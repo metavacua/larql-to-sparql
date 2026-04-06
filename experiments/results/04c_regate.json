@@ -1,0 +1,53 @@
+{
+  "prompt": "The capital of Atlantis is",
+  "target": "Poseidon",
+  "features_found": 200,
+  "features_regated": 200,
+  "before": [
+    [
+      "said",
+      0.17791222035884857
+    ],
+    [
+      "believed",
+      0.17626358568668365
+    ],
+    [
+      "a",
+      0.10043215751647949
+    ],
+    [
+      "called",
+      0.07350156456232071
+    ],
+    [
+      "known",
+      0.06056992709636688
+    ]
+  ],
+  "after": [
+    [
+      "said",
+      0.17791222035884857
+    ],
+    [
+      "believed",
+      0.17626358568668365
+    ],
+    [
+      "a",
+      0.10043215751647949
+    ],
+    [
+      "called",
+      0.07350156456232071
+    ],
+    [
+      "known",
+      0.06056992709636688
+    ]
+  ],
+  "target_found": false,
+  "target_rank": null,
+  "output_changed": false
+}

@@ -1,0 +1,23 @@
+[package]
+name = "larql-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "CLI for LARQL knowledge graph extraction and querying"
+
+[[bin]]
+name = "larql"
+path = "src/main.rs"
+
+[dependencies]
+larql-core = { path = "../larql-core" }
+larql-inference = { path = "../larql-inference" }
+larql-models = { path = "../larql-models" }
+larql-lql = { path = "../larql-lql" }
+larql-vindex = { path = "../larql-vindex" }
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

@@ -1,0 +1,30 @@
+{
+  "capital": {
+    "n_train": 12,
+    "n_test": 20,
+    "train_real": 11,
+    "test_real": 14,
+    "test_synth": 0
+  },
+  "language": {
+    "n_train": 12,
+    "n_test": 20,
+    "train_real": 12,
+    "test_real": 18,
+    "test_synth": 2
+  },
+  "born_in": {
+    "n_train": 12,
+    "n_test": 12,
+    "train_real": 10,
+    "test_real": 7,
+    "test_synth": 0
+  },
+  "created_by": {
+    "n_train": 9,
+    "n_test": 7,
+    "train_real": 7,
+    "test_real": 6,
+    "test_synth": 0
+  }
+}

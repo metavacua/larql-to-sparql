@@ -1,0 +1,1285 @@
+{
+  "L10_F6794": {
+    "primary": "instrument",
+    "confidence": 0.714,
+    "hits": 7,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "instrument": 5,
+      "language": 2
+    }
+  },
+  "L11_F6642": {
+    "primary": "country_leader",
+    "confidence": 0.826,
+    "hits": 23,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "country_leader": 19,
+      "head_of_government": 3,
+      "ceo": 1
+    }
+  },
+  "L12_F7040": {
+    "primary": "occupation",
+    "confidence": 1.0,
+    "hits": 7,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "occupation": 7
+    }
+  },
+  "L12_F9270": {
+    "primary": "party",
+    "confidence": 0.83,
+    "hits": 88,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "party": 73,
+      "instrument": 13,
+      "award": 2
+    }
+  },
+  "L11_F9820": {
+    "primary": "party",
+    "confidence": 0.963,
+    "hits": 27,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "party": 26,
+      "morph:nominalization": 1
+    }
+  },
+  "L9_F1251": {
+    "primary": "party",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "party": 2
+    }
+  },
+  "L11_F4606": {
+    "primary": "film_studio",
+    "confidence": 0.609,
+    "hits": 23,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "film_studio": 14,
+      "developer": 3,
+      "party": 2,
+      "director": 2,
+      "designer": 2
+    }
+  },
+  "L9_F2836": {
+    "primary": "league",
+    "confidence": 0.778,
+    "hits": 9,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "league": 7,
+      "operating_system": 1,
+      "architect": 1
+    }
+  },
+  "L10_F466": {
+    "primary": "chemical_symbol",
+    "confidence": 1.0,
+    "hits": 8,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "chemical_symbol": 8
+    }
+  },
+  "L9_F864": {
+    "primary": "architect",
+    "confidence": 1.0,
+    "hits": 31,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "architect": 31
+    }
+  },
+  "L9_F8795": {
+    "primary": "university_country",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 0,
+    "entities": [],
+    "outputs": [],
+    "relations": {
+      "university_country": 2
+    }
+  },
+  "L9_F9747": {
+    "primary": "wn:synonym",
+    "confidence": 0.6,
+    "hits": 5,
+    "entity_count": 3,
+    "entities": [
+      "balmy",
+      "difficult",
+      "mild"
+    ],
+    "outputs": [
+      "hard",
+      "soft"
+    ],
+    "relations": {
+      "wn:synonym": 3,
+      "wn:antonym": 2
+    }
+  },
+  "L12_F2502": {
+    "primary": "wn:antonym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "hard",
+      "loud"
+    ],
+    "outputs": [
+      "soft"
+    ],
+    "relations": {
+      "wn:antonym": 2,
+      "wn:synonym": 1
+    }
+  },
+  "L10_F7278": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 9,
+    "entity_count": 9,
+    "entities": [
+      "ample",
+      "asleep",
+      "copious",
+      "deceased",
+      "deep",
+      "departed",
+      "kaput",
+      "plenteous",
+      "plentiful"
+    ],
+    "outputs": [
+      "gone",
+      "rich"
+    ],
+    "relations": {
+      "wn:synonym": 9
+    }
+  },
+  "L11_F8748": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "dull",
+      "obtuse"
+    ],
+    "outputs": [
+      "slow"
+    ],
+    "relations": {
+      "wn:synonym": 2
+    }
+  },
+  "L3_F2756": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "aureate",
+      "gilt",
+      "gold"
+    ],
+    "outputs": [
+      "golden"
+    ],
+    "relations": {
+      "wn:synonym": 3
+    }
+  },
+  "L5_F9571": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 8,
+    "entity_count": 8,
+    "entities": [
+      "angry",
+      "barbarian",
+      "furious",
+      "raging",
+      "savage",
+      "tempestuous",
+      "uncivilised",
+      "uncivilized"
+    ],
+    "outputs": [
+      "wild"
+    ],
+    "relations": {
+      "wn:synonym": 8
+    }
+  },
+  "L4_F3797": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "blunt",
+      "candid"
+    ],
+    "outputs": [
+      "frank"
+    ],
+    "relations": {
+      "wn:synonym": 2
+    }
+  },
+  "L6_F7": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "distinguished",
+      "grand"
+    ],
+    "outputs": [
+      "imposing"
+    ],
+    "relations": {
+      "wn:synonym": 2
+    }
+  },
+  "L7_F2764": {
+    "primary": "wn:synonym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "erratic",
+      "measly"
+    ],
+    "outputs": [
+      "fickle",
+      "miserable"
+    ],
+    "relations": {
+      "wn:synonym": 2,
+      "morph:third_person": 1
+    }
+  },
+  "L1_F9914": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 4,
+    "entity_count": 4,
+    "entities": [
+      "crocked",
+      "loaded",
+      "pixilated",
+      "plastered"
+    ],
+    "outputs": [
+      "wet"
+    ],
+    "relations": {
+      "wn:synonym": 4
+    }
+  },
+  "L2_F1297": {
+    "primary": "wn:synonym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "deceased",
+      "departed"
+    ],
+    "outputs": [
+      "gone"
+    ],
+    "relations": {
+      "wn:synonym": 2
+    }
+  },
+  "L7_F8600": {
+    "primary": "wn:hypernym",
+    "confidence": 0.8,
+    "hits": 5,
+    "entity_count": 4,
+    "entities": [
+      "bifurcation",
+      "divarication",
+      "fibrillation",
+      "trifurcation"
+    ],
+    "outputs": [
+      "branching"
+    ],
+    "relations": {
+      "wn:hypernym": 4,
+      "wn:synonym": 1
+    }
+  },
+  "L12_F6861": {
+    "primary": "wn:hypernym",
+    "confidence": 0.571,
+    "hits": 7,
+    "entity_count": 4,
+    "entities": [
+      "circumvolution",
+      "gyration",
+      "pronation",
+      "supination"
+    ],
+    "outputs": [
+      "rotation"
+    ],
+    "relations": {
+      "wn:hypernym": 4,
+      "wn:synonym": 2,
+      "python:async def": 1
+    }
+  },
+  "L11_F4317": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 4,
+    "entity_count": 4,
+    "entities": [
+      "header",
+      "hop",
+      "leap",
+      "vault"
+    ],
+    "outputs": [
+      "jump"
+    ],
+    "relations": {
+      "wn:hypernym": 4
+    }
+  },
+  "L7_F2846": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 4,
+    "entity_count": 4,
+    "entities": [
+      "backsliding",
+      "breach",
+      "loss",
+      "out"
+    ],
+    "outputs": [
+      "failure"
+    ],
+    "relations": {
+      "wn:hypernym": 4
+    }
+  },
+  "L2_F4920": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "comparison",
+      "scan",
+      "testing"
+    ],
+    "outputs": [
+      "examination"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L5_F1827": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "foray",
+      "liberation",
+      "shot"
+    ],
+    "outputs": [
+      "attempt"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L2_F572": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 9,
+    "entity_count": 6,
+    "entities": [
+      "glance",
+      "lookout",
+      "observation",
+      "peek",
+      "sightseeing",
+      "view"
+    ],
+    "outputs": [
+      "look"
+    ],
+    "relations": {
+      "wn:hypernym": 6,
+      "wn:gerund": 1,
+      "wn:past_tense": 1,
+      "wn:third_person": 1
+    }
+  },
+  "L7_F3335": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "bite",
+      "withholding"
+    ],
+    "outputs": [
+      "subtraction"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L7_F191": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "risk",
+      "sally"
+    ],
+    "outputs": [
+      "venture"
+    ],
+    "relations": {
+      "wn:hypernym": 2,
+      "morph:plural": 1
+    }
+  },
+  "L7_F8670": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "down",
+      "left"
+    ],
+    "outputs": [
+      "turn"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L2_F5451": {
+    "primary": "wn:hypernym",
+    "confidence": 0.833,
+    "hits": 6,
+    "entity_count": 5,
+    "entities": [
+      "conversion",
+      "move",
+      "substitution",
+      "switch",
+      "updating"
+    ],
+    "outputs": [
+      "change"
+    ],
+    "relations": {
+      "wn:hypernym": 5,
+      "morph:gerund": 1
+    }
+  },
+  "L3_F751": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "blockbuster",
+      "bunt",
+      "plunk"
+    ],
+    "outputs": [
+      "hit"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L12_F1415": {
+    "primary": "wn:hypernym",
+    "confidence": 0.571,
+    "hits": 7,
+    "entity_count": 4,
+    "entities": [
+      "foraging",
+      "frisk",
+      "manhunt",
+      "ransacking"
+    ],
+    "outputs": [
+      "search"
+    ],
+    "relations": {
+      "wn:hypernym": 4,
+      "wn:derivation": 3
+    }
+  },
+  "L11_F46": {
+    "primary": "wn:hypernym",
+    "confidence": 0.857,
+    "hits": 7,
+    "entity_count": 6,
+    "entities": [
+      "duster",
+      "fastball",
+      "knuckleball",
+      "screwball",
+      "sinker",
+      "spitball"
+    ],
+    "outputs": [
+      "pitch"
+    ],
+    "relations": {
+      "wn:hypernym": 6,
+      "wn:derivation": 1
+    }
+  },
+  "L1_F9386": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "putout",
+      "strikeout"
+    ],
+    "outputs": [
+      "out"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L1_F2845": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "putout",
+      "strikeout"
+    ],
+    "outputs": [
+      "out"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L2_F402": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "putout",
+      "strikeout"
+    ],
+    "outputs": [
+      "out"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L11_F201": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 5,
+    "entity_count": 5,
+    "entities": [
+      "galvanization",
+      "lubrication",
+      "plastering",
+      "scumble",
+      "waxing"
+    ],
+    "outputs": [
+      "application"
+    ],
+    "relations": {
+      "wn:hypernym": 5
+    }
+  },
+  "L8_F6049": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "passage",
+      "reflex"
+    ],
+    "outputs": [
+      "reaction"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L4_F3077": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "felony",
+      "forgery",
+      "mayhem"
+    ],
+    "outputs": [
+      "crime"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L6_F6944": {
+    "primary": "wn:hypernym",
+    "confidence": 0.533,
+    "hits": 15,
+    "entity_count": 8,
+    "entities": [
+      "foliation",
+      "fumigation",
+      "lining",
+      "lubrication",
+      "painting",
+      "scumble",
+      "technology",
+      "tinning"
+    ],
+    "outputs": [
+      "application"
+    ],
+    "relations": {
+      "wn:hypernym": 8,
+      "python:call": 1,
+      "python:class": 1,
+      "python:def": 1,
+      "python:for": 1,
+      "rs:function_def": 1,
+      "rs:impl_block": 1,
+      "rs:variable_bind": 1
+    }
+  },
+  "L11_F638": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "nightcap",
+      "pinball"
+    ],
+    "outputs": [
+      "game"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L7_F1515": {
+    "primary": "wn:meronym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "break",
+      "carom"
+    ],
+    "outputs": [
+      "pool"
+    ],
+    "relations": {
+      "wn:meronym": 2,
+      "wn:hypernym": 1
+    }
+  },
+  "L8_F5413": {
+    "primary": "wn:hypernym",
+    "confidence": 0.75,
+    "hits": 4,
+    "entity_count": 3,
+    "entities": [
+      "perfumery",
+      "printmaking",
+      "topiary"
+    ],
+    "outputs": [
+      "art"
+    ],
+    "relations": {
+      "wn:hypernym": 3,
+      "wn:derivation": 1
+    }
+  },
+  "L8_F10018": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "discipline",
+      "exercise"
+    ],
+    "outputs": [
+      "training"
+    ],
+    "relations": {
+      "wn:hypernym": 2,
+      "morph:gerund": 1
+    }
+  },
+  "L9_F6708": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 6,
+    "entity_count": 6,
+    "entities": [
+      "abduction",
+      "apprehension",
+      "conquest",
+      "enslavement",
+      "kidnapping",
+      "usurpation"
+    ],
+    "outputs": [
+      "capture"
+    ],
+    "relations": {
+      "wn:hypernym": 6
+    }
+  },
+  "L12_F4850": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "hammerlock",
+      "headlock"
+    ],
+    "outputs": [
+      "lock"
+    ],
+    "relations": {
+      "wn:hypernym": 2,
+      "wn:derivation": 1
+    }
+  },
+  "L12_F143": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "hammerlock",
+      "headlock"
+    ],
+    "outputs": [
+      "lock"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L9_F3395": {
+    "primary": "wn:hypernym",
+    "confidence": 0.6,
+    "hits": 5,
+    "entity_count": 3,
+    "entities": [
+      "authentication",
+      "intrusion",
+      "registration"
+    ],
+    "outputs": [
+      "entrance",
+      "validation"
+    ],
+    "relations": {
+      "wn:hypernym": 3,
+      "wn:derivation": 1,
+      "python:call": 1
+    }
+  },
+  "L9_F6861": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "acquiring",
+      "nonaccomplishment",
+      "propulsion"
+    ],
+    "outputs": [
+      "act"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L5_F9101": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "emergence",
+      "reappearance"
+    ],
+    "outputs": [
+      "appearance"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L11_F3500": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 5,
+    "entity_count": 5,
+    "entities": [
+      "radiography",
+      "radioscopy",
+      "sonography",
+      "telephotography",
+      "xerography"
+    ],
+    "outputs": [
+      "imaging",
+      "photography"
+    ],
+    "relations": {
+      "wn:hypernym": 5
+    }
+  },
+  "L1_F6223": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "domestication",
+      "habituation",
+      "readjustment"
+    ],
+    "outputs": [
+      "adjustment"
+    ],
+    "relations": {
+      "wn:hypernym": 3
+    }
+  },
+  "L2_F6871": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "cryosurgery",
+      "implantation"
+    ],
+    "outputs": [
+      "operation"
+    ],
+    "relations": {
+      "wn:hypernym": 2,
+      "wn:derivation": 1
+    }
+  },
+  "L1_F2282": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "bootlegging",
+      "capitalization"
+    ],
+    "outputs": [
+      "selling"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L6_F988": {
+    "primary": "wn:hypernym",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "devitalization",
+      "minimization"
+    ],
+    "outputs": [
+      "decrease"
+    ],
+    "relations": {
+      "wn:hypernym": 2
+    }
+  },
+  "L11_F2726": {
+    "primary": "wn:hypernym",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "authentication",
+      "documentation"
+    ],
+    "outputs": [
+      "validation"
+    ],
+    "relations": {
+      "wn:hypernym": 2,
+      "wn:derivation": 1
+    }
+  },
+  "L8_F2652": {
+    "primary": "wn:meronym",
+    "confidence": 1.0,
+    "hits": 3,
+    "entity_count": 3,
+    "entities": [
+      "furcula",
+      "pennon",
+      "uropygium"
+    ],
+    "outputs": [
+      "bird"
+    ],
+    "relations": {
+      "wn:meronym": 3
+    }
+  },
+  "L7_F5279": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "goosey",
+      "goosy"
+    ],
+    "outputs": [
+      "goose"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F8870": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "curable",
+      "curative"
+    ],
+    "outputs": [
+      "cure"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F9908": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "partial",
+      "partitive"
+    ],
+    "outputs": [
+      "part"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L9_F5777": {
+    "primary": "wn:derivation",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "derivative",
+      "official"
+    ],
+    "outputs": [
+      "derive",
+      "office"
+    ],
+    "relations": {
+      "wn:derivation": 2,
+      "python:call": 1
+    }
+  },
+  "L2_F6258": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "advisable",
+      "advisory"
+    ],
+    "outputs": [
+      "advise"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F9396": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "synthetic",
+      "synthetical"
+    ],
+    "outputs": [
+      "synthesis"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L5_F2423": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "dependant",
+      "dependent"
+    ],
+    "outputs": [
+      "depend"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F5853": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "conscientious",
+      "conscious"
+    ],
+    "outputs": [
+      "conscience",
+      "consciousness"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F2347": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "extendible",
+      "extensive"
+    ],
+    "outputs": [
+      "extend"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F6396": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "schematic",
+      "scholarly"
+    ],
+    "outputs": [
+      "scheme",
+      "scholar"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L6_F926": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "prototypal",
+      "prototypical"
+    ],
+    "outputs": [
+      "prototype"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L3_F4605": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "mechanical",
+      "mechanistic"
+    ],
+    "outputs": [
+      "mechanism"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L12_F8525": {
+    "primary": "wn:derivation",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "circumferent",
+      "circumferential"
+    ],
+    "outputs": [
+      "circumference"
+    ],
+    "relations": {
+      "wn:derivation": 2
+    }
+  },
+  "L2_F5176": {
+    "primary": "morph:gerund",
+    "confidence": 0.667,
+    "hits": 3,
+    "entity_count": 2,
+    "entities": [
+      "ask",
+      "beg"
+    ],
+    "outputs": [
+      "asking",
+      "begging"
+    ],
+    "relations": {
+      "morph:gerund": 2,
+      "morph:third_person": 1
+    }
+  },
+  "L2_F2010": {
+    "primary": "morph:gerund",
+    "confidence": 1.0,
+    "hits": 2,
+    "entity_count": 2,
+    "entities": [
+      "connect",
+      "link"
+    ],
+    "outputs": [
+      "connecting",
+      "linking"
+    ],
+    "relations": {
+      "morph:gerund": 2
+    }
+  },
+  "L2_F3461": {
+    "primary": "morph:comparative",
+    "confidence": 1.0,
+    "hits": 5,
+    "entity_count": 5,
+    "entities": [
+      "big",
+      "hard",
+      "large",
+      "thick",
+      "thin"
+    ],
+    "outputs": [
+      "bigger",
+      "harder",
+      "larger",
+      "thicker",
+      "thinner"
+    ],
+    "relations": {
+      "morph:comparative": 5
+    }
+  }
+}

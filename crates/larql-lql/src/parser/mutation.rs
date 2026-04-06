@@ -1,0 +1,98 @@
+/// Mutation statement parsers: INSERT, DELETE, UPDATE, MERGE.
+
+use crate::ast::*;
+use crate::lexer::{Keyword, Token};
+use super::{Parser, ParseError};
+
+impl Parser {
+    pub(crate) fn parse_insert(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Insert)?;
+        self.expect_keyword(Keyword::Into)?;
+        self.expect_keyword(Keyword::Edges)?;
+
+        // (entity, relation, target)
+        self.expect_token(&Token::LParen)?;
+        self.expect_ident_eq("entity")?;
+        self.expect_token(&Token::Comma)?;
+        self.expect_ident_eq("relation")?;
+        self.expect_token(&Token::Comma)?;
+        self.expect_ident_eq("target")?;
+        self.expect_token(&Token::RParen)?;
+
+        // VALUES (e, r, t)
+        self.expect_keyword(Keyword::Values)?;
+        self.expect_token(&Token::LParen)?;
+        let entity = self.expect_string()?;
+        self.expect_token(&Token::Comma)?;
+        let relation = self.expect_string()?;
+        self.expect_token(&Token::Comma)?;
+        let target = self.expect_string()?;
+        self.expect_token(&Token::RParen)?;
+
+        let mut layer = None;
+        let mut confidence = None;
+
+        loop {
+            match self.peek() {
+                Token::Keyword(Keyword::At) => {
+                    self.advance();
+                    self.expect_keyword(Keyword::Layer)?;
+                    layer = Some(self.expect_u32()?);
+                }
+                Token::Keyword(Keyword::Confidence) => {
+                    self.advance();
+                    confidence = Some(self.expect_f32()?);
+                }
+                _ => break,
+            }
+        }
+
+        self.eat_semicolon();
+        Ok(Statement::Insert { entity, relation, target, layer, confidence })
+    }
+
+    pub(crate) fn parse_delete(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Delete)?;
+        self.expect_keyword(Keyword::From)?;
+        self.expect_keyword(Keyword::Edges)?;
+        self.expect_keyword(Keyword::Where)?;
+        let conditions = self.parse_conditions()?;
+        self.eat_semicolon();
+        Ok(Statement::Delete { conditions })
+    }
+
+    pub(crate) fn parse_update(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Update)?;
+        self.expect_keyword(Keyword::Edges)?;
+        self.expect_keyword(Keyword::Set)?;
+
+        let set = self.parse_assignments()?;
+
+        self.expect_keyword(Keyword::Where)?;
+        let conditions = self.parse_conditions()?;
+        self.eat_semicolon();
+        Ok(Statement::Update { set, conditions })
+    }
+
+    pub(crate) fn parse_merge(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Merge)?;
+        let source = self.expect_string()?;
+
+        let mut target = None;
+        let mut conflict = None;
+
+        if self.check_keyword(Keyword::Into) {
+            self.advance();
+            target = Some(self.expect_string()?);
+        }
+
+        if self.check_keyword(Keyword::On) {
+            self.advance();
+            self.expect_keyword(Keyword::Conflict)?;
+            conflict = Some(self.parse_conflict_strategy()?);
+        }
+
+        self.eat_semicolon();
+        Ok(Statement::Merge { source, target, conflict })
+    }
+}

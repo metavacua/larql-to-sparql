@@ -1,0 +1,78 @@
+{
+  "known_prompt": "The capital of France is",
+  "new_prompt": "The capital of Atlantis is",
+  "features_inserted": 8,
+  "before": [
+    "said",
+    0.17791222035884857
+  ],
+  "after": [
+    ":",
+    0.34470289945602417
+  ],
+  "output_changed": true,
+  "target_found": false,
+  "target_rank": null,
+  "france_sanity": [
+    "known",
+    0.2953106462955475
+  ],
+  "inserted": [
+    {
+      "layer": 20,
+      "feature": 128,
+      "gate_rank": 1,
+      "down_norm": 722.40185546875,
+      "target_contribution": 722.4017944335938
+    },
+    {
+      "layer": 21,
+      "feature": 691,
+      "gate_rank": 1,
+      "down_norm": 738.0841674804688,
+      "target_contribution": 738.0841674804688
+    },
+    {
+      "layer": 22,
+      "feature": 473,
+      "gate_rank": 1,
+      "down_norm": 780.52294921875,
+      "target_contribution": 780.52294921875
+    },
+    {
+      "layer": 23,
+      "feature": 1532,
+      "gate_rank": 1,
+      "down_norm": 832.26708984375,
+      "target_contribution": 832.26708984375
+    },
+    {
+      "layer": 24,
+      "feature": 1618,
+      "gate_rank": 1,
+      "down_norm": 863.5870971679688,
+      "target_contribution": 863.5870361328125
+    },
+    {
+      "layer": 25,
+      "feature": 3262,
+      "gate_rank": 1,
+      "down_norm": 914.1212158203125,
+      "target_contribution": 914.1211547851562
+    },
+    {
+      "layer": 26,
+      "feature": 8647,
+      "gate_rank": 1,
+      "down_norm": 989.16455078125,
+      "target_contribution": 989.16455078125
+    },
+    {
+      "layer": 27,
+      "feature": 433,
+      "gate_rank": 1,
+      "down_norm": 1067.8125,
+      "target_contribution": 1067.8126220703125
+    }
+  ]
+}
