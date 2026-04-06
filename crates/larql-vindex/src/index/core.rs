@@ -79,6 +79,9 @@ pub struct VectorIndex {
     pub(crate) gate_q4_slices: Vec<GateQ4Slice>,
     /// Q4_0 lm_head mmap — for GPU Q4 logits (replaces CPU f32 lm_head KNN).
     pub(crate) lm_head_q4_mmap: Option<Arc<memmap2::Mmap>>,
+    /// Q4_K/Q6_K attention weights (Ollama-compatible).
+    pub(crate) attn_q4k_mmap: Option<Arc<memmap2::Mmap>>,
+    pub(crate) attn_q4k_manifest: Option<Vec<(usize, usize, String)>>,
     /// Q4_0 attention weights mmap — for GPU full pipeline.
     pub(crate) attn_q4_mmap: Option<Arc<memmap2::Mmap>>,
     /// Per-matrix (offset, length) in attn_q4_mmap — from manifest.
@@ -120,6 +123,8 @@ impl Clone for VectorIndex {
             gate_q4_mmap: self.gate_q4_mmap.clone(),
             gate_q4_slices: self.gate_q4_slices.clone(),
             lm_head_q4_mmap: self.lm_head_q4_mmap.clone(),
+            attn_q4k_mmap: self.attn_q4k_mmap.clone(),
+            attn_q4k_manifest: self.attn_q4k_manifest.clone(),
             attn_q4_mmap: self.attn_q4_mmap.clone(),
             attn_q4_manifest: self.attn_q4_manifest.clone(),
             attn_q8_mmap: self.attn_q8_mmap.clone(),
@@ -160,6 +165,8 @@ impl VectorIndex {
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
+            attn_q4k_mmap: None,
+            attn_q4k_manifest: None,
             attn_q4_mmap: None,
             attn_q4_manifest: None,
             attn_q8_mmap: None,
@@ -201,6 +208,8 @@ impl VectorIndex {
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
+            attn_q4k_mmap: None,
+            attn_q4k_manifest: None,
             attn_q4_mmap: None,
             attn_q4_manifest: None,
             attn_q8_mmap: None,
@@ -370,6 +379,8 @@ impl VectorIndex {
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
+            attn_q4k_mmap: None,
+            attn_q4k_manifest: None,
             attn_q4_mmap: None,
             attn_q4_manifest: None,
             attn_q8_mmap: None,

@@ -67,6 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(()) => print!("attn_q4 "),
         Err(_) => {}
     }
+    match index.load_attn_q4k(&vindex_path) {
+        Ok(()) => print!("attn_q4k "),
+        Err(_) => {}
+    }
     match index.load_attn_q8(&vindex_path) {
         Ok(()) => print!("attn_q8 "),
         Err(_) => {}

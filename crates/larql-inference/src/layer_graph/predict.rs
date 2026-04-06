@@ -418,26 +418,47 @@ pub fn predict_honest(
     let used_gpu = if seq_len == 1 && backend.has_q4() {
         let gate_index: &dyn larql_vindex::GateIndex = index;
         let q4_ffn = gate_index.interleaved_q4_mmap_ref();
+        let has_q4k = index.attn_q4k_layer_data(layer_range.start).is_some();
         let has_q8 = index.attn_q8_layer_data(layer_range.start).is_some();
 
         if let Some(q4_ffn_mmap) = q4_ffn {
             let intermediate = gate_index.num_features(layer_range.start);
             let hidden = weights.hidden_size;
-            if intermediate > 0 && has_q8 {
+            if intermediate > 0 && (has_q4k || has_q8) {
                 let q4_ffn_per_matrix = intermediate * hidden / 32 * 18;
                 let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
                 let arch = &*weights.arch;
 
                 use larql_compute::{QuantWeight, QuantFormat};
+                fn to_format(s: &str) -> QuantFormat {
+                    match s { "Q6_K" => QuantFormat::Q6_K, _ => QuantFormat::Q4_K }
+                }
+
                 let layers: Vec<larql_compute::FullPipelineLayer> = layer_range.clone()
                     .map(|layer| {
-                        let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
                         let fs = layer * q4_ffn_per_layer;
+
+                        // Prefer Q4_K (Ollama strategy, smaller + precise) over Q8
+                        let (wq, wk, wv, wo) = if has_q4k {
+                            let [q, k, v, o] = index.attn_q4k_layer_data(layer).unwrap();
+                            (
+                                QuantWeight { data: q.0, scales: None, format: to_format(q.1) },
+                                QuantWeight { data: k.0, scales: None, format: to_format(k.1) },
+                                QuantWeight { data: v.0, scales: None, format: to_format(v.1) },
+                                QuantWeight { data: o.0, scales: None, format: to_format(o.1) },
+                            )
+                        } else {
+                            let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
+                            (
+                                QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
+                                QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
+                                QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
+                                QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
+                            )
+                        };
+
                         larql_compute::FullPipelineLayer {
-                            wq: QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
-                            wk: QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
-                            wv: QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
-                            wo: QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
+                            wq, wk, wv, wo,
                             gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
                             up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
                             down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },

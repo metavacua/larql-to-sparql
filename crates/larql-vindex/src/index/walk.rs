@@ -382,6 +382,52 @@ impl VectorIndex {
         Some(result)
     }
 
+    /// Load Q4_K/Q6_K attention weights for Ollama-compatible GPU pipeline.
+    pub fn load_attn_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
+        let path = dir.join("attn_weights_q4k.bin");
+        if !path.exists() {
+            return Err(VindexError::Parse("attn_weights_q4k.bin not found".into()));
+        }
+        let file = std::fs::File::open(&path)?;
+        let mmap = unsafe { mmap_optimized(&file)? };
+
+        let manifest_path = dir.join("attn_weights_q4k_manifest.json");
+        if manifest_path.exists() {
+            let json: Vec<serde_json::Value> = serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?
+            ).map_err(|e| VindexError::Parse(e.to_string()))?;
+
+            // Each entry: {key, shape, format, offset, length}
+            let entries: Vec<(usize, usize, String)> = json.iter()
+                .map(|e| {
+                    let offset = e["offset"].as_u64().unwrap_or(0) as usize;
+                    let length = e["length"].as_u64().unwrap_or(0) as usize;
+                    let format = e["format"].as_str().unwrap_or("Q4_K").to_string();
+                    (offset, length, format)
+                })
+                .collect();
+            self.attn_q4k_manifest = Some(entries);
+        }
+        self.attn_q4k_mmap = Some(Arc::new(mmap));
+        Ok(())
+    }
+
+    /// Get per-layer Q4_K/Q6_K attention slices: (data, format) for Q, K, V, O.
+    pub fn attn_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 4]> {
+        let mmap = self.attn_q4k_mmap.as_ref()?;
+        let manifest = self.attn_q4k_manifest.as_ref()?;
+        let base = layer * 4;
+        if base + 3 >= manifest.len() { return None; }
+
+        let mut result: [(&[u8], &str); 4] = [(&[], ""); 4];
+        for i in 0..4 {
+            let (offset, length, ref format) = manifest[base + i];
+            result[i] = (&mmap[offset..offset + length], format.as_str());
+        }
+        Some(result)
+    }
+
     /// Load Q4 attention weights + manifest for GPU full pipeline.
     pub fn load_attn_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join("attn_weights_q4.bin");

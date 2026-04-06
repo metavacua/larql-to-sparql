@@ -125,6 +125,57 @@ fn encode_residual_add(
     enc.dispatch_threads(MTLSize::new(len as u64, 1, 1), MTLSize::new(256.min(len as u64), 1, 1));
 }
 
+/// Dispatch a matvec based on the weight's quantization format.
+/// Q4_K/Q6_K take f32 input. Q8_0/Q4_0 take Q8 input.
+fn encode_quant_matvec(
+    enc: &ComputeCommandEncoderRef,
+    format: crate::QuantFormat,
+    q4_pipeline: &ComputePipelineState,
+    q8_pipeline: &ComputePipelineState,
+    q4k_pipeline: &ComputePipelineState,
+    q6k_pipeline: &ComputePipelineState,
+    buf_w: &Buffer,
+    buf_input: &Buffer,        // f32 for Q4_K/Q6_K, Q8 int8 for Q4_0/Q8_0
+    buf_scales: &Buffer,       // Q8 weight scales (Q8_0 only) or input scales
+    buf_input_scales: &Buffer, // Q8 input scales (Q8_0 only)
+    buf_out: &Buffer,
+    num_rows: usize,
+    hidden: usize,
+) {
+    match format {
+        crate::QuantFormat::Q4_K => {
+            let n = num_rows as u32;
+            let k = hidden as u32;
+            let tgs = ((num_rows as u64) + 3) / 4; // Q4_K: 4 rows per TG
+            enc.set_compute_pipeline_state(q4k_pipeline);
+            enc.set_buffer(0, Some(buf_w), 0);
+            enc.set_buffer(1, Some(buf_input), 0);  // f32 input
+            enc.set_buffer(2, Some(buf_out), 0);
+            enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+        }
+        crate::QuantFormat::Q6_K => {
+            let n = num_rows as u32;
+            let k = hidden as u32;
+            let tgs = ((num_rows as u64) + 3) / 4;
+            enc.set_compute_pipeline_state(q6k_pipeline);
+            enc.set_buffer(0, Some(buf_w), 0);
+            enc.set_buffer(1, Some(buf_input), 0);
+            enc.set_buffer(2, Some(buf_out), 0);
+            enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+        }
+        crate::QuantFormat::Q4_0 => {
+            encode_q4_matvec(enc, q4_pipeline, buf_w, buf_input, buf_scales, buf_out, num_rows, hidden);
+        }
+        crate::QuantFormat::Q8_0 => {
+            encode_q8_matvec(enc, q8_pipeline, buf_w, buf_input, buf_scales, buf_input_scales, buf_out, num_rows, hidden);
+        }
+    }
+}
+
 /// Run all layers in ONE Metal command buffer with correct norms and residuals.
 pub fn dispatch_full_pipeline(
     queue: &CommandQueue,
@@ -135,6 +186,8 @@ pub fn dispatch_full_pipeline(
     fused_attn_pipeline: Option<&ComputePipelineState>,
     q8_matvec_pipeline: &ComputePipelineState,
     q8_qkv_proj_pipeline: &ComputePipelineState,
+    q4k_matvec_pipeline: &ComputePipelineState,
+    q6k_matvec_pipeline: &ComputePipelineState,
     rms_norm_pipeline: &ComputePipelineState,
     residual_add_pipeline: &ComputePipelineState,
     rms_norm_q8_pipeline: &ComputePipelineState,
@@ -232,8 +285,41 @@ pub fn dispatch_full_pipeline(
         let norm_offset = layers[l].norm_offset;
         let has_post_norms = layers[l].has_post_norms;
 
-        // ── 1. FUSED: rms_norm + Q8 quantize (replaces 2 separate dispatches) ──
-        {
+        // ── 1+3. Input norm + Q/K/V projections (format-aware) ──
+        let attn_format = layers[l].wq.format;
+        let uses_f32_input = attn_format == crate::QuantFormat::Q4_K || attn_format == crate::QuantFormat::Q6_K;
+
+        if uses_f32_input {
+            // Q4_K/Q6_K path: norm → f32, then Q4_K/Q6_K matvec (reads f32 input)
+            // Skips Q8 quantize — saves ~0.1ms/layer
+            let enc = cmd.new_compute_command_encoder();
+            encode_rms_norm(enc, rms_norm_pipeline,
+                &h_bufs[l], &input_norm_bufs[l], &norm_outs[l], hidden, eps, norm_offset);
+            enc.end_encoding();
+
+            // Q projection
+            let enc = cmd.new_compute_command_encoder();
+            encode_quant_matvec(enc, layers[l].wq.format,
+                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                &wq_bufs[l], &norm_outs[l], &wq_scale_bufs[l], &q8s_bufs[l],
+                &q_outs[l], q_dim, hidden);
+            enc.end_encoding();
+            // K projection
+            let enc = cmd.new_compute_command_encoder();
+            encode_quant_matvec(enc, layers[l].wk.format,
+                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                &wk_bufs[l], &norm_outs[l], &wk_scale_bufs[l], &q8s_bufs[l],
+                &k_outs[l], kv_dim, hidden);
+            enc.end_encoding();
+            // V projection (may be Q6_K)
+            let enc = cmd.new_compute_command_encoder();
+            encode_quant_matvec(enc, layers[l].wv.format,
+                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                &wv_bufs[l], &norm_outs[l], &wv_scale_bufs[l], &q8s_bufs[l],
+                &v_outs[l], kv_dim, hidden);
+            enc.end_encoding();
+        } else {
+            // Q8_0 path: fused norm+Q8 → fused Q8 QKV projection
             let enc = cmd.new_compute_command_encoder();
             enc.set_compute_pipeline_state(rms_norm_q8_pipeline);
             enc.set_buffer(0, Some(&h_bufs[l]), 0);
@@ -245,10 +331,7 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(6, 4, &norm_offset as *const f32 as *const c_void);
             enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
             enc.end_encoding();
-        }
 
-        // ── 3. FUSED Q8 Q+K+V projection — one dispatch for all 3 ──
-        {
             let q_rows_val = q_dim as u32;
             let k_rows_val = kv_dim as u32;
             let v_rows_val = kv_dim as u32;
@@ -260,11 +343,11 @@ pub fn dispatch_full_pipeline(
             enc.set_buffer(0, Some(&wq_bufs[l]), 0);
             enc.set_buffer(1, Some(&wk_bufs[l]), 0);
             enc.set_buffer(2, Some(&wv_bufs[l]), 0);
-            enc.set_buffer(3, Some(&q8_bufs[l]), 0);    // Q8 input (same for all)
+            enc.set_buffer(3, Some(&q8_bufs[l]), 0);
             enc.set_buffer(4, Some(&wq_scale_bufs[l]), 0);
             enc.set_buffer(5, Some(&wk_scale_bufs[l]), 0);
             enc.set_buffer(6, Some(&wv_scale_bufs[l]), 0);
-            enc.set_buffer(7, Some(&q8s_bufs[l]), 0);   // input scales
+            enc.set_buffer(7, Some(&q8s_bufs[l]), 0);
             enc.set_buffer(8, Some(&q_outs[l]), 0);
             enc.set_buffer(9, Some(&k_outs[l]), 0);
             enc.set_buffer(10, Some(&v_outs[l]), 0);
