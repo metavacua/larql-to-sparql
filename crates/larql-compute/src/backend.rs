@@ -121,6 +121,20 @@ pub trait ComputeBackend: Send + Sync {
         _rope_base: f32,
     ) -> Option<Vec<f32>> { None }
 
+    /// Q4_K matvec: scores[N] = Q4_K[N,K] @ f32_x[K]. Returns None if not supported.
+    fn q4k_matvec(
+        &self,
+        _q4k_data: &[u8], _x: &[f32],
+        _num_rows: usize, _hidden: usize,
+    ) -> Option<Vec<f32>> { None }
+
+    /// Q6_K matvec: scores[N] = Q6_K[N,K] @ f32_x[K]. Returns None if not supported.
+    fn q6k_matvec(
+        &self,
+        _q6k_data: &[u8], _x: &[f32],
+        _num_rows: usize, _hidden: usize,
+    ) -> Option<Vec<f32>> { None }
+
     /// Whether this backend supports Q4 fused operations.
     fn has_q4(&self) -> bool { false }
 

@@ -32,12 +32,24 @@ f32 attn proj [2560²]          0.68ms      1.11ms      —          CPU BLAS wi
 Gate KNN [10240,2560]          0.91ms      0.90ms      —          vindex scoring
 ```
 
+### Quantization strategy (matching Ollama Q4_K_M)
+
+```
+Component       Ollama          LARQL           Format
+Attn Q/K/O      Q4_K            Q4_K            q4k_matvec shader
+Attn V          Q6_K            Q6_K            q6k_matvec shader
+FFN gate/up     Q4_K            Q4_K (Q4_0)     q4_matvec_v4 shader
+FFN down        Q6_K            Q6_K (Q4_0)     q6k_matvec / q4_f32_matvec
+Embeddings      Q6_K            Q6_K            —
+Norms           F32             F32             rms_norm shader
+```
+
 **Component parity with Ollama.** The remaining gap is pipeline integration:
 - Ollama's full pipeline is tighter (C++ vs Rust dispatch overhead)
 - Ollama uses Q4_K_M/Q6_K (group scaling) vs our Q4_0/Q8_0 (per-block scaling)
 - Our Q4 logits are **faster** than Ollama (0.57ms vs ~1ms)
 
-## Shaders (22 Metal kernels, all compiled and tested)
+## Shaders (26 Metal kernels, all compiled and tested)
 
 | Shader | Purpose | Status |
 |--------|---------|--------|
@@ -60,6 +72,13 @@ Gate KNN [10240,2560]          0.91ms      0.90ms      —          vindex scori
 | `kv_cache_append` | Append K/V to cache | production |
 | `rope_apply` | Rotary position embeddings | **new**, tested |
 | `fused_attention` | Full GQA: RoPE+QK-norm+softcap+causal | **new**, tested |
+| `q4k_matvec` | Q4_K super-block matvec (Ollama format) | **new**, tested |
+| `q6k_matvec` | Q6_K super-block matvec (V proj, FFN down) | **new**, tested |
+| `q8_qkv_proj` | Fused Q+K+V projection (simdgroup) | **new**, tested |
+| `q8_proj_rope` | Single Q8 projection (O proj) | **new** |
+| `rms_norm_q8` | Fused norm + Q8 quantize | **new**, tested |
+| `residual_norm` | Fused residual + norm | **new**, tested |
+| `residual_norm_q8` | Fused residual + norm + Q8 | **new**, tested |
 
 ## Quick start
 
@@ -113,8 +132,12 @@ src/
       attention.rs          — Causal attention (fused QKV)    (3 tests)
 
   metal/                    (feature-gated: --features metal)
-    mod.rs                  — MetalBackend struct + trait impl
-    shaders/                — 20 Metal Shading Language kernels (one file each)
+    mod.rs                  — MetalBackend struct + constructor + accessors
+    trait_impl.rs           — impl ComputeBackend (all trait methods)
+    direct_ops.rs           — Q4 direct dispatch (matvec, vecmat, pair_batch)
+    decode.rs               — KV cache decode pipeline
+    pipeline.rs             — Full pipeline + multi-layer FFN batch
+    shaders/                — 26 Metal Shading Language kernels (one file each)
     ops/                    — GPU dispatch modules (one file each)
     buffers.rs              — GPU buffer cache (zero-copy mmap)
     calibrate.rs            — CPU vs GPU auto-calibration
@@ -130,7 +153,7 @@ src/
 # CPU tests (28 unit + 6 integration + 2 doc = 36 tests)
 cargo test -p larql-compute
 
-# CPU + Metal tests (64 tests)
+# CPU + Metal tests (67 tests)
 cargo test -p larql-compute --features metal
 ```
 
@@ -145,7 +168,9 @@ Test coverage:
 - Residual: Metal add correctness
 - Attention: single token, causal mask, output shape
 - RoPE: Metal shader matches CPU reference implementation
-- Fused attention: single token GQA with RoPE, finite nonzero output
+- Fused attention: single token + multi-token GQA with RoPE, verified vs CPU
+- Q4_K matvec: super-block dequant + matvec, nonzero output verified
+- Q6_K matvec: super-block dequant + matvec, nonzero output verified
 - Batch: Metal pair_batch matches individual calls
 - Multi-layer: 21-layer pipeline produces output (zero-copy)
 - Shader compilation: all 20 kernel functions exist

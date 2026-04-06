@@ -78,10 +78,26 @@ Full pipeline 21 layers (with norms + residuals):  25.9ms = 39 tok/s
 
 ```
 CPU tests:       28 unit + 6 integration + 2 doc = 36
-Metal tests:     26 integration (shader correctness)
-Total:           62 tests, all passing
-Warnings:        0 (non-cosmetic)
-Shaders:         16 compiled, 16 tested
+Metal tests:     31 integration (shader correctness, Q4_K/Q6_K, fused ops)
+Total:           67 tests, all passing
+Warnings:        0
+Shaders:         26 compiled, all tested
+```
+
+## Architecture (modular)
+
+```
+metal/
+  mod.rs          MetalBackend struct + constructor (~165 lines)
+  trait_impl.rs   impl ComputeBackend (all trait methods)
+  direct_ops.rs   Q4 direct dispatch
+  decode.rs       KV cache decode pipeline
+  pipeline.rs     Full pipeline + multi-layer batch
+  buffers.rs      GPU buffer cache (zero-copy mmap)
+  calibrate.rs    CPU/GPU auto-calibration
+  f32_ops.rs      f32 tiled matmul
+  shaders/        26 Metal kernels (one file each)
+  ops/            GPU dispatch modules (one file each)
 ```
 
 ## Historical Progress

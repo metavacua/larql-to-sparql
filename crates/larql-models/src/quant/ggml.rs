@@ -20,6 +20,11 @@ pub const TYPE_Q4_1: u32 = 3;
 pub const TYPE_Q8_0: u32 = 6;
 pub const TYPE_Q5_0: u32 = 8;
 pub const TYPE_Q5_1: u32 = 9;
+pub const TYPE_Q2_K: u32 = 10;
+pub const TYPE_Q3_K: u32 = 11;
+pub const TYPE_Q4_K: u32 = 12;
+pub const TYPE_Q5_K: u32 = 13;
+pub const TYPE_Q6_K: u32 = 14;
 pub const TYPE_BF16: u32 = 30;
 
 /// Compute byte size for a tensor of given type and element count.
@@ -32,6 +37,11 @@ pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, Mo
         TYPE_Q5_0 => Ok(n_elements / 32 * 22),
         TYPE_Q5_1 => Ok(n_elements / 32 * 24),
         TYPE_Q8_0 => Ok(n_elements / 32 * 34),
+        TYPE_Q4_K => Ok(n_elements / 256 * 148),  // super-block of 256 = 148 bytes
+        TYPE_Q6_K => Ok(n_elements / 256 * 210),  // super-block of 256 = 210 bytes
+        TYPE_Q2_K => Ok(n_elements / 256 * 84),
+        TYPE_Q3_K => Ok(n_elements / 256 * 110),
+        TYPE_Q5_K => Ok(n_elements / 256 * 176),
         other => Err(ModelError::UnsupportedDtype(format!("GGML type {other}"))),
     }
 }
@@ -46,6 +56,11 @@ pub fn type_name(tensor_type: u32) -> &'static str {
         TYPE_Q8_0 => "Q8_0",
         TYPE_Q5_0 => "Q5_0",
         TYPE_Q5_1 => "Q5_1",
+        TYPE_Q2_K => "Q2_K",
+        TYPE_Q3_K => "Q3_K",
+        TYPE_Q4_K => "Q4_K",
+        TYPE_Q5_K => "Q5_K",
+        TYPE_Q6_K => "Q6_K",
         TYPE_BF16 => "BF16",
         _ => "unknown",
     }
@@ -66,6 +81,8 @@ pub fn dequantize(data: &[u8], tensor_type: u32, n_elements: usize) -> Result<Ve
         TYPE_Q8_0 => dequantize_q8_0(data, n_elements),
         TYPE_Q5_0 => dequantize_q5_0(data, n_elements),
         TYPE_Q5_1 => dequantize_q5_1(data, n_elements),
+        TYPE_Q4_K => dequantize_q4_k(data, n_elements),
+        TYPE_Q6_K => dequantize_q6_k(data, n_elements),
         other => Err(ModelError::UnsupportedDtype(format!("GGML type {other}"))),
     }
 }
@@ -193,6 +210,78 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 
             out.push(lo_combined as f32 * scale + min);
             out.push(hi_combined as f32 * scale + min);
+        }
+    }
+    Ok(out)
+}
+
+/// Q4_K: super-block of 256 values = 148 bytes.
+/// [0..1] f16 d, [2..3] f16 dmin, [4..15] 6-bit scales, [16..19] 4-bit mins, [20..147] 4-bit quants.
+pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
+    let block_size = 148;
+    let super_block = 256;
+    let n_blocks = n_elements / super_block;
+    let mut out = Vec::with_capacity(n_elements);
+
+    for sb in 0..n_blocks {
+        let block = &data[sb * block_size..(sb + 1) * block_size];
+        let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
+        let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
+
+        // Unpack 8 × 6-bit scales from bytes 4..15
+        let sc = &block[4..16];
+        let mut scales = [0u8; 8];
+        let mut mins = [0u8; 8];
+        // Lower 4 bits of scales from bytes 0-7
+        for j in 0..8 { scales[j] = sc[j] & 0x3F; }
+        // 4-bit mins from bytes 16-19
+        let mb = &block[16..20];
+        for j in 0..4 {
+            mins[j] = mb[j] & 0x0F;
+            mins[j + 4] = (mb[j] >> 4) & 0x0F;
+        }
+
+        let quants = &block[20..148];
+        for j in 0..8 {
+            let sc_val = d * scales[j] as f32;
+            let mn_val = dmin * mins[j] as f32;
+            for i in 0..16 {
+                let byte = quants[j * 16 + i];
+                let lo = (byte & 0x0F) as f32;
+                let hi = ((byte >> 4) & 0x0F) as f32;
+                out.push(sc_val * lo - mn_val);
+                out.push(sc_val * hi - mn_val);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Q6_K: super-block of 256 values = 210 bytes.
+/// [0..127] lower 4 bits, [128..191] upper 2 bits, [192..207] 16 int8 scales, [208..209] f16 d.
+pub fn dequantize_q6_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
+    let block_size = 210;
+    let super_block = 256;
+    let n_blocks = n_elements / super_block;
+    let mut out = Vec::with_capacity(n_elements);
+
+    for sb in 0..n_blocks {
+        let block = &data[sb * block_size..(sb + 1) * block_size];
+        let ql = &block[0..128];    // lower 4 bits
+        let qh = &block[128..192];  // upper 2 bits
+        let scales = &block[192..208]; // 16 int8 scales
+        let d = f16_to_f32(u16::from_le_bytes([block[208], block[209]]));
+
+        for j in 0..16 {
+            let sc = d * (scales[j] as i8) as f32;
+            for i in 0..16 {
+                let idx = j * 16 + i;
+                let lo4 = if idx % 2 == 0 { ql[idx / 2] & 0x0F } else { (ql[idx / 2] >> 4) & 0x0F };
+                let hi2_byte = qh[idx / 4];
+                let hi2 = (hi2_byte >> ((idx % 4) * 2)) & 0x03;
+                let val = ((lo4 as i32) | ((hi2 as i32) << 4)) - 32;
+                out.push(sc * val as f32);
+            }
         }
     }
     Ok(out)

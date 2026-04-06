@@ -72,7 +72,7 @@ kernel void q8_qkv_proj(
         device const char* wb = row_data + b * 32;
         threadgroup const int8_t* xb = tg_x8 + b * 32;
 
-        // int8 × int8 dot product — fully unrolled for 32 elements
+        // int8 × int8 dot product (compiler auto-vectorizes)
         int isum = 0;
         for (uint i = 0; i < 32; i++) {
             isum += int(wb[i]) * int(xb[i]);

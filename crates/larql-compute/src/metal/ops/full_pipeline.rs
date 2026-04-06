@@ -57,6 +57,7 @@ fn encode_q4_matvec(
     );
 }
 
+#[allow(dead_code)]
 fn encode_q8_matvec(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -155,7 +156,7 @@ pub fn dispatch_full_pipeline(
     let num_layers = layers.len();
     let hidden_val = hidden as u32;
     let inter_val = inter as u32;
-    let n_blocks = (hidden / 32) as u32;
+    let _n_blocks = (hidden / 32) as u32;
     let eps = 1e-6f32;
 
     // Pre-cache Q8 attention weight buffers (higher precision for Q/K dot products)

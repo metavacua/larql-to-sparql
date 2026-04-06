@@ -20,7 +20,8 @@ fn main() {
                               "rms_norm_q8", "residual_norm", "residual_norm_q8",
                               "rms_norm", "residual_add", "q8_matvec",
                               "q8_proj_rope", "q8_qkv_proj",
-                              "rms_norm_q8", "residual_norm", "residual_norm_q8"] {
+                              "rms_norm_q8", "residual_norm", "residual_norm_q8",
+                              "q4k_matvec", "q6k_matvec"] {
                     match lib.get_function(name, None) {
                         Ok(_) => println!("  ✓ {name}"),
                         Err(e) => println!("  ✗ {name}: {e}"),

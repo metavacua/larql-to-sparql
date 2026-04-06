@@ -43,8 +43,8 @@ kernel void kv_attention(
     for (uint t = tid; t < T; t += tg_sz) {
         device const float* k = K_cache + t * num_kv * head_dim + kv_head * head_dim;
         float dot = 0.0f;
-        for (uint d = 0; d < head_dim; d++) {
-            dot += q[d] * k[d];
+        for (uint d = 0; d < head_dim; d += 4) {
+            dot += q[d] * k[d] + q[d+1] * k[d+1] + q[d+2] * k[d+2] + q[d+3] * k[d+3];
         }
         dot *= scale;
         tg_scores[t] = dot;
