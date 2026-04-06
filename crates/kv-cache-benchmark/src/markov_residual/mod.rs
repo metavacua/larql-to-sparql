@@ -57,7 +57,7 @@ impl KvStrategy for MarkovResidual {
         "Markov Residual Stream"
     }
 
-    fn encode(&self, keys: &[Vec<f32>], values: &[Vec<f32>]) -> Vec<u8> {
+    fn encode(&self, keys: &[Vec<f32>], _values: &[Vec<f32>]) -> Vec<u8> {
         // For the synthetic benchmark, Markov RS doesn't store K/V at all.
         // It stores residuals (simulated as window of recent vectors) + token IDs.
         //

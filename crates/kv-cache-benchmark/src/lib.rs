@@ -4,7 +4,12 @@ pub mod standard_kv;
 pub mod turboquant;
 pub mod markov_residual;
 pub mod graph_walk;
+pub mod hybrid_cracked;
 pub mod benchmark;
+pub mod shader_bench;
+
+#[cfg(feature = "real-model")]
+pub mod real_model;
 
 use metrics::Metrics;
 use model_config::ModelConfig;
@@ -34,81 +39,73 @@ pub trait KvStrategy {
 
     /// Analytical memory for `seq_len` tokens (config-level, no data needed).
     fn memory_bytes(&self, config: &ModelConfig, seq_len: usize) -> usize;
-
-    /// Run encode → decode → measure on synthetic data.
-    fn benchmark(
-        &self,
-        config: &ModelConfig,
-        seq_len: usize,
-        rng: &mut impl rand::Rng,
-    ) -> StrategyResult {
-        let dim = config.kv_dim();
-        let num_vectors = seq_len * config.layers * config.kv_heads;
-
-        // Generate random vectors in FP16 range
-        let keys: Vec<Vec<f32>> = (0..num_vectors)
-            .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
-            .collect();
-        let values: Vec<Vec<f32>> = (0..num_vectors)
-            .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
-            .collect();
-
-        // Encode
-        let t0 = std::time::Instant::now();
-        let encoded = self.encode(&keys, &values);
-        let encode_us = t0.elapsed().as_secs_f64() * 1e6;
-
-        // Decode
-        let t0 = std::time::Instant::now();
-        let (dec_keys, dec_values) = self.decode(&encoded, num_vectors, dim);
-        let decode_us = t0.elapsed().as_secs_f64() * 1e6;
-
-        // Flatten for metrics
-        let flat_orig_k: Vec<f32> = keys.iter().flatten().copied().collect();
-        let flat_dec_k: Vec<f32> = dec_keys.iter().flatten().copied().collect();
-        let flat_orig_v: Vec<f32> = values.iter().flatten().copied().collect();
-        let flat_dec_v: Vec<f32> = dec_values.iter().flatten().copied().collect();
-
-        let mse_k = Metrics::compute_mse(&flat_orig_k, &flat_dec_k);
-        let mse_v = Metrics::compute_mse(&flat_orig_v, &flat_dec_v);
-        let cos_k = Metrics::compute_cosine(&flat_orig_k, &flat_dec_k);
-        let cos_v = Metrics::compute_cosine(&flat_orig_v, &flat_dec_v);
-
-        // Random query vectors for inner product error
-        let queries: Vec<Vec<f32>> = (0..10)
-            .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
-            .collect();
-
-        // Sample inner product error from first vector
-        let ip_err = if !keys.is_empty() && !dec_keys.is_empty() {
-            Metrics::compute_inner_product_error(&keys[0], &dec_keys[0], &queries)
-        } else {
-            0.0
-        };
-
-        let original_bytes = num_vectors * 2 * dim * 4; // K+V, f32
-        let compression_ratio = if encoded.is_empty() {
-            0.0
-        } else {
-            original_bytes as f64 / encoded.len() as f64
-        };
-
-        StrategyResult {
-            strategy_name: self.name().to_string(),
-            model_name: config.name.to_string(),
-            seq_len,
-            metrics: Metrics {
-                mse: (mse_k + mse_v) / 2.0,
-                cosine_sim: (cos_k + cos_v) / 2.0,
-                inner_product_error: ip_err,
-                compression_ratio,
-                encoded_bytes: encoded.len(),
-                original_bytes,
-                encode_us,
-                decode_us,
-            },
-        }
-    }
 }
 
-use rand::Rng;
+/// Run encode → decode → measure on synthetic data for any strategy.
+pub fn run_strategy_benchmark(
+    strategy: &dyn KvStrategy,
+    config: &ModelConfig,
+    seq_len: usize,
+    rng: &mut impl rand::Rng,
+) -> StrategyResult {
+    let dim = config.kv_dim();
+    let num_vectors = seq_len * config.layers * config.kv_heads;
+
+    let keys: Vec<Vec<f32>> = (0..num_vectors)
+        .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
+        .collect();
+    let values: Vec<Vec<f32>> = (0..num_vectors)
+        .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
+        .collect();
+
+    let t0 = std::time::Instant::now();
+    let encoded = strategy.encode(&keys, &values);
+    let encode_us = t0.elapsed().as_secs_f64() * 1e6;
+
+    let t0 = std::time::Instant::now();
+    let (dec_keys, dec_values) = strategy.decode(&encoded, num_vectors, dim);
+    let decode_us = t0.elapsed().as_secs_f64() * 1e6;
+
+    let flat_orig_k: Vec<f32> = keys.iter().flatten().copied().collect();
+    let flat_dec_k: Vec<f32> = dec_keys.iter().flatten().copied().collect();
+    let flat_orig_v: Vec<f32> = values.iter().flatten().copied().collect();
+    let flat_dec_v: Vec<f32> = dec_values.iter().flatten().copied().collect();
+
+    let mse_k = Metrics::compute_mse(&flat_orig_k, &flat_dec_k);
+    let mse_v = Metrics::compute_mse(&flat_orig_v, &flat_dec_v);
+    let cos_k = Metrics::compute_cosine(&flat_orig_k, &flat_dec_k);
+    let cos_v = Metrics::compute_cosine(&flat_orig_v, &flat_dec_v);
+
+    let queries: Vec<Vec<f32>> = (0..10)
+        .map(|_| (0..dim).map(|_| rng.gen_range(-1.0f32..1.0f32)).collect())
+        .collect();
+
+    let ip_err = if !keys.is_empty() && !dec_keys.is_empty() {
+        Metrics::compute_inner_product_error(&keys[0], &dec_keys[0], &queries)
+    } else {
+        0.0
+    };
+
+    let original_bytes = num_vectors * 2 * dim * 4;
+    let compression_ratio = if encoded.is_empty() {
+        0.0
+    } else {
+        original_bytes as f64 / encoded.len() as f64
+    };
+
+    StrategyResult {
+        strategy_name: strategy.name().to_string(),
+        model_name: config.name.to_string(),
+        seq_len,
+        metrics: Metrics {
+            mse: (mse_k + mse_v) / 2.0,
+            cosine_sim: (cos_k + cos_v) / 2.0,
+            inner_product_error: ip_err,
+            compression_ratio,
+            encoded_bytes: encoded.len(),
+            original_bytes,
+            encode_us,
+            decode_us,
+        },
+    }
+}

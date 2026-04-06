@@ -36,7 +36,7 @@ impl TurboQuant {
         };
 
         // Step 2: Walsh-Hadamard transform (in-place)
-        let mut y = rotation::wht(&x_hat);
+        let y = rotation::wht(&x_hat);
 
         // Step 3: Lloyd-Max quantize each coordinate
         let codebook = codebooks::get_codebook(d, self.bits);

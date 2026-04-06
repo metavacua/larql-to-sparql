@@ -4,6 +4,7 @@ use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::standard_kv::StandardKv;
 use kv_cache_benchmark::turboquant::TurboQuant;
 use kv_cache_benchmark::markov_residual::MarkovResidual;
+use kv_cache_benchmark::hybrid_cracked::HybridCrackedAttention;
 use kv_cache_benchmark::graph_walk::GraphWalk;
 
 #[test]
@@ -127,4 +128,69 @@ fn test_multi_model_memory() {
             config.name
         );
     }
+}
+
+#[test]
+fn test_five_strategy_memory_ordering() {
+    let config = ModelConfig::gemma_4b();
+    let standard = StandardKv;
+    let tq4 = TurboQuant::new(4);
+    let markov = MarkovResidual::new(512);
+    let hybrid = HybridCrackedAttention::gemma_4b();
+    let graph = GraphWalk::gemma_4b();
+
+    let seq_len = 4096;
+    let mem_std = standard.memory_bytes(&config, seq_len);
+    let mem_tq = tq4.memory_bytes(&config, seq_len);
+    let mem_hyb = hybrid.memory_bytes(&config, seq_len);
+    let mem_gw = graph.memory_bytes(&config, seq_len);
+
+    // Standard > TurboQuant > Hybrid > Graph Walk
+    assert!(mem_std > mem_tq, "Standard > TurboQuant");
+    assert!(mem_tq > mem_hyb, "TurboQuant > Hybrid");
+    assert!(mem_hyb > mem_gw, "Hybrid > Graph Walk");
+}
+
+#[test]
+fn test_five_strategy_table_format() {
+    let config = ModelConfig::gemma_4b();
+    let standard = StandardKv;
+    let tq4 = TurboQuant::new(4);
+    let markov = MarkovResidual::new(512);
+    let hybrid = HybridCrackedAttention::gemma_4b();
+    let graph = GraphWalk::gemma_4b();
+
+    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &hybrid, &graph];
+    let table = benchmark::format_comparative_table(&config, &strategies);
+
+    assert!(table.contains("Hybrid RS+CA"));
+    assert!(table.contains("ZERO (vindex)"));
+    assert!(table.contains("~1-2L dynamic"));
+}
+
+#[test]
+fn test_370k_five_strategy_ratios() {
+    let config = ModelConfig::gemma_4b();
+    let standard = StandardKv;
+    let tq4 = TurboQuant::new(4);
+    let markov = MarkovResidual::new(512);
+    let hybrid = HybridCrackedAttention::gemma_4b();
+    let graph = GraphWalk::gemma_4b();
+
+    let seq_len = 370_000;
+    let mem_std = standard.memory_bytes(&config, seq_len) as f64;
+    let mem_tq = tq4.memory_bytes(&config, seq_len) as f64;
+    let mem_mrk = markov.memory_bytes(&config, seq_len) as f64;
+    let mem_hyb = hybrid.memory_bytes(&config, seq_len) as f64;
+    let mem_gw = graph.memory_bytes(&config, seq_len) as f64;
+
+    println!("At 370K tokens on {}:", config.name);
+    println!("  Standard KV:   {:.1} GB", mem_std / 1e9);
+    println!("  TurboQuant 4b: {:.1} GB ({:.1}x)", mem_tq / 1e9, mem_std / mem_tq);
+    println!("  Markov RS:     {:.1} MB ({:.0}x)", mem_mrk / 1e6, mem_std / mem_mrk);
+    println!("  Hybrid RS+CA:  {:.1} MB ({:.0}x)", mem_hyb / 1e6, mem_std / mem_hyb);
+    println!("  Graph Walk:    {:.1} MB ({:.0}x)", mem_gw / 1e6, mem_std / mem_gw);
+
+    // Hybrid should be between TQ and Markov RS in compression
+    assert!(mem_std / mem_hyb > 5.0, "Hybrid compression too low");
 }

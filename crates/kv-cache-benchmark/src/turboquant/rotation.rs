@@ -10,21 +10,28 @@
 /// In-place WHT on a power-of-2 length buffer.
 /// Applies deterministic sign flips before the transform for better decorrelation.
 /// Output is scaled by 1/sqrt(d) so the transform is orthonormal (self-inverse).
+/// Apply deterministic sign flips (diagonal ±1 matrix D).
+/// D·D = I, so applying twice is identity.
+fn apply_sign_flips(y: &mut [f32]) {
+    for (i, v) in y.iter_mut().enumerate() {
+        if (i.wrapping_mul(2654435761) >> 16) & 1 == 1 {
+            *v = -*v;
+        }
+    }
+}
+
+/// Forward WHT with sign flips: D · H · D · x
+/// Self-inverse because (DHD)^2 = DH(DD)HD = DH·I·HD = D(HH)D = D·I·D = I
 pub fn wht(x: &[f32]) -> Vec<f32> {
     let d = x.len();
     assert!(d.is_power_of_two(), "WHT requires power-of-2 dimension, got {d}");
 
     let mut y = x.to_vec();
 
-    // Deterministic sign flips (simulates random orthogonal rotation component)
-    // Using a fixed seed for reproducibility across encode/decode
-    for i in 0..d {
-        if (i.wrapping_mul(2654435761) >> 16) & 1 == 1 {
-            y[i] = -y[i];
-        }
-    }
+    // Apply D (sign flips)
+    apply_sign_flips(&mut y);
 
-    // Butterfly stages
+    // Apply H (Hadamard butterfly)
     let mut half = 1;
     while half < d {
         let mut i = 0;
@@ -40,11 +47,14 @@ pub fn wht(x: &[f32]) -> Vec<f32> {
         half *= 2;
     }
 
-    // Normalize to make it orthonormal (self-inverse)
+    // Normalize: 1/sqrt(d) makes H orthonormal
     let scale = 1.0 / (d as f32).sqrt();
     for v in &mut y {
         *v *= scale;
     }
+
+    // Apply D again (sign flips)
+    apply_sign_flips(&mut y);
 
     y
 }

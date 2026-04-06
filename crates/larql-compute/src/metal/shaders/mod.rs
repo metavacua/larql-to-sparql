@@ -27,6 +27,9 @@ pub mod q8_attn_proj;
 pub mod q4k_matvec;
 pub mod q4k_qkv_proj;
 pub mod q6k_matvec;
+pub mod turboquant_encode;
+pub mod turboquant_decode;
+pub mod graph_walk_knn;
 
 /// Concatenate all shaders into one MSL source string for compilation.
 pub fn all_shaders() -> String {
@@ -61,5 +64,10 @@ pub fn all_shaders() -> String {
     src.push_str(q4k_matvec::SHADER);
     src.push_str(q4k_qkv_proj::SHADER);
     src.push_str(q6k_matvec::SHADER);
+    // TurboQuant (KV cache compression)
+    src.push_str(turboquant_encode::SHADER);
+    src.push_str(turboquant_decode::SHADER);
+    // Graph walk KNN
+    src.push_str(graph_walk_knn::SHADER);
     src
 }

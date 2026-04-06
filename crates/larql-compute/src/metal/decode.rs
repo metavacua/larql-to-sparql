@@ -241,16 +241,17 @@ impl MetalBackend {
                 enc.end_encoding();
             }
 
-            // 6. Q4 FFN: gate+up (one encoder) → GEGLU → down
+            // 6. Q4 FFN + residual: gate+up → GEGLU → down → residual (one encoder)
             let gate_out = self.bufs.output((inter * 4) as u64);
             let up_out = self.bufs.output((inter * 4) as u64);
             let act_buf = self.bufs.output((inter * 4) as u64);
             let down_out = self.bufs.output((hidden * 4) as u64);
+            let new_h = self.bufs.output((hidden * 4) as u64);
             {
+                // Gate + Up in one encoder (independent dispatches)
                 let enc = cmd.new_compute_command_encoder();
                 use crate::metal::shaders::q4_matvec as q4mv;
                 let n_tgs_gate = ((inter as u64) + q4mv::ROWS_PER_TG - 1) / q4mv::ROWS_PER_TG;
-                // Gate
                 enc.set_compute_pipeline_state(&self.q4.matvec);
                 enc.set_buffer(0, Some(&gate_bufs[l]), 0);
                 enc.set_buffer(1, Some(&ffn_q8), 0);
@@ -259,24 +260,17 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_thread_groups(MTLSize::new(n_tgs_gate, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
-                // Up
                 enc.set_buffer(0, Some(&up_bufs[l]), 0);
                 enc.set_buffer(3, Some(&up_out), 0);
                 enc.dispatch_thread_groups(MTLSize::new(n_tgs_gate, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
-                enc.end_encoding();
-            }
-            {
-                let enc = cmd.new_compute_command_encoder();
+                // GEGLU in same encoder (depends on gate+up)
                 enc.set_compute_pipeline_state(&self.geglu_pipeline);
                 enc.set_buffer(0, Some(&gate_out), 0);
                 enc.set_buffer(1, Some(&up_out), 0);
                 enc.set_buffer(2, Some(&act_buf), 0);
                 enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
-                enc.end_encoding();
-            }
-            {
-                let enc = cmd.new_compute_command_encoder();
+                // Down in same encoder (depends on GEGLU)
                 enc.set_compute_pipeline_state(&self.q4.f32_matvec);
                 enc.set_buffer(0, Some(&down_bufs[l]), 0);
                 enc.set_buffer(1, Some(&act_buf), 0);
@@ -284,14 +278,8 @@ impl MetalBackend {
                 enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256, 1, 1));
-                enc.end_encoding();
-            }
-
-            // 7. Post-FFN residual add → h for next layer
-            let new_h = self.bufs.output((hidden * 4) as u64);
-            {
+                // 7. Post-FFN residual add in same encoder (depends on down)
                 let len_val = hidden as u32;
-                let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(&self.residual_add_pipeline);
                 enc.set_buffer(0, Some(&h_post_attn), 0);
                 enc.set_buffer(1, Some(&down_out), 0);

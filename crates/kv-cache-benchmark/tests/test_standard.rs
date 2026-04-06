@@ -61,9 +61,9 @@ fn test_standard_kv_memory_formula() {
     let mem_370k = StandardKv.memory_bytes(&config, 370_000);
     let expected_370k = 370_000 * 34 * 2 * 2 * 256 * 2;
     assert_eq!(mem_370k, expected_370k);
-    // Should be ~56 GB range
-    assert!(mem_370k > 50_000_000_000);
-    assert!(mem_370k < 70_000_000_000);
+    // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
+    assert!(mem_370k > 20_000_000_000);
+    assert!(mem_370k < 30_000_000_000);
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn test_standard_kv_benchmark_runs() {
     let strategy = StandardKv;
     let mut rng = StdRng::seed_from_u64(42);
 
-    let result = strategy.benchmark(&config, 64, &mut rng);
+    let result = kv_cache_benchmark::run_strategy_benchmark(&strategy, &config, 64, &mut rng);
     assert_eq!(result.strategy_name, "Standard KV (FP16)");
     assert_eq!(result.seq_len, 64);
     // MSE should be very small (FP16 quantization noise only)

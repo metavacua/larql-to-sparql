@@ -1,7 +1,7 @@
 /// Benchmark runner: sweeps context lengths × strategies × models.
 /// Outputs JSON + formatted table.
 
-use crate::{KvStrategy, StrategyResult, model_config::ModelConfig};
+use crate::{KvStrategy, StrategyResult, run_strategy_benchmark, model_config::ModelConfig};
 use rand::prelude::*;
 
 /// Context lengths to sweep.
@@ -21,7 +21,7 @@ pub fn run_sweep(
 
     for &seq_len in context_lengths {
         for strategy in strategies {
-            let result = strategy.benchmark(config, seq_len, &mut rng);
+            let result = run_strategy_benchmark(*strategy, config, seq_len, &mut rng);
             results.push(result);
         }
     }
@@ -123,54 +123,49 @@ pub fn format_comparative_table(
     let mut out = String::new();
     out.push_str(&format!("\n=== KV Cache Strategy Comparison: {} ===\n\n", config.name));
 
-    // Header
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "Context Length",
-        strategies.get(0).map_or("", |s| s.name()),
-        strategies.get(1).map_or("", |s| s.name()),
-        strategies.get(2).map_or("", |s| s.name()),
-        strategies.get(3).map_or("", |s| s.name()),
-    ));
-    out.push_str(&"-".repeat(90));
+    // Dynamic header based on number of strategies
+    let col_width = 15;
+    out.push_str(&format!("{:<25}", "Context Length"));
+    for s in strategies {
+        out.push_str(&format!(" {:>width$}", s.name(), width = col_width));
+    }
+    out.push('\n');
+    out.push_str(&"-".repeat(25 + strategies.len() * (col_width + 1)));
     out.push('\n');
 
     for &seq_len in &[512, 4096, 32768, 131072, 370_000usize] {
         out.push_str(&format!("{:<25}", format_tokens(seq_len)));
         for strategy in strategies {
             let mem = strategy.memory_bytes(config, seq_len);
-            out.push_str(&format!(" {:>15}", format_bytes(mem)));
+            out.push_str(&format!(" {:>width$}", format_bytes(mem), width = col_width));
         }
         out.push('\n');
     }
 
-    out.push_str(&"\n--- Computation per token ---\n\n");
+    out.push_str("\n--- Computation per token ---\n\n");
+    // 5-column computation table
+    let ops = [
+        ("Attention matmul", "34 layers", "34 layers", "window only", "~1-2L dynamic", "ELIMINATED"),
+        ("FFN matmul",       "34 layers", "34 layers", "34 layers",   "ZERO (vindex)", "ELIMINATED"),
+        ("Logits matmul",    "1x",        "1x",        "1x",          "ZERO (KNN)",    "ELIMINATED"),
+        ("KV cache write",   "34 layers", "34L + quant","none",       "~1-2L dynamic", "none"),
+        ("Cached attn",      "none",      "none",       "none",       "~32-33L",       "none"),
+        ("Graph lookup",     "none",      "none",       "none",       "34L FFN",       "3 per hop"),
+    ];
+
     out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "Operation", "Standard KV", "TurboQuant", "Markov RS", "Graph Walk"
+        "{:<20} {:>14} {:>14} {:>14} {:>14} {:>14}\n",
+        "Operation", "Standard KV", "TurboQuant", "Markov RS", "Hybrid RS+CA", "Graph Walk"
     ));
-    out.push_str(&"-".repeat(90));
+    out.push_str(&"-".repeat(92));
     out.push('\n');
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "Attention matmul", "34 layers", "34 layers", "window only", "ELIMINATED"
-    ));
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "FFN matmul", "34 layers", "34 layers", "34 layers", "ELIMINATED"
-    ));
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "Logits matmul", "1x", "1x", "1x", "ELIMINATED"
-    ));
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "KV cache write", "34 layers", "34L + quant", "none", "none"
-    ));
-    out.push_str(&format!(
-        "{:<25} {:>15} {:>15} {:>15} {:>15}\n",
-        "Graph lookup", "none", "none", "none", "3 per hop"
-    ));
+
+    for (op, std, tq, mrs, hyb, gw) in &ops {
+        out.push_str(&format!(
+            "{:<20} {:>14} {:>14} {:>14} {:>14} {:>14}\n",
+            op, std, tq, mrs, hyb, gw,
+        ));
+    }
 
     out
 }

@@ -136,7 +136,7 @@ fn test_turboquant_benchmark_runs() {
     let tq = TurboQuant::new(4);
     let mut rng = StdRng::seed_from_u64(42);
 
-    let result = tq.benchmark(&config, 32, &mut rng);
+    let result = kv_cache_benchmark::run_strategy_benchmark(&tq, &config, 32, &mut rng);
     assert_eq!(result.strategy_name, "TurboQuant 4-bit");
     assert!(result.metrics.mse > 0.0, "MSE should be non-zero for lossy compression");
     assert!(result.metrics.cosine_sim > 0.9, "Cosine should be high");

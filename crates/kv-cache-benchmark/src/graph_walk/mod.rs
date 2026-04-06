@@ -76,7 +76,7 @@ impl KvStrategy for GraphWalk {
         buf
     }
 
-    fn decode(&self, encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    fn decode(&self, _encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         // Graph Walk produces predictions via graph lookup, not K/V reconstruction.
         // For the synthetic benchmark, we return zeros to indicate "no K/V vectors".
         // Accuracy is measured differently: top-1 token match, not MSE on K/V.

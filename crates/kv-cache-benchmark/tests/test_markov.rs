@@ -87,3 +87,49 @@ fn test_markov_encode_decode() {
         }
     }
 }
+
+#[test]
+fn test_markov_reconstruction_exact() {
+    // Within the active window, residuals are stored at full precision.
+    // Reconstruction from the window should be bit-perfect (KL = 0.0).
+    let strategy = MarkovResidual::new(512);
+    let dim = 64;
+    let n = 100; // All within window
+
+    let keys: Vec<Vec<f32>> = (0..n)
+        .map(|i| (0..dim).map(|j| (i * dim + j) as f32 * 0.01).collect())
+        .collect();
+    let values: Vec<Vec<f32>> = (0..n)
+        .map(|i| (0..dim).map(|j| (i * dim + j) as f32 * 0.02).collect())
+        .collect();
+
+    let encoded = strategy.encode(&keys, &values);
+    let (dec_keys, _dec_values) = strategy.decode(&encoded, n, dim);
+
+    // All within window — should be exact (bit-perfect)
+    for i in 0..n {
+        for j in 0..dim {
+            assert!(
+                (dec_keys[i][j] - keys[i][j]).abs() < 1e-6,
+                "Not bit-perfect at [{i}][{j}]: {} vs {}",
+                dec_keys[i][j], keys[i][j],
+            );
+        }
+    }
+}
+
+#[test]
+fn test_markov_checkpoint_spacing() {
+    use kv_cache_benchmark::markov_residual::checkpoint::CheckpointConfig;
+
+    let config = CheckpointConfig::gemma_4b();
+    // Max recompute should be bounded (max 8-9 layers)
+    let max = config.max_recompute();
+    assert!(
+        max <= 10,
+        "Max recompute from checkpoint should be ≤10 layers, got {max}"
+    );
+
+    // Should have 5 checkpoints
+    assert_eq!(config.layers.len(), 5);
+}

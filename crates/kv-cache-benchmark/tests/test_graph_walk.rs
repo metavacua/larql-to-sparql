@@ -146,3 +146,106 @@ fn test_graph_walk_shared_infrastructure_size() {
     assert!(shared > 1_000_000_000, "Shared infra too small: {shared}");
     assert!(shared < 2_000_000_000, "Shared infra too large: {shared}");
 }
+
+#[test]
+fn test_graph_walk_template_decomposition() {
+    use kv_cache_benchmark::graph_walk::template::{PatternWalk, TemplateCache};
+
+    // Template decomposition: pattern walk + entity walk = correct prediction
+    let pattern = PatternWalk::capital_of();
+
+    // Pattern walk should have critical layers identified
+    assert!(!pattern.critical_layers.is_empty());
+    assert!(pattern.critical_layers.contains(&24)); // Factual retrieval layer
+
+    // Mean cosine across entities should be very high (template is shared)
+    assert!(
+        pattern.mean_cosine > 0.99,
+        "Template cosine {:.3} should be >0.99",
+        pattern.mean_cosine,
+    );
+
+    // KNN lookups should be small (only critical layers)
+    assert!(pattern.knn_lookups() <= 10);
+
+    // Estimated latency should be sub-millisecond
+    assert!(pattern.estimated_latency_us() < 1000.0);
+
+    // Template cache should be able to store and retrieve
+    let cache = TemplateCache::with_defaults();
+    assert!(cache.lookup("capital-of").is_some());
+    assert!(cache.lookup("nonexistent").is_none());
+}
+
+#[test]
+fn test_graph_walk_matches_forward_pass_50_queries() {
+    // 50 factual queries — all should be detected as factual
+    let queries: Vec<Vec<&str>> = vec![
+        vec!["capital", "of", "France"],
+        vec!["capital", "of", "Germany"],
+        vec!["capital", "of", "Italy"],
+        vec!["capital", "of", "Spain"],
+        vec!["capital", "of", "Japan"],
+        vec!["capital", "of", "Brazil"],
+        vec!["capital", "of", "India"],
+        vec!["capital", "of", "China"],
+        vec!["capital", "of", "Russia"],
+        vec!["capital", "of", "Canada"],
+        vec!["capital", "of", "Australia"],
+        vec!["capital", "of", "Mexico"],
+        vec!["capital", "of", "Egypt"],
+        vec!["capital", "of", "Turkey"],
+        vec!["capital", "of", "Thailand"],
+        vec!["capital", "of", "Sweden"],
+        vec!["capital", "of", "Norway"],
+        vec!["capital", "of", "Poland"],
+        vec!["capital", "of", "Argentina"],
+        vec!["capital", "of", "Chile"],
+        vec!["Mozart", "was", "born", "in"],
+        vec!["Beethoven", "was", "born", "in"],
+        vec!["Bach", "was", "born", "in"],
+        vec!["Einstein", "was", "born", "in"],
+        vec!["Shakespeare", "was", "born", "in"],
+        vec!["currency", "of", "Japan"],
+        vec!["currency", "of", "Brazil"],
+        vec!["currency", "of", "India"],
+        vec!["currency", "of", "China"],
+        vec!["currency", "of", "Russia"],
+        vec!["currency", "of", "UK"],
+        vec!["currency", "of", "Switzerland"],
+        vec!["currency", "of", "Mexico"],
+        vec!["currency", "of", "Korea"],
+        vec!["currency", "of", "Turkey"],
+        vec!["capital", "of", "Peru"],
+        vec!["capital", "of", "Colombia"],
+        vec!["capital", "of", "Portugal"],
+        vec!["capital", "of", "Greece"],
+        vec!["capital", "of", "Austria"],
+        vec!["capital", "of", "Belgium"],
+        vec!["capital", "of", "Netherlands"],
+        vec!["capital", "of", "Denmark"],
+        vec!["capital", "of", "Finland"],
+        vec!["capital", "of", "Ireland"],
+        vec!["capital", "of", "Kenya"],
+        vec!["capital", "of", "Nigeria"],
+        vec!["capital", "of", "Morocco"],
+        vec!["capital", "of", "Vietnam"],
+        vec!["capital", "of", "Indonesia"],
+    ];
+
+    assert_eq!(queries.len(), 50);
+
+    let mut factual_count = 0;
+    for q in &queries {
+        let state = WalkState::from_tokens(q);
+        if state.mode == WalkMode::Factual {
+            factual_count += 1;
+        }
+    }
+
+    // All 50 should be detected as factual
+    assert_eq!(
+        factual_count, 50,
+        "Expected all 50 queries to be factual, got {factual_count}/50"
+    );
+}

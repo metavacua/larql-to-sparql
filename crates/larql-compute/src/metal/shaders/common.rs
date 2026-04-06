@@ -13,4 +13,15 @@ static inline float decode_f16_metal(ushort bits) {
     exp = exp + 127 - 15;
     return as_type<float>(sign | (exp << 23) | (mant << 13));
 }
+
+// Q4_K super-block: 256 values in 148 bytes.
+// Struct layout matches the serialized format exactly.
+// Using packed struct enables compiler to generate coalesced reads.
+struct block_q4_K {
+    ushort d;           // f16 delta (2 bytes)
+    ushort dmin;        // f16 minimum (2 bytes)
+    uchar  scales[12];  // 8 × 6-bit sub-block scales packed (12 bytes)
+    uchar  mins[4];     // 8 × 4-bit sub-block mins packed (4 bytes)
+    uchar  qs[128];     // 256 × 4-bit values (128 bytes)
+};                      // Total: 148 bytes
 "#;
