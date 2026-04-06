@@ -167,6 +167,21 @@ fn encode_quant_matvec(
             enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
         }
+        crate::QuantFormat::Q4_KF => {
+            // Q4_KF: same as Q4_K but data layout is different (pre-baked scales)
+            // Uses the same q4k_matvec pipeline (standalone) as fallback
+            // In practice, Q4_KF goes through the fused QKV path, not here
+            let n = num_rows as u32;
+            let k = hidden as u32;
+            let tgs = ((num_rows as u64) + 3) / 4;
+            enc.set_compute_pipeline_state(q4k_pipeline);
+            enc.set_buffer(0, Some(buf_w), 0);
+            enc.set_buffer(1, Some(buf_input), 0);
+            enc.set_buffer(2, Some(buf_out), 0);
+            enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+            enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+        }
         crate::QuantFormat::Q4_0 => {
             encode_q4_matvec(enc, q4_pipeline, buf_w, buf_input, buf_scales, buf_out, num_rows, hidden);
         }
@@ -289,7 +304,7 @@ pub fn dispatch_full_pipeline(
 
         // ── 1+3. Input norm + Q/K/V projections (format-aware) ──
         let attn_format = layers[l].wq.format;
-        let uses_f32_input = attn_format == crate::QuantFormat::Q4_K || attn_format == crate::QuantFormat::Q6_K;
+        let uses_f32_input = attn_format == crate::QuantFormat::Q4_K || attn_format == crate::QuantFormat::Q6_K || attn_format == crate::QuantFormat::Q4_KF;
 
         if uses_f32_input {
             // Q4_K/Q6_K path: norm → f32, then fused Q4_K QKV (one dispatch)

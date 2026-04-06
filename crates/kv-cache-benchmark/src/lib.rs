@@ -7,6 +7,8 @@ pub mod graph_walk;
 pub mod hybrid_cracked;
 pub mod benchmark;
 pub mod shader_bench;
+pub mod accuracy;
+pub mod accuracy_suite;
 
 #[cfg(feature = "real-model")]
 pub mod real_model;

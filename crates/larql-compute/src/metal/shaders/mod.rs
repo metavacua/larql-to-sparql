@@ -26,6 +26,7 @@ pub mod fused_ops;
 pub mod q8_attn_proj;
 pub mod q4k_matvec;
 pub mod q4k_qkv_proj;
+pub mod q4kf_qkv_proj;
 pub mod q6k_matvec;
 pub mod turboquant_encode;
 pub mod turboquant_decode;
@@ -63,6 +64,7 @@ pub fn all_shaders() -> String {
     src.push_str(q8_attn_proj::SHADER);
     src.push_str(q4k_matvec::SHADER);
     src.push_str(q4k_qkv_proj::SHADER);
+    src.push_str(q4kf_qkv_proj::SHADER);
     src.push_str(q6k_matvec::SHADER);
     // TurboQuant (KV cache compression)
     src.push_str(turboquant_encode::SHADER);

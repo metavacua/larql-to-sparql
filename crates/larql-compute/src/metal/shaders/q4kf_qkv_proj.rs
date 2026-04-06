@@ -1,50 +1,47 @@
-//! Fused Q4_K QKV projection — sub-block lane assignment + struct access.
+//! Fused Q4_KF QKV projection — pre-baked half scales, raw byte access.
 //!
-//! Best performing variant after extensive optimization:
-//! - Sub-block iteration (80 subs / 32 lanes = 83% utilization)
-//! - block_q4_K struct for coalesced header reads
-//! - uint4 per-subblock loads for nibble data
-//! - Precomputed scale products, separated dot/xsum
-//! - 8 rows/TG (8 simdgroups × 32 lanes)
+//! Q4_KF layout per 256-value block (160 bytes):
+//!   [0..15]   8 × half pre-baked d*scale_j
+//!   [16..31]  8 × half pre-baked dmin*min_j
+//!   [32..159] 128 bytes nibbles
 //!
-//! Performance: 0.50ms/layer for QKV (3584 rows × 2560 hidden)
-//! Speedup: 1.88x vs Q8 fused QKV
-//!
-//! Grid: ((total_rows + 7) / 8, 1, 1).
+//! Hot loop: read one half (2B) + uint4 nibbles (16B) + dot product. Zero decode overhead.
 
 pub const SHADER: &str = r#"
-constant uint Q4K_QKV_ROWS_PER_TG = 8;
+constant uint Q4KF_ROWS_PER_TG = 8;
+constant uint Q4KF_BLOCK_SIZE = 160;
 
-kernel void q4k_qkv_proj(
-    device const block_q4_K* Wq  [[buffer(0)]],
-    device const block_q4_K* Wk  [[buffer(1)]],
-    device const block_q4_K* Wv  [[buffer(2)]],
-    device const float*      X   [[buffer(3)]],
-    device float*        Q_out   [[buffer(4)]],
-    device float*        K_out   [[buffer(5)]],
-    device float*        V_out   [[buffer(6)]],
-    constant uint&       q_rows  [[buffer(7)]],
-    constant uint&       k_rows  [[buffer(8)]],
-    constant uint&       v_rows  [[buffer(9)]],
-    constant uint&       K       [[buffer(10)]],
+kernel void q4kf_qkv_proj(
+    device const uchar*  Wq     [[buffer(0)]],
+    device const uchar*  Wk     [[buffer(1)]],
+    device const uchar*  Wv     [[buffer(2)]],
+    device const float*  X      [[buffer(3)]],
+    device float*        Q_out  [[buffer(4)]],
+    device float*        K_out  [[buffer(5)]],
+    device float*        V_out  [[buffer(6)]],
+    constant uint&       q_rows [[buffer(7)]],
+    constant uint&       k_rows [[buffer(8)]],
+    constant uint&       v_rows [[buffer(9)]],
+    constant uint&       K      [[buffer(10)]],
     uint tg_id     [[threadgroup_position_in_grid]],
     uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
     uint total_rows = q_rows + k_rows + v_rows;
-    uint global_row = tg_id * Q4K_QKV_ROWS_PER_TG + sg_id;
+    uint global_row = tg_id * Q4KF_ROWS_PER_TG + sg_id;
     if (global_row >= total_rows) return;
 
     uint superblocks = K / 256;
     uint total_subs = superblocks * 8;
+    uint bytes_per_row = superblocks * Q4KF_BLOCK_SIZE;
 
     threadgroup float tg_x[4096];
     for (uint i = tid_in_tg; i < K; i += 256)
         tg_x[i] = X[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    device const block_q4_K* W;
+    device const uchar* W;
     device float* out_buf;
     uint local_row;
     if (global_row < q_rows) {
@@ -55,23 +52,23 @@ kernel void q4k_qkv_proj(
         W = Wv; out_buf = V_out; local_row = global_row - q_rows - k_rows;
     }
 
-    device const block_q4_K* row = W + local_row * superblocks;
+    device const uchar* row = W + local_row * bytes_per_row;
     float acc = 0.0f;
 
     for (uint sub = lane; sub < total_subs; sub += 32) {
         uint sb = sub / 8;
         uint j = sub % 8;
 
-        device const block_q4_K& blk = row[sb];
-        float d    = decode_f16_metal(blk.d);
-        float dmin = decode_f16_metal(blk.dmin);
+        device const uchar* block = row + sb * Q4KF_BLOCK_SIZE;
 
-        float sc = d * float(blk.scales[j] & 0x3F);
-        float mn;
-        if (j < 4) mn = dmin * float(blk.mins[j] & 0x0F);
-        else mn = dmin * float((blk.mins[j - 4] >> 4) & 0x0F);
+        // PRE-BAKED: read half directly — 2 bytes each, native Metal half type
+        device const half* scales = (device const half*)(block);
+        device const half* mins = (device const half*)(block + 16);
+        float sc = float(scales[j]);
+        float mn = float(mins[j]);
 
-        device const uint4* qp = (device const uint4*)(blk.qs + j * 16);
+        // Nibbles at offset 32
+        device const uint4* qp = (device const uint4*)(block + 32 + j * 16);
         uint4 w = qp[0];
         uint xi = sb * 256 + j * 32;
 
@@ -92,45 +89,43 @@ kernel void q4k_qkv_proj(
     if (lane == 0) out_buf[local_row] = acc;
 }
 
-kernel void q4k_proj(
-    device const block_q4_K* W4K [[buffer(0)]],
-    device const float*      X   [[buffer(1)]],
-    device float*            out [[buffer(2)]],
-    constant uint&           N   [[buffer(3)]],
-    constant uint&           K   [[buffer(4)]],
+kernel void q4kf_proj(
+    device const uchar*  W     [[buffer(0)]],
+    device const float*  X     [[buffer(1)]],
+    device float*        out   [[buffer(2)]],
+    constant uint&       N     [[buffer(3)]],
+    constant uint&       K     [[buffer(4)]],
     uint tg_id     [[threadgroup_position_in_grid]],
     uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
-    uint row_idx = tg_id * Q4K_QKV_ROWS_PER_TG + sg_id;
+    uint row_idx = tg_id * Q4KF_ROWS_PER_TG + sg_id;
     if (row_idx >= N) return;
 
     uint superblocks = K / 256;
     uint total_subs = superblocks * 8;
+    uint bytes_per_row = superblocks * Q4KF_BLOCK_SIZE;
 
     threadgroup float tg_x[4096];
     for (uint i = tid_in_tg; i < K; i += 256)
         tg_x[i] = X[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    device const block_q4_K* row = W4K + row_idx * superblocks;
+    device const uchar* row = W + row_idx * bytes_per_row;
     float acc = 0.0f;
 
     for (uint sub = lane; sub < total_subs; sub += 32) {
         uint sb = sub / 8;
         uint j = sub % 8;
+        device const uchar* block = row + sb * Q4KF_BLOCK_SIZE;
 
-        device const block_q4_K& blk = row[sb];
-        float d    = decode_f16_metal(blk.d);
-        float dmin = decode_f16_metal(blk.dmin);
+        device const half* scales = (device const half*)(block);
+        device const half* mins = (device const half*)(block + 16);
+        float sc = float(scales[j]);
+        float mn = float(mins[j]);
 
-        float sc = d * float(blk.scales[j] & 0x3F);
-        float mn;
-        if (j < 4) mn = dmin * float(blk.mins[j] & 0x0F);
-        else mn = dmin * float((blk.mins[j - 4] >> 4) & 0x0F);
-
-        device const uint4* qp = (device const uint4*)(blk.qs + j * 16);
+        device const uint4* qp = (device const uint4*)(block + 32 + j * 16);
         uint4 w = qp[0];
         uint xi = sb * 256 + j * 32;
 

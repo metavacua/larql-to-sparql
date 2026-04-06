@@ -42,6 +42,7 @@ pub mod metal;
 pub enum QuantFormat {
     Q4_0,   // 18 bytes per 32 values (one f16 scale)
     Q4_K,   // 148 bytes per 256 values (super-block with group scales)
+    Q4_KF,  // 160 bytes per 256 values (pre-baked half scales — fast decode)
     Q6_K,   // 210 bytes per 256 values (6-bit with sub-block scales)
     Q8_0,   // int8 values + separate f32 scales
 }

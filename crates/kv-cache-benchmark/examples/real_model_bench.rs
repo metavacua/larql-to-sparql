@@ -17,21 +17,15 @@ fn main() {
     let model = larql_inference::InferenceModel::load(model_name)
         .expect("Failed to load model");
 
-    // Load vindex
-    let vindex_path = args.get(2).map(|s| s.as_str());
-    let index = if let Some(path) = vindex_path {
-        println!("Loading vindex from: {path}");
-        let config = larql_vindex::load_vindex_config(path).expect("Failed to load vindex config");
-        larql_vindex::VectorIndex::load(path, &config, &larql_vindex::SilentLoadCallbacks)
-            .expect("Failed to load vindex")
-    } else {
-        println!("No vindex path provided, resolving from HuggingFace...");
-        let vindex_dir = larql_vindex::resolve_hf_vindex(model_name)
-            .expect("Failed to resolve vindex");
-        let config = larql_vindex::load_vindex_config(&vindex_dir).expect("Failed to load vindex config");
-        larql_vindex::VectorIndex::load(&vindex_dir, &config, &larql_vindex::SilentLoadCallbacks)
-            .expect("Failed to load vindex")
-    };
+    // Load vindex (requires explicit path)
+    let vindex_path = args.get(2).expect(
+        "Usage: real_model_bench <model-name-or-path> <vindex-path>"
+    );
+    println!("Loading vindex from: {vindex_path}");
+    let index = larql_vindex::VectorIndex::load_vindex(
+        std::path::Path::new(vindex_path),
+        &mut larql_vindex::SilentLoadCallbacks,
+    ).expect("Failed to load vindex");
 
     // Create compute backend
     let backend = larql_inference::default_backend();

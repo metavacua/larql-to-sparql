@@ -53,7 +53,8 @@ impl MetalBackend {
             let norm_offset = layers[l].norm_offset;
             let _has_post_norms = layers[l].has_post_norms;
             let uses_q4k = layers[l].wq.format == crate::QuantFormat::Q4_K
-                || layers[l].wq.format == crate::QuantFormat::Q6_K;
+                || layers[l].wq.format == crate::QuantFormat::Q6_K
+                || layers[l].wq.format == crate::QuantFormat::Q4_KF;
 
             // 1+2. Input norm + QKV projection (format-dependent)
             let q_out = self.bufs.output((q_dim * 4) as u64);
@@ -66,9 +67,8 @@ impl MetalBackend {
             let norm_f32_buf; // f32 norm output for Q4_K path
 
             if uses_q4k {
-                // ── Q4_K path: rms_norm → f32 → fused Q4_K QKV (one dispatch) ──
-                // No Q8 quantization needed — Q4_K takes f32 input directly.
-                // Data is ~0.58x the size of Q8 → less bandwidth.
+                // ── Q4_K/Q4_KF path: rms_norm → f32 → fused QKV (one dispatch) ──
+                let is_q4kf = layers[l].wq.format == crate::QuantFormat::Q4_KF;
                 norm_f32_buf = Some(self.bufs.output((hidden * 4) as u64));
                 q8_buf = self.bufs.output(1); // dummy, not used
                 q8s_buf = self.bufs.output(1);
@@ -81,15 +81,28 @@ impl MetalBackend {
                     enc.end_encoding();
                 }
                 {
-                    use crate::metal::shaders::q4k_qkv_proj as q4k_qkv;
+                    // Use Q4_KF (pre-baked) or Q4_K shader based on format
+                    let qkv_rows_per_tg = if is_q4kf {
+                        crate::metal::shaders::q4kf_qkv_proj::ROWS_PER_TG
+                    } else {
+                        crate::metal::shaders::q4k_qkv_proj::ROWS_PER_TG
+                    };
+                    let qkv_threads = if is_q4kf {
+                        crate::metal::shaders::q4kf_qkv_proj::THREADS_PER_TG
+                    } else {
+                        crate::metal::shaders::q4k_qkv_proj::THREADS_PER_TG
+                    };
                     let total_rows = (q_dim + kv_dim + kv_dim) as u32;
                     let q_rows_val = q_dim as u32;
                     let k_rows_val = kv_dim as u32;
                     let v_rows_val = kv_dim as u32;
                     let k_val = hidden as u32;
-                    let num_tgs = ((total_rows as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
+                    let num_tgs = ((total_rows as u64) + qkv_rows_per_tg - 1) / qkv_rows_per_tg;
                     let enc = cmd.new_compute_command_encoder();
-                    enc.set_compute_pipeline_state(&self.q4k_qkv_proj_pipeline);
+                    enc.set_compute_pipeline_state(
+                        if is_q4kf { &self.q4kf_qkv_proj_pipeline }
+                        else { &self.q4k_qkv_proj_pipeline }
+                    );
                     enc.set_buffer(0, Some(&wq_bufs[l]), 0);
                     enc.set_buffer(1, Some(&wk_bufs[l]), 0);
                     enc.set_buffer(2, Some(&wv_bufs[l]), 0);
@@ -103,7 +116,7 @@ impl MetalBackend {
                     enc.set_bytes(10, 4, &k_val as *const u32 as *const std::ffi::c_void);
                     enc.dispatch_thread_groups(
                         MTLSize::new(num_tgs, 1, 1),
-                        MTLSize::new(q4k_qkv::THREADS_PER_TG, 1, 1),
+                        MTLSize::new(qkv_threads, 1, 1),
                     );
                     enc.end_encoding();
                 }
@@ -168,13 +181,25 @@ impl MetalBackend {
             // 4. O projection (format-dependent)
             let o_out = self.bufs.output((hidden * 4) as u64);
             if uses_q4k {
-                // Q4_K O projection: f32 input → Q4_K matvec
-                use crate::metal::shaders::q4k_qkv_proj as q4k_qkv;
+                let is_q4kf = layers[l].wo.format == crate::QuantFormat::Q4_KF;
+                let proj_rows_per_tg = if is_q4kf {
+                    crate::metal::shaders::q4kf_qkv_proj::ROWS_PER_TG
+                } else {
+                    crate::metal::shaders::q4k_qkv_proj::ROWS_PER_TG
+                };
+                let proj_threads = if is_q4kf {
+                    crate::metal::shaders::q4kf_qkv_proj::THREADS_PER_TG
+                } else {
+                    crate::metal::shaders::q4k_qkv_proj::THREADS_PER_TG
+                };
                 let o_rows = hidden as u32;
                 let o_k = q_dim as u32;
-                let num_tgs = ((hidden as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
+                let num_tgs = ((hidden as u64) + proj_rows_per_tg - 1) / proj_rows_per_tg;
                 let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(&self.q4k_proj_pipeline);
+                enc.set_compute_pipeline_state(
+                    if is_q4kf { &self.q4kf_proj_pipeline }
+                    else { &self.q4k_proj_pipeline }
+                );
                 enc.set_buffer(0, Some(&wo_bufs[l]), 0);
                 enc.set_buffer(1, Some(&attn_out), 0);
                 enc.set_buffer(2, Some(&o_out), 0);
@@ -182,7 +207,7 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &o_k as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_thread_groups(
                     MTLSize::new(num_tgs, 1, 1),
-                    MTLSize::new(q4k_qkv::THREADS_PER_TG, 1, 1),
+                    MTLSize::new(proj_threads, 1, 1),
                 );
                 enc.end_encoding();
             } else {

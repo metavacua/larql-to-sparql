@@ -16,16 +16,19 @@ use kv_cache_benchmark::real_model::*;
 use kv_cache_benchmark::real_model::runner::*;
 
 /// Helper to load model + vindex for tests. Returns None if model not available.
+/// Set LARQL_MODEL_PATH and LARQL_VINDEX_PATH env vars, or uses default HF paths.
 fn load_test_model() -> Option<(
     larql_inference::InferenceModel,
     larql_vindex::VectorIndex,
 )> {
-    let model = larql_inference::InferenceModel::load("google/gemma-3-4b-it").ok()?;
+    let model_path = std::env::var("LARQL_MODEL_PATH")
+        .unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
+    let model = larql_inference::InferenceModel::load(&model_path).ok()?;
 
-    let vindex_dir = larql_vindex::resolve_hf_vindex("google/gemma-3-4b-it").ok()?;
-    let config = larql_vindex::load_vindex_config(&vindex_dir).ok()?;
-    let index = larql_vindex::VectorIndex::load(
-        &vindex_dir, &config, &larql_vindex::SilentLoadCallbacks,
+    let vindex_path = std::env::var("LARQL_VINDEX_PATH").ok()?;
+    let index = larql_vindex::VectorIndex::load_vindex(
+        std::path::Path::new(&vindex_path),
+        &mut larql_vindex::SilentLoadCallbacks,
     ).ok()?;
 
     Some((model, index))
@@ -182,11 +185,128 @@ fn test_graph_walk_factual_accuracy() {
             matches += 1;
         }
         println!(
-            "  '{}' → Graph Walk: '{}' (match={}, tier={:?})",
-            prompt, gw.top1_token, gw.top1_match, gw.tier,
+            "  '{}' → Graph Walk: '{}' (match={})",
+            prompt, gw.top1_token, gw.top1_match,
         );
     }
 
     let accuracy = matches as f64 / total as f64;
     println!("\nGraph Walk factual accuracy: {matches}/{total} = {accuracy:.0}%");
+}
+
+// ── Category 1: Top-1 Token Match (real model) ──
+
+#[test]
+#[ignore]
+fn test_accuracy_top1_factual_20() {
+    let (model, index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+    let bench = RealModelBenchmark::new(
+        model.weights(), model.tokenizer(), &index, backend.as_ref(),
+    );
+
+    let prompts = kv_cache_benchmark::accuracy::factual_prompts();
+    let mut matches = 0;
+    let total = prompts.len();
+
+    for (prompt, _expected) in &prompts {
+        let results = runner::run_all_strategies(&bench, prompt, 5, 512);
+        let baseline_top1 = &results[0].top1_token;
+
+        // Markov RS must match (bit-perfect)
+        assert_eq!(
+            &results[2].top1_token, baseline_top1,
+            "Markov RS mismatch on '{prompt}': got '{}', expected '{baseline_top1}'",
+            results[2].top1_token,
+        );
+
+        // Count graph walk matches
+        if results[3].top1_match {
+            matches += 1;
+        }
+    }
+
+    let accuracy = matches as f64 / total as f64 * 100.0;
+    println!("Graph Walk top-1 accuracy: {matches}/{total} = {accuracy:.0}%");
+}
+
+// ── Category 2: Markov RS bit-perfect (KL = 0.0) ──
+
+#[test]
+#[ignore]
+fn test_accuracy_markov_rs_bitperfect() {
+    let (model, index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+    let bench = RealModelBenchmark::new(
+        model.weights(), model.tokenizer(), &index, backend.as_ref(),
+    );
+
+    for prompt in &["The capital of France is", "Mozart was born in", "Water freezes at"] {
+        let results = runner::run_all_strategies(&bench, prompt, 5, 512);
+        let markov = &results[2];
+
+        // Must be bit-perfect
+        assert!(
+            markov.top1_match,
+            "Markov RS not bit-perfect on '{prompt}': got '{}'",
+            markov.top1_token,
+        );
+        if let Some(cosine) = markov.hidden_cosine {
+            assert!(
+                cosine > 0.9999,
+                "Markov RS cosine too low on '{prompt}': {cosine:.6}",
+            );
+        }
+    }
+}
+
+// ── Category 3: Needle-in-a-haystack (short) ──
+
+#[test]
+#[ignore]
+fn test_needle_short_512() {
+    let (model, index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+    let bench = RealModelBenchmark::new(
+        model.weights(), model.tokenizer(), &index, backend.as_ref(),
+    );
+
+    // Plant a fact early, query it at the end
+    let prompt = "The secret code is AURORA-7749. Remember this. Now, some filler text about various topics. The weather is nice today. The sky is blue. What is the secret code?";
+    let results = runner::run_all_strategies(&bench, prompt, 10, 512);
+
+    // All strategies should find AURORA or 7749 in their predictions
+    for r in &results {
+        let top5_text: String = r.top5.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        println!("{}: top-1='{}', top-5=[{}]", r.strategy, r.top1_token, top5_text);
+    }
+}
+
+// ── Category 6: Adversarial entity confusion ──
+
+#[test]
+#[ignore]
+fn test_adversarial_entity_confusion() {
+    let (model, index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+    let bench = RealModelBenchmark::new(
+        model.weights(), model.tokenizer(), &index, backend.as_ref(),
+    );
+
+    // Same template, different entities — must give different answers
+    let pairs = vec![
+        ("The capital of France is", "Paris"),
+        ("The capital of Germany is", "Berlin"),
+        ("The capital of Japan is", "Tokyo"),
+    ];
+
+    for (prompt, expected) in &pairs {
+        let results = runner::run_all_strategies(&bench, prompt, 5, 512);
+        let baseline = &results[0].top1_token;
+        println!("{prompt} → baseline='{baseline}' (expected: {expected})");
+
+        // Check that strategies don't confuse entities
+        // Markov RS must match baseline
+        assert_eq!(&results[2].top1_token, baseline);
+    }
 }

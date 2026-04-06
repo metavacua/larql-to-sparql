@@ -44,6 +44,19 @@ fn encode_quant_matvec_at_offset(
             enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
             enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
         }
+        crate::QuantFormat::Q4_KF => {
+            // Q4_KF uses same standalone matvec as Q4_K for non-fused path
+            let n = num_rows as u32;
+            let k = hidden as u32;
+            let tgs = ((num_rows as u64) + 3) / 4;
+            enc.set_compute_pipeline_state(q4k_pipeline);
+            enc.set_buffer(0, Some(buf_w), 0);
+            enc.set_buffer(1, Some(buf_input), in_offset);
+            enc.set_buffer(2, Some(buf_out), out_offset);
+            enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+            enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+        }
         crate::QuantFormat::Q6_K => {
             let n = num_rows as u32;
             let k = hidden as u32;

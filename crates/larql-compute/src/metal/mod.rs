@@ -59,6 +59,8 @@ pub struct MetalBackend {
     rope_pipeline: ComputePipelineState,
     q4k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
+    q4kf_qkv_proj_pipeline: ComputePipelineState,
+    q4kf_proj_pipeline: ComputePipelineState,
     /// KV cache for decode mode — initialized on first decode_token call.
     kv_cache: std::sync::Mutex<Option<ops::kv_cache::KVCache>>,
     rms_norm_q8_pipeline: ComputePipelineState,
@@ -147,6 +149,12 @@ impl MetalBackend {
         let q4k_proj_fn = library.get_function("q4k_proj", None).ok()?;
         let q4k_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4k_proj_fn).ok()?;
 
+        // Q4_KF: pre-baked scales (faster inference)
+        let q4kf_qkv_fn = library.get_function("q4kf_qkv_proj", None).ok()?;
+        let q4kf_qkv_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4kf_qkv_fn).ok()?;
+        let q4kf_proj_fn = library.get_function("q4kf_proj", None).ok()?;
+        let q4kf_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4kf_proj_fn).ok()?;
+
         // Fused attention (RoPE + GQA + softcap)
         let fused_attn_fn = library.get_function("fused_attention", None).ok()?;
         let fused_attn_pipeline = device.new_compute_pipeline_state_with_function(&fused_attn_fn).ok()?;
@@ -167,6 +175,7 @@ impl MetalBackend {
             q4k_matvec_pipeline, q6k_matvec_pipeline,
             rope_pipeline,
             q4k_qkv_proj_pipeline, q4k_proj_pipeline,
+            q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,
             flop_threshold: AtomicUsize::new(calibrate::DEFAULT_FLOP_THRESHOLD),

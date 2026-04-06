@@ -16,7 +16,6 @@ static inline float decode_f16_metal(ushort bits) {
 
 // Q4_K super-block: 256 values in 148 bytes.
 // Struct layout matches the serialized format exactly.
-// Using packed struct enables compiler to generate coalesced reads.
 struct block_q4_K {
     ushort d;           // f16 delta (2 bytes)
     ushort dmin;        // f16 minimum (2 bytes)
@@ -24,4 +23,13 @@ struct block_q4_K {
     uchar  mins[4];     // 8 × 4-bit sub-block mins packed (4 bytes)
     uchar  qs[128];     // 256 × 4-bit values (128 bytes)
 };                      // Total: 148 bytes
+
+// Q4_KF super-block: 256 values in 160 bytes.
+// Pre-baked scales: d*scale_j and dmin*min_j pre-computed as half.
+// Eliminates ALL header decode + scale unpack from the inference hot loop.
+struct block_q4_kf {
+    half   scales[8];   // pre-computed d * scale_j (16 bytes)
+    half   mins[8];     // pre-computed dmin * min_j (16 bytes)
+    uchar  qs[128];     // 256 × 4-bit values (128 bytes)
+};                      // Total: 160 bytes
 "#;

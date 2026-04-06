@@ -238,6 +238,87 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
     out
 }
 
+/// Convert Q4_K data to Q4_KF (pre-baked half scales) for fast GPU inference.
+///
+/// Q4_KF eliminates ALL header decode + scale unpack from the inference hot loop.
+/// Each 148-byte Q4_K superblock becomes 160 bytes:
+///   [0..15]    8 × f16 pre-computed d*scale_j (16 bytes)
+///   [16..31]   8 × f16 pre-computed dmin*min_j (16 bytes)
+///   [32..159]  128 bytes nibbles (unchanged)
+pub fn q4k_to_q4kf(q4k_data: &[u8], num_rows: usize, hidden: usize) -> Vec<u8> {
+    let superblocks_per_row = hidden / 256;
+    let q4k_bytes_per_row = superblocks_per_row * 148;
+    let q4kf_bytes_per_row = superblocks_per_row * 160;
+    let mut out = Vec::with_capacity(num_rows * q4kf_bytes_per_row);
+
+    for row in 0..num_rows {
+        for sb in 0..superblocks_per_row {
+            let offset = row * q4k_bytes_per_row + sb * 148;
+            let block = &q4k_data[offset..];
+
+            // Decode Q4_K header
+            let d_bits = u16::from_le_bytes([block[0], block[1]]);
+            let dmin_bits = u16::from_le_bytes([block[2], block[3]]);
+            let d = f16_to_f32(d_bits);
+            let dmin = f16_to_f32(dmin_bits);
+
+            // Unpack 8 scales and mins, pre-bake products
+            let sc_bytes = &block[4..16];
+            let min_bytes = &block[16..20];
+
+            let mut scales = [0.0f32; 8];
+            let mut mins = [0.0f32; 8];
+            for j in 0..4 {
+                scales[j] = d * (sc_bytes[j] & 0x3F) as f32;
+                scales[j + 4] = d * (sc_bytes[j + 4] & 0x3F) as f32;
+                mins[j] = dmin * (min_bytes[j] & 0x0F) as f32;
+                mins[j + 4] = dmin * ((min_bytes[j] >> 4) & 0x0F) as f32;
+            }
+
+            // Write pre-baked scales as f16
+            for j in 0..8 {
+                out.extend_from_slice(&f32_to_f16(scales[j]).to_le_bytes());
+            }
+            // Write pre-baked mins as f16
+            for j in 0..8 {
+                out.extend_from_slice(&f32_to_f16(mins[j]).to_le_bytes());
+            }
+            // Copy nibbles unchanged
+            out.extend_from_slice(&block[20..148]);
+        }
+    }
+    out
+}
+
+/// Quantize f32 data directly to Q4_KF format (pre-baked half scales).
+pub fn quantize_q4_kf(data: &[f32]) -> Vec<u8> {
+    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    // First quantize to Q4_K, then convert
+    let q4k = quantize_q4_k(data);
+    let num_rows = 1; // treat as single row
+    let hidden = data.len();
+    q4k_to_q4kf(&q4k, num_rows, hidden)
+}
+
+/// Decode f16 bits to f32 (shared helper).
+pub fn f16_to_f32(bits: u16) -> f32 {
+    let sign = ((bits >> 15) & 1) as u32;
+    let exp = ((bits >> 10) & 0x1F) as i32;
+    let mant = (bits & 0x3FF) as u32;
+    if exp == 0 {
+        if mant == 0 { return if sign == 1 { -0.0 } else { 0.0 }; }
+        let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
+        return if sign == 1 { -val } else { val };
+    }
+    if exp == 31 {
+        return if mant == 0 {
+            if sign == 1 { f32::NEG_INFINITY } else { f32::INFINITY }
+        } else { f32::NAN };
+    }
+    let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
+    if sign == 1 { -val } else { val }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
