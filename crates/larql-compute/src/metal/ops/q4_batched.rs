@@ -83,10 +83,8 @@ pub fn pair_batch(
     let mut gate_results = Vec::with_capacity(seq_len);
     let mut up_results = Vec::with_capacity(seq_len);
     for s in 0..seq_len {
-        let gp = gate_bufs[s].contents() as *const f32;
-        let up = up_bufs[s].contents() as *const f32;
-        gate_results.push(unsafe { std::slice::from_raw_parts(gp, num_rows).to_vec() });
-        up_results.push(unsafe { std::slice::from_raw_parts(up, num_rows).to_vec() });
+        gate_results.push(crate::metal::buffers::read_buffer_f32(&gate_bufs[s], num_rows));
+        up_results.push(crate::metal::buffers::read_buffer_f32(&up_bufs[s], num_rows));
     }
     (gate_results, up_results)
 }
@@ -208,6 +206,5 @@ pub fn multi_layer_ffn(
     cmd.wait_until_completed();
 
     let last = num_layers - 1;
-    let ptr = down_outs[last].contents() as *const f32;
-    unsafe { std::slice::from_raw_parts(ptr, hidden).to_vec() }
+    crate::metal::buffers::read_buffer_f32(&down_outs[last], hidden)
 }

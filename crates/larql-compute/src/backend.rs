@@ -135,6 +135,21 @@ pub trait ComputeBackend: Send + Sync {
         _num_rows: usize, _hidden: usize,
     ) -> Option<Vec<f32>> { None }
 
+    /// Prefill: full pipeline for seq>1 with KV cache population.
+    /// Runs Q4 attention + FFN for all layers, stores post-RoPE K/V in KV cache.
+    /// Returns the final hidden state [seq_len * hidden] for all positions.
+    #[allow(clippy::too_many_arguments)]
+    fn prefill_q4(
+        &self,
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x: &[f32],
+        _hidden: usize, _inter: usize,
+        _q_dim: usize, _kv_dim: usize,
+        _seq_len: usize,
+        _num_q_heads: usize, _num_kv_heads: usize, _head_dim: usize,
+        _rope_base: f32, _use_qk_norm: bool, _softcap: f32,
+    ) -> Option<Vec<f32>> { None }
+
     /// Whether this backend supports Q4 fused operations.
     fn has_q4(&self) -> bool { false }
 

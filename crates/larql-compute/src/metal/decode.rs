@@ -52,56 +52,108 @@ impl MetalBackend {
         for l in 0..num_layers {
             let norm_offset = layers[l].norm_offset;
             let _has_post_norms = layers[l].has_post_norms;
+            let uses_q4k = layers[l].wq.format == crate::QuantFormat::Q4_K
+                || layers[l].wq.format == crate::QuantFormat::Q6_K;
 
-            // 1. RMS norm + Q8 quantize (fused)
-            let q8_buf = self.bufs.output(hidden as u64);
-            let q8s_buf = self.bufs.output((hidden / 32 * 4) as u64);
-            {
-                let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(&self.rms_norm_q8_pipeline);
-                enc.set_buffer(0, Some(&h_buf), 0);
-                enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
-                enc.set_buffer(2, Some(&q8_buf), 0);
-                enc.set_buffer(3, Some(&q8s_buf), 0);
-                enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
-                enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
-                enc.end_encoding();
-            }
-
-            // 2. Fused Q+K+V projection (one dispatch)
+            // 1+2. Input norm + QKV projection (format-dependent)
             let q_out = self.bufs.output((q_dim * 4) as u64);
             let k_out = self.bufs.output((kv_dim * 4) as u64);
             let v_out = self.bufs.output((kv_dim * 4) as u64);
-            {
-                let total_rows = (q_dim + kv_dim + kv_dim) as u32;
-                let q_rows = q_dim as u32;
-                let k_rows = kv_dim as u32;
-                let v_rows = kv_dim as u32;
-                let k_val = hidden as u32;
-                let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(&self.q8_qkv_proj_pipeline);
-                enc.set_buffer(0, Some(&wq_bufs[l]), 0);
-                enc.set_buffer(1, Some(&wk_bufs[l]), 0);
-                enc.set_buffer(2, Some(&wv_bufs[l]), 0);
-                enc.set_buffer(3, Some(&q8_buf), 0);
-                enc.set_buffer(4, Some(&wq_scale_bufs[l]), 0);
-                enc.set_buffer(5, Some(&wk_scale_bufs[l]), 0);
-                enc.set_buffer(6, Some(&wv_scale_bufs[l]), 0);
-                enc.set_buffer(7, Some(&q8s_buf), 0);
-                enc.set_buffer(8, Some(&q_out), 0);
-                enc.set_buffer(9, Some(&k_out), 0);
-                enc.set_buffer(10, Some(&v_out), 0);
-                enc.set_bytes(11, 4, &q_rows as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(12, 4, &k_rows as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(13, 4, &v_rows as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(14, 4, &k_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(
-                    MTLSize::new(((total_rows as u64) + 7) / 8, 1, 1),
-                    MTLSize::new(256, 1, 1),
-                );
-                enc.end_encoding();
+
+            // Also prepare buffers for FFN input (needed later)
+            let q8_buf;
+            let q8s_buf;
+            let norm_f32_buf; // f32 norm output for Q4_K path
+
+            if uses_q4k {
+                // ── Q4_K path: rms_norm → f32 → fused Q4_K QKV (one dispatch) ──
+                // No Q8 quantization needed — Q4_K takes f32 input directly.
+                // Data is ~0.58x the size of Q8 → less bandwidth.
+                norm_f32_buf = Some(self.bufs.output((hidden * 4) as u64));
+                q8_buf = self.bufs.output(1); // dummy, not used
+                q8s_buf = self.bufs.output(1);
+                {
+                    use crate::metal::ops::full_pipeline::encode_rms_norm;
+                    let enc = cmd.new_compute_command_encoder();
+                    encode_rms_norm(enc, &self.rms_norm_pipeline,
+                        &h_buf, &input_norm_bufs[l], norm_f32_buf.as_ref().unwrap(),
+                        hidden, eps, norm_offset);
+                    enc.end_encoding();
+                }
+                {
+                    use crate::metal::shaders::q4k_qkv_proj as q4k_qkv;
+                    let total_rows = (q_dim + kv_dim + kv_dim) as u32;
+                    let q_rows_val = q_dim as u32;
+                    let k_rows_val = kv_dim as u32;
+                    let v_rows_val = kv_dim as u32;
+                    let k_val = hidden as u32;
+                    let num_tgs = ((total_rows as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&self.q4k_qkv_proj_pipeline);
+                    enc.set_buffer(0, Some(&wq_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&wk_bufs[l]), 0);
+                    enc.set_buffer(2, Some(&wv_bufs[l]), 0);
+                    enc.set_buffer(3, Some(norm_f32_buf.as_ref().unwrap()), 0);
+                    enc.set_buffer(4, Some(&q_out), 0);
+                    enc.set_buffer(5, Some(&k_out), 0);
+                    enc.set_buffer(6, Some(&v_out), 0);
+                    enc.set_bytes(7, 4, &q_rows_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(8, 4, &k_rows_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(9, 4, &v_rows_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(10, 4, &k_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(num_tgs, 1, 1),
+                        MTLSize::new(q4k_qkv::THREADS_PER_TG, 1, 1),
+                    );
+                    enc.end_encoding();
+                }
+            } else {
+                // ── Q8 path: fused rms_norm+Q8 → fused Q8 QKV ──
+                norm_f32_buf = None;
+                q8_buf = self.bufs.output(hidden as u64);
+                q8s_buf = self.bufs.output((hidden / 32 * 4) as u64);
+                {
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&self.rms_norm_q8_pipeline);
+                    enc.set_buffer(0, Some(&h_buf), 0);
+                    enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
+                    enc.set_buffer(2, Some(&q8_buf), 0);
+                    enc.set_buffer(3, Some(&q8s_buf), 0);
+                    enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+                    enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.end_encoding();
+                }
+                {
+                    let total_rows = (q_dim + kv_dim + kv_dim) as u32;
+                    let q_rows = q_dim as u32;
+                    let k_rows = kv_dim as u32;
+                    let v_rows = kv_dim as u32;
+                    let k_val = hidden as u32;
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&self.q8_qkv_proj_pipeline);
+                    enc.set_buffer(0, Some(&wq_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&wk_bufs[l]), 0);
+                    enc.set_buffer(2, Some(&wv_bufs[l]), 0);
+                    enc.set_buffer(3, Some(&q8_buf), 0);
+                    enc.set_buffer(4, Some(&wq_scale_bufs[l]), 0);
+                    enc.set_buffer(5, Some(&wk_scale_bufs[l]), 0);
+                    enc.set_buffer(6, Some(&wv_scale_bufs[l]), 0);
+                    enc.set_buffer(7, Some(&q8s_buf), 0);
+                    enc.set_buffer(8, Some(&q_out), 0);
+                    enc.set_buffer(9, Some(&k_out), 0);
+                    enc.set_buffer(10, Some(&v_out), 0);
+                    enc.set_bytes(11, 4, &q_rows as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(12, 4, &k_rows as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(13, 4, &v_rows as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(14, 4, &k_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(((total_rows as u64) + 7) / 8, 1, 1),
+                        MTLSize::new(256, 1, 1),
+                    );
+                    enc.end_encoding();
+                }
             }
 
             // 3. KV cache: append K/V, attend Q against cache
@@ -113,39 +165,60 @@ impl MetalBackend {
                 num_q_heads, scale,
             );
 
-            // 4. Q8 quantize attention output + O projection
-            let o_q8 = self.bufs.output(q_dim as u64);
-            let o_q8s = self.bufs.output((q_dim / 32 * 4) as u64);
-            {
-                let dim_val = q_dim as u32;
-                let blocks = (q_dim / 32) as u32;
-                let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(&self.q8_quant_pipeline);
-                enc.set_buffer(0, Some(&attn_out), 0);
-                enc.set_buffer(1, Some(&o_q8), 0);
-                enc.set_buffer(2, Some(&o_q8s), 0);
-                enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
-                enc.end_encoding();
-            }
+            // 4. O projection (format-dependent)
             let o_out = self.bufs.output((hidden * 4) as u64);
-            {
+            if uses_q4k {
+                // Q4_K O projection: f32 input → Q4_K matvec
+                use crate::metal::shaders::q4k_qkv_proj as q4k_qkv;
                 let o_rows = hidden as u32;
                 let o_k = q_dim as u32;
+                let num_tgs = ((hidden as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
                 let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(&self.q8_matvec_pipeline);
+                enc.set_compute_pipeline_state(&self.q4k_proj_pipeline);
                 enc.set_buffer(0, Some(&wo_bufs[l]), 0);
-                enc.set_buffer(1, Some(&o_q8), 0);
-                enc.set_buffer(2, Some(&wo_scale_bufs[l]), 0);
-                enc.set_buffer(3, Some(&o_q8s), 0);
-                enc.set_buffer(4, Some(&o_out), 0);
-                enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
+                enc.set_buffer(1, Some(&attn_out), 0);
+                enc.set_buffer(2, Some(&o_out), 0);
+                enc.set_bytes(3, 4, &o_rows as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(4, 4, &o_k as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_thread_groups(
-                    MTLSize::new(((hidden as u64) + 7) / 8, 1, 1),
-                    MTLSize::new(256, 1, 1),
+                    MTLSize::new(num_tgs, 1, 1),
+                    MTLSize::new(q4k_qkv::THREADS_PER_TG, 1, 1),
                 );
                 enc.end_encoding();
+            } else {
+                // Q8 O projection: Q8 quantize attention → Q8 matvec
+                let o_q8 = self.bufs.output(q_dim as u64);
+                let o_q8s = self.bufs.output((q_dim / 32 * 4) as u64);
+                {
+                    let dim_val = q_dim as u32;
+                    let blocks = (q_dim / 32) as u32;
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&self.q8_quant_pipeline);
+                    enc.set_buffer(0, Some(&attn_out), 0);
+                    enc.set_buffer(1, Some(&o_q8), 0);
+                    enc.set_buffer(2, Some(&o_q8s), 0);
+                    enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
+                    enc.end_encoding();
+                }
+                {
+                    let o_rows = hidden as u32;
+                    let o_k = q_dim as u32;
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&self.q8_matvec_pipeline);
+                    enc.set_buffer(0, Some(&wo_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&o_q8), 0);
+                    enc.set_buffer(2, Some(&wo_scale_bufs[l]), 0);
+                    enc.set_buffer(3, Some(&o_q8s), 0);
+                    enc.set_buffer(4, Some(&o_out), 0);
+                    enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(((hidden as u64) + 7) / 8, 1, 1),
+                        MTLSize::new(256, 1, 1),
+                    );
+                    enc.end_encoding();
+                }
             }
 
             // 5. Residual + pre-FFN norm + Q8 (fused)
@@ -233,7 +306,6 @@ impl MetalBackend {
         cmd.commit();
         cmd.wait_until_completed();
 
-        let ptr = h_buf.contents() as *const f32;
-        unsafe { std::slice::from_raw_parts(ptr, hidden).to_vec() }
+        super::buffers::read_buffer_f32(&h_buf, hidden)
     }
 }

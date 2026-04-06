@@ -59,6 +59,7 @@ impl ComputeBackend for MetalBackend {
             &self.q4k_matvec_pipeline, &self.q6k_matvec_pipeline,
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
             &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
+            Some(&self.q4k_qkv_proj_pipeline), Some(&self.q4k_proj_pipeline),
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
             rope_base, use_qk_norm, softcap,
@@ -102,8 +103,7 @@ impl ComputeBackend for MetalBackend {
         cmd.commit();
         cmd.wait_until_completed();
 
-        let ptr = buf_out.contents() as *const f32;
-        Some(unsafe { std::slice::from_raw_parts(ptr, num_rows).to_vec() })
+        Some(super::buffers::read_buffer_f32(&buf_out, num_rows))
     }
 
     fn q6k_matvec(
@@ -133,8 +133,42 @@ impl ComputeBackend for MetalBackend {
         cmd.commit();
         cmd.wait_until_completed();
 
-        let ptr = buf_out.contents() as *const f32;
-        Some(unsafe { std::slice::from_raw_parts(ptr, num_rows).to_vec() })
+        Some(super::buffers::read_buffer_f32(&buf_out, num_rows))
+    }
+
+    fn prefill_q4(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        seq_len: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32, use_qk_norm: bool, softcap: f32,
+    ) -> Option<Vec<f32>> {
+        let num_layers = layers.len();
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        if cache_guard.is_none() {
+            *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+        }
+        let kv = cache_guard.as_mut().unwrap();
+        while kv.layers.len() < num_layers {
+            kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, num_kv_heads, head_dim));
+        }
+        Some(super::prefill::dispatch_prefill(
+            &self.queue, &self.bufs, &self.q4,
+            &self.geglu_pipeline, &self.q8_quant_pipeline,
+            &self.fused_attn_pipeline,
+            &self.q8_matvec_pipeline,
+            &self.q8_qkv_proj_pipeline,
+            &self.q4k_matvec_pipeline, &self.q6k_matvec_pipeline,
+            &self.rms_norm_pipeline, &self.residual_add_pipeline,
+            &self.rope_pipeline,
+            kv,
+            layers, x, hidden, inter, q_dim, kv_dim,
+            seq_len, num_q_heads, num_kv_heads, head_dim,
+            rope_base, use_qk_norm, softcap,
+        ))
     }
 
     fn has_kv_cache(&self) -> bool { true }
@@ -160,6 +194,8 @@ impl ComputeBackend for MetalBackend {
         let total = seq_len * num_kv_heads * head_dim;
         let k_ptr = lc.k_cache.contents() as *mut f32;
         let v_ptr = lc.v_cache.contents() as *mut f32;
+        // SAFETY: k_ptr/v_ptr point to pre-allocated Metal buffers sized for max_seq * kv_dim.
+        // k_data/v_data are borrow-checked &[f32] params. Copy size is bounded by min(total, src.len()).
         unsafe {
             std::ptr::copy_nonoverlapping(k_data.as_ptr(), k_ptr, total.min(k_data.len()));
             std::ptr::copy_nonoverlapping(v_data.as_ptr(), v_ptr, total.min(v_data.len()));

@@ -79,6 +79,165 @@ pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
     out
 }
 
+/// Encode f32 to f16 bits (for quantize helpers).
+fn f32_to_f16(val: f32) -> u16 {
+    let bits = val.to_bits();
+    let sign = (bits >> 16) & 0x8000;
+    let exp = ((bits >> 23) & 0xFF) as i32;
+    let mant = bits & 0x7FFFFF;
+    if exp == 0 { return sign as u16; }
+    if exp == 255 { return (sign | 0x7C00 | (mant >> 13) as u32) as u16; }
+    let new_exp = exp - 127 + 15;
+    if new_exp >= 31 { return (sign | 0x7C00) as u16; }
+    if new_exp <= 0 { return sign as u16; }
+    (sign | ((new_exp as u32) << 10) | (mant >> 13)) as u16
+}
+
+/// Quantize f32 data to Q4_K format (4-bit with sub-block scales, Ollama-compatible).
+///
+/// Each super-block of 256 floats becomes 148 bytes:
+///   [0..1]    f16 d (delta)
+///   [2..3]    f16 dmin (minimum)
+///   [4..15]   12 bytes: 8 × 6-bit sub-block scales (packed)
+///   [16..19]  4 bytes: 8 × 4-bit sub-block mins (packed)
+///   [20..147] 128 bytes: 256 × 4-bit values (packed nibbles)
+pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
+    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    let n_superblocks = data.len() / 256;
+    let mut out = Vec::with_capacity(n_superblocks * 148);
+
+    for sb in 0..n_superblocks {
+        let block = &data[sb * 256..(sb + 1) * 256];
+
+        // Compute per-sub-block (32 values each) min and max
+        let mut sub_mins = [0.0f32; 8];
+        let mut sub_maxs = [0.0f32; 8];
+        for j in 0..8 {
+            let sub = &block[j * 32..(j + 1) * 32];
+            sub_mins[j] = sub.iter().copied().fold(f32::INFINITY, f32::min);
+            sub_maxs[j] = sub.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        }
+
+        // Global delta and min
+        let global_max_range = sub_maxs.iter().zip(&sub_mins).map(|(a, b)| a - b)
+            .fold(0.0f32, f32::max);
+        let global_min = sub_mins.iter().copied().fold(f32::INFINITY, f32::min);
+
+        let d = if global_max_range > 0.0 { global_max_range / 63.0 } else { 0.0 };
+        let dmin = if global_min < 0.0 { -global_min / 15.0 } else { 0.0 };
+
+        out.extend_from_slice(&f32_to_f16(d).to_le_bytes());
+        out.extend_from_slice(&f32_to_f16(dmin).to_le_bytes());
+
+        // Compute 8 sub-block scales and mins (quantized to 6-bit and 4-bit)
+        let mut q_scales = [0u8; 8];
+        let mut q_mins = [0u8; 8];
+        for j in 0..8 {
+            let range = sub_maxs[j] - sub_mins[j];
+            q_scales[j] = if d > 0.0 { (range / d).round().clamp(0.0, 63.0) as u8 } else { 0 };
+            q_mins[j] = if dmin > 0.0 { (-sub_mins[j] / dmin).round().clamp(0.0, 15.0) as u8 } else { 0 };
+        }
+
+        // Pack 6-bit scales into 12 bytes (simplified: only using lower 6 bits of 8 bytes)
+        let mut sc_packed = [0u8; 12];
+        for j in 0..8 {
+            sc_packed[j] = q_scales[j] & 0x3F;
+        }
+        out.extend_from_slice(&sc_packed);
+
+        // Pack 4-bit mins into 4 bytes
+        let mut min_packed = [0u8; 4];
+        for j in 0..4 {
+            min_packed[j] = (q_mins[j] & 0x0F) | ((q_mins[j + 4] & 0x0F) << 4);
+        }
+        out.extend_from_slice(&min_packed);
+
+        // Quantize 256 values to 4-bit nibbles
+        for j in 0..8 {
+            let sc = d * q_scales[j] as f32;
+            let mn = dmin * q_mins[j] as f32;
+            let inv_sc = if sc > 0.0 { 1.0 / sc } else { 0.0 };
+            let sub = &block[j * 32..(j + 1) * 32];
+
+            for i in 0..16 {
+                let v0 = ((sub[i * 2] + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
+                let v1 = ((sub[i * 2 + 1] + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
+                out.push(v0 | (v1 << 4));
+            }
+        }
+    }
+    out
+}
+
+/// Quantize f32 data to Q6_K format (6-bit with sub-block scales, Ollama-compatible).
+///
+/// Each super-block of 256 floats becomes 210 bytes:
+///   [0..127]    128 bytes: lower 4 bits of each value (packed nibbles)
+///   [128..191]   64 bytes: upper 2 bits (packed, 4 per byte)
+///   [192..207]   16 bytes: 16 × int8 scales (one per 16-value sub-block)
+///   [208..209]    2 bytes: f16 super-block scale (d)
+pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
+    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    let n_superblocks = data.len() / 256;
+    let mut out = Vec::with_capacity(n_superblocks * 210);
+
+    for sb in 0..n_superblocks {
+        let block = &data[sb * 256..(sb + 1) * 256];
+
+        // Find global abs max for super-block scale
+        let amax = block.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        let d = amax / 32.0; // 6-bit range: -32..+31
+        let _inv_d = if d > 0.0 { 1.0 / d } else { 0.0 };
+
+        // Compute per-sub-block (16 values) int8 scales
+        let mut sub_scales = [0i8; 16];
+        for j in 0..16 {
+            let sub = &block[j * 16..(j + 1) * 16];
+            let sub_max = sub.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+            let sc = if d > 0.0 { sub_max / d } else { 0.0 };
+            sub_scales[j] = sc.round().clamp(-128.0, 127.0) as i8;
+        }
+
+        // Quantize all 256 values to 6-bit
+        let mut q6_vals = [0u8; 256];
+        for j in 0..16 {
+            let sc = d * sub_scales[j] as f32;
+            let inv_sc = if sc.abs() > 1e-10 { 1.0 / sc } else { 0.0 };
+            for i in 0..16 {
+                let idx = j * 16 + i;
+                let q = (block[idx] * inv_sc).round().clamp(-32.0, 31.0) as i8;
+                q6_vals[idx] = (q + 32) as u8; // bias to unsigned
+            }
+        }
+
+        // Pack lower 4 bits: 128 bytes (2 nibbles per byte)
+        let mut ql = [0u8; 128];
+        for i in 0..128 {
+            ql[i] = (q6_vals[i * 2] & 0x0F) | ((q6_vals[i * 2 + 1] & 0x0F) << 4);
+        }
+        out.extend_from_slice(&ql);
+
+        // Pack upper 2 bits: 64 bytes (4 × 2 bits per byte)
+        let mut qh = [0u8; 64];
+        for i in 0..256 {
+            let hi2 = (q6_vals[i] >> 4) & 0x03;
+            let byte_idx = i / 4;
+            let bit_offset = (i % 4) * 2;
+            qh[byte_idx] |= hi2 << bit_offset;
+        }
+        out.extend_from_slice(&qh);
+
+        // 16 × int8 scales
+        for &s in &sub_scales {
+            out.push(s as u8);
+        }
+
+        // f16 super-block scale
+        out.extend_from_slice(&f32_to_f16(d).to_le_bytes());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

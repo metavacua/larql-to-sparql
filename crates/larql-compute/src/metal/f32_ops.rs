@@ -36,8 +36,7 @@ impl F32Ops {
         cmd.commit();
         cmd.wait_until_completed();
 
-        let ptr = buf_c.contents() as *const f32;
-        unsafe { std::slice::from_raw_parts(ptr, m * n).to_vec() }
+        super::buffers::read_buffer_f32(&buf_c, m * n)
     }
 
     /// C = A × B^T  (A: [m,k], B: [n,k], C: [m,n])
@@ -60,8 +59,7 @@ impl F32Ops {
         cmd.commit();
         cmd.wait_until_completed();
 
-        let ptr = buf_c.contents() as *const f32;
-        unsafe { std::slice::from_raw_parts(ptr, m * n).to_vec() }
+        super::buffers::read_buffer_f32(&buf_c, m * n)
     }
 
     /// Encode one matmul dispatch into a command encoder.

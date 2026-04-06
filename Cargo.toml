@@ -10,6 +10,7 @@ members = [
     "crates/larql-cli",
     "crates/larql-server",
     "crates/larql-python",
+    "crates/kv-cache-benchmark",
 ]
 default-members = [
     "crates/larql-models",
@@ -20,6 +21,7 @@ default-members = [
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
+    "crates/kv-cache-benchmark",
 ]
 
 [workspace.package]

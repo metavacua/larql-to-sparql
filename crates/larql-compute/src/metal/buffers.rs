@@ -115,3 +115,28 @@ impl BufferCache {
         (ptr as usize) % PAGE_SIZE == 0 && bytes % PAGE_SIZE == 0
     }
 }
+
+/// Read `len` f32 values from a completed Metal buffer.
+///
+/// # Safety (encapsulated)
+/// The caller must ensure the buffer has been committed and completed
+/// (i.e., `cmd.wait_until_completed()` has returned) before calling this.
+/// The pointer is valid for the buffer's lifetime — we immediately copy
+/// into a new Vec, so no dangling reference is possible.
+///
+/// # Panics
+/// Panics if the buffer's contents pointer is null or the buffer is
+/// smaller than `len * sizeof(f32)` bytes.
+pub fn read_buffer_f32(buf: &metal::Buffer, len: usize) -> Vec<f32> {
+    let ptr = buf.contents() as *const f32;
+    assert!(!ptr.is_null(), "Metal buffer contents pointer is null");
+    assert!(
+        buf.length() as usize >= len * std::mem::size_of::<f32>(),
+        "Metal buffer too small: {} bytes, need {}",
+        buf.length(),
+        len * std::mem::size_of::<f32>(),
+    );
+    // SAFETY: ptr is non-null, buffer is large enough, and command buffer
+    // has completed (caller invariant). Data is immediately copied to Vec.
+    unsafe { std::slice::from_raw_parts(ptr, len).to_vec() }
+}

@@ -30,6 +30,7 @@ kernel void fused_attention(
     constant float&     rope_base [[buffer(9)]],
     constant uint&      use_qk_norm [[buffer(10)]],  // 0 or 1
     constant float&     softcap     [[buffer(11)]],  // 0.0 = disabled
+    constant uint&      skip_rope   [[buffer(12)]],  // 0 = apply RoPE, 1 = skip (caller pre-applied)
     uint2 tg_id [[threadgroup_position_in_grid]],    // (head, query_pos)
     uint tid    [[thread_index_in_threadgroup]])
 {
@@ -41,30 +42,34 @@ kernel void fused_attention(
     uint kv_head = head / (num_q / num_kv);
     uint hdim = head_dim / 2;
 
-    // ── Local Q with RoPE ──
-    // Load Q for this head and position, apply RoPE in registers
+    // ── Local Q with optional RoPE ──
+    // Load Q for this head and position, optionally apply RoPE in registers
     threadgroup float tg_q[512];   // max head_dim = 512
     if (tid < head_dim) {
         uint q_idx = qi * num_q * head_dim + head * head_dim + tid;
         float q_val = Q[q_idx];
 
-        // RoPE: split-half rotation
-        float freq = 1.0f / pow(rope_base, float(2 * (tid % hdim)) / float(head_dim));
-        float angle = float(qi) * freq;
-        float cos_a = cos(angle);
-        float sin_a = sin(angle);
+        if (skip_rope == 0) {
+            // RoPE: split-half rotation
+            float freq = 1.0f / pow(rope_base, float(2 * (tid % hdim)) / float(head_dim));
+            float angle = float(qi) * freq;
+            float cos_a = cos(angle);
+            float sin_a = sin(angle);
 
-        uint pair_tid = (tid < hdim) ? tid + hdim : tid - hdim;
-        uint pair_idx = qi * num_q * head_dim + head * head_dim + pair_tid;
-        float pair_val = Q[pair_idx];
+            uint pair_tid = (tid < hdim) ? tid + hdim : tid - hdim;
+            uint pair_idx = qi * num_q * head_dim + head * head_dim + pair_tid;
+            float pair_val = Q[pair_idx];
 
-        float rotated;
-        if (tid < hdim) {
-            rotated = q_val * cos_a - pair_val * sin_a;
+            float rotated;
+            if (tid < hdim) {
+                rotated = q_val * cos_a - pair_val * sin_a;
+            } else {
+                rotated = pair_val * sin_a + q_val * cos_a;
+            }
+            tg_q[tid] = rotated;
         } else {
-            rotated = pair_val * sin_a + q_val * cos_a;
+            tg_q[tid] = q_val;
         }
-        tg_q[tid] = rotated;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -92,30 +97,34 @@ kernel void fused_attention(
     uint causal_len = qi + 1;
 
     for (uint k = tid; k < causal_len; k += tg_sz) {
-        // Load K[k] for this KV head with RoPE
+        // Load K[k] for this KV head, optionally apply RoPE
         float dot = 0.0f;
         for (uint d = 0; d < head_dim; d++) {
             uint k_idx = k * num_kv * head_dim + kv_head * head_dim + d;
             float k_val = K[k_idx];
 
-            // RoPE on K
-            float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(head_dim));
-            float angle = float(k) * freq;
-            float cos_a = cos(angle);
-            float sin_a = sin(angle);
+            float k_final;
+            if (skip_rope == 0) {
+                // RoPE on K
+                float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(head_dim));
+                float angle = float(k) * freq;
+                float cos_a = cos(angle);
+                float sin_a = sin(angle);
 
-            uint pair_d = (d < hdim) ? d + hdim : d - hdim;
-            uint pair_idx = k * num_kv * head_dim + kv_head * head_dim + pair_d;
-            float pair_val = K[pair_idx];
+                uint pair_d = (d < hdim) ? d + hdim : d - hdim;
+                uint pair_idx = k * num_kv * head_dim + kv_head * head_dim + pair_d;
+                float pair_val = K[pair_idx];
 
-            float k_rotated;
-            if (d < hdim) {
-                k_rotated = k_val * cos_a - pair_val * sin_a;
+                if (d < hdim) {
+                    k_final = k_val * cos_a - pair_val * sin_a;
+                } else {
+                    k_final = pair_val * sin_a + k_val * cos_a;
+                }
             } else {
-                k_rotated = pair_val * sin_a + k_val * cos_a;
+                k_final = k_val;
             }
 
-            dot += tg_q[d] * k_rotated;
+            dot += tg_q[d] * k_final;
         }
 
         dot *= scale;

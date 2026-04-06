@@ -604,6 +604,8 @@ fn fused_attention_single_token() {
     enc.set_bytes(9, 4, &rope_base as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(10, 4, &use_qk_norm as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(11, 4, &softcap as *const f32 as *const std::ffi::c_void);
+    let skip_rope_val = 0u32;
+    enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const std::ffi::c_void);
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
         metal::MTLSize::new(256, 1, 1),
@@ -890,6 +892,8 @@ fn fused_attention_matches_cpu_reference() {
     enc.set_bytes(9, 4, &rope_base as *const f32 as *const std::ffi::c_void);
     enc.set_bytes(10, 4, &use_qk_norm as *const u32 as *const std::ffi::c_void);
     enc.set_bytes(11, 4, &softcap as *const f32 as *const std::ffi::c_void);
+    let skip_rope_val = 0u32;
+    enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const std::ffi::c_void);
     enc.dispatch_thread_groups(
         metal::MTLSize::new(num_q as u64, seq_len as u64, 1),
         metal::MTLSize::new(256, 1, 1),
@@ -1173,4 +1177,164 @@ fn q4k_quantize_then_matvec_matches_f32() {
     padded.resize(padded_len, 0.0);
     // Verify f32 reference is nonzero (sanity — full Q4_K round-trip tested via inference)
     assert!(cpu_result.iter().any(|&v| v.abs() > 0.001));
+}
+
+// ── Cross-backend: Q4_K Metal vs CPU ──
+
+#[test]
+fn q4k_matvec_matches_cpu() {
+    let metal = get_metal();
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let hidden = 256usize;
+    let rows = 32usize;
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    let q4k_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(&matrix);
+
+    let cpu_result = cpu.q4k_matvec(&q4k_data, &x, rows, hidden).unwrap();
+    let metal_result = metal.q4k_matvec(&q4k_data, &x, rows, hidden).unwrap();
+
+    let diff = max_diff(&cpu_result, &metal_result);
+    assert!(diff < 0.5, "Q4_K matvec Metal vs CPU max diff {diff} exceeds 0.5");
+    assert!(cpu_result.iter().any(|&v| v.abs() > 0.001), "CPU result should be nonzero");
+    assert!(metal_result.iter().any(|&v| v.abs() > 0.001), "Metal result should be nonzero");
+}
+
+// ── Cross-backend: Q6_K Metal vs CPU ──
+
+#[test]
+fn q6k_matvec_matches_cpu() {
+    let metal = get_metal();
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let hidden = 256usize;
+    let rows = 32usize;
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    let q6k_data = larql_compute::cpu::ops::q4_common::quantize_q6_k(&matrix);
+
+    let cpu_result = cpu.q6k_matvec(&q6k_data, &x, rows, hidden).unwrap();
+    let metal_result = metal.q6k_matvec(&q6k_data, &x, rows, hidden).unwrap();
+
+    let diff = max_diff(&cpu_result, &metal_result);
+    assert!(diff < 0.3, "Q6_K matvec Metal vs CPU max diff {diff} exceeds 0.3");
+    assert!(cpu_result.iter().any(|&v| v.abs() > 0.001), "CPU result should be nonzero");
+    assert!(metal_result.iter().any(|&v| v.abs() > 0.001), "Metal result should be nonzero");
+}
+
+// ── Cross-backend: Q8 matvec Metal vs CPU ──
+
+#[test]
+fn q8_matvec_metal_matches_cpu_reference() {
+    let metal = get_metal();
+    let hidden = 256usize;
+    let rows = 64usize;
+
+    // Create matrix and input
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    // CPU f32 reference
+    let mut cpu_ref = vec![0.0f32; rows];
+    for r in 0..rows {
+        for c in 0..hidden { cpu_ref[r] += matrix[r * hidden + c] * x[c]; }
+    }
+
+    // Q4_0 quantize and run through Metal Q4 matvec
+    let q4_data = quantize_q4_0(&matrix);
+    let (q8_x, q8_scales) = q4::quantize_to_q8(&x);
+
+    let metal_result = metal.q4_matvec(&q4_data, &q8_x, &q8_scales, rows, hidden).unwrap();
+
+    // Q4 is lossy (4-bit weights + 8-bit input), so allow generous tolerance
+    let diff = max_diff(&cpu_ref, &metal_result);
+    assert!(diff < 3.0, "Q4 matvec vs f32 ref max diff {diff} exceeds 3.0");
+}
+
+// ── Cross-backend: multi-position Q4_K ──
+
+#[test]
+fn multi_position_q4k_matches_individual() {
+    let metal = get_metal();
+    let cpu = larql_compute::cpu::CpuBackend;
+
+    let hidden = 256usize;
+    let rows = 32usize;
+    let seq_len = 6usize;
+
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+    let q4k_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(&matrix);
+
+    // Run individual matvec per position on CPU
+    let mut per_pos_results = Vec::with_capacity(seq_len);
+    for s in 0..seq_len {
+        let x: Vec<f32> = (0..hidden).map(|i| ((i + s * 100) as f32 * 0.01).sin()).collect();
+        let result = cpu.q4k_matvec(&q4k_data, &x, rows, hidden).unwrap();
+        per_pos_results.push(result);
+    }
+
+    // Run same on Metal and compare
+    for s in 0..seq_len {
+        let x: Vec<f32> = (0..hidden).map(|i| ((i + s * 100) as f32 * 0.01).sin()).collect();
+        let metal_result = metal.q4k_matvec(&q4k_data, &x, rows, hidden).unwrap();
+        let diff = max_diff(&per_pos_results[s], &metal_result);
+        assert!(diff < 0.5, "Position {s}: Q4_K Metal vs CPU max diff {diff}");
+    }
+}
+
+// ── Smoke test: full pipeline produces output ──
+
+#[test]
+fn full_pipeline_seq1_produces_nonzero() {
+    let metal = get_metal();
+    let hidden = 256usize;
+    let inter = 512usize;
+    let num_q_heads = 4usize;
+    let num_kv_heads = 4usize;
+    let head_dim = 64usize;
+    let q_dim = num_q_heads * head_dim;
+    let kv_dim = num_kv_heads * head_dim;
+
+    // Create synthetic Q4_0 weights for one layer
+    let gate_data = quantize_q4_0(&vec![0.01f32; inter * hidden]);
+    let up_data = quantize_q4_0(&vec![0.01f32; inter * hidden]);
+    let down_data = quantize_q4_0(&vec![0.01f32; hidden * inter]);
+    let wq_data = quantize_q4_0(&vec![0.01f32; q_dim * hidden]);
+    let wk_data = quantize_q4_0(&vec![0.01f32; kv_dim * hidden]);
+    let wv_data = quantize_q4_0(&vec![0.01f32; kv_dim * hidden]);
+    let wo_data = quantize_q4_0(&vec![0.01f32; hidden * q_dim]);
+    let (_q8_x_q, q8_s_q) = q4::quantize_to_q8(&vec![0.01f32; hidden]);
+
+    let norm = vec![1.0f32; hidden];
+    let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    let layer = larql_compute::FullPipelineLayer {
+        wq: larql_compute::QuantWeight { data: &wq_data, scales: Some(&q8_s_q), format: larql_compute::QuantFormat::Q4_0 },
+        wk: larql_compute::QuantWeight { data: &wk_data, scales: Some(&q8_s_q), format: larql_compute::QuantFormat::Q4_0 },
+        wv: larql_compute::QuantWeight { data: &wv_data, scales: Some(&q8_s_q), format: larql_compute::QuantFormat::Q4_0 },
+        wo: larql_compute::QuantWeight { data: &wo_data, scales: Some(&q8_s_q), format: larql_compute::QuantFormat::Q4_0 },
+        gate: larql_compute::QuantWeight { data: &gate_data, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+        up: larql_compute::QuantWeight { data: &up_data, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+        down: larql_compute::QuantWeight { data: &down_data, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+        input_norm: &norm,
+        post_attn_norm: &norm,
+        pre_ffn_norm: None,
+        post_ffn_norm: None,
+        norm_offset: 1.0,
+        has_post_norms: false,
+    };
+
+    let result = metal.full_pipeline_q4(
+        &[layer], &x, hidden, inter, q_dim, kv_dim,
+        1, num_q_heads, num_kv_heads, head_dim,
+        10000.0, false, 0.0,
+    );
+
+    assert!(result.is_some(), "full_pipeline_q4 should return Some");
+    let output = result.unwrap();
+    assert_eq!(output.len(), hidden);
+    assert!(output.iter().any(|&v| v.abs() > 1e-6), "Pipeline output should be nonzero");
 }

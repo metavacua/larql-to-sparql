@@ -96,6 +96,5 @@ pub fn dispatch(
     cmd.commit();
     cmd.wait_until_completed();
 
-    let ptr = buf_o_out.contents() as *const f32;
-    unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden).to_vec() }
+    crate::metal::buffers::read_buffer_f32(&buf_o_out, seq_len * hidden)
 }

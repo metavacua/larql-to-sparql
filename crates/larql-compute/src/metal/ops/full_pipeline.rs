@@ -87,7 +87,7 @@ fn encode_q8_matvec(
     );
 }
 
-fn encode_rms_norm(
+pub fn encode_rms_norm(
     enc: &ComputeCommandEncoderRef,
     rms_pipeline: &ComputePipelineState,
     buf_x: &Buffer,
@@ -108,7 +108,7 @@ fn encode_rms_norm(
     enc.dispatch_threads(MTLSize::new(len as u64, 1, 1), MTLSize::new(256.min(len as u64), 1, 1));
 }
 
-fn encode_residual_add(
+pub fn encode_residual_add(
     enc: &ComputeCommandEncoderRef,
     add_pipeline: &ComputePipelineState,
     buf_a: &Buffer,
@@ -192,6 +192,8 @@ pub fn dispatch_full_pipeline(
     residual_add_pipeline: &ComputePipelineState,
     rms_norm_q8_pipeline: &ComputePipelineState,
     residual_norm_q8_pipeline: &ComputePipelineState,
+    q4k_qkv_proj_pipeline: Option<&ComputePipelineState>,
+    q4k_proj_pipeline: Option<&ComputePipelineState>,
     layers: &[crate::FullPipelineLayer],
     x: &[f32],
     hidden: usize,
@@ -290,34 +292,60 @@ pub fn dispatch_full_pipeline(
         let uses_f32_input = attn_format == crate::QuantFormat::Q4_K || attn_format == crate::QuantFormat::Q6_K;
 
         if uses_f32_input {
-            // Q4_K/Q6_K path: norm → f32, then Q4_K/Q6_K matvec (reads f32 input)
-            // Skips Q8 quantize — saves ~0.1ms/layer
+            // Q4_K/Q6_K path: norm → f32, then fused Q4_K QKV (one dispatch)
             let enc = cmd.new_compute_command_encoder();
             encode_rms_norm(enc, rms_norm_pipeline,
                 &h_bufs[l], &input_norm_bufs[l], &norm_outs[l], hidden, eps, norm_offset);
             enc.end_encoding();
 
-            // Q projection
-            let enc = cmd.new_compute_command_encoder();
-            encode_quant_matvec(enc, layers[l].wq.format,
-                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
-                &wq_bufs[l], &norm_outs[l], &wq_scale_bufs[l], &q8s_bufs[l],
-                &q_outs[l], q_dim, hidden);
-            enc.end_encoding();
-            // K projection
-            let enc = cmd.new_compute_command_encoder();
-            encode_quant_matvec(enc, layers[l].wk.format,
-                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
-                &wk_bufs[l], &norm_outs[l], &wk_scale_bufs[l], &q8s_bufs[l],
-                &k_outs[l], kv_dim, hidden);
-            enc.end_encoding();
-            // V projection (may be Q6_K)
-            let enc = cmd.new_compute_command_encoder();
-            encode_quant_matvec(enc, layers[l].wv.format,
-                &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
-                &wv_bufs[l], &norm_outs[l], &wv_scale_bufs[l], &q8s_bufs[l],
-                &v_outs[l], kv_dim, hidden);
-            enc.end_encoding();
+            if let Some(q4k_qkv_pipeline) = q4k_qkv_proj_pipeline {
+                // Fused Q4_K QKV: one dispatch for Q+K+V (reduces dispatch overhead)
+                use crate::metal::shaders::q4k_qkv_proj as q4k_qkv;
+                let total_rows = (q_dim + kv_dim + kv_dim) as u32;
+                let q_rows_val = q_dim as u32;
+                let k_rows_val = kv_dim as u32;
+                let v_rows_val = kv_dim as u32;
+                let k_val = hidden as u32;
+                let num_tgs = ((total_rows as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(q4k_qkv_pipeline);
+                enc.set_buffer(0, Some(&wq_bufs[l]), 0);
+                enc.set_buffer(1, Some(&wk_bufs[l]), 0);
+                enc.set_buffer(2, Some(&wv_bufs[l]), 0);
+                enc.set_buffer(3, Some(&norm_outs[l]), 0);
+                enc.set_buffer(4, Some(&q_outs[l]), 0);
+                enc.set_buffer(5, Some(&k_outs[l]), 0);
+                enc.set_buffer(6, Some(&v_outs[l]), 0);
+                enc.set_bytes(7, 4, &q_rows_val as *const u32 as *const c_void);
+                enc.set_bytes(8, 4, &k_rows_val as *const u32 as *const c_void);
+                enc.set_bytes(9, 4, &v_rows_val as *const u32 as *const c_void);
+                enc.set_bytes(10, 4, &k_val as *const u32 as *const c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(num_tgs, 1, 1),
+                    MTLSize::new(q4k_qkv::THREADS_PER_TG, 1, 1),
+                );
+                enc.end_encoding();
+            } else {
+                // Fallback: 3 separate Q4_K dispatches
+                let enc = cmd.new_compute_command_encoder();
+                encode_quant_matvec(enc, layers[l].wq.format,
+                    &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                    &wq_bufs[l], &norm_outs[l], &wq_scale_bufs[l], &q8s_bufs[l],
+                    &q_outs[l], q_dim, hidden);
+                enc.end_encoding();
+                let enc = cmd.new_compute_command_encoder();
+                encode_quant_matvec(enc, layers[l].wk.format,
+                    &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                    &wk_bufs[l], &norm_outs[l], &wk_scale_bufs[l], &q8s_bufs[l],
+                    &k_outs[l], kv_dim, hidden);
+                enc.end_encoding();
+                let enc = cmd.new_compute_command_encoder();
+                encode_quant_matvec(enc, layers[l].wv.format,
+                    &q4.matvec, q8_matvec_pipeline, q4k_matvec_pipeline, q6k_matvec_pipeline,
+                    &wv_bufs[l], &norm_outs[l], &wv_scale_bufs[l], &q8s_bufs[l],
+                    &v_outs[l], kv_dim, hidden);
+                enc.end_encoding();
+            }
         } else {
             // Q8_0 path: fused norm+Q8 → fused Q8 QKV projection
             let enc = cmd.new_compute_command_encoder();
@@ -385,6 +413,8 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(9, 4, &rope_base as *const f32 as *const c_void);
             enc.set_bytes(10, 4, &qknorm_val as *const u32 as *const c_void);
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
+            let skip_rope_val = 0u32; // full_pipeline applies RoPE in-shader
+            enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
                 MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
                 MTLSize::new(256, 1, 1),
@@ -532,6 +562,5 @@ pub fn dispatch_full_pipeline(
     cmd.wait_until_completed();
 
     // Read final hidden state
-    let ptr = h_bufs[num_layers].contents() as *const f32;
-    unsafe { std::slice::from_raw_parts(ptr, hidden).to_vec() }
+    crate::metal::buffers::read_buffer_f32(&h_bufs[num_layers], hidden)
 }
