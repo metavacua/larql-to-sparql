@@ -37,23 +37,35 @@ pub mod cpu;
 #[cfg(feature = "metal")]
 pub mod metal;
 
+/// Quantization format for a weight tensor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum QuantFormat {
+    Q4_0,   // 18 bytes per 32 values (one f16 scale)
+    Q4_K,   // 148 bytes per 256 values (super-block with group scales)
+    Q6_K,   // 210 bytes per 256 values (6-bit with sub-block scales)
+    Q8_0,   // int8 values + separate f32 scales
+}
+
+/// A quantized weight matrix — raw bytes with format tag.
+#[derive(Clone, Copy)]
+pub struct QuantWeight<'a> {
+    pub data: &'a [u8],
+    pub scales: Option<&'a [f32]>,  // only for Q8_0 (separate scale array)
+    pub format: QuantFormat,
+}
+
 /// Per-layer quantized weights for the full pipeline.
-/// Attention: Q8 (higher precision for Q/K dot products).
-/// FFN: Q4 (lower precision acceptable).
+/// Supports Q4_K/Q6_K (Ollama strategy) or Q8_0 (higher precision fallback).
 pub struct FullPipelineLayer<'a> {
-    // Q8 attention weights (int8 values + f32 scales, separate arrays)
-    pub wq_q8: &'a [u8],       // int8 values [q_dim * hidden]
-    pub wq_scales: &'a [f32],  // per-block scales [q_dim * hidden / 32]
-    pub wk_q8: &'a [u8],
-    pub wk_scales: &'a [f32],
-    pub wv_q8: &'a [u8],
-    pub wv_scales: &'a [f32],
-    pub wo_q8: &'a [u8],
-    pub wo_scales: &'a [f32],
-    // Q4 FFN weights
-    pub gate_q4: &'a [u8],
-    pub up_q4: &'a [u8],
-    pub down_t_q4: &'a [u8],
+    // Attention weights (Q4_K for Q/K/O, Q6_K for V — matching Ollama)
+    pub wq: QuantWeight<'a>,
+    pub wk: QuantWeight<'a>,
+    pub wv: QuantWeight<'a>,
+    pub wo: QuantWeight<'a>,
+    // FFN weights (Q4_K for gate/up, Q6_K for down — matching Ollama)
+    pub gate: QuantWeight<'a>,
+    pub up: QuantWeight<'a>,
+    pub down: QuantWeight<'a>,
     // Norm weights (f32 vectors, hidden_size elements)
     pub input_norm: &'a [f32],       // input_layernorm (before attention)
     pub post_attn_norm: &'a [f32],   // post_attention_layernorm (before FFN, or post-attn norm)

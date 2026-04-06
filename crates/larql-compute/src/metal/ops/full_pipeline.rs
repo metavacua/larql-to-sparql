@@ -160,18 +160,18 @@ pub fn dispatch_full_pipeline(
     let eps = 1e-6f32;
 
     // Pre-cache Q8 attention weight buffers (higher precision for Q/K dot products)
-    let wq_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wq_q8)).collect();
-    let wq_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wq_scales)).collect();
-    let wk_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wk_q8)).collect();
-    let wk_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wk_scales)).collect();
-    let wv_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wv_q8)).collect();
-    let wv_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wv_scales)).collect();
-    let wo_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wo_q8)).collect();
-    let wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wo_scales)).collect();
+    let wq_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wq.data)).collect();
+    let wq_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wq.scales.unwrap_or(&[]))).collect();
+    let wk_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wk.data)).collect();
+    let wk_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wk.scales.unwrap_or(&[]))).collect();
+    let wv_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wv.data)).collect();
+    let wv_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wv.scales.unwrap_or(&[]))).collect();
+    let wo_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wo.data)).collect();
+    let wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wo.scales.unwrap_or(&[]))).collect();
     // Q4 FFN weight buffers
-    let gate_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.gate_q4)).collect();
-    let up_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.up_q4)).collect();
-    let down_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.down_t_q4)).collect();
+    let gate_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.gate.data)).collect();
+    let up_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.up.data)).collect();
+    let down_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.down.data)).collect();
 
     // Norm weight buffers
     let input_norm_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.input_norm)).collect();

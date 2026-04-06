@@ -428,18 +428,19 @@ pub fn predict_honest(
                 let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
                 let arch = &*weights.arch;
 
+                use larql_compute::{QuantWeight, QuantFormat};
                 let layers: Vec<larql_compute::FullPipelineLayer> = layer_range.clone()
                     .map(|layer| {
                         let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
                         let fs = layer * q4_ffn_per_layer;
                         larql_compute::FullPipelineLayer {
-                            wq_q8: q.0, wq_scales: q.1,
-                            wk_q8: k.0, wk_scales: k.1,
-                            wv_q8: v.0, wv_scales: v.1,
-                            wo_q8: o.0, wo_scales: o.1,
-                            gate_q4: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix],
-                            up_q4: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix],
-                            down_t_q4: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix],
+                            wq: QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
+                            wk: QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
+                            wv: QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
+                            wo: QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
+                            gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
+                            up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
+                            down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
                             input_norm: weights.vectors.get(&arch.input_layernorm_key(layer))
                                 .map(|v| v.as_slice()).unwrap_or(&[]),
                             post_attn_norm: weights.vectors.get(&arch.post_attention_layernorm_key(layer))

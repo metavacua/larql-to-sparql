@@ -18,11 +18,13 @@ impl MetalBackend {
         let dummy_scales = vec![1.0f32; hidden * hidden / 32]; // oversized, safe
         let full_layers: Vec<crate::FullPipelineLayer> = layers.iter().map(|l| {
             crate::FullPipelineLayer {
-                wq_q8: l.wq_q4, wq_scales: &dummy_scales,
-                wk_q8: l.wk_q4, wk_scales: &dummy_scales,
-                wv_q8: l.wv_q4, wv_scales: &dummy_scales,
-                wo_q8: l.wo_q4, wo_scales: &dummy_scales,
-                gate_q4: l.gate_q4, up_q4: l.up_q4, down_t_q4: l.down_t_q4,
+                wq: crate::QuantWeight { data: l.wq_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                wk: crate::QuantWeight { data: l.wk_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                wv: crate::QuantWeight { data: l.wv_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                wo: crate::QuantWeight { data: l.wo_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                gate: crate::QuantWeight { data: l.gate_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                up: crate::QuantWeight { data: l.up_q4, scales: None, format: crate::QuantFormat::Q4_0 },
+                down: crate::QuantWeight { data: l.down_t_q4, scales: None, format: crate::QuantFormat::Q4_0 },
                 input_norm: &dummy_norm, post_attn_norm: &dummy_norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
                 norm_offset: 0.0, has_post_norms: false,
