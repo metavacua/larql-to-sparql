@@ -94,6 +94,33 @@ pub trait ComputeBackend: Send + Sync {
         _hidden: usize,
     ) -> Option<Vec<f32>> { None }
 
+    /// Whether this backend supports KV cache decode operations.
+    fn has_kv_cache(&self) -> bool { false }
+
+    /// Populate KV cache with prefill K/V data for one layer.
+    /// k_data/v_data: [seq_len, kv_dim] as flat f32.
+    fn populate_kv_layer(
+        &self, _layer: usize,
+        _k_data: &[f32], _v_data: &[f32],
+        _seq_len: usize, _num_kv_heads: usize, _head_dim: usize,
+    ) { /* no-op for non-KV backends */ }
+
+    /// Reset KV cache (for new prompt).
+    fn reset_kv_cache(&self) {}
+
+    /// Decode one token through all layers with KV cache.
+    /// Q8 attention + KV cache + Q4 FFN, one command buffer.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_token(
+        &self,
+        _layers: &[crate::FullPipelineLayer<'_>],
+        _x: &[f32],
+        _hidden: usize, _inter: usize,
+        _q_dim: usize, _kv_dim: usize,
+        _num_q_heads: usize, _num_kv_heads: usize, _head_dim: usize,
+        _rope_base: f32,
+    ) -> Option<Vec<f32>> { None }
+
     /// Whether this backend supports Q4 fused operations.
     fn has_q4(&self) -> bool { false }
 

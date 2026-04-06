@@ -4,6 +4,85 @@ use larql_compute::ComputeBackend;
 use crate::model::ModelWeights;
 use super::{LayerGraph, LayerOutput, DenseLayerGraph, CachedLayerGraph};
 
+/// Prefill with KV cache population: run CPU attention, capture K/V, populate Metal KV cache.
+/// Returns the final hidden state after all layers.
+/// After this, `backend.decode_token()` can generate new tokens using the populated cache.
+pub fn prefill_with_kv(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn ComputeBackend,
+    layer_range: std::ops::Range<usize>,
+) -> Array2<f32> {
+    let mut h = crate::forward::embed_tokens_pub(weights, token_ids);
+    let hidden = weights.hidden_size;
+    let num_kv = weights.num_kv_heads;
+    let head_dim = weights.head_dim;
+    let kv_dim = num_kv * head_dim;
+    let seq_len = token_ids.len();
+
+    for layer in layer_range {
+        // CPU attention with K/V capture
+        let (h_post_attn, k_rope, v) =
+            crate::attention::run_attention_with_kv(weights, &h, layer)
+                .unwrap();
+
+        // Write K/V to backend's KV cache for this layer
+        if backend.has_kv_cache() {
+            let k_flat = k_rope.as_slice().unwrap_or(&[]);
+            let v_flat = v.as_slice().unwrap_or(&[]);
+            backend.populate_kv_layer(layer, k_flat, v_flat, seq_len, num_kv, head_dim);
+        }
+
+        // FFN
+        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+        h = h_out;
+    }
+    h
+}
+
+/// Shared logits computation: final norm + vindex KNN + softmax.
+pub fn finalize_logits(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    h: &Array2<f32>,
+    top_k: usize,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn ComputeBackend,
+    norm_offset: f32,
+) -> crate::forward::PredictResult {
+    let h_final = crate::forward::apply_norm(weights, h, weights.arch.final_norm_key(), norm_offset);
+    let seq_len = h_final.shape()[0];
+    let last_row = h_final.row(seq_len - 1).to_owned();
+
+    let hits = index.lm_head_knn_backend(&last_row, top_k, backend);
+
+    let logits_scale = weights.arch.logits_scaling();
+    let final_softcap = weights.arch.final_logit_softcapping();
+    let inv_scale = 1.0 / logits_scale;
+
+    let scaled: Vec<(u32, f32)> = hits.iter().map(|&(tid, score)| {
+        let mut logit = score * inv_scale;
+        if let Some(cap) = final_softcap {
+            logit = (logit / cap).tanh() * cap;
+        }
+        (tid, logit)
+    }).collect();
+
+    let max_logit = scaled.iter().map(|(_, l)| *l).fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f64 = scaled.iter().map(|(_, l)| ((*l - max_logit) as f64).exp()).sum();
+    let predictions = scaled.iter()
+        .filter_map(|&(tid, logit)| {
+            let prob = ((logit - max_logit) as f64).exp() / exp_sum;
+            tokenizer.decode(&[tid], true).ok()
+                .map(|s| (s.trim().to_string(), prob))
+        })
+        .collect();
+
+    crate::forward::PredictResult { predictions }
+}
+
 /// Run a full forward pass using vindex logits (KNN against lm_head mmap).
 /// Replaces the 231ms dense logits matmul with a ~1ms KNN lookup.
 pub fn predict_with_graph_vindex_logits(
@@ -378,6 +457,18 @@ pub fn predict_honest(
                 let q_dim = weights.num_q_heads * weights.head_dim;
                 let kv_dim = weights.num_kv_heads * weights.head_dim;
                 let rope = arch.rope_base_for_layer(layer_range.start) as f32;
+
+                // Try KV-cached decode first (faster — reuses previous K/V)
+                if let Some(result) = backend.decode_token(
+                    &layers, &x, hidden, intermediate, q_dim, kv_dim,
+                    weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+                ) {
+                    let mut row = h.row_mut(0);
+                    for j in 0..hidden { row[j] = result[j]; }
+                    return finalize_logits(weights, tokenizer, &h, top_k, index, backend, norm_offset);
+                }
+
+                // Fallback: full pipeline without KV cache
                 let softcap = arch.attn_logit_softcapping().unwrap_or(0.0) as f32;
                 let qk_norm = arch.attn_q_norm_key(layer_range.start).is_some();
 
@@ -406,36 +497,7 @@ pub fn predict_honest(
         }
     }
 
-    // Logits: GPU Q4 when lm_head_q4 available, else CPU BLAS
-    let h_final = crate::forward::apply_norm(weights, &h, weights.arch.final_norm_key(), norm_offset);
-    let seq_len = h_final.shape()[0];
-    let last_row = h_final.row(seq_len - 1).to_owned();
-
-    let hits = index.lm_head_knn_backend(&last_row, top_k, backend);
-
-    let logits_scale = weights.arch.logits_scaling();
-    let final_softcap = weights.arch.final_logit_softcapping();
-    let inv_scale = 1.0 / logits_scale;
-
-    let scaled: Vec<(u32, f32)> = hits.iter().map(|&(tid, score)| {
-        let mut logit = score * inv_scale;
-        if let Some(cap) = final_softcap {
-            logit = (logit / cap).tanh() * cap;
-        }
-        (tid, logit)
-    }).collect();
-
-    let max_logit = scaled.iter().map(|(_, l)| *l).fold(f32::NEG_INFINITY, f32::max);
-    let exp_sum: f64 = scaled.iter().map(|(_, l)| ((*l - max_logit) as f64).exp()).sum();
-    let predictions = scaled.iter()
-        .filter_map(|&(tid, logit)| {
-            let prob = ((logit - max_logit) as f64).exp() / exp_sum;
-            tokenizer.decode(&[tid], true).ok()
-                .map(|s| (s.trim().to_string(), prob))
-        })
-        .collect();
-
-    crate::forward::PredictResult { predictions }
+    finalize_logits(weights, tokenizer, &h, top_k, index, backend, norm_offset)
 }
 
 /// Optimized predict: uses vindex logits when lm_head is loaded, falls back to full matmul.

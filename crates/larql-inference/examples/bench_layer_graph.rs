@@ -201,15 +201,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Honest vs Dense:     {:.1}x ({:.0}ms saved)", dense_ms / honest_ms, dense_ms - honest_ms);
     println!("  Honest vs Ollama:    {:.1}x (Ollama ~10ms = 98 tok/s)", 10.0 / honest_ms);
 
-    // Diagnostic: GPU single-layer vs CPU full pipeline
+    // Prefill → Decode with KV cache
     {
-        let single_gpu = predict_honest(weights, tokenizer, &token_ids, 5, &index, &*gpu_be, &cache, 13..14);
-        let cpu_be = larql_inference::cpu_backend();
-        let single_cpu = predict_honest(weights, tokenizer, &token_ids, 5, &index,
-            &*cpu_be, &cache, 13..14);
-        eprintln!("  L13 only — GPU: {:?}  CPU: {:?}",
-            single_gpu.predictions.first().map(|(t,_)| t.as_str()),
-            single_cpu.predictions.first().map(|(t,_)| t.as_str()));
+        use larql_inference::layer_graph::predict::{prefill_with_kv, finalize_logits};
+
+        // Step 1: Prefill (populates KV cache on Metal)
+        gpu_be.reset_kv_cache();
+        let t0 = std::time::Instant::now();
+        let h_prefill = prefill_with_kv(weights, &token_ids, &index, &*gpu_be, 0..num_layers);
+        let prefill_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        // Step 2: Use prefill output for logits (the hidden state is already computed)
+        // This measures the logits-only path (norm + vindex KNN) after prefill.
+        let empty_cache = CachedLayerGraph::from_residuals(vec![]);
+        // Measure logits from prefill output (norm + vindex KNN only — 0 layers)
+        let norm_offset = weights.arch.norm_weight_offset();
+        let t0 = std::time::Instant::now();
+        for _ in 0..n {
+            let _ = finalize_logits(weights, tokenizer, &h_prefill, 5, &index, &*gpu_be, norm_offset);
+        }
+        let logits_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
+        let decode_r = finalize_logits(weights, tokenizer, &h_prefill, 5, &index, &*gpu_be, norm_offset);
+        let (decode_tok, decode_prob) = decode_r.predictions.first()
+            .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+
+        println!("\n  ═══ PREFILL → DECODE (KV cache) ═══");
+        println!("  Prefill ({} tokens):                {prefill_ms:>6.0}ms", token_ids.len());
+        println!("  Logits (from prefill): {decode_tok:>10} ({:.2}%)  {logits_ms:>6.1}ms",
+            decode_prob * 100.0);
+        println!("  Ollama:              prefill ~15ms, decode 10ms (99 tok/s)");
     }
 
     println!("=== Done ===");

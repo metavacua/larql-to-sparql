@@ -16,7 +16,7 @@ mod dense;
 mod walk;
 mod cached;
 mod template;
-mod predict;
+pub mod predict;
 
 use ndarray::Array2;
 

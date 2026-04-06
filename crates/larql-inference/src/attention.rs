@@ -362,6 +362,63 @@ pub fn gqa_attention_with_weights(
     (out, weights)
 }
 
+/// Same as run_attention_block_gpu but also returns K (after RoPE) and V for KV cache.
+pub fn run_attention_with_kv(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+) -> Option<(Array2<f32>, Array2<f32>, Array2<f32>)> {
+    use crate::forward::{apply_norm, add_bias, dot_proj};
+    use crate::residual::rms_norm_heads;
+
+    let arch = &*weights.arch;
+    let (hd, nq, nkv) = (weights.head_dim, weights.num_q_heads, weights.num_kv_heads);
+    let reps = nq / nkv;
+    let scale = if arch.attention_multiplier() != 1.0 { arch.attention_multiplier() as f64 } else { arch.attention_scale() };
+    let seq_len = h.shape()[0];
+    let norm_off = arch.norm_weight_offset();
+
+    let h_norm = apply_norm(weights, h, &arch.input_layernorm_key(layer), norm_off);
+    let (wq, wk, wv, wo) = (
+        weights.tensors.get(&arch.attn_q_key(layer))?,
+        weights.tensors.get(&arch.attn_k_key(layer))?,
+        weights.tensors.get(&arch.attn_v_key(layer))?,
+        weights.tensors.get(&arch.attn_o_key(layer))?,
+    );
+
+    let (mut q, mut k, mut v) = (dot_proj(&h_norm, wq), dot_proj(&h_norm, wk), dot_proj(&h_norm, wv));
+    for (proj, bias_fn) in [(&mut q, arch.attn_q_bias_key(layer) as Option<String>),
+                             (&mut k, arch.attn_k_bias_key(layer)),
+                             (&mut v, arch.attn_v_bias_key(layer))] {
+        if let Some(b) = bias_fn.and_then(|key| weights.vectors.get(&key)) { add_bias(proj, b); }
+    }
+
+    let qk_off = if arch.qk_norm_weight_offset() != 0.0 { arch.qk_norm_weight_offset() } else { norm_off };
+    let q = match arch.attn_q_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+        Some(w) => rms_norm_heads(&q, w, nq, hd, qk_off), None => q,
+    };
+    let k = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+        Some(w) => rms_norm_heads(&k, w, nkv, hd, qk_off), None => k,
+    };
+
+    let rb = arch.rope_base_for_layer(layer);
+    let q_r = apply_rope(&q, nq, hd, rb);
+    let k_r = apply_rope(&k, nkv, hd, rb);
+
+    let (attn_out, _) = gqa_attention_with_weights(
+        &q_r, &k_r, &v, nq, hd, reps, scale, seq_len, false, arch.attn_logit_softcapping());
+    let mut o = dot_proj(&attn_out, wo);
+    if let Some(b) = arch.attn_o_bias_key(layer).and_then(|k| weights.vectors.get(&k)) { add_bias(&mut o, b); }
+
+    let rm = arch.residual_multiplier();
+    let h_out = if arch.has_post_norms() {
+        let n = apply_norm(weights, &o, &arch.post_attention_layernorm_key(layer), norm_off);
+        if rm != 1.0 { h + &(&n * rm) } else { h + &n }
+    } else if rm != 1.0 { h + &(&o * rm) } else { h + &o };
+
+    Some((h_out, k_r, v))
+}
+
 /// Q4 attention projection: single projection via Q4 matvec through ComputeBackend.
 ///
 /// Replaces `dot_proj_gpu(h, w, backend)` when Q4 weight data is available.
