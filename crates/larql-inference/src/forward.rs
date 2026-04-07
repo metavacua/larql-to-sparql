@@ -235,7 +235,7 @@ fn precompute_per_layer_inputs(
     let num_layers = weights.num_layers;
     let seq_len = token_ids.len();
     let hidden = weights.hidden_size;
-    let total_ple_dim = num_layers * ple_dim;
+    let _total_ple_dim = num_layers * ple_dim;
 
     // Stream 1: model projection from main embeddings
     let w_model_proj = match weights.tensors.get("per_layer_model_projection.weight") {
@@ -266,7 +266,7 @@ fn precompute_per_layer_inputs(
         for s in 0..seq_len {
             for d in 0..ple_dim {
                 // Stream 1: projected model embedding, scaled
-                let mut val = projected[[s, col_start + d]] * model_proj_scale;
+                let val = projected[[s, col_start + d]] * model_proj_scale;
 
                 // RMSNorm per vector (stream 1)
                 // Deferred — apply after filling the row
