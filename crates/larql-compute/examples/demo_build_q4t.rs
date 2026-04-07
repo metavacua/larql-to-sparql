@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure hidden is multiple of 32 (for Q4 blocks) — it's 2560, which is 80×32 ✓
     // Ensure intermediate is multiple of 32 — it's 10240, which is 320×32 ✓
-    assert!(hidden % 32 == 0 && inter % 32 == 0);
+    assert!(hidden.is_multiple_of(32) && inter.is_multiple_of(32));
 
     let floats_per_gate = inter * hidden;
     let floats_per_up = inter * hidden;

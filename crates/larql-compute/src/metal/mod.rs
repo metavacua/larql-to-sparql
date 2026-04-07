@@ -57,12 +57,23 @@ pub struct MetalBackend {
     q8_qkv_proj_pipeline: ComputePipelineState,
     q4k_matvec_pipeline: ComputePipelineState,
     q6k_matvec_pipeline: ComputePipelineState,
+    #[allow(dead_code)]
     rope_pipeline: ComputePipelineState,
-    rope_at_pos_pipeline: ComputePipelineState,
+    pub rope_at_pos_pipeline: ComputePipelineState,
     pub q4k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
     q4kf_qkv_proj_pipeline: ComputePipelineState,
     q4kf_proj_pipeline: ComputePipelineState,
+    // Standalone activations (non-gated FFN)
+    pub silu_pipeline: ComputePipelineState,
+    pub gelu_tanh_pipeline: ComputePipelineState,
+    // LayerNorm (StarCoder2)
+    pub layer_norm_pipeline: ComputePipelineState,
+    pub layer_norm_no_bias_pipeline: ComputePipelineState,
+    // V-norm (Gemma 4)
+    pub v_norm_pipeline: ComputePipelineState,
+    // Scale vector (per-layer scalar, Gemma 4)
+    pub scale_vector_pipeline: ComputePipelineState,
     /// KV cache for decode mode — initialized on first decode_token call.
     kv_cache: std::sync::Mutex<Option<ops::kv_cache::KVCache>>,
     rms_norm_q8_pipeline: ComputePipelineState,
@@ -167,6 +178,26 @@ impl MetalBackend {
         let fused_attn_fn = library.get_function("fused_attention", None).ok()?;
         let fused_attn_pipeline = device.new_compute_pipeline_state_with_function(&fused_attn_fn).ok()?;
 
+        // Standalone activations (non-gated FFN)
+        let silu_fn = library.get_function("silu", None).ok()?;
+        let gelu_tanh_fn = library.get_function("gelu_tanh", None).ok()?;
+        let silu_pipeline = device.new_compute_pipeline_state_with_function(&silu_fn).ok()?;
+        let gelu_tanh_pipeline = device.new_compute_pipeline_state_with_function(&gelu_tanh_fn).ok()?;
+
+        // LayerNorm (StarCoder2, GPT-2)
+        let layer_norm_fn = library.get_function("layer_norm", None).ok()?;
+        let layer_norm_no_bias_fn = library.get_function("layer_norm_no_bias", None).ok()?;
+        let layer_norm_pipeline = device.new_compute_pipeline_state_with_function(&layer_norm_fn).ok()?;
+        let layer_norm_no_bias_pipeline = device.new_compute_pipeline_state_with_function(&layer_norm_no_bias_fn).ok()?;
+
+        // V-norm (parameter-free RMSNorm, Gemma 4)
+        let v_norm_fn = library.get_function("v_norm", None).ok()?;
+        let v_norm_pipeline = device.new_compute_pipeline_state_with_function(&v_norm_fn).ok()?;
+
+        // Scale vector (per-layer scalar multiplier, Gemma 4)
+        let scale_vector_fn = library.get_function("scale_vector", None).ok()?;
+        let scale_vector_pipeline = device.new_compute_pipeline_state_with_function(&scale_vector_fn).ok()?;
+
         // KV cache attention
         let kv_attend_fn = library.get_function("kv_attention", None).ok()?;
         let kv_append_fn = library.get_function("kv_cache_append", None).ok()?;
@@ -184,6 +215,10 @@ impl MetalBackend {
             rope_pipeline, rope_at_pos_pipeline,
             q4k_qkv_proj_pipeline, q4k_proj_pipeline,
             q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,
+            silu_pipeline, gelu_tanh_pipeline,
+            layer_norm_pipeline, layer_norm_no_bias_pipeline,
+            v_norm_pipeline,
+            scale_vector_pipeline,
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,
             flop_threshold: AtomicUsize::new(calibrate::DEFAULT_FLOP_THRESHOLD),

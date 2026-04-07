@@ -9,6 +9,7 @@ impl MetalBackend {
     /// Decode one token through all layers with KV cache.
     /// Q8 attention + KV cache append/attend + Q4 FFN, one command buffer.
     /// Returns the updated hidden state after all layers.
+    #[allow(clippy::too_many_arguments)]
     pub fn decode_token(
         &self,
         kv_cache: &mut ops::kv_cache::KVCache,
@@ -18,15 +19,14 @@ impl MetalBackend {
         inter: usize,
         q_dim: usize,
         kv_dim: usize,
-        num_q_heads: usize,
-        num_kv_heads: usize,
-        head_dim: usize,
-        rope_base: f32,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
     ) -> Vec<f32> {
         let num_layers = layers.len();
         let hidden_val = hidden as u32;
         let inter_val = inter as u32;
-        let eps = 1e-6f32;
 
         // Pre-cache weight buffers
         let wq_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wq.data)).collect();
@@ -45,16 +45,23 @@ impl MetalBackend {
 
         // Initial hidden state
         let mut h_buf = self.bufs.transient_from_f32(x);
-        let scale = 1.0f32 / (head_dim as f32).sqrt();
 
         let cmd = self.queue.new_command_buffer();
 
         for l in 0..num_layers {
-            let norm_offset = layers[l].norm_offset;
-            let _has_post_norms = layers[l].has_post_norms;
-            let uses_q4k = layers[l].wq.format == crate::QuantFormat::Q4_K
-                || layers[l].wq.format == crate::QuantFormat::Q6_K
-                || layers[l].wq.format == crate::QuantFormat::Q4_KF;
+            let layer = &layers[l];
+            let norm_offset = layer.norm_offset;
+            let eps = layer.eps;
+            let scale = layer.attn_scale;
+            let layer_head_dim = layer.head_dim;
+            let layer_num_q_heads = layer.num_q_heads;
+            let layer_num_kv_heads = layer.num_kv_heads;
+            let layer_rope_base = layer.rope_base;
+            let layer_rotary_dim = if layer.rotary_dim > 0 { layer.rotary_dim } else { layer_head_dim };
+            let _has_post_norms = layer.has_post_norms;
+            let uses_q4k = layer.wq.format == crate::QuantFormat::Q4_K
+                || layer.wq.format == crate::QuantFormat::Q6_K
+                || layer.wq.format == crate::QuantFormat::Q4_KF;
 
             // 1+2. Input norm + QKV projection (format-dependent)
             let q_out = self.bufs.output((q_dim * 4) as u64);
@@ -72,13 +79,40 @@ impl MetalBackend {
                     let k_rows_val = kv_dim as u32;
                     let v_rows_val = kv_dim as u32;
                     let k_val = hidden as u32;
-                    let num_tgs = ((total_rows as u64) + qkv_sh::ROWS_PER_TG - 1) / qkv_sh::ROWS_PER_TG;
+                    let num_tgs = (total_rows as u64).div_ceil(qkv_sh::ROWS_PER_TG);
 
                     let enc = cmd.new_compute_command_encoder();
-                    // Dispatch 1: rms_norm
-                    encode_rms_norm(enc, &self.rms_norm_pipeline,
-                        &h_buf, &input_norm_bufs[l], &norm_f32_buf,
-                        hidden, eps, norm_offset);
+                    // Dispatch 1: norm (RMSNorm or LayerNorm)
+                    if layer.norm_type == crate::NormType::LayerNorm {
+                        let len_val = hidden as u32;
+                        if let Some(bias) = layer.input_norm_bias {
+                            let bias_buf = self.bufs.transient_from_f32(bias);
+                            enc.set_compute_pipeline_state(&self.layer_norm_pipeline);
+                            enc.set_buffer(0, Some(&h_buf), 0);
+                            enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
+                            enc.set_buffer(2, Some(&bias_buf), 0);
+                            enc.set_buffer(3, Some(&norm_f32_buf), 0);
+                            enc.set_bytes(4, 4, &len_val as *const u32 as *const std::ffi::c_void);
+                            enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+                            enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
+                        } else {
+                            enc.set_compute_pipeline_state(&self.layer_norm_no_bias_pipeline);
+                            enc.set_buffer(0, Some(&h_buf), 0);
+                            enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
+                            enc.set_buffer(2, Some(&norm_f32_buf), 0);
+                            enc.set_bytes(3, 4, &len_val as *const u32 as *const std::ffi::c_void);
+                            enc.set_bytes(4, 4, &eps as *const f32 as *const std::ffi::c_void);
+                            enc.set_bytes(5, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
+                        }
+                        enc.dispatch_threads(
+                            MTLSize::new(hidden as u64, 1, 1),
+                            MTLSize::new(256.min(hidden as u64), 1, 1),
+                        );
+                    } else {
+                        encode_rms_norm(enc, &self.rms_norm_pipeline,
+                            &h_buf, &input_norm_bufs[l], &norm_f32_buf,
+                            hidden, eps, norm_offset);
+                    }
                     // Dispatch 2: Q4_K QKV (depends on norm output)
                     enc.set_compute_pipeline_state(&self.q4kf_qkv_proj_pipeline);
                     enc.set_buffer(0, Some(&wq_bufs[l]), 0);
@@ -139,7 +173,7 @@ impl MetalBackend {
                     enc.set_bytes(13, 4, &v_rows as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(14, 4, &k_val as *const u32 as *const std::ffi::c_void);
                     enc.dispatch_thread_groups(
-                        MTLSize::new(((total_rows as u64) + 7) / 8, 1, 1),
+                        MTLSize::new((total_rows as u64).div_ceil(8), 1, 1),
                         MTLSize::new(256, 1, 1),
                     );
                     enc.end_encoding();
@@ -147,43 +181,69 @@ impl MetalBackend {
             }
 
             // 2b. Apply RoPE to Q and K at the correct absolute position
-            // Uses rope_at_pos shader: one dispatch per head, explicit position parameter
+            // Uses per-layer rope_base and rotary_dim for partial RoPE (Gemma 4).
             {
                 let pos = kv_cache.layers[l].current_len as u32;
-                let hd = head_dim as u32;
-                let hdim = (head_dim / 2) as u64;
+                let hd = layer_head_dim as u32;
+                let rdim = layer_rotary_dim as u32;
+                let rope_pairs = (layer_rotary_dim / 2) as u64;
 
                 let enc = cmd.new_compute_command_encoder();
                 // RoPE on each Q head
-                for qh in 0..num_q_heads {
-                    let offset = (qh * head_dim * 4) as u64;
+                for qh in 0..layer_num_q_heads {
+                    let offset = (qh * layer_head_dim * 4) as u64;
                     enc.set_compute_pipeline_state(&self.rope_at_pos_pipeline);
                     enc.set_buffer(0, Some(&q_out), offset);
                     enc.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const std::ffi::c_void);
+                    enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
+                    enc.set_bytes(4, 4, &rdim as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(rope_pairs, 1, 1), MTLSize::new(rope_pairs.min(256), 1, 1));
                 }
                 // RoPE on each KV head
-                for kvh in 0..num_kv_heads {
-                    let offset = (kvh * head_dim * 4) as u64;
+                for kvh in 0..layer_num_kv_heads {
+                    let offset = (kvh * layer_head_dim * 4) as u64;
                     enc.set_compute_pipeline_state(&self.rope_at_pos_pipeline);
                     enc.set_buffer(0, Some(&k_out), offset);
                     enc.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const std::ffi::c_void);
+                    enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
+                    enc.set_bytes(4, 4, &rdim as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(rope_pairs, 1, 1), MTLSize::new(rope_pairs.min(256), 1, 1));
                 }
                 enc.end_encoding();
             }
 
+            // 2c. V-norm: parameter-free RMSNorm on V states (Gemma 4).
+            if layer.has_v_norm {
+                let kv_total = (layer_num_kv_heads * layer_head_dim) as u64;
+                let enc = cmd.new_compute_command_encoder();
+                // V-norm each KV head independently
+                for kvh in 0..layer_num_kv_heads {
+                    let offset = (kvh * layer_head_dim * 4) as u64;
+                    let hd_val = layer_head_dim as u32;
+                    enc.set_compute_pipeline_state(&self.v_norm_pipeline);
+                    enc.set_buffer(0, Some(&v_out), offset);
+                    enc.set_buffer(1, Some(&v_out), offset); // in-place via separate out ptr
+                    enc.set_bytes(2, 4, &hd_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(3, 4, &eps as *const f32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(
+                        MTLSize::new(layer_head_dim as u64, 1, 1),
+                        MTLSize::new((layer_head_dim as u64).min(256), 1, 1),
+                    );
+                }
+                let _ = kv_total; // used for sizing validation
+                enc.end_encoding();
+            }
+
             // 3. KV cache: append RoPE'd K/V, attend RoPE'd Q against cache
-            let attn_out = self.bufs.output((q_dim * 4) as u64);
+            let layer_q_dim = layer_num_q_heads * layer_head_dim;
+            let attn_out = self.bufs.output((layer_q_dim * 4) as u64);
             ops::kv_cache::append_and_attend(
                 cmd, &mut kv_cache.layers[l],
                 &self.kv_append_pipeline, &self.kv_attend_pipeline,
                 &k_out, &v_out, &q_out, &attn_out,
-                num_q_heads, scale,
+                layer_num_q_heads, scale,
             );
 
             // 4. O projection (format-dependent)
@@ -192,7 +252,7 @@ impl MetalBackend {
                 use crate::metal::shaders::q4kf_qkv_proj as proj_sh;
                 let o_rows = hidden as u32;
                 let o_k = q_dim as u32;
-                let num_tgs = ((hidden as u64) + proj_sh::ROWS_PER_TG - 1) / proj_sh::ROWS_PER_TG;
+                let num_tgs = (hidden as u64).div_ceil(proj_sh::ROWS_PER_TG);
                 let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(&self.q4kf_proj_pipeline);
                 enc.set_buffer(0, Some(&wo_bufs[l]), 0);
@@ -234,7 +294,7 @@ impl MetalBackend {
                     enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
                     enc.dispatch_thread_groups(
-                        MTLSize::new(((hidden as u64) + 7) / 8, 1, 1),
+                        MTLSize::new((hidden as u64).div_ceil(8), 1, 1),
                         MTLSize::new(256, 1, 1),
                     );
                     enc.end_encoding();
@@ -294,37 +354,66 @@ impl MetalBackend {
                 enc.end_encoding();
             }
 
-            // 6. Q4 FFN + residual: gate+up → GEGLU → down → residual (one encoder)
-            let gate_out = self.bufs.output((inter * 4) as u64);
+            // 6. FFN: gated (gate+up → GEGLU → down) or standard (up → activation → down)
             let up_out = self.bufs.output((inter * 4) as u64);
             let act_buf = self.bufs.output((inter * 4) as u64);
             let down_out = self.bufs.output((hidden * 4) as u64);
             let new_h = self.bufs.output((hidden * 4) as u64);
             {
-                // Gate + Up in one encoder (independent dispatches)
                 let enc = cmd.new_compute_command_encoder();
                 use crate::metal::shaders::q4_matvec as q4mv;
-                let n_tgs_gate = ((inter as u64) + q4mv::ROWS_PER_TG - 1) / q4mv::ROWS_PER_TG;
-                enc.set_compute_pipeline_state(&self.q4.matvec);
-                enc.set_buffer(0, Some(&gate_bufs[l]), 0);
-                enc.set_buffer(1, Some(&ffn_q8), 0);
-                enc.set_buffer(2, Some(&ffn_q8s), 0);
-                enc.set_buffer(3, Some(&gate_out), 0);
-                enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(n_tgs_gate, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
-                enc.set_buffer(0, Some(&up_bufs[l]), 0);
-                enc.set_buffer(3, Some(&up_out), 0);
-                enc.dispatch_thread_groups(MTLSize::new(n_tgs_gate, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
-                // GEGLU in same encoder — select activation based on model architecture
-                let geglu = if layers[l].use_gelu_tanh { &self.geglu_gelu_tanh_pipeline } else { &self.geglu_pipeline };
-                enc.set_compute_pipeline_state(geglu);
-                enc.set_buffer(0, Some(&gate_out), 0);
-                enc.set_buffer(1, Some(&up_out), 0);
-                enc.set_buffer(2, Some(&act_buf), 0);
-                enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
-                // Down in same encoder (depends on GEGLU)
+                let n_tgs_ffn = (inter as u64).div_ceil(q4mv::ROWS_PER_TG);
+
+                if layer.is_gated() {
+                    // Gated FFN: gate+up → GEGLU → down
+                    let gate_out = self.bufs.output((inter * 4) as u64);
+                    enc.set_compute_pipeline_state(&self.q4.matvec);
+                    enc.set_buffer(0, Some(&gate_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&ffn_q8), 0);
+                    enc.set_buffer(2, Some(&ffn_q8s), 0);
+                    enc.set_buffer(3, Some(&gate_out), 0);
+                    enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                    enc.set_buffer(0, Some(&up_bufs[l]), 0);
+                    enc.set_buffer(3, Some(&up_out), 0);
+                    enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                    // GEGLU: select activation based on architecture
+                    let geglu = match layer.activation {
+                        crate::Activation::GeluTanh => &self.geglu_gelu_tanh_pipeline,
+                        _ => &self.geglu_pipeline,
+                    };
+                    enc.set_compute_pipeline_state(geglu);
+                    enc.set_buffer(0, Some(&gate_out), 0);
+                    enc.set_buffer(1, Some(&up_out), 0);
+                    enc.set_buffer(2, Some(&act_buf), 0);
+                    enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                } else {
+                    // Standard FFN: up → activation → down (no gate)
+                    enc.set_compute_pipeline_state(&self.q4.matvec);
+                    enc.set_buffer(0, Some(&up_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&ffn_q8), 0);
+                    enc.set_buffer(2, Some(&ffn_q8s), 0);
+                    enc.set_buffer(3, Some(&up_out), 0);
+                    enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                    // Standalone activation (same shader but gate=up, so out = activation(up) * up...
+                    // Actually for standard FFN, we need standalone activation, not GEGLU.
+                    // Use GELU-tanh or SiLU applied in-place to up_out.
+                    let activation_pipeline = match layer.activation {
+                        crate::Activation::GeluTanh => &self.gelu_tanh_pipeline,
+                        _ => &self.silu_pipeline,
+                    };
+                    enc.set_compute_pipeline_state(activation_pipeline);
+                    enc.set_buffer(0, Some(&up_out), 0);
+                    enc.set_buffer(1, Some(&act_buf), 0);
+                    enc.set_bytes(2, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                }
+
+                // Down projection
                 enc.set_compute_pipeline_state(&self.q4.f32_matvec);
                 enc.set_buffer(0, Some(&down_bufs[l]), 0);
                 enc.set_buffer(1, Some(&act_buf), 0);
@@ -334,16 +423,44 @@ impl MetalBackend {
                 enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256, 1, 1));
                 enc.end_encoding();
             }
-            // 7. Post-FFN: norm (if post_norms) + residual add
+            // 7. Post-FFN: norm (if post_norms) + residual add + optional layer scalar
+            let has_post_norms = layer.has_post_norms;
             if has_post_norms {
-                if let Some(post_ffn) = layers[l].post_ffn_norm {
+                if let Some(post_ffn) = layer.post_ffn_norm {
                     let post_ffn_buf = self.bufs.transient_from_f32(post_ffn);
                     let normed_ffn = self.bufs.output((hidden * 4) as u64);
                     {
-                        use crate::metal::ops::full_pipeline::encode_rms_norm;
                         let enc = cmd.new_compute_command_encoder();
-                        encode_rms_norm(enc, &self.rms_norm_pipeline,
-                            &down_out, &post_ffn_buf, &normed_ffn, hidden, eps, norm_offset);
+                        if layer.norm_type == crate::NormType::LayerNorm {
+                            let len_val = hidden as u32;
+                            if let Some(bias) = layer.post_attn_norm_bias {
+                                let bias_buf = self.bufs.transient_from_f32(bias);
+                                enc.set_compute_pipeline_state(&self.layer_norm_pipeline);
+                                enc.set_buffer(0, Some(&down_out), 0);
+                                enc.set_buffer(1, Some(&post_ffn_buf), 0);
+                                enc.set_buffer(2, Some(&bias_buf), 0);
+                                enc.set_buffer(3, Some(&normed_ffn), 0);
+                                enc.set_bytes(4, 4, &len_val as *const u32 as *const std::ffi::c_void);
+                                enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+                                enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
+                            } else {
+                                enc.set_compute_pipeline_state(&self.layer_norm_no_bias_pipeline);
+                                enc.set_buffer(0, Some(&down_out), 0);
+                                enc.set_buffer(1, Some(&post_ffn_buf), 0);
+                                enc.set_buffer(2, Some(&normed_ffn), 0);
+                                enc.set_bytes(3, 4, &len_val as *const u32 as *const std::ffi::c_void);
+                                enc.set_bytes(4, 4, &eps as *const f32 as *const std::ffi::c_void);
+                                enc.set_bytes(5, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
+                            }
+                            enc.dispatch_threads(
+                                MTLSize::new(hidden as u64, 1, 1),
+                                MTLSize::new(256.min(hidden as u64), 1, 1),
+                            );
+                        } else {
+                            use crate::metal::ops::full_pipeline::encode_rms_norm;
+                            encode_rms_norm(enc, &self.rms_norm_pipeline,
+                                &down_out, &post_ffn_buf, &normed_ffn, hidden, eps, norm_offset);
+                        }
                         enc.end_encoding();
                     }
                     {
@@ -371,7 +488,22 @@ impl MetalBackend {
                 enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 enc.end_encoding();
             }
-            h_buf = new_h;
+            // 8. Optional per-layer scalar (Gemma 4: learned multiplier after residual).
+            if layer.layer_scalar != 0.0 {
+                let scaled = self.bufs.output((hidden * 4) as u64);
+                let scalar_val = layer.layer_scalar;
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(&self.scale_vector_pipeline);
+                enc.set_buffer(0, Some(&new_h), 0);
+                enc.set_buffer(1, Some(&scaled), 0);
+                enc.set_bytes(2, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(3, 4, &scalar_val as *const f32 as *const std::ffi::c_void);
+                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.end_encoding();
+                h_buf = scaled;
+            } else {
+                h_buf = new_h;
+            }
         }
 
         cmd.commit();

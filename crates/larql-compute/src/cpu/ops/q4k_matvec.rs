@@ -33,7 +33,7 @@ pub fn dispatch(q4k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
     let bytes_per_row = superblocks * Q4K_BLOCK_SIZE;
     let mut out = vec![0.0f32; num_rows];
 
-    for row in 0..num_rows {
+    for (row, out_val) in out.iter_mut().enumerate().take(num_rows) {
         let row_start = row * bytes_per_row;
         let mut acc = 0.0f32;
 
@@ -72,16 +72,16 @@ pub fn dispatch(q4k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
                 let mn = dmin * mins[j];
                 let qb = &quants[j * 16..];
 
-                for i in 0..16 {
+                for (i, &qb_val) in qb.iter().enumerate().take(16) {
                     let xi = x_base + j * 32 + i * 2;
-                    let lo = (qb[i] & 0x0F) as f32;
-                    let hi = ((qb[i] >> 4) & 0x0F) as f32;
+                    let lo = (qb_val & 0x0F) as f32;
+                    let hi = ((qb_val >> 4) & 0x0F) as f32;
                     acc += (sc * lo - mn) * x[xi];
                     acc += (sc * hi - mn) * x[xi + 1];
                 }
             }
         }
-        out[row] = acc;
+        *out_val = acc;
     }
     out
 }

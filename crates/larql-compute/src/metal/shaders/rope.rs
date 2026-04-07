@@ -2,22 +2,29 @@
 //!
 //! Split-half pairing: rotates (x[i], x[i + half_dim]) pairs.
 //! Matches HuggingFace default and MLX traditional=False.
+//!
+//! Both kernels support partial rotation via `rotary_dim`:
+//! only the first `rotary_dim` dimensions are rotated, the rest pass through.
+//! Gemma 4 global layers use 25% rotation (rotary_dim = head_dim * 0.25).
 
 pub const SHADER: &str = r#"
 // Apply RoPE to a single vector [dim] in-place at a given absolute position.
 // Used by KV-cached decode: apply to Q and K at the correct sequence position.
-// Grid: (dim/2, 1, 1).
+// Supports partial rotation: only first `rotary_dim` dims are rotated.
+// Grid: (rotary_dim/2, 1, 1).
 kernel void rope_at_pos(
-    device float* x         [[buffer(0)]],   // [dim] — modified in-place (one head)
-    constant uint&  dim     [[buffer(1)]],   // head_dim
-    constant float& base    [[buffer(2)]],   // rope_theta
-    constant uint&  pos     [[buffer(3)]],   // absolute position in sequence
+    device float* x           [[buffer(0)]],   // [dim] — modified in-place (one head)
+    constant uint&  dim       [[buffer(1)]],   // head_dim
+    constant float& base      [[buffer(2)]],   // rope_theta
+    constant uint&  pos       [[buffer(3)]],   // absolute position in sequence
+    constant uint&  rotary_dim[[buffer(4)]],   // dimensions to rotate (≤ dim). 0 = use dim.
     uint tid [[thread_position_in_grid]])
 {
-    uint hdim = dim / 2;
+    uint rdim = (rotary_dim == 0) ? dim : min(rotary_dim, dim);
+    uint hdim = rdim / 2;
     if (tid >= hdim) return;
 
-    float freq = 1.0f / pow(base, float(2 * tid) / float(dim));
+    float freq = 1.0f / pow(base, float(2 * tid) / float(rdim));
     float angle = float(pos) * freq;
     float cos_a = cos(angle);
     float sin_a = sin(angle);

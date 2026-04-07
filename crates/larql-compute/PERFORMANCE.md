@@ -57,6 +57,28 @@ full dispatch overhead).
 | GEGLU (10240 elements) | 0.015ms | — | Trivial |
 | Quantize to Q8 (2560 elements) | 0.002ms | — | Trivial |
 
+## New Kernel Benchmarks (model-agnostic alignment, 2026-04-07)
+
+Isolated dispatch timing (M3 Max). Each kernel dispatched individually — in a fused pipeline, these share
+one command buffer and add effectively zero latency.
+
+| Kernel | Time | vs Baseline | Notes |
+|--------|------|-------------|-------|
+| SiLU standalone (10240) | 305µs | — | Dispatch-dominated |
+| GELU-tanh standalone (10240) | 189µs | — | Dispatch-dominated |
+| GEGLU SiLU (gated, 10240) | 194µs | — | Comparable to standalone |
+| RMSNorm (2560) | 687µs | baseline | Standard norm |
+| LayerNorm with bias (2560) | 686µs | 1.00x RMSNorm | No penalty |
+| LayerNorm no bias (2560) | 499µs | 0.73x RMSNorm | 27% faster |
+| V-norm (256, 1 head) | 181µs | — | Parameter-free RMSNorm |
+| V-norm (256, 4 heads) | 723µs | — | Per-head dispatch |
+| scale_vector (2560) | 163µs | — | Element-wise multiply |
+| Full RoPE (256 dims) | 151µs | baseline | Standard rotation |
+| Partial RoPE (64 dims) | 149µs | ~same | Dispatch-dominated at this size |
+
+**Key finding**: All new kernels are dispatch-overhead-dominated. The actual GPU compute is <1µs for element-wise ops.
+In the fused decode pipeline, V-norm, layer_scalar, partial RoPE, and LayerNorm add negligible overhead because they share the command buffer with the existing dispatches.
+
 ## Ollama Reference
 
 ```
@@ -113,7 +135,7 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 | Merged norm+QKV encoder | Marginal | Metal encoder overhead is ~0ms |
 | llama.cpp exact kernel port | Same speed | Same inner loop = same speed |
 
-## Shader Inventory (28 kernels, all compiled and tested)
+## Shader Inventory (46 kernels, all compiled and tested)
 
 | Shader | Type | Status | Notes |
 |--------|------|--------|-------|
@@ -145,6 +167,12 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 | kv_attention | GQA | Production | KV-cached decode |
 | kv_cache_append | Buffer | Production | K/V cache update |
 | fused_ops (rms_norm_q8, residual_norm, residual_norm_q8) | Fused | Production | Multi-op fusion |
+| **silu** | Activation | **Production** | Standalone SiLU (non-gated FFN) |
+| **gelu_tanh** | Activation | **Production** | Standalone GELU-tanh (non-gated FFN) |
+| **layer_norm** | Normalization | **Production** | Standard LayerNorm with bias (StarCoder2) |
+| **layer_norm_no_bias** | Normalization | **Production** | LayerNorm without bias |
+| **v_norm** | Normalization | **Production** | Parameter-free RMSNorm on V (Gemma 4) |
+| **scale_vector** | Element-wise | **Production** | Per-layer scalar multiplier (Gemma 4) |
 | turboquant_encode/decode | Experimental | New | WHT + 4-bit quantization |
 | graph_walk_knn | Experimental | New | GPU-accelerated gate KNN |
 
@@ -152,12 +180,26 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 
 ```
 CPU unit tests:      30
-Metal shader tests:  37 (compilation + correctness + cross-backend + partial RoPE)
+Metal shader tests:  45 (compilation + correctness + cross-backend + partial RoPE + new kernels)
 Correctness tests:    6 (CPU vs ndarray)
 Doc tests:            2
-Total:               75 tests, all passing
+Bench tests:          2
+Total:               83 tests (with --features metal), all passing
 Warnings:             0
 ```
+
+### New Shader Tests (model-agnostic compute alignment)
+
+| Test | Verifies |
+|------|----------|
+| silu_standalone_matches_cpu | SiLU activation without gate multiply |
+| gelu_tanh_standalone_matches_cpu | GELU-tanh activation without gate multiply |
+| layer_norm_matches_cpu | Standard LayerNorm with bias |
+| layer_norm_no_bias_matches_cpu | LayerNorm without bias |
+| v_norm_matches_cpu | Parameter-free RMSNorm (Gemma 4 V-norm) |
+| scale_vector_matches_cpu | Per-layer scalar multiplier |
+| rms_norm_with_different_eps | Verifies eps is parameterized (not hardcoded) |
+| new_kernel_functions_exist | All 7 new kernels compile and link |
 
 ### Cross-Backend Tests (Metal vs CPU)
 

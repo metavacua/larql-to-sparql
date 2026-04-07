@@ -153,6 +153,18 @@ Inverse: unpack indices → centroid lookup → inverse WHT → rescale.
 ### graph_walk_knn.rs
 GPU-accelerated gate KNN for vindex walk architecture.
 
+### activation.rs — `silu`, `gelu_tanh`
+Standalone activation functions for non-gated FFN (StarCoder2, GPT-2). Unlike GEGLU, these apply activation to a single buffer without gate multiplication. `out[i] = activation(input[i])`.
+
+### layer_norm.rs — `layer_norm`, `layer_norm_no_bias`
+Standard LayerNorm: `out = (x - mean) / sqrt(var + eps) * (weight + offset) + bias`. Used by StarCoder2, GPT-2, BERT. `layer_norm_no_bias` variant omits the bias term.
+
+### v_norm.rs — `v_norm`
+Parameter-free RMSNorm applied to V states before attention (Gemma 4). `out = x / sqrt(mean(x²) + eps)` — no learned weight multiplication.
+
+### residual_inject.rs (updated) — `scale_vector`
+Per-layer scalar multiplier: `out = input * scalar`. Used by Gemma 4's learned layer scalars. Added alongside existing `residual_copy` and `residual_add`.
+
 ## Common Header (common.rs)
 
 Included by all shaders:

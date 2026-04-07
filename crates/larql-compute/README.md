@@ -49,7 +49,7 @@ The kernel is already faster than Ollama. The gap is in per-dispatch overhead (5
 1. **Merge dispatches**: norm+QKV+attend+O+FFN in 1 encoder per layer → save ~8ms
 2. **Cache L0-12**: compute only 8 entity-dependent layers → 59 × 21/8 = **155 tok/s**
 
-## Shaders (28 Metal kernels)
+## Shaders (46 Metal kernels)
 
 | Category | Kernels | Production |
 |----------|---------|------------|
@@ -58,7 +58,9 @@ The kernel is already faster than Ollama. The gap is in per-dispatch overhead (5
 | Q4_K/Q6_K | q4k_matvec, q4k_qkv_proj, q4kf_qkv_proj, q6k_matvec | Fused QKV, sub-block lanes |
 | Q8 | q8_matvec, q8_qkv_proj, q8_proj_rope | Fused QKV, simdgroup reduction |
 | Attention | fused_attention (RoPE+GQA+softcap), causal, kv_attention, kv_append | skip_rope flag, partial rotary_dim |
-| Element-wise | geglu, rms_norm, residual_add, residual_inject, rope (partial rotary), quantize_q8 | |
+| Normalization | rms_norm, **layer_norm**, **layer_norm_no_bias**, **v_norm** | RMSNorm + LayerNorm + V-norm |
+| Activation | geglu_silu, geglu_gelu_tanh, **silu**, **gelu_tanh** | Gated + standalone activations |
+| Element-wise | residual_add, residual_inject, **scale_vector**, rope (partial rotary), quantize_q8 | |
 | Fused ops | rms_norm_q8, residual_norm, residual_norm_q8 | Multi-op fusion |
 | Experimental | turboquant_encode/decode, graph_walk_knn | |
 
@@ -98,7 +100,8 @@ let h = backend.prefill_q4(&layers, &x, hidden, inter, q_dim, kv_dim,
 
 ```
 src/
-  lib.rs              QuantFormat, QuantWeight, FullPipelineLayer, re-exports
+  lib.rs              Re-exports from pipeline.rs and backend.rs
+  pipeline.rs         QuantFormat, QuantWeight, NormType, FfnType, Activation, FullPipelineLayer
   backend.rs          ComputeBackend trait (15 methods)
 
   cpu/
@@ -108,12 +111,12 @@ src/
                       q8_matvec, vector, attention, geglu
 
   metal/              (feature-gated: --features metal)
-    mod.rs            MetalBackend (28 pipeline states, KV cache)
+    mod.rs            MetalBackend (34 pipeline states, KV cache)
     trait_impl.rs     ComputeBackend dispatch (Q4_K/Q8 dual-path)
     decode.rs         KV-cached decode (norm→QKV→attend→O→FFN per layer)
     prefill.rs        GPU prefill for seq>1
     buffers.rs        GPU buffer cache + read_buffer_f32
-    shaders/          28 Metal kernels (one file each)
+    shaders/          46 Metal kernels (one file each)
     ops/              GPU dispatch helpers
 
   csrc/q4_dot.c       ARM NEON Q4 kernel
@@ -125,11 +128,11 @@ src/
 # CPU only (38 tests)
 cargo test -p larql-compute
 
-# CPU + Metal (75 tests)
+# CPU + Metal (83 tests)
 cargo test -p larql-compute --features metal
 ```
 
-75 tests covering: quantization round-trips, cross-backend correctness (Metal vs CPU with tolerance), shader compilation, fused attention, partial RoPE, KV cache, pipeline output verification.
+83 tests covering: quantization round-trips, cross-backend correctness (Metal vs CPU with tolerance), shader compilation, fused attention, partial RoPE, KV cache, pipeline output verification, standalone activations (SiLU, GELU-tanh), LayerNorm (with/without bias), V-norm, scale_vector, per-layer eps verification.
 
 ## Examples
 
@@ -159,6 +162,7 @@ cargo run --release --features metal -p larql-compute --example profile_componen
 cargo run --release --features metal -p larql-compute --example profile_operations   # CPU vs Metal per-operation
 cargo run --release --features metal -p larql-compute --example profile_kernels      # Q4 v1-v5, sparse, attention
 cargo run --release --features metal -p larql-compute --example profile_raw_dispatch # Pure kernel, zero overhead
+cargo run --release --features metal -p larql-compute --example profile_new_kernels  # New model-agnostic kernels
 cargo run --release --features metal -p larql-compute --example profile_kv_cache     # Attention vs cache length
 cargo run --release --features metal -p larql-compute --example profile_bandwidth    # Raw memory throughput
 ```
@@ -176,15 +180,15 @@ cargo run --release --features metal -p larql-compute --example best_multi_layer
 |-----|---------|
 | [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, component profiling, optimization history |
 | [ROADMAP.md](ROADMAP.md) | Planned optimizations, performance targets |
-| [docs/adr/](docs/adr/) | 10 architectural decision records (design choices, algorithm origins) |
-| [docs/shaders.md](docs/shaders.md) | All 28 Metal kernels with origin, performance, parameters |
+| [docs/adr/](docs/adr/) | 11 architectural decision records (design choices, algorithm origins, per-layer params) |
+| [docs/shaders.md](docs/shaders.md) | All 46 Metal kernels with origin, performance, parameters |
 | [docs/quantization-formats.md](docs/quantization-formats.md) | Q4_0, Q4_K, Q4_KF, Q6_K, Q8_0 format specs |
 | [docs/decode-pipeline.md](docs/decode-pipeline.md) | Decode data flow, dual-path architecture, KV cache |
 
 ## Design Principles
 
 1. **Trait-based dispatch** — callers use `ComputeBackend` exclusively
-2. **One file per kernel** — 28 shaders, each in its own file
+2. **One file per kernel** — 32 shader files, each containing related kernels
 3. **Zero-copy mmap** — `newBufferWithBytesNoCopy` for weight buffers
 4. **Safe by default** — `read_buffer_f32` with bounds checking
 5. **Feature-gated** — Metal with `--features metal`, CPU always available

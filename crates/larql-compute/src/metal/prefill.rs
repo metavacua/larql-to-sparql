@@ -16,6 +16,8 @@ use super::ops::full_pipeline::{encode_rms_norm, encode_residual_add};
 
 /// Encode a quant matvec for a single position at the given offsets.
 /// The input buffer is read from `in_offset` bytes, output written to `out_offset` bytes.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn encode_quant_matvec_at_offset(
     enc: &ComputeCommandEncoderRef,
     format: crate::QuantFormat,
@@ -35,7 +37,7 @@ fn encode_quant_matvec_at_offset(
         crate::QuantFormat::Q4_K => {
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4;
+            let tgs = (num_rows as u64).div_ceil(4);
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), in_offset);
@@ -48,7 +50,7 @@ fn encode_quant_matvec_at_offset(
             // Q4_KF uses same standalone matvec as Q4_K for non-fused path
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4;
+            let tgs = (num_rows as u64).div_ceil(4);
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), in_offset);
@@ -60,7 +62,7 @@ fn encode_quant_matvec_at_offset(
         crate::QuantFormat::Q6_K => {
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4;
+            let tgs = (num_rows as u64).div_ceil(4);
             enc.set_compute_pipeline_state(q6k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), in_offset);
@@ -72,7 +74,7 @@ fn encode_quant_matvec_at_offset(
         crate::QuantFormat::Q4_0 => {
             let n = num_rows as u32;
             let k = hidden as u32;
-            let num_tgs = ((num_rows as u64) + q4mv_shader::ROWS_PER_TG - 1) / q4mv_shader::ROWS_PER_TG;
+            let num_tgs = (num_rows as u64).div_ceil(q4mv_shader::ROWS_PER_TG);
             // Q4_0 needs Q8 input — but for prefill we use Q4_K/Q6_K path only.
             // Fallback: use f32 input path (q4_f32_matvec)
             enc.set_compute_pipeline_state(q4_pipeline);
@@ -95,7 +97,7 @@ fn encode_quant_matvec_at_offset(
             enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
             enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
-                MTLSize::new(((num_rows as u64) + 7) / 8, 1, 1),
+                MTLSize::new((num_rows as u64).div_ceil(8), 1, 1),
                 MTLSize::new(256, 1, 1),
             );
         }
@@ -106,6 +108,8 @@ fn encode_quant_matvec_at_offset(
 /// populating the KV cache for subsequent decode.
 ///
 /// Returns the final hidden state [seq_len * hidden] as a flat f32 vector.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch_prefill(
     queue: &CommandQueue,
     bufs: &BufferCache,
@@ -128,16 +132,15 @@ pub fn dispatch_prefill(
     q_dim: usize,
     kv_dim: usize,
     seq_len: usize,
-    num_q_heads: usize,
-    num_kv_heads: usize,
-    head_dim: usize,
-    rope_base: f32,
+    _num_q_heads: usize,
+    _num_kv_heads: usize,
+    _head_dim: usize,
+    _rope_base: f32,
     use_qk_norm: bool,
     softcap: f32,
 ) -> Vec<f32> {
     let num_layers = layers.len();
     let hidden_bytes = (hidden * 4) as u64;
-    let eps = 1e-6f32;
 
     // Pre-cache weight buffers
     let wq_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wq.data)).collect();
@@ -157,8 +160,14 @@ pub fn dispatch_prefill(
 
     for l in 0..num_layers {
         let norm_offset = layers[l].norm_offset;
+        let eps = layers[l].eps;
         let has_post_norms = layers[l].has_post_norms;
         let attn_format = layers[l].wq.format;
+        let head_dim = layers[l].head_dim;
+        let num_q_heads = layers[l].num_q_heads;
+        let num_kv_heads = layers[l].num_kv_heads;
+        let rope_base = layers[l].rope_base;
+        let scale = layers[l].attn_scale;
 
         // ── 1. Input norm: [seq_len, hidden] → [seq_len, hidden] ──
         let norm_out = bufs.output(hidden_bytes * seq_len as u64);
@@ -223,7 +232,7 @@ pub fn dispatch_prefill(
             let hd_val = head_dim as u32;
             let nq_val = num_q_heads as u32;
             let nkv_val = num_kv_heads as u32;
-            let scale_val = 1.0f32 / (head_dim as f32).sqrt();
+            let scale_val = scale;
             let qknorm_val = if use_qk_norm { 1u32 } else { 0u32 };
             let skip_rope_val = 0u32; // fused_attention applies RoPE internally
 

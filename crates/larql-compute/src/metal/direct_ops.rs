@@ -25,6 +25,7 @@ impl MetalBackend {
     }
 
     /// Full layer pipeline: attention + FFN in one Metal command buffer.
+    #[allow(clippy::too_many_arguments)]
     pub fn full_layer_direct(
         &self,
         w_q: &[f32], w_k: &[f32], w_v: &[f32], w_o: &[f32],

@@ -29,12 +29,12 @@ pub fn quantize_to_q8(x: &[f32]) -> (Vec<i8>, Vec<f32>) {
     let n_blocks = x.len() / 32;
     let mut q8 = vec![0i8; x.len()];
     let mut scales = vec![0.0f32; n_blocks];
-    for b in 0..n_blocks {
+    for (b, scale_out) in scales.iter_mut().enumerate().take(n_blocks) {
         let off = b * 32;
         let block = &x[off..off + 32];
         let amax = block.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
         let scale = amax / 127.0;
-        scales[b] = scale;
+        *scale_out = scale;
         let inv = if scale > 0.0 { 1.0 / scale } else { 0.0 };
         for j in 0..32 {
             q8[off + j] = (block[j] * inv).round().clamp(-128.0, 127.0) as i8;
@@ -48,7 +48,7 @@ pub fn quantize_to_q8(x: &[f32]) -> (Vec<i8>, Vec<f32>) {
 /// Each block of 32 floats becomes 18 bytes: 2 bytes f16 scale + 16 bytes packed nibbles.
 /// Used for weight quantization in benchmarks, tests, and tooling.
 pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
-    assert!(data.len() % 32 == 0, "data length must be a multiple of 32");
+    assert!(data.len().is_multiple_of(32), "data length must be a multiple of 32");
     let n_blocks = data.len() / 32;
     let mut out = Vec::with_capacity(n_blocks * 18);
     for i in 0..n_blocks {
@@ -62,7 +62,7 @@ pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
         let exp = ((bits >> 23) & 0xFF) as i32;
         let mant = bits & 0x7FFFFF;
         let f16 = if exp == 0 { sign as u16 }
-            else if exp == 255 { (sign | 0x7C00 | (mant >> 13) as u32) as u16 }
+            else if exp == 255 { (sign | 0x7C00 | (mant >> 13)) as u16 }
             else {
                 let new_exp = exp - 127 + 15;
                 if new_exp >= 31 { (sign | 0x7C00) as u16 }
@@ -86,7 +86,7 @@ fn f32_to_f16(val: f32) -> u16 {
     let exp = ((bits >> 23) & 0xFF) as i32;
     let mant = bits & 0x7FFFFF;
     if exp == 0 { return sign as u16; }
-    if exp == 255 { return (sign | 0x7C00 | (mant >> 13) as u32) as u16; }
+    if exp == 255 { return (sign | 0x7C00 | (mant >> 13)) as u16; }
     let new_exp = exp - 127 + 15;
     if new_exp >= 31 { return (sign | 0x7C00) as u16; }
     if new_exp <= 0 { return sign as u16; }
@@ -102,7 +102,7 @@ fn f32_to_f16(val: f32) -> u16 {
 ///   [16..19]  4 bytes: 8 × 4-bit sub-block mins (packed)
 ///   [20..147] 128 bytes: 256 × 4-bit values (packed nibbles)
 pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
-    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    assert!(data.len().is_multiple_of(256), "data length must be a multiple of 256");
     let n_superblocks = data.len() / 256;
     let mut out = Vec::with_capacity(n_superblocks * 148);
 
@@ -177,7 +177,7 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
 ///   [192..207]   16 bytes: 16 × int8 scales (one per 16-value sub-block)
 ///   [208..209]    2 bytes: f16 super-block scale (d)
 pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
-    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    assert!(data.len().is_multiple_of(256), "data length must be a multiple of 256");
     let n_superblocks = data.len() / 256;
     let mut out = Vec::with_capacity(n_superblocks * 210);
 
@@ -191,17 +191,17 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
 
         // Compute per-sub-block (16 values) int8 scales
         let mut sub_scales = [0i8; 16];
-        for j in 0..16 {
+        for (j, sub_scale) in sub_scales.iter_mut().enumerate() {
             let sub = &block[j * 16..(j + 1) * 16];
             let sub_max = sub.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
             let sc = if d > 0.0 { sub_max / d } else { 0.0 };
-            sub_scales[j] = sc.round().clamp(-128.0, 127.0) as i8;
+            *sub_scale = sc.round().clamp(-128.0, 127.0) as i8;
         }
 
         // Quantize all 256 values to 6-bit
         let mut q6_vals = [0u8; 256];
-        for j in 0..16 {
-            let sc = d * sub_scales[j] as f32;
+        for (j, &sub_scale) in sub_scales.iter().enumerate() {
+            let sc = d * sub_scale as f32;
             let inv_sc = if sc.abs() > 1e-10 { 1.0 / sc } else { 0.0 };
             for i in 0..16 {
                 let idx = j * 16 + i;
@@ -219,8 +219,8 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
 
         // Pack upper 2 bits: 64 bytes (4 × 2 bits per byte)
         let mut qh = [0u8; 64];
-        for i in 0..256 {
-            let hi2 = (q6_vals[i] >> 4) & 0x03;
+        for (i, &q6_val) in q6_vals.iter().enumerate() {
+            let hi2 = (q6_val >> 4) & 0x03;
             let byte_idx = i / 4;
             let bit_offset = (i % 4) * 2;
             qh[byte_idx] |= hi2 << bit_offset;
@@ -246,7 +246,7 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
 ///   bytes 4-7: lower 6 bits of scales 4-7
 ///   bytes 8-11: upper 2 bits of scales + lower 4 bits of mins
 pub fn quantize_q4_k_gguf(data: &[f32]) -> Vec<u8> {
-    assert!(data.len() % 256 == 0);
+    assert!(data.len().is_multiple_of(256));
     let n_superblocks = data.len() / 256;
     let mut out = Vec::with_capacity(n_superblocks * 144);
 
@@ -351,12 +351,12 @@ pub fn q4k_to_q4kf(q4k_data: &[u8], num_rows: usize, hidden: usize) -> Vec<u8> {
             }
 
             // Write pre-baked scales as f16
-            for j in 0..8 {
-                out.extend_from_slice(&f32_to_f16(scales[j]).to_le_bytes());
+            for scale in &scales {
+                out.extend_from_slice(&f32_to_f16(*scale).to_le_bytes());
             }
             // Write pre-baked mins as f16
-            for j in 0..8 {
-                out.extend_from_slice(&f32_to_f16(mins[j]).to_le_bytes());
+            for min in &mins {
+                out.extend_from_slice(&f32_to_f16(*min).to_le_bytes());
             }
             // Copy nibbles unchanged
             out.extend_from_slice(&block[20..148]);
@@ -367,7 +367,7 @@ pub fn q4k_to_q4kf(q4k_data: &[u8], num_rows: usize, hidden: usize) -> Vec<u8> {
 
 /// Quantize f32 data directly to Q4_KF format (pre-baked half scales).
 pub fn quantize_q4_kf(data: &[f32]) -> Vec<u8> {
-    assert!(data.len() % 256 == 0, "data length must be a multiple of 256");
+    assert!(data.len().is_multiple_of(256), "data length must be a multiple of 256");
     // First quantize to Q4_K, then convert
     let q4k = quantize_q4_k(data);
     let num_rows = 1; // treat as single row

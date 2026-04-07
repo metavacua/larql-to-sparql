@@ -70,9 +70,9 @@ fn main() {
         let b = synth(*n, *k, 43);
         let bytes = *n * *k * 4; // weight matrix read
         println!("  [{m},{k}] @ [{n},{k}]^T = [{m},{n}]  ({label})");
-        bench.run(&format!("    CPU"), bytes, || { let _ = cpu.matmul_transb(a.view(), b.view()); });
+        bench.run("    CPU", bytes, || { let _ = cpu.matmul_transb(a.view(), b.view()); });
         if default.name() != cpu.name() {
-            bench.run(&format!("    {}", default.name()), bytes, || { let _ = default.matmul_transb(a.view(), b.view()); });
+            bench.run(default.name(), bytes, || { let _ = default.matmul_transb(a.view(), b.view()); });
         }
     }
 
@@ -102,7 +102,7 @@ fn main() {
             let _ = cpu.q4_matvec(&q4_data, &q8_x, &q8_scales, inter, hidden);
         });
         if default.has_q4() && default.name() != cpu.name() {
-            bench.run(&format!("{}", default.name()), bytes, || {
+            bench.run(default.name(), bytes, || {
                 let _ = default.q4_matvec(&q4_data, &q8_x, &q8_scales, inter, hidden);
             });
         }
@@ -120,7 +120,7 @@ fn main() {
             let _ = cpu.q4_vecmat(&activation, &q4_data, inter, hidden);
         });
         if default.has_q4() && default.name() != cpu.name() {
-            bench.run(&format!("{}", default.name()), bytes, || {
+            bench.run(default.name(), bytes, || {
                 let _ = default.q4_vecmat(&activation, &q4_data, inter, hidden);
             });
         }

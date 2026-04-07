@@ -111,8 +111,13 @@ impl BufferCache {
         self.cache.lock().unwrap().len()
     }
 
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn is_page_aligned(ptr: *const c_void, bytes: usize) -> bool {
-        (ptr as usize) % PAGE_SIZE == 0 && bytes % PAGE_SIZE == 0
+        (ptr as usize).is_multiple_of(PAGE_SIZE) && bytes.is_multiple_of(PAGE_SIZE)
     }
 }
 

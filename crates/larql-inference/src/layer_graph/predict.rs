@@ -481,6 +481,18 @@ pub fn predict_honest(
                             )
                         };
 
+                        let layer_hd = arch.head_dim_for_layer(layer);
+                        let layer_nq = arch.num_q_heads_for_layer(layer);
+                        let layer_nkv = arch.num_kv_heads_for_layer(layer);
+                        let rotary_frac = arch.rotary_fraction_for_layer(layer);
+                        let rotary_dim = if rotary_frac >= 1.0 { 0 } else { (layer_hd as f64 * rotary_frac) as usize };
+                        let sw = if arch.is_sliding_window_layer(layer) {
+                            arch.sliding_window_size().unwrap_or(0)
+                        } else { 0 };
+                        let layer_scalar = arch.layer_scalar_key(layer)
+                            .and_then(|k| weights.vectors.get(&k))
+                            .and_then(|v| v.first().copied())
+                            .unwrap_or(0.0);
                         larql_compute::FullPipelineLayer {
                             wq, wk, wv, wo,
                             gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
@@ -496,7 +508,35 @@ pub fn predict_honest(
                                 .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
                             norm_offset: arch.norm_weight_offset(),
                             has_post_norms: arch.has_post_norms(),
-                            use_gelu_tanh: arch.activation() == larql_models::Activation::GeluTanh,
+                            activation: match arch.activation() {
+                                larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
+                                _ => larql_compute::Activation::Silu,
+                            },
+                            qk_norm_offset: arch.qk_norm_weight_offset(),
+                            eps: 1e-6,
+                            norm_type: match arch.norm_type() {
+                                larql_models::NormType::LayerNorm => larql_compute::NormType::LayerNorm,
+                                _ => larql_compute::NormType::RmsNorm,
+                            },
+                            ffn_type: match arch.ffn_type() {
+                                larql_models::FfnType::Standard => larql_compute::FfnType::Standard,
+                                _ => larql_compute::FfnType::Gated,
+                            },
+                            attn_scale: arch.attention_scale() as f32,
+                            head_dim: layer_hd,
+                            num_q_heads: layer_nq,
+                            num_kv_heads: layer_nkv,
+                            rope_base: arch.rope_base_for_layer(layer) as f32,
+                            rotary_dim,
+                            sliding_window: sw,
+                            has_v_norm: arch.has_v_norm(),
+                            layer_scalar,
+                            input_norm_bias: None,
+                            post_attn_norm_bias: None,
+                            ffn_up_bias: arch.ffn_up_bias_key(layer)
+                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+                            ffn_down_bias: arch.ffn_down_bias_key(layer)
+                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
                         }
                     }).collect();
 
@@ -689,6 +729,18 @@ pub fn generate(
                     QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
                 )
             };
+            let layer_hd = arch.head_dim_for_layer(layer);
+            let layer_nq = arch.num_q_heads_for_layer(layer);
+            let layer_nkv = arch.num_kv_heads_for_layer(layer);
+            let rotary_frac = arch.rotary_fraction_for_layer(layer);
+            let rotary_dim = if rotary_frac >= 1.0 { 0 } else { (layer_hd as f64 * rotary_frac) as usize };
+            let sw = if arch.is_sliding_window_layer(layer) {
+                arch.sliding_window_size().unwrap_or(0)
+            } else { 0 };
+            let layer_scalar = arch.layer_scalar_key(layer)
+                .and_then(|k| weights.vectors.get(&k))
+                .and_then(|v| v.first().copied())
+                .unwrap_or(0.0);
             larql_compute::FullPipelineLayer {
                 wq, wk, wv, wo,
                 gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
@@ -704,7 +756,35 @@ pub fn generate(
                     .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
                 norm_offset: arch.norm_weight_offset(),
                 has_post_norms: arch.has_post_norms(),
-                use_gelu_tanh: arch.activation() == larql_models::Activation::GeluTanh,
+                activation: match arch.activation() {
+                    larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
+                    _ => larql_compute::Activation::Silu,
+                },
+                qk_norm_offset: arch.qk_norm_weight_offset(),
+                eps: 1e-6,
+                norm_type: match arch.norm_type() {
+                    larql_models::NormType::LayerNorm => larql_compute::NormType::LayerNorm,
+                    _ => larql_compute::NormType::RmsNorm,
+                },
+                ffn_type: match arch.ffn_type() {
+                    larql_models::FfnType::Standard => larql_compute::FfnType::Standard,
+                    _ => larql_compute::FfnType::Gated,
+                },
+                attn_scale: arch.attention_scale() as f32,
+                head_dim: layer_hd,
+                num_q_heads: layer_nq,
+                num_kv_heads: layer_nkv,
+                rope_base: arch.rope_base_for_layer(layer) as f32,
+                rotary_dim,
+                sliding_window: sw,
+                has_v_norm: arch.has_v_norm(),
+                layer_scalar,
+                input_norm_bias: None,
+                post_attn_norm_bias: None,
+                ffn_up_bias: arch.ffn_up_bias_key(layer)
+                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+                ffn_down_bias: arch.ffn_down_bias_key(layer)
+                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
             }
         }).collect();
 

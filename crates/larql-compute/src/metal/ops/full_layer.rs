@@ -11,6 +11,7 @@ use crate::metal::f32_ops::F32Ops;
 use super::q4_common::Q4Pipelines;
 
 /// Run a full transformer layer on Metal: attention + FFN, one command buffer.
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch(
     queue: &CommandQueue,
     bufs: &BufferCache,

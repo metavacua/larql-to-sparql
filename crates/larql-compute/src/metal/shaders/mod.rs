@@ -28,6 +28,9 @@ pub mod q4k_matvec;
 pub mod q4k_qkv_proj;
 pub mod q4kf_qkv_proj;
 pub mod q6k_matvec;
+pub mod activation;
+pub mod layer_norm;
+pub mod v_norm;
 pub mod turboquant_encode;
 pub mod turboquant_decode;
 pub mod graph_walk_knn;
@@ -66,6 +69,12 @@ pub fn all_shaders() -> String {
     src.push_str(q4k_qkv_proj::SHADER);
     src.push_str(q4kf_qkv_proj::SHADER);
     src.push_str(q6k_matvec::SHADER);
+    // Standalone activations (non-gated FFN)
+    src.push_str(activation::SHADER);
+    // LayerNorm (StarCoder2, GPT-2)
+    src.push_str(layer_norm::SHADER);
+    // V-norm (parameter-free, Gemma 4)
+    src.push_str(v_norm::SHADER);
     // TurboQuant (KV cache compression)
     src.push_str(turboquant_encode::SHADER);
     src.push_str(turboquant_decode::SHADER);

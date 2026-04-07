@@ -1,6 +1,6 @@
 # Roadmap — larql-models
 
-## Current: 12 architectures, 28 tests, safetensors + GGUF loading
+## Current: 12 architectures, 130 tests, safetensors + GGUF loading
 
 ## P0: Complete Gemma 4 Support
 
@@ -87,7 +87,7 @@ Add a `validate()` method to `ModelArchitecture` that checks for inconsistencies
 
 | Item | Date | Impact |
 |------|------|--------|
-| ModelArchitecture trait | 2026-03 | Foundation — 60+ methods with defaults |
+| ModelArchitecture trait | 2026-03 | Foundation — 80+ methods with defaults |
 | Gemma 2/3 support | 2026-03 | QK-norm, softcapping, sliding window |
 | Llama/Mistral/Qwen/DeepSeek | 2026-03 | Core architecture coverage |
 | Mixtral MoE (PerExpert) | 2026-03 | Expert key patterns |
@@ -102,3 +102,7 @@ Add a `validate()` method to `ModelArchitecture` that checks for inconsistencies
 | Gemma4Arch re-export | 2026-04-07 | Public API complete |
 | v_shares_k from config | 2026-04-07 | Uses attention_k_eq_v flag instead of hardcoded false |
 | Gemma 3 qk_norm_weight_offset | 2026-04-07 | Was missing (Gemma 2 had it, Gemma 3 didn't) |
+| Full test coverage (130 tests) | 2026-04-07 | All 12 architectures tested: Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, DeepSeek, GPT-OSS, Granite, StarCoder2, Generic |
+| Clippy clean (zero warnings) | 2026-04-07 | lib + examples + tests all pass `-D warnings` |
+| Documentation suite | 2026-04-07 | README, ROADMAP, PERFORMANCE, 3 docs, 6 ADRs |
+| Example suite (3 demos) | 2026-04-07 | architecture_demo (all 12), demo_tensor_keys (all 12), demo_loading |

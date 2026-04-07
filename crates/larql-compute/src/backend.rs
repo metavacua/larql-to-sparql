@@ -60,6 +60,7 @@ pub trait ComputeBackend: Send + Sync {
     ) -> Option<Vec<f32>> { None }
 
     /// Batched Q4 gate+up for all seq positions in one submission.
+    #[allow(clippy::type_complexity)]
     fn q4_matvec_pair_batch(
         &self,
         _gate_q4: &[u8], _up_q4: &[u8],

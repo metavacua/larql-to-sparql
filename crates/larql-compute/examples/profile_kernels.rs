@@ -122,7 +122,7 @@ fn main() {
             let n_val = inter as u32;
             let k_val = hidden as u32;
             let rows_per_tg = 8u64;
-            let num_tgs = ((inter as u64) + rows_per_tg - 1) / rows_per_tg;
+            let num_tgs = (inter as u64).div_ceil(rows_per_tg);
 
             bench_metal("v1 (simdgroup+tg)", &pipeline,
                 MTLSize::new(num_tgs, 1, 1), MTLSize::new(256, 1, 1),
@@ -142,10 +142,10 @@ fn main() {
             ).unwrap();
             let n_val = inter as u32;
             let k_val = hidden as u32;
-            let n_threads = ((inter + 3) / 4) as u64;
+            let n_threads = inter.div_ceil(4) as u64;
 
             bench_metal("v2 (4-row, f32 in)", &pipeline,
-                MTLSize::new((n_threads + 255) / 256, 1, 1), MTLSize::new(256, 1, 1),
+                MTLSize::new(n_threads.div_ceil(256), 1, 1), MTLSize::new(256, 1, 1),
                 &|enc, buf_out| {
                     enc.set_buffer(1, Some(&buf_x), 0);
                     enc.set_buffer(2, Some(buf_out), 0);
@@ -161,10 +161,10 @@ fn main() {
             ).unwrap();
             let n_val = inter as u32;
             let k_val = hidden as u32;
-            let n_threads = ((inter + 7) / 8) as u64;
+            let n_threads = inter.div_ceil(8) as u64;
 
             bench_metal("v3 (8-row, unrolled)", &pipeline,
-                MTLSize::new((n_threads + 255) / 256, 1, 1), MTLSize::new(256, 1, 1),
+                MTLSize::new(n_threads.div_ceil(256), 1, 1), MTLSize::new(256, 1, 1),
                 &|enc, buf_out| {
                     enc.set_buffer(1, Some(&buf_x), 0);
                     enc.set_buffer(2, Some(buf_out), 0);
@@ -183,7 +183,7 @@ fn main() {
             let n_val = inter as u32;
             let k_val = hidden as u32;
             let rows_per_tg = 8u64;
-            let num_tgs = ((inter as u64) + rows_per_tg - 1) / rows_per_tg;
+            let num_tgs = (inter as u64).div_ceil(rows_per_tg);
 
             bench_metal("v4 (uint32+simdgrp)", &pipeline,
                 MTLSize::new(num_tgs, 1, 1), MTLSize::new(256, 1, 1),
@@ -205,7 +205,7 @@ fn main() {
             let buf_sc = bufs.transient_from_f32(&q8_scales);
             let n_val = inter as u32;
             let k_val = hidden as u32;
-            let num_tgs = ((inter + 255) / 256) as u64;
+            let num_tgs = inter.div_ceil(256) as u64;
 
             bench_metal("v5 (256-row, no simd)", &pipeline,
                 MTLSize::new(num_tgs, 1, 1), MTLSize::new(256, 1, 1),
@@ -306,7 +306,7 @@ fn main() {
             let n_q = hidden as u32;
             let k_q = hidden as u32;
             let rows_per_tg = 8u64;
-            let num_tgs_q = ((hidden as u64) + rows_per_tg - 1) / rows_per_tg;
+            let num_tgs_q = (hidden as u64).div_ceil(rows_per_tg);
 
             bench_metal("v4 Q proj [2560,2560]", &pipeline,
                 MTLSize::new(num_tgs_q, 1, 1), MTLSize::new(256, 1, 1),
@@ -325,7 +325,7 @@ fn main() {
             let wk_q4 = quantize_q4_0(&wk_f32);
             let buf_wk = bufs.get_bytes(&wk_q4);
             let n_k = kv_dim as u32;
-            let num_tgs_k = ((kv_dim as u64) + rows_per_tg - 1) / rows_per_tg;
+            let num_tgs_k = (kv_dim as u64).div_ceil(rows_per_tg);
 
             // Need smaller output buffer
             let buf_out_k = bufs.output((kv_dim * 4) as u64);

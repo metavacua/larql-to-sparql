@@ -33,53 +33,20 @@ extern crate blas_src;
 
 pub mod backend;
 pub mod cpu;
+pub mod pipeline;
 
 #[cfg(feature = "metal")]
 pub mod metal;
 
-/// Quantization format for a weight tensor.
-/// Names match GGUF conventions (Q4_K, Q6_K, etc.).
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(non_camel_case_types)]
-pub enum QuantFormat {
-    Q4_0,   // 18 bytes per 32 values (one f16 scale)
-    Q4_K,   // 148 bytes per 256 values (super-block with group scales)
-    Q4_KF,  // 160 bytes per 256 values (pre-baked half scales — fast decode)
-    Q6_K,   // 210 bytes per 256 values (6-bit with sub-block scales)
-    Q8_0,   // int8 values + separate f32 scales
-}
+// ── Re-exports: pipeline types ──
 
-/// A quantized weight matrix — raw bytes with format tag.
-#[derive(Clone, Copy)]
-pub struct QuantWeight<'a> {
-    pub data: &'a [u8],
-    pub scales: Option<&'a [f32]>,  // only for Q8_0 (separate scale array)
-    pub format: QuantFormat,
-}
+pub use pipeline::{
+    QuantFormat, QuantWeight,
+    NormType, FfnType, Activation,
+    FullPipelineLayer,
+};
 
-/// Per-layer quantized weights for the full pipeline.
-/// Supports Q4_K/Q6_K (Ollama strategy) or Q8_0 (higher precision fallback).
-pub struct FullPipelineLayer<'a> {
-    // Attention weights (Q4_K for Q/K/O, Q6_K for V — matching Ollama)
-    pub wq: QuantWeight<'a>,
-    pub wk: QuantWeight<'a>,
-    pub wv: QuantWeight<'a>,
-    pub wo: QuantWeight<'a>,
-    // FFN weights (Q4_K for gate/up, Q6_K for down — matching Ollama)
-    pub gate: QuantWeight<'a>,
-    pub up: QuantWeight<'a>,
-    pub down: QuantWeight<'a>,
-    // Norm weights (f32 vectors, hidden_size elements)
-    pub input_norm: &'a [f32],       // input_layernorm (before attention)
-    pub post_attn_norm: &'a [f32],   // post_attention_layernorm (before FFN, or post-attn norm)
-    pub pre_ffn_norm: Option<&'a [f32]>,   // pre_feedforward_layernorm (Gemma post-norms)
-    pub post_ffn_norm: Option<&'a [f32]>,  // post_feedforward_layernorm (Gemma post-norms)
-    pub norm_offset: f32,            // 0.0 standard (Llama, Gemma 4), 1.0 for Gemma 2/3
-    pub has_post_norms: bool,        // Gemma 3 uses post-norms
-    pub use_gelu_tanh: bool,         // false=SiLU (Llama), true=GELU-tanh (Gemma)
-}
-
-// ── Re-exports ──
+// ── Re-exports: backend ──
 
 pub use backend::{ComputeBackend, MatMulOp, dot_proj_gpu, matmul_gpu};
 pub use cpu::CpuBackend;

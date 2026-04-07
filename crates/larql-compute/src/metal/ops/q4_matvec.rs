@@ -17,6 +17,7 @@ use crate::metal::shaders::q4_matvec as shader;
 /// - `q8_x`: pre-quantized input vector (transient)
 /// - `q8_scales`: per-block Q8 scales (transient)
 /// - Returns: f32 scores vector
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch(
     queue: &CommandQueue,
     bufs: &BufferCache,
@@ -47,6 +48,7 @@ pub fn dispatch(
 
 /// Encode a Q4 matvec dispatch into an existing command encoder.
 /// Used by batched operations to chain multiple dispatches.
+#[allow(clippy::too_many_arguments)]
 pub fn encode(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -66,7 +68,7 @@ pub fn encode(
     enc.set_bytes(4, 4, &n_val as *const u32 as *const c_void);
     enc.set_bytes(5, 4, &k_val as *const u32 as *const c_void);
 
-    let num_tgs = ((num_rows as u64) + shader::ROWS_PER_TG - 1) / shader::ROWS_PER_TG;
+    let num_tgs = (num_rows as u64).div_ceil(shader::ROWS_PER_TG);
     enc.dispatch_thread_groups(
         MTLSize::new(num_tgs, 1, 1),
         MTLSize::new(shader::THREADS_PER_TG, 1, 1),

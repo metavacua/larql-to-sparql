@@ -42,7 +42,7 @@ Detection handles both top-level and nested `text_config` (multimodal models lik
 
 ## ModelArchitecture Trait
 
-The trait has ~60 methods organized into categories:
+The trait has ~80 methods organized into categories:
 
 | Category | Methods | Purpose |
 |----------|---------|---------|
@@ -153,7 +153,7 @@ src/
     mxfp4.rs          MXFP4 + e8m0 scale dequantization
 
 tests/
-  test_architectures.rs  Integration tests (28): MoE keys, cross-arch, Gemma 4, quant round-trips
+  test_architectures.rs  Integration tests (58): all 12 architectures, MoE, MLA, bias, scaling, quant
 
 examples/
   architecture_demo.rs   Guided tour: detection, keys, sliding window, MoE, quant formats
@@ -167,7 +167,7 @@ examples/
 cargo test -p larql-models
 ```
 
-28 tests covering: architecture detection, tensor key patterns, MoE expert formats (PerExpert vs PackedMxfp4), Gemma 4 per-layer geometry (head_dim, KV heads, partial RoPE, KV sharing, PLE), quantization round-trips (Q4_0, Q8_0), and `drop_ffn_weights`.
+130 tests (72 unit + 58 integration) covering all 12 architectures: detection, tensor key patterns, MoE expert formats (PerExpert vs PackedMxfp4), MLA compression keys, Gemma 2 softcapping + QK norm offsets, Gemma 3 sliding window + dual RoPE, Gemma 4 per-layer geometry (head_dim, KV heads, partial RoPE, KV sharing, PLE, V-norm, K=V), Qwen attention bias, StarCoder2 bias + LayerNorm + non-gated FFN, DeepSeek shared experts + MLA, Granite scaling multipliers, generic fallback defaults, quantization round-trips (Q4_0, Q8_0), and `drop_ffn_weights`.
 
 ## Examples
 
@@ -189,7 +189,7 @@ cargo run -p larql-models --example demo_tensor_keys
 | Doc | Content |
 |-----|---------|
 | [ROADMAP.md](ROADMAP.md) | Planned architectures, trait extensions, loading improvements |
-| [docs/adr/](docs/adr/) | Architectural decision records |
+| [docs/adr/](docs/adr/) | 6 architectural decision records (trait design, component names, config parsing, prefix stripping, Gemma 4 layers, norm offsets) |
 | [docs/architecture-trait.md](docs/architecture-trait.md) | ModelArchitecture trait design and extension guide |
 | [docs/weight-loading.md](docs/weight-loading.md) | Loading pipeline: formats, dtype conversion, prefix stripping |
 | [docs/quantization-formats.md](docs/quantization-formats.md) | GGML, MXFP4, f16 format specifications |

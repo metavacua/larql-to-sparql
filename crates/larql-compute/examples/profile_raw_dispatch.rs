@@ -18,7 +18,7 @@ fn main() {
         let kv_dim = 1280usize;
         let n = 100;
 
-        fn pad(d: &[f32]) -> Vec<f32> { let p = (d.len()+255)/256*256; let mut o = d.to_vec(); o.resize(p, 0.0); o }
+        fn pad(d: &[f32]) -> Vec<f32> { let p = d.len().div_ceil(256)*256; let mut o = d.to_vec(); o.resize(p, 0.0); o }
 
         let wq = quantize_q4_k(&pad(&(0..q_dim*hidden).map(|i| (i as f32*0.0001).cos()).collect::<Vec<_>>()));
         let wk = quantize_q4_k(&pad(&(0..kv_dim*hidden).map(|i| (i as f32*0.0002).sin()).collect::<Vec<_>>()));
@@ -32,7 +32,7 @@ fn main() {
 
         use larql_compute::metal::shaders::q4k_qkv_proj as sh;
         let total = (q_dim + kv_dim + kv_dim) as u32;
-        let num_tgs = ((total as u64) + sh::ROWS_PER_TG - 1) / sh::ROWS_PER_TG;
+        let num_tgs = (total as u64).div_ceil(sh::ROWS_PER_TG);
 
         println!("=== Raw Q4_K QKV Kernel ===");
         println!("QKV: {total} rows × {hidden} hidden\n");

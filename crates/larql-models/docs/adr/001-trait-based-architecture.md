@@ -6,14 +6,14 @@
 
 ## Decision
 
-Define a `ModelArchitecture` trait with ~60 methods, all with default implementations. Each model family implements this trait, overriding only what differs.
+Define a `ModelArchitecture` trait with ~80 methods, all with default implementations. Each model family implements this trait, overriding only what differs.
 
 ```rust
 pub trait ModelArchitecture: Send + Sync {
     fn family(&self) -> &str;
     fn config(&self) -> &ModelConfig;
     
-    // ~60 methods with defaults covering:
+    // ~80 methods with defaults covering:
     // tensor keys, norms, attention, FFN, MoE, MLA, scaling, softcapping
 }
 ```
@@ -24,5 +24,5 @@ pub trait ModelArchitecture: Send + Sync {
 - **Good**: Adding new trait methods never breaks existing architectures.
 - **Good**: Zero compute dependency — `larql-models` has no BLAS, Metal, or math imports.
 - **Good**: `Box<dyn ModelArchitecture>` enables runtime architecture dispatch.
-- **Trade-off**: Large trait surface (~60 methods). Accepted because most have one-line defaults and are logically grouped.
+- **Trade-off**: Large trait surface (~80 methods). Accepted because most have one-line defaults and are logically grouped.
 - **Trade-off**: `ModelConfig` struct grows with each new architecture's fields. Accepted for now — fields are flat and documented.

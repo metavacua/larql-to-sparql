@@ -15,6 +15,7 @@ use super::q4_common::{Q4Pipelines, quantize_to_q8};
 
 /// Batched gate+up for ALL seq positions in ONE GPU submission.
 /// Encodes 2×seq_len Q4 matvec dispatches in a single command buffer.
+#[allow(clippy::too_many_arguments)]
 pub fn pair_batch(
     queue: &CommandQueue,
     bufs: &BufferCache,
@@ -28,7 +29,7 @@ pub fn pair_batch(
 ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let n_val = num_rows as u32;
     let k_val = hidden as u32;
-    let num_tgs = ((num_rows as u64) + shader::ROWS_PER_TG - 1) / shader::ROWS_PER_TG;
+    let num_tgs = (num_rows as u64).div_ceil(shader::ROWS_PER_TG);
     let grid = MTLSize::new(num_tgs, 1, 1);
     let tg_size = MTLSize::new(shader::THREADS_PER_TG, 1, 1);
     let out_bytes = (num_rows * 4) as u64;
@@ -92,6 +93,7 @@ pub fn pair_batch(
 /// Multi-layer Q4 FFN in ONE command buffer.
 /// gate → up → GEGLU → down → Q8 quantize → next layer.
 /// All on GPU, no CPU return between layers.
+#[allow(clippy::too_many_arguments)]
 pub fn multi_layer_ffn(
     queue: &CommandQueue,
     bufs: &BufferCache,
@@ -108,7 +110,7 @@ pub fn multi_layer_ffn(
     let k_val = hidden as u32;
     let inter_val = inter as u32;
     let hidden_val = hidden as u32;
-    let num_tgs = ((inter as u64) + shader::ROWS_PER_TG - 1) / shader::ROWS_PER_TG;
+    let num_tgs = (inter as u64).div_ceil(shader::ROWS_PER_TG);
     let n_blocks = (hidden / 32) as u32;
 
     let (q8_init, q8s_init) = quantize_to_q8(x);

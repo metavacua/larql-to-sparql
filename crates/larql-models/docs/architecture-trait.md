@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ModelArchitecture` is the core abstraction in `larql-models`. It describes *what a model is* — tensor key patterns, norm behavior, activation functions, scaling — without any compute dependencies.
+`ModelArchitecture` is the core abstraction in `larql-models`. It has 81 methods that describe *what a model is* — tensor key patterns, norm behavior, activation functions, scaling — without any compute dependencies.
 
 Every model family (Gemma, Llama, DeepSeek, ...) implements this trait. The rest of LARQL (inference, compute, vindex) only interacts with models through this trait.
 

@@ -22,7 +22,7 @@ fn main() {
         let layers = 34usize;
         let n = 30;
 
-        fn pad(d: &[f32]) -> Vec<f32> { let p=(d.len()+255)/256*256; let mut o=d.to_vec(); o.resize(p,0.0); o }
+        fn pad(d: &[f32]) -> Vec<f32> { let p=d.len().div_ceil(256)*256; let mut o=d.to_vec(); o.resize(p,0.0); o }
 
         println!("=== Component Profiling ({layers} layers, 1 cmd buffer each) ===\n");
 
@@ -85,7 +85,7 @@ fn main() {
         let qkv_ms = bench!("Q4_K QKV fused", {
             let cmd = metal.queue().new_command_buffer();
             let total = (q_dim + kv_dim + kv_dim) as u32;
-            let num_tgs = ((total as u64) + qkv_sh::ROWS_PER_TG - 1) / qkv_sh::ROWS_PER_TG;
+            let num_tgs = (total as u64).div_ceil(qkv_sh::ROWS_PER_TG);
             for _ in 0..layers {
                 let qo = metal.bufs().output((q_dim*4) as u64);
                 let ko = metal.bufs().output((kv_dim*4) as u64);
@@ -111,11 +111,11 @@ fn main() {
             metal.reset_kv_cache();
             // Pre-populate some KV to simulate decode at T=5
             let cmd = metal.queue().new_command_buffer();
-            for l in 0..layers {
+            for _l in 0..layers {
                 let ko = metal.bufs().output((kv_dim*4) as u64);
-                let vo = metal.bufs().output((kv_dim*4) as u64);
-                let qo = metal.bufs().output((q_dim*4) as u64);
-                let ao = metal.bufs().output((q_dim*4) as u64);
+                let _vo = metal.bufs().output((kv_dim*4) as u64);
+                let _qo = metal.bufs().output((q_dim*4) as u64);
+                let _ao = metal.bufs().output((q_dim*4) as u64);
                 // Need kv_cache — use decode_token trait to init, then just measure attend
                 // Simplified: just measure the dispatch overhead
                 let enc = cmd.new_compute_command_encoder();
@@ -137,7 +137,7 @@ fn main() {
         // 4. O projection × 34
         let o_ms = bench!("Q4_K O projection", {
             let cmd = metal.queue().new_command_buffer();
-            let o_tgs = ((hidden as u64) + qkv_sh::ROWS_PER_TG - 1) / qkv_sh::ROWS_PER_TG;
+            let o_tgs = (hidden as u64).div_ceil(qkv_sh::ROWS_PER_TG);
             for _ in 0..layers {
                 let oo = metal.bufs().output((hidden*4) as u64);
                 let enc = cmd.new_compute_command_encoder();
@@ -180,7 +180,7 @@ fn main() {
 
         let ffn_ms = bench!("Q4 FFN (gate+up+geglu+down)", {
             let cmd = metal.queue().new_command_buffer();
-            let n_tgs = ((inter as u64) + q4mv::ROWS_PER_TG - 1) / q4mv::ROWS_PER_TG;
+            let n_tgs = (inter as u64).div_ceil(q4mv::ROWS_PER_TG);
             for _ in 0..layers {
                 let go = metal.bufs().output((inter*4) as u64);
                 let uo = metal.bufs().output((inter*4) as u64);

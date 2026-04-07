@@ -53,7 +53,9 @@ fn all_kernel_functions_exist() {
     let lib = device.new_library_with_source(&src, &opts).unwrap();
 
     let names = ["sgemm", "sgemm_transb", "q4_matvec", "q4_vecmat",
-                 "q4_f32_matvec", "geglu_silu", "quantize_q8", "causal_attention"];
+                 "q4_f32_matvec", "geglu_silu", "quantize_q8", "causal_attention",
+                 "silu", "gelu_tanh", "layer_norm", "layer_norm_no_bias",
+                 "v_norm", "scale_vector", "rope_at_pos"];
     for name in &names {
         lib.get_function(name, None)
             .unwrap_or_else(|e| panic!("Kernel '{name}' not found: {e}"));
@@ -664,7 +666,7 @@ fn fused_attention_single_token() {
 
     let q: Vec<f32> = (0..total).map(|i| (i as f32 * 0.1).sin()).collect();
     let k: Vec<f32> = (0..kv_total).map(|i| (i as f32 * 0.2).cos()).collect();
-    let v: Vec<f32> = (0..kv_total).map(|i| (i as f32 * 0.05 + 1.0)).collect();
+    let v: Vec<f32> = (0..kv_total).map(|i| i as f32 * 0.05 + 1.0).collect();
 
     let buf_q = bufs.transient_from_f32(&q);
     let buf_k = bufs.transient_from_f32(&k);
@@ -725,7 +727,7 @@ fn rms_norm_matches_cpu() {
     let queue = device.new_command_queue();
 
     let len = 64usize;
-    let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.1 - 3.2)).collect();
+    let x: Vec<f32> = (0..len).map(|i| i as f32 * 0.1 - 3.2).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.5 + (i as f32 * 0.01)).collect();
     let eps = 1e-6f32;
     let offset = 1.0f32; // Gemma 2/3 style (Gemma 4 uses 0.0)
@@ -777,7 +779,7 @@ fn rms_norm_zero_offset() {
     let queue = device.new_command_queue();
 
     let len = 32usize;
-    let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.2 - 3.0)).collect();
+    let x: Vec<f32> = (0..len).map(|i| i as f32 * 0.2 - 3.0).collect();
     let weight: Vec<f32> = vec![1.0f32; len];
     let eps = 1e-6f32;
     let offset = 0.0f32;
@@ -880,9 +882,9 @@ fn fused_attention_matches_cpu_reference() {
     let kv_total = (seq_len * num_kv * head_dim) as usize;
 
     // Deterministic test data
-    let q: Vec<f32> = (0..total).map(|i| ((i as f32 * 0.37 + 1.0).sin() * 0.5)).collect();
-    let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32 * 0.23 + 2.0).cos() * 0.5)).collect();
-    let v: Vec<f32> = (0..kv_total).map(|i| ((i as f32 * 0.11 + 3.0).sin() * 0.3)).collect();
+    let q: Vec<f32> = (0..total).map(|i| (i as f32 * 0.37 + 1.0).sin() * 0.5).collect();
+    let k: Vec<f32> = (0..kv_total).map(|i| (i as f32 * 0.23 + 2.0).cos() * 0.5).collect();
+    let v: Vec<f32> = (0..kv_total).map(|i| (i as f32 * 0.11 + 3.0).sin() * 0.3).collect();
 
     // ── CPU reference: apply RoPE then causal attention ──
     let hd = head_dim as usize;
@@ -1011,7 +1013,7 @@ fn quantize_q8_matches_cpu() {
     let queue = device.new_command_queue();
 
     let len = 64usize;
-    let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.15 - 4.8)).collect();
+    let x: Vec<f32> = (0..len).map(|i| i as f32 * 0.15 - 4.8).collect();
 
     // CPU reference
     let (cpu_q8, cpu_scales) = larql_compute::cpu::q4::quantize_to_q8(&x);
@@ -1069,7 +1071,7 @@ fn rms_norm_q8_matches_separate_ops() {
     let queue = device.new_command_queue();
 
     let len = 64usize;
-    let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.15 - 4.8)).collect();
+    let x: Vec<f32> = (0..len).map(|i| i as f32 * 0.15 - 4.8).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.5 + i as f32 * 0.01).collect();
     let eps = 1e-6f32;
     let offset = 1.0f32;
@@ -1132,8 +1134,8 @@ fn residual_norm_matches_separate_ops() {
     let queue = device.new_command_queue();
 
     let len = 64usize;
-    let a: Vec<f32> = (0..len).map(|i| (i as f32 * 0.1 - 3.2)).collect();
-    let b: Vec<f32> = (0..len).map(|i| (i as f32 * 0.05 + 0.3)).collect();
+    let a: Vec<f32> = (0..len).map(|i| i as f32 * 0.1 - 3.2).collect();
+    let b: Vec<f32> = (0..len).map(|i| i as f32 * 0.05 + 0.3).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.8 + i as f32 * 0.005).collect();
     let eps = 1e-6f32;
     let offset = 0.0f32;
@@ -1258,7 +1260,7 @@ fn q4k_quantize_then_matvec_matches_f32() {
     }
 
     // Q4_K quantize (via models crate) then GPU matvec
-    let padded_len = (rows * hidden + 255) / 256 * 256;
+    let padded_len = (rows * hidden).div_ceil(256) * 256;
     let mut padded = matrix.clone();
     padded.resize(padded_len, 0.0);
     // Verify f32 reference is nonzero (sanity — full Q4_K round-trip tested via inference)
@@ -1363,10 +1365,10 @@ fn multi_position_q4k_matches_individual() {
     }
 
     // Run same on Metal and compare
-    for s in 0..seq_len {
+    for (s, cpu_result) in per_pos_results.iter().enumerate() {
         let x: Vec<f32> = (0..hidden).map(|i| ((i + s * 100) as f32 * 0.01).sin()).collect();
         let metal_result = metal.q4k_matvec(&q4k_data, &x, rows, hidden).unwrap();
-        let diff = max_diff(&per_pos_results[s], &metal_result);
+        let diff = max_diff(cpu_result, &metal_result);
         assert!(diff < 0.5, "Position {s}: Q4_K Metal vs CPU max diff {diff}");
     }
 }
@@ -1410,7 +1412,25 @@ fn full_pipeline_seq1_produces_nonzero() {
         pre_ffn_norm: None,
         post_ffn_norm: None,
         norm_offset: 1.0,
-        has_post_norms: false, use_gelu_tanh: false,
+        has_post_norms: false,
+            activation: larql_compute::Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: larql_compute::NormType::RmsNorm,
+            ffn_type: larql_compute::FfnType::Gated,
+            attn_scale: 1.0 / (head_dim as f32).sqrt(),
+            head_dim,
+            num_q_heads,
+            num_kv_heads,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
     };
 
     let result = metal.full_pipeline_q4(
@@ -1423,4 +1443,288 @@ fn full_pipeline_seq1_produces_nonzero() {
     let output = result.unwrap();
     assert_eq!(output.len(), hidden);
     assert!(output.iter().any(|&v| v.abs() > 1e-6), "Pipeline output should be nonzero");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// New shader kernel tests (model-agnostic compute alignment)
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn new_kernel_functions_exist() {
+    let device = metal::Device::system_default().unwrap();
+    let src = larql_compute::metal::shaders::all_shaders();
+    let opts = metal::CompileOptions::new();
+    let lib = device.new_library_with_source(&src, &opts).unwrap();
+
+    let names = [
+        "silu", "gelu_tanh",                         // standalone activations
+        "layer_norm", "layer_norm_no_bias",           // LayerNorm
+        "v_norm",                                      // V-norm
+        "scale_vector",                                // per-layer scalar
+    ];
+    for name in &names {
+        lib.get_function(name, None)
+            .unwrap_or_else(|e| panic!("Kernel '{name}' not found: {e}"));
+    }
+}
+
+#[test]
+fn silu_standalone_matches_cpu() {
+    let metal = get_metal();
+    let n = 256;
+    let input: Vec<f32> = (0..n).map(|i| (i as f32 - 128.0) * 0.05).collect();
+    let expected: Vec<f32> = input.iter().map(|&x| x / (1.0 + (-x).exp())).collect();
+
+    let input_buf = metal.bufs().transient_from_f32(&input);
+    let output_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.silu_pipeline);
+    enc.set_buffer(0, Some(&input_buf), 0);
+    enc.set_buffer(1, Some(&output_buf), 0);
+    enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&output_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-5, "SiLU standalone max diff {diff} exceeds 1e-5");
+}
+
+#[test]
+fn gelu_tanh_standalone_matches_cpu() {
+    let metal = get_metal();
+    let n = 256;
+    let input: Vec<f32> = (0..n).map(|i| (i as f32 - 128.0) * 0.05).collect();
+    let expected: Vec<f32> = input.iter().map(|&x| {
+        let c = (2.0f32 / std::f32::consts::PI).sqrt();
+        let t = (c * (x + 0.044715 * x * x * x)).tanh();
+        0.5 * x * (1.0 + t)
+    }).collect();
+
+    let input_buf = metal.bufs().transient_from_f32(&input);
+    let output_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.gelu_tanh_pipeline);
+    enc.set_buffer(0, Some(&input_buf), 0);
+    enc.set_buffer(1, Some(&output_buf), 0);
+    enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&output_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-4, "GELU-tanh standalone max diff {diff} exceeds 1e-4");
+}
+
+#[test]
+fn layer_norm_matches_cpu() {
+    let metal = get_metal();
+    let n = 128;
+    let x: Vec<f32> = (0..n).map(|i| (i as f32 - 64.0) * 0.1).collect();
+    let weight: Vec<f32> = (0..n).map(|i| 1.0 + (i as f32) * 0.001).collect();
+    let bias: Vec<f32> = (0..n).map(|i| (i as f32) * 0.01).collect();
+    let eps = 1e-5f32;
+    let offset = 0.0f32;
+
+    // CPU reference
+    let mean: f32 = x.iter().sum::<f32>() / n as f32;
+    let var: f32 = x.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
+    let inv_std = 1.0 / (var + eps).sqrt();
+    let expected: Vec<f32> = (0..n).map(|i| {
+        (x[i] - mean) * inv_std * (weight[i] + offset) + bias[i]
+    }).collect();
+
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let w_buf = metal.bufs().transient_from_f32(&weight);
+    let b_buf = metal.bufs().transient_from_f32(&bias);
+    let out_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.layer_norm_pipeline);
+    enc.set_buffer(0, Some(&x_buf), 0);
+    enc.set_buffer(1, Some(&w_buf), 0);
+    enc.set_buffer(2, Some(&b_buf), 0);
+    enc.set_buffer(3, Some(&out_buf), 0);
+    enc.set_bytes(4, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+    enc.set_bytes(6, 4, &offset as *const f32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(128, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&out_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-4, "LayerNorm max diff {diff} exceeds 1e-4");
+}
+
+#[test]
+fn layer_norm_no_bias_matches_cpu() {
+    let metal = get_metal();
+    let n = 128;
+    let x: Vec<f32> = (0..n).map(|i| (i as f32 - 64.0) * 0.1).collect();
+    let weight: Vec<f32> = (0..n).map(|i| 1.0 + (i as f32) * 0.001).collect();
+    let eps = 1e-5f32;
+    let offset = 0.0f32;
+
+    let mean: f32 = x.iter().sum::<f32>() / n as f32;
+    let var: f32 = x.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
+    let inv_std = 1.0 / (var + eps).sqrt();
+    let expected: Vec<f32> = (0..n).map(|i| {
+        (x[i] - mean) * inv_std * (weight[i] + offset)
+    }).collect();
+
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let w_buf = metal.bufs().transient_from_f32(&weight);
+    let out_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.layer_norm_no_bias_pipeline);
+    enc.set_buffer(0, Some(&x_buf), 0);
+    enc.set_buffer(1, Some(&w_buf), 0);
+    enc.set_buffer(2, Some(&out_buf), 0);
+    enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(4, 4, &eps as *const f32 as *const std::ffi::c_void);
+    enc.set_bytes(5, 4, &offset as *const f32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(128, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&out_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-4, "LayerNorm (no bias) max diff {diff} exceeds 1e-4");
+}
+
+#[test]
+fn v_norm_matches_cpu() {
+    let metal = get_metal();
+    let n = 256;
+    let x: Vec<f32> = (0..n).map(|i| (i as f32 - 128.0) * 0.02).collect();
+    let eps = 1e-6f32;
+
+    // CPU reference: parameter-free RMSNorm
+    let sum_sq: f32 = x.iter().map(|v| v * v).sum();
+    let rms = 1.0 / (sum_sq / n as f32 + eps).sqrt();
+    let expected: Vec<f32> = x.iter().map(|v| v * rms).collect();
+
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let out_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.v_norm_pipeline);
+    enc.set_buffer(0, Some(&x_buf), 0);
+    enc.set_buffer(1, Some(&out_buf), 0);
+    enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(3, 4, &eps as *const f32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&out_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-5, "V-norm max diff {diff} exceeds 1e-5");
+}
+
+#[test]
+fn scale_vector_matches_cpu() {
+    let metal = get_metal();
+    let n = 512;
+    let input: Vec<f32> = (0..n).map(|i| (i as f32 - 256.0) * 0.01).collect();
+    let scalar = 0.73f32;
+    let expected: Vec<f32> = input.iter().map(|v| v * scalar).collect();
+
+    let input_buf = metal.bufs().transient_from_f32(&input);
+    let out_buf = metal.bufs().output((n * 4) as u64);
+    let n_val = n as u32;
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.scale_vector_pipeline);
+    enc.set_buffer(0, Some(&input_buf), 0);
+    enc.set_buffer(1, Some(&out_buf), 0);
+    enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(3, 4, &scalar as *const f32 as *const std::ffi::c_void);
+    enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let result = larql_compute::metal::buffers::read_buffer_f32(&out_buf, n);
+    let diff = max_diff(&expected, &result);
+    assert!(diff < 1e-6, "scale_vector max diff {diff} exceeds 1e-6");
+}
+
+#[test]
+fn rms_norm_with_different_eps() {
+    // Verify that eps parameter actually affects output (was hardcoded to 1e-6 before)
+    let metal = get_metal();
+    let n = 64;
+    let x: Vec<f32> = vec![0.001; n]; // tiny values where eps matters
+    let weight: Vec<f32> = vec![1.0; n];
+    let offset = 0.0f32;
+
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let w_buf = metal.bufs().transient_from_f32(&weight);
+    let n_val = n as u32;
+
+    // Run with eps=1e-6
+    let out1 = metal.bufs().output((n * 4) as u64);
+    let eps1 = 1e-6f32;
+    {
+        let cmd = metal.queue().new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&metal.rms_norm_pipeline);
+        enc.set_buffer(0, Some(&x_buf), 0);
+        enc.set_buffer(1, Some(&w_buf), 0);
+        enc.set_buffer(2, Some(&out1), 0);
+        enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &eps1 as *const f32 as *const std::ffi::c_void);
+        enc.set_bytes(5, 4, &offset as *const f32 as *const std::ffi::c_void);
+        enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(64, 1, 1));
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+    }
+
+    // Run with eps=0.1 (much larger)
+    let out2 = metal.bufs().output((n * 4) as u64);
+    let eps2 = 0.1f32;
+    {
+        let cmd = metal.queue().new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&metal.rms_norm_pipeline);
+        enc.set_buffer(0, Some(&x_buf), 0);
+        enc.set_buffer(1, Some(&w_buf), 0);
+        enc.set_buffer(2, Some(&out2), 0);
+        enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &eps2 as *const f32 as *const std::ffi::c_void);
+        enc.set_bytes(5, 4, &offset as *const f32 as *const std::ffi::c_void);
+        enc.dispatch_threads(metal::MTLSize::new(n as u64, 1, 1), metal::MTLSize::new(64, 1, 1));
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+    }
+
+    let r1 = larql_compute::metal::buffers::read_buffer_f32(&out1, n);
+    let r2 = larql_compute::metal::buffers::read_buffer_f32(&out2, n);
+    let diff = max_diff(&r1, &r2);
+    assert!(diff > 0.1, "Different eps values should produce different outputs (diff={diff})");
 }

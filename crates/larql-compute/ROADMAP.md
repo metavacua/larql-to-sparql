@@ -101,3 +101,7 @@ Single kernel per layer: norm → QKV → attention → O → residual → norm 
 | Example reorganization | 2026-04-07 | 23 examples: demo_, compare_, profile_, best_, test_ |
 | PERFORMANCE.md refresh | 2026-04-07 | All numbers from fresh benchmark runs |
 | ROADMAP.md | 2026-04-07 | P0/P1/P2 targets documented |
+| Per-layer architecture params (ADR-011) | 2026-04-07 | 18 fields on FullPipelineLayer: eps, attn_scale, head_dim, num_q/kv_heads, rope_base, rotary_dim, sliding_window, v_norm, layer_scalar, norm_type, ffn_type, activation, biases |
+| pipeline.rs extraction | 2026-04-07 | FullPipelineLayer + types moved from lib.rs to pipeline.rs |
+| 7 new shader kernels | 2026-04-07 | silu, gelu_tanh, layer_norm (2), v_norm, scale_vector, rope_at_pos partial |
+| Model-agnostic compute | 2026-04-07 | No hardcoded model assumptions — all behavior parameterized per-layer |

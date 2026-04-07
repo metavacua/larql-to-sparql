@@ -15,7 +15,7 @@
 extern crate blas_src;
 
 fn main() {
-    use larql_compute::{ComputeBackend, default_backend, cpu_backend};
+    use larql_compute::{default_backend, cpu_backend};
     use larql_compute::cpu::ops::q4_common::{quantize_q4_0, quantize_q4_k, quantize_to_q8};
     use ndarray::Array2;
     use std::time::Instant;
@@ -51,7 +51,7 @@ fn main() {
     let q4_ms = t.elapsed().as_secs_f64() * 1000.0;
     println!("   Q4_0 [10240, 2560] @ Q8[2560]: {q4_ms:.2}ms  (14.7MB data, {:.0} GB/s)",
         14.7 / q4_ms);
-    println!("   Output nonzero: {}\n", scores.map_or(false, |s| s.iter().any(|v| v.abs() > 0.001)));
+    println!("   Output nonzero: {}\n", scores.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001)));
 
     // ── 4. Q4_K Ollama-Compatible ──
     println!("4. Q4_K Quantization (Ollama-compatible, 148B per 256 values)");
@@ -60,7 +60,7 @@ fn main() {
     let t = Instant::now();
     let q4k_out = backend.q4k_matvec(&q4k, &x, 256, 2560);
     println!("   Q4_K [256, 2560] @ f32[2560]: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
-    println!("   Output nonzero: {}\n", q4k_out.map_or(false, |s| s.iter().any(|v| v.abs() > 0.001)));
+    println!("   Output nonzero: {}\n", q4k_out.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001)));
 
     // ── 5. Fused QKV ──
     println!("5. Fused QKV Projection (ADR-003)");
@@ -94,7 +94,25 @@ fn main() {
             up: larql_compute::QuantWeight { data: &up, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &down, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &norm, post_attn_norm: &norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            activation: larql_compute::Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: larql_compute::NormType::RmsNorm,
+            ffn_type: larql_compute::FfnType::Gated,
+            attn_scale: 1.0 / (320.0f32).sqrt(),
+            head_dim: 320,
+            num_q_heads: 8,
+            num_kv_heads: 4,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
         };
         let layers = vec![layer];
 
@@ -106,7 +124,7 @@ fn main() {
         println!("   1 layer (attn+FFN, 1 cmd): {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
         println!("   Output: {} elements, nonzero: {}\n",
             result.as_ref().map_or(0, |r| r.len()),
-            result.map_or(false, |r| r.iter().any(|v| v.abs() > 1e-6)));
+            result.is_some_and(|r| r.iter().any(|v| v.abs() > 1e-6)));
     }
 
     // ── 8. Architecture Summary ──

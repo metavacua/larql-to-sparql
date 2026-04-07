@@ -31,6 +31,7 @@ pub struct LayerWeights<'a> {
     pub down_t_q4: &'a [u8],
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_q4_matvec(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -50,7 +51,7 @@ fn encode_q4_matvec(
     enc.set_buffer(3, Some(buf_out), 0);
     enc.set_bytes(4, 4, &n_val as *const u32 as *const c_void);
     enc.set_bytes(5, 4, &k_val as *const u32 as *const c_void);
-    let num_tgs = ((num_rows as u64) + q4mv_shader::ROWS_PER_TG - 1) / q4mv_shader::ROWS_PER_TG;
+    let num_tgs = (num_rows as u64).div_ceil(q4mv_shader::ROWS_PER_TG);
     enc.dispatch_thread_groups(
         MTLSize::new(num_tgs, 1, 1),
         MTLSize::new(q4mv_shader::THREADS_PER_TG, 1, 1),
@@ -58,6 +59,7 @@ fn encode_q4_matvec(
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn encode_q8_matvec(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -72,7 +74,7 @@ fn encode_q8_matvec(
     let n_val = num_rows as u32;
     let k_val = hidden as u32;
     let rows_per_tg = 8u64;
-    let num_tgs = ((num_rows as u64) + rows_per_tg - 1) / rows_per_tg;
+    let num_tgs = (num_rows as u64).div_ceil(rows_per_tg);
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(buf_w8), 0);
     enc.set_buffer(1, Some(buf_q8), 0);
@@ -87,6 +89,7 @@ fn encode_q8_matvec(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn encode_rms_norm(
     enc: &ComputeCommandEncoderRef,
     rms_pipeline: &ComputePipelineState,
@@ -127,6 +130,7 @@ pub fn encode_residual_add(
 
 /// Dispatch a matvec based on the weight's quantization format.
 /// Q4_K/Q6_K take f32 input. Q8_0/Q4_0 take Q8 input.
+#[allow(clippy::too_many_arguments)]
 fn encode_quant_matvec(
     enc: &ComputeCommandEncoderRef,
     format: crate::QuantFormat,
@@ -146,7 +150,7 @@ fn encode_quant_matvec(
         crate::QuantFormat::Q4_K => {
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4; // Q4_K: 4 rows per TG
+            let tgs = (num_rows as u64).div_ceil(4); // Q4_K: 4 rows per TG
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), 0);  // f32 input
@@ -158,7 +162,7 @@ fn encode_quant_matvec(
         crate::QuantFormat::Q6_K => {
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4;
+            let tgs = (num_rows as u64).div_ceil(4);
             enc.set_compute_pipeline_state(q6k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), 0);
@@ -173,7 +177,7 @@ fn encode_quant_matvec(
             // In practice, Q4_KF goes through the fused QKV path, not here
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = ((num_rows as u64) + 3) / 4;
+            let tgs = (num_rows as u64).div_ceil(4);
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), 0);
@@ -192,11 +196,15 @@ fn encode_quant_matvec(
 }
 
 /// Run all layers in ONE Metal command buffer with correct norms and residuals.
+#[allow(clippy::too_many_arguments)]
 pub fn dispatch_full_pipeline(
     queue: &CommandQueue,
     bufs: &BufferCache,
     q4: &Q4Pipelines,
     geglu_pipeline: &ComputePipelineState,
+    geglu_gelu_tanh_pipeline: &ComputePipelineState,
+    silu_pipeline: &ComputePipelineState,
+    gelu_tanh_pipeline: &ComputePipelineState,
     q8_quant_pipeline: &ComputePipelineState,
     fused_attn_pipeline: Option<&ComputePipelineState>,
     q8_matvec_pipeline: &ComputePipelineState,
@@ -220,8 +228,8 @@ pub fn dispatch_full_pipeline(
     seq_len: usize,
     num_q_heads: usize,
     num_kv_heads: usize,
-    head_dim: usize,
-    rope_base: f32,
+    _head_dim: usize,
+    _rope_base: f32, // global fallback; per-layer layers[l].rope_base used in loop
     use_qk_norm: bool,
     softcap: f32,
 ) -> Vec<f32> {
@@ -229,7 +237,6 @@ pub fn dispatch_full_pipeline(
     let hidden_val = hidden as u32;
     let inter_val = inter as u32;
     let _n_blocks = (hidden / 32) as u32;
-    let eps = 1e-6f32;
 
     // Pre-cache Q8 attention weight buffers (higher precision for Q/K dot products)
     let wq_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wq.data)).collect();
@@ -301,6 +308,10 @@ pub fn dispatch_full_pipeline(
     let cmd = queue.new_command_buffer();
 
     for l in 0..num_layers {
+        let eps = layers[l].eps;
+        let layer_rope_base = layers[l].rope_base;
+        let layer_head_dim = layers[l].head_dim;
+        let layer_attn_scale = layers[l].attn_scale;
         let norm_offset = layers[l].norm_offset;
         let has_post_norms = layers[l].has_post_norms;
 
@@ -323,7 +334,7 @@ pub fn dispatch_full_pipeline(
                 let k_rows_val = kv_dim as u32;
                 let v_rows_val = kv_dim as u32;
                 let k_val = hidden as u32;
-                let num_tgs = ((total_rows as u64) + q4k_qkv::ROWS_PER_TG - 1) / q4k_qkv::ROWS_PER_TG;
+                let num_tgs = (total_rows as u64).div_ceil(q4k_qkv::ROWS_PER_TG);
                 let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(q4k_qkv_pipeline);
                 enc.set_buffer(0, Some(&wq_bufs[l]), 0);
@@ -415,33 +426,33 @@ pub fn dispatch_full_pipeline(
 
         if use_separate_rope {
             let rope_pipeline = rope_at_pos_pipeline.unwrap();
-            let hd = head_dim as u32;
-            let hdim = (head_dim / 2) as u64;
+            let hd = layer_head_dim as u32;
+            let hdim = (layer_head_dim / 2) as u64;
 
             // Apply RoPE per head using rope_apply (handles all positions in one dispatch).
-            // Q layout: [seq, num_q * head_dim]. For each head, offset by head * head_dim
-            // within each position's stride of num_q * head_dim.
+            // Q layout: [seq, num_q * layer_head_dim]. For each head, offset by head * layer_head_dim
+            // within each position's stride of num_q * layer_head_dim.
             // rope_apply expects [seq_len, dim] contiguous — but our data has stride
-            // = num_heads * head_dim, not head_dim. So we must use rope_at_pos per position per head.
+            // = num_heads * layer_head_dim, not layer_head_dim. So we must use rope_at_pos per position per head.
             // Optimization: batch all positions into one encoder, all heads sequential.
             let enc = cmd.new_compute_command_encoder();
             for pos in 0..seq_len {
                 let pos_val = pos as u32;
                 for qh in 0..num_q_heads {
-                    let offset = (pos * num_q_heads * head_dim + qh * head_dim) as u64 * 4;
+                    let offset = (pos * num_q_heads * layer_head_dim + qh * layer_head_dim) as u64 * 4;
                     enc.set_compute_pipeline_state(rope_pipeline);
                     enc.set_buffer(0, Some(&q_outs[l]), offset);
                     enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
-                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
+                    enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const c_void);
                     enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
                     enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
                 }
                 for kvh in 0..num_kv_heads {
-                    let offset = (pos * num_kv_heads * head_dim + kvh * head_dim) as u64 * 4;
+                    let offset = (pos * num_kv_heads * layer_head_dim + kvh * layer_head_dim) as u64 * 4;
                     enc.set_compute_pipeline_state(rope_pipeline);
                     enc.set_buffer(0, Some(&k_outs[l]), offset);
                     enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
-                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
+                    enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const c_void);
                     enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
                     enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
                 }
@@ -452,10 +463,10 @@ pub fn dispatch_full_pipeline(
         // ── 4. Fused attention (RoPE + GQA + softcap) ──
         if let Some(fused_pipeline) = fused_attn_pipeline {
             let seq_val = seq_len as u32;
-            let hd_val = head_dim as u32;
+            let hd_val = layer_head_dim as u32;
             let nq_val = num_q_heads as u32;
             let nkv_val = num_kv_heads as u32;
-            let scale_val = 1.0f32 / (head_dim as f32).sqrt();
+            let scale_val = layer_attn_scale;
             let qknorm_val = if use_qk_norm { 1u32 } else { 0u32 };
 
             let enc = cmd.new_compute_command_encoder();
@@ -469,7 +480,7 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(6, 4, &nq_val as *const u32 as *const c_void);
             enc.set_bytes(7, 4, &nkv_val as *const u32 as *const c_void);
             enc.set_bytes(8, 4, &scale_val as *const f32 as *const c_void);
-            enc.set_bytes(9, 4, &rope_base as *const f32 as *const c_void);
+            enc.set_bytes(9, 4, &layer_rope_base as *const f32 as *const c_void);
             enc.set_bytes(10, 4, &qknorm_val as *const u32 as *const c_void);
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
             // skip_rope=1 when we applied RoPE separately, 0 otherwise
@@ -505,7 +516,7 @@ pub fn dispatch_full_pipeline(
             // O projection uses simdgroup Q8 (q8_proj_rope kernel)
             let o_rows = hidden as u32;
             let o_k = q_dim as u32;
-            let o_tgs = ((hidden as u64) + 7) / 8;
+            let o_tgs = (hidden as u64).div_ceil(8);
             enc.set_compute_pipeline_state(q8_matvec_pipeline); // fallback to existing Q8 for now
             enc.set_buffer(0, Some(&wo_bufs[l]), 0);
             enc.set_buffer(1, Some(&q8_bufs[l]), 0);  // reuse attn Q8
@@ -567,22 +578,49 @@ pub fn dispatch_full_pipeline(
             enc.end_encoding();
         }
 
-        // ── 9. Q4 FFN: gate+up in one encoder, GEGLU, down ──
-        {
-            let enc = cmd.new_compute_command_encoder();
-            encode_q4_matvec(enc, &q4.matvec, &gate_bufs[l], &ffn_q8_bufs[l], &ffn_q8s_bufs[l], &gate_outs[l], inter, hidden);
-            encode_q4_matvec(enc, &q4.matvec, &up_bufs[l], &ffn_q8_bufs[l], &ffn_q8s_bufs[l], &up_outs[l], inter, hidden);
-            enc.end_encoding();
-        }
-        {
-            let enc = cmd.new_compute_command_encoder();
-            enc.set_compute_pipeline_state(geglu_pipeline);
-            enc.set_buffer(0, Some(&gate_outs[l]), 0);
-            enc.set_buffer(1, Some(&up_outs[l]), 0);
-            enc.set_buffer(2, Some(&act_bufs_vec[l]), 0);
-            enc.set_bytes(3, 4, &inter_val as *const u32 as *const c_void);
-            enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
-            enc.end_encoding();
+        // ── 9. Q4 FFN: gated (gate+up → GEGLU → down) or standard (up → activation → down) ──
+        if layers[l].ffn_type == crate::FfnType::Standard {
+            // Standard FFN: up → activation → down (no gate)
+            {
+                let enc = cmd.new_compute_command_encoder();
+                encode_q4_matvec(enc, &q4.matvec, &up_bufs[l], &ffn_q8_bufs[l], &ffn_q8s_bufs[l], &up_outs[l], inter, hidden);
+                enc.end_encoding();
+            }
+            {
+                let activation_pipe = match layers[l].activation {
+                    crate::Activation::GeluTanh => gelu_tanh_pipeline,
+                    _ => silu_pipeline,
+                };
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(activation_pipe);
+                enc.set_buffer(0, Some(&up_outs[l]), 0);
+                enc.set_buffer(1, Some(&act_bufs_vec[l]), 0);
+                enc.set_bytes(2, 4, &inter_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                enc.end_encoding();
+            }
+        } else {
+            // Gated FFN: gate+up → GEGLU → down
+            {
+                let enc = cmd.new_compute_command_encoder();
+                encode_q4_matvec(enc, &q4.matvec, &gate_bufs[l], &ffn_q8_bufs[l], &ffn_q8s_bufs[l], &gate_outs[l], inter, hidden);
+                encode_q4_matvec(enc, &q4.matvec, &up_bufs[l], &ffn_q8_bufs[l], &ffn_q8s_bufs[l], &up_outs[l], inter, hidden);
+                enc.end_encoding();
+            }
+            {
+                let geglu_pipe = match layers[l].activation {
+                    crate::Activation::GeluTanh => geglu_gelu_tanh_pipeline,
+                    _ => geglu_pipeline,
+                };
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(geglu_pipe);
+                enc.set_buffer(0, Some(&gate_outs[l]), 0);
+                enc.set_buffer(1, Some(&up_outs[l]), 0);
+                enc.set_buffer(2, Some(&act_bufs_vec[l]), 0);
+                enc.set_bytes(3, 4, &inter_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                enc.end_encoding();
+            }
         }
         {
             let enc = cmd.new_compute_command_encoder();
@@ -625,11 +663,12 @@ pub fn dispatch_full_pipeline(
     // Populate KV cache from GPU-computed RoPE'd K and V (post-commit, buffers readable)
     if let Some(ref mut kv) = kv_cache {
         for l in 0..num_layers {
+            let lhd = layers[l].head_dim;
             while kv.layers.len() <= l {
                 kv.layers.push(super::kv_cache::LayerKVCache::new(
-                    bufs, 4096, num_kv_heads, head_dim));
+                    bufs, 4096, num_kv_heads, lhd));
             }
-            let total_kv = seq_len * num_kv_heads * head_dim;
+            let total_kv = seq_len * num_kv_heads * lhd;
             let k_src = k_outs[l].contents() as *const f32;
             let v_src = v_outs[l].contents() as *const f32;
             let k_dst = kv.layers[l].k_cache.contents() as *mut f32;

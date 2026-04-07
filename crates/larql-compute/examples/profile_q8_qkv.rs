@@ -29,7 +29,7 @@ fn main() {
         let wqs: Vec<f32> = vec![0.01; q_dim * blocks];
         let wks: Vec<f32> = vec![0.01; kv_dim * blocks];
         let wvs: Vec<f32> = vec![0.01; kv_dim * blocks];
-        let x8: Vec<i8> = (0..hidden).map(|i| ((i % 100) as i8 - 50)).collect();
+        let x8: Vec<i8> = (0..hidden).map(|i| (i % 100) as i8 - 50).collect();
         let xs: Vec<f32> = vec![0.02; blocks];
         
         let buf_wq = bufs.get_bytes(&wq);
@@ -71,7 +71,7 @@ fn main() {
             enc.set_bytes(13, 4, &v_rows as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(14, 4, &k_val as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(
-                MTLSize::new(((total_rows as u64) + 7) / 8, 1, 1),
+                MTLSize::new((total_rows as u64).div_ceil(8), 1, 1),
                 MTLSize::new(256, 1, 1),
             );
             enc.end_encoding();
@@ -101,7 +101,7 @@ fn main() {
             enc.set_bytes(13, 4, &v_rows as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(14, 4, &k_val as *const u32 as *const std::ffi::c_void);
             enc.dispatch_thread_groups(
-                MTLSize::new(((total_rows as u64) + 7) / 8, 1, 1),
+                MTLSize::new((total_rows as u64).div_ceil(8), 1, 1),
                 MTLSize::new(256, 1, 1),
             );
             enc.end_encoding();
@@ -137,7 +137,7 @@ fn main() {
                 enc.set_bytes(5, 4, &r as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(6, 4, &k_val as *const u32 as *const std::ffi::c_void);
                 enc.dispatch_thread_groups(
-                    MTLSize::new(((*rows as u64) + 7) / 8, 1, 1),
+                    MTLSize::new((*rows as u64).div_ceil(8), 1, 1),
                     MTLSize::new(256, 1, 1),
                 );
                 enc.end_encoding();

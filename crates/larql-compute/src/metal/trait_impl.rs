@@ -50,14 +50,18 @@ impl ComputeBackend for MetalBackend {
         num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
         rope_base: f32, use_qk_norm: bool, softcap: f32,
     ) -> Option<Vec<f32>> {
-        let geglu = if layers.first().map_or(false, |l| l.use_gelu_tanh) {
+        let geglu = if layers.first().is_some_and(|l| l.activation == crate::Activation::GeluTanh) {
             &self.geglu_gelu_tanh_pipeline
         } else {
             &self.geglu_pipeline
         };
         Some(ops::full_pipeline::dispatch_full_pipeline(
             &self.queue, &self.bufs, &self.q4,
-            geglu, &self.q8_quant_pipeline,
+            geglu,
+            &self.geglu_gelu_tanh_pipeline,
+            &self.silu_pipeline,
+            &self.gelu_tanh_pipeline,
+            &self.q8_quant_pipeline,
             Some(&self.fused_attn_pipeline),
             &self.q8_matvec_pipeline,
             &self.q8_qkv_proj_pipeline,
@@ -91,7 +95,7 @@ impl ComputeBackend for MetalBackend {
         let buf_out = self.bufs.output((num_rows * 4) as u64);
         let n = num_rows as u32;
         let k = hidden as u32;
-        let num_tgs = ((num_rows as u64) + q4k::ROWS_PER_TG - 1) / q4k::ROWS_PER_TG;
+        let num_tgs = (num_rows as u64).div_ceil(q4k::ROWS_PER_TG);
 
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
@@ -121,7 +125,7 @@ impl ComputeBackend for MetalBackend {
         let buf_out = self.bufs.output((num_rows * 4) as u64);
         let n = num_rows as u32;
         let k = hidden as u32;
-        let num_tgs = ((num_rows as u64) + q6k::ROWS_PER_TG - 1) / q6k::ROWS_PER_TG;
+        let num_tgs = (num_rows as u64).div_ceil(q6k::ROWS_PER_TG);
 
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
@@ -162,14 +166,18 @@ impl ComputeBackend for MetalBackend {
         while kv.layers.len() < num_layers {
             kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, num_kv_heads, head_dim));
         }
-        let geglu = if layers.first().map_or(false, |l| l.use_gelu_tanh) {
+        let geglu = if layers.first().is_some_and(|l| l.activation == crate::Activation::GeluTanh) {
             &self.geglu_gelu_tanh_pipeline
         } else {
             &self.geglu_pipeline
         };
         Some(ops::full_pipeline::dispatch_full_pipeline(
             &self.queue, &self.bufs, &self.q4,
-            geglu, &self.q8_quant_pipeline,
+            geglu,
+            &self.geglu_gelu_tanh_pipeline,
+            &self.silu_pipeline,
+            &self.gelu_tanh_pipeline,
+            &self.q8_quant_pipeline,
             Some(&self.fused_attn_pipeline),
             &self.q8_matvec_pipeline,
             &self.q8_qkv_proj_pipeline,

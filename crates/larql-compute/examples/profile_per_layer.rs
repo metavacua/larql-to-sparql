@@ -9,7 +9,6 @@ fn main() {
     #[cfg(feature = "metal")]
     {
         use std::time::Instant;
-        use larql_compute::ComputeBackend;
         use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_0};
 
         let metal = larql_compute::default_backend();
@@ -20,7 +19,7 @@ fn main() {
         let num_q = 8usize; let num_kv = 4usize; let hd = 320usize;
         let q_dim = num_q * hd; let kv_dim = num_kv * hd;
 
-        fn pad(d: &[f32]) -> Vec<f32> { let p = (d.len()+255)/256*256; let mut o = d.to_vec(); o.resize(p, 0.0); o }
+        fn pad(d: &[f32]) -> Vec<f32> { let p = d.len().div_ceil(256)*256; let mut o = d.to_vec(); o.resize(p, 0.0); o }
 
         println!("=== Per-Layer Kernel Micro-Benchmark ===\n");
 
@@ -49,7 +48,25 @@ fn main() {
                     down: larql_compute::QuantWeight { data: d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                     input_norm: norm, post_attn_norm: norm,
                     pre_ffn_norm: None, post_ffn_norm: None,
-                    norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+                    norm_offset: 1.0, has_post_norms: false,
+                    activation: larql_compute::Activation::Silu,
+                    qk_norm_offset: 0.0,
+                    eps: 1e-6,
+                    norm_type: larql_compute::NormType::RmsNorm,
+                    ffn_type: larql_compute::FfnType::Gated,
+                    attn_scale: 1.0 / (hd as f32).sqrt(),
+                    head_dim: hd,
+                    num_q_heads: num_q,
+                    num_kv_heads: num_kv,
+                    rope_base: 10000.0,
+                    rotary_dim: 0,
+                    sliding_window: 0,
+                    has_v_norm: false,
+                    layer_scalar: 0.0,
+                    input_norm_bias: None,
+                    post_attn_norm_bias: None,
+                    ffn_up_bias: None,
+                    ffn_down_bias: None,
                 }
             }).collect();
 

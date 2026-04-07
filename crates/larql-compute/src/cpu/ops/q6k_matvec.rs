@@ -33,7 +33,7 @@ pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
     let bytes_per_row = superblocks * Q6K_BLOCK_SIZE;
     let mut out = vec![0.0f32; num_rows];
 
-    for row in 0..num_rows {
+    for (row, out_val) in out.iter_mut().enumerate().take(num_rows) {
         let row_start = row * bytes_per_row;
         let mut acc = 0.0f32;
 
@@ -52,8 +52,8 @@ pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
 
             let x_base = sb * 256;
 
-            for j in 0..16usize {
-                let sc = d * (scales[j] as i8) as f32;
+            for (j, &scale) in scales.iter().enumerate() {
+                let sc = d * (scale as i8) as f32;
                 let sub_base = j * 16;
 
                 for i in 0..8usize {
@@ -81,7 +81,7 @@ pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
                 }
             }
         }
-        out[row] = acc;
+        *out_val = acc;
     }
     out
 }

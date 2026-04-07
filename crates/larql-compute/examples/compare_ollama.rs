@@ -28,7 +28,7 @@ fn main() {
         let q_dim = num_q * hd; let kv_dim = num_kv * hd;
         let n = 20;
 
-        fn pad(d: &[f32]) -> Vec<f32> { let p=(d.len()+255)/256*256; let mut o=d.to_vec(); o.resize(p,0.0); o }
+        fn pad(d: &[f32]) -> Vec<f32> { let p=d.len().div_ceil(256)*256; let mut o=d.to_vec(); o.resize(p,0.0); o }
 
         println!("╔═══════════════════════════════════════════════════╗");
         println!("║         LARQL vs Ollama — Head to Head            ║");
@@ -79,7 +79,25 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            activation: larql_compute::Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: larql_compute::NormType::RmsNorm,
+            ffn_type: larql_compute::FfnType::Gated,
+            attn_scale: 1.0 / (hd as f32).sqrt(),
+            head_dim: hd,
+            num_q_heads: num_q,
+            num_kv_heads: num_kv,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
         }).collect();
 
         metal.reset_kv_cache();
@@ -98,7 +116,25 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            activation: larql_compute::Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: larql_compute::NormType::RmsNorm,
+            ffn_type: larql_compute::FfnType::Gated,
+            attn_scale: 1.0 / (hd as f32).sqrt(),
+            head_dim: hd,
+            num_q_heads: num_q,
+            num_kv_heads: num_kv,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
         }).collect();
 
         metal.reset_kv_cache();
@@ -118,7 +154,25 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            activation: larql_compute::Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: larql_compute::NormType::RmsNorm,
+            ffn_type: larql_compute::FfnType::Gated,
+            attn_scale: 1.0 / (hd as f32).sqrt(),
+            head_dim: hd,
+            num_q_heads: num_q,
+            num_kv_heads: num_kv,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
         }).collect();
 
         metal.reset_kv_cache();
@@ -134,7 +188,7 @@ fn main() {
         let buf_x = metal_raw.bufs().transient_from_f32(&x);
         use larql_compute::metal::shaders::q4k_qkv_proj as sh;
         let total = (q_dim + kv_dim + kv_dim) as u32;
-        let num_tgs = ((total as u64) + sh::ROWS_PER_TG - 1) / sh::ROWS_PER_TG;
+        let num_tgs = (total as u64).div_ceil(sh::ROWS_PER_TG);
         // warmup
         for _ in 0..5 {
             let cmd = metal_raw.queue().new_command_buffer();

@@ -30,6 +30,18 @@ kernel void residual_add(
     out[tid] = a[tid] + b[tid];
 }
 
+// Scale vector: out = input * scalar (per-layer scalar multiplier, Gemma 4).
+kernel void scale_vector(
+    device const float* input  [[buffer(0)]],
+    device float*       out    [[buffer(1)]],
+    constant uint&      len    [[buffer(2)]],
+    constant float&     scalar [[buffer(3)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= len) return;
+    out[tid] = input[tid] * scalar;
+}
+
 // RMS norm: out = x * (weight + offset) / sqrt(mean(x²) + eps)
 // offset=0 for standard models (Llama, Gemma 4), offset=1 for Gemma 2/3 (norm_weight_offset)
 kernel void rms_norm(

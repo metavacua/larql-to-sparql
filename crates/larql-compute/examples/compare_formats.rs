@@ -12,7 +12,7 @@ fn main() {
     {
         use std::time::Instant;
         use larql_compute::ComputeBackend;
-        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_k_gguf, quantize_q4_0, quantize_to_q8, q4k_to_q4kf};
+        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_k_gguf, quantize_q4_0, q4k_to_q4kf};
 
         let metal_raw = larql_compute::metal::MetalBackend::new().expect("Metal required");
         let metal: &dyn ComputeBackend = &metal_raw;
@@ -31,7 +31,7 @@ fn main() {
         println!("{num_layers} layers, hidden={hidden}\n");
 
         fn pad256(data: &[f32]) -> Vec<f32> {
-            let padded_len = (data.len() + 255) / 256 * 256;
+            let padded_len = data.len().div_ceil(256) * 256;
             let mut out = data.to_vec();
             out.resize(padded_len, 0.0);
             out
@@ -100,7 +100,25 @@ fn main() {
                 down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                 input_norm: &ld.norm, post_attn_norm: &ld.norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+                norm_offset: 1.0, has_post_norms: false,
+                activation: larql_compute::Activation::Silu,
+                qk_norm_offset: 0.0,
+                eps: 1e-6,
+                norm_type: larql_compute::NormType::RmsNorm,
+                ffn_type: larql_compute::FfnType::Gated,
+                attn_scale: 1.0 / (head_dim as f32).sqrt(),
+                head_dim,
+                num_q_heads,
+                num_kv_heads,
+                rope_base: 10000.0,
+                rotary_dim: 0,
+                sliding_window: 0,
+                has_v_norm: false,
+                layer_scalar: 0.0,
+                input_norm_bias: None,
+                post_attn_norm_bias: None,
+                ffn_up_bias: None,
+                ffn_down_bias: None,
             }
         }).collect();
 
@@ -122,7 +140,25 @@ fn main() {
                 down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                 input_norm: &ld.norm, post_attn_norm: &ld.norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+                norm_offset: 1.0, has_post_norms: false,
+                activation: larql_compute::Activation::Silu,
+                qk_norm_offset: 0.0,
+                eps: 1e-6,
+                norm_type: larql_compute::NormType::RmsNorm,
+                ffn_type: larql_compute::FfnType::Gated,
+                attn_scale: 1.0 / (head_dim as f32).sqrt(),
+                head_dim,
+                num_q_heads,
+                num_kv_heads,
+                rope_base: 10000.0,
+                rotary_dim: 0,
+                sliding_window: 0,
+                has_v_norm: false,
+                layer_scalar: 0.0,
+                input_norm_bias: None,
+                post_attn_norm_bias: None,
+                ffn_up_bias: None,
+                ffn_down_bias: None,
             }
         }).collect();
 
@@ -144,7 +180,25 @@ fn main() {
                 down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                 input_norm: &ld.norm, post_attn_norm: &ld.norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
+                norm_offset: 1.0, has_post_norms: false,
+                activation: larql_compute::Activation::Silu,
+                qk_norm_offset: 0.0,
+                eps: 1e-6,
+                norm_type: larql_compute::NormType::RmsNorm,
+                ffn_type: larql_compute::FfnType::Gated,
+                attn_scale: 1.0 / (head_dim as f32).sqrt(),
+                head_dim,
+                num_q_heads,
+                num_kv_heads,
+                rope_base: 10000.0,
+                rotary_dim: 0,
+                sliding_window: 0,
+                has_v_norm: false,
+                layer_scalar: 0.0,
+                input_norm_bias: None,
+                post_attn_norm_bias: None,
+                ffn_up_bias: None,
+                ffn_down_bias: None,
             }
         }).collect();
 

@@ -1,5 +1,5 @@
 fn main() {
-    use larql_compute::{ComputeBackend, cpu_backend, default_backend};
+    use larql_compute::{cpu_backend, default_backend};
     use larql_compute::cpu::q4::{quantize_q4_0, quantize_to_q8};
 
     let hidden = 256;

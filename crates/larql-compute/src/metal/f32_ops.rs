@@ -17,6 +17,7 @@ pub struct F32Ops {
 
 impl F32Ops {
     /// C = A × B  (A: [m,k], B: [k,n], C: [m,n])
+    #[allow(clippy::too_many_arguments)]
     pub fn dispatch_notrans(
         &self,
         queue: &CommandQueue,
@@ -40,6 +41,7 @@ impl F32Ops {
     }
 
     /// C = A × B^T  (A: [m,k], B: [n,k], C: [m,n])
+    #[allow(clippy::too_many_arguments)]
     pub fn dispatch_transb(
         &self,
         queue: &CommandQueue,
@@ -64,6 +66,7 @@ impl F32Ops {
 
     /// Encode one matmul dispatch into a command encoder.
     /// Public for use by pipeline builders (full-layer Metal pipeline).
+    #[allow(clippy::too_many_arguments)]
     pub fn encode_static(
         pipeline: &ComputePipelineState,
         encoder: &ComputeCommandEncoderRef,
@@ -82,7 +85,7 @@ impl F32Ops {
         encoder.set_bytes(5, 4, &k_val as *const u32 as *const c_void);
 
         let tg = MTLSize::new(32, 32, 1);
-        let grid = MTLSize::new(((n + 31) / 32) as u64, ((m + 31) / 32) as u64, 1);
+        let grid = MTLSize::new(n.div_ceil(32) as u64, m.div_ceil(32) as u64, 1);
         encoder.dispatch_thread_groups(grid, tg);
     }
 

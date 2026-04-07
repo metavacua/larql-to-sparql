@@ -580,4 +580,9 @@ pub trait ModelArchitecture: Send + Sync {
             .as_ref()
             .map_or(1.0, |s| s.factor)
     }
+
+    /// Norm epsilon for RMSNorm / LayerNorm. Default: 1e-6.
+    fn norm_eps(&self) -> f32 {
+        1e-6
+    }
 }

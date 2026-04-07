@@ -62,6 +62,7 @@ impl KVCache {
 
 /// Append new K/V to cache and run attention in one command buffer.
 /// Returns attention output [num_q_heads, head_dim].
+#[allow(clippy::too_many_arguments)]
 pub fn append_and_attend(
     cmd: &CommandBufferRef,
     cache: &mut LayerKVCache,
@@ -112,6 +113,8 @@ pub fn append_and_attend(
         enc.set_bytes(6, 4, &num_q_val as *const u32 as *const c_void);
         enc.set_bytes(7, 4, &num_kv as *const u32 as *const c_void);
         enc.set_bytes(8, 4, &scale as *const f32 as *const c_void);
+        let window_size: u32 = 0; // 0 = full attention (no sliding window)
+        enc.set_bytes(9, 4, &window_size as *const u32 as *const c_void);
         // One threadgroup per head
         enc.dispatch_thread_groups(
             MTLSize::new(num_q_heads as u64, 1, 1),

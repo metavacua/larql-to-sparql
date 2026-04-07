@@ -5,6 +5,9 @@
 //!   weights = softmax(scores)           → [T]
 //!   output = weights × V                → [head_dim]
 //!
+//! Supports sliding window attention: when window_size > 0, only the most recent
+//! window_size tokens are attended to. window_size = 0 means full attention.
+//!
 //! One threadgroup per head. Threads cooperatively compute the dot products,
 //! softmax, and weighted sum.
 
@@ -23,6 +26,7 @@ kernel void kv_attention(
     constant uint&      num_q   [[buffer(6)]],   // num query heads
     constant uint&      num_kv  [[buffer(7)]],   // num KV heads (for GQA)
     constant float&     scale   [[buffer(8)]],
+    constant uint&      window_size [[buffer(9)]],  // 0 = full attention (no window)
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]])
@@ -33,21 +37,25 @@ kernel void kv_attention(
 
     device const float* q = Q + head * head_dim;
 
-    // Phase 1: compute scores = Q · K[t]^T for all t in [0, T)
+    // Sliding window: only attend to the most recent window_size tokens
+    uint t_start = (window_size > 0 && T > window_size) ? T - window_size : 0;
+    uint t_len = T - t_start;
+
+    // Phase 1: compute scores = Q · K[t]^T for t in [t_start, T)
     // Each thread handles a stripe of t values
-    threadgroup float tg_scores[4096];  // max T = 4096
+    threadgroup float tg_scores[4096];  // max window = 4096
     threadgroup float tg_max;
     threadgroup float tg_sum;
 
     float local_max = -1e30f;
-    for (uint t = tid; t < T; t += tg_sz) {
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
         device const float* k = K_cache + t * num_kv * head_dim + kv_head * head_dim;
         float dot = 0.0f;
         for (uint d = 0; d < head_dim; d += 4) {
             dot += q[d] * k[d] + q[d+1] * k[d+1] + q[d+2] * k[d+2] + q[d+3] * k[d+3];
         }
         dot *= scale;
-        tg_scores[t] = dot;
+        tg_scores[t - t_start] = dot;
         if (dot > local_max) local_max = dot;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -58,7 +66,7 @@ kernel void kv_attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid == 0) {
         float m = -1e30f;
-        for (uint i = 0; i < min(tg_sz, T); i++) {
+        for (uint i = 0; i < min(tg_sz, t_len); i++) {
             if (tg_maxes[i] > m) m = tg_maxes[i];
         }
         tg_max = m;
@@ -67,9 +75,9 @@ kernel void kv_attention(
 
     // Phase 2: softmax exp + sum
     float local_sum = 0.0f;
-    for (uint t = tid; t < T; t += tg_sz) {
-        float w = exp(tg_scores[t] - tg_max);
-        tg_scores[t] = w;  // reuse as weights
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
+        float w = exp(tg_scores[t - t_start] - tg_max);
+        tg_scores[t - t_start] = w;  // reuse as weights
         local_sum += w;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -79,7 +87,7 @@ kernel void kv_attention(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (tid == 0) {
         float s = 0.0f;
-        for (uint i = 0; i < min(tg_sz, T); i++) s += tg_sums[i];
+        for (uint i = 0; i < min(tg_sz, t_len); i++) s += tg_sums[i];
         tg_sum = s;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -91,9 +99,9 @@ kernel void kv_attention(
     device float* out_head = out + head * head_dim;
     for (uint d = tid; d < head_dim; d += tg_sz) {
         float acc = 0.0f;
-        for (uint t = 0; t < T; t++) {
+        for (uint t = t_start; t < T; t++) {
             device const float* v = V_cache + t * num_kv * head_dim + kv_head * head_dim;
-            acc += tg_scores[t] * inv_sum * v[d];
+            acc += tg_scores[t - t_start] * inv_sum * v[d];
         }
         out_head[d] = acc;
     }
