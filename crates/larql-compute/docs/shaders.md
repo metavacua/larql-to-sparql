@@ -1,6 +1,6 @@
 # Metal Shader Reference — larql-compute
 
-28 Metal Shading Language kernels. One file per kernel in `src/metal/shaders/`.
+44 Metal Shading Language kernels across 32 shader files in `src/metal/shaders/`.
 All compiled into a single Metal library via `all_shaders()`.
 
 ## f32 Matrix Multiply
@@ -114,7 +114,7 @@ Basic causal attention (seq≤64). Used by full_layer benchmark. Simpler than fu
 ### kv_attention.rs — `kv_attention`
 KV-cached decode attention. One query attends against full cached K/V (all previous positions). One threadgroup per query head.
 
-### rope.rs — `rope_apply`
+### rope.rs — `rope_at_pos`, `rope_apply`
 Standalone RoPE (split-half pairing) with partial rotation support. Applies position-dependent rotation to [seq_len, dim] in-place. `rotary_dim` (buffer 3) controls how many dimensions are rotated — 0 means full `dim`. Dimensions beyond `rotary_dim` pass through unchanged. See [ADR-010](adr/010-partial-rope-rotary-dim.md).
 
 ## Element-wise Operations

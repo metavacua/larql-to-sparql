@@ -95,10 +95,10 @@ Single kernel per layer: norm → QKV → attention → O → residual → norm 
 | ADR documentation | 2026-04-07 | 8 decisions recorded |
 | Partial RoPE (rotary_dim) | 2026-04-07 | rope_apply + fused_attention, ADR-010 |
 | Gemma 4 architecture support | 2026-04-07 | Per-layer head_dim, KV heads, K=V, layer_scalar |
-| Shader documentation | 2026-04-07 | docs/shaders.md — all 28 kernels |
+| Shader documentation | 2026-04-07 | docs/shaders.md — all 44 kernels |
 | Quantization format docs | 2026-04-07 | docs/quantization-formats.md |
 | Decode pipeline docs | 2026-04-07 | docs/decode-pipeline.md |
-| Example reorganization | 2026-04-07 | 23 examples: demo_, compare_, profile_, best_, test_ |
+| Example reorganization | 2026-04-07 | 25 examples: demo_, compare_, profile_, best_, test_ |
 | PERFORMANCE.md refresh | 2026-04-07 | All numbers from fresh benchmark runs |
 | ROADMAP.md | 2026-04-07 | P0/P1/P2 targets documented |
 | Per-layer architecture params (ADR-011) | 2026-04-07 | 18 fields on FullPipelineLayer: eps, attn_scale, head_dim, num_q/kv_heads, rope_base, rotary_dim, sliding_window, v_norm, layer_scalar, norm_type, ffn_type, activation, biases |

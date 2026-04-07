@@ -87,7 +87,7 @@ Add a `validate()` method to `ModelArchitecture` that checks for inconsistencies
 
 | Item | Date | Impact |
 |------|------|--------|
-| ModelArchitecture trait | 2026-03 | Foundation — 80+ methods with defaults |
+| ModelArchitecture trait | 2026-03 | Foundation — 82 methods with defaults |
 | Gemma 2/3 support | 2026-03 | QK-norm, softcapping, sliding window |
 | Llama/Mistral/Qwen/DeepSeek | 2026-03 | Core architecture coverage |
 | Mixtral MoE (PerExpert) | 2026-03 | Expert key patterns |

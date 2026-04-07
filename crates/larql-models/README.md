@@ -42,7 +42,7 @@ Detection handles both top-level and nested `text_config` (multimodal models lik
 
 ## ModelArchitecture Trait
 
-The trait has ~80 methods organized into categories:
+The trait has 82 methods organized into categories:
 
 | Category | Methods | Purpose |
 |----------|---------|---------|

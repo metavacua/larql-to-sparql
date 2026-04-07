@@ -118,9 +118,9 @@ let name = ggml::type_name(ggml::TYPE_Q8_0);                // "Q8_0"
 | `TYPE_F16` | 1 | F16 |
 | `TYPE_Q4_0` | 2 | Q4_0 |
 | `TYPE_Q4_1` | 3 | Q4_1 |
-| `TYPE_Q5_0` | 6 | Q5_0 |
-| `TYPE_Q5_1` | 7 | Q5_1 |
-| `TYPE_Q8_0` | 8 | Q8_0 |
+| `TYPE_Q8_0` | 6 | Q8_0 |
+| `TYPE_Q5_0` | 8 | Q5_0 |
+| `TYPE_Q5_1` | 9 | Q5_1 |
 | `TYPE_Q4_K` | 12 | Q4_K |
 | `TYPE_Q6_K` | 14 | Q6_K |
 | `TYPE_BF16` | 30 | BF16 |

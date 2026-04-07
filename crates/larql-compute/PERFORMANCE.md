@@ -135,7 +135,7 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 | Merged norm+QKV encoder | Marginal | Metal encoder overhead is ~0ms |
 | llama.cpp exact kernel port | Same speed | Same inner loop = same speed |
 
-## Shader Inventory (46 kernels, all compiled and tested)
+## Shader Inventory (44 kernels, all compiled and tested)
 
 | Shader | Type | Status | Notes |
 |--------|------|--------|-------|
@@ -180,7 +180,7 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 
 ```
 CPU unit tests:      30
-Metal shader tests:  45 (compilation + correctness + cross-backend + partial RoPE + new kernels)
+Metal shader tests:  46 (compilation + correctness + cross-backend + partial RoPE + new kernels)
 Correctness tests:    6 (CPU vs ndarray)
 Doc tests:            2
 Bench tests:          2
@@ -259,7 +259,7 @@ larql-compute/
     q4_dot.c          ARM NEON Q4 dot product kernel
   tests/
     test_correctness.rs    CPU functional tests (6)
-    test_metal_shaders.rs  Metal shader tests (36)
+    test_metal_shaders.rs  Metal shader tests (46)
   examples/
     23 organized: 3 demo_, 4 compare_, 10 profile_, 2 best_, 2 test_, 1 arch, 1 tool
   benches/
