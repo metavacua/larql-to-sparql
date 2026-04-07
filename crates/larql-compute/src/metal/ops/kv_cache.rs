@@ -60,66 +60,98 @@ impl KVCache {
     }
 }
 
-/// Append new K/V to cache and run attention in one command buffer.
-/// Returns attention output [num_q_heads, head_dim].
+/// Encode KV append dispatch into an existing encoder.
+/// The encoder is NOT ended — caller continues adding dispatches.
 #[allow(clippy::too_many_arguments)]
-pub fn append_and_attend(
-    cmd: &CommandBufferRef,
-    cache: &mut LayerKVCache,
+pub fn encode_kv_append(
+    enc: &ComputeCommandEncoderRef,
+    cache: &LayerKVCache,
     append_pipeline: &ComputePipelineState,
-    attend_pipeline: &ComputePipelineState,
-    new_k: &Buffer,      // [num_kv_heads, head_dim]
-    new_v: &Buffer,      // [num_kv_heads, head_dim]
-    q: &Buffer,          // [num_q_heads, head_dim]
-    out: &Buffer,        // [num_q_heads, head_dim]
-    num_q_heads: usize,
-    scale: f32,
+    new_k: &Buffer,
+    new_v: &Buffer,
 ) {
     let pos = cache.current_len as u32;
     let num_kv = cache.num_kv_heads as u32;
     let hd = cache.head_dim as u32;
     let total = cache.num_kv_heads * cache.head_dim;
 
-    // Append new K/V to cache
+    enc.set_compute_pipeline_state(append_pipeline);
+    enc.set_buffer(0, Some(new_k), 0);
+    enc.set_buffer(1, Some(new_v), 0);
+    enc.set_buffer(2, Some(&cache.k_cache), 0);
+    enc.set_buffer(3, Some(&cache.v_cache), 0);
+    enc.set_bytes(4, 4, &pos as *const u32 as *const c_void);
+    enc.set_bytes(5, 4, &num_kv as *const u32 as *const c_void);
+    enc.set_bytes(6, 4, &hd as *const u32 as *const c_void);
+    enc.dispatch_threads(
+        MTLSize::new(total as u64, 1, 1),
+        MTLSize::new(256.min(total as u64), 1, 1),
+    );
+}
+
+/// Encode KV attend dispatch into an existing encoder.
+/// The encoder is NOT ended — caller continues adding dispatches.
+#[allow(clippy::too_many_arguments)]
+pub fn encode_kv_attend(
+    enc: &ComputeCommandEncoderRef,
+    cache: &LayerKVCache,
+    attend_pipeline: &ComputePipelineState,
+    q: &Buffer,
+    out: &Buffer,
+    num_q_heads: usize,
+    scale: f32,
+    window_size: u32,
+) {
+    let t_val = (cache.current_len + 1) as u32;
+    let hd = cache.head_dim as u32;
+    let num_q_val = num_q_heads as u32;
+    let num_kv = cache.num_kv_heads as u32;
+
+    enc.set_compute_pipeline_state(attend_pipeline);
+    enc.set_buffer(0, Some(q), 0);
+    enc.set_buffer(1, Some(&cache.k_cache), 0);
+    enc.set_buffer(2, Some(&cache.v_cache), 0);
+    enc.set_buffer(3, Some(out), 0);
+    enc.set_bytes(4, 4, &t_val as *const u32 as *const c_void);
+    enc.set_bytes(5, 4, &hd as *const u32 as *const c_void);
+    enc.set_bytes(6, 4, &num_q_val as *const u32 as *const c_void);
+    enc.set_bytes(7, 4, &num_kv as *const u32 as *const c_void);
+    enc.set_bytes(8, 4, &scale as *const f32 as *const c_void);
+    enc.set_bytes(9, 4, &window_size as *const u32 as *const c_void);
+    enc.dispatch_thread_groups(
+        MTLSize::new(num_q_heads as u64, 1, 1),
+        MTLSize::new(256.min(cache.head_dim as u64), 1, 1),
+    );
+}
+
+/// Append new K/V to cache and run attention in one command buffer.
+/// Returns attention output [num_q_heads, head_dim].
+/// Legacy API — creates its own encoders. For merged pipelines, use
+/// encode_kv_append + encode_kv_attend directly.
+#[allow(clippy::too_many_arguments)]
+pub fn append_and_attend(
+    cmd: &CommandBufferRef,
+    cache: &mut LayerKVCache,
+    append_pipeline: &ComputePipelineState,
+    attend_pipeline: &ComputePipelineState,
+    new_k: &Buffer,
+    new_v: &Buffer,
+    q: &Buffer,
+    out: &Buffer,
+    num_q_heads: usize,
+    scale: f32,
+) {
+    // Append in its own encoder
     {
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(append_pipeline);
-        enc.set_buffer(0, Some(new_k), 0);
-        enc.set_buffer(1, Some(new_v), 0);
-        enc.set_buffer(2, Some(&cache.k_cache), 0);
-        enc.set_buffer(3, Some(&cache.v_cache), 0);
-        enc.set_bytes(4, 4, &pos as *const u32 as *const c_void);
-        enc.set_bytes(5, 4, &num_kv as *const u32 as *const c_void);
-        enc.set_bytes(6, 4, &hd as *const u32 as *const c_void);
-        enc.dispatch_threads(
-            MTLSize::new(total as u64, 1, 1),
-            MTLSize::new(256.min(total as u64), 1, 1),
-        );
+        encode_kv_append(enc, cache, append_pipeline, new_k, new_v);
         enc.end_encoding();
     }
 
-    // Attend: Q against full cache [0..pos+1]
-    let t_val = (cache.current_len + 1) as u32;
-    let num_q_val = num_q_heads as u32;
+    // Attend in its own encoder (reads from cache written by append)
     {
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(attend_pipeline);
-        enc.set_buffer(0, Some(q), 0);
-        enc.set_buffer(1, Some(&cache.k_cache), 0);
-        enc.set_buffer(2, Some(&cache.v_cache), 0);
-        enc.set_buffer(3, Some(out), 0);
-        enc.set_bytes(4, 4, &t_val as *const u32 as *const c_void);
-        enc.set_bytes(5, 4, &hd as *const u32 as *const c_void);
-        enc.set_bytes(6, 4, &num_q_val as *const u32 as *const c_void);
-        enc.set_bytes(7, 4, &num_kv as *const u32 as *const c_void);
-        enc.set_bytes(8, 4, &scale as *const f32 as *const c_void);
-        let window_size: u32 = 0; // 0 = full attention (no sliding window)
-        enc.set_bytes(9, 4, &window_size as *const u32 as *const c_void);
-        // One threadgroup per head
-        enc.dispatch_thread_groups(
-            MTLSize::new(num_q_heads as u64, 1, 1),
-            MTLSize::new(256.min(cache.head_dim as u64), 1, 1),
-        );
+        encode_kv_attend(enc, cache, attend_pipeline, q, out, num_q_heads, scale, 0);
         enc.end_encoding();
     }
 
