@@ -728,7 +728,7 @@ fn rms_norm_matches_cpu() {
     let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.1 - 3.2)).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.5 + (i as f32 * 0.01)).collect();
     let eps = 1e-6f32;
-    let offset = 1.0f32; // Gemma-style
+    let offset = 1.0f32; // Gemma 2/3 style (Gemma 4 uses 0.0)
 
     // CPU reference
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();

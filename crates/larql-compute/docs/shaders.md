@@ -131,7 +131,7 @@ Buffer copy and element-wise addition for residual connections.
 ## Fused Multi-Op Kernels
 
 ### fused_ops.rs — `rms_norm`, `rms_norm_q8`, `residual_norm`, `residual_norm_q8`
-- `rms_norm`: RMS normalization with configurable weight offset (0.0 for Llama, 1.0 for Gemma).
+- `rms_norm`: RMS normalization with configurable weight offset (0.0 for Llama/Gemma 4, 1.0 for Gemma 2/3).
 - `rms_norm_q8`: Fused norm + Q8 quantize (saves one dispatch per layer).
 - `residual_norm`: Fused residual add + norm.
 - `residual_norm_q8`: Fused residual add + norm + Q8 quantize (saves two dispatches per layer).

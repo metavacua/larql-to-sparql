@@ -74,7 +74,7 @@ pub struct FullPipelineLayer<'a> {
     pub post_attn_norm: &'a [f32],   // post_attention_layernorm (before FFN, or post-attn norm)
     pub pre_ffn_norm: Option<&'a [f32]>,   // pre_feedforward_layernorm (Gemma post-norms)
     pub post_ffn_norm: Option<&'a [f32]>,  // post_feedforward_layernorm (Gemma post-norms)
-    pub norm_offset: f32,            // 0.0 standard, 1.0 for Gemma
+    pub norm_offset: f32,            // 0.0 standard (Llama, Gemma 4), 1.0 for Gemma 2/3
     pub has_post_norms: bool,        // Gemma 3 uses post-norms
     pub use_gelu_tanh: bool,         // false=SiLU (Llama), true=GELU-tanh (Gemma)
 }

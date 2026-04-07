@@ -31,7 +31,7 @@ kernel void residual_add(
 }
 
 // RMS norm: out = x * (weight + offset) / sqrt(mean(x²) + eps)
-// offset=0 for standard models, offset=1 for Gemma (norm_weight_offset)
+// offset=0 for standard models (Llama, Gemma 4), offset=1 for Gemma 2/3 (norm_weight_offset)
 kernel void rms_norm(
     device const float* x      [[buffer(0)]],
     device const float* weight [[buffer(1)]],
