@@ -402,6 +402,17 @@ pub fn write_model_weights(
         } else {
             None
         },
+        // Per-layer geometry (Gemma 4)
+        global_head_dim: cfg.global_head_dim,
+        num_global_kv_heads: cfg.num_global_kv_heads,
+        partial_rotary_factor: cfg.partial_rotary_factor,
+        sliding_window_pattern: cfg.sliding_window_pattern,
+        layer_types: cfg.layer_types.clone(),
+        attention_k_eq_v: cfg.attention_k_eq_v,
+        num_kv_shared_layers: cfg.num_kv_shared_layers,
+        per_layer_embed_dim: cfg.per_layer_embed_dim,
+        rope_local_base: cfg.rope_local_base,
+        query_pre_attn_scalar: cfg.query_pre_attn_scalar,
     });
 
     let config_json = serde_json::to_string_pretty(&config)
@@ -437,7 +448,8 @@ pub fn load_model_weights(
         VindexError::Parse("vindex missing model_config in index.json".into())
     })?;
 
-    let arch_json = serde_json::json!({
+    // Reconstruct full architecture config — includes per-layer geometry for Gemma 4.
+    let mut arch_obj = serde_json::json!({
         "model_type": model_cfg.model_type,
         "hidden_size": config.hidden_size,
         "num_hidden_layers": config.num_layers,
@@ -449,7 +461,19 @@ pub fn load_model_weights(
         "sliding_window": model_cfg.sliding_window,
         "vocab_size": config.vocab_size,
     });
-    let arch = larql_models::detect_from_json(&arch_json);
+    // Pass through Gemma 4 per-layer geometry fields (if present in vindex config).
+    let obj = arch_obj.as_object_mut().unwrap();
+    if let Some(v) = model_cfg.global_head_dim { obj.insert("global_head_dim".into(), v.into()); }
+    if let Some(v) = model_cfg.num_global_kv_heads { obj.insert("num_global_key_value_heads".into(), v.into()); }
+    if let Some(v) = model_cfg.partial_rotary_factor { obj.insert("partial_rotary_factor".into(), v.into()); }
+    if let Some(v) = model_cfg.sliding_window_pattern { obj.insert("sliding_window_pattern".into(), v.into()); }
+    if let Some(ref v) = model_cfg.layer_types { obj.insert("layer_types".into(), serde_json::to_value(v).unwrap_or_default()); }
+    if model_cfg.attention_k_eq_v { obj.insert("attention_k_eq_v".into(), true.into()); }
+    if let Some(v) = model_cfg.num_kv_shared_layers { obj.insert("num_kv_shared_layers".into(), v.into()); }
+    if let Some(v) = model_cfg.per_layer_embed_dim { obj.insert("hidden_size_per_layer_input".into(), v.into()); }
+    if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
+    if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
+    let arch = larql_models::detect_from_json(&arch_obj);
 
     callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
     let embed_file = std::fs::File::open(dir.join("embeddings.bin"))?;

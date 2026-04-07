@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let rows = shape[0].as_u64().unwrap() as usize;
         let cols = shape[1].as_u64().unwrap() as usize;
         let num_floats = rows * cols;
-        let padded = (num_floats + 31) / 32 * 32;
+        let padded = num_floats.div_ceil(32) * 32;
         let n_blocks = padded / 32;
 
         let f32_data = unsafe {
@@ -83,8 +83,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let inv = if scale > 0.0 { 1.0 / scale } else { 0.0 };
             q8_scales.push(scale);
 
-            for j in 0..32 {
-                let q = (block[j] * inv).round().clamp(-128.0, 127.0) as i8;
+            for val in &block {
+                let q = (val * inv).round().clamp(-128.0, 127.0) as i8;
                 q8_vals.push(q as u8);
             }
         }

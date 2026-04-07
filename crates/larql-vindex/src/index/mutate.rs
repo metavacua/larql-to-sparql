@@ -1,7 +1,6 @@
 /// VectorIndex mutation and persistence methods.
 ///
 /// Adds INSERT/DELETE/UPDATE support and the ability to save a modified vindex back to disk.
-
 use std::io::{BufWriter, Write};
 use std::path::Path;
 

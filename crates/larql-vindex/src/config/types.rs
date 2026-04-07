@@ -115,6 +115,11 @@ impl LayerBands {
             ("gemma2", 42) => Some(Self { syntax: (0, 16), knowledge: (17, 34), output: (35, 41) }),
             ("gemma2", 46) => Some(Self { syntax: (0, 18), knowledge: (19, 37), output: (38, 45) }),
 
+            // Gemma 4 family
+            ("gemma4", 36) => Some(Self { syntax: (0, 14), knowledge: (15, 28), output: (29, 35) }),
+            ("gemma4", 35) => Some(Self { syntax: (0, 13), knowledge: (14, 27), output: (28, 34) }),
+            ("gemma4", 60) => Some(Self { syntax: (0, 23), knowledge: (24, 47), output: (48, 59) }),
+
             // Llama family
             ("llama", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
             ("llama", 40) => Some(Self { syntax: (0, 15), knowledge: (16, 32), output: (33, 39) }),
@@ -173,6 +178,8 @@ impl LayerBands {
 }
 
 /// Model configuration stored in the vindex for architecture reconstruction.
+/// All fields are serialized to index.json so the model architecture can be
+/// reconstructed without the original config.json.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VindexModelConfig {
     pub model_type: String,
@@ -185,6 +192,43 @@ pub struct VindexModelConfig {
     /// MoE configuration (None for dense models).
     #[serde(default)]
     pub moe: Option<MoeConfig>,
+
+    // ── Gemma 4 per-layer attention geometry ──
+    // All optional for backward compatibility with existing vindexes.
+
+    /// Head dimension for global (full) attention layers. If None, all layers use head_dim.
+    /// Gemma 4: 512 for global layers, head_dim (256) for sliding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_head_dim: Option<usize>,
+    /// Number of KV heads for global attention layers. If None, all layers use num_kv_heads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_global_kv_heads: Option<usize>,
+    /// Fraction of head_dim to apply RoPE to (0.0–1.0). If None, full rotation.
+    /// Gemma 4 global layers: 0.25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_rotary_factor: Option<f64>,
+    /// Sliding window pattern: every Nth layer is full attention.
+    /// Gemma 4: 6 (layers 5, 11, 17, ... are full).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sliding_window_pattern: Option<usize>,
+    /// Explicit per-layer type array (e.g., ["sliding_attention", "full_attention", ...]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer_types: Option<Vec<String>>,
+    /// Whether value projection shares key projection (K=V).
+    #[serde(default)]
+    pub attention_k_eq_v: bool,
+    /// Number of layers at the end that share KV from earlier layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_kv_shared_layers: Option<usize>,
+    /// Per-layer embedding dimension (PLE). 0 or None = no PLE.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_layer_embed_dim: Option<usize>,
+    /// RoPE base for local/sliding window layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rope_local_base: Option<f64>,
+    /// Query pre-attention scalar (overrides 1/sqrt(head_dim)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_pre_attn_scalar: Option<f64>,
 }
 
 /// MoE (Mixture of Experts) configuration.

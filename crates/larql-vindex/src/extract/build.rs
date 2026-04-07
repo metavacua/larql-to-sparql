@@ -295,6 +295,7 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
     /// Reads gate vectors and down projections directly from safetensors,
     /// projects down vectors to vocabulary for top-k token metadata,
     /// writes everything to a self-contained directory.
+    #[allow(clippy::too_many_arguments)]
     pub fn build_vindex(
         weights: &ModelWeights,
         tokenizer: &tokenizers::Tokenizer,
@@ -424,7 +425,7 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
         let (ww_ids_shared, ww_embed_shared) =
             build_whole_word_vocab(tokenizer, &weights.embed, vocab_size, hidden_size);
 
-        for layer in 0..num_layers {
+        for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(num_layers) {
             callbacks.on_layer_start("down", layer, num_layers);
             let start = std::time::Instant::now();
 
@@ -552,10 +553,10 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
 
                 // Collect in memory for binary write
                 let feat_idx = feature_offset + feat;
-                if all_down_meta[layer].is_none() {
-                    all_down_meta[layer] = Some(Vec::new());
+                if layer_down_meta.is_none() {
+                    *layer_down_meta = Some(Vec::new());
                 }
-                if let Some(ref mut metas) = all_down_meta[layer] {
+                if let Some(ref mut metas) = layer_down_meta {
                     while metas.len() <= feat_idx {
                         metas.push(None);
                     }
@@ -623,24 +624,38 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
             extract_level,
             dtype,
             layer_bands: crate::LayerBands::for_family(&family, num_layers),
-            model_config: Some(VindexModelConfig {
-                model_type: weights.arch.config().model_type.clone(),
-                head_dim: weights.head_dim,
-                num_q_heads: weights.num_q_heads,
-                num_kv_heads: weights.num_kv_heads,
-                rope_base: weights.rope_base,
-                sliding_window: weights.arch.config().sliding_window,
-                moe: if is_moe {
-                    Some(crate::MoeConfig {
-                        num_experts: n_experts,
-                        top_k: weights.arch.num_experts_per_token(),
-                        shared_expert: weights.arch.num_shared_experts() > 0,
-                        router_type: "top_k_softmax".to_string(),
-                    })
-                } else {
-                    None
-                },
-            }),
+            model_config: {
+                let cfg = weights.arch.config();
+                Some(VindexModelConfig {
+                    model_type: cfg.model_type.clone(),
+                    head_dim: weights.head_dim,
+                    num_q_heads: weights.num_q_heads,
+                    num_kv_heads: weights.num_kv_heads,
+                    rope_base: weights.rope_base,
+                    sliding_window: cfg.sliding_window,
+                    moe: if is_moe {
+                        Some(crate::MoeConfig {
+                            num_experts: n_experts,
+                            top_k: weights.arch.num_experts_per_token(),
+                            shared_expert: weights.arch.num_shared_experts() > 0,
+                            router_type: "top_k_softmax".to_string(),
+                        })
+                    } else {
+                        None
+                    },
+                    // Per-layer geometry (Gemma 4)
+                    global_head_dim: cfg.global_head_dim,
+                    num_global_kv_heads: cfg.num_global_kv_heads,
+                    partial_rotary_factor: cfg.partial_rotary_factor,
+                    sliding_window_pattern: cfg.sliding_window_pattern,
+                    layer_types: cfg.layer_types.clone(),
+                    attention_k_eq_v: cfg.attention_k_eq_v,
+                    num_kv_shared_layers: cfg.num_kv_shared_layers,
+                    per_layer_embed_dim: cfg.per_layer_embed_dim,
+                    rope_local_base: cfg.rope_local_base,
+                    query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+                })
+            },
         };
 
         // Write preliminary index.json (needed by write_model_weights which reads it)
@@ -837,15 +852,28 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
             extract_level: crate::ExtractLevel::Browse,
             dtype: StorageDtype::F32,
             layer_bands: crate::LayerBands::for_family(&family, num_layers),
-            model_config: Some(VindexModelConfig {
-                model_type: weights.arch.config().model_type.clone(),
-                head_dim: weights.head_dim,
-                num_q_heads: weights.num_q_heads,
-                num_kv_heads: weights.num_kv_heads,
-                rope_base: weights.rope_base,
-                sliding_window: weights.arch.config().sliding_window,
-                moe: None,
-            }),
+            model_config: {
+                let cfg = weights.arch.config();
+                Some(VindexModelConfig {
+                    model_type: cfg.model_type.clone(),
+                    head_dim: weights.head_dim,
+                    num_q_heads: weights.num_q_heads,
+                    num_kv_heads: weights.num_kv_heads,
+                    rope_base: weights.rope_base,
+                    sliding_window: cfg.sliding_window,
+                    moe: None,
+                    global_head_dim: cfg.global_head_dim,
+                    num_global_kv_heads: cfg.num_global_kv_heads,
+                    partial_rotary_factor: cfg.partial_rotary_factor,
+                    sliding_window_pattern: cfg.sliding_window_pattern,
+                    layer_types: cfg.layer_types.clone(),
+                    attention_k_eq_v: cfg.attention_k_eq_v,
+                    num_kv_shared_layers: cfg.num_kv_shared_layers,
+                    per_layer_embed_dim: cfg.per_layer_embed_dim,
+                    rope_local_base: cfg.rope_local_base,
+                    query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+                })
+            },
         };
 
         config.checksums = crate::format::checksums::compute_checksums(output_dir).ok();

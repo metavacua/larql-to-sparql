@@ -481,6 +481,7 @@ impl VectorIndex {
 
     /// Get per-layer Q4 attention weight slices (Q, K, V, O) using the manifest.
     /// Returns None if manifest or Q4 attn data is not loaded.
+    #[allow(clippy::type_complexity)]
     pub fn attn_q4_layer_slices(&self, layer: usize) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
         let mmap = self.attn_q4_mmap.as_ref()?;
         let manifest = self.attn_q4_manifest.as_ref()?;

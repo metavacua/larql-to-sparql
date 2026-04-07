@@ -26,6 +26,7 @@ struct MmapShard {
 /// Build a vindex by streaming from safetensors files (no full model load).
 ///
 /// Peak memory: embeddings + 1 layer of gate/down weights at a time.
+#[allow(clippy::too_many_arguments)]
 pub fn build_vindex_streaming(
     model_dir: &Path,
     tokenizer: &tokenizers::Tokenizer,
@@ -262,7 +263,7 @@ pub fn build_vindex_streaming(
     // Build whole-word vocab once
     let (_ww_ids, _ww_embed) = super::build::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
 
-    for layer in 0..num_layers {
+    for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(num_layers) {
         callbacks.on_layer_start("down", layer, num_layers);
         let start = std::time::Instant::now();
 
@@ -357,10 +358,10 @@ pub fn build_vindex_streaming(
                     };
 
                     let feat_idx = feature_offset + feat;
-                    if all_down_meta[layer].is_none() {
-                        all_down_meta[layer] = Some(Vec::new());
+                    if layer_down_meta.is_none() {
+                        *layer_down_meta = Some(Vec::new());
                     }
-                    if let Some(ref mut metas) = all_down_meta[layer] {
+                    if let Some(ref mut metas) = layer_down_meta {
                         while metas.len() <= feat_idx { metas.push(None); }
                         metas[feat_idx] = Some(crate::FeatureMeta {
                             top_token, top_token_id, c_score, top_k: top_k_entries,
@@ -421,6 +422,17 @@ pub fn build_vindex_streaming(
                     router_type: "top_k_softmax".to_string(),
                 })
             } else { None },
+            // Per-layer geometry (Gemma 4)
+            global_head_dim: cfg.global_head_dim,
+            num_global_kv_heads: cfg.num_global_kv_heads,
+            partial_rotary_factor: cfg.partial_rotary_factor,
+            sliding_window_pattern: cfg.sliding_window_pattern,
+            layer_types: cfg.layer_types.clone(),
+            attention_k_eq_v: cfg.attention_k_eq_v,
+            num_kv_shared_layers: cfg.num_kv_shared_layers,
+            per_layer_embed_dim: cfg.per_layer_embed_dim,
+            rope_local_base: cfg.rope_local_base,
+            query_pre_attn_scalar: cfg.query_pre_attn_scalar,
         }),
     };
 

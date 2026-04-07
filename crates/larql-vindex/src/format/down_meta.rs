@@ -86,6 +86,7 @@ pub fn write_binary(
 
 /// Read down_meta from binary format.
 /// Token strings are resolved via the tokenizer.
+#[allow(clippy::type_complexity)]
 pub fn read_binary(
     dir: &Path,
     tokenizer: &tokenizers::Tokenizer,

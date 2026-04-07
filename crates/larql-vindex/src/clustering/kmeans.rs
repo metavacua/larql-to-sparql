@@ -119,9 +119,9 @@ fn kmeans_pp_init(data: &Array2<f32>, k: usize) -> Array2<f32> {
 
         let mut best_i = 0;
         let mut best_d = f32::NEG_INFINITY;
-        for i in 0..n {
-            if min_dists[i] > best_d {
-                best_d = min_dists[i];
+        for (i, &dist) in min_dists.iter().enumerate().take(n) {
+            if dist > best_d {
+                best_d = dist;
                 best_i = i;
             }
         }

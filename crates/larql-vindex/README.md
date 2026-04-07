@@ -140,16 +140,21 @@ All matrix operations go through `larql-compute` (BLAS on CPU, Metal GPU planned
 
 ## Supported Architectures
 
-| Family | Models | FFN Type |
-|--------|--------|----------|
-| Gemma | Gemma 2/3 (2B-27B) | Gated (GeGLU) |
-| Llama | Llama 2/3 (7B-405B) | Gated (SiLU) |
-| Mistral | Mistral 7B | Gated (SiLU) |
-| Mixtral | Mixtral 8x7B/8x22B | MoE (8 experts) |
-| Qwen | Qwen 2/2.5 | Gated (SiLU) |
-| Phi | Phi 2/3 | Gated |
-| DeepSeek | DeepSeek V2/V3 | MoE (shared + routed) |
-| GPT-2 | GPT-2 | Dense (GELU) |
+| Family | Models | FFN Type | Notes |
+|--------|--------|----------|-------|
+| Gemma 4 | Gemma 4 31B/E2B | Gated (GeGLU) | Per-layer head_dim, K=V, V-norm, partial RoPE, PLE, KV sharing |
+| Gemma 3 | Gemma 3 (4B-27B) | Gated (GeGLU) | QK-norm, sliding window, dual RoPE |
+| Gemma 2 | Gemma 2 (2B-27B) | Gated (GeGLU) | Softcapping, QK-norm |
+| Llama | Llama 2/3 (7B-405B) | Gated (SiLU) | GQA, RoPE scaling |
+| Mistral | Mistral 7B | Gated (SiLU) | Sliding window |
+| Mixtral | Mixtral 8x7B/8x22B | MoE (8 experts) | PerExpert format |
+| Qwen | Qwen 2/2.5/3 | Gated (SiLU) | Attention bias, QK-norm |
+| Phi | Phi 2/3 | Gated | |
+| DeepSeek | DeepSeek V2/V3 | MoE (shared + routed) | MLA, YaRN |
+| Granite | Granite | Gated (SiLU) | Scaling multipliers |
+| StarCoder2 | StarCoder2 | Standard (GELU) | LayerNorm, bias, non-gated FFN |
+| GPT-OSS | GPT-OSS | MoE (PackedMxfp4) | MXFP4 packed experts |
+| GPT-2 | GPT-2 | Dense (GELU) | |
 
 ## File Layout
 
@@ -315,7 +320,7 @@ pinned layers skip PCIe transfers and the gradient steepens.
 Tests:      146 passing (41 clustering + 7 HNSW + 98 main)
 Warnings:   0 (build)
 Formats:    f32, Q8_0, Q4_K, Q6_K, Q4_0
-Models:     Gemma, Llama, Mixtral, Qwen, Phi, GPT-2, DeepSeek
+Models:     Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, Phi, DeepSeek, Granite, StarCoder2, GPT-OSS, GPT-2
 ```
 
 ## License

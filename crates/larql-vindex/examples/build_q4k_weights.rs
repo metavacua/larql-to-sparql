@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Pad to 256 for K-quant super-blocks
-            let padded_len = (num_floats + 255) / 256 * 256;
+            let padded_len = num_floats.div_ceil(256) * 256;
             let padded = if padded_len != num_floats {
                 let mut v = f32_data.to_vec();
                 v.resize(padded_len, 0.0);
@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         std::slice::from_raw_parts(ptr, floats_per_matrix)
                     };
 
-                    let padded_len = (floats_per_matrix + 255) / 256 * 256;
+                    let padded_len = floats_per_matrix.div_ceil(256) * 256;
                     let padded = if padded_len != floats_per_matrix {
                         let mut v = f32_data.to_vec();
                         v.resize(padded_len, 0.0);

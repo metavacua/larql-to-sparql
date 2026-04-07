@@ -656,6 +656,11 @@ fn v2_config_full_round_trip() {
             rope_base: 10000.0,
             sliding_window: Some(1024),
             moe: None,
+            global_head_dim: None, num_global_kv_heads: None,
+            partial_rotary_factor: None, sliding_window_pattern: None,
+            layer_types: None, attention_k_eq_v: false,
+            num_kv_shared_layers: None, per_layer_embed_dim: None,
+            rope_local_base: None, query_pre_attn_scalar: None,
         }),
     };
 
@@ -726,6 +731,11 @@ fn v2_config_with_moe() {
                 shared_expert: false,
                 router_type: "top_k_softmax".into(),
             }),
+            global_head_dim: None, num_global_kv_heads: None,
+            partial_rotary_factor: None, sliding_window_pattern: None,
+            layer_types: None, attention_k_eq_v: false,
+            num_kv_shared_layers: None, per_layer_embed_dim: None,
+            rope_local_base: None, query_pre_attn_scalar: None,
         }),
     };
 
@@ -842,6 +852,11 @@ fn moe_layer_info_round_trip() {
                 shared_expert: false,
                 router_type: "top_k_softmax".into(),
             }),
+            global_head_dim: None, num_global_kv_heads: None,
+            partial_rotary_factor: None, sliding_window_pattern: None,
+            layer_types: None, attention_k_eq_v: false,
+            num_kv_shared_layers: None, per_layer_embed_dim: None,
+            rope_local_base: None, query_pre_attn_scalar: None,
         }),
     };
 
@@ -1683,7 +1698,7 @@ fn extract_synthetic_model_f32() {
     assert_eq!(config.num_layers, 2);
     assert_eq!(config.hidden_size, 8);
     assert_eq!(config.intermediate_size, 4);
-    assert_eq!(config.has_model_weights, true);
+    assert!(config.has_model_weights);
     assert_eq!(config.dtype, larql_vindex::StorageDtype::F32);
     assert!(config.source.is_some());
     // layer_bands may be None for tiny models (< 8 layers)
@@ -2483,7 +2498,7 @@ fn lm_head_knn_returns_top_k() {
     // Build a small lm_head: [vocab, hidden]
     let mut lm_head = vec![0.0f32; vocab * hidden];
     // Token 0 responds to dim 0
-    lm_head[0 * hidden + 0] = 10.0;
+    lm_head[0] = 10.0;
     // Token 3 responds to dim 1
     lm_head[3 * hidden + 1] = 5.0;
     // Token 7 responds to dim 2

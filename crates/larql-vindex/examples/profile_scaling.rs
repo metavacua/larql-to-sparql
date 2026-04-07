@@ -487,15 +487,15 @@ fn main() {
             let (q8_x, q8_scales) = quantize_to_q8(x_slice);
 
             // Warmup
-            for l in 16..64 {
-                let q4 = rm.pinned_q4(l).unwrap_or(&q4_layers[l]);
+            for (l, q4_layer) in q4_layers.iter().enumerate().take(64).skip(16) {
+                let q4 = rm.pinned_q4(l).unwrap_or(q4_layer);
                 let _ = best_backend.q4_matvec(q4, &q8_x, &q8_scales, features, hidden);
             }
 
             let t0 = Instant::now();
             for _ in 0..n {
-                for l in 16..64 {
-                    let q4 = rm.pinned_q4(l).unwrap_or(&q4_layers[l]);
+                for (l, q4_layer) in q4_layers.iter().enumerate().take(64).skip(16) {
+                    let q4 = rm.pinned_q4(l).unwrap_or(q4_layer);
                     let _ = best_backend.q4_matvec(q4, &q8_x, &q8_scales, features, hidden);
                 }
             }

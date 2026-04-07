@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         layer_info["length"] = serde_json::json!(new_length);
         new_offset += new_length;
 
-        if layer % 10 == 0 || layer == num_layers - 1 {
+        if layer.is_multiple_of(10) || layer == num_layers - 1 {
             println!("  Layer {layer}/{num_layers}: {num_features} features, {:.1}MB",
                 new_length as f64 / 1e6);
         }

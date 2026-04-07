@@ -458,10 +458,9 @@ fn rss_mb() -> f64 {
 
 fn random_query(hidden: usize) -> Array1<f32> {
     // Deterministic pseudo-random for reproducibility
-    let mut v = vec![0.0f32; hidden];
-    for i in 0..hidden {
-        v[i] = ((i * 7 + 13) % 100) as f32 / 100.0 - 0.5;
-    }
+    let v: Vec<f32> = (0..hidden)
+        .map(|i| ((i * 7 + 13) % 100) as f32 / 100.0 - 0.5)
+        .collect();
     Array1::from_vec(v)
 }
 

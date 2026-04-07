@@ -60,10 +60,27 @@ let layer = FullPipelineLayer {
     wq: QuantWeight { data: q.0, scales: None, format: to_format(q.1) },
     wk: QuantWeight { data: k.0, scales: None, format: to_format(k.1) },
     // ... format tag drives kernel selection in decode_token
+
+    // Per-layer architecture params (from ModelArchitecture trait):
+    eps: arch.norm_eps(),
+    attn_scale: arch.attention_scale_for_layer(layer) as f32,
+    head_dim: arch.head_dim_for_layer(layer),
+    num_q_heads: arch.num_q_heads_for_layer(layer),
+    num_kv_heads: arch.num_kv_heads_for_layer(layer),
+    rope_base: arch.rope_base_for_layer(layer) as f32,
+    rotary_dim: (arch.rotary_fraction_for_layer(layer) * arch.head_dim_for_layer(layer) as f64) as usize,
+    sliding_window: arch.sliding_window_size().unwrap_or(0),
+    has_v_norm: arch.has_v_norm(),
+    layer_scalar: 0.0,  // loaded from weight if arch.layer_scalar_key(layer) exists
+    norm_type: NormType::RmsNorm,  // or LayerNorm for StarCoder2
+    ffn_type: FfnType::Gated,     // or Standard for StarCoder2
+    activation: Activation::Silu,  // or GeluTanh for Gemma
+    // ...
 };
 ```
 
 The `QuantFormat` tag (Q4_K, Q6_K, Q8_0, Q4_0) determines which Metal shader the compute backend dispatches.
+All per-layer architecture params (head_dim, rope_base, attention scale, etc.) come from the `ModelArchitecture` trait — the compute backend reads these per-layer in its inner loop.
 
 ## Format Decision Flow
 

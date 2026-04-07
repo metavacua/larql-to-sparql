@@ -88,10 +88,7 @@ pub fn resolve_hf_vindex(hf_path: &str) -> Result<PathBuf, VindexError> {
         if *filename == "index.json" {
             continue; // already downloaded
         }
-        match repo.get(filename) {
-            Ok(_) => {} // downloaded or already cached
-            Err(_) => {} // optional file, skip if missing
-        }
+        let _ = repo.get(filename); // optional file, skip if missing
     }
 
     Ok(vindex_dir)
@@ -126,10 +123,7 @@ pub fn download_hf_weights(hf_path: &str) -> Result<(), VindexError> {
     };
 
     for filename in VINDEX_WEIGHT_FILES {
-        match repo.get(filename) {
-            Ok(_) => {}
-            Err(_) => {} // optional, skip if not in repo
-        }
+        let _ = repo.get(filename); // optional, skip if not in repo
     }
 
     Ok(())

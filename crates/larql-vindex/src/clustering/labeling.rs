@@ -42,10 +42,10 @@ pub fn auto_label_clusters(
     let mut labels = Vec::with_capacity(k);
     let mut top_lists = Vec::with_capacity(k);
 
-    for c in 0..k {
-        let cluster_size = cluster_tokens[c].values().sum::<usize>().max(1) as f64;
+    for (c, cluster_tok) in cluster_tokens.iter().enumerate().take(k) {
+        let cluster_size = cluster_tok.values().sum::<usize>().max(1) as f64;
 
-        let mut scored: Vec<(String, f64)> = cluster_tokens[c]
+        let mut scored: Vec<(String, f64)> = cluster_tok
             .iter()
             .filter(|(_, &count)| count >= 1)
             .map(|(tok, &count)| {
@@ -66,7 +66,7 @@ pub fn auto_label_clusters(
             .collect();
 
         let label = if top.is_empty() {
-            let mut freq: Vec<(String, usize)> = cluster_tokens[c]
+            let mut freq: Vec<(String, usize)> = cluster_tok
                 .iter()
                 .map(|(t, &c)| (t.clone(), c))
                 .collect();
@@ -121,11 +121,11 @@ pub fn auto_label_clusters_from_embeddings(
 
     // Collect member embeddings per cluster
     let mut cluster_member_embeds: Vec<Vec<Array1<f32>>> = vec![Vec::new(); k];
-    for c in 0..k {
+    for (c, member_embeds) in cluster_member_embeds.iter_mut().enumerate().take(k) {
         if let Some(members) = top_lists.get(c) {
             for tok in members.iter().take(10) {
                 if let Some(emb) = encode_token_with_tokenizer(tok, embed, hidden, tokenizer) {
-                    cluster_member_embeds[c].push(emb);
+                    member_embeds.push(emb);
                 }
             }
         }
@@ -134,8 +134,7 @@ pub fn auto_label_clusters_from_embeddings(
     // Score each candidate category by mean similarity to cluster members
     let mut labels = Vec::with_capacity(k);
 
-    for c in 0..k {
-        let members = &cluster_member_embeds[c];
+    for (c, members) in cluster_member_embeds.iter().enumerate().take(k) {
         if members.is_empty() {
             labels.push(tfidf_labels.get(c).cloned().unwrap_or_else(|| format!("cluster-{c}")));
             continue;

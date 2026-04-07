@@ -87,11 +87,11 @@ impl HnswLayer {
         let mut node_levels = vec![0u8; n];
         let mut max_level = 0usize;
         let mut rng = 42u64;
-        for i in 0..n {
+        for nl in node_levels.iter_mut().take(n) {
             rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             let u = (rng >> 33) as f64 / (1u64 << 31) as f64;
             let level = ((-u.max(1e-12).ln() * ml).floor() as usize).min(12);
-            node_levels[i] = level as u8;
+            *nl = level as u8;
             if level > max_level { max_level = level; }
         }
 
@@ -319,9 +319,9 @@ impl HnswLayer {
         if start + cap > arr.len() { return; }
         let slot = &mut arr[start..start + cap];
 
-        for i in 0..cap {
-            if slot[i] == u32::MAX { slot[i] = new_nb; return; }
-            if slot[i] == new_nb { return; }
+        for s in slot.iter_mut().take(cap) {
+            if *s == u32::MAX { *s = new_nb; return; }
+            if *s == new_nb { return; }
         }
 
         // Evict worst neighbor if new one is better
@@ -329,8 +329,8 @@ impl HnswLayer {
         let new_score = Self::dot(&node_vec, &vectors.row(new_nb as usize));
         let mut worst_i = 0;
         let mut worst_s = f32::MAX;
-        for i in 0..cap {
-            let s = Self::dot(&node_vec, &vectors.row(slot[i] as usize));
+        for (i, &nb) in slot.iter().enumerate().take(cap) {
+            let s = Self::dot(&node_vec, &vectors.row(nb as usize));
             if s < worst_s { worst_s = s; worst_i = i; }
         }
         if new_score > worst_s {

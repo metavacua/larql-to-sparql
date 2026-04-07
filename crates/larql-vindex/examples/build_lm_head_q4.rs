@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Must be multiple of 32 for Q4 — pad if needed
-    let padded_len = (num_floats + 31) / 32 * 32;
+    let padded_len = num_floats.div_ceil(32) * 32;
     let data = if padded_len != num_floats {
         let mut v = f32_data.to_vec();
         v.resize(padded_len, 0.0);

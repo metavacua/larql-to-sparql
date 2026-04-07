@@ -362,7 +362,7 @@ STAGE edge
     section("16. Quantization formats (quant module)");
 
     // f16 round-trip
-    let f16_vals = [0.0f32, 1.0, -1.0, 0.5, 100.0, 3.14];
+    let f16_vals = [0.0f32, 1.0, -1.0, 0.5, 100.0, std::f32::consts::PI];
     let f16_encoded = larql_models::quant::half::encode_f16(&f16_vals);
     let f16_decoded = larql_models::quant::half::decode_f16(&f16_encoded);
     print!("  f16 round-trip: ");

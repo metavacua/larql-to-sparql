@@ -63,12 +63,52 @@ model.vindex/
     "knowledge": [13, 27],
     "output": [28, 33]
   },
+  "model_config": {
+    "model_type": "gemma3",
+    "head_dim": 256,
+    "num_q_heads": 8,
+    "num_kv_heads": 4,
+    "rope_base": 1000000.0,
+    "sliding_window": 1024,
+    "global_head_dim": null,
+    "num_global_kv_heads": null,
+    "partial_rotary_factor": null,
+    "sliding_window_pattern": null,
+    "attention_k_eq_v": false,
+    "num_kv_shared_layers": null
+  },
   "checksums": {
     "gate_vectors.bin": "sha256:...",
     "embeddings.bin": "sha256:..."
   }
 }
 ```
+
+For Gemma 4, the `model_config` includes per-layer geometry:
+
+```json
+{
+  "model_config": {
+    "model_type": "gemma4_text",
+    "head_dim": 256,
+    "num_q_heads": 16,
+    "num_kv_heads": 8,
+    "rope_base": 1000000.0,
+    "sliding_window": 1024,
+    "global_head_dim": 512,
+    "num_global_kv_heads": 4,
+    "partial_rotary_factor": 0.25,
+    "sliding_window_pattern": 6,
+    "attention_k_eq_v": true,
+    "num_kv_shared_layers": 20,
+    "per_layer_embed_dim": 256,
+    "rope_local_base": 10000.0
+  }
+}
+```
+
+All Gemma 4 fields are optional — existing vindexes without them load correctly
+with defaults (standard behavior for pre-Gemma-4 models).
 
 ## Binary down_meta Format
 
