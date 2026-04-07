@@ -238,6 +238,81 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
     out
 }
 
+/// Quantize f32 to GGUF Q4_K format (144 bytes per 256 values).
+///
+/// GGUF layout: half d, half dmin, scales[12] (packed 6-bit scales+mins), qs[128].
+/// Scales and mins are packed into the SAME 12-byte array:
+///   bytes 0-3: lower 6 bits of scales 0-3
+///   bytes 4-7: lower 6 bits of scales 4-7
+///   bytes 8-11: upper 2 bits of scales + lower 4 bits of mins
+pub fn quantize_q4_k_gguf(data: &[f32]) -> Vec<u8> {
+    assert!(data.len() % 256 == 0);
+    let n_superblocks = data.len() / 256;
+    let mut out = Vec::with_capacity(n_superblocks * 144);
+
+    for sb in 0..n_superblocks {
+        let block = &data[sb * 256..(sb + 1) * 256];
+
+        // Per-sub-block min/max
+        let mut sub_mins = [0.0f32; 8];
+        let mut sub_maxs = [0.0f32; 8];
+        for j in 0..8 {
+            let sub = &block[j * 32..(j + 1) * 32];
+            sub_mins[j] = sub.iter().copied().fold(f32::INFINITY, f32::min);
+            sub_maxs[j] = sub.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        }
+
+        let global_max_range = sub_maxs.iter().zip(&sub_mins).map(|(a, b)| a - b).fold(0.0f32, f32::max);
+        let global_min = sub_mins.iter().copied().fold(f32::INFINITY, f32::min);
+
+        let d = if global_max_range > 0.0 { global_max_range / 63.0 } else { 0.0 };
+        let dmin = if global_min < 0.0 { -global_min / 63.0 } else { 0.0 };
+
+        // Quantize scales and mins to 6-bit each
+        let mut q_scales = [0u8; 8];
+        let mut q_mins = [0u8; 8];
+        for j in 0..8 {
+            let range = sub_maxs[j] - sub_mins[j];
+            q_scales[j] = if d > 0.0 { (range / d).round().clamp(0.0, 63.0) as u8 } else { 0 };
+            q_mins[j] = if dmin > 0.0 { (-sub_mins[j] / dmin).round().clamp(0.0, 63.0) as u8 } else { 0 };
+        }
+
+        // Write d, dmin as f16
+        out.extend_from_slice(&f32_to_f16(d).to_le_bytes());
+        out.extend_from_slice(&f32_to_f16(dmin).to_le_bytes());
+
+        // Pack scales[12]: GGUF format
+        // bytes 0-3: (scales[0..4] & 0x3F) | (mins[0..4] << 6)  — lower 6 of scale + lower 2 of min
+        // bytes 4-7: (scales[4..8] & 0x3F) | (mins[4..8] << 6)
+        // bytes 8-11: upper 4 bits of mins packed
+        let mut packed = [0u8; 12];
+        for j in 0..4 {
+            packed[j] = (q_scales[j] & 0x3F) | ((q_mins[j] & 0x03) << 6);
+            packed[j + 4] = (q_scales[j + 4] & 0x3F) | ((q_mins[j + 4] & 0x03) << 6);
+        }
+        // bytes 8-11: pack upper bits of mins
+        packed[8] = ((q_mins[0] >> 2) & 0x0F) | (((q_mins[1] >> 2) & 0x0F) << 4);
+        packed[9] = ((q_mins[2] >> 2) & 0x0F) | (((q_mins[3] >> 2) & 0x0F) << 4);
+        packed[10] = ((q_mins[4] >> 2) & 0x0F) | (((q_mins[5] >> 2) & 0x0F) << 4);
+        packed[11] = ((q_mins[6] >> 2) & 0x0F) | (((q_mins[7] >> 2) & 0x0F) << 4);
+        out.extend_from_slice(&packed);
+
+        // Quantize 256 values to 4-bit nibbles
+        for j in 0..8 {
+            let sc = d * q_scales[j] as f32;
+            let mn = dmin * q_mins[j] as f32;
+            let inv_sc = if sc > 0.0 { 1.0 / sc } else { 0.0 };
+            let sub = &block[j * 32..(j + 1) * 32];
+            for i in 0..16 {
+                let v0 = ((sub[i * 2] + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
+                let v1 = ((sub[i * 2 + 1] + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
+                out.push(v0 | (v1 << 4));
+            }
+        }
+    }
+    out
+}
+
 /// Convert Q4_K data to Q4_KF (pre-baked half scales) for fast GPU inference.
 ///
 /// Q4_KF eliminates ALL header decode + scale unpack from the inference hot loop.

@@ -1,16 +1,9 @@
-//! Fused Q4_K QKV projection — sub-block lane assignment + struct access.
+//! Fused Q4_K QKV — direct device memory reads, no threadgroup memory.
 //!
-//! Best performing variant after extensive optimization:
-//! - Sub-block iteration (80 subs / 32 lanes = 83% utilization)
-//! - block_q4_K struct for coalesced header reads
-//! - uint4 per-subblock loads for nibble data
-//! - Precomputed scale products, separated dot/xsum
-//! - 8 rows/TG (8 simdgroups × 32 lanes)
-//!
-//! Performance: 0.50ms/layer for QKV (3584 rows × 2560 hidden)
-//! Speedup: 1.88x vs Q8 fused QKV
-//!
-//! Grid: ((total_rows + 7) / 8, 1, 1).
+//! KEY CHANGE: Reads input X directly from device memory (like llama.cpp).
+//! Eliminates: threadgroup_barrier, tg_x load phase, threadgroup memory traffic.
+//! Apple Silicon L2 cache ensures device reads of the input vector are fast
+//! since all lanes read nearby addresses within the same 2560-float vector.
 
 pub const SHADER: &str = r#"
 constant uint Q4K_QKV_ROWS_PER_TG = 8;
@@ -39,10 +32,7 @@ kernel void q4k_qkv_proj(
     uint superblocks = K / 256;
     uint total_subs = superblocks * 8;
 
-    threadgroup float tg_x[4096];
-    for (uint i = tid_in_tg; i < K; i += 256)
-        tg_x[i] = X[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // NO threadgroup memory. NO barrier. Input read directly from device.
 
     device const block_q4_K* W;
     device float* out_buf;
@@ -75,9 +65,10 @@ kernel void q4k_qkv_proj(
         uint4 w = qp[0];
         uint xi = sb * 256 + j * 32;
 
+        // Direct device reads — L2 cached since all simdgroups read same X
         float dot = 0.0f, xs = 0.0f;
         #define P(W, S, I) { \
-            float a = tg_x[xi+I], b = tg_x[xi+I+1]; \
+            float a = X[xi+I], b = X[xi+I+1]; \
             dot += float((W>>S)&0xFu)*a + float((W>>(S+4))&0xFu)*b; \
             xs += a + b; }
         P(w.x, 0, 0); P(w.x, 8, 2); P(w.x,16, 4); P(w.x,24, 6);
@@ -109,11 +100,6 @@ kernel void q4k_proj(
     uint superblocks = K / 256;
     uint total_subs = superblocks * 8;
 
-    threadgroup float tg_x[4096];
-    for (uint i = tid_in_tg; i < K; i += 256)
-        tg_x[i] = X[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
     device const block_q4_K* row = W4K + row_idx * superblocks;
     float acc = 0.0f;
 
@@ -136,7 +122,7 @@ kernel void q4k_proj(
 
         float dot = 0.0f, xs = 0.0f;
         #define P(W, S, I) { \
-            float a = tg_x[xi+I], b = tg_x[xi+I+1]; \
+            float a = X[xi+I], b = X[xi+I+1]; \
             dot += float((W>>S)&0xFu)*a + float((W>>(S+4))&0xFu)*b; \
             xs += a + b; }
         P(w.x, 0, 0); P(w.x, 8, 2); P(w.x,16, 4); P(w.x,24, 6);

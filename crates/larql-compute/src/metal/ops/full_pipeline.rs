@@ -208,7 +208,7 @@ pub fn dispatch_full_pipeline(
     rms_norm_q8_pipeline: &ComputePipelineState,
     residual_norm_q8_pipeline: &ComputePipelineState,
     q4k_qkv_proj_pipeline: Option<&ComputePipelineState>,
-    q4k_proj_pipeline: Option<&ComputePipelineState>,
+    _q4k_proj_pipeline: Option<&ComputePipelineState>,
     layers: &[crate::FullPipelineLayer],
     x: &[f32],
     hidden: usize,

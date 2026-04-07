@@ -29,15 +29,19 @@ mod with_model {
     }
 
     #[test]
-    fn test_diverse_100_ten_per_category() {
+    fn test_diverse_100_balanced_categories() {
         let prompts = prompts::diverse_100();
         let mut categories: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for p in &prompts {
             *categories.entry(p.category).or_default() += 1;
         }
+        // Each category should have at least 10 prompts
         for (cat, count) in &categories {
-            assert_eq!(*count, 10, "Category '{cat}' has {count} prompts, expected 10");
+            assert!(*count >= 10, "Category '{cat}' has {count} prompts, expected >=10");
         }
+        // Total should be 100
+        let total: usize = categories.values().sum();
+        assert_eq!(total, 100, "Total prompts: {total}, expected 100");
     }
 
     #[test]

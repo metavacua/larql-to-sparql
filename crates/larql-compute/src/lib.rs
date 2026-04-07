@@ -38,7 +38,9 @@ pub mod cpu;
 pub mod metal;
 
 /// Quantization format for a weight tensor.
+/// Names match GGUF conventions (Q4_K, Q6_K, etc.).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum QuantFormat {
     Q4_0,   // 18 bytes per 32 values (one f16 scale)
     Q4_K,   // 148 bytes per 256 values (super-block with group scales)

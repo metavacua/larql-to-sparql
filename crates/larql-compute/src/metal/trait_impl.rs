@@ -205,9 +205,7 @@ impl ComputeBackend for MetalBackend {
 
     fn reset_kv_cache(&self) {
         let mut cache_guard = self.kv_cache.lock().unwrap();
-        if let Some(kv) = cache_guard.as_mut() {
-            kv.clear();
-        }
+        *cache_guard = None; // drop entirely so next decode_token re-creates with correct layer count
     }
 
     fn decode_token(

@@ -14,8 +14,7 @@ static inline float decode_f16_metal(ushort bits) {
     return as_type<float>(sign | (exp << 23) | (mant << 13));
 }
 
-// Q4_K super-block: 256 values in 148 bytes.
-// Struct layout matches the serialized format exactly.
+// Q4_K super-block: 256 values in 148 bytes (larql format).
 struct block_q4_K {
     ushort d;           // f16 delta (2 bytes)
     ushort dmin;        // f16 minimum (2 bytes)
@@ -23,6 +22,16 @@ struct block_q4_K {
     uchar  mins[4];     // 8 × 4-bit sub-block mins packed (4 bytes)
     uchar  qs[128];     // 256 × 4-bit values (128 bytes)
 };                      // Total: 148 bytes
+
+// GGUF Q4_K super-block: 256 values in 144 bytes.
+// Scales AND mins packed into 12 bytes (6 bits each).
+// This matches llama.cpp/Ollama's exact format.
+struct block_q4_K_gguf {
+    half   d;           // super-block scale (2 bytes)
+    half   dmin;        // super-block min scale (2 bytes)
+    uchar  scales[12];  // 8 scales + 8 mins packed in 6 bits each
+    uchar  qs[128];     // 256 × 4-bit values (128 bytes)
+};                      // Total: 144 bytes
 
 // Q4_KF super-block: 256 values in 160 bytes.
 // Pre-baked scales: d*scale_j and dmin*min_j pre-computed as half.

@@ -12,7 +12,7 @@ fn main() {
     {
         use std::time::Instant;
         use larql_compute::ComputeBackend;
-        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_0, quantize_to_q8, q4k_to_q4kf};
+        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_k_gguf, quantize_q4_0, quantize_to_q8, q4k_to_q4kf};
 
         let metal_raw = larql_compute::metal::MetalBackend::new().expect("Metal required");
         let metal: &dyn ComputeBackend = &metal_raw;
@@ -24,7 +24,7 @@ fn main() {
         let head_dim = 320usize;
         let q_dim = num_q_heads * head_dim;
         let kv_dim = num_kv_heads * head_dim;
-        let num_layers = 21usize;
+        let num_layers = 34usize;  // Gemma3 4B actual layer count
         let n = 20;
 
         println!("=== Q4_KF vs Q4_K vs Q8 Decode Benchmark ===");
@@ -40,6 +40,7 @@ fn main() {
         struct LayerData {
             wq_q4k: Vec<u8>, wk_q4k: Vec<u8>, wv_q4k: Vec<u8>, wo_q4k: Vec<u8>,
             wq_q4kf: Vec<u8>, wk_q4kf: Vec<u8>, wv_q4kf: Vec<u8>, wo_q4kf: Vec<u8>,
+            wq_gguf: Vec<u8>, wk_gguf: Vec<u8>, wv_gguf: Vec<u8>, wo_gguf: Vec<u8>,
             gate_q4: Vec<u8>, up_q4: Vec<u8>, down_q4: Vec<u8>,
             norm: Vec<f32>,
         }
@@ -68,9 +69,16 @@ fn main() {
             let wv_q4kf = q4k_to_q4kf(&wv_q4k, kv_rows, hidden);
             let wo_q4kf = q4k_to_q4kf(&wo_q4k, o_rows, q_dim);
 
+            // GGUF Q4_K (144-byte blocks, packed scales+mins)
+            let wq_gguf = quantize_q4_k_gguf(&pad256(&wq_f32));
+            let wk_gguf = quantize_q4_k_gguf(&pad256(&wk_f32));
+            let wv_gguf = quantize_q4_k_gguf(&pad256(&wv_f32));
+            let wo_gguf = quantize_q4_k_gguf(&pad256(&wo_f32));
+
             layers_data.push(LayerData {
                 wq_q4k, wk_q4k, wv_q4k, wo_q4k,
                 wq_q4kf, wk_q4kf, wv_q4kf, wo_q4kf,
+                wq_gguf, wk_gguf, wv_gguf, wo_gguf,
                 gate_q4: quantize_q4_0(&g_f32),
                 up_q4: quantize_q4_0(&u_f32),
                 down_q4: quantize_q4_0(&d_f32),
@@ -124,7 +132,30 @@ fn main() {
         for _ in 0..n { let _ = metal.decode_token(&q4k_layers, &x, hidden, inter, q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, 10000.0); }
         let q4k_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
+        // ── GGUF Q4_K decode (144-byte blocks, llama.cpp kernel) ──
+        let gguf_layers: Vec<larql_compute::FullPipelineLayer> = layers_data.iter().map(|ld| {
+            larql_compute::FullPipelineLayer {
+                wq: larql_compute::QuantWeight { data: &ld.wq_gguf, scales: None, format: larql_compute::QuantFormat::Q4_KF },
+                wk: larql_compute::QuantWeight { data: &ld.wk_gguf, scales: None, format: larql_compute::QuantFormat::Q4_KF },
+                wv: larql_compute::QuantWeight { data: &ld.wv_gguf, scales: None, format: larql_compute::QuantFormat::Q4_KF },
+                wo: larql_compute::QuantWeight { data: &ld.wo_gguf, scales: None, format: larql_compute::QuantFormat::Q4_KF },
+                gate: larql_compute::QuantWeight { data: &ld.gate_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+                up: larql_compute::QuantWeight { data: &ld.up_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+                down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
+                input_norm: &ld.norm, post_attn_norm: &ld.norm,
+                pre_ffn_norm: None, post_ffn_norm: None,
+                norm_offset: 1.0, has_post_norms: false,
+            }
+        }).collect();
+
+        metal.reset_kv_cache();
+        for _ in 0..5 { let _ = metal.decode_token(&gguf_layers, &x, hidden, inter, q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, 10000.0); }
+        let t0 = Instant::now();
+        for _ in 0..n { let _ = metal.decode_token(&gguf_layers, &x, hidden, inter, q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, 10000.0); }
+        let gguf_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
+
         println!("--- decode_token ({num_layers} layers, KV cache) ---\n");
+        println!("  GGUF Q4_K (llama):  {gguf_ms:>6.1}ms  ({:.0} tok/s)", 1000.0 / gguf_ms);
         println!("  Q4_KF (pre-baked):  {q4kf_ms:>6.1}ms  ({:.0} tok/s)", 1000.0 / q4kf_ms);
         println!("  Q4_K  (runtime):    {q4k_ms:>6.1}ms  ({:.0} tok/s)", 1000.0 / q4k_ms);
         println!("  Q4_KF speedup:      {:.2}x vs Q4_K", q4k_ms / q4kf_ms);

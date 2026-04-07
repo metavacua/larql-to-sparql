@@ -8,214 +8,189 @@ Provides a `ComputeBackend` trait that abstracts all hardware-specific matrix op
 
 ## Backends
 
-| Backend | Feature flag | f32 matmul | Q4 fused ops | Multi-layer pipeline |
-|---------|-------------|------------|--------------|---------------------|
+| Backend | Feature flag | f32 matmul | Quantized ops | Pipeline |
+|---------|-------------|------------|---------------|---------|
 | **CPU** | (always) | BLAS (Accelerate AMX) | C kernel (ARM vdotq_s32) | Sequential |
-| **Metal** | `--features metal` | Tiled compute shaders | Simdgroup Q4×Q8 (v4 kernel) | One command buffer |
+| **Metal** | `--features metal` | Tiled shaders | Simdgroup Q4/Q4_K/Q6_K/Q8 | One command buffer |
 | **CUDA** | (planned) | — | — | — |
 
 ## Performance vs Ollama (M3 Max, Gemma 3 4B)
 
-Ollama gemma3:4b Q4_K_M: **10.1ms/token = 99 tok/s** (decode, warm)
-
 ```
-Operation                      CPU         Metal       Ollama      Notes
-─────────────────────────────  ──────────  ──────────  ──────────  ──────
-Q4 matvec [10240,2560]         0.93ms      0.57ms      ~0.4ms     FFN projection (1.4x)
-Q4 pair batch (6 pos)          11.42ms     1.54ms      —          gate+up fused (7x)
-Q4 vecmat [10240,2560]         1.30ms      1.68ms      —          down projection
-Multi-layer Q4 FFN (21L)       —           8.4ms       ~5ms       one cmd buffer (1.7x)
-Full pipeline (21L, norms)     —           25.9ms      ~10ms      attn+FFN+norms+residuals
-f32 logits [262K,2560]         24.0ms      28.4ms      —          f32 BLAS
-Q4 logits [262K,2560]          —           0.57ms      ~1ms       FASTER than Ollama
-f32 attn proj [2560²]          0.68ms      1.11ms      —          CPU BLAS wins (small)
-Gate KNN [10240,2560]          0.91ms      0.90ms      —          vindex scoring
+Ollama gemma3:4b:       9.7–10.3ms/token = 97–103 tok/s (decode, 34 layers)
+LARQL Q4_K (21 layers):     16.9ms/token =  59 tok/s (decode, KV cached)
+LARQL Q4_K (34 layers):     27.3ms/token =  37 tok/s (decode, KV cached)
+LARQL Q8   (21 layers):     24.3ms/token =  41 tok/s (decode, KV cached)
 ```
 
-### Quantization strategy (matching Ollama Q4_K_M)
+### Component Breakdown (34 layers, isolated — `profile_components`)
 
-```
-Component       Ollama          LARQL           Format
-Attn Q/K/O      Q4_K            Q4_K            q4k_matvec shader
-Attn V          Q6_K            Q6_K            q6k_matvec shader
-FFN gate/up     Q4_K            Q4_K (Q4_0)     q4_matvec_v4 shader
-FFN down        Q6_K            Q6_K (Q4_0)     q6k_matvec / q4_f32_matvec
-Embeddings      Q6_K            Q6_K            —
-Norms           F32             F32             rms_norm shader
-```
+| Component | Total | Per-Layer | % | Notes |
+|-----------|-------|-----------|---|-------|
+| Q4 FFN (gate+up+geglu+down) | 13.0ms | 0.382ms | 36% | Dominant cost |
+| KV cache append+attend | 10.5ms | 0.308ms | 29% | kv_attention shader |
+| Norms (2×) | 10.5ms | 0.309ms | 29% | Dispatch overhead, not compute |
+| **Q4_K QKV fused** | **1.3ms** | **0.037ms** | **3.5%** | **Fast — not the bottleneck** |
+| Q4_K O projection | 0.8ms | 0.024ms | 2% | |
+| Residual add | 0.3ms | 0.010ms | 1% | |
 
-**Component parity with Ollama.** The remaining gap is pipeline integration:
-- Ollama's full pipeline is tighter (C++ vs Rust dispatch overhead)
-- Ollama uses Q4_K_M/Q6_K (group scaling) vs our Q4_0/Q8_0 (per-block scaling)
-- Our Q4 logits are **faster** than Ollama (0.57ms vs ~1ms)
+### Raw Kernel Speed (`profile_raw_dispatch`)
 
-## Shaders (26 Metal kernels, all compiled and tested)
+| Kernel | Time | Per-Layer | vs Ollama |
+|--------|------|-----------|-----------|
+| Q4_K QKV (34L, 1 cmd) | 1.6ms | 0.048ms | **6.3x faster than Ollama's entire layer** |
+| Q4_0 v4 matvec [10240,2560] | 0.26ms | — | 57 GB/s production FFN kernel |
+| Q8 fused QKV (1 dispatch) | 0.51ms | — | 2.5x vs separate dispatches |
 
-| Shader | Purpose | Status |
-|--------|---------|--------|
-| `sgemm` | f32 tiled matmul C=A×B | production |
-| `sgemm_transb` | f32 tiled matmul C=A×B^T | production |
-| `q4_matvec` | Q4×Q8 simdgroup (v1) | production |
-| `q4_matvec_v2` | Q4×f32, 4 rows/thread | experimental |
-| `q4_matvec_v3` | Q4×f32, 8 rows unrolled | experimental |
-| `q4_matvec_v4` | Q4×Q8 uint32 wide loads (**production**, 0.69ms) | production |
-| `q4_matvec_v5` | Q4×Q8, 256 rows/TG | experimental |
-| `q4_vecmat` | Q4 scatter-accumulate | production |
-| `q4_f32_matvec` | Q4×f32 for transposed down | production |
-| `q4_sparse_matvec` | Sparse Q4 by index (walk) | production |
-| `q8_matvec` | Q8×Q8 (V projection) | production |
-| `geglu_silu` | Element-wise SiLU gate | production |
-| `quantize_q8` | f32→Q8 (layer chaining) | production |
-| `residual_copy/add/rms_norm` | Buffer ops | production |
-| `causal_attention` | Basic causal (seq≤64) | production |
-| `kv_attention` | KV-cached GQA decode | production |
-| `kv_cache_append` | Append K/V to cache | production |
-| `rope_apply` | Rotary position embeddings | **new**, tested |
-| `fused_attention` | Full GQA: RoPE+QK-norm+softcap+causal | **new**, tested |
-| `q4k_matvec` | Q4_K super-block matvec (Ollama format) | **new**, tested |
-| `q6k_matvec` | Q6_K super-block matvec (V proj, FFN down) | **new**, tested |
-| `q8_qkv_proj` | Fused Q+K+V projection (simdgroup) | **new**, tested |
-| `q8_proj_rope` | Single Q8 projection (O proj) | **new** |
-| `rms_norm_q8` | Fused norm + Q8 quantize | **new**, tested |
-| `residual_norm` | Fused residual + norm | **new**, tested |
-| `residual_norm_q8` | Fused residual + norm + Q8 | **new**, tested |
+### Path to Parity
 
-## Quick start
+The kernel is already faster than Ollama. The gap is in per-dispatch overhead (5–7 encoder creations per layer × 34 layers) and FFN cost. Two paths to close:
+
+1. **Merge dispatches**: norm+QKV+attend+O+FFN in 1 encoder per layer → save ~8ms
+2. **Cache L0-12**: compute only 8 entity-dependent layers → 59 × 21/8 = **155 tok/s**
+
+## Shaders (28 Metal kernels)
+
+| Category | Kernels | Production |
+|----------|---------|------------|
+| f32 matmul | sgemm, sgemm_transb | Tiled 32×32 |
+| Q4_0 matvec | v1, v2, v3, **v4** (prod), v5, sparse | v4: uint32 wide loads, 61 GB/s |
+| Q4_K/Q6_K | q4k_matvec, q4k_qkv_proj, q4kf_qkv_proj, q6k_matvec | Fused QKV, sub-block lanes |
+| Q8 | q8_matvec, q8_qkv_proj, q8_proj_rope | Fused QKV, simdgroup reduction |
+| Attention | fused_attention (RoPE+GQA+softcap), causal, kv_attention, kv_append | skip_rope flag for prefill |
+| Element-wise | geglu, rms_norm, residual_add, residual_inject, rope, quantize_q8 | |
+| Fused ops | rms_norm_q8, residual_norm, residual_norm_q8 | Multi-op fusion |
+| Experimental | turboquant_encode/decode, graph_walk_knn | |
+
+## Safe Buffer Access
+
+All Metal buffer reads go through one audited function with null/size checks:
 
 ```rust
-use larql_compute::{ComputeBackend, default_backend, cpu_backend};
+// Replaces 13 previous unsafe { from_raw_parts } sites
+pub fn read_buffer_f32(buf: &metal::Buffer, len: usize) -> Vec<f32>
+```
 
-// Auto-detect best backend (Metal if available, else CPU)
+## Quick Start
+
+```rust
+use larql_compute::{ComputeBackend, default_backend};
+
 let backend = default_backend();
 println!("Using: {} ({})", backend.name(), backend.device_info());
 
 // f32 matmul
 let c = backend.matmul_transb(a.view(), b.view());
 
-// Q4 fused operations
-if backend.has_q4() {
-    let scores = backend.q4_matvec(&q4_data, &q8_x, &q8_scales, rows, hidden);
-}
+// Q4_K matvec (Ollama-compatible format)
+let scores = backend.q4k_matvec(&q4k_data, &x, rows, hidden);
 
-// Multi-layer Q4 FFN (one command buffer, 8.6ms for 21 layers)
-let result = backend.multi_layer_q4_ffn(&layers_q4, &x, inter, hidden);
+// KV-cached decode (one token through all layers)
+let h = backend.decode_token(&layers, &x, hidden, inter, q_dim, kv_dim,
+    num_q_heads, num_kv_heads, head_dim, rope_base);
 
-// Full pipeline: attention + FFN for all layers (10.5ms for 21 layers)
-let result = backend.full_pipeline_q4(&layers, &x, hidden, inter, q_dim, kv_dim);
-
-// Vector operations (BLAS-backed)
-use larql_compute::{dot, norm, cosine};
-let similarity = cosine(&a_vec.view(), &b_vec.view());
-
-// Q4 quantization utility
-use larql_compute::cpu::q4::quantize_q4_0;
-let q4_data = quantize_q4_0(&f32_weights);
+// GPU prefill (seq>1, populates KV cache)
+let h = backend.prefill_q4(&layers, &x, hidden, inter, q_dim, kv_dim,
+    seq_len, num_q_heads, num_kv_heads, head_dim, rope_base, qk_norm, softcap);
 ```
 
 ## Architecture
 
 ```
 src/
-  lib.rs                    — crate root, ComputeBackend trait, factory functions
-  backend.rs                — trait definition + helper functions
+  lib.rs              QuantFormat, QuantWeight, FullPipelineLayer, re-exports
+  backend.rs          ComputeBackend trait (15 methods)
 
   cpu/
-    mod.rs                  — CpuBackend struct + trait impl
-    ops/
-      f32_matmul.rs         — BLAS sgemm/sgemm_transb       (3 tests)
-      q4_matvec.rs          — C kernel Q4×Q8 matvec          (2 tests)
-      q4_vecmat.rs          — C kernel Q4 vecmat             (2 tests)
-      q4_common.rs          — Q4/Q8 quantize, C FFI decls    (7 tests)
-      q8_matvec.rs          — Q8 matvec + weight quantizer   (2 tests)
-      vector.rs             — dot, norm, cosine similarity    (6 tests)
-      geglu.rs              — SiLU gate activation            (3 tests)
-      attention.rs          — Causal attention (fused QKV)    (3 tests)
+    mod.rs            CpuBackend (BLAS f32 + C Q4 + Q4_K/Q6_K reference)
+    ops/              f32_matmul, q4_matvec, q4_vecmat, q4k_matvec, q6k_matvec,
+                      q4_common (quantizers: Q4_0, Q4_K, Q4_KF, Q6_K, GGUF Q4_K),
+                      q8_matvec, vector, attention, geglu
 
-  metal/                    (feature-gated: --features metal)
-    mod.rs                  — MetalBackend struct + constructor + accessors
-    trait_impl.rs           — impl ComputeBackend (all trait methods)
-    direct_ops.rs           — Q4 direct dispatch (matvec, vecmat, pair_batch)
-    decode.rs               — KV cache decode pipeline
-    pipeline.rs             — Full pipeline + multi-layer FFN batch
-    shaders/                — 26 Metal Shading Language kernels (one file each)
-    ops/                    — GPU dispatch modules (one file each)
-    buffers.rs              — GPU buffer cache (zero-copy mmap)
-    calibrate.rs            — CPU vs GPU auto-calibration
-    f32_ops.rs              — f32 dispatch with GPU/CPU routing
+  metal/              (feature-gated: --features metal)
+    mod.rs            MetalBackend (28 pipeline states, KV cache)
+    trait_impl.rs     ComputeBackend dispatch (Q4_K/Q8 dual-path)
+    decode.rs         KV-cached decode (norm→QKV→attend→O→FFN per layer)
+    prefill.rs        GPU prefill for seq>1
+    buffers.rs        GPU buffer cache + read_buffer_f32
+    shaders/          28 Metal kernels (one file each)
+    ops/              GPU dispatch helpers
 
-  csrc/
-    q4_dot.c                — C kernel: ARM vdotq_s32 + scalar fallback
+  csrc/q4_dot.c       ARM NEON Q4 kernel
 ```
 
 ## Tests
 
 ```bash
-# CPU tests (28 unit + 6 integration + 2 doc = 36 tests)
+# CPU only (38 tests)
 cargo test -p larql-compute
 
-# CPU + Metal tests (67 tests)
+# CPU + Metal (74 tests)
 cargo test -p larql-compute --features metal
 ```
 
-Test coverage:
-- Q4 quantize: output size, zero input, round-trip accuracy, alignment, end-to-end matvec
-- Q4 matvec: CPU kernel, Metal v4, zero input, small matrix, Metal vs CPU
-- Q4 vecmat: CPU kernel, Metal, zero activation
-- Q4 sparse: Metal sparse matches dense at selected indices
-- Q8 matvec: CPU kernel, Q8 vs f32 cosine > 0.999, Metal nonzero
-- Vector ops: dot product, norm, cosine similarity (identical, orthogonal, opposite)
-- GEGLU: SiLU basic, Metal vs CPU cross-validation
-- Residual: Metal add correctness
-- Attention: single token, causal mask, output shape
-- RoPE: Metal shader matches CPU reference implementation
-- Fused attention: single token + multi-token GQA with RoPE, verified vs CPU
-- Q4_K matvec: super-block dequant + matvec, nonzero output verified
-- Q6_K matvec: super-block dequant + matvec, nonzero output verified
-- Batch: Metal pair_batch matches individual calls
-- Multi-layer: 21-layer pipeline produces output (zero-copy)
-- Shader compilation: all 20 kernel functions exist
-- Buffer cache: pointer reuse, zero-copy mmap
-- Trait dispatch: Metal implements ComputeBackend correctly
+74 tests covering: quantization round-trips, cross-backend correctness (Metal vs CPU with tolerance), shader compilation, fused attention, KV cache, pipeline output verification.
 
-## Benchmarks
+## Examples
+
+### Demos
 
 ```bash
-# All operations at representative sizes (CPU + Metal side by side)
-cargo run --release -p larql-compute --features metal --example bench_full
+# Architecture overview — guided tour of all major design decisions
+cargo run --release --features metal -p larql-compute --example demo_architecture
 
-# Full 21-layer pipeline (all Q4, one submission) — compare with Ollama
-cargo run --release -p larql-compute --features metal --example bench_full_pipeline
-
-# Kernel variant comparison (v1-v5 + sparse)
-cargo run --release -p larql-compute --features metal --example bench_kernel_variants
-
-# Q4 attention projections (single + 21-layer)
-cargo run --release -p larql-compute --features metal --example bench_q4_attention
-
-# Token generation with KV cache
-cargo run --release -p larql-compute --features metal --example bench_generation
-
-# Raw memory bandwidth test
-cargo run --release -p larql-compute --example bench_bandwidth -- <file>
-
-# Verify all 20 shaders compile
-cargo run --release -p larql-compute --features metal --example test_shader_compile
-
-# Criterion statistical benchmarks
-cargo bench -p larql-compute --bench matmul
+# Basic usage — backend detection, matmul, Q4 dispatch
+cargo run --release --features metal -p larql-compute --example demo_basic
 ```
 
-## Design principles
+### Benchmarks: Compare (us vs Ollama)
 
-1. **One file per operation** — every shader and dispatch function lives in its own file
-2. **Trait-based dispatch** — callers use `ComputeBackend` exclusively
-3. **Zero-copy for mmap** — `newBufferWithBytesNoCopy` on Apple Silicon unified memory
-4. **Cached vs transient** — weight buffers cached by pointer, input/output allocated fresh
+```bash
+cargo run --release --features metal -p larql-compute --example compare_decode     # Q4_K vs Q8, KV cached
+cargo run --release --features metal -p larql-compute --example compare_generation  # Prefill + decode
+cargo run --release --features metal -p larql-compute --example compare_pipeline    # Attention + FFN breakdown
+cargo run --release --features metal -p larql-compute --example compare_formats     # Q4_KF vs Q4_K vs GGUF
+```
+
+### Benchmarks: Profile (bottleneck analysis)
+
+```bash
+cargo run --release --features metal -p larql-compute --example profile_components   # Every op isolated over 34 layers
+cargo run --release --features metal -p larql-compute --example profile_operations   # CPU vs Metal per-operation
+cargo run --release --features metal -p larql-compute --example profile_kernels      # Q4 v1-v5, sparse, attention
+cargo run --release --features metal -p larql-compute --example profile_raw_dispatch # Pure kernel, zero overhead
+cargo run --release --features metal -p larql-compute --example profile_kv_cache     # Attention vs cache length
+cargo run --release --features metal -p larql-compute --example profile_bandwidth    # Raw memory throughput
+```
+
+### Benchmarks: Best Run
+
+```bash
+cargo run --release --features metal -p larql-compute --example best_pipeline       # Full pipeline, 1 cmd buffer
+cargo run --release --features metal -p larql-compute --example best_multi_layer     # Multi-layer batch
+```
+
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, component profiling, optimization history |
+| [ROADMAP.md](ROADMAP.md) | Planned optimizations, performance targets |
+| [docs/adr/](docs/adr/) | 8 architectural decision records (design choices, algorithm origins) |
+| [docs/shaders.md](docs/shaders.md) | All 28 Metal kernels with origin, performance, parameters |
+| [docs/quantization-formats.md](docs/quantization-formats.md) | Q4_0, Q4_K, Q4_KF, Q6_K, Q8_0 format specs |
+| [docs/decode-pipeline.md](docs/decode-pipeline.md) | Decode data flow, dual-path architecture, KV cache |
+
+## Design Principles
+
+1. **Trait-based dispatch** — callers use `ComputeBackend` exclusively
+2. **One file per kernel** — 28 shaders, each in its own file
+3. **Zero-copy mmap** — `newBufferWithBytesNoCopy` for weight buffers
+4. **Safe by default** — `read_buffer_f32` with bounds checking
 5. **Feature-gated** — Metal with `--features metal`, CPU always available
-6. **Auto-calibration** — Metal benchmarks CPU vs GPU at startup
-7. **Batch API** — multi-layer pipeline encodes all ops in one command buffer
-8. **Shared utilities** — `quantize_q4_0` and `quantize_to_q8` public, no duplication
-9. **Mixed precision** — Q4 for projections + FFN, Q8 for V, f32 for attention scores
+6. **Auto-calibration** — benchmarks CPU vs GPU at startup for routing threshold
+7. **Dual-path decode** — auto-detects Q4_K vs Q8 weights, uses optimal pipeline
+8. **GGUF-compatible** — Q4_K/Q6_K formats match Ollama's quantization
 
 ## License
 

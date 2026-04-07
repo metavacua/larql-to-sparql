@@ -1,7 +1,7 @@
 //! Accuracy suite runner — produces the video frame table.
 //!
 //! Runs all 5 tests across all strategies and outputs:
-//! ```
+//! ```text
 //!                     Top-1    KL div    Gen stable    Needle@32K
 //! Standard KV         100%     0.0       baseline      100%
 //! TurboQuant 4-bit    ~99%     ~0.01     ~10 tokens    ~95%

@@ -15,7 +15,7 @@ impl MetalBackend {
         let dummy_norm = vec![1.0f32; hidden];
         // Convert old LayerWeights (Q4 attention) to new FullPipelineLayer (Q8 attention)
         // For backward compat: treat Q4 data as Q8 (wrong but benchmark-only path)
-        let dummy_scales = vec![1.0f32; hidden * hidden / 32]; // oversized, safe
+        let _dummy_scales = vec![1.0f32; hidden * hidden / 32]; // oversized, reserved for Q8 path
         let full_layers: Vec<crate::FullPipelineLayer> = layers.iter().map(|l| {
             crate::FullPipelineLayer {
                 wq: crate::QuantWeight { data: l.wq_q4, scales: None, format: crate::QuantFormat::Q4_0 },
