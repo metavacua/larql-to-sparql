@@ -95,14 +95,15 @@ Grid: 8 rows per TG, 256 threads
 ## Attention
 
 ### fused_attention.rs — `fused_attention` (PRODUCTION)
-**Full GQA attention in one kernel.** RoPE (split-half) + QK-norm (optional, Gemma3) + GQA (grouped query) + softcap (optional, Gemma2) + causal mask + softmax + V weighted sum.
+**Full GQA attention in one kernel.** RoPE (split-half, partial rotation) + QK-norm (optional, Gemma3/4) + GQA (grouped query) + softcap (optional, Gemma2/4) + causal mask + softmax + V weighted sum.
 
-One threadgroup per (query_head, query_position). `skip_rope` flag (buffer 12) allows caller to pre-apply RoPE for prefill KV cache population.
-Origin: LARQL original.
+One threadgroup per (query_head, query_position). `skip_rope` flag (buffer 12) allows caller to pre-apply RoPE for prefill KV cache population. `rotary_dim` (buffer 13) controls partial rotation — only the first `rotary_dim` dimensions of each head get RoPE; the rest pass through unchanged (Gemma 4 global layers use 25% rotation). Pass 0 for full rotation.
+Origin: LARQL original. See [ADR-007](adr/007-fused-attention-skip-rope.md) and [ADR-010](adr/010-partial-rope-rotary-dim.md).
 
 ```
 Input: Q[seq, num_q*hd], K[seq, num_kv*hd], V[seq, num_kv*hd]
 Output: out[seq, num_q*hd]
+Buffers: 0-3 data, 4-8 dims/scale, 9 rope_base, 10 use_qk_norm, 11 softcap, 12 skip_rope, 13 rotary_dim
 Causal: scores limited to positions 0..=qi
 Threadgroup: float tg_scores[4096] (max seq_len)
 ```
@@ -114,7 +115,7 @@ Basic causal attention (seq≤64). Used by full_layer benchmark. Simpler than fu
 KV-cached decode attention. One query attends against full cached K/V (all previous positions). One threadgroup per query head.
 
 ### rope.rs — `rope_apply`
-Standalone RoPE (split-half pairing). Applies position-dependent rotation to [seq_len, dim] in-place. Used by prefill pipeline to pre-RoPE K for KV cache population.
+Standalone RoPE (split-half pairing) with partial rotation support. Applies position-dependent rotation to [seq_len, dim] in-place. `rotary_dim` (buffer 3) controls how many dimensions are rotated — 0 means full `dim`. Dimensions beyond `rotary_dim` pass through unchanged. See [ADR-010](adr/010-partial-rope-rotary-dim.md).
 
 ## Element-wise Operations
 

@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::architectures::deepseek::DeepSeekArch;
 use crate::architectures::gemma2::Gemma2Arch;
 use crate::architectures::gemma3::Gemma3Arch;
+use crate::architectures::gemma4::Gemma4Arch;
 use crate::architectures::generic::GenericArch;
 use crate::architectures::gpt_oss::GptOssArch;
 use crate::architectures::granite::GraniteArch;
@@ -54,6 +55,7 @@ pub fn detect_from_json(config: &serde_json::Value) -> Box<dyn ModelArchitecture
 
     match model_type {
         // Gemma family
+        t if t.starts_with("gemma4") => Box::new(Gemma4Arch::from_config(model_config)),
         t if t.starts_with("gemma3") => Box::new(Gemma3Arch::from_config(model_config)),
         t if t.starts_with("gemma2") || t == "gemma" => Box::new(Gemma2Arch::from_config(model_config)),
         // Llama family
@@ -90,7 +92,7 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         .to_string();
 
     // Pick defaults based on model type.
-    let is_gemma = model_type.starts_with("gemma3") || model_type.starts_with("gemma2");
+    let is_gemma = model_type.starts_with("gemma");
     let rope_default = if is_gemma { 1_000_000.0 } else { 10_000.0 };
 
     let num_layers = text_config["num_hidden_layers"].as_u64().unwrap_or(32) as usize;
@@ -154,6 +156,18 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let attention_multiplier = text_config["attention_multiplier"].as_f64();
     let logits_scaling = text_config["logits_scaling"].as_f64();
 
+    // Per-layer attention geometry (Gemma 4 style)
+    let global_head_dim = text_config["global_head_dim"].as_u64().map(|v| v as usize);
+    let num_global_kv_heads = text_config["num_global_key_value_heads"]
+        .as_u64()
+        .map(|v| v as usize);
+    let partial_rotary_factor = text_config["partial_rotary_factor"].as_f64();
+    // Sliding window pattern: Gemma 4 uses "sliding_window_pattern" in config.json.
+    // Fallback: infer from model family defaults.
+    let sliding_window_pattern = text_config["sliding_window_pattern"]
+        .as_u64()
+        .map(|v| v as usize);
+
     ModelConfig {
         model_type,
         num_layers,
@@ -179,6 +193,10 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         residual_multiplier,
         attention_multiplier,
         logits_scaling,
+        global_head_dim,
+        num_global_kv_heads,
+        partial_rotary_factor,
+        sliding_window_pattern,
     }
 }
 
@@ -747,6 +765,113 @@ mod tests {
 
         let arch = detect_from_json(&config);
         assert_eq!(arch.family(), "qwen2_moe");
+    }
+
+    #[test]
+    fn test_detect_gemma4_31b() {
+        // Real Gemma 4 31B config — multimodal wrapper with text_config
+        let config = serde_json::json!({
+            "model_type": "gemma4",
+            "text_config": {
+                "model_type": "gemma4_text",
+                "hidden_size": 5376,
+                "intermediate_size": 21504,
+                "num_hidden_layers": 60,
+                "num_attention_heads": 32,
+                "num_key_value_heads": 16,
+                "head_dim": 256,
+                "global_head_dim": 512,
+                "num_global_key_value_heads": 4,
+                "vocab_size": 262144,
+                "rope_theta": 1000000.0,
+                "rope_local_base_freq": 10000.0,
+                "sliding_window": 1024,
+                "partial_rotary_factor": 0.25,
+                "final_logit_softcapping": 30.0,
+                "query_pre_attn_scalar": 256
+            }
+        });
+
+        let arch = detect_from_json(&config);
+        assert_eq!(arch.family(), "gemma4");
+        assert_eq!(arch.config().num_layers, 60);
+        assert_eq!(arch.config().hidden_size, 5376);
+        assert_eq!(arch.config().head_dim, 256);
+        assert_eq!(arch.config().global_head_dim, Some(512));
+        assert_eq!(arch.config().num_global_kv_heads, Some(4));
+
+        // Sliding layer (layer 0): uses base head_dim and kv_heads
+        assert!(arch.is_sliding_window_layer(0));
+        assert_eq!(arch.head_dim_for_layer(0), 256);
+        assert_eq!(arch.num_kv_heads_for_layer(0), 16);
+        assert_eq!(arch.num_q_heads_for_layer(0), 32);
+        assert_eq!(arch.rotary_fraction_for_layer(0), 1.0);
+
+        // Global layer (layer 5): uses global_head_dim and global kv_heads
+        assert!(!arch.is_sliding_window_layer(5));
+        assert_eq!(arch.head_dim_for_layer(5), 512);
+        assert_eq!(arch.num_kv_heads_for_layer(5), 4);
+        // Q heads at global layer: (32 * 256) / 512 = 16
+        assert_eq!(arch.num_q_heads_for_layer(5), 16);
+        assert_eq!(arch.rotary_fraction_for_layer(5), 0.25);
+
+        // RoPE bases
+        assert_eq!(arch.rope_base_for_layer(0), 10_000.0); // sliding
+        assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0); // global
+
+        // Gemma family traits
+        assert_eq!(arch.norm_weight_offset(), 1.0);
+        assert_eq!(arch.embed_scale(), (5376.0f32).sqrt());
+        assert!(arch.has_post_norms());
+        assert!(arch.attn_q_norm_key(0).is_some());
+        assert_eq!(arch.final_logit_softcapping(), Some(30.0));
+
+        // Layer scalar key
+        assert_eq!(
+            arch.layer_scalar_key(5),
+            Some("layers.5.layer_scalar".to_string())
+        );
+
+        // Per-layer attention scale uses per-layer head_dim
+        let scale_sliding = arch.attention_scale_for_layer(0);
+        let scale_global = arch.attention_scale_for_layer(5);
+        // query_pre_attn_scalar=256 overrides both
+        assert_eq!(scale_sliding, (256.0f64).powf(-0.5));
+        assert_eq!(scale_global, (256.0f64).powf(-0.5));
+    }
+
+    #[test]
+    fn test_detect_gemma4_e2b() {
+        let config = serde_json::json!({
+            "model_type": "gemma4",
+            "text_config": {
+                "model_type": "gemma4_text",
+                "hidden_size": 1536,
+                "intermediate_size": 6144,
+                "num_hidden_layers": 35,
+                "num_attention_heads": 8,
+                "num_key_value_heads": 1,
+                "head_dim": 256,
+                "vocab_size": 262144,
+                "rope_theta": 1000000.0,
+                "sliding_window": 512,
+                "sliding_window_pattern": 5,
+                "final_logit_softcapping": 30.0
+            }
+        });
+
+        let arch = detect_from_json(&config);
+        assert_eq!(arch.family(), "gemma4");
+        assert_eq!(arch.config().num_layers, 35);
+        // E2B: pattern=5 means layer 4, 9, 14, ... are global
+        assert!(arch.is_sliding_window_layer(0));
+        assert!(arch.is_sliding_window_layer(3));
+        assert!(!arch.is_sliding_window_layer(4)); // global
+        assert!(arch.is_sliding_window_layer(5));
+        assert!(!arch.is_sliding_window_layer(9)); // global
+        // No global_head_dim → all layers use head_dim=256
+        assert_eq!(arch.head_dim_for_layer(0), 256);
+        assert_eq!(arch.head_dim_for_layer(4), 256);
     }
 
     #[test]

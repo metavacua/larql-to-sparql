@@ -128,6 +128,8 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
                         tensors.insert(key, arr.into_shared());
                     }
                     1 => { vectors.insert(key, data); }
+                    // 0D scalar tensors (e.g., layer_scalar) → store as 1-element vector
+                    0 => { vectors.insert(key, data); }
                     _ => {}
                 }
             }

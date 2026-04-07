@@ -119,7 +119,7 @@ pub fn dispatch_prefill(
     q6k_matvec_pipeline: &ComputePipelineState,
     rms_norm_pipeline: &ComputePipelineState,
     residual_add_pipeline: &ComputePipelineState,
-    rope_pipeline: &ComputePipelineState,
+    _rope_pipeline: &ComputePipelineState,
     _kv_cache: &mut super::ops::kv_cache::KVCache,
     layers: &[crate::FullPipelineLayer],
     x: &[f32],
@@ -209,68 +209,12 @@ pub fn dispatch_prefill(
             enc.end_encoding();
         }
 
-        // ── 3. Apply RoPE to Q and K separately ──
-        // RoPE on Q: [seq_len, q_dim] — grid: (q_dim/2, seq_len)
-        // But Q is [seq_len, num_q * head_dim], and RoPE operates per-head.
-        // The rope_apply kernel treats input as [seq_len, dim] and applies per-position.
-        // For multi-head, we need to apply per head. Since RoPE is the same for all heads
-        // at a given (position, dim_within_head), we can apply to the full q_dim treating
-        // it as dim=head_dim with num_q independent vectors per position.
-        // Actually the rope shader uses dim as the full second dimension. For GQA heads,
-        // head_dim is the right unit. Apply per head group:
-        // Simplification: apply rope to each head separately using buffer offsets.
-        for s in 0..seq_len {
-            for h in 0..num_q_heads {
-                let q_offset = ((s * q_dim + h * head_dim) * 4) as u64;
-                let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(rope_pipeline);
-                enc.set_buffer(0, Some(&q_out), q_offset);
-                let dim_val = head_dim as u32;
-                enc.set_bytes(1, 4, &dim_val as *const u32 as *const c_void);
-                enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
-                // For rope_apply, position is encoded in the grid.y
-                // But with offset, we're passing a single head's data starting at pos=0.
-                // We need the actual position `s` for correct rotation.
-                // The shader uses tid.y as position — so we dispatch 1 position
-                // and use a position-offset trick. Actually, rope_apply expects
-                // [seq_len, dim] and position = tid.y. If we pass the buffer at
-                // the head's offset, the shader sees [1, head_dim] with pos=0.
-                // We need pos=s. So dispatch with grid (head_dim/2, 1) won't work.
-                // Instead, apply RoPE to the full [seq_len, head_dim] per head.
-                enc.end_encoding();
-            }
-        }
-        // Actually the above is getting complicated. Let me use a simpler approach:
-        // Apply RoPE to Q and K using the full buffer with the original rope_apply shader.
-        // The shader expects [seq_len, dim] where dim is the stride.
-        // For Q: we have [seq_len, num_q * head_dim]. RoPE should be applied per head.
-        // Since all heads use the same head_dim and same position, we can treat
-        // num_q * head_dim as dim for the shader — but the rotation pairs are
-        // (i, i + head_dim/2), not (i, i + num_q*head_dim/2).
-        // This won't work directly. Instead, apply RoPE manually per head.
-        // But this is too many dispatches. Better approach: just use skip_rope=0
-        // in fused_attention (let it apply RoPE internally), and apply RoPE
-        // ONLY to K separately for KV cache population.
-
-        // ── 3b. Apply RoPE to K for KV cache ──
-        // K is [seq_len, num_kv * head_dim]. Apply rope per kv head.
-        for h in 0..num_kv_heads {
-            // RoPE to K[*, h*head_dim..(h+1)*head_dim] for all positions
-            // We can't easily do this with buffer offsets since stride != head_dim.
-            // Alternative: use fused_attention with skip_rope=0 (it applies RoPE internally),
-            // then apply RoPE to K separately for cache.
-            // For K: create a temporary contiguous buffer per head, apply rope, copy back.
-            // This is expensive. Better: just populate KV cache from CPU after the command buffer.
-            let _ = h; // suppress warning
-        }
-
-        // PRACTICAL APPROACH: Use fused_attention with skip_rope=0 (applies RoPE internally).
-        // After the command buffer completes, populate KV cache from CPU using the un-RoPE'd
-        // K/V buffers + CPU RoPE. This is simpler and the CPU RoPE cost is negligible
-        // for seq=6 prefill. The expensive part (Q4 projections + FFN) is on GPU.
-        //
-        // For this first implementation: just run fused_attention normally (skip_rope=0).
-        // KV cache will be populated after all GPU work completes.
+        // ── 3. RoPE ──
+        // RoPE is applied inside fused_attention (skip_rope=0). The standalone
+        // rope_apply shader is available for models needing partial rotation
+        // (rotary_dim < head_dim), but the current prefill pipeline lets the
+        // fused kernel handle it. KV cache K vectors get CPU RoPE after the
+        // command buffer completes (negligible cost at prefill seq lengths).
 
         // ── 4. Fused attention with RoPE (skip_rope=0) ──
         let attn_out = bufs.output((q_dim * seq_len * 4) as u64);
@@ -298,6 +242,8 @@ pub fn dispatch_prefill(
             enc.set_bytes(10, 4, &qknorm_val as *const u32 as *const c_void);
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
             enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
+            let rotary_dim_val = 0u32; // 0 = full head_dim rotation
+            enc.set_bytes(13, 4, &rotary_dim_val as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
                 MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
                 MTLSize::new(256, 1, 1),
@@ -345,12 +291,18 @@ pub fn dispatch_prefill(
                 enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 enc.end_encoding();
             }
-            // FFN norm
+            // FFN norm — use pre_ffn_norm if available (Gemma post-norm), else post_attn_norm
+            let ffn_norm_weight = if has_post_norms {
+                layers[l].pre_ffn_norm.map(|n| bufs.transient_from_f32(n))
+            } else {
+                None
+            };
+            let ffn_norm_buf = ffn_norm_weight.as_ref().unwrap_or(&post_attn_norm_bufs[l]);
             let enc = cmd.new_compute_command_encoder();
             let len_val = hidden as u32;
             enc.set_compute_pipeline_state(rms_norm_pipeline);
             enc.set_buffer(0, Some(&h_post_attn), h_off);
-            enc.set_buffer(1, Some(&post_attn_norm_bufs[l]), 0);
+            enc.set_buffer(1, Some(ffn_norm_buf), 0);
             enc.set_buffer(2, Some(&ffn_norm_out), h_off);
             enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
             enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
@@ -426,19 +378,57 @@ pub fn dispatch_prefill(
             enc.end_encoding();
         }
 
-        // ── 8. Post-FFN residual: h_new = h_post_attn + down_out ──
+        // ── 8. Post-FFN: norm (if post_norms) + residual ──
         let new_h = bufs.output(hidden_bytes * seq_len as u64);
         for s in 0..seq_len {
             let off = (s * hidden * 4) as u64;
-            let enc = cmd.new_compute_command_encoder();
-            let len_val = hidden as u32;
-            enc.set_compute_pipeline_state(residual_add_pipeline);
-            enc.set_buffer(0, Some(&h_post_attn), off);
-            enc.set_buffer(1, Some(&down_out), off);
-            enc.set_buffer(2, Some(&new_h), off);
-            enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
-            enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
-            enc.end_encoding();
+            if has_post_norms {
+                // Post-norm: norm(down_out[s]) then add to residual
+                if let Some(post_ffn_norm) = layers[l].post_ffn_norm {
+                    let post_ffn_buf = bufs.transient_from_f32(post_ffn_norm);
+                    let normed = bufs.output(hidden_bytes);
+                    // rms_norm with offset: read from down_out at position s
+                    let enc = cmd.new_compute_command_encoder();
+                    let len_val = hidden as u32;
+                    enc.set_compute_pipeline_state(rms_norm_pipeline);
+                    enc.set_buffer(0, Some(&down_out), off);
+                    enc.set_buffer(1, Some(&post_ffn_buf), 0);
+                    enc.set_buffer(2, Some(&normed), 0);
+                    enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
+                    enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.end_encoding();
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(residual_add_pipeline);
+                    enc.set_buffer(0, Some(&h_post_attn), off);
+                    enc.set_buffer(1, Some(&normed), 0);
+                    enc.set_buffer(2, Some(&new_h), off);
+                    enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.end_encoding();
+                } else {
+                    let enc = cmd.new_compute_command_encoder();
+                    let len_val = hidden as u32;
+                    enc.set_compute_pipeline_state(residual_add_pipeline);
+                    enc.set_buffer(0, Some(&h_post_attn), off);
+                    enc.set_buffer(1, Some(&down_out), off);
+                    enc.set_buffer(2, Some(&new_h), off);
+                    enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.end_encoding();
+                }
+            } else {
+                let enc = cmd.new_compute_command_encoder();
+                let len_val = hidden as u32;
+                enc.set_compute_pipeline_state(residual_add_pipeline);
+                enc.set_buffer(0, Some(&h_post_attn), off);
+                enc.set_buffer(1, Some(&down_out), off);
+                enc.set_buffer(2, Some(&new_h), off);
+                enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.end_encoding();
+            }
         }
 
         h_buf = new_h;

@@ -187,6 +187,19 @@ pub fn run_ffn(
     (h_out, activation)
 }
 
+/// Apply per-layer scalar multiplier if present (e.g., Gemma 4 layer_scalar).
+fn apply_layer_scalar(weights: &ModelWeights, h: &mut Array2<f32>, layer: usize) {
+    if let Some(key) = weights.arch.layer_scalar_key(layer) {
+        if let Some(scalars) = weights.vectors.get(&key) {
+            if let Some(&scalar) = scalars.first() {
+                if scalar != 1.0 {
+                    *h *= scalar;
+                }
+            }
+        }
+    }
+}
+
 /// Run a single transformer layer with the given FFN backend.
 fn run_layer_with_ffn(
     weights: &ModelWeights,
@@ -196,7 +209,8 @@ fn run_layer_with_ffn(
     capture_activation: bool,
 ) -> Option<(Array2<f32>, Option<Array2<f32>>)> {
     let h_post_attn = run_attention(weights, h, layer)?;
-    let (h_out, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
+    let (mut h_out, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
+    apply_layer_scalar(weights, &mut h_out, layer);
     Some((h_out, activation))
 }
 
@@ -210,7 +224,8 @@ fn run_layer_with_capture(
     capture_attention: bool,
 ) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<AttentionWeights>)> {
     let (h_post_attn, attn_weights) = run_attention_inner(weights, h, layer, capture_attention)?;
-    let (h_out, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
+    let (mut h_out, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
+    apply_layer_scalar(weights, &mut h_out, layer);
     Some((h_out, activation, attn_weights))
 }
 

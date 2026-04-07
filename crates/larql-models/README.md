@@ -48,6 +48,7 @@ let f32_back = half::decode_f16(&f16_bytes);
 
 | Family | Model Type | FFN | Expert Format |
 |--------|-----------|-----|---------------|
+| Gemma 4 | `gemma4` | Gated (GeGLU) | Dense (31B) / MoE (A4B) |
 | Gemma 3 | `gemma3` | Gated (GeGLU) | Dense |
 | Gemma 2 | `gemma2` | Gated (GeGLU) | Dense |
 | Llama | `llama` | Gated (SiLU) | Dense |
@@ -107,6 +108,7 @@ larql-models/src/
 │   └── mxfp4.rs        MXFP4 (GPT-OSS)
 └── architectures/
     ├── llama.rs        Llama 2/3
+    ├── gemma4.rs       Gemma 4 (per-layer head_dim, K=V, partial RoPE, layer_scalar)
     ├── gemma3.rs       Gemma 3
     ├── gemma2.rs       Gemma 2
     ├── mistral.rs      Mistral

@@ -27,7 +27,7 @@ impl MetalBackend {
                 down: crate::QuantWeight { data: l.down_t_q4, scales: None, format: crate::QuantFormat::Q4_0 },
                 input_norm: &dummy_norm, post_attn_norm: &dummy_norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 0.0, has_post_norms: false,
+                norm_offset: 0.0, has_post_norms: false, use_gelu_tanh: false,
             }
         }).collect();
         ops::full_pipeline::dispatch_full_pipeline(

@@ -430,6 +430,8 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
             let skip_rope_val = 0u32; // full_pipeline applies RoPE in-shader
             enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
+            let rotary_dim_val = 0u32; // 0 = full head_dim rotation
+            enc.set_bytes(13, 4, &rotary_dim_val as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
                 MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
                 MTLSize::new(256, 1, 1),

@@ -7,6 +7,7 @@
 pub mod deepseek;
 pub mod gemma2;
 pub mod gemma3;
+pub mod gemma4;
 pub mod generic;
 pub mod gpt_oss;
 pub mod granite;

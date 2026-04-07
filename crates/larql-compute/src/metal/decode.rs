@@ -252,8 +252,9 @@ impl MetalBackend {
                 enc.set_buffer(0, Some(&up_bufs[l]), 0);
                 enc.set_buffer(3, Some(&up_out), 0);
                 enc.dispatch_thread_groups(MTLSize::new(n_tgs_gate, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
-                // GEGLU in same encoder (depends on gate+up)
-                enc.set_compute_pipeline_state(&self.geglu_pipeline);
+                // GEGLU in same encoder — select activation based on model architecture
+                let geglu = if layers[l].use_gelu_tanh { &self.geglu_gelu_tanh_pipeline } else { &self.geglu_pipeline };
+                enc.set_compute_pipeline_state(geglu);
                 enc.set_buffer(0, Some(&gate_out), 0);
                 enc.set_buffer(1, Some(&up_out), 0);
                 enc.set_buffer(2, Some(&act_buf), 0);

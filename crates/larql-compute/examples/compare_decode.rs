@@ -92,7 +92,7 @@ fn main() {
                 down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                 input_norm: &ld.norm, post_attn_norm: &ld.norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 1.0, has_post_norms: false,
+                norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
             }
         }).collect();
 
@@ -123,7 +123,7 @@ fn main() {
                 down: larql_compute::QuantWeight { data: &ld.down_q4, scales: None, format: larql_compute::QuantFormat::Q4_0 },
                 input_norm: &ld.norm, post_attn_norm: &ld.norm,
                 pre_ffn_norm: None, post_ffn_norm: None,
-                norm_offset: 1.0, has_post_norms: false,
+                norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
             }
         }).collect();
 

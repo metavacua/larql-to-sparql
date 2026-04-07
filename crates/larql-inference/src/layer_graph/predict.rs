@@ -498,6 +498,7 @@ pub fn predict_honest(
                                 .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
                             norm_offset: arch.norm_weight_offset(),
                             has_post_norms: arch.has_post_norms(),
+                            use_gelu_tanh: arch.activation() == larql_models::Activation::GeluTanh,
                         }
                     }).collect();
 
@@ -529,8 +530,10 @@ pub fn predict_honest(
                         for j in 0..hidden { row[j] = result[j]; }
                         true
                     } else { false }
-                } else {
-                    // Prefill path (seq>1): GPU Q4 pipeline for all positions
+                } else if !arch.has_post_norms() {
+                    // Prefill path (seq>1): GPU Q4 pipeline for pre-norm models (Llama, Mistral)
+                    // Post-norm models (Gemma3) fall through to CPU — prefill.rs post-norm
+                    // handling needs further work (see ADR-009).
                     let x: Vec<f32> = h.as_slice().unwrap_or(&[]).to_vec();
 
                     if let Some(result) = backend.prefill_q4(
@@ -550,6 +553,8 @@ pub fn predict_honest(
 
                         true
                     } else { false }
+                } else {
+                    false // Post-norm models: fall through to CPU for correct prefill
                 }
             } else { false }
         } else { false }

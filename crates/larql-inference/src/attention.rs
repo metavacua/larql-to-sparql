@@ -12,28 +12,43 @@ pub fn apply_rope(
     head_dim: usize,
     rope_base: f64,
 ) -> Array2<f32> {
+    apply_rope_partial(x, num_heads, head_dim, rope_base, 1.0)
+}
+
+/// Apply RoPE with partial rotation: only the first `fraction` of each head's
+/// dimensions get rotary encoding. The rest pass through unchanged.
+/// fraction = 1.0 means full rotation (standard RoPE).
+pub fn apply_rope_partial(
+    x: &Array2<f32>,
+    num_heads: usize,
+    head_dim: usize,
+    rope_base: f64,
+    fraction: f64,
+) -> Array2<f32> {
     let seq_len = x.shape()[0];
     let mut out = x.clone();
 
-    let half_dim = head_dim / 2;
-    let inv_freq: Vec<f64> = (0..half_dim)
-        .map(|i| 1.0 / rope_base.powf(2.0 * i as f64 / head_dim as f64))
+    let rotary_dim = ((head_dim as f64 * fraction) as usize).max(2);
+    let half_rotary = rotary_dim / 2;
+    let inv_freq: Vec<f64> = (0..half_rotary)
+        .map(|i| 1.0 / rope_base.powf(2.0 * i as f64 / rotary_dim as f64))
         .collect();
 
     for pos in 0..seq_len {
         for h in 0..num_heads {
             let offset = h * head_dim;
-            for i in 0..half_dim {
+            for i in 0..half_rotary {
                 let theta = pos as f64 * inv_freq[i];
                 let cos_t = theta.cos() as f32;
                 let sin_t = theta.sin() as f32;
 
                 let x0 = x[[pos, offset + i]];
-                let x1 = x[[pos, offset + half_dim + i]];
+                let x1 = x[[pos, offset + half_rotary + i]];
 
                 out[[pos, offset + i]] = x0 * cos_t - x1 * sin_t;
-                out[[pos, offset + half_dim + i]] = x0 * sin_t + x1 * cos_t;
+                out[[pos, offset + half_rotary + i]] = x0 * sin_t + x1 * cos_t;
             }
+            // Dimensions beyond rotary_dim pass through unchanged (already in out via clone)
         }
     }
     out
@@ -63,14 +78,14 @@ pub fn run_attention_block(
     use crate::residual::rms_norm_heads;
 
     let arch = &*weights.arch;
-    let head_dim = weights.head_dim;
-    let num_q = weights.num_q_heads;
-    let num_kv = weights.num_kv_heads;
+    let head_dim = arch.head_dim_for_layer(layer);
+    let num_q = arch.num_q_heads_for_layer(layer);
+    let num_kv = arch.num_kv_heads_for_layer(layer);
     let reps = num_q / num_kv;
     let scale = if arch.attention_multiplier() != 1.0 {
         arch.attention_multiplier() as f64
     } else {
-        arch.attention_scale()
+        arch.attention_scale_for_layer(layer)
     };
     let seq_len = h.shape()[0];
     let norm_offset = arch.norm_weight_offset();
@@ -81,7 +96,13 @@ pub fn run_attention_block(
     // Q/K/V projections
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
     let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-    let w_v = weights.tensors.get(&arch.attn_v_key(layer)).unwrap();
+    // K=V sharing: if v_proj is missing, use K as V
+    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+    let w_v = if v_from_k {
+        w_k
+    } else {
+        weights.tensors.get(&arch.attn_v_key(layer)).unwrap()
+    };
     let w_o = weights.tensors.get(&arch.attn_o_key(layer)).unwrap();
 
     let mut q_full = dot_proj(&h_norm, w_q);
@@ -99,7 +120,7 @@ pub fn run_attention_block(
         add_bias(&mut v_full, bias);
     }
 
-    // Per-head QK norm (Qwen2/Granite)
+    // Per-head QK norm (Gemma, Qwen3)
     let qk_offset = weights.arch.qk_norm_weight_offset();
     let qk_norm_off = if qk_offset != 0.0 { qk_offset } else { norm_offset };
     let q_normed = match arch.attn_q_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
@@ -111,10 +132,11 @@ pub fn run_attention_block(
         None => k_full,
     };
 
-    // RoPE
+    // RoPE (with partial rotation support)
     let layer_rope_base = arch.rope_base_for_layer(layer);
-    let q_rope = apply_rope(&q_normed, num_q, head_dim, layer_rope_base);
-    let k_rope = apply_rope(&k_normed, num_kv, head_dim, layer_rope_base);
+    let rotary_frac = arch.rotary_fraction_for_layer(layer);
+    let q_rope = apply_rope_partial(&q_normed, num_q, head_dim, layer_rope_base, rotary_frac);
+    let k_rope = apply_rope_partial(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac);
 
     // GQA attention
     let softcap = arch.attn_logit_softcapping();
@@ -160,14 +182,14 @@ pub fn run_attention_block_gpu(
     use crate::residual::rms_norm_heads;
 
     let arch = &*weights.arch;
-    let head_dim = weights.head_dim;
-    let num_q = weights.num_q_heads;
-    let num_kv = weights.num_kv_heads;
+    let head_dim = arch.head_dim_for_layer(layer);
+    let num_q = arch.num_q_heads_for_layer(layer);
+    let num_kv = arch.num_kv_heads_for_layer(layer);
     let reps = num_q / num_kv;
     let scale = if arch.attention_multiplier() != 1.0 {
         arch.attention_multiplier() as f64
     } else {
-        arch.attention_scale()
+        arch.attention_scale_for_layer(layer)
     };
     let seq_len = h.shape()[0];
     let norm_offset = arch.norm_weight_offset();
@@ -176,7 +198,8 @@ pub fn run_attention_block_gpu(
 
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
     let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-    let w_v = weights.tensors.get(&arch.attn_v_key(layer)).unwrap();
+    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+    let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer)).unwrap() };
     let w_o = weights.tensors.get(&arch.attn_o_key(layer)).unwrap();
 
     // Q/K/V projections — GPU-accelerated
@@ -206,8 +229,9 @@ pub fn run_attention_block_gpu(
     };
 
     let layer_rope_base = arch.rope_base_for_layer(layer);
-    let q_rope = apply_rope(&q_normed, num_q, head_dim, layer_rope_base);
-    let k_rope = apply_rope(&k_normed, num_kv, head_dim, layer_rope_base);
+    let rotary_frac = arch.rotary_fraction_for_layer(layer);
+    let q_rope = apply_rope_partial(&q_normed, num_q, head_dim, layer_rope_base, rotary_frac);
+    let k_rope = apply_rope_partial(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac);
 
     let softcap = arch.attn_logit_softcapping();
     let (attn_out, attn_weights) = gqa_attention_with_weights(
@@ -372,19 +396,20 @@ pub fn run_attention_with_kv(
     use crate::residual::rms_norm_heads;
 
     let arch = &*weights.arch;
-    let (hd, nq, nkv) = (weights.head_dim, weights.num_q_heads, weights.num_kv_heads);
+    let hd = arch.head_dim_for_layer(layer);
+    let nq = arch.num_q_heads_for_layer(layer);
+    let nkv = arch.num_kv_heads_for_layer(layer);
     let reps = nq / nkv;
-    let scale = if arch.attention_multiplier() != 1.0 { arch.attention_multiplier() as f64 } else { arch.attention_scale() };
+    let scale = if arch.attention_multiplier() != 1.0 { arch.attention_multiplier() as f64 } else { arch.attention_scale_for_layer(layer) };
     let seq_len = h.shape()[0];
     let norm_off = arch.norm_weight_offset();
 
     let h_norm = apply_norm(weights, h, &arch.input_layernorm_key(layer), norm_off);
-    let (wq, wk, wv, wo) = (
-        weights.tensors.get(&arch.attn_q_key(layer))?,
-        weights.tensors.get(&arch.attn_k_key(layer))?,
-        weights.tensors.get(&arch.attn_v_key(layer))?,
-        weights.tensors.get(&arch.attn_o_key(layer))?,
-    );
+    let wq = weights.tensors.get(&arch.attn_q_key(layer))?;
+    let wk = weights.tensors.get(&arch.attn_k_key(layer))?;
+    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+    let wv = if v_from_k { wk } else { weights.tensors.get(&arch.attn_v_key(layer))? };
+    let wo = weights.tensors.get(&arch.attn_o_key(layer))?;
 
     let (mut q, mut k, mut v) = (dot_proj(&h_norm, wq), dot_proj(&h_norm, wk), dot_proj(&h_norm, wv));
     for (proj, bias_fn) in [(&mut q, arch.attn_q_bias_key(layer) as Option<String>),
@@ -402,8 +427,9 @@ pub fn run_attention_with_kv(
     };
 
     let rb = arch.rope_base_for_layer(layer);
-    let q_r = apply_rope(&q, nq, hd, rb);
-    let k_r = apply_rope(&k, nkv, hd, rb);
+    let rf = arch.rotary_fraction_for_layer(layer);
+    let q_r = apply_rope_partial(&q, nq, hd, rb, rf);
+    let k_r = apply_rope_partial(&k, nkv, hd, rb, rf);
 
     let (attn_out, _) = gqa_attention_with_weights(
         &q_r, &k_r, &v, nq, hd, reps, scale, seq_len, false, arch.attn_logit_softcapping());

@@ -55,9 +55,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     check_norms(weights);
 
     let mut cb = SilentLoadCallbacks;
+    eprint!("Loading vindex... ");
     let mut index = VectorIndex::load_vindex(&vindex_path, &mut cb)?;
+    eprint!("down_features... ");
     index.load_down_features(&vindex_path)?;
+    eprint!("up_features... ");
     index.load_up_features(&vindex_path)?;
+    eprint!("lm_head... ");
     index.load_lm_head(&vindex_path)?;
     match index.load_lm_head_q4(&vindex_path) {
         Ok(()) => print!("lm_head_q4 "),
@@ -81,6 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     match index.load_interleaved_q4(&vindex_path) {
         Ok(()) => print!("Q4 "),
+        Err(_) => {}
+    }
+    match index.load_interleaved_q4k(&vindex_path) {
+        Ok(()) => print!("Q4K_FFN "),
         Err(_) => {}
     }
     println!("lm_head (vocab={})\n", index.vocab_size);

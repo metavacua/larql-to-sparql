@@ -419,4 +419,141 @@ mod edge_cases {
         let diff = max_diff(&fused, &naive);
         assert!(diff < 1e-5, "custom scale diff = {diff}");
     }
+
+    #[test]
+    fn large_head_dim_512() {
+        // Gemma 4 global attention: head_dim=512
+        let seq = 3;
+        let head_dim = 512;
+        let q = synth_matrix(seq, head_dim, 140);
+        let k = synth_matrix(seq, head_dim, 141);
+        let v = synth_matrix(seq, head_dim, 142);
+        let scale = 1.0 / (head_dim as f64).sqrt();
+
+        let fused = gqa_attention(&q, &k, &v, 1, head_dim, 1, scale, seq);
+        let naive = reference_attention(&q, &k, &v, 1, head_dim, 1, scale, seq, None);
+
+        let diff = max_diff(&fused, &naive);
+        assert!(diff < 1e-3, "head_dim=512 diff = {diff}");
+    }
+}
+
+// ── RoPE tests ──
+
+mod rope_tests {
+    use ndarray::Array2;
+    use larql_inference::attention::{apply_rope, apply_rope_partial};
+
+    #[test]
+    fn partial_rope_fraction_1_matches_full() {
+        // apply_rope_partial with fraction=1.0 should match apply_rope exactly
+        let seq = 4;
+        let heads = 2;
+        let head_dim = 64;
+        let dim = heads * head_dim;
+        let base = 10000.0;
+
+        let x = Array2::from_shape_fn((seq, dim), |(i, j)| ((i * dim + j) as f32 * 0.01).sin());
+
+        let full = apply_rope(&x, heads, head_dim, base);
+        let partial = apply_rope_partial(&x, heads, head_dim, base, 1.0);
+
+        for i in 0..seq {
+            for j in 0..dim {
+                assert!(
+                    (full[[i, j]] - partial[[i, j]]).abs() < 1e-6,
+                    "mismatch at [{i},{j}]: full={}, partial={}",
+                    full[[i, j]], partial[[i, j]]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn partial_rope_preserves_non_rotated_dims() {
+        // With fraction=0.25 (Gemma 4 style), dims beyond rotary_dim should be unchanged
+        let seq = 4;
+        let heads = 1;
+        let head_dim = 64;
+        let dim = heads * head_dim;
+        let base = 1000000.0;
+        let fraction = 0.25;
+
+        let x = Array2::from_shape_fn((seq, dim), |(i, j)| ((i * dim + j) as f32 * 0.01).sin());
+
+        let result = apply_rope_partial(&x, heads, head_dim, base, fraction);
+
+        let rotary_dim = (head_dim as f64 * fraction) as usize; // 16
+        // Dims [rotary_dim..head_dim] should be untouched
+        for pos in 0..seq {
+            for d in rotary_dim..head_dim {
+                assert_eq!(
+                    result[[pos, d]], x[[pos, d]],
+                    "dim {d} at pos {pos} was modified: {} -> {}",
+                    x[[pos, d]], result[[pos, d]]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn partial_rope_rotates_correct_dims() {
+        // Rotated dims should differ from input (at pos > 0)
+        let seq = 4;
+        let heads = 1;
+        let head_dim = 64;
+        let dim = heads * head_dim;
+        let base = 10000.0;
+        let fraction = 0.25;
+
+        let x = Array2::from_shape_fn((seq, dim), |(_, j)| (j as f32 + 1.0) * 0.1);
+
+        let result = apply_rope_partial(&x, heads, head_dim, base, fraction);
+
+        let rotary_dim = (head_dim as f64 * fraction) as usize;
+        // At pos=0, RoPE is identity (angle=0, cos=1, sin=0)
+        for d in 0..rotary_dim {
+            assert!(
+                (result[[0, d]] - x[[0, d]]).abs() < 1e-6,
+                "pos=0 should be identity"
+            );
+        }
+        // At pos > 0, rotated dims should differ
+        let mut any_changed = false;
+        for d in 0..rotary_dim {
+            if (result[[1, d]] - x[[1, d]]).abs() > 1e-6 {
+                any_changed = true;
+            }
+        }
+        assert!(any_changed, "no dims were rotated at pos=1");
+    }
+
+    #[test]
+    fn partial_rope_multi_head() {
+        // Verify per-head rotation works correctly with partial RoPE
+        let seq = 2;
+        let heads = 4;
+        let head_dim = 32;
+        let dim = heads * head_dim;
+        let base = 10000.0;
+        let fraction = 0.5;
+
+        let x = Array2::from_shape_fn((seq, dim), |(i, j)| ((i * dim + j) as f32 * 0.01).sin());
+
+        let result = apply_rope_partial(&x, heads, head_dim, base, fraction);
+
+        let rotary_dim = (head_dim as f64 * fraction) as usize;
+        // Each head's non-rotated dims should be unchanged
+        for h in 0..heads {
+            let offset = h * head_dim;
+            for pos in 0..seq {
+                for d in rotary_dim..head_dim {
+                    assert_eq!(
+                        result[[pos, offset + d]], x[[pos, offset + d]],
+                        "head {h} dim {d} at pos {pos} was modified"
+                    );
+                }
+            }
+        }
+    }
 }

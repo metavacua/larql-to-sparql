@@ -94,7 +94,7 @@ fn main() {
             up: larql_compute::QuantWeight { data: &up, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &down, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &norm, post_attn_norm: &norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
         };
         let layers = vec![layer];
 

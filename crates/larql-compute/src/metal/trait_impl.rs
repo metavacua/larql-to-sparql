@@ -50,9 +50,14 @@ impl ComputeBackend for MetalBackend {
         num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
         rope_base: f32, use_qk_norm: bool, softcap: f32,
     ) -> Option<Vec<f32>> {
+        let geglu = if layers.first().map_or(false, |l| l.use_gelu_tanh) {
+            &self.geglu_gelu_tanh_pipeline
+        } else {
+            &self.geglu_pipeline
+        };
         Some(ops::full_pipeline::dispatch_full_pipeline(
             &self.queue, &self.bufs, &self.q4,
-            &self.geglu_pipeline, &self.q8_quant_pipeline,
+            geglu, &self.q8_quant_pipeline,
             Some(&self.fused_attn_pipeline),
             &self.q8_matvec_pipeline,
             &self.q8_qkv_proj_pipeline,
@@ -155,9 +160,14 @@ impl ComputeBackend for MetalBackend {
         while kv.layers.len() < num_layers {
             kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, num_kv_heads, head_dim));
         }
+        let geglu = if layers.first().map_or(false, |l| l.use_gelu_tanh) {
+            &self.geglu_gelu_tanh_pipeline
+        } else {
+            &self.geglu_pipeline
+        };
         Some(super::prefill::dispatch_prefill(
             &self.queue, &self.bufs, &self.q4,
-            &self.geglu_pipeline, &self.q8_quant_pipeline,
+            geglu, &self.q8_quant_pipeline,
             &self.fused_attn_pipeline,
             &self.q8_matvec_pipeline,
             &self.q8_qkv_proj_pipeline,

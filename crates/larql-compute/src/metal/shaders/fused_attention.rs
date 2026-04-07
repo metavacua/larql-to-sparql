@@ -31,6 +31,7 @@ kernel void fused_attention(
     constant uint&      use_qk_norm [[buffer(10)]],  // 0 or 1
     constant float&     softcap     [[buffer(11)]],  // 0.0 = disabled
     constant uint&      skip_rope   [[buffer(12)]],  // 0 = apply RoPE, 1 = skip (caller pre-applied)
+    constant uint&      rotary_dim  [[buffer(13)]],  // 0 = full head_dim, else partial rotation
     uint2 tg_id [[threadgroup_position_in_grid]],    // (head, query_pos)
     uint tid    [[thread_index_in_threadgroup]])
 {
@@ -40,18 +41,19 @@ kernel void fused_attention(
 
     uint tg_sz = 256;  // threadgroup size
     uint kv_head = head / (num_q / num_kv);
-    uint hdim = head_dim / 2;
+    uint rdim = (rotary_dim == 0) ? head_dim : min(rotary_dim, head_dim);
+    uint hdim = rdim / 2;
 
-    // ── Local Q with optional RoPE ──
-    // Load Q for this head and position, optionally apply RoPE in registers
+    // ── Local Q with optional RoPE (partial rotation support) ──
+    // Only the first rdim dimensions are rotated; the rest pass through.
     threadgroup float tg_q[512];   // max head_dim = 512
     if (tid < head_dim) {
         uint q_idx = qi * num_q * head_dim + head * head_dim + tid;
         float q_val = Q[q_idx];
 
-        if (skip_rope == 0) {
-            // RoPE: split-half rotation
-            float freq = 1.0f / pow(rope_base, float(2 * (tid % hdim)) / float(head_dim));
+        if (skip_rope == 0 && tid < rdim) {
+            // RoPE: split-half rotation within rotary dims
+            float freq = 1.0f / pow(rope_base, float(2 * (tid % hdim)) / float(rdim));
             float angle = float(qi) * freq;
             float cos_a = cos(angle);
             float sin_a = sin(angle);
@@ -97,16 +99,16 @@ kernel void fused_attention(
     uint causal_len = qi + 1;
 
     for (uint k = tid; k < causal_len; k += tg_sz) {
-        // Load K[k] for this KV head, optionally apply RoPE
+        // Load K[k] for this KV head, optionally apply partial RoPE
         float dot = 0.0f;
         for (uint d = 0; d < head_dim; d++) {
             uint k_idx = k * num_kv * head_dim + kv_head * head_dim + d;
             float k_val = K[k_idx];
 
             float k_final;
-            if (skip_rope == 0) {
-                // RoPE on K
-                float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(head_dim));
+            if (skip_rope == 0 && d < rdim) {
+                // RoPE on K (only within rotary dims)
+                float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(rdim));
                 float angle = float(k) * freq;
                 float cos_a = cos(angle);
                 float sin_a = sin(angle);

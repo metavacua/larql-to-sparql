@@ -57,8 +57,8 @@ The kernel is already faster than Ollama. The gap is in per-dispatch overhead (5
 | Q4_0 matvec | v1, v2, v3, **v4** (prod), v5, sparse | v4: uint32 wide loads, 61 GB/s |
 | Q4_K/Q6_K | q4k_matvec, q4k_qkv_proj, q4kf_qkv_proj, q6k_matvec | Fused QKV, sub-block lanes |
 | Q8 | q8_matvec, q8_qkv_proj, q8_proj_rope | Fused QKV, simdgroup reduction |
-| Attention | fused_attention (RoPE+GQA+softcap), causal, kv_attention, kv_append | skip_rope flag for prefill |
-| Element-wise | geglu, rms_norm, residual_add, residual_inject, rope, quantize_q8 | |
+| Attention | fused_attention (RoPE+GQA+softcap), causal, kv_attention, kv_append | skip_rope flag, partial rotary_dim |
+| Element-wise | geglu, rms_norm, residual_add, residual_inject, rope (partial rotary), quantize_q8 | |
 | Fused ops | rms_norm_q8, residual_norm, residual_norm_q8 | Multi-op fusion |
 | Experimental | turboquant_encode/decode, graph_walk_knn | |
 
@@ -176,7 +176,7 @@ cargo run --release --features metal -p larql-compute --example best_multi_layer
 |-----|---------|
 | [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, component profiling, optimization history |
 | [ROADMAP.md](ROADMAP.md) | Planned optimizations, performance targets |
-| [docs/adr/](docs/adr/) | 8 architectural decision records (design choices, algorithm origins) |
+| [docs/adr/](docs/adr/) | 10 architectural decision records (design choices, algorithm origins) |
 | [docs/shaders.md](docs/shaders.md) | All 28 Metal kernels with origin, performance, parameters |
 | [docs/quantization-formats.md](docs/quantization-formats.md) | Q4_0, Q4_K, Q4_KF, Q6_K, Q8_0 format specs |
 | [docs/decode-pipeline.md](docs/decode-pipeline.md) | Decode data flow, dual-path architecture, KV cache |

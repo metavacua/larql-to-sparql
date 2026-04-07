@@ -5,20 +5,24 @@
 
 pub const SHADER: &str = r#"
 // Apply RoPE to a [seq_len, dim] matrix in-place.
+// Supports partial rotation: only the first `rotary_dim` dimensions are rotated,
+// the rest pass through unchanged.
 // Each thread handles one (position, dimension_pair).
-// Grid: (dim/2, seq_len, 1).
+// Grid: (rotary_dim/2, seq_len, 1).
 kernel void rope_apply(
-    device float* x         [[buffer(0)]],   // [seq_len, dim] — modified in-place
-    constant uint&  dim     [[buffer(1)]],
-    constant float& base    [[buffer(2)]],   // rope_theta (e.g., 10000.0 or 1000000.0)
+    device float* x           [[buffer(0)]],   // [seq_len, dim] — modified in-place
+    constant uint&  dim       [[buffer(1)]],
+    constant float& base      [[buffer(2)]],   // rope_theta (e.g., 10000.0 or 1000000.0)
+    constant uint&  rotary_dim[[buffer(3)]],   // dimensions to rotate (≤ dim). 0 = use dim.
     uint2 tid [[thread_position_in_grid]])
 {
-    uint d = tid.x;           // dimension pair index [0, dim/2)
+    uint rdim = (rotary_dim == 0) ? dim : min(rotary_dim, dim);
+    uint d = tid.x;           // dimension pair index [0, rdim/2)
     uint pos = tid.y;         // sequence position
-    uint hdim = dim / 2;
+    uint hdim = rdim / 2;
     if (d >= hdim) return;
 
-    float freq = 1.0f / pow(base, float(2 * d) / float(dim));
+    float freq = 1.0f / pow(base, float(2 * d) / float(rdim));
     float angle = float(pos) * freq;
     float cos_a = cos(angle);
     float sin_a = sin(angle);

@@ -76,6 +76,7 @@ pub struct FullPipelineLayer<'a> {
     pub post_ffn_norm: Option<&'a [f32]>,  // post_feedforward_layernorm (Gemma post-norms)
     pub norm_offset: f32,            // 0.0 standard, 1.0 for Gemma
     pub has_post_norms: bool,        // Gemma 3 uses post-norms
+    pub use_gelu_tanh: bool,         // false=SiLU (Llama), true=GELU-tanh (Gemma)
 }
 
 // ── Re-exports ──

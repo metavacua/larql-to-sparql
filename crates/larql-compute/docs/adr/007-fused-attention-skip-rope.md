@@ -23,3 +23,7 @@ Original LARQL design. The flag enables the prefill pipeline to:
 - All existing dispatch sites pass `skip_rope=0` (no behavior change)
 - Prefill pipeline uses `skip_rope=1` when pre-applying RoPE for KV cache
 - Shader binary is slightly larger but branch is coherent (all threads take same path)
+
+## Extensions
+
+- **ADR-010** adds `rotary_dim` (buffer 13) for partial RoPE rotation. The `skip_rope` and `rotary_dim` parameters are orthogonal: `skip_rope=1` skips all rotation regardless of `rotary_dim`.

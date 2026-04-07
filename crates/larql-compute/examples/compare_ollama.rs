@@ -79,7 +79,7 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
         }).collect();
 
         metal.reset_kv_cache();
@@ -98,7 +98,7 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
         }).collect();
 
         metal.reset_kv_cache();
@@ -118,7 +118,7 @@ fn main() {
             up: larql_compute::QuantWeight { data: &l.u, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             down: larql_compute::QuantWeight { data: &l.d, scales: None, format: larql_compute::QuantFormat::Q4_0 },
             input_norm: &l.norm, post_attn_norm: &l.norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false, use_gelu_tanh: false,
         }).collect();
 
         metal.reset_kv_cache();

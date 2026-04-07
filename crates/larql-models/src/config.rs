@@ -88,6 +88,17 @@ pub struct ModelConfig {
     pub residual_multiplier: Option<f64>,
     pub attention_multiplier: Option<f64>,
     pub logits_scaling: Option<f64>,
+    // Per-layer attention geometry (Gemma 4 style: different head_dim / KV heads
+    // for sliding vs global attention layers).
+    /// Head dimension for global (full) attention layers. If None, all layers use head_dim.
+    pub global_head_dim: Option<usize>,
+    /// Number of KV heads for global attention layers. If None, all layers use num_kv_heads.
+    pub num_global_kv_heads: Option<usize>,
+    /// Fraction of head_dim dimensions to apply RoPE to (0.0–1.0). If None, full rotation.
+    pub partial_rotary_factor: Option<f64>,
+    /// Sliding window pattern: every Nth layer is full attention.
+    /// E.g., 6 means layers 5, 11, 17, ... are full attention.
+    pub sliding_window_pattern: Option<usize>,
 }
 
 /// Architecture-specific behavior. Describes how a model is structured
@@ -266,6 +277,49 @@ pub trait ModelArchitecture: Send + Sync {
         self.config().rope_base
     }
 
+    /// Head dimension for a given layer. Models with different head dims for
+    /// sliding vs global attention (e.g., Gemma 4) override this.
+    /// Default: config.head_dim for all layers.
+    fn head_dim_for_layer(&self, _layer: usize) -> usize {
+        self.config().head_dim
+    }
+
+    /// Number of KV heads for a given layer. Models with different KV head counts
+    /// for sliding vs global attention override this.
+    /// Default: config.num_kv_heads for all layers.
+    fn num_kv_heads_for_layer(&self, _layer: usize) -> usize {
+        self.config().num_kv_heads
+    }
+
+    /// Number of Q heads for a given layer. Usually constant, but can vary
+    /// when head_dim changes across layers (Q proj dim stays constant,
+    /// but num_q_heads = q_proj_dim / head_dim).
+    /// Default: config.num_q_heads for all layers.
+    fn num_q_heads_for_layer(&self, _layer: usize) -> usize {
+        self.config().num_q_heads
+    }
+
+    /// Fraction of head_dim to apply RoPE to (0.0–1.0).
+    /// Models with partial rotary embedding (e.g., 0.25) override per layer.
+    /// Default: 1.0 (full rotation).
+    fn rotary_fraction_for_layer(&self, _layer: usize) -> f64 {
+        1.0
+    }
+
+    /// Whether value shares key projections at this layer (V = K).
+    /// When true, the forward pass uses K in place of V.
+    /// Default: false.
+    fn v_shares_k(&self, _layer: usize) -> bool {
+        false
+    }
+
+    /// Per-layer scalar multiplier key. When present, the layer output is
+    /// multiplied by this learned scalar after the residual add.
+    /// Default: None (no per-layer scalar).
+    fn layer_scalar_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
     /// Attention scale: 1/sqrt(query_pre_attn_scalar) or 1/sqrt(head_dim).
     fn attention_scale(&self) -> f64 {
         let scalar = self
@@ -273,6 +327,16 @@ pub trait ModelArchitecture: Send + Sync {
             .query_pre_attn_scalar
             .unwrap_or(self.config().head_dim as f64);
         scalar.powf(-0.5)
+    }
+
+    /// Attention scale for a specific layer. Accounts for per-layer head_dim
+    /// when query_pre_attn_scalar is not set.
+    fn attention_scale_for_layer(&self, layer: usize) -> f64 {
+        if let Some(scalar) = self.config().query_pre_attn_scalar {
+            scalar.powf(-0.5)
+        } else {
+            (self.head_dim_for_layer(layer) as f64).powf(-0.5)
+        }
     }
 
     // ── Softcapping (Gemma2) ──
