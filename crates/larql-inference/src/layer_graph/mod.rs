@@ -21,8 +21,6 @@ pub mod predict;
 use ndarray::Array2;
 
 use crate::attention::AttentionWeights;
-use larql_compute::ComputeBackend;
-use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 
 // Re-export everything publicly

@@ -451,7 +451,7 @@ impl VectorExtractor {
             .get(&format!("{prefix}o_proj.weight"))
             .ok_or_else(|| InferenceError::MissingTensor(format!("{prefix}o_proj.weight")))?;
 
-        let head_dim = self.weights.head_dim;
+        let head_dim = self.weights.arch.head_dim_for_layer(layer);
         let hidden = self.weights.hidden_size;
         let num_kv_heads = w_v.shape()[0] / head_dim;
         callbacks.on_layer_start(COMPONENT_ATTN_OV, layer, num_kv_heads);
@@ -546,7 +546,7 @@ impl VectorExtractor {
             .get(&format!("{prefix}k_proj.weight"))
             .ok_or_else(|| InferenceError::MissingTensor(format!("{prefix}k_proj.weight")))?;
 
-        let head_dim = self.weights.head_dim;
+        let head_dim = self.weights.arch.head_dim_for_layer(layer);
         let hidden = self.weights.hidden_size;
         let num_q_heads = w_q.shape()[0] / head_dim;
         let num_kv_heads = w_k.shape()[0] / head_dim;

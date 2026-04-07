@@ -99,6 +99,14 @@ pub struct ModelConfig {
     /// Sliding window pattern: every Nth layer is full attention.
     /// E.g., 6 means layers 5, 11, 17, ... are full attention.
     pub sliding_window_pattern: Option<usize>,
+    /// Explicit per-layer type array (e.g., ["sliding_attention", "full_attention", ...]).
+    /// When present, overrides sliding_window_pattern.
+    pub layer_types: Option<Vec<String>>,
+    /// Whether value projection shares key projection (K=V) on some layers.
+    pub attention_k_eq_v: bool,
+    /// Per-layer embedding dimension (PLE). If > 0, each layer adds a gated
+    /// per-layer embedding lookup to the hidden state before attention.
+    pub per_layer_embed_dim: Option<usize>,
 }
 
 /// Architecture-specific behavior. Describes how a model is structured
@@ -313,6 +321,13 @@ pub trait ModelArchitecture: Send + Sync {
         false
     }
 
+    /// Whether to apply parameter-free RMSNorm to V states before attention.
+    /// Gemma 4 applies V-norm (normalization only, no learned scale).
+    /// Default: false.
+    fn has_v_norm(&self) -> bool {
+        false
+    }
+
     /// Per-layer scalar multiplier key. When present, the layer output is
     /// multiplied by this learned scalar after the residual add.
     /// Default: None (no per-layer scalar).
@@ -336,6 +351,55 @@ pub trait ModelArchitecture: Send + Sync {
             scalar.powf(-0.5)
         } else {
             (self.head_dim_for_layer(layer) as f64).powf(-0.5)
+        }
+    }
+
+    // ── Per-Layer Embeddings (PLE) ──
+
+    /// Whether this model uses per-layer embeddings (PLE).
+    /// When true, each layer adds a gated embedding lookup to the hidden state.
+    fn has_per_layer_embeddings(&self) -> bool {
+        self.config().per_layer_embed_dim.unwrap_or(0) > 0
+    }
+
+    /// Per-layer embedding dimension. 0 if PLE is not used.
+    fn per_layer_embed_dim(&self) -> usize {
+        self.config().per_layer_embed_dim.unwrap_or(0)
+    }
+
+    /// Key for the shared per-layer embedding matrix [vocab, num_layers * ple_dim].
+    fn per_layer_embed_key(&self) -> Option<String> {
+        if self.has_per_layer_embeddings() {
+            Some("embed_tokens_per_layer.weight".to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Key for the per-layer input gate projection [ple_dim, hidden].
+    fn per_layer_input_gate_key(&self, layer: usize) -> Option<String> {
+        if self.has_per_layer_embeddings() {
+            Some(format!("{}per_layer_input_gate.weight", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    /// Key for the per-layer output projection [hidden, ple_dim].
+    fn per_layer_projection_key(&self, layer: usize) -> Option<String> {
+        if self.has_per_layer_embeddings() {
+            Some(format!("{}per_layer_projection.weight", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    /// Key for the post-PLE norm weight.
+    fn post_per_layer_input_norm_key(&self, layer: usize) -> Option<String> {
+        if self.has_per_layer_embeddings() {
+            Some(format!("{}post_per_layer_input_norm.weight", self.layer_prefix(layer)))
+        } else {
+            None
         }
     }
 

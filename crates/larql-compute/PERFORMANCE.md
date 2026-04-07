@@ -139,8 +139,8 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 | rms_norm | Element-wise | Production | With configurable offset |
 | residual_add | Element-wise | Production | a + b |
 | residual_inject | Element-wise | Production | Buffer copy |
-| rope_apply | Element-wise | Production | Split-half RoPE |
-| fused_attention | GQA | Production | RoPE + QK-norm + softcap + causal |
+| rope_apply | Element-wise | Production | Split-half RoPE, partial rotary_dim |
+| fused_attention | GQA | Production | RoPE + partial rotary + QK-norm + softcap + causal |
 | causal_attention | Basic | Production | Simple causal (benchmarks) |
 | kv_attention | GQA | Production | KV-cached decode |
 | kv_cache_append | Buffer | Production | K/V cache update |
@@ -152,10 +152,10 @@ data (7.6MB vs 13.1MB per layer) and eliminating Q8 quantization overhead.
 
 ```
 CPU unit tests:      30
-Metal shader tests:  36 (compilation + correctness + cross-backend)
+Metal shader tests:  37 (compilation + correctness + cross-backend + partial RoPE)
 Correctness tests:    6 (CPU vs ndarray)
 Doc tests:            2
-Total:               74 tests, all passing
+Total:               75 tests, all passing
 Warnings:             0
 ```
 

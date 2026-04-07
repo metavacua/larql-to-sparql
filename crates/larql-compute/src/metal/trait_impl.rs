@@ -65,6 +65,7 @@ impl ComputeBackend for MetalBackend {
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
             &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
             Some(&self.q4k_qkv_proj_pipeline), Some(&self.q4k_proj_pipeline),
+            None, None, // no rope_at_pos or KV cache for standard full_pipeline_q4
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
             rope_base, use_qk_norm, softcap,
@@ -151,6 +152,7 @@ impl ComputeBackend for MetalBackend {
         num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
         rope_base: f32, use_qk_norm: bool, softcap: f32,
     ) -> Option<Vec<f32>> {
+        // Use full_pipeline with KV cache population via separate RoPE + skip_rope=1
         let num_layers = layers.len();
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if cache_guard.is_none() {
@@ -165,16 +167,17 @@ impl ComputeBackend for MetalBackend {
         } else {
             &self.geglu_pipeline
         };
-        Some(super::prefill::dispatch_prefill(
+        Some(ops::full_pipeline::dispatch_full_pipeline(
             &self.queue, &self.bufs, &self.q4,
             geglu, &self.q8_quant_pipeline,
-            &self.fused_attn_pipeline,
+            Some(&self.fused_attn_pipeline),
             &self.q8_matvec_pipeline,
             &self.q8_qkv_proj_pipeline,
             &self.q4k_matvec_pipeline, &self.q6k_matvec_pipeline,
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
-            &self.rope_pipeline,
-            kv,
+            &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
+            Some(&self.q4k_qkv_proj_pipeline), Some(&self.q4k_proj_pipeline),
+            Some(&self.rope_at_pos_pipeline), Some(kv),
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
             rope_base, use_qk_norm, softcap,

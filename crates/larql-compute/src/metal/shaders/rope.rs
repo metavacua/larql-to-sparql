@@ -4,6 +4,31 @@
 //! Matches HuggingFace default and MLX traditional=False.
 
 pub const SHADER: &str = r#"
+// Apply RoPE to a single vector [dim] in-place at a given absolute position.
+// Used by KV-cached decode: apply to Q and K at the correct sequence position.
+// Grid: (dim/2, 1, 1).
+kernel void rope_at_pos(
+    device float* x         [[buffer(0)]],   // [dim] — modified in-place (one head)
+    constant uint&  dim     [[buffer(1)]],   // head_dim
+    constant float& base    [[buffer(2)]],   // rope_theta
+    constant uint&  pos     [[buffer(3)]],   // absolute position in sequence
+    uint tid [[thread_position_in_grid]])
+{
+    uint hdim = dim / 2;
+    if (tid >= hdim) return;
+
+    float freq = 1.0f / pow(base, float(2 * tid) / float(dim));
+    float angle = float(pos) * freq;
+    float cos_a = cos(angle);
+    float sin_a = sin(angle);
+
+    float re = x[tid];
+    float im = x[tid + hdim];
+
+    x[tid]        = re * cos_a - im * sin_a;
+    x[tid + hdim] = re * sin_a + im * cos_a;
+}
+
 // Apply RoPE to a [seq_len, dim] matrix in-place.
 // Supports partial rotation: only the first `rotary_dim` dimensions are rotated,
 // the rest pass through unchanged.

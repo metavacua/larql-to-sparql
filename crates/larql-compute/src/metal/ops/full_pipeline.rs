@@ -209,6 +209,8 @@ pub fn dispatch_full_pipeline(
     residual_norm_q8_pipeline: &ComputePipelineState,
     q4k_qkv_proj_pipeline: Option<&ComputePipelineState>,
     _q4k_proj_pipeline: Option<&ComputePipelineState>,
+    rope_at_pos_pipeline: Option<&ComputePipelineState>,
+    mut kv_cache: Option<&mut super::kv_cache::KVCache>,
     layers: &[crate::FullPipelineLayer],
     x: &[f32],
     hidden: usize,
@@ -405,6 +407,48 @@ pub fn dispatch_full_pipeline(
             enc.end_encoding();
         }
 
+        // ── 3b. Apply RoPE separately when populating KV cache ──
+        // When kv_cache is provided, apply RoPE to Q and K via rope_at_pos per head
+        // per position, write K/V to cache, then run fused_attention with skip_rope=1.
+        // When kv_cache is None, let fused_attention handle RoPE internally (skip_rope=0).
+        let use_separate_rope = kv_cache.is_some() && rope_at_pos_pipeline.is_some();
+
+        if use_separate_rope {
+            let rope_pipeline = rope_at_pos_pipeline.unwrap();
+            let hd = head_dim as u32;
+            let hdim = (head_dim / 2) as u64;
+
+            // Apply RoPE per head using rope_apply (handles all positions in one dispatch).
+            // Q layout: [seq, num_q * head_dim]. For each head, offset by head * head_dim
+            // within each position's stride of num_q * head_dim.
+            // rope_apply expects [seq_len, dim] contiguous — but our data has stride
+            // = num_heads * head_dim, not head_dim. So we must use rope_at_pos per position per head.
+            // Optimization: batch all positions into one encoder, all heads sequential.
+            let enc = cmd.new_compute_command_encoder();
+            for pos in 0..seq_len {
+                let pos_val = pos as u32;
+                for qh in 0..num_q_heads {
+                    let offset = (pos * num_q_heads * head_dim + qh * head_dim) as u64 * 4;
+                    enc.set_compute_pipeline_state(rope_pipeline);
+                    enc.set_buffer(0, Some(&q_outs[l]), offset);
+                    enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
+                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
+                    enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
+                }
+                for kvh in 0..num_kv_heads {
+                    let offset = (pos * num_kv_heads * head_dim + kvh * head_dim) as u64 * 4;
+                    enc.set_compute_pipeline_state(rope_pipeline);
+                    enc.set_buffer(0, Some(&k_outs[l]), offset);
+                    enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
+                    enc.set_bytes(2, 4, &rope_base as *const f32 as *const c_void);
+                    enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
+                }
+            }
+            enc.end_encoding();
+        }
+
         // ── 4. Fused attention (RoPE + GQA + softcap) ──
         if let Some(fused_pipeline) = fused_attn_pipeline {
             let seq_val = seq_len as u32;
@@ -428,9 +472,10 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(9, 4, &rope_base as *const f32 as *const c_void);
             enc.set_bytes(10, 4, &qknorm_val as *const u32 as *const c_void);
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
-            let skip_rope_val = 0u32; // full_pipeline applies RoPE in-shader
+            // skip_rope=1 when we applied RoPE separately, 0 otherwise
+            let skip_rope_val = if use_separate_rope { 1u32 } else { 0u32 };
             enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
-            let rotary_dim_val = 0u32; // 0 = full head_dim rotation
+            let rotary_dim_val = 0u32;
             enc.set_bytes(13, 4, &rotary_dim_val as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
                 MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
@@ -439,7 +484,6 @@ pub fn dispatch_full_pipeline(
             enc.end_encoding();
         } else {
             // No fused attention — skip (benchmark shortcut, attention output = Q output)
-            // This means Q proj result passes directly to O proj. Incorrect but fast.
         }
 
         // ── 5. Q4 O projection ──
@@ -577,6 +621,26 @@ pub fn dispatch_full_pipeline(
 
     cmd.commit();
     cmd.wait_until_completed();
+
+    // Populate KV cache from GPU-computed RoPE'd K and V (post-commit, buffers readable)
+    if let Some(ref mut kv) = kv_cache {
+        for l in 0..num_layers {
+            while kv.layers.len() <= l {
+                kv.layers.push(super::kv_cache::LayerKVCache::new(
+                    bufs, 4096, num_kv_heads, head_dim));
+            }
+            let total_kv = seq_len * num_kv_heads * head_dim;
+            let k_src = k_outs[l].contents() as *const f32;
+            let v_src = v_outs[l].contents() as *const f32;
+            let k_dst = kv.layers[l].k_cache.contents() as *mut f32;
+            let v_dst = kv.layers[l].v_cache.contents() as *mut f32;
+            unsafe {
+                std::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
+                std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
+            }
+            kv.layers[l].current_len = seq_len;
+        }
+    }
 
     // Read final hidden state
     crate::metal::buffers::read_buffer_f32(&h_bufs[num_layers], hidden)

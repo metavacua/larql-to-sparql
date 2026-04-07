@@ -2,7 +2,7 @@ use ndarray::Array2;
 
 use larql_compute::ComputeBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput, DenseLayerGraph, CachedLayerGraph};
+use super::{LayerGraph, DenseLayerGraph, CachedLayerGraph};
 
 /// Prefill with KV cache population: run CPU attention, capture K/V, populate Metal KV cache.
 /// Returns the final hidden state after all layers.
@@ -15,10 +15,6 @@ pub fn prefill_with_kv(
     layer_range: std::ops::Range<usize>,
 ) -> Array2<f32> {
     let mut h = crate::forward::embed_tokens_pub(weights, token_ids);
-    let hidden = weights.hidden_size;
-    let num_kv = weights.num_kv_heads;
-    let head_dim = weights.head_dim;
-    let kv_dim = num_kv * head_dim;
     let seq_len = token_ids.len();
 
     for layer in layer_range {
@@ -29,9 +25,11 @@ pub fn prefill_with_kv(
 
         // Write K/V to backend's KV cache for this layer
         if backend.has_kv_cache() {
+            let layer_hd = weights.arch.head_dim_for_layer(layer);
+            let layer_nkv = weights.arch.num_kv_heads_for_layer(layer);
             let k_flat = k_rope.as_slice().unwrap_or(&[]);
             let v_flat = v.as_slice().unwrap_or(&[]);
-            backend.populate_kv_layer(layer, k_flat, v_flat, seq_len, num_kv, head_dim);
+            backend.populate_kv_layer(layer, k_flat, v_flat, seq_len, layer_nkv, layer_hd);
         }
 
         // FFN
@@ -502,6 +500,8 @@ pub fn predict_honest(
                         }
                     }).collect();
 
+                // GPU pipeline uses uniform dims (sliding layer defaults). Models with
+                // per-layer variation (Gemma 4) route through CPU via has_post_norms().
                 let q_dim = weights.num_q_heads * weights.head_dim;
                 let kv_dim = weights.num_kv_heads * weights.head_dim;
                 let rope = arch.rope_base_for_layer(layer_range.start) as f32;
@@ -554,7 +554,33 @@ pub fn predict_honest(
                         true
                     } else { false }
                 } else {
-                    false // Post-norm models: fall through to CPU for correct prefill
+                    // Post-norm models (Gemma3): CPU prefill (correct) → GPU logits (fast)
+                    // CPU handles post-norms correctly. Use CPU hidden state, GPU for logits only.
+                    // KV cache populated for future decode_token calls (token generation).
+                    backend.reset_kv_cache();
+
+                    let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+                    let mut h_cpu = h.clone();
+                    for (rel_idx, abs_layer) in layer_range.clone().enumerate() {
+                        let (h_post_attn, k_rope, v) =
+                            crate::attention::run_attention_with_kv(weights, &h_cpu, abs_layer)
+                                .unwrap();
+
+                        if backend.has_kv_cache() {
+                            let k_flat = k_rope.as_slice().unwrap_or(&[]);
+                            let v_flat = v.as_slice().unwrap_or(&[]);
+                            backend.populate_kv_layer(rel_idx, k_flat, v_flat,
+                                seq_len, weights.num_kv_heads, weights.head_dim);
+                        }
+
+                        let (h_out, _) = crate::forward::run_ffn(
+                            weights, &h_post_attn, abs_layer, &walk_ffn, false);
+                        h_cpu = h_out;
+                    }
+
+                    // Use correct CPU hidden state, finalize with GPU logits
+                    h = h_cpu;
+                    return finalize_logits(weights, tokenizer, &h, top_k, index, backend, norm_offset);
                 }
             } else { false }
         } else { false }
@@ -573,6 +599,273 @@ pub fn predict_honest(
     }
 
     finalize_logits(weights, tokenizer, &h, top_k, index, backend, norm_offset)
+}
+
+/// Generate multiple tokens: CPU prefill → GPU decode loop.
+///
+/// Prefills the prompt via CPU (correct for all architectures), populates KV cache,
+/// then generates `max_tokens` via GPU `decode_token` at ~59 tok/s.
+///
+/// Returns: Vec of (token_string, probability) for each generated token,
+/// plus timing (prefill_ms, per_token_ms).
+#[allow(clippy::too_many_arguments)]
+pub fn generate(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    token_ids: &[u32],
+    max_tokens: usize,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn ComputeBackend,
+    cached_layers: &CachedLayerGraph,
+    layer_range: std::ops::Range<usize>,
+) -> GenerateResult {
+    let norm_offset = weights.arch.norm_weight_offset();
+    let arch = &*weights.arch;
+    let hidden = weights.hidden_size;
+    let gate_index: &dyn larql_vindex::GateIndex = index;
+
+    // Build layer descriptors (same as predict_honest)
+    let (q4_ffn, ffn_is_q4k) = if let Some(mmap) = gate_index.interleaved_q4k_mmap_ref() {
+        (Some(mmap), true)
+    } else {
+        (gate_index.interleaved_q4_mmap_ref(), false)
+    };
+    let has_q4k = index.attn_q4k_layer_data(layer_range.start).is_some();
+    let has_q8 = index.attn_q8_layer_data(layer_range.start).is_some();
+
+    if !backend.has_q4() || q4_ffn.is_none() {
+        // No GPU path available — fall back to predict_honest per token
+        let r = predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        return GenerateResult {
+            tokens: r.predictions.into_iter().take(1).collect(),
+            prefill_ms: 0.0,
+            decode_ms: vec![],
+        };
+    }
+
+    let q4_ffn_mmap = q4_ffn.unwrap();
+    let intermediate = gate_index.num_features(layer_range.start);
+    if intermediate == 0 || (!has_q4k && !has_q8) {
+        let r = predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        return GenerateResult {
+            tokens: r.predictions.into_iter().take(1).collect(),
+            prefill_ms: 0.0,
+            decode_ms: vec![],
+        };
+    }
+
+    let q4_ffn_per_matrix = if ffn_is_q4k {
+        (intermediate * hidden + 255) / 256 * 148
+    } else {
+        intermediate * hidden / 32 * 18
+    };
+    let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
+    let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
+
+    use larql_compute::{QuantWeight, QuantFormat};
+    fn to_format(s: &str) -> QuantFormat {
+        match s { "Q6_K" => QuantFormat::Q6_K, _ => QuantFormat::Q4_K }
+    }
+
+    // Build GPU layers for ALL layers (0..num_layers) for full KV-cached decode
+    let num_layers = weights.num_layers;
+    let layers: Vec<larql_compute::FullPipelineLayer> = (0..num_layers)
+        .map(|layer| {
+            let fs = layer * q4_ffn_per_layer;
+            let (wq, wk, wv, wo) = if has_q4k {
+                let [q, k, v, o] = index.attn_q4k_layer_data(layer).unwrap();
+                (
+                    QuantWeight { data: q.0, scales: None, format: to_format(q.1) },
+                    QuantWeight { data: k.0, scales: None, format: to_format(k.1) },
+                    QuantWeight { data: v.0, scales: None, format: to_format(v.1) },
+                    QuantWeight { data: o.0, scales: None, format: to_format(o.1) },
+                )
+            } else {
+                let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
+                (
+                    QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
+                    QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
+                    QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
+                    QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
+                )
+            };
+            larql_compute::FullPipelineLayer {
+                wq, wk, wv, wo,
+                gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
+                up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: ffn_format },
+                down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: ffn_format },
+                input_norm: weights.vectors.get(&arch.input_layernorm_key(layer))
+                    .map(|v| v.as_slice()).unwrap_or(&[]),
+                post_attn_norm: weights.vectors.get(&arch.post_attention_layernorm_key(layer))
+                    .map(|v| v.as_slice()).unwrap_or(&[]),
+                pre_ffn_norm: arch.pre_feedforward_layernorm_key(layer)
+                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+                post_ffn_norm: arch.post_feedforward_layernorm_key(layer)
+                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+                norm_offset: arch.norm_weight_offset(),
+                has_post_norms: arch.has_post_norms(),
+                use_gelu_tanh: arch.activation() == larql_models::Activation::GeluTanh,
+            }
+        }).collect();
+
+    let q_dim = weights.num_q_heads * weights.head_dim;
+    let kv_dim = weights.num_kv_heads * weights.head_dim;
+    let rope = arch.rope_base_for_layer(layer_range.start) as f32;
+
+    // ── Phase 1: GPU prefill ALL layers → populate KV cache ──
+    // Uses full_pipeline_q4 with separate RoPE + skip_rope=1 for KV cache compatibility.
+    // This produces correct output AND populates the KV cache for decode_token.
+    let prefill_start = std::time::Instant::now();
+    backend.reset_kv_cache();
+    let seq_len = token_ids.len();
+
+    let h_embed = crate::forward::embed_tokens_pub(weights, token_ids);
+    let x: Vec<f32> = h_embed.as_slice().unwrap_or(&[]).to_vec();
+
+    let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0) as f32;
+    let qk_norm_val = arch.attn_q_norm_key(0).is_some();
+
+    // prefill_q4 now uses full_pipeline with KV cache population
+    let h_vec = backend.prefill_q4(
+        &layers, &x, hidden, intermediate, q_dim, kv_dim,
+        seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
+        rope, qk_norm_val, softcap_val,
+    ).unwrap_or_else(|| {
+        // GPU prefill failed — fall back to CPU
+        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let mut h = h_embed.clone();
+        for layer in 0..num_layers {
+            let (h_post_attn, _, _) =
+                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
+            let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+            h = h_out;
+        }
+        h.as_slice().unwrap_or(&[]).to_vec()
+    });
+
+    let h = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec)
+        .unwrap_or_else(|_| h_embed);
+
+    // First token from prefill
+    let h_1d = {
+        let h_final = crate::forward::apply_norm(weights, &h, weights.arch.final_norm_key(), norm_offset);
+        h_final.row(seq_len - 1).to_owned()
+    };
+    let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Sample first token
+    let mut tokens = Vec::with_capacity(max_tokens);
+    let mut decode_ms = Vec::with_capacity(max_tokens);
+
+    let first_hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+    if let Some(&(tid, score)) = first_hits.first() {
+        let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
+        let prob = softmax_prob(score, &first_hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+        tokens.push((tok_str, prob));
+    }
+
+    // ── Phase 2: GPU decode loop ──
+    let mut current_token_id = first_hits.first().map(|&(tid, _)| tid).unwrap_or(0);
+
+    let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+
+    for _step in 1..max_tokens {
+        let decode_start = std::time::Instant::now();
+
+        // GPU decode_token with KV cache (populated by GPU prefill_q4)
+        let h_tok = crate::forward::embed_tokens_pub(weights, &[current_token_id]);
+        let x_dec: Vec<f32> = h_tok.row(0).to_vec();
+        let result = backend.decode_token(
+            &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
+            weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+        );
+
+        if let Some(h_out) = result {
+            let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
+            let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
+            let h_1d = h_final.row(0).to_owned();
+
+            let hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+            let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
+            decode_ms.push(step_ms);
+
+            if let Some(&(tid, score)) = hits.first() {
+                let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
+                let prob = softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+                let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
+                tokens.push((tok_str, prob));
+                current_token_id = tid;
+                if is_eos { break; }
+            } else { break; }
+        } else {
+            // GPU failed — CPU fallback for this token
+            let mut h_dec = h_tok;
+            for layer in 0..num_layers {
+                let (h_post_attn, _, _) =
+                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None).unwrap();
+                let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                h_dec = h_out;
+            }
+            let h_final = crate::forward::apply_norm(weights, &h_dec, weights.arch.final_norm_key(), norm_offset);
+            let h_1d = h_final.row(0).to_owned();
+            let hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+            let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
+            decode_ms.push(step_ms);
+            if let Some(&(tid, score)) = hits.first() {
+                let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
+                let prob = softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+                let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
+                tokens.push((tok_str, prob));
+                current_token_id = tid;
+                if is_eos { break; }
+            } else { break; }
+        }
+    }
+
+    GenerateResult { tokens, prefill_ms, decode_ms }
+}
+
+/// Result of multi-token generation.
+pub struct GenerateResult {
+    /// Generated tokens with probabilities.
+    pub tokens: Vec<(String, f64)>,
+    /// Prefill time in milliseconds (one-time).
+    pub prefill_ms: f64,
+    /// Per-token decode times in milliseconds.
+    pub decode_ms: Vec<f64>,
+}
+
+impl GenerateResult {
+    /// Average decode milliseconds per token.
+    pub fn avg_decode_ms(&self) -> f64 {
+        if self.decode_ms.is_empty() { 0.0 }
+        else { self.decode_ms.iter().sum::<f64>() / self.decode_ms.len() as f64 }
+    }
+
+    /// Decode tokens per second.
+    pub fn decode_tok_s(&self) -> f64 {
+        let avg = self.avg_decode_ms();
+        if avg > 0.0 { 1000.0 / avg } else { 0.0 }
+    }
+
+    /// Generated text.
+    pub fn text(&self) -> String {
+        self.tokens.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("")
+    }
+}
+
+fn softmax_prob(score: f32, hits: &[(u32, f32)], logits_scale: f32, softcap: Option<f32>) -> f64 {
+    let inv_scale = 1.0 / logits_scale;
+    let scaled: Vec<f32> = hits.iter().map(|&(_, s)| {
+        let mut l = s * inv_scale;
+        if let Some(cap) = softcap { l = (l / cap).tanh() * cap; }
+        l
+    }).collect();
+    let max_l = scaled.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f64 = scaled.iter().map(|l| ((*l - max_l) as f64).exp()).sum();
+    let mut target = score * inv_scale;
+    if let Some(cap) = softcap { target = (target / cap).tanh() * cap; }
+    ((target - max_l) as f64).exp() / exp_sum
 }
 
 /// Optimized predict: uses vindex logits when lm_head is loaded, falls back to full matmul.

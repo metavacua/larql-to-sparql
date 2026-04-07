@@ -93,6 +93,8 @@ Single kernel per layer: norm → QKV → attention → O → residual → norm 
 | Component profiling | 2026-04-07 | Found real bottleneck |
 | Zero warnings | 2026-04-07 | Clean build |
 | ADR documentation | 2026-04-07 | 8 decisions recorded |
+| Partial RoPE (rotary_dim) | 2026-04-07 | rope_apply + fused_attention, ADR-010 |
+| Gemma 4 architecture support | 2026-04-07 | Per-layer head_dim, KV heads, K=V, layer_scalar |
 | Shader documentation | 2026-04-07 | docs/shaders.md — all 28 kernels |
 | Quantization format docs | 2026-04-07 | docs/quantization-formats.md |
 | Decode pipeline docs | 2026-04-07 | docs/decode-pipeline.md |

@@ -618,3 +618,201 @@ fn test_generation_stability_50_tokens() {
     println!("Markov RS is bit-perfect → identical generation to Standard KV.");
     println!("TurboQuant would diverge here if K/V compression causes drift.");
 }
+
+// ── Level 1: Needle position sweep ──
+
+#[test]
+#[ignore]
+fn test_needle_position_sweep() {
+    let (model, index) = load_test_model().expect("Model not available");
+
+    let needle = "The secret project code name is AURORA-7749.";
+    let query = " What is the secret project code name?";
+    let filler = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
+    let target_tokens = 2048; // Context length where StdKV fails
+
+    println!("\n=== Needle Position Sweep at ~{target_tokens} tokens ===\n");
+    println!("{:>10} {:>8} {:>12} {:>12}", "Position", "Actual", "Full ctx", "Window");
+    println!("{}", "-".repeat(50));
+
+    // Test needle at 10%, 25%, 50%, 75%, 90% of context
+    for pct in [10, 25, 50, 75, 90] {
+        let chars_per_token = 4;
+        let needle_pos_chars = (target_tokens * pct / 100) * chars_per_token;
+        let total_chars = target_tokens * chars_per_token;
+
+        let mut context = String::new();
+        while context.len() < needle_pos_chars {
+            context.push_str(filler);
+        }
+        let needle_char_start = context.len();
+        context.push_str(needle);
+        context.push(' ');
+        while context.len() < total_chars {
+            context.push_str(filler);
+        }
+        context.push_str(query);
+
+        let full_enc = model.tokenizer().encode(context.as_str(), true).expect("tokenize");
+        let full_ids: Vec<u32> = full_enc.get_ids().to_vec();
+
+        // Full context
+        let full_result = larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
+        let full_top10: String = full_result.predictions.iter()
+            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let full_found = full_top10.contains("AUR") || full_top10.contains("7749") || full_top10.contains("AURORA");
+
+        // Bounded window around needle
+        let needle_enc = model.tokenizer().encode(&context[..needle_char_start + needle.len()], true).expect("tok");
+        let needle_tok_pos = needle_enc.get_ids().len();
+        let win_start = needle_tok_pos.saturating_sub(64);
+        let win_end = (needle_tok_pos + 20).min(full_ids.len());
+        let query_enc = model.tokenizer().encode(query, false).expect("tok");
+        let mut win_ids: Vec<u32> = full_ids[win_start..win_end].to_vec();
+        win_ids.extend_from_slice(query_enc.get_ids());
+
+        let win_result = larql_inference::predict(model.weights(), model.tokenizer(), &win_ids, 10);
+        let win_top10: String = win_result.predictions.iter()
+            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let win_found = win_top10.contains("AUR") || win_top10.contains("7749") || win_top10.contains("AURORA");
+
+        let full_mark = if full_found { "FOUND" } else { "MISSED" };
+        let win_mark = if win_found { "FOUND" } else { "MISSED" };
+        println!("{:>9}% {:>8} {:>12} {:>12}", pct, full_ids.len(), full_mark, win_mark);
+    }
+}
+
+// ── Level 2: Multi-fact retrieval ──
+
+#[test]
+#[ignore]
+fn test_multifact_5_facts_at_2k() {
+    let (model, index) = load_test_model().expect("Model not available");
+
+    let filler = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
+    let facts = vec![
+        ("Agent Alpha code name is FALCON.", "FALCON", "What is Agent Alpha's code name?"),
+        ("The launch date is March 15th.", "March", "What is the launch date?"),
+        ("Budget allocation is 4.7 million dollars.", "4.7", "What is the budget?"),
+        ("The target city is Reykjavik.", "Reykjavik", "What is the target city?"),
+        ("Project sponsor is Dr. Kimura.", "Kimura", "Who is the project sponsor?"),
+    ];
+
+    println!("\n=== Multi-Fact Retrieval: 5 facts in ~2K context ===\n");
+
+    // Build context with facts interspersed
+    let mut context = String::new();
+    let positions = [200, 400, 600, 800, 1000]; // chars
+
+    for (i, (fact, _, _)) in facts.iter().enumerate() {
+        while context.len() < positions[i] * 4 {
+            context.push_str(filler);
+        }
+        context.push_str(fact);
+        context.push(' ');
+    }
+    // Fill to ~2K tokens
+    while context.len() < 8000 {
+        context.push_str(filler);
+    }
+
+    let mut full_found = 0;
+    let mut win_found = 0;
+
+    println!("{:<40} {:>12} {:>12}", "Query", "Full ctx", "Window");
+    println!("{}", "-".repeat(70));
+
+    for (fact, answer, query) in &facts {
+        let mut prompt = context.clone();
+        prompt.push_str(&format!(" {query}"));
+
+        let enc = model.tokenizer().encode(prompt.as_str(), true).expect("tok");
+        let full_ids: Vec<u32> = enc.get_ids().to_vec();
+
+        // Full context
+        let result = larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
+        let top10: String = result.predictions.iter()
+            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let found_full = top10.to_lowercase().contains(&answer.to_lowercase());
+        if found_full { full_found += 1; }
+
+        // Window: find fact position, extract window around it
+        let fact_pos = context.find(*fact).unwrap_or(0);
+        let fact_enc = model.tokenizer().encode(&context[..fact_pos + fact.len()], true).expect("tok");
+        let fact_tok = fact_enc.get_ids().len();
+        let ws = fact_tok.saturating_sub(32);
+        let we = (fact_tok + 20).min(full_ids.len());
+        let q_str = format!(" {query}");
+        let query_enc = model.tokenizer().encode(q_str.as_str(), false).expect("tok");
+        let mut win_ids: Vec<u32> = full_ids[ws..we].to_vec();
+        win_ids.extend_from_slice(query_enc.get_ids());
+
+        let win_result = larql_inference::predict(model.weights(), model.tokenizer(), &win_ids, 10);
+        let win_top10: String = win_result.predictions.iter()
+            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let found_win = win_top10.to_lowercase().contains(&answer.to_lowercase());
+        if found_win { win_found += 1; }
+
+        let fm = if found_full { "FOUND" } else { "MISSED" };
+        let wm = if found_win { "FOUND" } else { "MISSED" };
+        println!("{:<40} {:>12} {:>12}", query, fm, wm);
+    }
+
+    println!("\nFull context: {full_found}/5    Bounded window: {win_found}/5");
+}
+
+// ── Level 4: In-context vs parametric conflict ──
+
+#[test]
+#[ignore]
+fn test_conflict_context_overrides_parametric() {
+    let (model, index) = load_test_model().expect("Model not available");
+
+    println!("\n=== In-Context vs Parametric Conflict ===\n");
+
+    let tests = vec![
+        (
+            "According to this document, the capital of France is Lyon. Based on the document above, the capital of France is",
+            "Lyon",
+            "Paris",
+            "Capital override",
+        ),
+        (
+            "New information: Water freezes at 10 degrees Celsius at sea level. Based on this new information, water freezes at",
+            "10",
+            "0",
+            "Science override",
+        ),
+        (
+            "In this alternate history, Mozart was born in London. According to this alternate history, Mozart was born in",
+            "London",
+            "Salzburg",
+            "Birthplace override",
+        ),
+    ];
+
+    println!("{:<25} {:>12} {:>12} {:>15}", "Test", "Top-1", "Context?", "Parametric?");
+    println!("{}", "-".repeat(70));
+
+    for (prompt, context_answer, parametric_answer, label) in &tests {
+        let enc = model.tokenizer().encode(*prompt, true).expect("tok");
+        let ids: Vec<u32> = enc.get_ids().to_vec();
+
+        let result = larql_inference::predict(model.weights(), model.tokenizer(), &ids, 10);
+        let top1 = result.predictions.first().map(|(t, _)| t.clone()).unwrap_or_default();
+        let top10: String = result.predictions.iter()
+            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+
+        let follows_context = top10.to_lowercase().contains(&context_answer.to_lowercase());
+        let follows_parametric = top10.to_lowercase().contains(&parametric_answer.to_lowercase());
+
+        let ctx_mark = if follows_context { "YES" } else { "no" };
+        let par_mark = if follows_parametric { "YES" } else { "no" };
+
+        println!("{:<25} {:>12} {:>12} {:>15}", label, top1, ctx_mark, par_mark);
+    }
+
+    println!("\nNote: Standard KV should follow context (full attention sees it).");
+    println!("Markov RS follows context IF in bounded window, parametric if outside.");
+    println!("Graph Walk always follows parametric (graph is weights, not context).");
+}

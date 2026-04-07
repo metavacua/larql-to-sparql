@@ -125,11 +125,11 @@ src/
 # CPU only (38 tests)
 cargo test -p larql-compute
 
-# CPU + Metal (74 tests)
+# CPU + Metal (75 tests)
 cargo test -p larql-compute --features metal
 ```
 
-74 tests covering: quantization round-trips, cross-backend correctness (Metal vs CPU with tolerance), shader compilation, fused attention, KV cache, pipeline output verification.
+75 tests covering: quantization round-trips, cross-backend correctness (Metal vs CPU with tolerance), shader compilation, fused attention, partial RoPE, KV cache, pipeline output verification.
 
 ## Examples
 

@@ -68,7 +68,7 @@ pub use layer_graph::{
     LayerGraph, LayerOutput, DenseLayerGraph, WalkLayerGraph, PipelinedLayerGraph,
     CachedLayerGraph, PerLayerGraph,
     predict_with_graph, predict_with_graph_vindex_logits, predict_pipeline,
-    predict_split_pass, predict_split_cached, predict_honest, AttentionCache,
+    predict_split_pass, predict_split_cached, predict_honest, generate, GenerateResult, AttentionCache,
     trace_with_graph, build_adaptive_graph,
     // Analysis/validation
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,

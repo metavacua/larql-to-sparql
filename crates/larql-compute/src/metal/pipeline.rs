@@ -40,6 +40,7 @@ impl MetalBackend {
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
             &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
             None, None, // no Q4_K QKV for legacy benchmark path
+            None, None, // no rope_at_pos or KV cache
             &full_layers, x, hidden, inter, q_dim, kv_dim,
             1, 0, 0, 0, 0.0, false, 0.0,
         )

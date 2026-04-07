@@ -58,6 +58,7 @@ pub struct MetalBackend {
     q4k_matvec_pipeline: ComputePipelineState,
     q6k_matvec_pipeline: ComputePipelineState,
     rope_pipeline: ComputePipelineState,
+    rope_at_pos_pipeline: ComputePipelineState,
     pub q4k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
     q4kf_qkv_proj_pipeline: ComputePipelineState,
@@ -146,6 +147,10 @@ impl MetalBackend {
         let rope_fn = library.get_function("rope_apply", None).ok()?;
         let rope_pipeline = device.new_compute_pipeline_state_with_function(&rope_fn).ok()?;
 
+        // RoPE at position (for KV-cached decode)
+        let rope_at_pos_fn = library.get_function("rope_at_pos", None).ok()?;
+        let rope_at_pos_pipeline = device.new_compute_pipeline_state_with_function(&rope_at_pos_fn).ok()?;
+
         // Fused Q4_K QKV projection (one dispatch for Q+K+V)
         let q4k_qkv_fn = library.get_function("q4k_qkv_proj", None).ok()?;
         let q4k_qkv_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4k_qkv_fn).ok()?;
@@ -176,7 +181,7 @@ impl MetalBackend {
             rms_norm_pipeline, residual_add_pipeline,
             q8_qkv_proj_pipeline,
             q4k_matvec_pipeline, q6k_matvec_pipeline,
-            rope_pipeline,
+            rope_pipeline, rope_at_pos_pipeline,
             q4k_qkv_proj_pipeline, q4k_proj_pipeline,
             q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,
             kv_cache: std::sync::Mutex::new(None),

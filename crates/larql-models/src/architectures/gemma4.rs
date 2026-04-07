@@ -9,6 +9,11 @@
 //! - QK-norm (inherited from Gemma 3)
 //! - 4 norms per layer (inherited from Gemma 3)
 //! - Logit softcapping (inherited from Gemma 2)
+//!
+//! Layer types are determined from:
+//! 1. Explicit `layer_types` array in config.json (["sliding_attention", "full_attention", ...])
+//! 2. `sliding_window_pattern` field (every Nth layer is full)
+//! 3. Default pattern of 6 (every 6th layer is full)
 
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
 
@@ -20,11 +25,19 @@ pub struct Gemma4Arch {
 
 impl Gemma4Arch {
     pub fn from_config(config: ModelConfig) -> Self {
-        let pattern = config.sliding_window_pattern.unwrap_or(6);
         let num_layers = config.num_layers;
-        let global_layers = (0..num_layers)
-            .map(|layer| (layer + 1) % pattern == 0)
-            .collect();
+
+        // Determine global layers from explicit layer_types or pattern
+        let global_layers = if let Some(ref types) = config.layer_types {
+            types.iter()
+                .map(|t| t == "full_attention")
+                .collect()
+        } else {
+            let pattern = config.sliding_window_pattern.unwrap_or(6);
+            (0..num_layers)
+                .map(|layer| (layer + 1) % pattern == 0)
+                .collect()
+        };
 
         Self {
             config,
@@ -46,6 +59,11 @@ impl ModelArchitecture for Gemma4Arch {
         &self.config
     }
 
+    /// Gemma 4 weights use `model.language_model.` prefix (multimodal wrapper).
+    fn key_prefixes_to_strip(&self) -> &[&str] {
+        &["model.language_model.model.", "model.language_model.", "language_model.model.", "model."]
+    }
+
     // ── Per-layer attention geometry ──
 
     fn head_dim_for_layer(&self, layer: usize) -> usize {
@@ -64,16 +82,11 @@ impl ModelArchitecture for Gemma4Arch {
         }
     }
 
-    fn num_q_heads_for_layer(&self, layer: usize) -> usize {
-        if self.is_global_layer(layer) {
-            // Q projection output dim is constant, but head_dim changes
-            // num_q_heads = q_proj_dim / global_head_dim
-            let q_proj_dim = self.config.num_q_heads * self.config.head_dim;
-            let global_hd = self.config.global_head_dim.unwrap_or(self.config.head_dim);
-            q_proj_dim / global_hd
-        } else {
-            self.config.num_q_heads
-        }
+    fn num_q_heads_for_layer(&self, _layer: usize) -> usize {
+        // Gemma 4 keeps num_q_heads constant across all layers.
+        // At global layers, each head uses global_head_dim instead of head_dim,
+        // so Q projection output is larger (num_q * global_head_dim).
+        self.config.num_q_heads
     }
 
     fn rotary_fraction_for_layer(&self, layer: usize) -> f64 {
@@ -84,13 +97,24 @@ impl ModelArchitecture for Gemma4Arch {
         }
     }
 
-    fn v_shares_k(&self, layer: usize) -> bool {
-        // Gemma 4 uses K=V on later global layers. We detect this at runtime
-        // by checking whether the v_proj tensor exists. The architecture just
-        // signals that this *can* happen; the forward pass checks the weights.
-        // Always return false here — let the forward pass do the lookup.
-        let _ = layer;
+    fn v_shares_k(&self, _layer: usize) -> bool {
+        // K=V sharing is enabled at the config level (attention_k_eq_v=true).
+        // The forward pass detects it at runtime by checking for missing v_proj.
         false
+    }
+
+    fn has_v_norm(&self) -> bool {
+        true
+    }
+
+    // Gemma 4 uses QK-norm which already normalizes dot products.
+    // No additional 1/sqrt(head_dim) scaling is applied (scaling = 1.0).
+    fn attention_scale(&self) -> f64 {
+        1.0
+    }
+
+    fn attention_scale_for_layer(&self, _layer: usize) -> f64 {
+        1.0
     }
 
     fn layer_scalar_key(&self, layer: usize) -> Option<String> {
@@ -115,8 +139,10 @@ impl ModelArchitecture for Gemma4Arch {
 
     // ── Gemma-family behavior ──
 
+    // Gemma 4 stores norm weights as the full multiplier (no +1 offset).
+    // Unlike Gemma 2/3 which used 1+weight, Gemma 4's Gemma4RMSNorm applies weight directly.
     fn norm_weight_offset(&self) -> f32 {
-        1.0
+        0.0
     }
 
     fn activation(&self) -> Activation {

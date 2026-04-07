@@ -108,8 +108,20 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         .map(|v| v as usize)
         .unwrap_or(if default_head_dim > 0 { default_head_dim } else { hidden_size / num_q_heads });
     let num_kv_heads = text_config["num_key_value_heads"].as_u64().unwrap_or(4) as usize;
-    let rope_base = text_config["rope_theta"].as_f64().unwrap_or(rope_default);
-    let rope_local_base = text_config["rope_local_base_freq"].as_f64();
+    // RoPE base: check rope_parameters.full_attention.rope_theta (Gemma 4),
+    // then top-level rope_theta, then default.
+    let rope_params = text_config.get("rope_parameters");
+    let rope_base = rope_params
+        .and_then(|rp| rp.get("full_attention"))
+        .and_then(|fa| fa["rope_theta"].as_f64())
+        .or_else(|| text_config["rope_theta"].as_f64())
+        .unwrap_or(rope_default);
+    // Local RoPE base for sliding window layers: check rope_parameters.sliding_attention,
+    // then rope_local_base_freq.
+    let rope_local_base = rope_params
+        .and_then(|rp| rp.get("sliding_attention"))
+        .and_then(|sa| sa["rope_theta"].as_f64())
+        .or_else(|| text_config["rope_local_base_freq"].as_f64());
     let vocab_size = text_config["vocab_size"].as_u64().map(|v| v as usize);
     let sliding_window = text_config["sliding_window"].as_u64().map(|v| v as usize);
 
@@ -161,12 +173,31 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let num_global_kv_heads = text_config["num_global_key_value_heads"]
         .as_u64()
         .map(|v| v as usize);
-    let partial_rotary_factor = text_config["partial_rotary_factor"].as_f64();
-    // Sliding window pattern: Gemma 4 uses "sliding_window_pattern" in config.json.
-    // Fallback: infer from model family defaults.
+    // Partial rotary factor: check rope_parameters.full_attention first (Gemma 4),
+    // then top-level partial_rotary_factor.
+    let partial_rotary_factor = rope_params
+        .and_then(|rp| rp.get("full_attention"))
+        .and_then(|fa| fa["partial_rotary_factor"].as_f64())
+        .or_else(|| text_config["partial_rotary_factor"].as_f64());
+    // Sliding window pattern: explicit sliding_window_pattern field, or infer later.
     let sliding_window_pattern = text_config["sliding_window_pattern"]
         .as_u64()
         .map(|v| v as usize);
+    // Explicit per-layer type array (Gemma 4: ["sliding_attention", "full_attention", ...])
+    let layer_types = text_config.get("layer_types").and_then(|lt| {
+        lt.as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+    });
+    // K=V sharing flag
+    let attention_k_eq_v = text_config["attention_k_eq_v"].as_bool().unwrap_or(false);
+    // Per-layer embedding dimension (PLE)
+    let per_layer_embed_dim = text_config["hidden_size_per_layer_input"]
+        .as_u64()
+        .map(|v| v as usize)
+        .filter(|&v| v > 0);
 
     ModelConfig {
         model_type,
@@ -197,6 +228,9 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         num_global_kv_heads,
         partial_rotary_factor,
         sliding_window_pattern,
+        layer_types,
+        attention_k_eq_v,
+        per_layer_embed_dim,
     }
 }
 
@@ -769,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_detect_gemma4_31b() {
-        // Real Gemma 4 31B config — multimodal wrapper with text_config
+        // Real Gemma 4 31B config — matches actual HuggingFace config.json
         let config = serde_json::json!({
             "model_type": "gemma4",
             "text_config": {
@@ -783,12 +817,42 @@ mod tests {
                 "global_head_dim": 512,
                 "num_global_key_value_heads": 4,
                 "vocab_size": 262144,
-                "rope_theta": 1000000.0,
-                "rope_local_base_freq": 10000.0,
+                "attention_k_eq_v": true,
                 "sliding_window": 1024,
-                "partial_rotary_factor": 0.25,
                 "final_logit_softcapping": 30.0,
-                "query_pre_attn_scalar": 256
+                "rope_parameters": {
+                    "full_attention": {
+                        "partial_rotary_factor": 0.25,
+                        "rope_theta": 1000000.0,
+                        "rope_type": "proportional"
+                    },
+                    "sliding_attention": {
+                        "rope_theta": 10000.0,
+                        "rope_type": "default"
+                    }
+                },
+                "layer_types": [
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "sliding_attention", "full_attention"
+                ]
             }
         });
 
@@ -811,8 +875,8 @@ mod tests {
         assert!(!arch.is_sliding_window_layer(5));
         assert_eq!(arch.head_dim_for_layer(5), 512);
         assert_eq!(arch.num_kv_heads_for_layer(5), 4);
-        // Q heads at global layer: (32 * 256) / 512 = 16
-        assert_eq!(arch.num_q_heads_for_layer(5), 16);
+        // Q heads constant across all layers
+        assert_eq!(arch.num_q_heads_for_layer(5), 32);
         assert_eq!(arch.rotary_fraction_for_layer(5), 0.25);
 
         // RoPE bases
@@ -832,12 +896,15 @@ mod tests {
             Some("layers.5.layer_scalar".to_string())
         );
 
-        // Per-layer attention scale uses per-layer head_dim
+        // Per-layer attention scale uses per-layer head_dim (no query_pre_attn_scalar)
         let scale_sliding = arch.attention_scale_for_layer(0);
         let scale_global = arch.attention_scale_for_layer(5);
-        // query_pre_attn_scalar=256 overrides both
+        // Sliding: 1/sqrt(256), Global: 1/sqrt(512)
         assert_eq!(scale_sliding, (256.0f64).powf(-0.5));
-        assert_eq!(scale_global, (256.0f64).powf(-0.5));
+        assert_eq!(scale_global, (512.0f64).powf(-0.5));
+
+        // K=V flag parsed
+        assert!(arch.config().attention_k_eq_v);
     }
 
     #[test]
@@ -872,6 +939,59 @@ mod tests {
         // No global_head_dim → all layers use head_dim=256
         assert_eq!(arch.head_dim_for_layer(0), 256);
         assert_eq!(arch.head_dim_for_layer(4), 256);
+    }
+
+    #[test]
+    fn test_detect_gemma4_real_config() {
+        // Test against the actual HuggingFace config.json if available
+        let config_path = std::env::var("HOME").ok()
+            .map(|h| std::path::PathBuf::from(h).join(".cache/huggingface/hub/models--google--gemma-4-31B-it"));
+        let config_path = match config_path {
+            Some(p) if p.exists() => {
+                // Find the snapshot
+                let snapshots = p.join("snapshots");
+                std::fs::read_dir(&snapshots).ok()
+                    .and_then(|mut entries| entries.next())
+                    .and_then(|e| e.ok())
+                    .map(|e| e.path().join("config.json"))
+            }
+            _ => None,
+        };
+        let config_path = match config_path {
+            Some(p) if p.exists() => p,
+            _ => return, // skip if model not cached
+        };
+
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let arch = detect_from_json(&config);
+
+        assert_eq!(arch.family(), "gemma4");
+        assert_eq!(arch.config().num_layers, 60);
+        assert_eq!(arch.config().hidden_size, 5376);
+        assert_eq!(arch.config().head_dim, 256);
+        assert_eq!(arch.config().global_head_dim, Some(512));
+        assert_eq!(arch.config().num_kv_heads, 16);
+        assert_eq!(arch.config().num_global_kv_heads, Some(4));
+        assert_eq!(arch.config().partial_rotary_factor, Some(0.25));
+        assert!(arch.config().attention_k_eq_v);
+
+        // Verify layer_types parsed correctly (60 layers: 50 sliding + 10 full)
+        assert!(arch.config().layer_types.is_some());
+        let types = arch.config().layer_types.as_ref().unwrap();
+        assert_eq!(types.len(), 60);
+        let full_count = types.iter().filter(|t| *t == "full_attention").count();
+        assert_eq!(full_count, 10);
+
+        // Layer 5 is full_attention in the real config
+        assert!(!arch.is_sliding_window_layer(5));
+        assert_eq!(arch.head_dim_for_layer(5), 512);
+        assert_eq!(arch.num_kv_heads_for_layer(5), 4);
+        assert_eq!(arch.rotary_fraction_for_layer(5), 0.25);
+
+        // RoPE bases from rope_parameters
+        assert_eq!(arch.rope_base_for_layer(0), 10_000.0);
+        assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0);
     }
 
     #[test]

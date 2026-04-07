@@ -85,7 +85,7 @@ pub struct LayerKVCache {
 
 `prefill_q4` in `metal/prefill.rs` handles multi-token prefill on GPU:
 - Per-position Q4_K projection dispatch within one command buffer
-- Fused attention with skip_rope flag
+- Fused attention with skip_rope and rotary_dim flags (partial RoPE for Gemma 4)
 - KV cache populated via CPU `prefill_with_kv` after GPU forward pass
 
 ## Performance (M3 Max, 21 layers)

@@ -1,6 +1,5 @@
 use ndarray::Array2;
 
-use larql_compute::ComputeBackend;
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use super::{LayerGraph, LayerOutput, DenseLayerGraph, PerLayerGraph};

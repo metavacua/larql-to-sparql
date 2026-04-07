@@ -124,7 +124,7 @@ larql-models/src/
 ## Testing
 
 ```bash
-cargo test -p larql-models                              # 86 tests
+cargo test -p larql-models                              # 88 tests
 cargo run -p larql-models --example architecture_demo   # Architecture showcase
 ```
 

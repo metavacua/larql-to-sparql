@@ -45,7 +45,6 @@ struct RawEdge {
 pub struct AttentionWalker {
     weights: ModelWeights,
     tokenizer: tokenizers::Tokenizer,
-    head_dim: usize,
 }
 
 impl AttentionWalker {
@@ -62,12 +61,9 @@ impl AttentionWalker {
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| InferenceError::Parse(e.to_string()))?;
 
-        let head_dim = weights.head_dim;
-
         Ok(Self {
             weights,
             tokenizer,
-            head_dim,
         })
     }
 
@@ -97,7 +93,8 @@ impl AttentionWalker {
             .get(&format!("{prefix}o_proj.weight"))
             .ok_or_else(|| InferenceError::MissingTensor(format!("{prefix}o_proj.weight")))?;
 
-        let num_kv_heads = w_v.shape()[0] / self.head_dim;
+        let hd = self.weights.arch.head_dim_for_layer(layer);
+        let num_kv_heads = w_v.shape()[0] / hd;
         callbacks.on_layer_start(layer, num_kv_heads);
 
         let k_inputs = (config.top_k * 10).min(self.weights.vocab_size);
@@ -107,8 +104,6 @@ impl AttentionWalker {
 
         for h in 0..num_kv_heads {
             callbacks.on_progress(layer, h, num_kv_heads);
-
-            let hd = self.head_dim;
             let v_h = w_v.slice(ndarray::s![h * hd..(h + 1) * hd, ..]);
             let o_h = w_o.slice(ndarray::s![.., h * hd..(h + 1) * hd]);
 

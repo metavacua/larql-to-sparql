@@ -55,6 +55,34 @@ pub fn layer_norm(
     out
 }
 
+/// Per-head RMS norm without learned weights (parameter-free normalization).
+/// Used for V-norm in Gemma 4: just normalizes, no scaling.
+pub fn rms_norm_heads_no_weight(
+    x: &Array2<f32>,
+    num_heads: usize,
+    head_dim: usize,
+) -> Array2<f32> {
+    let eps = 1e-5f64;
+    let seq_len = x.shape()[0];
+    let mut out = x.clone();
+
+    for s in 0..seq_len {
+        for h in 0..num_heads {
+            let off = h * head_dim;
+            let mut sq_sum = 0.0f64;
+            for d in 0..head_dim {
+                let v = x[[s, off + d]] as f64;
+                sq_sum += v * v;
+            }
+            let rms = (sq_sum / head_dim as f64 + eps).sqrt() as f32;
+            for d in 0..head_dim {
+                out[[s, off + d]] = x[[s, off + d]] / rms;
+            }
+        }
+    }
+    out
+}
+
 /// Per-head RMS norm for Q/K projections with configurable weight offset.
 /// Uses f64 accumulation for the sum-of-squares.
 pub fn rms_norm_heads(

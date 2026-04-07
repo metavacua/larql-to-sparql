@@ -75,7 +75,7 @@ pub fn run_attention_block(
     capture_attention: bool,
 ) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>)> {
     use crate::forward::{dot_proj, add_bias};
-    use crate::residual::rms_norm_heads;
+    use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
     let arch = &*weights.arch;
     let head_dim = arch.head_dim_for_layer(layer);
@@ -118,6 +118,11 @@ pub fn run_attention_block(
     }
     if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut v_full, bias);
+    }
+
+    // V-norm: parameter-free per-head RMSNorm on value states (Gemma 4)
+    if arch.has_v_norm() {
+        v_full = rms_norm_heads_no_weight(&v_full, num_kv, head_dim);
     }
 
     // Per-head QK norm (Gemma, Qwen3)
@@ -179,7 +184,7 @@ pub fn run_attention_block_gpu(
 ) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>)> {
     use larql_compute::dot_proj_gpu;
     use crate::forward::add_bias;
-    use crate::residual::rms_norm_heads;
+    use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
     let arch = &*weights.arch;
     let head_dim = arch.head_dim_for_layer(layer);
@@ -215,6 +220,11 @@ pub fn run_attention_block_gpu(
     }
     if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut v_full, bias);
+    }
+
+    // V-norm: parameter-free per-head RMSNorm on value states (Gemma 4)
+    if arch.has_v_norm() {
+        v_full = rms_norm_heads_no_weight(&v_full, num_kv, head_dim);
     }
 
     let qk_offset = weights.arch.qk_norm_weight_offset();
@@ -393,7 +403,7 @@ pub fn run_attention_with_kv(
     layer: usize,
 ) -> Option<(Array2<f32>, Array2<f32>, Array2<f32>)> {
     use crate::forward::{apply_norm, add_bias, dot_proj};
-    use crate::residual::rms_norm_heads;
+    use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
     let arch = &*weights.arch;
     let hd = arch.head_dim_for_layer(layer);
@@ -416,6 +426,10 @@ pub fn run_attention_with_kv(
                              (&mut k, arch.attn_k_bias_key(layer)),
                              (&mut v, arch.attn_v_bias_key(layer))] {
         if let Some(b) = bias_fn.and_then(|key| weights.vectors.get(&key)) { add_bias(proj, b); }
+    }
+
+    if arch.has_v_norm() {
+        v = rms_norm_heads_no_weight(&v, nkv, hd);
     }
 
     let qk_off = if arch.qk_norm_weight_offset() != 0.0 { arch.qk_norm_weight_offset() } else { norm_off };
