@@ -99,8 +99,7 @@ pub fn dequantize_q4_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let scale = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
         let quants = &block[2..];
 
-        for j in 0..16 {
-            let byte = quants[j];
+        for byte in &quants[..16] {
             let lo = (byte & 0x0F) as i8 - 8;
             let hi = ((byte >> 4) & 0x0F) as i8 - 8;
             out.push(lo as f32 * scale);
@@ -123,8 +122,7 @@ fn dequantize_q4_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelErro
         let min = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
         let quants = &block[4..];
 
-        for j in 0..16 {
-            let byte = quants[j];
+        for byte in &quants[..16] {
             let lo = (byte & 0x0F) as f32;
             let hi = ((byte >> 4) & 0x0F) as f32;
             out.push(lo * scale + min);
@@ -145,8 +143,8 @@ fn dequantize_q8_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelErro
         let scale = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
         let quants = &block[2..];
 
-        for j in 0..32 {
-            out.push(quants[j] as i8 as f32 * scale);
+        for &q in &quants[..32] {
+            out.push(q as i8 as f32 * scale);
         }
     }
     Ok(out)
@@ -165,10 +163,9 @@ pub fn dequantize_q5_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let high_bits = u32::from_le_bytes([block[2], block[3], block[4], block[5]]);
         let quants = &block[6..];
 
-        for j in 0..16 {
-            let byte = quants[j];
-            let lo_lo4 = (byte & 0x0F) as u8;
-            let hi_lo4 = ((byte >> 4) & 0x0F) as u8;
+        for (j, &byte) in quants[..16].iter().enumerate() {
+            let lo_lo4 = byte & 0x0F;
+            let hi_lo4 = (byte >> 4) & 0x0F;
 
             let lo_hi1 = ((high_bits >> (j * 2)) & 1) as u8;
             let hi_hi1 = ((high_bits >> (j * 2 + 1)) & 1) as u8;
@@ -197,10 +194,9 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let high_bits = u32::from_le_bytes([block[4], block[5], block[6], block[7]]);
         let quants = &block[8..];
 
-        for j in 0..16 {
-            let byte = quants[j];
-            let lo_lo4 = (byte & 0x0F) as u8;
-            let hi_lo4 = ((byte >> 4) & 0x0F) as u8;
+        for (j, &byte) in quants[..16].iter().enumerate() {
+            let lo_lo4 = byte & 0x0F;
+            let hi_lo4 = (byte >> 4) & 0x0F;
 
             let lo_hi1 = ((high_bits >> (j * 2)) & 1) as u8;
             let hi_hi1 = ((high_bits >> (j * 2 + 1)) & 1) as u8;
@@ -232,8 +228,8 @@ pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let sc = &block[4..16];
         let mut scales = [0u8; 8];
         let mut mins = [0u8; 8];
-        // Lower 4 bits of scales from bytes 0-7
-        for j in 0..8 { scales[j] = sc[j] & 0x3F; }
+        // Lower 6 bits of scales from bytes 0-7
+        for (j, &s) in sc[..8].iter().enumerate() { scales[j] = s & 0x3F; }
         // 4-bit mins from bytes 16-19
         let mb = &block[16..20];
         for j in 0..4 {
@@ -272,8 +268,8 @@ pub fn dequantize_q6_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let scales = &block[192..208]; // 16 int8 scales
         let d = f16_to_f32(u16::from_le_bytes([block[208], block[209]]));
 
-        for j in 0..16 {
-            let sc = d * (scales[j] as i8) as f32;
+        for (j, &sc_byte) in scales[..16].iter().enumerate() {
+            let sc = d * (sc_byte as i8) as f32;
             for i in 0..16 {
                 let idx = j * 16 + i;
                 let lo4 = if idx % 2 == 0 { ql[idx / 2] & 0x0F } else { (ql[idx / 2] >> 4) & 0x0F };
@@ -339,8 +335,8 @@ pub fn quantize_q8_0(data: &[f32]) -> Vec<u8> {
         let scale_f16 = super::half::f32_to_f16(scale);
         out.extend_from_slice(&scale_f16.to_le_bytes());
 
-        for j in 0..32 {
-            let q = (block[j] * inv_scale).round().clamp(-128.0, 127.0) as i8;
+        for &val in &block[..32] {
+            let q = (val * inv_scale).round().clamp(-128.0, 127.0) as i8;
             out.push(q as u8);
         }
     }

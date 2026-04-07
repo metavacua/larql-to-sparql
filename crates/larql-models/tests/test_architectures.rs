@@ -463,6 +463,390 @@ fn gemma4_gemma_family_traits() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Gemma 2 — softcapping, QK norm with +1 offset
+// ═══════════════════════════════════════════════════════════════
+
+fn gemma2_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "gemma2",
+        "hidden_size": 2304, "num_hidden_layers": 26, "intermediate_size": 9216,
+        "num_attention_heads": 8, "num_key_value_heads": 4, "head_dim": 256,
+        "query_pre_attn_scalar": 256.0,
+        "attn_logit_softcapping": 50.0, "final_logit_softcapping": 30.0
+    }))
+}
+
+#[test]
+fn gemma2_detection() {
+    let arch = gemma2_arch();
+    assert_eq!(arch.family(), "gemma2");
+    assert_eq!(arch.config().num_layers, 26);
+}
+
+#[test]
+fn gemma2_softcapping() {
+    let arch = gemma2_arch();
+    assert_eq!(arch.attn_logit_softcapping(), Some(50.0));
+    assert_eq!(arch.final_logit_softcapping(), Some(30.0));
+}
+
+#[test]
+fn gemma2_norm_offsets() {
+    let arch = gemma2_arch();
+    assert_eq!(arch.norm_weight_offset(), 1.0);
+    assert_eq!(arch.qk_norm_weight_offset(), 1.0);
+}
+
+#[test]
+fn gemma2_qk_norm_keys() {
+    let arch = gemma2_arch();
+    assert_eq!(arch.attn_q_norm_key(5).unwrap(), "layers.5.self_attn.q_norm.weight");
+    assert_eq!(arch.attn_k_norm_key(5).unwrap(), "layers.5.self_attn.k_norm.weight");
+}
+
+#[test]
+fn gemma2_attention_scale() {
+    let arch = gemma2_arch();
+    // query_pre_attn_scalar = 256 → scale = 256^(-0.5) = 1/16 = 0.0625
+    let expected = (256.0f64).powf(-0.5);
+    assert_eq!(arch.attention_scale(), expected);
+}
+
+#[test]
+fn gemma2_gemma_family_traits() {
+    let arch = gemma2_arch();
+    assert_eq!(arch.activation(), larql_models::Activation::GeluTanh);
+    assert!(arch.has_post_norms());
+    assert_eq!(arch.embed_scale(), (2304.0f32).sqrt());
+    // No sliding window on Gemma 2
+    assert!(!arch.is_sliding_window_layer(0));
+    assert!(!arch.is_sliding_window_layer(5));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Gemma 3 — sliding window, dual RoPE, QK norm offset
+// ═══════════════════════════════════════════════════════════════
+
+fn gemma3_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "gemma3",
+        "text_config": {
+            "model_type": "gemma3_text",
+            "hidden_size": 2560, "num_hidden_layers": 34, "intermediate_size": 10240,
+            "num_attention_heads": 8, "num_key_value_heads": 4,
+            "head_dim": 256, "sliding_window": 1024
+        }
+    }))
+}
+
+#[test]
+fn gemma3_detection() {
+    let arch = gemma3_arch();
+    assert_eq!(arch.family(), "gemma3");
+    assert_eq!(arch.config().num_layers, 34);
+}
+
+#[test]
+fn gemma3_sliding_window_pattern() {
+    let arch = gemma3_arch();
+    // Every 6th layer (0-indexed: 5, 11, 17, ...) is full attention
+    assert!(arch.is_sliding_window_layer(0));
+    assert!(arch.is_sliding_window_layer(4));
+    assert!(!arch.is_sliding_window_layer(5));  // full
+    assert!(arch.is_sliding_window_layer(6));
+    assert!(!arch.is_sliding_window_layer(11)); // full
+}
+
+#[test]
+fn gemma3_dual_rope_bases() {
+    let arch = gemma3_arch();
+    // Sliding layers: 10k, full layers: 1M
+    assert_eq!(arch.rope_base_for_layer(0), 10_000.0);
+    assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0);
+}
+
+#[test]
+fn gemma3_norm_offsets() {
+    let arch = gemma3_arch();
+    assert_eq!(arch.norm_weight_offset(), 1.0);
+    assert_eq!(arch.qk_norm_weight_offset(), 1.0);
+}
+
+#[test]
+fn gemma3_gemma_family_traits() {
+    let arch = gemma3_arch();
+    assert_eq!(arch.activation(), larql_models::Activation::GeluTanh);
+    assert!(arch.has_post_norms());
+    assert_eq!(arch.embed_scale(), (2560.0f32).sqrt());
+    assert!(arch.attn_q_norm_key(0).is_some());
+    // No softcapping on Gemma 3
+    assert!(arch.attn_logit_softcapping().is_none());
+    assert!(arch.final_logit_softcapping().is_none());
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Mistral — sliding window, Llama-compatible keys
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn mistral_detection_and_keys() {
+    let arch = detect_from_json(&serde_json::json!({
+        "model_type": "mistral",
+        "hidden_size": 4096, "num_hidden_layers": 32, "intermediate_size": 14336,
+        "num_attention_heads": 32, "num_key_value_heads": 8, "sliding_window": 4096
+    }));
+    assert_eq!(arch.family(), "mistral");
+    assert_eq!(arch.sliding_window_size(), Some(4096));
+    // Mistral uses same keys as Llama
+    assert_eq!(arch.attn_q_key(0), "layers.0.self_attn.q_proj.weight");
+    assert_eq!(arch.ffn_gate_key(0), "layers.0.mlp.gate_proj.weight");
+    // RMSNorm, SiLU, gated FFN
+    assert_eq!(arch.norm_type(), larql_models::NormType::RmsNorm);
+    assert_eq!(arch.activation(), larql_models::Activation::Silu);
+    assert_eq!(arch.ffn_type(), larql_models::FfnType::Gated);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Qwen — attention bias, QK norm keys
+// ═══════════════════════════════════════════════════════════════
+
+fn qwen_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "qwen2",
+        "hidden_size": 2048, "num_hidden_layers": 24, "intermediate_size": 5504,
+        "num_attention_heads": 16, "num_key_value_heads": 2
+    }))
+}
+
+#[test]
+fn qwen_detection() {
+    let arch = qwen_arch();
+    assert_eq!(arch.family(), "qwen2");
+    assert_eq!(arch.config().num_layers, 24);
+}
+
+#[test]
+fn qwen_attention_bias_keys() {
+    let arch = qwen_arch();
+    assert_eq!(arch.attn_q_bias_key(3).unwrap(), "layers.3.self_attn.q_proj.bias");
+    assert_eq!(arch.attn_k_bias_key(3).unwrap(), "layers.3.self_attn.k_proj.bias");
+    assert_eq!(arch.attn_v_bias_key(3).unwrap(), "layers.3.self_attn.v_proj.bias");
+}
+
+#[test]
+fn qwen_qk_norm_keys() {
+    let arch = qwen_arch();
+    assert_eq!(arch.attn_q_norm_key(0).unwrap(), "layers.0.self_attn.q_norm.weight");
+    assert_eq!(arch.attn_k_norm_key(0).unwrap(), "layers.0.self_attn.k_norm.weight");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DeepSeek — MoE + MLA
+// ═══════════════════════════════════════════════════════════════
+
+fn deepseek_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "deepseek_v2",
+        "hidden_size": 5120, "num_hidden_layers": 60, "intermediate_size": 12288,
+        "num_attention_heads": 128, "num_key_value_heads": 128,
+        "n_routed_experts": 160, "num_experts_per_tok": 6, "n_shared_experts": 2,
+        "kv_lora_rank": 512, "q_lora_rank": 1536,
+        "rope_scaling": { "type": "yarn", "factor": 40.0 }
+    }))
+}
+
+#[test]
+fn deepseek_detection() {
+    let arch = deepseek_arch();
+    assert_eq!(arch.family(), "deepseek");
+    assert_eq!(arch.config().num_layers, 60);
+}
+
+#[test]
+fn deepseek_moe() {
+    let arch = deepseek_arch();
+    assert!(arch.is_moe());
+    assert_eq!(arch.num_experts(), 160);
+    assert_eq!(arch.num_experts_per_token(), 6);
+    assert_eq!(arch.num_shared_experts(), 2);
+    assert_eq!(arch.expert_format(), ExpertFormat::PerExpert);
+}
+
+#[test]
+fn deepseek_expert_keys() {
+    let arch = deepseek_arch();
+    assert_eq!(arch.moe_router_key(0).unwrap(), "layers.0.mlp.gate.weight");
+    assert_eq!(arch.expert_ffn_gate_key(0, 5).unwrap(), "layers.0.mlp.experts.5.gate_proj.weight");
+    assert_eq!(arch.expert_ffn_up_key(0, 5).unwrap(), "layers.0.mlp.experts.5.up_proj.weight");
+    assert_eq!(arch.expert_ffn_down_key(0, 5).unwrap(), "layers.0.mlp.experts.5.down_proj.weight");
+}
+
+#[test]
+fn deepseek_shared_expert_keys() {
+    let arch = deepseek_arch();
+    assert_eq!(arch.shared_expert_gate_key(0).unwrap(), "layers.0.mlp.shared_experts.gate_proj.weight");
+    assert_eq!(arch.shared_expert_up_key(0).unwrap(), "layers.0.mlp.shared_experts.up_proj.weight");
+    assert_eq!(arch.shared_expert_down_key(0).unwrap(), "layers.0.mlp.shared_experts.down_proj.weight");
+}
+
+#[test]
+fn deepseek_mla() {
+    let arch = deepseek_arch();
+    assert!(arch.uses_mla());
+    assert_eq!(arch.kv_lora_rank(), 512);
+    assert_eq!(arch.q_lora_rank(), 1536);
+    assert_eq!(arch.mla_kv_a_key(0).unwrap(), "layers.0.self_attn.kv_a_proj_with_mqa.weight");
+    assert_eq!(arch.mla_kv_b_key(0).unwrap(), "layers.0.self_attn.kv_b_proj.weight");
+    assert_eq!(arch.mla_q_a_key(0).unwrap(), "layers.0.self_attn.q_a_proj.weight");
+    assert_eq!(arch.mla_q_b_key(0).unwrap(), "layers.0.self_attn.q_b_proj.weight");
+}
+
+#[test]
+fn deepseek_rope_scaling() {
+    let arch = deepseek_arch();
+    assert_eq!(arch.rope_scaling_type(), Some("yarn"));
+    assert_eq!(arch.rope_scaling_factor(), 40.0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Granite — scaling multipliers
+// ═══════════════════════════════════════════════════════════════
+
+fn granite_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "granite",
+        "hidden_size": 2048, "num_hidden_layers": 40, "intermediate_size": 8192,
+        "num_attention_heads": 32, "num_key_value_heads": 8,
+        "embedding_multiplier": 12.0, "residual_multiplier": 0.22,
+        "attention_multiplier": 0.22, "logits_scaling": 0.13
+    }))
+}
+
+#[test]
+fn granite_detection() {
+    let arch = granite_arch();
+    assert_eq!(arch.family(), "granite");
+    assert_eq!(arch.config().num_layers, 40);
+}
+
+#[test]
+fn granite_scaling_multipliers() {
+    let arch = granite_arch();
+    assert_eq!(arch.embed_scale(), 12.0);
+    assert_eq!(arch.residual_multiplier(), 0.22);
+    assert_eq!(arch.attention_multiplier(), 0.22);
+    assert_eq!(arch.logits_scaling(), 0.13);
+}
+
+#[test]
+fn granite_uses_llama_defaults() {
+    let arch = granite_arch();
+    // Same keys, norm, activation as Llama
+    assert_eq!(arch.attn_q_key(0), "layers.0.self_attn.q_proj.weight");
+    assert_eq!(arch.ffn_gate_key(0), "layers.0.mlp.gate_proj.weight");
+    assert_eq!(arch.norm_type(), larql_models::NormType::RmsNorm);
+    assert_eq!(arch.activation(), larql_models::Activation::Silu);
+    assert!(!arch.is_moe());
+}
+
+// ═══════════════════════════════════════════════════════════════
+// StarCoder2 — LayerNorm, GELU, bias, non-gated FFN, c_fc/c_proj keys
+// ═══════════════════════════════════════════════════════════════
+
+fn starcoder2_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "starcoder2",
+        "hidden_size": 3072, "num_hidden_layers": 30, "intermediate_size": 12288,
+        "num_attention_heads": 24, "num_key_value_heads": 2
+    }))
+}
+
+#[test]
+fn starcoder2_detection() {
+    let arch = starcoder2_arch();
+    assert_eq!(arch.family(), "starcoder2");
+    assert_eq!(arch.config().num_layers, 30);
+}
+
+#[test]
+fn starcoder2_norm_and_activation() {
+    let arch = starcoder2_arch();
+    assert_eq!(arch.norm_type(), larql_models::NormType::LayerNorm);
+    assert_eq!(arch.activation(), larql_models::Activation::GeluTanh);
+    assert_eq!(arch.ffn_type(), larql_models::FfnType::Standard);
+}
+
+#[test]
+fn starcoder2_ffn_keys() {
+    let arch = starcoder2_arch();
+    // Uses c_fc/c_proj naming
+    assert_eq!(arch.ffn_up_key(0), "layers.0.mlp.c_fc.weight");
+    assert_eq!(arch.ffn_down_key(0), "layers.0.mlp.c_proj.weight");
+}
+
+#[test]
+fn starcoder2_bias_keys() {
+    let arch = starcoder2_arch();
+    // FFN biases
+    assert_eq!(arch.ffn_up_bias_key(0).unwrap(), "layers.0.mlp.c_fc.bias");
+    assert_eq!(arch.ffn_down_bias_key(0).unwrap(), "layers.0.mlp.c_proj.bias");
+    // Attention biases (including O)
+    assert_eq!(arch.attn_q_bias_key(0).unwrap(), "layers.0.self_attn.q_proj.bias");
+    assert_eq!(arch.attn_k_bias_key(0).unwrap(), "layers.0.self_attn.k_proj.bias");
+    assert_eq!(arch.attn_v_bias_key(0).unwrap(), "layers.0.self_attn.v_proj.bias");
+    assert_eq!(arch.attn_o_bias_key(0).unwrap(), "layers.0.self_attn.o_proj.bias");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Generic fallback — safe defaults for unknown models
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn generic_fallback() {
+    let arch = detect_from_json(&serde_json::json!({
+        "model_type": "some_future_model",
+        "hidden_size": 4096, "num_hidden_layers": 32, "intermediate_size": 11008,
+        "num_attention_heads": 32, "num_key_value_heads": 32
+    }));
+    assert_eq!(arch.family(), "generic");
+    // All safe defaults
+    assert_eq!(arch.norm_type(), larql_models::NormType::RmsNorm);
+    assert_eq!(arch.activation(), larql_models::Activation::Silu);
+    assert_eq!(arch.ffn_type(), larql_models::FfnType::Gated);
+    assert_eq!(arch.norm_weight_offset(), 0.0);
+    assert_eq!(arch.embed_scale(), 1.0);
+    assert!(!arch.has_post_norms());
+    assert!(!arch.is_moe());
+    assert!(!arch.uses_mla());
+    assert!(arch.attn_q_norm_key(0).is_none());
+    assert!(arch.attn_logit_softcapping().is_none());
+    assert!(arch.attn_q_bias_key(0).is_none());
+    assert!(arch.ffn_up_bias_key(0).is_none());
+    // Standard keys still work
+    assert_eq!(arch.attn_q_key(0), "layers.0.self_attn.q_proj.weight");
+    assert_eq!(arch.ffn_gate_key(0), "layers.0.mlp.gate_proj.weight");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Cross-architecture: default multipliers are 1.0 for non-Granite
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn non_granite_multipliers_are_one() {
+    let configs = [
+        serde_json::json!({"model_type": "llama", "hidden_size": 4096, "num_hidden_layers": 32, "intermediate_size": 14336, "num_attention_heads": 32, "num_key_value_heads": 8}),
+        serde_json::json!({"model_type": "mistral", "hidden_size": 4096, "num_hidden_layers": 32, "intermediate_size": 14336, "num_attention_heads": 32, "num_key_value_heads": 8}),
+        serde_json::json!({"model_type": "qwen2", "hidden_size": 2048, "num_hidden_layers": 24, "intermediate_size": 5504, "num_attention_heads": 16, "num_key_value_heads": 2}),
+    ];
+    for config in &configs {
+        let arch = detect_from_json(config);
+        assert_eq!(arch.residual_multiplier(), 1.0, "{} should have residual_multiplier=1.0", arch.family());
+        assert_eq!(arch.attention_multiplier(), 1.0, "{} should have attention_multiplier=1.0", arch.family());
+        assert_eq!(arch.logits_scaling(), 1.0, "{} should have logits_scaling=1.0", arch.family());
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Q4 round-trip: quantize then dequantize
 // ═══════════════════════════════════════════════════════════════
 

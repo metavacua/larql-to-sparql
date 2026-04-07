@@ -929,3 +929,100 @@ fn format_bytes(bytes: usize) -> String {
         format!("{} B", bytes)
     }
 }
+
+// ── Hybrid: Does head classification hold for in-context knowledge? ──
+
+#[test]
+#[ignore]
+fn test_hybrid_head_classification_incontext() {
+    let (model, index) = load_test_model().expect("Model not available");
+
+    println!("\n=== Head Classification: In-Context vs Parametric ===\n");
+
+    // Parametric: entities from model's training data
+    let parametric_entities = &["France", "Germany", "Japan", "Italy", "Spain"];
+    let parametric_cls = kv_cache_benchmark::real_model::hybrid_layer::classify_heads(
+        model.weights(), model.tokenizer(),
+        "The capital of ",
+        parametric_entities,
+        0.90,
+    );
+
+    // In-context: planted facts with DIFFERENT content per entity
+    // Same template structure but the "entity" is a planted code, not a country
+    let incontext_prompts: Vec<String> = vec![
+        "The code for project Alpha is FALCON. The code for project Alpha is",
+        "The code for project Beta is EAGLE. The code for project Beta is",
+        "The code for project Gamma is TIGER. The code for project Gamma is",
+        "The code for project Delta is SHARK. The code for project Delta is",
+        "The code for project Omega is RAVEN. The code for project Omega is",
+    ].into_iter().map(String::from).collect();
+
+    // Capture per-head outputs for in-context prompts
+    let mut incontext_captures = Vec::new();
+    for prompt in &incontext_prompts {
+        let encoding = model.tokenizer().encode(prompt.as_str(), true).expect("tokenize");
+        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+        incontext_captures.push(
+            kv_cache_benchmark::real_model::hybrid_layer::capture_per_head_attention(
+                model.weights(), &token_ids,
+            )
+        );
+    }
+
+    // Compare per-head cosine: parametric vs in-context
+    let num_layers = model.weights().num_layers;
+    let num_q = model.weights().num_q_heads;
+
+    println!("{:>5} {:>12} {:>12} {:>10}", "Layer", "Param cos", "InCtx cos", "Diff");
+    println!("{}", "-".repeat(45));
+
+    let mut param_static = 0;
+    let mut inctx_static = 0;
+    let mut both_agree = 0;
+
+    for layer in 0..num_layers {
+        // Parametric mean cosine for this layer
+        let param_layer: Vec<&kv_cache_benchmark::real_model::hybrid_layer::HeadClassResult> =
+            parametric_cls.results.iter().filter(|r| r.layer == layer).collect();
+        let param_mean: f32 = param_layer.iter().map(|r| r.mean_cosine).sum::<f32>() / num_q as f32;
+        let param_all_static = param_layer.iter().all(|r| r.is_static);
+
+        // In-context: compute pairwise cosine across prompts per head
+        let mut inctx_cosines = Vec::new();
+        for head in 0..num_q {
+            let mut cos_sum = 0.0f64;
+            let mut pairs = 0;
+            for i in 0..incontext_captures.len() {
+                for j in (i+1)..incontext_captures.len() {
+                    let a = &incontext_captures[i][layer].heads[head];
+                    let b = &incontext_captures[j][layer].heads[head];
+                    let dot: f64 = a.iter().zip(b).map(|(&x, &y)| x as f64 * y as f64).sum();
+                    let na: f64 = a.iter().map(|&x| (x as f64).powi(2)).sum::<f64>().sqrt();
+                    let nb: f64 = b.iter().map(|&x| (x as f64).powi(2)).sum::<f64>().sqrt();
+                    let cos = if na * nb > 1e-12 { dot / (na * nb) } else { 0.0 };
+                    cos_sum += cos;
+                    pairs += 1;
+                }
+            }
+            inctx_cosines.push(if pairs > 0 { (cos_sum / pairs as f64) as f32 } else { 0.0 });
+        }
+        let inctx_mean: f32 = inctx_cosines.iter().sum::<f32>() / num_q as f32;
+        let inctx_all_static = inctx_cosines.iter().all(|&c| c >= 0.90);
+
+        if param_all_static { param_static += 1; }
+        if inctx_all_static { inctx_static += 1; }
+        if param_all_static == inctx_all_static { both_agree += 1; }
+
+        let diff = inctx_mean - param_mean;
+        let marker = if !param_all_static || !inctx_all_static { " ←" } else { "" };
+        println!("L{:<4} {:>12.4} {:>12.4} {:>+10.4}{marker}", layer, param_mean, inctx_mean, diff);
+    }
+
+    println!("\nParametric: {param_static}/{num_layers} layers all-static");
+    println!("In-context: {inctx_static}/{num_layers} layers all-static");
+    println!("Agreement:  {both_agree}/{num_layers} layers agree on classification");
+    println!("\nKey question: do the same layers show up as dynamic for both?");
+    println!("If yes → Hybrid RS+CA works for in-context knowledge too.");
+    println!("If no  → head classification may need to be context-aware.");
+}

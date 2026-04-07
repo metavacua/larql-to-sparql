@@ -906,8 +906,10 @@ mod tests {
         assert_eq!(arch.attention_scale_for_layer(0), 1.0);
         assert_eq!(arch.attention_scale_for_layer(5), 1.0);
 
-        // K=V flag parsed
+        // K=V flag parsed — v_shares_k() exposes it via the trait
         assert!(arch.config().attention_k_eq_v);
+        assert!(arch.v_shares_k(0));
+        assert!(arch.v_shares_k(5));
 
         // V-norm (parameter-free RMSNorm on V states)
         assert!(arch.has_v_norm());
@@ -1016,6 +1018,7 @@ mod tests {
 
         // No K=V on E2B
         assert!(!arch.config().attention_k_eq_v);
+        assert!(!arch.v_shares_k(0));
     }
 
     #[test]

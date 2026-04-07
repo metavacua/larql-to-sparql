@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn f16_round_trip() {
-        for &v in &[0.0f32, 1.0, -1.0, 0.5, 100.0, 3.14] {
+        for &v in &[0.0f32, 1.0, -1.0, 0.5, 100.0, 2.71] {
             let bits = f32_to_f16(v);
             let back = f16_to_f32(bits);
             assert!((v - back).abs() < 0.01 * v.abs().max(0.001),

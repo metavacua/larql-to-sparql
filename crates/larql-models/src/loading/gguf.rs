@@ -166,6 +166,7 @@ impl GgufFile {
     }
 
     /// Load all tensors, dequantizing to f32.
+    #[allow(clippy::type_complexity)]
     pub fn load_tensors(&self) -> Result<(HashMap<String, crate::WeightArray>, HashMap<String, Vec<f32>>), ModelError> {
         let file = std::fs::File::open(&self.path)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)? };

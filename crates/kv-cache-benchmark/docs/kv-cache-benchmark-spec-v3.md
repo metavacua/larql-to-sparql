@@ -101,17 +101,36 @@ Why this works:
 - The 4.5% dynamic heads are the ones doing actual entity-specific routing
 - Those heads need real KV — but that's 4.5% of the original cache, not 100%
 
-What's proven:
-- 95.5% head cacheability (cosine 0.942+)
+What's proven (on real Gemma 3-4B weights):
+- 97.1% head cacheability for parametric queries (264/272 heads static, cosine ≥ 0.90)
+- 76.5% head cacheability for in-context queries (26/34 layers all-static)
+- Dynamic layers identified: L1, L13, L26, L32 (parametric), + L3, L14, L22, L27, L29, L30 (in-context)
+- KV reduction: 34× parametric, 4.3× in-context, ~3.4× worst-case (union)
+- All 5 test prompts produce correct predictions with hybrid classification
 - Routing table: 352 KB, 44 centroids, 100% precision @ 62% coverage
 - FFN walk: 34 layers validated, zero accuracy loss
 - Template scaffolding: 0.99 cosine across entities
-- 13 of 34 layers fully skippable via template detection
 - Entity confusion test: France→Paris, Germany→Berlin, Japan→Tokyo on same template (PROVEN)
 
-What's needed for benchmark:
-- Head-level classification: which heads are static vs dynamic per layer
-- Cached attention output storage format
+Dual retrieval circuits discovered:
+- L13 + L26: shared entity-sensitive routing (dynamic for BOTH parametric and in-context)
+- L29 + L30: in-context comprehension circuit (static for parametric, DYNAMIC for in-context)
+- L1 + L32: parametric routing circuit (dynamic for parametric, STATIC for in-context)
+- This is a mechanistic interpretability finding: the model has specialised layers
+  for parametric vs in-context retrieval, mappable at per-head granularity.
+
+Dynamic classification by query type:
+    Parametric queries (factual, entity-relation):
+      → 4 dynamic layers, 34× KV reduction (97.1% static)
+    In-context queries (references document, planted facts):
+      → 8 dynamic layers, 4.3× KV reduction (76.5% static)
+    Unknown / mixed:
+      → union of both, 10 dynamic layers, 3.4× KV reduction (70% static)
+    All cases: still eliminates majority of KV cache.
+
+What's needed to ship:
+- Dynamic classification router (template detection already exists)
+- Static head output injection in inference pipeline
 - Dynamic-head-only KV cache implementation
 - Fallback: if a query doesn't match a known template, use full Markov RS
 
@@ -193,6 +212,34 @@ What's open:
     Softmax dilution crossover: between 1024 and 2048 tokens.
     Far more aggressive than expected.
 
+### Hybrid RS+CA (confirmed on real model)
+
+    Metric                          Parametric    In-context
+    ─────────────────────────────────────────────────────────
+    Static heads                    264/272       ~208/272
+    Static fraction                 97.1%         76.5%
+    Dynamic layers                  4 (L1,13,26,32)   8 (+L3,14,22,27,29,30)
+    KV reduction                    34×           4.3×
+    Correct predictions             5/5           (same forward pass)
+    Dynamic KV per prompt           98 KB         (vs 836 KB full)
+
+    Dual retrieval circuits:
+      L13 + L26: entity-sensitive (both parametric and in-context)
+      L29 + L30: in-context comprehension (activates for planted facts)
+      L1 + L32: parametric routing (activates for trained knowledge)
+
+### Multi-Fact Retrieval
+
+    Test                         Full context    Bounded window
+    ───────────────────────────────────────────────────────────
+    5 facts planted in 2K ctx    0/5 found       3/5 found
+    Needle position sweep @2K    0/5 positions   5/5 positions
+
+### Context vs Parametric Conflict
+
+    "Capital of France is Lyon"  → model follows context (Lyon wins over Paris)
+    "Mozart born in London"      → model follows context (London wins, Salzburg in top-10)
+
 ### Multi-Turn Retention
 
     Fact                     Found in top-10?
@@ -256,8 +303,9 @@ Cold storage / conv     978 MB          ~160-240 MB         10.2 KB             
 Compression vs KV       1×              4-6×                135-1,012×          15-27× (4K) / 180-370×   N/A**
 Still grows O(N)?       yes             yes                 no (bounded)        ~O(N) for 4.5% heads     no (graph is fixed)
 Softmax dilution?       yes (1/N)       yes (1/N)           no (512 max)        only on 4.5% heads       no (no softmax)
-Accuracy                exact           cosine 0.991        KL = 0.0           KL ≈ 0.0                 top-1 match (factual)
+Accuracy                exact           cosine 0.991        KL = 0.0           5/5 correct              top-1 match (factual)
 Needle @ 2K tokens      MISSED          MISSED              FOUND              FOUND                    routing*
+Head static %           n/a             n/a                 n/a                97.1% / 76.5%            n/a
 Forward pass?           yes (34L)       yes (34L)           yes (window)        partial (~1-2L attn)     NO
 FFN matmuls?            34L             34L                 34L                 ZERO (vindex)            ZERO (vindex)
 Attn matmuls?           34L             34L                 window              ~1-2L (dynamic only)     ZERO

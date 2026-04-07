@@ -53,8 +53,12 @@ impl ModelArchitecture for Gemma3Arch {
 
     // ── Gemma-specific behavior ──
 
-    // All Gemma norms (layer + QK) use 1.0 + learned_weight at runtime.
+    // All Gemma 3 norms (layer + QK) use 1.0 + learned_weight at runtime.
     fn norm_weight_offset(&self) -> f32 {
+        1.0
+    }
+
+    fn qk_norm_weight_offset(&self) -> f32 {
         1.0
     }
 

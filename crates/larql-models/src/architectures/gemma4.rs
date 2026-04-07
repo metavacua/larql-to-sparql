@@ -132,9 +132,7 @@ impl ModelArchitecture for Gemma4Arch {
     }
 
     fn v_shares_k(&self, _layer: usize) -> bool {
-        // K=V sharing is enabled at the config level (attention_k_eq_v=true).
-        // The forward pass detects it at runtime by checking for missing v_proj.
-        false
+        self.config.attention_k_eq_v
     }
 
     fn has_v_norm(&self) -> bool {
