@@ -53,8 +53,7 @@ pub fn kmeans(
         let mut new_centres = Array2::<f32>::zeros((k, dim));
         let mut counts = vec![0usize; k];
 
-        for i in 0..n {
-            let c = assignments[i];
+        for (i, &c) in assignments.iter().enumerate() {
             counts[c] += 1;
             let row = data.row(i);
             for j in 0..dim {

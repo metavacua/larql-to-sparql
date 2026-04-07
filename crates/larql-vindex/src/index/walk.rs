@@ -221,6 +221,22 @@ impl VectorIndex {
         self.interleaved_q4_mmap.is_some()
     }
 
+    /// Load Q4_K/Q6_K interleaved FFN data (Ollama-compatible, matches attn format).
+    pub fn load_interleaved_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
+        let path = dir.join("interleaved_q4k.bin");
+        if !path.exists() {
+            return Err(VindexError::Parse("interleaved_q4k.bin not found".into()));
+        }
+        let file = std::fs::File::open(&path)?;
+        let mmap = unsafe { mmap_optimized(&file)? };
+        self.interleaved_q4k_mmap = Some(Arc::new(mmap));
+        Ok(())
+    }
+
+    pub fn has_interleaved_q4k(&self) -> bool {
+        self.interleaved_q4k_mmap.is_some()
+    }
+
     /// Dequantize one matrix from Q4 interleaved file → f32 Array2.
     /// component: 0=gate, 1=up, 2=down
     fn dequant_q4_matrix(&self, layer: usize, component: usize) -> Option<ndarray::Array2<f32>> {

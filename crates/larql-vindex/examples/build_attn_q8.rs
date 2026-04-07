@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         for b in 0..n_blocks {
             let start = b * 32;
-            let end = (start + 32).min(num_floats);
+            let _end = (start + 32).min(num_floats);
             let block: Vec<f32> = (start..start + 32).map(|i| {
                 if i < num_floats { f32_data[i] } else { 0.0 }
             }).collect();

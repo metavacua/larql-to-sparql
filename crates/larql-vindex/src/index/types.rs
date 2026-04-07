@@ -54,6 +54,8 @@ pub trait GateIndex {
     fn interleaved_q4_down(&self, _layer: usize) -> Option<ndarray::Array2<f32>> { None }
     fn prefetch_interleaved_q4_layer(&self, _layer: usize) {}
     fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> { None }
+    fn has_interleaved_q4k(&self) -> bool { false }
+    fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> { None }
 
     /// Per-feature gate scoring: iterate all features, dot product each one.
     /// No matrix multiplication — each feature scored individually.

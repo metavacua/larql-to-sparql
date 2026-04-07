@@ -185,14 +185,26 @@ model.vindex/
 
 ```bash
 cargo test -p larql-vindex                                                      # 146 tests
-cargo run -p larql-vindex --example vindex_demo                                 # Feature showcase
-cargo run -p larql-vindex --example vindex_bench --release                      # Core benchmarks
-cargo run -p larql-vindex --example bench_scaling --release                     # Production dims (CPU)
-cargo run -p larql-vindex --features metal --example bench_scaling --release    # Production dims (Metal)
-cargo run -p larql-vindex --example build_gate_vectors_q4 --release -- <vindex> # Build Q4 gates
+
+# Demo
+cargo run -p larql-vindex --example demo_features                               # Feature showcase
+
+# Benchmarks
+cargo run -p larql-vindex --example profile_operations --release                # Core microbenchmarks
+cargo run -p larql-vindex --example profile_scaling --release                   # Production dims (CPU)
+cargo run -p larql-vindex --features metal --example profile_scaling --release  # Production dims (Metal)
+
+# Build pipeline (production, uses larql-compute quantizers)
+cargo run --release -p larql-vindex --example build_q4k_weights -- <vindex>     # Q4_K/Q6_K attn + FFN
+cargo run --release -p larql-vindex --example build_attn_q8 -- <vindex>         # Q8 attention (fallback)
+cargo run --release -p larql-vindex --example build_interleaved -- <vindex>     # Pack gate|up|down
+cargo run --release -p larql-vindex --example build_down_features -- <vindex>   # Feature-major transpose
+cargo run --release -p larql-vindex --example build_up_features -- <vindex>     # f16 → f32 decode
+cargo run --release -p larql-vindex --example build_gate_q4 -- <vindex>         # Q4 gate vectors
+cargo run --release -p larql-vindex --example build_lm_head_q4 -- <vindex>      # Q4 logits projection
 ```
 
-Test coverage (140 tests):
+Test coverage (146 tests):
 - Construction, dimensions, layer counts, feature counts
 - Gate KNN: brute-force, f32, Q4 via compute backend, top-K ordering
 - Gate walk: BLAS gemv path matches brute-force KNN
@@ -277,7 +289,34 @@ pinned layers skip PCIe transfers and the gradient steepens.
 4. **One file per matrix type** — gate, attn, up, down stored separately
 5. **Streaming extraction** — processes one layer at a time (~2 GB peak for 120B models)
 6. **All compute through larql-compute** — BLAS dispatch, no raw ndarray .dot() calls
-7. **Adaptive residency** — pin hot layers in memory budget, stream cold ones from mmap. Every device gets the best it can do
+7. **Adaptive residency** — pin hot layers in memory budget, stream cold ones from mmap
+8. **Format-agnostic storage** — vindex stores raw quantized bytes, compute dequants at inference
+
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, scaling projections, compute integration |
+| [ROADMAP.md](ROADMAP.md) | Planned features, completed items |
+| [docs/vindex-format.md](docs/vindex-format.md) | File format specification, directory layout, manifest schemas |
+| [docs/compute-integration.md](docs/compute-integration.md) | How vindex stores data and compute consumes it |
+| [docs/adr/001](docs/adr/001-weights-as-database.md) | Transformer weights as queryable database |
+| [docs/adr/002](docs/adr/002-quantization-strategy.md) | Ollama-compatible Q4_K/Q6_K quantization |
+| [docs/adr/003](docs/adr/003-mmap-zero-copy.md) | Mmap zero-copy architecture |
+| [docs/adr/004](docs/adr/004-three-storage-tiers.md) | Three-tier weight storage (f32, Q8, Q4_K) |
+| [docs/adr/005](docs/adr/005-patch-overlay.md) | Patch overlay for editable knowledge |
+| [docs/adr/006](docs/adr/006-hnsw-index.md) | HNSW graph index for sub-linear KNN |
+| [docs/adr/007](docs/adr/007-interleaved-layout.md) | Interleaved weight layout (TLB optimization) |
+| [docs/adr/008](docs/adr/008-quantizer-source-of-truth.md) | Single source of truth for quantizers |
+
+## Status
+
+```
+Tests:      146 passing (41 clustering + 7 HNSW + 98 main)
+Warnings:   0 (build)
+Formats:    f32, Q8_0, Q4_K, Q6_K, Q4_0
+Models:     Gemma, Llama, Mixtral, Qwen, Phi, GPT-2, DeepSeek
+```
 
 ## License
 

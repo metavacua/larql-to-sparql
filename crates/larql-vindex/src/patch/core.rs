@@ -119,6 +119,11 @@ impl VindexPatch {
         self.operations.len()
     }
 
+    /// Whether this patch has no operations.
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+
     /// Summary counts: (inserts, updates, deletes).
     pub fn counts(&self) -> (usize, usize, usize) {
         let mut ins = 0;

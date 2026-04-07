@@ -432,7 +432,12 @@ pub fn predict_honest(
     let seq_len = h.shape()[0];
     let used_gpu = if backend.has_q4() {
         let gate_index: &dyn larql_vindex::GateIndex = index;
-        let q4_ffn = gate_index.interleaved_q4_mmap_ref();
+        // Prefer Q4_K FFN (Ollama-compatible) over Q4_0
+        let (q4_ffn, ffn_is_q4k) = if let Some(mmap) = gate_index.interleaved_q4k_mmap_ref() {
+            (Some(mmap), true)
+        } else {
+            (gate_index.interleaved_q4_mmap_ref(), false)
+        };
         let has_q4k = index.attn_q4k_layer_data(layer_range.start).is_some();
         let has_q8 = index.attn_q8_layer_data(layer_range.start).is_some();
 
@@ -440,8 +445,14 @@ pub fn predict_honest(
             let intermediate = gate_index.num_features(layer_range.start);
             let hidden = weights.hidden_size;
             if intermediate > 0 && (has_q4k || has_q8) {
-                let q4_ffn_per_matrix = intermediate * hidden / 32 * 18;
+                // Q4_K: 148B/256vals, Q4_0: 18B/32vals
+                let q4_ffn_per_matrix = if ffn_is_q4k {
+                    (intermediate * hidden + 255) / 256 * 148
+                } else {
+                    intermediate * hidden / 32 * 18
+                };
                 let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
+                let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
                 let arch = &*weights.arch;
 
                 use larql_compute::{QuantWeight, QuantFormat};
@@ -474,9 +485,9 @@ pub fn predict_honest(
 
                         larql_compute::FullPipelineLayer {
                             wq, wk, wv, wo,
-                            gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
-                            up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
-                            down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: QuantFormat::Q4_0 },
+                            gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
+                            up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: ffn_format },
+                            down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: ffn_format },
                             input_norm: weights.vectors.get(&arch.input_layernorm_key(layer))
                                 .map(|v| v.as_slice()).unwrap_or(&[]),
                             post_attn_norm: weights.vectors.get(&arch.post_attention_layernorm_key(layer))

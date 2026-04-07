@@ -72,6 +72,8 @@ pub struct VectorIndex {
     pub(crate) interleaved_mmap: Option<Arc<memmap2::Mmap>>,
     /// Q4_0 quantized interleaved FFN data (7x smaller, dequant on read).
     pub(crate) interleaved_q4_mmap: Option<Arc<memmap2::Mmap>>,
+    /// Q4_K/Q6_K quantized interleaved FFN data (Ollama-compatible, matches attn format).
+    pub(crate) interleaved_q4k_mmap: Option<Arc<memmap2::Mmap>>,
 
     /// Q4_0 gate vectors mmap — for fast Q4 KNN via larql-compute.
     pub(crate) gate_q4_mmap: Option<Arc<memmap2::Mmap>>,
@@ -120,6 +122,7 @@ impl Clone for VectorIndex {
             vocab_size: self.vocab_size,
             interleaved_mmap: self.interleaved_mmap.clone(),
             interleaved_q4_mmap: self.interleaved_q4_mmap.clone(),
+            interleaved_q4k_mmap: self.interleaved_q4k_mmap.clone(),
             gate_q4_mmap: self.gate_q4_mmap.clone(),
             gate_q4_slices: self.gate_q4_slices.clone(),
             lm_head_q4_mmap: self.lm_head_q4_mmap.clone(),
@@ -162,6 +165,7 @@ impl VectorIndex {
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
+            interleaved_q4k_mmap: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -205,6 +209,7 @@ impl VectorIndex {
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
+            interleaved_q4k_mmap: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -376,6 +381,7 @@ impl VectorIndex {
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
+            interleaved_q4k_mmap: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -570,5 +576,13 @@ impl GateIndex for VectorIndex {
 
     fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> {
         self.interleaved_q4_mmap.as_ref().map(|m| m.as_ref() as &[u8])
+    }
+
+    fn has_interleaved_q4k(&self) -> bool {
+        self.has_interleaved_q4k()
+    }
+
+    fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> {
+        self.interleaved_q4k_mmap.as_ref().map(|m| m.as_ref() as &[u8])
     }
 }

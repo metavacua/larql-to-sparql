@@ -53,11 +53,11 @@ Current KV cache allocates for 4096 tokens at creation. Need dynamic growth or c
 
 ## P2: Research
 
-### Q4_K FFN kernels
+### Q4_K FFN pipeline (end-to-end) — DONE
 **Effort**: Medium  
-**Status**: FFN uses Q4_0 format
+**Status**: ✅ Complete (2026-04-07)
 
-Currently gate/up/down use Q4_0 (18B/32vals). Switching to Q4_K (148B/256vals) would match Ollama's strategy. The Q4_K kernel infrastructure exists; need vindex to provide Q4_K FFN data.
+Vindex loader (`load_interleaved_q4k`), inference wiring (`predict_honest` prefers Q4_K FFN), and format tag propagation through `FullPipelineLayer` all wired. When `interleaved_q4k.bin` exists, Q4_K format flows through to compute shader dispatch.
 
 ### simdgroup_multiply_accumulate for tiled matmul
 **Effort**: Large  

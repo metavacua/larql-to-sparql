@@ -12,6 +12,13 @@
 /// Safe to call on any file. The advisory hints are best-effort —
 /// the OS may ignore them, but on macOS/Linux they significantly
 /// improve page cache behavior for large sequential reads.
+///
+/// # Safety
+///
+/// The caller must ensure the file is not modified or truncated while the
+/// mmap is alive. This is the standard memmap2 safety contract — the mmap
+/// returns a `&[u8]` view into the file's pages, which become invalid if
+/// the file changes on disk.
 pub unsafe fn mmap_optimized(file: &std::fs::File) -> Result<memmap2::Mmap, std::io::Error> {
     let mmap = memmap2::Mmap::map(file)?;
     advise_sequential(&mmap);
