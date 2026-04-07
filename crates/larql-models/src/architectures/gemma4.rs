@@ -21,6 +21,8 @@ pub struct Gemma4Arch {
     config: ModelConfig,
     /// Precomputed: which layer indices are full (global) attention.
     global_layers: Vec<bool>,
+    /// Precomputed: KV sharing source for each layer (None = compute own KV).
+    kv_sources: Vec<Option<usize>>,
 }
 
 impl Gemma4Arch {
@@ -28,7 +30,7 @@ impl Gemma4Arch {
         let num_layers = config.num_layers;
 
         // Determine global layers from explicit layer_types or pattern
-        let global_layers = if let Some(ref types) = config.layer_types {
+        let global_layers: Vec<bool> = if let Some(ref types) = config.layer_types {
             types.iter()
                 .map(|t| t == "full_attention")
                 .collect()
@@ -39,9 +41,41 @@ impl Gemma4Arch {
                 .collect()
         };
 
+        // Precompute KV sharing sources.
+        // Layers in the shared region reuse KV from the last non-shared layer
+        // of the same type (sliding→last sliding source, global→last global source).
+        let num_shared = config.num_kv_shared_layers.unwrap_or(0);
+        let first_shared = if num_shared > 0 && num_shared < num_layers {
+            num_layers - num_shared
+        } else {
+            num_layers // no sharing
+        };
+        let kv_sources = if num_shared > 0 {
+            // Find the last non-shared sliding and global layers
+            let last_sliding = (0..first_shared).rev()
+                .find(|&l| !global_layers[l]);
+            let last_global = (0..first_shared).rev()
+                .find(|&l| global_layers[l]);
+
+            (0..num_layers)
+                .map(|layer| {
+                    if layer < first_shared {
+                        None // non-shared: compute own KV
+                    } else if global_layers[layer] {
+                        last_global // shared global → last non-shared global
+                    } else {
+                        last_sliding // shared sliding → last non-shared sliding
+                    }
+                })
+                .collect()
+        } else {
+            vec![None; num_layers]
+        };
+
         Self {
             config,
             global_layers,
+            kv_sources,
         }
     }
 
@@ -105,6 +139,10 @@ impl ModelArchitecture for Gemma4Arch {
 
     fn has_v_norm(&self) -> bool {
         true
+    }
+
+    fn kv_shared_source_layer(&self, layer: usize) -> Option<usize> {
+        self.kv_sources.get(layer).copied().flatten()
     }
 
     // Gemma 4 uses QK-norm which already normalizes dot products.

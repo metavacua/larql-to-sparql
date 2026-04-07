@@ -67,6 +67,9 @@ pub struct AttentionWeights {
 ///
 /// Shared implementation used by both forward.rs and trace/capture.rs.
 /// Returns (h_post_attn, attn_projected_pre_residual, optional_attention_weights).
+/// Shared KV pair: post-RoPE K and post-V-norm V from a source layer.
+pub type SharedKV = (Array2<f32>, Array2<f32>);
+
 #[allow(clippy::too_many_arguments)]
 pub fn run_attention_block(
     weights: &crate::model::ModelWeights,
@@ -74,6 +77,44 @@ pub fn run_attention_block(
     layer: usize,
     capture_attention: bool,
 ) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>)> {
+    run_attention_block_shared(weights, h, layer, capture_attention, None)
+}
+
+/// Run attention with optional shared K/V from a source layer (KV sharing).
+/// When `shared_kv` is Some, K/V projections are skipped and the cached values are used.
+/// Returns (h_post_attn, attn_projected, optional_attn_weights, post-RoPE K, post-norm V).
+#[allow(clippy::too_many_arguments)]
+pub fn run_attention_block_with_kv_out(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+    capture_attention: bool,
+    shared_kv: Option<&SharedKV>,
+) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>, Array2<f32>, Array2<f32>)> {
+    run_attention_block_shared_with_kv_out(weights, h, layer, capture_attention, shared_kv)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_attention_block_shared(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+    capture_attention: bool,
+    shared_kv: Option<&SharedKV>,
+) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>)> {
+    let (h_post, attn_proj, attn_w, _, _) =
+        run_attention_block_shared_with_kv_out(weights, h, layer, capture_attention, shared_kv)?;
+    Some((h_post, attn_proj, attn_w))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_attention_block_shared_with_kv_out(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+    capture_attention: bool,
+    shared_kv: Option<&SharedKV>,
+) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>, Array2<f32>, Array2<f32>)> {
     use crate::forward::{dot_proj, add_bias};
     use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
@@ -93,60 +134,67 @@ pub fn run_attention_block(
     // Input norm
     let h_norm = crate::forward::apply_norm(weights, h, &arch.input_layernorm_key(layer), norm_offset);
 
-    // Q/K/V projections
+    // Q projection (always computed from current hidden state)
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
-    let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-    // K=V sharing: if v_proj is missing, use K as V
-    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
-    let w_v = if v_from_k {
-        w_k
-    } else {
-        weights.tensors.get(&arch.attn_v_key(layer)).unwrap()
-    };
     let w_o = weights.tensors.get(&arch.attn_o_key(layer)).unwrap();
-
     let mut q_full = dot_proj(&h_norm, w_q);
-    let mut k_full = dot_proj(&h_norm, w_k);
-    let mut v_full = dot_proj(&h_norm, w_v);
-
-    // Attention bias (Qwen2/2.5)
     if let Some(bias) = arch.attn_q_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut q_full, bias);
     }
-    if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
-        add_bias(&mut k_full, bias);
-    }
-    if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
-        add_bias(&mut v_full, bias);
-    }
 
-    // V-norm: parameter-free per-head RMSNorm on value states (Gemma 4)
-    if arch.has_v_norm() {
-        v_full = rms_norm_heads_no_weight(&v_full, num_kv, head_dim);
-    }
-
-    // Per-head QK norm (Gemma, Qwen3)
+    // QK norm on Q
     let qk_offset = weights.arch.qk_norm_weight_offset();
     let qk_norm_off = if qk_offset != 0.0 { qk_offset } else { norm_offset };
     let q_normed = match arch.attn_q_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
         Some(norm_w) => rms_norm_heads(&q_full, norm_w, num_q, head_dim, qk_norm_off),
         None => q_full,
     };
-    let k_normed = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
-        Some(norm_w) => rms_norm_heads(&k_full, norm_w, num_kv, head_dim, qk_norm_off),
-        None => k_full,
-    };
 
-    // RoPE (with partial rotation support)
+    // RoPE on Q
     let layer_rope_base = arch.rope_base_for_layer(layer);
     let rotary_frac = arch.rotary_fraction_for_layer(layer);
     let q_rope = apply_rope_partial(&q_normed, num_q, head_dim, layer_rope_base, rotary_frac);
-    let k_rope = apply_rope_partial(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac);
+
+    // K/V: either from shared cache or computed fresh
+    let (k_rope, v_final) = if let Some((cached_k, cached_v)) = shared_kv {
+        // KV sharing: reuse post-processed K/V from source layer
+        (cached_k.clone(), cached_v.clone())
+    } else {
+        // Compute K/V from current hidden state
+        let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
+        let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+        let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer)).unwrap() };
+
+        let mut k_full = dot_proj(&h_norm, w_k);
+        let mut v_full = dot_proj(&h_norm, w_v);
+
+        if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+            add_bias(&mut k_full, bias);
+        }
+        if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+            add_bias(&mut v_full, bias);
+        }
+
+        // V-norm
+        if arch.has_v_norm() {
+            v_full = rms_norm_heads_no_weight(&v_full, num_kv, head_dim);
+        }
+
+        // QK norm on K
+        let k_normed = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+            Some(norm_w) => rms_norm_heads(&k_full, norm_w, num_kv, head_dim, qk_norm_off),
+            None => k_full,
+        };
+
+        // RoPE on K
+        let k_r = apply_rope_partial(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac);
+        (k_r, v_full)
+    };
 
     // GQA attention
     let softcap = arch.attn_logit_softcapping();
     let (attn_out, attn_weights) = gqa_attention_with_weights(
-        &q_rope, &k_rope, &v_full, num_q, head_dim, reps, scale, seq_len,
+        &q_rope, &k_rope, &v_final, num_q, head_dim, reps, scale, seq_len,
         capture_attention, softcap,
     );
 
@@ -169,7 +217,7 @@ pub fn run_attention_block(
         h + &attn_projected
     };
 
-    Some((h_post_attn, attn_projected, attn_weights))
+    Some((h_post_attn, attn_projected, attn_weights, k_rope, v_final))
 }
 
 /// GPU-accelerated attention block. Same as `run_attention_block` but routes

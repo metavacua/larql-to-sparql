@@ -294,6 +294,175 @@ fn drop_ffn_weights_removes_moe_experts() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Gemma 4 — per-layer geometry, partial RoPE, V-norm, KV sharing
+// ═══════════════════════════════════════════════════════════════
+
+fn gemma4_e2b_arch() -> Box<dyn ModelArchitecture> {
+    detect_from_json(&serde_json::json!({
+        "model_type": "gemma4",
+        "text_config": {
+            "model_type": "gemma4_text",
+            "hidden_size": 1536,
+            "intermediate_size": 6144,
+            "num_hidden_layers": 35,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 1,
+            "head_dim": 256,
+            "global_head_dim": 512,
+            "vocab_size": 262144,
+            "sliding_window": 512,
+            "hidden_size_per_layer_input": 256,
+            "num_kv_shared_layers": 20,
+            "rope_parameters": {
+                "full_attention": {
+                    "partial_rotary_factor": 0.25,
+                    "rope_theta": 1000000.0
+                },
+                "sliding_attention": {
+                    "rope_theta": 10000.0
+                }
+            },
+            "layer_types": [
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention"
+            ]
+        }
+    }))
+}
+
+#[test]
+fn gemma4_per_layer_head_dim() {
+    let arch = gemma4_e2b_arch();
+    // Sliding: head_dim=256, Global: head_dim=512
+    assert_eq!(arch.head_dim_for_layer(0), 256);
+    assert_eq!(arch.head_dim_for_layer(3), 256);
+    assert_eq!(arch.head_dim_for_layer(4), 512); // first global
+    assert_eq!(arch.head_dim_for_layer(9), 512);
+    assert_eq!(arch.head_dim_for_layer(34), 512); // last layer (global)
+
+    // Q heads constant across all layers
+    assert_eq!(arch.num_q_heads_for_layer(0), 8);
+    assert_eq!(arch.num_q_heads_for_layer(4), 8);
+
+    // KV heads: 1 everywhere (E2B has MQA, no num_global_key_value_heads)
+    assert_eq!(arch.num_kv_heads_for_layer(0), 1);
+    assert_eq!(arch.num_kv_heads_for_layer(4), 1);
+}
+
+#[test]
+fn gemma4_partial_rotary() {
+    let arch = gemma4_e2b_arch();
+    // Sliding: full rotation
+    assert_eq!(arch.rotary_fraction_for_layer(0), 1.0);
+    assert_eq!(arch.rotary_fraction_for_layer(3), 1.0);
+    // Global: 25% rotation
+    assert_eq!(arch.rotary_fraction_for_layer(4), 0.25);
+    assert_eq!(arch.rotary_fraction_for_layer(9), 0.25);
+}
+
+#[test]
+fn gemma4_rope_bases() {
+    let arch = gemma4_e2b_arch();
+    // Sliding: 10k, Global: 1M
+    assert_eq!(arch.rope_base_for_layer(0), 10_000.0);
+    assert_eq!(arch.rope_base_for_layer(4), 1_000_000.0);
+}
+
+#[test]
+fn gemma4_attention_scale_is_one() {
+    let arch = gemma4_e2b_arch();
+    // QK-norm makes explicit scaling unnecessary
+    assert_eq!(arch.attention_scale(), 1.0);
+    assert_eq!(arch.attention_scale_for_layer(0), 1.0);
+    assert_eq!(arch.attention_scale_for_layer(4), 1.0);
+}
+
+#[test]
+fn gemma4_v_norm() {
+    let arch = gemma4_e2b_arch();
+    assert!(arch.has_v_norm());
+}
+
+#[test]
+fn gemma4_norm_offset_zero() {
+    let arch = gemma4_e2b_arch();
+    // Gemma 4 stores weights as full multiplier (no +1 like Gemma 2/3)
+    assert_eq!(arch.norm_weight_offset(), 0.0);
+}
+
+#[test]
+fn gemma4_kv_sharing() {
+    let arch = gemma4_e2b_arch();
+    // First 15 layers: no sharing
+    for l in 0..15 {
+        assert!(arch.kv_shared_source_layer(l).is_none(), "L{l} should not be shared");
+    }
+    // Layers 15-34: shared
+    // Sliding shared layers → last non-shared sliding (L13)
+    assert_eq!(arch.kv_shared_source_layer(15), Some(13));
+    assert_eq!(arch.kv_shared_source_layer(16), Some(13));
+    // Global shared layers → last non-shared global (L14)
+    assert_eq!(arch.kv_shared_source_layer(19), Some(14));
+    assert_eq!(arch.kv_shared_source_layer(34), Some(14));
+}
+
+#[test]
+fn gemma4_ple() {
+    let arch = gemma4_e2b_arch();
+    assert!(arch.has_per_layer_embeddings());
+    assert_eq!(arch.per_layer_embed_dim(), 256);
+    assert_eq!(
+        arch.per_layer_input_gate_key(5),
+        Some("layers.5.per_layer_input_gate.weight".to_string())
+    );
+    assert_eq!(
+        arch.per_layer_projection_key(5),
+        Some("layers.5.per_layer_projection.weight".to_string())
+    );
+}
+
+#[test]
+fn gemma4_layer_scalar() {
+    let arch = gemma4_e2b_arch();
+    assert_eq!(
+        arch.layer_scalar_key(10),
+        Some("layers.10.layer_scalar".to_string())
+    );
+}
+
+#[test]
+fn gemma4_prefix_strip() {
+    let arch = gemma4_e2b_arch();
+    let prefixes = arch.key_prefixes_to_strip();
+    // Must strip model.language_model. for multimodal Gemma 4
+    assert!(prefixes.contains(&"model.language_model."));
+    assert!(prefixes.contains(&"model.language_model.model."));
+}
+
+#[test]
+fn gemma4_gemma_family_traits() {
+    let arch = gemma4_e2b_arch();
+    assert_eq!(arch.activation(), larql_models::Activation::GeluTanh);
+    assert!(arch.has_post_norms());
+    assert!(arch.attn_q_norm_key(0).is_some());
+    assert!(arch.attn_k_norm_key(0).is_some());
+    // embed_scale = sqrt(hidden_size)
+    assert_eq!(arch.embed_scale(), (1536.0f32).sqrt());
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Q4 round-trip: quantize then dequantize
 // ═══════════════════════════════════════════════════════════════
 

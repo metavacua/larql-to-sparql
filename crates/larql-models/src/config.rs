@@ -107,6 +107,9 @@ pub struct ModelConfig {
     /// Per-layer embedding dimension (PLE). If > 0, each layer adds a gated
     /// per-layer embedding lookup to the hidden state before attention.
     pub per_layer_embed_dim: Option<usize>,
+    /// Number of layers at the end of the model that share KV from earlier layers.
+    /// E.g., 20 means the last 20 layers reuse KV cache from earlier source layers.
+    pub num_kv_shared_layers: Option<usize>,
 }
 
 /// Architecture-specific behavior. Describes how a model is structured
@@ -238,7 +241,7 @@ pub trait ModelArchitecture: Send + Sync {
     }
 
     /// Weight offset added during QK normalization (per-head Q/K norms).
-    /// Gemma: 1.0 (weight = 1 + learned_weight at runtime), others: 0.0.
+    /// Gemma 2/3: 1.0 (weight = 1 + learned_weight at runtime), Gemma 4 and others: 0.0.
     fn qk_norm_weight_offset(&self) -> f32 {
         0.0
     }
@@ -352,6 +355,13 @@ pub trait ModelArchitecture: Send + Sync {
         } else {
             (self.head_dim_for_layer(layer) as f64).powf(-0.5)
         }
+    }
+
+    /// Source layer for KV sharing. Returns Some(source_layer) if this layer
+    /// should reuse K/V from an earlier layer instead of computing its own.
+    /// Default: None (every layer computes its own K/V).
+    fn kv_shared_source_layer(&self, _layer: usize) -> Option<usize> {
+        None
     }
 
     // ── Per-Layer Embeddings (PLE) ──

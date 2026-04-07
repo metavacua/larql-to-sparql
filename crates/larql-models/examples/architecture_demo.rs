@@ -66,6 +66,67 @@ fn main() {
     let deepseek = detect_from_json(&deepseek_config);
     print_architecture(&*deepseek);
 
+    // ── Gemma 4 E2B (per-layer geometry, PLE, KV sharing) ──
+    let gemma4_config = serde_json::json!({
+        "model_type": "gemma4",
+        "text_config": {
+            "model_type": "gemma4_text",
+            "hidden_size": 1536,
+            "intermediate_size": 6144,
+            "num_hidden_layers": 35,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 1,
+            "head_dim": 256,
+            "global_head_dim": 512,
+            "vocab_size": 262144,
+            "sliding_window": 512,
+            "hidden_size_per_layer_input": 256,
+            "num_kv_shared_layers": 20,
+            "rope_parameters": {
+                "full_attention": { "partial_rotary_factor": 0.25, "rope_theta": 1000000.0 },
+                "sliding_attention": { "rope_theta": 10000.0 }
+            },
+            "layer_types": [
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention",
+                "sliding_attention", "sliding_attention", "sliding_attention",
+                "sliding_attention", "full_attention"
+            ]
+        }
+    });
+
+    let gemma4 = detect_from_json(&gemma4_config);
+    print_architecture(&*gemma4);
+
+    // Gemma 4 per-layer features
+    println!("=== Gemma 4 Per-Layer Features ===\n");
+    for layer in [0, 4, 13, 14, 15, 19, 34] {
+        let sliding = gemma4.is_sliding_window_layer(layer);
+        let hd = gemma4.head_dim_for_layer(layer);
+        let nkv = gemma4.num_kv_heads_for_layer(layer);
+        let frac = gemma4.rotary_fraction_for_layer(layer);
+        let rope = gemma4.rope_base_for_layer(layer);
+        let kv_src = gemma4.kv_shared_source_layer(layer);
+        let attn_type = if sliding { "sliding" } else { "GLOBAL " };
+        let sharing = kv_src.map_or("own KV".to_string(), |s| format!("shared from L{s}"));
+        println!("  L{layer:2}: {attn_type}  hd={hd:3}  kv_heads={nkv}  rotary={frac:.2}  rope={rope:.0}  {sharing}");
+    }
+
+    println!("\n  V-norm:       {}", gemma4.has_v_norm());
+    println!("  Attn scale:   {:.1}", gemma4.attention_scale());
+    println!("  PLE dim:      {}", gemma4.per_layer_embed_dim());
+    println!("  Layer scalar:  {}\n", gemma4.layer_scalar_key(0).unwrap_or_default());
+
     // ── Tensor key comparison ──
     println!("=== Tensor Key Comparison (Layer 5) ===\n");
     println!("{:<25} {:<45} Generic/Llama", "Key", "Gemma 3");

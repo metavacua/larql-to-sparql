@@ -122,21 +122,32 @@ pub fn run_attention_public(weights: &ModelWeights, h: &Array2<f32>, layer: usiz
 
 /// Run attention for a single layer. Returns the post-attention residual.
 fn run_attention(weights: &ModelWeights, h: &Array2<f32>, layer: usize) -> Option<Array2<f32>> {
-    let (h_post_attn, _) = run_attention_inner(weights, h, layer, false)?;
+    let (h_post_attn, _) = run_attention_inner(weights, h, layer, false, None)?;
     Some(h_post_attn)
 }
 
-/// Run attention with optional per-head weight capture.
-/// Delegates to the shared `run_attention_block` in attention.rs.
+/// Run attention with optional per-head weight capture and shared K/V.
 fn run_attention_inner(
     weights: &ModelWeights,
     h: &Array2<f32>,
     layer: usize,
     capture_attention: bool,
+    shared_kv: Option<&crate::attention::SharedKV>,
 ) -> Option<(Array2<f32>, Option<AttentionWeights>)> {
     let (h_post_attn, _attn_projected, attn_weights) =
-        crate::attention::run_attention_block(weights, h, layer, capture_attention)?;
+        crate::attention::run_attention_block_shared(weights, h, layer, capture_attention, shared_kv)?;
     Some((h_post_attn, attn_weights))
+}
+
+/// Run attention returning post-processed K/V for caching (KV sharing source layers).
+fn run_attention_with_kv_cache(
+    weights: &ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+) -> Option<(Array2<f32>, crate::attention::SharedKV)> {
+    let (h_post_attn, _, _, k_rope, v_final) =
+        crate::attention::run_attention_block_with_kv_out(weights, h, layer, false, None)?;
+    Some((h_post_attn, (k_rope, v_final)))
 }
 
 /// Run FFN for a single layer using the given backend. Returns the post-FFN residual.
@@ -362,7 +373,9 @@ fn apply_per_layer_embedding(
 }
 
 /// Run a single transformer layer with the given FFN backend.
-/// PLE input is the precomputed per-layer embedding signal (None if model doesn't use PLE).
+/// `ple_input`: precomputed per-layer embedding signal (None if model doesn't use PLE).
+/// `shared_kv`: cached K/V from a source layer (None = compute own K/V).
+/// Returns (h_out, activation, optional K/V for caching).
 fn run_layer_with_ffn(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -370,13 +383,19 @@ fn run_layer_with_ffn(
     ffn: &dyn FfnBackend,
     capture_activation: bool,
     ple_input: Option<&Array2<f32>>,
-) -> Option<(Array2<f32>, Option<Array2<f32>>)> {
-    let h_post_attn = run_attention(weights, h, layer)?;
+    shared_kv: Option<&crate::attention::SharedKV>,
+) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<crate::attention::SharedKV>)> {
+    // Attention: either with cached KV or compute fresh (returning KV for caching)
+    let (h_post_attn, kv_out) = if shared_kv.is_some() {
+        (run_attention_inner(weights, h, layer, false, shared_kv)?.0, None)
+    } else {
+        let (h_pa, kv) = run_attention_with_kv_cache(weights, h, layer)?;
+        (h_pa, Some(kv))
+    };
     let (h_post_ffn, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
-    // PLE runs after attention+FFN, before layer_scalar
     let mut h_out = apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_input);
     apply_layer_scalar(weights, &mut h_out, layer);
-    Some((h_out, activation))
+    Some((h_out, activation, kv_out))
 }
 
 /// Run a single transformer layer, optionally capturing attention weights.
@@ -388,12 +407,14 @@ fn run_layer_with_capture(
     capture_activation: bool,
     capture_attention: bool,
     ple_input: Option<&Array2<f32>>,
-) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<AttentionWeights>)> {
-    let (h_post_attn, attn_weights) = run_attention_inner(weights, h, layer, capture_attention)?;
+    shared_kv: Option<&crate::attention::SharedKV>,
+) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<AttentionWeights>, Option<crate::attention::SharedKV>)> {
+    let (h_post_attn, attn_weights) = run_attention_inner(weights, h, layer, capture_attention, shared_kv)?;
+    let kv_out = None; // capture path doesn't need KV caching (yet)
     let (h_post_ffn, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
     let mut h_out = apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_input);
     apply_layer_scalar(weights, &mut h_out, layer);
-    Some((h_out, activation, attn_weights))
+    Some((h_out, activation, attn_weights, kv_out))
 }
 
 /// Project the final hidden state to logits and return top-k predictions.
@@ -481,8 +502,8 @@ pub fn forward_to_layer(
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
     for layer in 0..=stop_layer {
-        h = match run_layer_with_ffn(weights, &h, layer, &ffn, false, ple_inputs.get(layer)) {
-            Some((h_new, _)) => h_new,
+        h = match run_layer_with_ffn(weights, &h, layer, &ffn, false, ple_inputs.get(layer), None) {
+            Some((h_new, _, _)) => h_new,
             None => continue,
         };
     }
@@ -558,8 +579,8 @@ pub fn trace_forward_full(
         let need_activation = capture_activations && is_capture_layer;
         let need_attention = capture_attention && is_capture_layer;
 
-        let (h_new, activation, attn_weights) =
-            match run_layer_with_capture(weights, &h, layer, ffn, need_activation, need_attention, ple_inputs.get(layer)) {
+        let (h_new, activation, attn_weights, _) =
+            match run_layer_with_capture(weights, &h, layer, ffn, need_activation, need_attention, ple_inputs.get(layer), None) {
                 Some(result) => result,
                 None => continue,
             };
@@ -617,11 +638,24 @@ pub fn predict_with_ffn(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
+    // KV cache for shared layers: stores post-RoPE K and post-V-norm V per source layer
+    let mut kv_cache: std::collections::HashMap<usize, crate::attention::SharedKV> =
+        std::collections::HashMap::new();
+
     for layer in 0..num_layers {
-        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer)) {
-            Some((h_new, _)) => h_new,
+        let shared_kv = weights.arch.kv_shared_source_layer(layer)
+            .and_then(|src| kv_cache.get(&src));
+
+        match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer), shared_kv) {
+            Some((h_new, _, kv_out)) => {
+                h = h_new;
+                // Cache K/V from non-shared layers for later reuse
+                if let Some(kv) = kv_out {
+                    kv_cache.insert(layer, kv);
+                }
+            }
             None => continue,
-        };
+        }
     }
 
     logits_to_predictions(weights, &h, tokenizer, top_k)
@@ -652,8 +686,8 @@ pub fn predict_with_ffn_attention(
     let mut residuals = Vec::with_capacity(num_layers);
 
     for layer in 0..num_layers {
-        match run_layer_with_capture(weights, &h, layer, ffn, false, true, ple_inputs.get(layer)) {
-            Some((h_new, _, attn_weights)) => {
+        match run_layer_with_capture(weights, &h, layer, ffn, false, true, ple_inputs.get(layer), None) {
+            Some((h_new, _, attn_weights, _)) => {
                 h = h_new;
                 // Capture last-token residual for logit lens
                 residuals.push((layer, h.row(seq_len - 1).to_vec()));
@@ -708,8 +742,8 @@ pub fn predict_with_ffn_trace(
         let last_pos = h.shape()[0] - 1;
         residuals.push(h.row(last_pos).to_vec());
 
-        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer)) {
-            Some((h_new, _)) => h_new,
+        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer), None) {
+            Some((h_new, _, _)) => h_new,
             None => continue,
         };
     }
@@ -735,8 +769,8 @@ pub fn predict_with_router(
 
     for layer in 0..num_layers {
         let ffn = router.get(layer);
-        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer)) {
-            Some((h_new, _)) => h_new,
+        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer), None) {
+            Some((h_new, _, _)) => h_new,
             None => continue,
         };
     }
@@ -759,8 +793,8 @@ pub fn predict_with_strategy(
     for layer in 0..num_layers {
         match &strategy[layer] {
             LayerMode::Compute(ffn) => {
-                h = match run_layer_with_ffn(weights, &h, layer, *ffn, false, ple_inputs.get(layer)) {
-                    Some((h_new, _)) => h_new,
+                h = match run_layer_with_ffn(weights, &h, layer, *ffn, false, ple_inputs.get(layer), None) {
+                    Some((h_new, _, _)) => h_new,
                     None => continue,
                 };
             }
@@ -815,8 +849,8 @@ pub fn predict_from_hidden_with_ffn(
     };
 
     for layer in start_layer..num_layers {
-        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer)) {
-            Some((h_new, _)) => h_new,
+        h = match run_layer_with_ffn(weights, &h, layer, ffn, false, ple_inputs.get(layer), None) {
+            Some((h_new, _, _)) => h_new,
             None => continue,
         };
     }

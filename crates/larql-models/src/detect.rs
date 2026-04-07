@@ -193,6 +193,11 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     });
     // K=V sharing flag
     let attention_k_eq_v = text_config["attention_k_eq_v"].as_bool().unwrap_or(false);
+    // KV sharing across layers
+    let num_kv_shared_layers = text_config["num_kv_shared_layers"]
+        .as_u64()
+        .map(|v| v as usize)
+        .filter(|&v| v > 0);
     // Per-layer embedding dimension (PLE)
     let per_layer_embed_dim = text_config["hidden_size_per_layer_input"]
         .as_u64()
@@ -231,6 +236,7 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         layer_types,
         attention_k_eq_v,
         per_layer_embed_dim,
+        num_kv_shared_layers,
     }
 }
 
@@ -883,8 +889,8 @@ mod tests {
         assert_eq!(arch.rope_base_for_layer(0), 10_000.0); // sliding
         assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0); // global
 
-        // Gemma family traits
-        assert_eq!(arch.norm_weight_offset(), 1.0);
+        // Gemma 4 stores norm weights as full multiplier (no +1 offset, unlike Gemma 2/3)
+        assert_eq!(arch.norm_weight_offset(), 0.0);
         assert_eq!(arch.embed_scale(), (5376.0f32).sqrt());
         assert!(arch.has_post_norms());
         assert!(arch.attn_q_norm_key(0).is_some());
@@ -896,19 +902,27 @@ mod tests {
             Some("layers.5.layer_scalar".to_string())
         );
 
-        // Per-layer attention scale uses per-layer head_dim (no query_pre_attn_scalar)
-        let scale_sliding = arch.attention_scale_for_layer(0);
-        let scale_global = arch.attention_scale_for_layer(5);
-        // Sliding: 1/sqrt(256), Global: 1/sqrt(512)
-        assert_eq!(scale_sliding, (256.0f64).powf(-0.5));
-        assert_eq!(scale_global, (512.0f64).powf(-0.5));
+        // Gemma 4 uses QK-norm, so attention scale is 1.0 (no 1/sqrt(head_dim))
+        assert_eq!(arch.attention_scale_for_layer(0), 1.0);
+        assert_eq!(arch.attention_scale_for_layer(5), 1.0);
 
         // K=V flag parsed
         assert!(arch.config().attention_k_eq_v);
+
+        // V-norm (parameter-free RMSNorm on V states)
+        assert!(arch.has_v_norm());
+
+        // 31B has no KV sharing (num_kv_shared_layers absent)
+        assert!(arch.kv_shared_source_layer(0).is_none());
+        assert!(arch.kv_shared_source_layer(30).is_none());
+
+        // 31B has no PLE
+        assert!(!arch.has_per_layer_embeddings());
     }
 
     #[test]
     fn test_detect_gemma4_e2b() {
+        // Real E2B config with PLE, KV sharing, global_head_dim, layer_types
         let config = serde_json::json!({
             "model_type": "gemma4",
             "text_config": {
@@ -919,26 +933,89 @@ mod tests {
                 "num_attention_heads": 8,
                 "num_key_value_heads": 1,
                 "head_dim": 256,
+                "global_head_dim": 512,
                 "vocab_size": 262144,
-                "rope_theta": 1000000.0,
                 "sliding_window": 512,
-                "sliding_window_pattern": 5,
-                "final_logit_softcapping": 30.0
+                "final_logit_softcapping": 30.0,
+                "hidden_size_per_layer_input": 256,
+                "num_kv_shared_layers": 20,
+                "attention_k_eq_v": false,
+                "use_double_wide_mlp": true,
+                "rope_parameters": {
+                    "full_attention": {
+                        "partial_rotary_factor": 0.25,
+                        "rope_theta": 1000000.0,
+                        "rope_type": "proportional"
+                    },
+                    "sliding_attention": {
+                        "rope_theta": 10000.0,
+                        "rope_type": "default"
+                    }
+                },
+                "layer_types": [
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention",
+                    "sliding_attention", "sliding_attention", "sliding_attention",
+                    "sliding_attention", "full_attention"
+                ]
             }
         });
 
         let arch = detect_from_json(&config);
         assert_eq!(arch.family(), "gemma4");
         assert_eq!(arch.config().num_layers, 35);
-        // E2B: pattern=5 means layer 4, 9, 14, ... are global
+
+        // Layer types from explicit array
         assert!(arch.is_sliding_window_layer(0));
         assert!(arch.is_sliding_window_layer(3));
         assert!(!arch.is_sliding_window_layer(4)); // global
         assert!(arch.is_sliding_window_layer(5));
         assert!(!arch.is_sliding_window_layer(9)); // global
-        // No global_head_dim → all layers use head_dim=256
+
+        // Per-layer head_dim: sliding=256, global=512
         assert_eq!(arch.head_dim_for_layer(0), 256);
-        assert_eq!(arch.head_dim_for_layer(4), 256);
+        assert_eq!(arch.head_dim_for_layer(4), 512);
+        assert_eq!(arch.num_q_heads_for_layer(0), 8);
+        assert_eq!(arch.num_q_heads_for_layer(4), 8); // constant across layers
+
+        // Partial rotary on global layers
+        assert_eq!(arch.rotary_fraction_for_layer(0), 1.0);
+        assert_eq!(arch.rotary_fraction_for_layer(4), 0.25);
+
+        // RoPE bases from rope_parameters
+        assert_eq!(arch.rope_base_for_layer(0), 10_000.0);
+        assert_eq!(arch.rope_base_for_layer(4), 1_000_000.0);
+
+        // PLE (Per-Layer Embeddings)
+        assert!(arch.has_per_layer_embeddings());
+        assert_eq!(arch.per_layer_embed_dim(), 256);
+
+        // KV sharing: layers 15-34 share from source layers
+        // First 15 layers are non-shared
+        assert!(arch.kv_shared_source_layer(0).is_none());
+        assert!(arch.kv_shared_source_layer(14).is_none());
+        // Layers 15+ are shared: sliding→L13, global→L14
+        assert_eq!(arch.kv_shared_source_layer(15), Some(13)); // sliding shared
+        assert_eq!(arch.kv_shared_source_layer(19), Some(14)); // global shared
+        assert_eq!(arch.kv_shared_source_layer(34), Some(14)); // last layer (global)
+
+        // V-norm, attention scale
+        assert!(arch.has_v_norm());
+        assert_eq!(arch.attention_scale(), 1.0);
+        assert_eq!(arch.norm_weight_offset(), 0.0);
+
+        // No K=V on E2B
+        assert!(!arch.config().attention_k_eq_v);
     }
 
     #[test]
