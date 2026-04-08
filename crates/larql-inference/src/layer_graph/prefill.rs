@@ -31,7 +31,7 @@ pub fn prefill_with_kv(
             backend.populate_kv_layer(layer, k_flat, v_flat, seq_len, layer_nkv, layer_hd);
         }
 
-        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
         let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
         h = h_out;
     }

@@ -25,6 +25,7 @@ pub mod ops;        // modular: ops/mod.rs → one file per operation
 pub mod calibrate;
 mod direct_ops;
 mod decode;
+mod decode_hybrid;
 mod pipeline;
 mod prefill;
 mod trait_impl;
@@ -56,10 +57,12 @@ pub struct MetalBackend {
     pub residual_add_pipeline: ComputePipelineState,
     q8_qkv_proj_pipeline: ComputePipelineState,
     q4k_matvec_pipeline: ComputePipelineState,
+    pub q4k_ffn_gate_up_pipeline: ComputePipelineState,
     q6k_matvec_pipeline: ComputePipelineState,
     #[allow(dead_code)]
     rope_pipeline: ComputePipelineState,
     pub rope_at_pos_pipeline: ComputePipelineState,
+    pub rope_at_pos_batched_pipeline: ComputePipelineState,
     pub q4k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
     q4kf_qkv_proj_pipeline: ComputePipelineState,
@@ -72,14 +75,14 @@ pub struct MetalBackend {
     pub layer_norm_no_bias_pipeline: ComputePipelineState,
     // V-norm (Gemma 4)
     pub v_norm_pipeline: ComputePipelineState,
+    pub v_norm_batched_pipeline: ComputePipelineState,
     // Scale vector (per-layer scalar, Gemma 4)
     pub scale_vector_pipeline: ComputePipelineState,
     /// KV cache for decode mode — initialized on first decode_token call.
     kv_cache: std::sync::Mutex<Option<ops::kv_cache::KVCache>>,
-    rms_norm_q8_pipeline: ComputePipelineState,
-    #[allow(dead_code)]
-    residual_norm_pipeline: ComputePipelineState,
-    residual_norm_q8_pipeline: ComputePipelineState,
+    pub rms_norm_q8_pipeline: ComputePipelineState,
+    pub residual_norm_pipeline: ComputePipelineState,
+    pub residual_norm_q8_pipeline: ComputePipelineState,
     flop_threshold: AtomicUsize,
 }
 
@@ -138,8 +141,10 @@ impl MetalBackend {
 
         // Q4_K and Q6_K matvec (Ollama-compatible quantization)
         let q4k_fn = library.get_function("q4k_matvec", None).ok()?;
+        let q4k_ffn_gate_up_fn = library.get_function("q4k_ffn_gate_up", None).ok()?;
         let q6k_fn = library.get_function("q6k_matvec", None).ok()?;
         let q4k_matvec_pipeline = device.new_compute_pipeline_state_with_function(&q4k_fn).ok()?;
+        let q4k_ffn_gate_up_pipeline = device.new_compute_pipeline_state_with_function(&q4k_ffn_gate_up_fn).ok()?;
         let q6k_matvec_pipeline = device.new_compute_pipeline_state_with_function(&q6k_fn).ok()?;
 
         // Fused Q8 QKV projection (all 3 in one dispatch)
@@ -161,6 +166,8 @@ impl MetalBackend {
         // RoPE at position (for KV-cached decode)
         let rope_at_pos_fn = library.get_function("rope_at_pos", None).ok()?;
         let rope_at_pos_pipeline = device.new_compute_pipeline_state_with_function(&rope_at_pos_fn).ok()?;
+        let rope_at_pos_batched_fn = library.get_function("rope_at_pos_batched", None).ok()?;
+        let rope_at_pos_batched_pipeline = device.new_compute_pipeline_state_with_function(&rope_at_pos_batched_fn).ok()?;
 
         // Fused Q4_K QKV projection (one dispatch for Q+K+V)
         let q4k_qkv_fn = library.get_function("q4k_qkv_proj", None).ok()?;
@@ -193,6 +200,8 @@ impl MetalBackend {
         // V-norm (parameter-free RMSNorm, Gemma 4)
         let v_norm_fn = library.get_function("v_norm", None).ok()?;
         let v_norm_pipeline = device.new_compute_pipeline_state_with_function(&v_norm_fn).ok()?;
+        let v_norm_batched_fn = library.get_function("v_norm_batched", None).ok()?;
+        let v_norm_batched_pipeline = device.new_compute_pipeline_state_with_function(&v_norm_batched_fn).ok()?;
 
         // Scale vector (per-layer scalar multiplier, Gemma 4)
         let scale_vector_fn = library.get_function("scale_vector", None).ok()?;
@@ -211,13 +220,13 @@ impl MetalBackend {
             q8_matvec_pipeline,
             rms_norm_pipeline, residual_add_pipeline,
             q8_qkv_proj_pipeline,
-            q4k_matvec_pipeline, q6k_matvec_pipeline,
-            rope_pipeline, rope_at_pos_pipeline,
+            q4k_matvec_pipeline, q4k_ffn_gate_up_pipeline, q6k_matvec_pipeline,
+            rope_pipeline, rope_at_pos_pipeline, rope_at_pos_batched_pipeline,
             q4k_qkv_proj_pipeline, q4k_proj_pipeline,
             q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,
             silu_pipeline, gelu_tanh_pipeline,
             layer_norm_pipeline, layer_norm_no_bias_pipeline,
-            v_norm_pipeline,
+            v_norm_pipeline, v_norm_batched_pipeline,
             scale_vector_pipeline,
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,
@@ -236,4 +245,14 @@ impl MetalBackend {
     pub fn cache_size(&self) -> usize { self.bufs.len() }
     pub fn bufs(&self) -> &BufferCache { &self.bufs }
     pub fn queue(&self) -> &CommandQueue { &self.queue }
+
+    /// Access the KV cache for hybrid decode (GPU attention + CPU FFN).
+    /// Creates the cache on first access.
+    pub fn kv_cache_mut(&self, num_layers: usize, num_kv_heads: usize, head_dim: usize) -> std::sync::MutexGuard<'_, Option<ops::kv_cache::KVCache>> {
+        let mut guard = self.kv_cache.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+        }
+        guard
+    }
 }

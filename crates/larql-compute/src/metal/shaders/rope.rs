@@ -68,4 +68,34 @@ kernel void rope_apply(
     x[idx_re] = re * cos_a - im * sin_a;
     x[idx_im] = re * sin_a + im * cos_a;
 }
+// Batched RoPE: apply to all heads in one dispatch.
+// x = [num_heads * head_dim] contiguous, each head of `head_dim` elements.
+// Grid: (rotary_dim/2, num_heads, 1).
+kernel void rope_at_pos_batched(
+    device float*       x          [[buffer(0)]],   // [num_heads, head_dim] — in-place
+    constant uint&      head_dim   [[buffer(1)]],
+    constant float&     base       [[buffer(2)]],
+    constant uint&      pos        [[buffer(3)]],
+    constant uint&      rotary_dim [[buffer(4)]],
+    constant uint&      num_heads  [[buffer(5)]],
+    uint2 tid [[thread_position_in_grid]])
+{
+    uint d  = tid.x;   // pair index within head
+    uint h  = tid.y;   // head index
+    if (h >= num_heads) return;
+    uint rdim = (rotary_dim == 0) ? head_dim : min(rotary_dim, head_dim);
+    uint hdim = rdim / 2;
+    if (d >= hdim) return;
+
+    float freq  = 1.0f / pow(base, float(2 * d) / float(rdim));
+    float angle = float(pos) * freq;
+    float cos_a = cos(angle);
+    float sin_a = sin(angle);
+
+    uint base_idx = h * head_dim;
+    float re = x[base_idx + d];
+    float im = x[base_idx + d + hdim];
+    x[base_idx + d]        = re * cos_a - im * sin_a;
+    x[base_idx + d + hdim] = re * sin_a + im * cos_a;
+}
 "#;

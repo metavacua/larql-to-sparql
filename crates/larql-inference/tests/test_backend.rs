@@ -277,7 +277,7 @@ mod metal_tests {
 
         let batch = metal.matmul_batch(&ops);
         for (i, op) in ops.iter().enumerate() {
-            let serial = metal.matmul_transb(&op.a, &op.b);
+            let serial = metal.matmul_transb(op.a.view(), op.b.view());
             assert!(
                 max_diff(&batch[i], &serial) < 1e-5,
                 "Metal batch[{i}] differs from serial"

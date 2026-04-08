@@ -515,7 +515,18 @@ impl GateIndex for VectorIndex {
     }
 
     fn has_down_features(&self) -> bool {
-        self.has_down_features()
+        self.down_features_mmap.is_some()
+    }
+
+    fn gate_knn_q4(
+        &self,
+        layer: usize,
+        residual: &ndarray::Array1<f32>,
+        top_k: usize,
+        backend: &dyn larql_compute::ComputeBackend,
+    ) -> Option<Vec<(usize, f32)>> {
+        // Delegate to VectorIndex's existing gate_knn_q4 method
+        VectorIndex::gate_knn_q4(self, layer, residual, top_k, backend)
     }
 
     fn down_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {

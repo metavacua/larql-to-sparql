@@ -28,12 +28,19 @@ pub struct WalkFfn<'a> {
 }
 
 impl<'a> WalkFfn<'a> {
+    /// Create a WalkFfn with unlimited K (uses all features above activation threshold).
+    /// The gate KNN returns all features; sparsity comes from the activation threshold.
     pub fn new(weights: &'a ModelWeights, index: &'a dyn GateIndex, top_k: usize) -> Self {
         Self {
             weights, index, top_k, backend: None,
             trace_residuals: std::cell::RefCell::new(Vec::new()),
             record_trace: false,
         }
+    }
+
+    /// Create with unlimited K — no artificial cap on feature count.
+    pub fn new_unlimited(weights: &'a ModelWeights, index: &'a dyn GateIndex) -> Self {
+        Self::new(weights, index, usize::MAX)
     }
 
     pub fn new_with_backend(
@@ -47,6 +54,15 @@ impl<'a> WalkFfn<'a> {
             trace_residuals: std::cell::RefCell::new(Vec::new()),
             record_trace: false,
         }
+    }
+
+    /// Create with backend and unlimited K.
+    pub fn new_unlimited_with_backend(
+        weights: &'a ModelWeights,
+        index: &'a dyn GateIndex,
+        backend: &'a dyn ComputeBackend,
+    ) -> Self {
+        Self::new_with_backend(weights, index, usize::MAX, backend)
     }
 
     pub fn new_with_trace(weights: &'a ModelWeights, index: &'a dyn GateIndex, top_k: usize) -> Self {
@@ -116,9 +132,16 @@ impl<'a> WalkFfn<'a> {
             let x_row = x.row(s);
             let x_owned = x_row.to_owned();
 
-            // Gate walk: per-feature dot products (no matmul)
-            // Falls back to gate_knn (HNSW or brute) if gate_walk not available
+            // Gate: try fastest path available
+            //   1. gate_walk (per-feature dot, no matmul) if available
+            //   2. Q4 gate KNN via compute backend (0.5ms Metal, 1ms CPU Q4)
+            //   3. f32 brute-force BLAS (1.1ms) as fallback
             let hits = self.index.gate_walk(layer, &x_owned, self.top_k)
+                .or_else(|| {
+                    self.backend.and_then(|be|
+                        self.index.gate_knn_q4(layer, &x_owned, self.top_k, be)
+                    )
+                })
                 .unwrap_or_else(|| self.index.gate_knn(layer, &x_owned, self.top_k));
 
             let mut out_row = out.row_mut(s);

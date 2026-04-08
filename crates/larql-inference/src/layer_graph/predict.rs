@@ -226,7 +226,7 @@ pub fn predict_split_pass(
                 h = output.residual;
             }
         }
-        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
         for layer in layer_range.clone() {
             let dense = DenseLayerGraph {
                 ffn: &walk_ffn, backend: None,
@@ -441,7 +441,7 @@ pub fn predict_honest(
                     // KV cache populated for future decode_token calls (token generation).
                     backend.reset_kv_cache();
 
-                    let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+                    let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
                     let mut h_cpu = h.clone();
                     for (rel_idx, abs_layer) in layer_range.clone().enumerate() {
                         let (h_post_attn, k_rope, v) =
@@ -470,7 +470,7 @@ pub fn predict_honest(
 
     // CPU fallback: interleaved attention + FFN (for prefill or when GPU not available)
     if !used_gpu {
-        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
         for layer in layer_range {
             let (h_post_attn, _, _) =
                 crate::attention::run_attention_block_gpu(weights, &h, layer, false, None)

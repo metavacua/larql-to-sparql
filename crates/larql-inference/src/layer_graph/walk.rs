@@ -68,8 +68,8 @@ impl<'a> LayerGraph for PipelinedLayerGraph<'a> {
         // WalkFfn checks for Q4 interleaved data and routes to Metal Q4
         // when backend.has_q4(), falling back to f32 BLAS otherwise.
         // This ensures the norm/residual logic matches exactly.
-        let walk_ffn = crate::vindex::WalkFfn::new_with_backend(
-            weights, self.index, 8192, self.backend,
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited_with_backend(
+            weights, self.index, self.backend,
         );
         let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
         Some(LayerOutput { residual: h_out, activation: None, attention: None })

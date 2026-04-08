@@ -90,7 +90,7 @@ pub fn generate(
         seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
         rope, qk_norm_val, softcap_val,
     ).unwrap_or_else(|| {
-        let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
         let mut h = h_embed.clone();
         for layer in 0..num_layers {
             let (h_post_attn, _, _) =
@@ -122,7 +122,7 @@ pub fn generate(
 
     // ── Phase 2: GPU decode loop ──
     let mut current_token_id = first_hits.first().map(|&(tid, _)| tid).unwrap_or(0);
-    let walk_ffn = crate::vindex::WalkFfn::new(weights, index, 8192);
+    let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
 
     for _step in 1..max_tokens {
         let decode_start = std::time::Instant::now();

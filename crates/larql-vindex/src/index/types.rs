@@ -57,6 +57,16 @@ pub trait GateIndex {
     fn has_interleaved_q4k(&self) -> bool { false }
     fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> { None }
 
+    /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
+    /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.
+    fn gate_knn_q4(
+        &self,
+        _layer: usize,
+        _residual: &Array1<f32>,
+        _top_k: usize,
+        _backend: &dyn larql_compute::ComputeBackend,
+    ) -> Option<Vec<(usize, f32)>> { None }
+
     /// Per-feature gate scoring: iterate all features, dot product each one.
     /// No matrix multiplication — each feature scored individually.
     /// Returns (feature_index, score) sorted by absolute score descending.
