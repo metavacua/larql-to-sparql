@@ -26,6 +26,7 @@ pub mod fused_ops;
 pub mod q8_attn_proj;
 pub mod q4k_matvec;
 pub mod q4k_qkv_proj;
+pub mod q4kf_ffn_gate_up;
 pub mod q4kf_qkv_proj;
 pub mod q4k_ffn_gate_up;
 pub mod q4k_geglu_down;
@@ -72,6 +73,7 @@ pub fn all_shaders() -> String {
     src.push_str(q4kf_qkv_proj::SHADER);
     src.push_str(q4k_ffn_gate_up::SHADER);
     src.push_str(q4k_geglu_down::SHADER);
+    src.push_str(q4kf_ffn_gate_up::SHADER);
     src.push_str(q6k_matvec::SHADER);
     // Standalone activations (non-gated FFN)
     src.push_str(activation::SHADER);

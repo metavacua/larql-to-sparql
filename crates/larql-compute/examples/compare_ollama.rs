@@ -235,6 +235,98 @@ fn main() {
         }
         let raw_34_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
+        // ── Isolated FFN benchmark (34 layers, Q4_KF gate+up+GEGLU+down) ──
+        {
+            use larql_compute::metal::shaders::q4kf_ffn_gate_up as q4kf_gu;
+            use larql_compute::metal::shaders::q4kf_qkv_proj as q4kf;
+            let ffn_input = metal_raw.bufs().transient_from_f32(&vec![0.1f32; hidden]);
+            let n_tgs_gu = (inter as u64).div_ceil(q4kf_gu::ROWS_PER_TG);
+            let n_tgs_down = (hidden as u64).div_ceil(q4kf::ROWS_PER_TG);
+            // warmup
+            for _ in 0..5 {
+                let cmd = metal_raw.queue().new_command_buffer();
+                for _ in 0..34 {
+                    let go = metal_raw.bufs().output((inter*4) as u64);
+                    let uo = metal_raw.bufs().output((inter*4) as u64);
+                    let ao = metal_raw.bufs().output((inter*4) as u64);
+                    let d_out = metal_raw.bufs().output((hidden*4) as u64);
+                    let enc = cmd.new_compute_command_encoder();
+                    // fused gate+up
+                    enc.set_compute_pipeline_state(&metal_raw.q4kf_ffn_gate_up_pipeline);
+                    enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].g)), 0);
+                    enc.set_buffer(1, Some(&metal_raw.bufs().get_bytes(&data_34[0].u)), 0);
+                    enc.set_buffer(2, Some(&ffn_input), 0);
+                    enc.set_buffer(3, Some(&go), 0);
+                    enc.set_buffer(4, Some(&uo), 0);
+                    let iv = inter as u32; let hv = hidden as u32;
+                    enc.set_bytes(5, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(6, 4, &hv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_gu*2, 1, 1), metal::MTLSize::new(q4kf_gu::THREADS_PER_TG, 1, 1));
+                    // GEGLU
+                    enc.set_compute_pipeline_state(&metal_raw.geglu_pipeline);
+                    enc.set_buffer(0, Some(&go), 0);
+                    enc.set_buffer(1, Some(&uo), 0);
+                    enc.set_buffer(2, Some(&ao), 0);
+                    enc.set_bytes(3, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+                    // down
+                    enc.set_compute_pipeline_state(&metal_raw.q4kf_proj_pipeline);
+                    enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].d)), 0);
+                    enc.set_buffer(1, Some(&ao), 0);
+                    enc.set_buffer(2, Some(&d_out), 0);
+                    enc.set_bytes(3, 4, &hv as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(4, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_down, 1, 1), metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                    enc.end_encoding();
+                }
+                cmd.commit(); cmd.wait_until_completed();
+            }
+            let t0 = Instant::now();
+            for _ in 0..n {
+                let cmd = metal_raw.queue().new_command_buffer();
+                for _ in 0..34 {
+                    let go = metal_raw.bufs().output((inter*4) as u64);
+                    let uo = metal_raw.bufs().output((inter*4) as u64);
+                    let ao = metal_raw.bufs().output((inter*4) as u64);
+                    let d_out = metal_raw.bufs().output((hidden*4) as u64);
+                    let enc = cmd.new_compute_command_encoder();
+                    enc.set_compute_pipeline_state(&metal_raw.q4kf_ffn_gate_up_pipeline);
+                    enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].g)), 0);
+                    enc.set_buffer(1, Some(&metal_raw.bufs().get_bytes(&data_34[0].u)), 0);
+                    enc.set_buffer(2, Some(&ffn_input), 0);
+                    enc.set_buffer(3, Some(&go), 0);
+                    enc.set_buffer(4, Some(&uo), 0);
+                    let iv = inter as u32; let hv = hidden as u32;
+                    enc.set_bytes(5, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(6, 4, &hv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_gu*2, 1, 1), metal::MTLSize::new(q4kf_gu::THREADS_PER_TG, 1, 1));
+                    enc.set_compute_pipeline_state(&metal_raw.geglu_pipeline);
+                    enc.set_buffer(0, Some(&go), 0);
+                    enc.set_buffer(1, Some(&uo), 0);
+                    enc.set_buffer(2, Some(&ao), 0);
+                    enc.set_bytes(3, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+                    enc.set_compute_pipeline_state(&metal_raw.q4kf_proj_pipeline);
+                    enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].d)), 0);
+                    enc.set_buffer(1, Some(&ao), 0);
+                    enc.set_buffer(2, Some(&d_out), 0);
+                    enc.set_bytes(3, 4, &hv as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(4, 4, &iv as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_down, 1, 1), metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                    enc.end_encoding();
+                }
+                cmd.commit(); cmd.wait_until_completed();
+            }
+            let ffn_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            let attn_ms = q4k_34_ms - ffn_ms - raw_34_ms;
+            println!();
+            println!("  Component breakdown (34 layers):");
+            println!("    FFN (gate+up+GEGLU+down):    {ffn_ms:.1}ms ({:.1}%)", ffn_ms/q4k_34_ms*100.0);
+            println!("    QKV projection:              {raw_34_ms:.1}ms ({:.1}%)", raw_34_ms/q4k_34_ms*100.0);
+            println!("    Attention + norms + residual: {attn_ms:.1}ms ({:.1}%)", attn_ms/q4k_34_ms*100.0);
+            println!("    FFN per-layer:               {:.3}ms", ffn_ms/34.0);
+        }
+
         // ── Ollama (live query) ──
         let ollama_ms = {
             // Warm up
