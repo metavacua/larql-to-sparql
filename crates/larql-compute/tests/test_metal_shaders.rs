@@ -52,10 +52,25 @@ fn all_kernel_functions_exist() {
     let opts = metal::CompileOptions::new();
     let lib = device.new_library_with_source(&src, &opts).unwrap();
 
-    let names = ["sgemm", "sgemm_transb", "q4_matvec", "q4_vecmat",
-                 "q4_f32_matvec", "geglu_silu", "quantize_q8", "causal_attention",
-                 "silu", "gelu_tanh", "layer_norm", "layer_norm_no_bias",
-                 "v_norm", "scale_vector", "rope_at_pos"];
+    let names = [
+        // f32 matmul
+        "sgemm", "sgemm_transb",
+        // Q4_0 matvec variants
+        "q4_matvec", "q4_vecmat", "q4_f32_matvec",
+        // Q4_K / Q4_KF matvec
+        "q4k_matvec", "q4k_qkv_proj", "q4k_proj",
+        "q4kf_qkv_proj", "q4kf_proj",
+        // Q4_K fused FFN
+        "q4k_ffn_gate_up", "q4k_geglu_silu_down", "q4k_geglu_gelu_tanh_down",
+        // Activations
+        "geglu_silu", "geglu_gelu_tanh", "silu", "gelu_tanh",
+        // Quantize / norms / residuals
+        "quantize_q8", "rms_norm_q8", "residual_norm", "residual_norm_q8", "residual_add",
+        "layer_norm", "layer_norm_no_bias", "v_norm", "v_norm_batched", "scale_vector",
+        // Attention / RoPE
+        "causal_attention", "kv_attention", "kv_cache_append",
+        "rope_apply", "rope_at_pos", "rope_at_pos_batched",
+    ];
     for name in &names {
         lib.get_function(name, None)
             .unwrap_or_else(|e| panic!("Kernel '{name}' not found: {e}"));

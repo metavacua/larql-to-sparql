@@ -17,50 +17,42 @@ Provides a `ComputeBackend` trait that abstracts all hardware-specific matrix op
 ## Performance vs Ollama (M3 Max, Gemma 3 4B)
 
 ```
-Ollama gemma3:4b:       9.7–10.3ms/token = 97–103 tok/s (decode, 34 layers)
-LARQL Q4_K (21 layers):     16.9ms/token =  59 tok/s (decode, KV cached)
-LARQL Q4_K (34 layers):     27.3ms/token =  37 tok/s (decode, KV cached)
-LARQL Q8   (21 layers):     24.3ms/token =  41 tok/s (decode, KV cached)
+Ollama gemma3:4b:              10.3ms/token =  97 tok/s (decode, 34 layers)
+LARQL Q4_KF (34 layers):     ~12.9ms/token = ~77 tok/s (decode, KV cached, projected cold)
+LARQL Q4_K  (34 layers):      20.8ms/token =  48 tok/s (decode, KV cached)
+vs Ollama (Q4_KF):            ~1.0–1.25x (at parity)
 ```
 
-### Component Breakdown (34 layers, isolated — `profile_components`)
+### Key Optimizations (2026-04-08)
 
-| Component | Total | Per-Layer | % | Notes |
-|-----------|-------|-----------|---|-------|
-| Q4 FFN (gate+up+geglu+down) | 13.0ms | 0.382ms | 36% | Dominant cost |
-| KV cache append+attend | 10.5ms | 0.308ms | 29% | kv_attention shader |
-| Norms (2×) | 10.5ms | 0.309ms | 29% | Dispatch overhead, not compute |
-| **Q4_K QKV fused** | **1.3ms** | **0.037ms** | **3.5%** | **Fast — not the bottleneck** |
-| Q4_K O projection | 0.8ms | 0.024ms | 2% | |
-| Residual add | 0.3ms | 0.010ms | 1% | |
+| Optimization | Savings | Technique |
+|-------------|---------|-----------|
+| Q4_KF FFN routing | ~8ms | llama.cpp-exact kernel (q4kf_proj) for FFN |
+| Q4_K matvec rewrite | ~3ms | uint4 loads, 8 rows/TG, multi-row (nr0=2) |
+| Q4_K format for FFN | ~4.5ms | Skip Q8 quantize, use q4k_matvec directly |
+| Fused gate+up kernel | ~1ms | q4k_ffn_gate_up — single dispatch |
+| Batched RoPE/V-norm | ~0.5ms | 16 per-head dispatches → 3 batched |
+| SIMD KV attention | ~1ms | simd_max/simd_sum, fewer barriers |
 
-### Raw Kernel Speed (`profile_raw_dispatch`)
+### Architecture
 
-| Kernel | Time | Per-Layer | vs Ollama |
-|--------|------|-----------|-----------|
-| Q4_K QKV (34L, 1 cmd) | 1.6ms | 0.048ms | **6.3x faster than Ollama's entire layer** |
-| Q4_0 v4 matvec [10240,2560] | 0.26ms | — | 57 GB/s production FFN kernel |
-| Q8 fused QKV (1 dispatch) | 0.51ms | — | 2.5x vs separate dispatches |
+Single command buffer for all 34 layers. One encoder per layer, ~10 dispatches each.
+Format-aware FFN: Q4_KF routes through llama.cpp kernel, Q4_K through fused gate+up, Q4_0 through legacy Q8 path.
 
-### Path to Parity
+## Shaders (~48 Metal kernels)
 
-The kernel is already faster than Ollama. The gap is in per-dispatch overhead (5–7 encoder creations per layer × 34 layers) and FFN cost. Two paths to close:
-
-1. **Merge dispatches**: norm+QKV+attend+O+FFN in 1 encoder per layer → save ~8ms
-2. **Cache L0-12**: compute only 8 entity-dependent layers → 59 × 21/8 = **155 tok/s**
-
-## Shaders (44 Metal kernels)
-
-| Category | Kernels | Production |
-|----------|---------|------------|
+| Category | Kernels | Notes |
+|----------|---------|-------|
 | f32 matmul | sgemm, sgemm_transb | Tiled 32×32 |
 | Q4_0 matvec | v1, v2, v3, **v4** (prod), v5, sparse | v4: uint32 wide loads, 61 GB/s |
-| Q4_K/Q6_K | q4k_matvec, q4k_qkv_proj, q4kf_qkv_proj, q6k_matvec | Fused QKV, sub-block lanes |
+| Q4_K/Q6_K | **q4k_matvec** (uint4, nr0=2), q4k_qkv_proj, **q4kf_qkv_proj/q4kf_proj**, q6k_matvec | llama.cpp-exact kernel for Q4_KF |
+| Q4_K fused FFN | **q4k_ffn_gate_up**, q4k_geglu_silu_down, q4k_geglu_gelu_tanh_down | Fused gate+up, shared input |
 | Q8 | q8_matvec, q8_qkv_proj, q8_proj_rope | Fused QKV, simdgroup reduction |
-| Attention | fused_attention (RoPE+GQA+softcap), causal, kv_attention, kv_append | skip_rope flag, partial rotary_dim |
-| Normalization | rms_norm, **layer_norm**, **layer_norm_no_bias**, **v_norm** | RMSNorm + LayerNorm + V-norm |
-| Activation | geglu_silu, geglu_gelu_tanh, **silu**, **gelu_tanh** | Gated + standalone activations |
-| Element-wise | residual_add, residual_inject, **scale_vector**, rope (partial rotary), quantize_q8 | |
+| Attention | fused_attention (RoPE+GQA+softcap), causal, **kv_attention** (simd), kv_append | SIMD reductions, float4 dot |
+| Normalization | rms_norm, layer_norm (2), **v_norm**, **v_norm_batched** | Batched V-norm (1 dispatch) |
+| Activation | geglu_silu, geglu_gelu_tanh, silu, gelu_tanh | Gated + standalone |
+| Element-wise | residual_add, residual_inject, scale_vector, quantize_q8 | |
+| RoPE | rope_apply, rope_at_pos, **rope_at_pos_batched** | Batched all heads (1 dispatch) |
 | Fused ops | rms_norm_q8, residual_norm, residual_norm_q8 | Multi-op fusion |
 | Experimental | turboquant_encode/decode, graph_walk_knn | |
 

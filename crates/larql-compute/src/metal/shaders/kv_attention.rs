@@ -1,120 +1,108 @@
 //! KV-cached attention for token generation (seq=1 decode).
 //!
-//! Given a single query vector Q[head_dim] and cached K[T, head_dim], V[T, head_dim]:
-//!   scores = Q × K^T / sqrt(head_dim)  → [T]
-//!   weights = softmax(scores)           → [T]
-//!   output = weights × V                → [head_dim]
+//! Optimized with:
+//!   - simd_sum/simd_max for reductions (eliminates serial loops)
+//!   - Reduced barrier count (3 instead of 6)
+//!   - float4 vectorized Q·K dot products
 //!
-//! Supports sliding window attention: when window_size > 0, only the most recent
-//! window_size tokens are attended to. window_size = 0 means full attention.
-//!
-//! One threadgroup per head. Threads cooperatively compute the dot products,
-//! softmax, and weighted sum.
+//! One threadgroup per Q head. Threads cooperate on T-length dot products.
 
 pub const SHADER: &str = r#"
-// KV-cached attention: one query against T cached keys/values.
-// Grid: (num_heads, 1, 1). Each threadgroup handles one attention head.
-// Threads within threadgroup cooperate on the T-length dot products.
-
 kernel void kv_attention(
-    device const float* Q       [[buffer(0)]],   // [num_heads, head_dim]
-    device const float* K_cache [[buffer(1)]],   // [T, num_kv_heads, head_dim]
-    device const float* V_cache [[buffer(2)]],   // [T, num_kv_heads, head_dim]
-    device float*       out     [[buffer(3)]],   // [num_heads, head_dim]
-    constant uint&      T       [[buffer(4)]],   // cache length
+    device const float* Q       [[buffer(0)]],
+    device const float* K_cache [[buffer(1)]],
+    device const float* V_cache [[buffer(2)]],
+    device float*       out     [[buffer(3)]],
+    constant uint&      T       [[buffer(4)]],
     constant uint&      head_dim[[buffer(5)]],
-    constant uint&      num_q   [[buffer(6)]],   // num query heads
-    constant uint&      num_kv  [[buffer(7)]],   // num KV heads (for GQA)
+    constant uint&      num_q   [[buffer(6)]],
+    constant uint&      num_kv  [[buffer(7)]],
     constant float&     scale   [[buffer(8)]],
-    constant uint&      window_size [[buffer(9)]],  // 0 = full attention (no window)
+    constant uint&      window_size [[buffer(9)]],
     uint tg_id  [[threadgroup_position_in_grid]],
     uint tid    [[thread_index_in_threadgroup]],
-    uint tg_sz  [[threads_per_threadgroup]])
+    uint tg_sz  [[threads_per_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]],
+    uint sg_id  [[simdgroup_index_in_threadgroup]])
 {
     uint head = tg_id;
     if (head >= num_q) return;
-    uint kv_head = head / (num_q / num_kv);  // GQA mapping
+    uint kv_head = head / (num_q / num_kv);
 
     device const float* q = Q + head * head_dim;
 
-    // Sliding window: only attend to the most recent window_size tokens
     uint t_start = (window_size > 0 && T > window_size) ? T - window_size : 0;
     uint t_len = T - t_start;
 
-    // Phase 1: compute scores = Q · K[t]^T for t in [t_start, T)
-    // Each thread handles a stripe of t values
-    threadgroup float tg_scores[4096];  // max window = 4096
-    threadgroup float tg_max;
-    threadgroup float tg_sum;
-
+    // Phase 1: Q·K dot products + find max (fused)
+    threadgroup float tg_scores[4096];
     float local_max = -1e30f;
+
     for (uint t = t_start + tid; t < T; t += tg_sz) {
         device const float* k = K_cache + t * num_kv * head_dim + kv_head * head_dim;
         float dot = 0.0f;
-        for (uint d = 0; d < head_dim; d += 4) {
-            dot += q[d] * k[d] + q[d+1] * k[d+1] + q[d+2] * k[d+2] + q[d+3] * k[d+3];
+        // float4 vectorized dot product
+        uint d = 0;
+        for (; d + 3 < head_dim; d += 4) {
+            float4 qv = *((device const float4*)(q + d));
+            float4 kv = *((device const float4*)(k + d));
+            dot += qv.x*kv.x + qv.y*kv.y + qv.z*kv.z + qv.w*kv.w;
         }
+        for (; d < head_dim; d++) dot += q[d] * k[d];
         dot *= scale;
         tg_scores[t - t_start] = dot;
-        if (dot > local_max) local_max = dot;
+        local_max = max(local_max, dot);
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // Reduce max across threads
-    threadgroup float tg_maxes[256];
-    tg_maxes[tid] = local_max;
+    // SIMD reduction for max
+    float sg_max = simd_max(local_max);
+    threadgroup float tg_sg_max[8];  // max 8 simdgroups
+    if (lane == 0) tg_sg_max[sg_id] = sg_max;
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (tid == 0) {
-        float m = -1e30f;
-        for (uint i = 0; i < min(tg_sz, t_len); i++) {
-            if (tg_maxes[i] > m) m = tg_maxes[i];
-        }
-        tg_max = m;
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float global_max = tg_sg_max[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) global_max = max(global_max, tg_sg_max[i]);
 
     // Phase 2: softmax exp + sum
     float local_sum = 0.0f;
     for (uint t = t_start + tid; t < T; t += tg_sz) {
-        float w = exp(tg_scores[t - t_start] - tg_max);
-        tg_scores[t - t_start] = w;  // reuse as weights
+        float w = exp(tg_scores[t - t_start] - global_max);
+        tg_scores[t - t_start] = w;
         local_sum += w;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    threadgroup float tg_sums[256];
-    tg_sums[tid] = local_sum;
+    // SIMD reduction for sum
+    float sg_sum = simd_sum(local_sum);
+    threadgroup float tg_sg_sum[8];
+    if (lane == 0) tg_sg_sum[sg_id] = sg_sum;
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (tid == 0) {
-        float s = 0.0f;
-        for (uint i = 0; i < min(tg_sz, t_len); i++) s += tg_sums[i];
-        tg_sum = s;
+    float global_sum = tg_sg_sum[0];
+    for (uint i = 1; i < n_sg; i++) global_sum += tg_sg_sum[i];
+    float inv_sum = 1.0f / global_sum;
+
+    // Normalize weights in-place
+    for (uint t = t_start + tid; t < T; t += tg_sz) {
+        tg_scores[t - t_start] *= inv_sum;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    float inv_sum = 1.0f / tg_sum;
-
-    // Phase 3: weighted sum of V
-    // Each thread computes a stripe of output dimensions
+    // Phase 3: weighted V sum — each thread handles a stripe of dimensions
     device float* out_head = out + head * head_dim;
     for (uint d = tid; d < head_dim; d += tg_sz) {
         float acc = 0.0f;
         for (uint t = t_start; t < T; t++) {
-            device const float* v = V_cache + t * num_kv * head_dim + kv_head * head_dim;
-            acc += tg_scores[t - t_start] * inv_sum * v[d];
+            acc += tg_scores[t - t_start] * V_cache[t * num_kv * head_dim + kv_head * head_dim + d];
         }
         out_head[d] = acc;
     }
 }
 
-// KV cache append: add new K/V vectors for the current token.
-// Called once per generated token before attention.
 kernel void kv_cache_append(
-    device const float* new_k    [[buffer(0)]],   // [num_kv_heads, head_dim]
-    device const float* new_v    [[buffer(1)]],   // [num_kv_heads, head_dim]
-    device float*       K_cache  [[buffer(2)]],   // [max_T, num_kv_heads, head_dim]
-    device float*       V_cache  [[buffer(3)]],   // [max_T, num_kv_heads, head_dim]
-    constant uint&      pos      [[buffer(4)]],   // current position (0-indexed)
+    device const float* new_k    [[buffer(0)]],
+    device const float* new_v    [[buffer(1)]],
+    device float*       K_cache  [[buffer(2)]],
+    device float*       V_cache  [[buffer(3)]],
+    constant uint&      pos      [[buffer(4)]],
     constant uint&      num_kv   [[buffer(5)]],
     constant uint&      head_dim [[buffer(6)]],
     uint tid [[thread_position_in_grid]])

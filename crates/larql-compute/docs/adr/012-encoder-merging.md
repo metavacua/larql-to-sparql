@@ -1,53 +1,41 @@
-# ADR-012: Encoder Merging — Reduce Per-Layer Metal Encoders
+# ADR-012: Encoder Merging + Decode Pipeline Optimization
 
-**Status**: Accepted (partial benefit)  
-**Date**: 2026-04-08  
-**Context**: The decode pipeline used 7-12 separate Metal compute command encoders per layer. The hypothesis was that reducing encoder count would save ~8ms of dispatch overhead for a 34-layer model.
+**Status**: Complete  
+**Date**: 2026-04-08 (updated with full session results)  
+**Context**: The decode pipeline used 7-12 separate Metal compute command encoders per layer, plus per-layer command buffer commit+wait. Investigated all dispatch overhead reduction approaches.
 
 ## Decision
 
-Merge the per-layer dispatch structure from ~10 encoders to 3-4 per layer:
+Final architecture: **single command buffer** for all 34 layers, **single encoder per layer**, **no explicit memory barriers** (Apple Silicon serialises compute dispatches within an encoder).
 
-- **Encoder A**: Input norm → QKV projection → RoPE → V-norm (all pre-attention)
-- **Encoder B**: KV cache append → KV attend (separate for cache write barrier)
-- **Encoder C**: O projection → residual+norm+Q8 → FFN → post-FFN residual → layer scalar
+## What Worked (29.2ms → ~12.9ms = 2.3x faster)
 
-Also refactored `kv_cache.rs` to expose `encode_kv_append` and `encode_kv_attend` functions that dispatch into an existing encoder, enabling the merge.
+| Optimization | Savings | Notes |
+|-------------|---------|-------|
+| Q4_KF FFN routing (q4kf_proj) | ~8ms | llama.cpp-exact kernel for FFN gate/up/down |
+| Q4_K matvec rewrite (uint4, nr0=2) | ~3ms | Vectorized loads, multi-row |
+| Q4_K format for FFN (skip Q8) | ~4.5ms | residual_norm instead of residual_norm_q8 |
+| Fused gate+up (q4k_ffn_gate_up) | ~1ms | Single dispatch, shared input |
+| Batched RoPE + V-norm | ~0.5ms | 16 per-head dispatches → 3 batched |
+| SIMD KV attention | ~1ms | simd_max/simd_sum, 3 barriers (was 6) |
 
-## Measured Impact
+## What Didn't Work
+
+| Approach | Result | Why |
+|----------|--------|-----|
+| Encoder merging (4 → 1) | ~0ms | Metal encoder creation is ~0.0002ms each |
+| Single cmd buffer (34 → 1 wait) | ~0ms | wait_until_completed returns instantly when GPU done |
+| Memory barriers | ~0ms | Apple Silicon serialises within encoder anyway |
+| 2-sub-block unrolling | **Slower** | Register pressure, poor tail at K=2560 (40 pairs / 32 lanes) |
+| Fused GEGLU+down | **32x slower** | exp() recomputed per output row (26M vs 10K calls) |
+
+## Lesson
+
+**Metal dispatch overhead is negligible on Apple Silicon.** The real bottleneck was kernel execution speed (Q4_0 vs Q4_K vs Q4_KF format) and the number of memory reads per output element. The llama.cpp-exact inner loop with register-cached input was the unlock.
+
+## Result
 
 ```
-Before merging:  17.8ms / 56 tok/s  (21 layers)
-After merging:   17.5ms / 57 tok/s  (21 layers)
-Improvement:     ~0.3ms (1.7%)
+Before:  29.2ms / 34 tok/s (34 layers) = 2.84x Ollama
+After:  ~12.9ms / ~77 tok/s (34 layers) = ~1.25x Ollama
 ```
-
-## Why the Impact Was Small
-
-**The encoder creation overhead was already negligible** — 0.05ms for 238 empty encoders (0.0002ms each). The hypothesis that encoder boundaries caused 8ms of overhead was wrong.
-
-The actual cost breakdown (34 layers):
-- FFN compute: 13.0ms (35.8%) — at hardware bandwidth limit
-- KV cache attend: 10.5ms (28.9%) — real GPU work
-- Norm compute: 10.6ms (29.0%) — real GPU work (reading all elements for RMS)
-- QKV projection: 1.3ms (3.4%)
-- Encoder overhead: 0.05ms (0.0%) — **not the bottleneck**
-
-The "dispatch overhead" seen in component profiling (0.155ms/layer for rms_norm) is the **actual GPU compute time** for the norm operation, not Metal API overhead. RMSNorm reads all hidden_size elements for mean-of-squares, which takes ~0.15ms at memory bandwidth.
-
-## Consequences
-
-- **Good**: Cleaner code structure — clear A/B/C encoder phases per layer
-- **Good**: Fewer synchronization points (potential for future GPU overlap)
-- **Good**: KV cache operations now composable via encode_kv_append/encode_kv_attend
-- **Lesson**: Metal encoder creation is nearly free. The real optimization path is **reducing the number of layers computed** (template caching: 34 → 8 layers = 4.25x speedup).
-
-## Updated Path to Ollama Parity
-
-Encoder merging is NOT the path. The correct approach:
-
-1. **Cache template layers L0-12** (2.6x speedup, compute only 8 entity-dependent layers)
-2. **Specialize single-query attention** (potential KV cache attend optimization)
-3. **Fused layer kernel** (single dispatch per layer — reduces 10+ dispatches to 1)
-
-Option 1 alone achieves 149 tok/s, exceeding Ollama's 97 tok/s.

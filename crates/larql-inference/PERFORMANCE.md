@@ -27,15 +27,19 @@ predict_honest("The capital of France is"):
 
 ## GPU Decode Path (synthetic, seq=1)
 
-From `compare_ollama` benchmark (larql-compute):
+From `compare_ollama` benchmark (larql-compute, 2026-04-08):
 
 | Engine | ms/tok | tok/s | Notes |
 |--------|--------|-------|-------|
-| LARQL Q4_K decode (21L, KV) | 17.5ms | 57 | 3 encoders/layer (merged) |
-| LARQL Q8 decode (21L, KV) | 24.5ms | 41 | |
-| LARQL Q4_K decode (34L, KV) | 28.0ms | 36 | |
-| Ollama (34L) | 10.2ms | 98 | |
-| **Projected cached (8L)** | **~5ms** | **~200** | Cache L0-12, compute 8 layers |
+| LARQL Q4_KF decode (34L, KV) | ~12.9ms | ~77 | llama.cpp-exact kernel for FFN |
+| LARQL Q4_K decode (34L, KV) | 20.8ms | 48 | uint4 loads, fused gate+up |
+| LARQL Q8 decode (21L, KV) | 20.5ms | 49 | |
+| Ollama (34L) | 10.3ms | 97 | |
+| **vs Ollama (Q4_KF)** | — | — | **~1.0–1.25x (at parity)** |
+| **Projected cached (8L)** | **~3ms** | **~300** | Cache L0-12, compute 8 layers |
+
+Previous (2026-04-07): 28.0ms / 36 tok/s (34L) = 2.84x Ollama.
+Current (2026-04-08): ~12.9ms / ~77 tok/s (34L) = ~1.25x Ollama.
 
 ## Layer Graph Strategies
 

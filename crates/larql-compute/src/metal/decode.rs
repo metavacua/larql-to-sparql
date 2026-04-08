@@ -8,19 +8,24 @@ impl MetalBackend {
 
     /// Decode one token through all layers with KV cache.
     ///
-    /// **Single command buffer, single encoder per layer** with memory barriers:
-    ///   1. Input norm → QKV projection → RoPE → V-norm
-    ///   2. ── memory barrier (Q/K/V outputs) ──
-    ///   3. KV cache append
-    ///   4. ── memory barrier (K/V caches) ──
-    ///   5. KV attend
-    ///   6. ── memory barrier (attention output) ──
-    ///   7. O projection
-    ///   8. ── memory barrier (O output) ──
-    ///   9. Residual+norm+Q8 → FFN → post-FFN residual → layer scalar
+    /// **Single command buffer**, one encoder per layer, no explicit barriers
+    /// (Apple Silicon serialises compute dispatches within an encoder).
     ///
-    /// One cmd buffer + one encoder per layer eliminates dispatch overhead
-    /// from encoder creation/teardown (was: 4 encoders per layer).
+    /// Per-layer pipeline (~10 dispatches):
+    ///   1. Input norm
+    ///   2. Fused QKV projection (Q4_K or Q4_KF)
+    ///   3. Batched RoPE (all Q heads), batched RoPE (all K heads)
+    ///   4. Batched V-norm (optional, Gemma 4)
+    ///   5. KV cache append + KV attend
+    ///   6. O projection
+    ///   7. Residual + norm (f32 for Q4_K/Q4_KF, +Q8 for Q4_0)
+    ///   8. FFN: fused gate+up (Q4_K) or separate gate/up (Q4_KF) + GEGLU + down
+    ///   9. Post-FFN residual + optional layer scalar
+    ///
+    /// Format-aware FFN routing:
+    ///   - Q4_KF: llama.cpp-exact kernel (q4kf_proj) with register-cached input
+    ///   - Q4_K:  fused gate+up kernel + q4k_matvec (uint4, 8 rows/TG, nr0=2)
+    ///   - Q4_0:  legacy Q8-input path
     #[allow(clippy::too_many_arguments)]
     pub fn decode_token(
         &self,

@@ -1,22 +1,23 @@
 //! Metal GPU compute backend — Apple Silicon.
 //!
 //! All operations go through the [`ComputeBackend`] trait. Metal-specific
-//! optimisations: simdgroup Q4 dot products, threadgroup shared memory,
-//! zero-copy mmap buffers, multi-layer command buffer pipeline.
+//! optimisations: simdgroup reductions, uint4 vectorised loads, native half reads,
+//! zero-copy mmap buffers, single command buffer pipeline.
 //!
 //! ## Modules
 //!
-//! - `shaders/`:  Metal Shading Language — one file per kernel (9 shaders)
+//! - `shaders/`:  Metal Shading Language — one file per kernel (~30 shader files)
 //! - `ops/`:      GPU dispatch — one file per operation (6 dispatchers)
 //! - `buffers`:   GPU buffer cache (zero-copy mmap, transient allocation)
 //! - `f32_ops`:   f32 tiled matmul dispatch with GPU/CPU routing
 //! - `calibrate`: CPU vs GPU auto-calibration
 //!
-//! ## Performance (M3 Max)
+//! ## Performance (M3 Max, Gemma 3 4B, 34 layers)
 //!
-//! - Q4 matvec: 0.57ms (simdgroup, 14.7MB matrix)
-//! - Multi-layer FFN: 8.5ms (21 layers, one command buffer)
-//! - Full layer: 1.7ms (attention + FFN, seq=1)
+//! - Full decode: ~0.38ms/layer, ~77 tok/s (Q4_KF path)
+//! - vs Ollama: ~1.0–1.25× (at parity)
+//! - Q4_K matvec: uint4 loads, 8 rows/TG, multi-row (nr0=2)
+//! - KV attention: simd_max/simd_sum reductions, float4 Q·K dot products
 
 pub mod shaders;   // modular: shaders/mod.rs → one file per shader
 pub mod buffers;

@@ -1,6 +1,6 @@
 # Metal Shader Reference — larql-compute
 
-44 Metal Shading Language kernels across 32 shader files in `src/metal/shaders/`.
+~48 Metal Shading Language kernels across ~30 shader files in `src/metal/shaders/`.
 All compiled into a single Metal library via `all_shaders()`.
 
 ## f32 Matrix Multiply
@@ -48,9 +48,9 @@ Sparse Q4 matvec by index — only computes selected rows. Used by vindex walk a
 
 ## Q4_K Quantized (Ollama-compatible, 148 bytes per 256 values)
 
-### q4k_matvec.rs — `q4k_matvec`
-Standalone Q4_K matvec. Reads f16 d/dmin header, unpacks 6-bit scales and 4-bit mins, processes 8 sub-blocks of 32 values. 4 rows per TG.
-Origin: LARQL original, matching GGUF Q4_K dequantization formula.
+### q4k_matvec.rs — `q4k_matvec` (PRODUCTION for Q4_K FFN down)
+Standalone Q4_K matvec. uint4 vectorized loads, sub-block striped across lanes, multi-row processing (nr0=2: each simdgroup computes 2 output rows, amortizing input reads via L1 cache). 8 rows per TG (4 simdgroups × 2 rows).
+Origin: LARQL original, rewritten 2026-04-08 with uint4+nr0 optimizations.
 
 ### q4k_qkv_proj.rs — `q4k_qkv_proj` (PRODUCTION for Q4_K attention)
 **Fused Q+K+V projection.** Single dispatch for all three attention projections. Rows 0..q_rows → Q, q_rows..+k_rows → K, rest → V. Sub-block lane assignment (80 sub-blocks / 32 lanes = 83% utilization). No threadgroup memory for input — direct device reads.
@@ -61,14 +61,23 @@ Performance: 1.5ms for 34 layers (0.045ms/layer) — 6.7x faster than Ollama's e
 Grid: 8 rows per TG, 256 threads
 ```
 
-### q4kf_qkv_proj.rs — `q4kf_qkv_proj`
-Fused Q+K+V using llama.cpp's kernel_mul_mv_q4_K_f32 architecture. Register-based input (yl[16], yh[16]), quarter-block lane decomposition (ix=lane/8), uint16_t nibble extraction, FOR_UNROLL pragma. Operates on our 148-byte Q4_K blocks.
-Origin: Ported from llama.cpp (MIT license), adapted for fused QKV and our block layout.
+### q4kf_qkv_proj.rs — `q4kf_qkv_proj`, `q4kf_proj` (PRODUCTION for Q4_KF attention + FFN)
+Fused Q+K+V and standalone projection using llama.cpp's kernel_mul_mv_q4_K_f32 architecture. Register-based input (yl[16], yh[16]), quarter-block lane decomposition (ix=lane/8), uint16_t nibble extraction, FOR_UNROLL pragma. Operates on GGUF 144-byte blocks.
+`q4kf_proj` is also used for **FFN gate, up, and down** when weights are Q4_KF format — this is the key kernel for Ollama parity.
+Origin: Ported from llama.cpp (MIT license), adapted for fused QKV and standalone projection.
 
 ```
-Performance: Same as q4k_qkv_proj (both converge to same speed)
-Grid: 4 rows per TG (2 SG × 2 rows/SG), 128 threads
+Performance: Same as q4k_qkv_proj for QKV; FFN routing enables ~1.25x Ollama
+Grid: 4 rows per TG (2 SG × 2 rows/SG), 64 threads
 ```
+
+### q4k_ffn_gate_up.rs — `q4k_ffn_gate_up` (PRODUCTION for Q4_K FFN)
+Fused gate+up projection — two Q4_K matvecs sharing the same input vector in one dispatch. Threadgroups 0..N handle gate rows, N..2N handle up rows. Same uint4+sub-block inner loop as q4k_matvec.
+Origin: LARQL original (2026-04-08).
+
+### q4k_geglu_down.rs — `q4k_geglu_silu_down`, `q4k_geglu_gelu_tanh_down`
+Experimental fused GEGLU activation + Q4_K down projection. Computes SiLU(gate)×up on-the-fly during the down matmul. **Not used in production** — recomputing exp() per output row (26M calls for hidden=2560 × inter=10240) is 32x slower than separate GEGLU + matmul.
+Origin: LARQL original (2026-04-08). Kept for documentation of the failed experiment.
 
 ## Q6_K Quantized (210 bytes per 256 values)
 
@@ -111,11 +120,18 @@ Threadgroup: float tg_scores[4096] (max seq_len)
 ### causal_attention.rs — `causal_attention`
 Basic causal attention (seq≤64). Used by full_layer benchmark. Simpler than fused_attention (no RoPE, no GQA, no softcap).
 
-### kv_attention.rs — `kv_attention`
-KV-cached decode attention. One query attends against full cached K/V (all previous positions). One threadgroup per query head.
+### kv_attention.rs — `kv_attention` (optimized 2026-04-08)
+KV-cached decode attention. One query attends against full cached K/V. One threadgroup per query head. Optimizations:
+- **simd_max/simd_sum** for softmax reductions (eliminates serial loops, 3 barriers instead of 6)
+- **float4 vectorized** Q·K dot products
+- Sliding window support (window_size > 0)
 
-### rope.rs — `rope_at_pos`, `rope_apply`
-Standalone RoPE (split-half pairing) with partial rotation support. Applies position-dependent rotation to [seq_len, dim] in-place. `rotary_dim` (buffer 3) controls how many dimensions are rotated — 0 means full `dim`. Dimensions beyond `rotary_dim` pass through unchanged. See [ADR-010](adr/010-partial-rope-rotary-dim.md).
+### rope.rs — `rope_at_pos`, `rope_at_pos_batched`, `rope_apply`
+Standalone RoPE (split-half pairing) with partial rotation support.
+- `rope_at_pos`: Single head, used by prefill and decode_hybrid
+- `rope_at_pos_batched`: **All heads in one 2D dispatch** (grid: rotary_dim/2 × num_heads). Reduces 12 per-head dispatches to 2 (one for Q heads, one for K heads).
+- `rope_apply`: Multi-position variant for prefill
+`rotary_dim` controls partial rotation. See [ADR-010](adr/010-partial-rope-rotary-dim.md).
 
 ## Element-wise Operations
 
@@ -159,8 +175,10 @@ Standalone activation functions for non-gated FFN (StarCoder2, GPT-2). Unlike GE
 ### layer_norm.rs — `layer_norm`, `layer_norm_no_bias`
 Standard LayerNorm: `out = (x - mean) / sqrt(var + eps) * (weight + offset) + bias`. Used by StarCoder2, GPT-2, BERT. `layer_norm_no_bias` variant omits the bias term.
 
-### v_norm.rs — `v_norm`
-Parameter-free RMSNorm applied to V states before attention (Gemma 4). `out = x / sqrt(mean(x²) + eps)` — no learned weight multiplication.
+### v_norm.rs — `v_norm`, `v_norm_batched`
+Parameter-free RMSNorm applied to V states before attention (Gemma 4). `out = x / sqrt(mean(x²) + eps)`.
+- `v_norm`: Single head
+- `v_norm_batched`: **All KV heads in one 2D dispatch** (grid: head_dim × num_heads). Reduces 4 per-head dispatches to 1.
 
 ### residual_inject.rs (updated) — `scale_vector`
 Per-layer scalar multiplier: `out = input * scalar`. Used by Gemma 4's learned layer scalars. Added alongside existing `residual_copy` and `residual_add`.

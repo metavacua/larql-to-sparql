@@ -8,13 +8,16 @@ How `decode_token` processes one token through all layers with KV cache.
 Input: x[hidden] (embedded token)
 Output: h[hidden] (final hidden state for logit projection)
 
-Per layer (in one Metal command buffer):
+Per layer (single encoder, ~10 dispatches):
   1. Input norm
-  2. QKV projection (fused)
-  3. KV cache append + attend
-  4. O projection
-  5. Residual + pre-FFN norm + Q8 quantize (fused)
-  6. FFN: gate + up + GEGLU + down + residual (one encoder)
+  2. Fused QKV projection (Q4_K or Q4_KF)
+  3. Batched RoPE (all Q heads + all K heads = 2 dispatches)
+  4. Batched V-norm (optional, Gemma 4)
+  5. KV cache append + attend (SIMD reductions)
+  6. O projection
+  7. Residual + norm (f32 for Q4_K/Q4_KF, +Q8 for Q4_0)
+  8. FFN: fused gate+up (or separate) + GEGLU + down
+  9. Post-FFN residual + optional layer scalar
 ```
 
 ## Dual-Path Architecture
@@ -22,21 +25,37 @@ Per layer (in one Metal command buffer):
 Weights are either Q4_K (Ollama strategy, smaller) or Q8_0 (higher precision).
 `decode_token` auto-detects from `FullPipelineLayer.wq.format`.
 
+### Q4_KF Path (fastest — llama.cpp-exact kernel)
+
+```
+h_buf [f32]
+  → rms_norm → norm_f32 [f32]
+  → q4kf_qkv_proj (fused, GGUF format) → Q, K, V [f32]
+  → rope_at_pos_batched (Q heads) + rope_at_pos_batched (K heads)
+  → v_norm_batched (optional, Gemma 4)
+  → kv_cache_append + kv_attention (simd_max/simd_sum)
+  → q4kf_proj (O projection)
+  → residual_norm → ffn_norm_out [f32], residual_add → h_post_attn [f32]
+  → q4kf_proj (gate) + q4kf_proj (up) → geglu → q4kf_proj (down)
+  → residual_add → h_buf [f32] for next layer
+```
+
+Advantages: llama.cpp-exact inner loop, register-cached input, native half reads, uint16 nibble masking. ~1.25x Ollama.
+
 ### Q4_K Path
 
 ```
 h_buf [f32]
   → rms_norm → norm_f32 [f32]
-  → q4k_qkv_proj (fused) → Q[q_dim], K[kv_dim], V[kv_dim] [f32]
-  → kv_cache_append → cache updated
-  → kv_attention → attn_out [f32]
-  → q4k_proj → o_out [f32]
-  → residual_norm_q8 (fused) → h_post_attn [f32], ffn_q8 [int8], ffn_q8s [f32]
-  → q4_matvec (gate, up) → geglu → q4_f32_matvec (down) → residual_add
-  → h_buf [f32] for next layer
+  → q4k_qkv_proj (fused) → Q, K, V [f32]
+  → rope_at_pos_batched + kv_cache_append + kv_attention
+  → q4k_proj (O projection)
+  → residual_norm → ffn_norm_out [f32], residual_add → h_post_attn [f32]
+  → q4k_ffn_gate_up (fused, one dispatch) → geglu → q4k_matvec (down)
+  → residual_add → h_buf [f32] for next layer
 ```
 
-Advantages: No Q8 quantization of input (saves one dispatch). Q4_K data is 1.73x smaller than Q8.
+Advantages: Fused gate+up (one dispatch), uint4 loads, 8 rows/TG, multi-row (nr0=2). ~2.0x Ollama.
 
 ### Q8 Path
 
@@ -54,13 +73,21 @@ Advantages: Higher precision QKV. Established path with integer inner loop.
 
 ## Metal Dispatch Structure
 
-One Metal command buffer per `decode_token` call. All layers encoded before `commit()`.
+Single Metal command buffer for all layers. One encoder per layer, no explicit memory barriers
+(Apple Silicon serialises compute dispatches within an encoder).
 
-Current encoder count per layer:
-- Q4_K path: 5 encoders (norm+QKV merged, KV append, KV attend, O proj, residual+FFN+residual merged)
-- Q8 path: 6 encoders (norm+Q8, QKV, KV append, KV attend, O quant+proj, residual+FFN+residual)
+Current dispatch count per layer: ~10
+- Input norm (1)
+- Fused QKV projection (1)
+- Batched RoPE Q + K (2)
+- Batched V-norm (0 or 1)
+- KV append + attend (2)
+- O projection (1)
+- Residual + norm (1)
+- FFN: gate+up fused or separate + GEGLU + down (2–3)
+- Post-FFN residual (1)
 
-Total for 34 layers: 170-204 encoders in one command buffer.
+Total for 34 layers: ~340 dispatches in 34 encoders, 1 command buffer, 1 commit+wait.
 
 ## KV Cache
 
@@ -88,10 +115,11 @@ pub struct LayerKVCache {
 - Fused attention with skip_rope and rotary_dim flags (partial RoPE for Gemma 4)
 - KV cache populated via CPU `prefill_with_kv` after GPU forward pass
 
-## Performance (M3 Max, 21 layers)
+## Performance (M3 Max, Gemma 3 4B, 2026-04-08)
 
-| Path | Time | tok/s |
-|------|------|-------|
-| Q4_K decode | 16.9ms | 59 |
-| Q8 decode | 24.3ms | 41 |
-| Ollama (34 layers) | 10.3ms | 97 |
+| Path | Time | tok/s | vs Ollama |
+|------|------|-------|-----------|
+| Q4_KF decode (34L) | ~12.9ms | ~77 | ~1.25x |
+| Q4_K decode (34L) | 20.8ms | 48 | 2.0x |
+| Q8 decode (21L) | 20.5ms | 49 | — |
+| Ollama (34L) | 10.3ms | 97 | 1.0x |
