@@ -26,7 +26,7 @@ println!("Top prediction: {} ({:.1}%)", result.predictions[0].0, result.predicti
 | `attention/` | BLAS-fused GQA attention: block, GQA, GPU dispatch, RoPE |
 | `forward/` | Forward pass: embed, layer, predict, PLE (per-layer embeddings), trace |
 | `ffn/` | FFN evaluation: dense, sparse, highway, route-guided (experimental backends deprecated) |
-| `layer_graph/` | Cached/dense/walk/pipelined layer graphs, `predict_honest()` (FullPipelineLayer construction) |
+| `layer_graph/` | Layer graphs + prediction pipeline: `pipeline_layer` (shared FullPipelineLayer construction), `predict` (entry points), `generate` (token loop), `logits` (KNN logits), `prefill` (KV cache) |
 | `residual.rs` | RMS norm, layer norm |
 | `trace/` | Residual stream decomposition and tiered storage |
 | `vindex/walk_ffn.rs` | WalkFfn: mmap'd FFN — faster than dense (517ms vs 535ms) |

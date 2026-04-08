@@ -116,7 +116,7 @@ src/
     decode.rs         KV-cached decode (norm→QKV→attend→O→FFN per layer)
     prefill.rs        GPU prefill for seq>1
     buffers.rs        GPU buffer cache + read_buffer_f32
-    shaders/          44 Metal kernels (one file each)
+    shaders/          44 Metal kernels across 32 shader files
     ops/              GPU dispatch helpers
 
   csrc/q4_dot.c       ARM NEON Q4 kernel
@@ -180,7 +180,7 @@ cargo run --release --features metal -p larql-compute --example best_multi_layer
 |-----|---------|
 | [PERFORMANCE.md](PERFORMANCE.md) | Benchmark data, component profiling, optimization history |
 | [ROADMAP.md](ROADMAP.md) | Planned optimizations, performance targets |
-| [docs/adr/](docs/adr/) | 11 architectural decision records (design choices, algorithm origins, per-layer params) |
+| [docs/adr/](docs/adr/) | 12 architectural decision records (design choices, algorithm origins, per-layer params, encoder merging) |
 | [docs/shaders.md](docs/shaders.md) | All 44 Metal kernels with origin, performance, parameters |
 | [docs/quantization-formats.md](docs/quantization-formats.md) | Q4_0, Q4_K, Q4_KF, Q6_K, Q8_0 format specs |
 | [docs/decode-pipeline.md](docs/decode-pipeline.md) | Decode data flow, dual-path architecture, KV cache |

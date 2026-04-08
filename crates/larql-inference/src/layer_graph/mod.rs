@@ -17,6 +17,9 @@ mod walk;
 mod cached;
 mod template;
 pub mod pipeline_layer;
+pub mod prefill;
+pub mod logits;
+pub mod generate;
 pub mod predict;
 
 use ndarray::Array2;
