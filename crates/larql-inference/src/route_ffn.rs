@@ -44,9 +44,11 @@ struct FeatureHitJson {
 }
 
 /// Pre-loaded routing table: for each (relation, entity), the features that fire per layer.
+type RouteMap = HashMap<(String, String), HashMap<usize, Vec<(usize, f32)>>>;
+
 pub struct RouteTable {
     /// (relation, entity) -> layer -> [(feature_index, activation)]
-    routes: HashMap<(String, String), HashMap<usize, Vec<(usize, f32)>>>,
+    routes: RouteMap,
 }
 
 impl RouteTable {
@@ -55,8 +57,7 @@ impl RouteTable {
         let data = std::fs::read_to_string(path)?;
         let table: RouteTableJson = serde_json::from_str(&data)?;
 
-        let mut routes: HashMap<(String, String), HashMap<usize, Vec<(usize, f32)>>> =
-            HashMap::new();
+        let mut routes: RouteMap = HashMap::new();
 
         for entry in &table.routes {
             let key = (entry.relation.clone(), entry.entity.clone());

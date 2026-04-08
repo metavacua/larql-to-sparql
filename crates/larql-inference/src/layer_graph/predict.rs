@@ -18,9 +18,9 @@ pub fn prefill_with_kv(
     let seq_len = token_ids.len();
 
     for layer in layer_range {
-        // CPU attention with K/V capture
+        // Attention with K/V capture (uses compute backend for projections when available)
         let (h_post_attn, k_rope, v) =
-            crate::attention::run_attention_with_kv(weights, &h, layer)
+            crate::attention::gpu::run_attention_with_kv_backend(weights, &h, layer, Some(backend))
                 .unwrap();
 
         // Write K/V to backend's KV cache for this layer
@@ -187,6 +187,7 @@ pub fn predict_with_graph(
 /// Pass 3: Add FFN outputs to the final residual and compute logits via vindex KNN.
 ///
 /// Target: 55ms attention + 8.5ms FFN + 5ms logits = 68ms → 15 tok/s
+#[allow(clippy::too_many_arguments)]
 pub fn predict_split_pass(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -405,6 +406,7 @@ pub fn predict_split_cached(
 /// - Logits: GPU Q4 matvec against lm_head (1ms)
 ///
 /// Every entity-dependent layer is computed. No approximate residuals.
+#[allow(clippy::too_many_arguments)]
 pub fn predict_honest(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -445,107 +447,25 @@ pub fn predict_honest(
             if intermediate > 0 && (has_q4k || has_q8) {
                 // Q4_K: 148B/256vals, Q4_0: 18B/32vals
                 let q4_ffn_per_matrix = if ffn_is_q4k {
-                    (intermediate * hidden + 255) / 256 * 148
+                    (intermediate * hidden).div_ceil(256) * 148
                 } else {
                     intermediate * hidden / 32 * 18
                 };
-                let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
+                // q4_ffn_per_layer computed inside build_pipeline_layers
                 let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
                 let arch = &*weights.arch;
 
-                use larql_compute::{QuantWeight, QuantFormat};
-                fn to_format(s: &str) -> QuantFormat {
-                    match s { "Q6_K" => QuantFormat::Q6_K, _ => QuantFormat::Q4_K }
-                }
-
-                let layers: Vec<larql_compute::FullPipelineLayer> = layer_range.clone()
-                    .map(|layer| {
-                        let fs = layer * q4_ffn_per_layer;
-
-                        // Prefer Q4_K (Ollama strategy, smaller + precise) over Q8
-                        let (wq, wk, wv, wo) = if has_q4k {
-                            let [q, k, v, o] = index.attn_q4k_layer_data(layer).unwrap();
-                            (
-                                QuantWeight { data: q.0, scales: None, format: to_format(q.1) },
-                                QuantWeight { data: k.0, scales: None, format: to_format(k.1) },
-                                QuantWeight { data: v.0, scales: None, format: to_format(v.1) },
-                                QuantWeight { data: o.0, scales: None, format: to_format(o.1) },
-                            )
-                        } else {
-                            let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
-                            (
-                                QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
-                                QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
-                                QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
-                                QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
-                            )
-                        };
-
-                        let layer_hd = arch.head_dim_for_layer(layer);
-                        let layer_nq = arch.num_q_heads_for_layer(layer);
-                        let layer_nkv = arch.num_kv_heads_for_layer(layer);
-                        let rotary_frac = arch.rotary_fraction_for_layer(layer);
-                        let rotary_dim = if rotary_frac >= 1.0 { 0 } else { (layer_hd as f64 * rotary_frac) as usize };
-                        let sw = if arch.is_sliding_window_layer(layer) {
-                            arch.sliding_window_size().unwrap_or(0)
-                        } else { 0 };
-                        let layer_scalar = arch.layer_scalar_key(layer)
-                            .and_then(|k| weights.vectors.get(&k))
-                            .and_then(|v| v.first().copied())
-                            .unwrap_or(0.0);
-                        larql_compute::FullPipelineLayer {
-                            wq, wk, wv, wo,
-                            gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
-                            up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: ffn_format },
-                            down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: ffn_format },
-                            input_norm: weights.vectors.get(&arch.input_layernorm_key(layer))
-                                .map(|v| v.as_slice()).unwrap_or(&[]),
-                            post_attn_norm: weights.vectors.get(&arch.post_attention_layernorm_key(layer))
-                                .map(|v| v.as_slice()).unwrap_or(&[]),
-                            pre_ffn_norm: arch.pre_feedforward_layernorm_key(layer)
-                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                            post_ffn_norm: arch.post_feedforward_layernorm_key(layer)
-                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                            norm_offset: arch.norm_weight_offset(),
-                            has_post_norms: arch.has_post_norms(),
-                            activation: match arch.activation() {
-                                larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
-                                _ => larql_compute::Activation::Silu,
-                            },
-                            qk_norm_offset: arch.qk_norm_weight_offset(),
-                            eps: 1e-6,
-                            norm_type: match arch.norm_type() {
-                                larql_models::NormType::LayerNorm => larql_compute::NormType::LayerNorm,
-                                _ => larql_compute::NormType::RmsNorm,
-                            },
-                            ffn_type: match arch.ffn_type() {
-                                larql_models::FfnType::Standard => larql_compute::FfnType::Standard,
-                                _ => larql_compute::FfnType::Gated,
-                            },
-                            attn_scale: arch.attention_scale() as f32,
-                            head_dim: layer_hd,
-                            num_q_heads: layer_nq,
-                            num_kv_heads: layer_nkv,
-                            rope_base: arch.rope_base_for_layer(layer) as f32,
-                            rotary_dim,
-                            sliding_window: sw,
-                            has_v_norm: arch.has_v_norm(),
-                            layer_scalar,
-                            input_norm_bias: None,
-                            post_attn_norm_bias: None,
-                            ffn_up_bias: arch.ffn_up_bias_key(layer)
-                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                            ffn_down_bias: arch.ffn_down_bias_key(layer)
-                                .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                        }
-                    }).collect();
+                let layers = super::pipeline_layer::build_pipeline_layers(
+                    weights, index, layer_range.clone(),
+                    q4_ffn_mmap, q4_ffn_per_matrix, ffn_format,
+                );
 
                 // GPU pipeline uses uniform dims (sliding layer defaults). Models with
                 // per-layer variation (Gemma 4) route through CPU via has_post_norms().
                 let q_dim = weights.num_q_heads * weights.head_dim;
                 let kv_dim = weights.num_kv_heads * weights.head_dim;
                 let rope = arch.rope_base_for_layer(layer_range.start) as f32;
-                let softcap = arch.attn_logit_softcapping().unwrap_or(0.0) as f32;
+                let softcap = arch.attn_logit_softcapping().unwrap_or(0.0);
                 let qk_norm = arch.attn_q_norm_key(layer_range.start).is_some();
 
                 if seq_len == 1 {
@@ -603,7 +523,7 @@ pub fn predict_honest(
                     let mut h_cpu = h.clone();
                     for (rel_idx, abs_layer) in layer_range.clone().enumerate() {
                         let (h_post_attn, k_rope, v) =
-                            crate::attention::run_attention_with_kv(weights, &h_cpu, abs_layer)
+                            crate::attention::gpu::run_attention_with_kv_backend(weights, &h_cpu, abs_layer, Some(backend))
                                 .unwrap();
 
                         if backend.has_kv_cache() {
@@ -695,98 +615,18 @@ pub fn generate(
     }
 
     let q4_ffn_per_matrix = if ffn_is_q4k {
-        (intermediate * hidden + 255) / 256 * 148
+        (intermediate * hidden).div_ceil(256) * 148
     } else {
         intermediate * hidden / 32 * 18
     };
-    let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
     let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
-
-    use larql_compute::{QuantWeight, QuantFormat};
-    fn to_format(s: &str) -> QuantFormat {
-        match s { "Q6_K" => QuantFormat::Q6_K, _ => QuantFormat::Q4_K }
-    }
 
     // Build GPU layers for ALL layers (0..num_layers) for full KV-cached decode
     let num_layers = weights.num_layers;
-    let layers: Vec<larql_compute::FullPipelineLayer> = (0..num_layers)
-        .map(|layer| {
-            let fs = layer * q4_ffn_per_layer;
-            let (wq, wk, wv, wo) = if has_q4k {
-                let [q, k, v, o] = index.attn_q4k_layer_data(layer).unwrap();
-                (
-                    QuantWeight { data: q.0, scales: None, format: to_format(q.1) },
-                    QuantWeight { data: k.0, scales: None, format: to_format(k.1) },
-                    QuantWeight { data: v.0, scales: None, format: to_format(v.1) },
-                    QuantWeight { data: o.0, scales: None, format: to_format(o.1) },
-                )
-            } else {
-                let [q, k, v, o] = index.attn_q8_layer_data(layer).unwrap();
-                (
-                    QuantWeight { data: q.0, scales: Some(q.1), format: QuantFormat::Q8_0 },
-                    QuantWeight { data: k.0, scales: Some(k.1), format: QuantFormat::Q8_0 },
-                    QuantWeight { data: v.0, scales: Some(v.1), format: QuantFormat::Q8_0 },
-                    QuantWeight { data: o.0, scales: Some(o.1), format: QuantFormat::Q8_0 },
-                )
-            };
-            let layer_hd = arch.head_dim_for_layer(layer);
-            let layer_nq = arch.num_q_heads_for_layer(layer);
-            let layer_nkv = arch.num_kv_heads_for_layer(layer);
-            let rotary_frac = arch.rotary_fraction_for_layer(layer);
-            let rotary_dim = if rotary_frac >= 1.0 { 0 } else { (layer_hd as f64 * rotary_frac) as usize };
-            let sw = if arch.is_sliding_window_layer(layer) {
-                arch.sliding_window_size().unwrap_or(0)
-            } else { 0 };
-            let layer_scalar = arch.layer_scalar_key(layer)
-                .and_then(|k| weights.vectors.get(&k))
-                .and_then(|v| v.first().copied())
-                .unwrap_or(0.0);
-            larql_compute::FullPipelineLayer {
-                wq, wk, wv, wo,
-                gate: QuantWeight { data: &q4_ffn_mmap[fs..fs + q4_ffn_per_matrix], scales: None, format: ffn_format },
-                up: QuantWeight { data: &q4_ffn_mmap[fs + q4_ffn_per_matrix..fs + 2 * q4_ffn_per_matrix], scales: None, format: ffn_format },
-                down: QuantWeight { data: &q4_ffn_mmap[fs + 2 * q4_ffn_per_matrix..fs + 3 * q4_ffn_per_matrix], scales: None, format: ffn_format },
-                input_norm: weights.vectors.get(&arch.input_layernorm_key(layer))
-                    .map(|v| v.as_slice()).unwrap_or(&[]),
-                post_attn_norm: weights.vectors.get(&arch.post_attention_layernorm_key(layer))
-                    .map(|v| v.as_slice()).unwrap_or(&[]),
-                pre_ffn_norm: arch.pre_feedforward_layernorm_key(layer)
-                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                post_ffn_norm: arch.post_feedforward_layernorm_key(layer)
-                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                norm_offset: arch.norm_weight_offset(),
-                has_post_norms: arch.has_post_norms(),
-                activation: match arch.activation() {
-                    larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
-                    _ => larql_compute::Activation::Silu,
-                },
-                qk_norm_offset: arch.qk_norm_weight_offset(),
-                eps: 1e-6,
-                norm_type: match arch.norm_type() {
-                    larql_models::NormType::LayerNorm => larql_compute::NormType::LayerNorm,
-                    _ => larql_compute::NormType::RmsNorm,
-                },
-                ffn_type: match arch.ffn_type() {
-                    larql_models::FfnType::Standard => larql_compute::FfnType::Standard,
-                    _ => larql_compute::FfnType::Gated,
-                },
-                attn_scale: arch.attention_scale() as f32,
-                head_dim: layer_hd,
-                num_q_heads: layer_nq,
-                num_kv_heads: layer_nkv,
-                rope_base: arch.rope_base_for_layer(layer) as f32,
-                rotary_dim,
-                sliding_window: sw,
-                has_v_norm: arch.has_v_norm(),
-                layer_scalar,
-                input_norm_bias: None,
-                post_attn_norm_bias: None,
-                ffn_up_bias: arch.ffn_up_bias_key(layer)
-                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-                ffn_down_bias: arch.ffn_down_bias_key(layer)
-                    .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
-            }
-        }).collect();
+    let layers = super::pipeline_layer::build_pipeline_layers(
+        weights, index, 0..num_layers,
+        q4_ffn_mmap, q4_ffn_per_matrix, ffn_format,
+    );
 
     let q_dim = weights.num_q_heads * weights.head_dim;
     let kv_dim = weights.num_kv_heads * weights.head_dim;
@@ -802,7 +642,7 @@ pub fn generate(
     let h_embed = crate::forward::embed_tokens_pub(weights, token_ids);
     let x: Vec<f32> = h_embed.as_slice().unwrap_or(&[]).to_vec();
 
-    let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0) as f32;
+    let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0);
     let qk_norm_val = arch.attn_q_norm_key(0).is_some();
 
     // prefill_q4 now uses full_pipeline with KV cache population
@@ -824,7 +664,7 @@ pub fn generate(
     });
 
     let h = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec)
-        .unwrap_or_else(|_| h_embed);
+        .unwrap_or(h_embed);
 
     // First token from prefill
     let h_1d = {

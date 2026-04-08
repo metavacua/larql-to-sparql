@@ -204,11 +204,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("  Total tensors:  {tensors_before}");
     println!("  FFN tensors:    {ffn_tensor_count} ({:.1} GB)", ffn_tensor_bytes as f64 / 1e9);
-    println!("  Attn+other:     {attn_tensor_count} ({:.1} GB)", (weights.tensors.iter().map(|(_, v)| v.len() * 4).sum::<usize>() - ffn_tensor_bytes) as f64 / 1e9);
+    println!("  Attn+other:     {attn_tensor_count} ({:.1} GB)", (weights.tensors.values().map(|v| v.len() * 4).sum::<usize>() - ffn_tensor_bytes) as f64 / 1e9);
     println!();
     println!("  drop_ffn_weights() would free: {:.1} GB", ffn_tensor_bytes as f64 / 1e9);
     println!("  Walk-only model size: {:.1} GB (attention + embeddings + norms)",
-        (rss_model - rss_start) as f64 / 1024.0 - ffn_tensor_bytes as f64 / 1e9);
+        (rss_model - rss_start) / 1024.0 - ffn_tensor_bytes as f64 / 1e9);
     println!();
     println!("  Use InferenceModel::load_walk_only() to load without FFN weights.");
     println!("  Requires down_features.bin + up_features.bin in the vindex.");

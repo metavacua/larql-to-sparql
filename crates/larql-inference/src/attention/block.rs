@@ -21,6 +21,7 @@ pub fn run_attention_block(
 
 /// Run attention with optional shared K/V, returning K/V for caching.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn run_attention_block_with_kv_out(
     weights: &crate::model::ModelWeights,
     h: &Array2<f32>,
@@ -47,6 +48,7 @@ pub fn run_attention_block_shared(
 
 /// Core attention block implementation.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 fn run_attention_block_core(
     weights: &crate::model::ModelWeights,
     h: &Array2<f32>,
@@ -99,7 +101,7 @@ fn run_attention_block_core(
         (cached_k.clone(), cached_v.clone())
     } else {
         let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-        let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+        let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
         let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer)).unwrap() };
 
         let mut k_full = dot_proj(&h_norm, w_k);

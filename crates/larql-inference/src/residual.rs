@@ -2,11 +2,19 @@
 
 use ndarray::Array2;
 
-/// RMS norm with configurable weight offset.
-/// offset=1.0 for Gemma QK norms (weight = 1 + learned), offset=0.0 for most layers.
+/// Default norm epsilon. Most models use 1e-5 or 1e-6.
+/// Callers should prefer passing `arch.norm_eps()` explicitly.
+pub const DEFAULT_EPS: f64 = 1e-6;
+
+/// RMS norm with configurable weight offset and epsilon.
+/// offset=1.0 for Gemma 2/3 (weight = 1 + learned), offset=0.0 for most layers.
 /// Uses f64 accumulation for the sum-of-squares to avoid order-dependent rounding.
 pub fn rms_norm(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32) -> Array2<f32> {
-    let eps = 1e-5f64;
+    rms_norm_eps(x, weight, offset, DEFAULT_EPS)
+}
+
+/// RMS norm with explicit epsilon.
+pub fn rms_norm_eps(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32, eps: f64) -> Array2<f32> {
     let (rows, cols) = (x.shape()[0], x.shape()[1]);
     let mut out = Array2::zeros((rows, cols));
 
@@ -32,7 +40,16 @@ pub fn layer_norm(
     weight: Option<&Vec<f32>>,
     bias: Option<&Vec<f32>>,
 ) -> Array2<f32> {
-    let eps = 1e-5f64;
+    layer_norm_eps(x, weight, bias, DEFAULT_EPS)
+}
+
+/// LayerNorm with explicit epsilon.
+pub fn layer_norm_eps(
+    x: &Array2<f32>,
+    weight: Option<&Vec<f32>>,
+    bias: Option<&Vec<f32>>,
+    eps: f64,
+) -> Array2<f32> {
     let (rows, cols) = (x.shape()[0], x.shape()[1]);
     let mut out = Array2::zeros((rows, cols));
 
@@ -62,7 +79,16 @@ pub fn rms_norm_heads_no_weight(
     num_heads: usize,
     head_dim: usize,
 ) -> Array2<f32> {
-    let eps = 1e-5f64;
+    rms_norm_heads_no_weight_eps(x, num_heads, head_dim, DEFAULT_EPS)
+}
+
+/// Per-head parameter-free RMS norm with explicit epsilon.
+pub fn rms_norm_heads_no_weight_eps(
+    x: &Array2<f32>,
+    num_heads: usize,
+    head_dim: usize,
+    eps: f64,
+) -> Array2<f32> {
     let seq_len = x.shape()[0];
     let mut out = x.clone();
 
@@ -92,7 +118,18 @@ pub fn rms_norm_heads(
     head_dim: usize,
     offset: f32,
 ) -> Array2<f32> {
-    let eps = 1e-5f64;
+    rms_norm_heads_eps(x, weight, num_heads, head_dim, offset, DEFAULT_EPS)
+}
+
+/// Per-head RMS norm with explicit epsilon.
+pub fn rms_norm_heads_eps(
+    x: &Array2<f32>,
+    weight: &[f32],
+    num_heads: usize,
+    head_dim: usize,
+    offset: f32,
+    eps: f64,
+) -> Array2<f32> {
     let seq_len = x.shape()[0];
     let mut out = x.clone();
 

@@ -94,8 +94,8 @@ impl ContextHeader {
         n_vecs * self.hidden_size as usize * 4
     }
 
-    fn to_bytes(&self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(*self) }
+    fn to_bytes(self) -> [u8; HEADER_SIZE] {
+        unsafe { std::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
@@ -120,8 +120,8 @@ struct ContextEntry {
 }
 
 impl ContextEntry {
-    fn to_bytes(&self) -> [u8; ENTRY_SIZE] {
-        unsafe { std::mem::transmute(*self) }
+    fn to_bytes(self) -> [u8; ENTRY_SIZE] {
+        unsafe { std::mem::transmute(self) }
     }
     fn from_bytes(bytes: &[u8; ENTRY_SIZE]) -> Self {
         unsafe { std::mem::transmute(*bytes) }

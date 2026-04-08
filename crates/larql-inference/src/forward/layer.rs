@@ -8,7 +8,7 @@ use crate::attention::{AttentionWeights, SharedKV};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use crate::residual::rms_norm;
-use super::{apply_norm, dot_proj, add_bias};
+use super::apply_norm;
 use super::ple::{apply_per_layer_embedding};
 
 /// Public wrapper for run_attention (used by CachedFfn calibration).
@@ -108,6 +108,7 @@ pub(super) fn apply_layer_scalar(weights: &ModelWeights, h: &mut Array2<f32>, la
 }
 
 /// Run a single transformer layer with the given FFN backend.
+#[allow(clippy::type_complexity)]
 pub(super) fn run_layer_with_ffn(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -130,6 +131,8 @@ pub(super) fn run_layer_with_ffn(
 }
 
 /// Run a single transformer layer, optionally capturing attention weights.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub(super) fn run_layer_with_capture(
     weights: &ModelWeights,
     h: &Array2<f32>,

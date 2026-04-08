@@ -136,7 +136,7 @@ fn main() {
     let inter = w_gate.shape()[0];
 
     bench(&format!("FFN gate proj ({inter}×{hidden})"), 200, || { let _ = dot_proj(&h_norm, w_gate); });
-    bench(&format!("FFN full (gate+up+act+down)"), 100, || {
+    bench("FFN full (gate+up+act+down)", 100, || {
         let gate = dot_proj(&h_norm, w_gate);
         let up = dot_proj(&h_norm, w_up);
         let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt();

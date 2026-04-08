@@ -40,7 +40,7 @@ impl<'a> FeatureListFfn<'a> {
         let norm_offset = weights.arch.norm_weight_offset();
         let mut feature_lists = vec![Vec::new(); num_layers];
 
-        for layer in 0..num_layers {
+        for (layer, feature_list) in feature_lists.iter_mut().enumerate().take(num_layers) {
             // Run attention
             let h_post_attn = match crate::forward::run_attention_public(weights, &h, layer) {
                 Some(ha) => ha,
@@ -72,7 +72,7 @@ impl<'a> FeatureListFfn<'a> {
             indexed.truncate(k);
             let mut feats: Vec<usize> = indexed.iter().map(|&(id, _)| id).collect();
             feats.sort_unstable();
-            feature_lists[layer] = feats;
+            *feature_list = feats;
 
             // Run dense FFN to get correct residual for next layer
             let ffn_out = ffn.forward(layer, &h_ffn);

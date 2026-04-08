@@ -234,8 +234,8 @@ impl<'a> WalkFfn<'a> {
             }
 
             // Down: one submission per position (GPU vecmat)
-            for s in 0..seq_len {
-                let down_result = be.q4_vecmat(&all_activation[s], down_q4, intermediate, hidden).unwrap();
+            for (s, activation_row) in all_activation.iter().enumerate().take(seq_len) {
+                let down_result = be.q4_vecmat(activation_row, down_q4, intermediate, hidden).unwrap();
                 let mut out_row = out.row_mut(s);
                 for j in 0..hidden { out_row[j] = down_result[j]; }
             }
@@ -399,7 +399,7 @@ impl<'a> WalkFfn<'a> {
         };
 
         // activation[seq, intermediate] @ down[intermediate, hidden] → [seq, hidden]
-        let mut out = activation.dot(&down_view);
+        let mut out = larql_compute::matmul_gpu(&activation, &down_view, self.backend);
 
         if let Some(bias) = arch.ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
@@ -467,12 +467,12 @@ impl<'a> WalkFfn<'a> {
 
         // Down: zero-copy BLAS gemm against mmap'd feature-major matrix
         let out = if let Some(down_view) = self.index.down_layer_matrix(layer) {
-            // Zero-copy: mmap reinterpreted as ArrayView2, directly to BLAS
-            activation.dot(&down_view)
+            // Zero-copy: mmap reinterpreted as ArrayView2, routed through compute backend
+            larql_compute::matmul_gpu(&activation, &down_view, self.backend)
         } else {
-            // Fallback: read W_down from model weights
+            // Fallback: read W_down from model weights via compute backend
             let w_down = self.weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
-            crate::forward::dot_proj(&activation, w_down)
+            larql_compute::dot_proj_gpu(&activation, w_down, self.backend)
         };
 
         let mut out = out;
@@ -511,7 +511,7 @@ impl<'a> FfnBackend for WalkFfn<'a> {
 
         // Q4 interleaved: preferred when GPU Q4 is available (Metal shader faster than BLAS).
         // CPU Q4 C kernel is slower than CPU BLAS at these dimensions — only use with GPU.
-        if self.index.has_interleaved_q4() && self.backend.map_or(false, |be| be.has_q4()) {
+        if self.index.has_interleaved_q4() && self.backend.is_some_and(|be| be.has_q4()) {
             if let Some(result) = self.walk_ffn_q4_interleaved(layer, x) {
                 return result;
             }

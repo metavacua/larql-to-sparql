@@ -155,8 +155,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut pairs = 0usize;
 
             let mut feature_union: HashSet<usize> = HashSet::new();
-            for e in 0..n {
-                feature_union.extend(t_features[e][layer].iter());
+            for feat in t_features.iter().take(n) {
+                feature_union.extend(feat[layer].iter());
             }
 
             for i in 0..n {

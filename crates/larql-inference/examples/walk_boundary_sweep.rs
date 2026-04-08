@@ -39,6 +39,7 @@ const DEFAULT_PROMPTS: &[(&str, &str)] = &[
     ("The largest planet in our solar system is", "Jupiter"),
 ];
 
+#[allow(clippy::type_complexity)]
 fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
     let args: Vec<String> = std::env::args().collect();
     let mut model = String::new();
@@ -56,12 +57,12 @@ fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
                 i += 1;
                 prompts = Some(
                     args[i].split(';')
-                        .filter_map(|p| {
+                        .map(|p| {
                             let parts: Vec<&str> = p.splitn(2, '=').collect();
                             if parts.len() == 2 {
-                                Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
+                                (parts[0].trim().to_string(), parts[1].trim().to_string())
                             } else {
-                                Some((p.trim().to_string(), String::new()))
+                                (p.trim().to_string(), String::new())
                             }
                         })
                         .collect(),
@@ -161,8 +162,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  {} boundaries x {} prompts = {} forward passes\n",
         boundaries.len(), prompts.len(), boundaries.len() * prompts.len());
     println!(
-        "  {:>4}  {:>6}  {:>8}  {:>8}  {:>6}  {}",
-        "B", "walk%", "correct", "top1_avg", "time", "details"
+        "  {:>4}  {:>6}  {:>8}  {:>8}  {:>6}  details",
+        "B", "walk%", "correct", "top1_avg", "time"
     );
     println!("  {:-<74}", "");
 
@@ -174,8 +175,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Build per-layer backend routing
         let mut backends: Vec<&dyn larql_inference::FfnBackend> = vec![&weight_ffn; num_layers];
-        for l in boundary..num_layers {
-            backends[l] = &walk_ffn;
+        for backend in backends.iter_mut().take(num_layers).skip(boundary) {
+            *backend = &walk_ffn;
         }
         let router = LayerFfnRouter::per_layer(backends);
 

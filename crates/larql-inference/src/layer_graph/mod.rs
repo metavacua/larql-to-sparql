@@ -16,6 +16,7 @@ mod dense;
 mod walk;
 mod cached;
 mod template;
+pub mod pipeline_layer;
 pub mod predict;
 
 use ndarray::Array2;

@@ -23,6 +23,7 @@ fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
 }
 
 /// Naive reference: materialized [seq, seq] scores matrix per head.
+#[allow(clippy::too_many_arguments)]
 fn reference_attention(
     q: &Array2<f32>,
     k: &Array2<f32>,

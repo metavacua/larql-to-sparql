@@ -96,14 +96,12 @@ enum Commands {
     /// Verify vindex file integrity (SHA256 checksums).
     Verify(verify_cmd::VerifyArgs),
 
-    /// Graph-routed walk with banded layer strategy (graph FFN + highway skip).
-    GraphWalk(graph_walk_cmd::GraphWalkArgs),
+    // GraphWalk removed — used deprecated FeatureListFfn
 
     /// Trace residual stream trajectories on the sphere across layers.
     TrajectoryTrace(trajectory_trace_cmd::TrajectoryTraceArgs),
 
-    /// Benchmark vindex walk: accuracy vs dense, throughput.
-    VindexBench(vindex_bench_cmd::VindexBenchArgs),
+    // VindexBench removed — used deprecated DownClusteredFfn
 
     /// Test rank-k projection: replace L0→L_inject with a linear map, run the rest dense.
     ProjectionTest(projection_test_cmd::ProjectionTestArgs),
@@ -246,9 +244,9 @@ fn main() {
         Commands::Convert(args) => convert_cmd::run(args),
         Commands::Hf(args) => hf_cmd::run(args),
         Commands::Verify(args) => verify_cmd::run(args),
-        Commands::GraphWalk(args) => graph_walk_cmd::run(args),
+        // Commands::GraphWalk removed
         Commands::TrajectoryTrace(args) => trajectory_trace_cmd::run(args),
-        Commands::VindexBench(args) => vindex_bench_cmd::run(args),
+        // Commands::VindexBench removed
         Commands::ProjectionTest(args) => projection_test_cmd::run(args),
         Commands::FingerprintExtract(args) => fingerprint_extract_cmd::run(args),
         Commands::BottleneckTest(args) => bottleneck_test_cmd::run(args),

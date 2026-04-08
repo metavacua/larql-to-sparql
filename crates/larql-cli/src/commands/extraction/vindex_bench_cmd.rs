@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_vindex::{load_vindex_tokenizer, IndexLoadCallbacks, VectorIndex};
+#[allow(deprecated)]
 use larql_inference::{
     predict, predict_with_ffn, DownClusteredFfn, DownClusteredIndex, InferenceModel,
     vindex::WalkFfn,

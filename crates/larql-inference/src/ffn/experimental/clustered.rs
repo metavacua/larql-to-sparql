@@ -53,11 +53,11 @@ impl ClusteredGateIndex {
         let mut assignments = vec![0usize; n];
         for _iter in 0..iters {
             let scores = w_gate.dot(&centroids.t());
-            for i in 0..n {
+            for (i, assign) in assignments.iter_mut().enumerate().take(n) {
                 let row = scores.row(i);
                 let (best_c, _) = row.iter().enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap();
-                assignments[i] = best_c;
+                *assign = best_c;
             }
             let mut sums = ndarray::Array2::<f32>::zeros((k, d));
             let mut counts = vec![0usize; k];

@@ -238,8 +238,8 @@ pub fn predict_with_strategy(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
-    for layer in 0..num_layers {
-        match &strategy[layer] {
+    for (layer, mode) in strategy.iter().enumerate().take(num_layers) {
+        match mode {
             LayerMode::Compute(ffn) => {
                 h = match run_layer_with_ffn(weights, &h, layer, *ffn, false, ple_inputs.get(layer), None) {
                     Some((h_new, _, _)) => h_new,

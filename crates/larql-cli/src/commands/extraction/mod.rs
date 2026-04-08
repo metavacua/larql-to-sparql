@@ -13,7 +13,7 @@ pub mod ffn_bench_cmd;
 pub mod ffn_bottleneck_cmd;
 pub mod ffn_overlap_cmd;
 pub mod ffn_throughput_cmd;
-pub mod graph_walk_cmd;
+// pub mod graph_walk_cmd;  // Removed: uses deprecated FeatureListFfn
 pub mod index_gates_cmd;
 pub mod kg_bench_cmd;
 pub mod ov_gate_cmd;
@@ -29,5 +29,5 @@ pub mod embedding_jump_cmd;
 pub mod fingerprint_extract_cmd;
 pub mod projection_test_cmd;
 pub mod trajectory_trace_cmd;
-pub mod vindex_bench_cmd;
+// pub mod vindex_bench_cmd;  // Removed: uses deprecated DownClusteredFfn
 pub mod weight_walk_cmd;

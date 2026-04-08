@@ -63,34 +63,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     index.load_up_features(&vindex_path)?;
     eprint!("lm_head... ");
     index.load_lm_head(&vindex_path)?;
-    match index.load_lm_head_q4(&vindex_path) {
-        Ok(()) => print!("lm_head_q4 "),
-        Err(_) => {}
-    }
-    match index.load_attn_q4(&vindex_path) {
-        Ok(()) => print!("attn_q4 "),
-        Err(_) => {}
-    }
-    match index.load_attn_q4k(&vindex_path) {
-        Ok(()) => print!("attn_q4k "),
-        Err(_) => {}
-    }
-    match index.load_attn_q8(&vindex_path) {
-        Ok(()) => print!("attn_q8 "),
-        Err(_) => {}
-    }
-    match index.load_interleaved(&vindex_path) {
-        Ok(()) => print!("interleaved "),
-        Err(_) => {}
-    }
-    match index.load_interleaved_q4(&vindex_path) {
-        Ok(()) => print!("Q4 "),
-        Err(_) => {}
-    }
-    match index.load_interleaved_q4k(&vindex_path) {
-        Ok(()) => print!("Q4K_FFN "),
-        Err(_) => {}
-    }
+    if let Ok(()) = index.load_lm_head_q4(&vindex_path) { print!("lm_head_q4 ") }
+    if let Ok(()) = index.load_attn_q4(&vindex_path) { print!("attn_q4 ") }
+    if let Ok(()) = index.load_attn_q4k(&vindex_path) { print!("attn_q4k ") }
+    if let Ok(()) = index.load_attn_q8(&vindex_path) { print!("attn_q8 ") }
+    if let Ok(()) = index.load_interleaved(&vindex_path) { print!("interleaved ") }
+    if let Ok(()) = index.load_interleaved_q4(&vindex_path) { print!("Q4 ") }
+    if let Ok(()) = index.load_interleaved_q4k(&vindex_path) { print!("Q4K_FFN ") }
     println!("lm_head (vocab={})\n", index.vocab_size);
 
     let dense_ffn = WeightFfn { weights };
@@ -225,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Step 2: Use prefill output for logits (the hidden state is already computed)
         // This measures the logits-only path (norm + vindex KNN) after prefill.
-        let empty_cache = CachedLayerGraph::from_residuals(vec![]);
+        let _empty_cache = CachedLayerGraph::from_residuals(vec![]);
         // Measure logits from prefill output (norm + vindex KNN only — 0 layers)
         let norm_offset = weights.arch.norm_weight_offset();
         let t0 = std::time::Instant::now();

@@ -15,7 +15,7 @@ use super::{dot_proj, apply_norm};
 ///      → reshape to [seq, num_layers, ple_dim] → RMSNorm per layer
 ///   2. Per-layer token embed: embed_tokens_per_layer[token_ids] * sqrt(ple_dim)
 ///      → reshape to [seq, num_layers, ple_dim]
-///   Combined: (stream1 + stream2) * 1/sqrt(2)
+///      Combined: (stream1 + stream2) * 1/sqrt(2)
 ///
 /// Returns a Vec of [seq, ple_dim] arrays, one per layer. Empty vec if PLE is not used.
 pub(super) fn precompute_per_layer_inputs(
@@ -76,7 +76,7 @@ pub(super) fn precompute_per_layer_inputs(
             }
 
             // Add stream 2: per-layer token embedding
-            if let Some(ref embed) = ple_embed {
+            if let Some(embed) = ple_embed {
                 let tok = token_ids[s] as usize;
                 let row = embed.row(tok);
                 for d in 0..ple_dim {

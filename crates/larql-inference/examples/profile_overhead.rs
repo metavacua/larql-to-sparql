@@ -157,14 +157,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }).collect();
 
     // Warm
-    for layer in 0..num_layers {
-        let _ = weight_ffn.forward(layer, &ffn_norms[layer]);
+    for (layer, norm) in ffn_norms.iter().enumerate().take(num_layers) {
+        let _ = weight_ffn.forward(layer, norm);
     }
 
     let t0 = Instant::now();
     for _ in 0..3 {
-        for layer in 0..num_layers {
-            let _ = weight_ffn.forward(layer, &ffn_norms[layer]);
+        for (layer, norm) in ffn_norms.iter().enumerate().take(num_layers) {
+            let _ = weight_ffn.forward(layer, norm);
         }
     }
     let ffn_all_ms = t0.elapsed().as_secs_f64() * 1000.0 / 3.0;

@@ -60,8 +60,7 @@ mod test_trace_store {
 
         // Verify every vector in chain 0
         let n_waypoints = N_LAYERS + 1;
-        for layer_idx in 0..n_waypoints {
-            let expected = &chain0[layer_idx];
+        for (layer_idx, expected) in chain0.iter().enumerate().take(n_waypoints) {
             let got_residual = store.residual(0, layer_idx).unwrap();
             let got_attn = store.attn_delta(0, layer_idx).unwrap();
             let got_ffn = store.ffn_delta(0, layer_idx).unwrap();
@@ -73,8 +72,7 @@ mod test_trace_store {
         }
 
         // Verify chain 1
-        for layer_idx in 0..n_waypoints {
-            let expected = &chain1[layer_idx];
+        for (layer_idx, expected) in chain1.iter().enumerate().take(n_waypoints) {
             let got_residual = store.residual(1, layer_idx).unwrap();
             assert_eq!(got_residual, expected.residual.as_slice());
         }

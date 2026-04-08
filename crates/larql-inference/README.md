@@ -23,10 +23,10 @@ println!("Top prediction: {} ({:.1}%)", result.predictions[0].0, result.predicti
 
 | Module | Purpose |
 |--------|---------|
-| `backend/` | MatMulBackend trait: CPU (Accelerate BLAS) and Metal GPU with auto-calibration |
-| `attention.rs` | BLAS-fused GQA attention with online softmax (no [seq,seq] allocation) |
-| `forward.rs` | Forward pass: `predict()`, `predict_with_ffn()`, `forward_to_layer()` |
+| `attention/` | BLAS-fused GQA attention: block, GQA, GPU dispatch, RoPE |
+| `forward/` | Forward pass: embed, layer, predict, PLE (per-layer embeddings), trace |
 | `ffn/` | FFN evaluation: dense, sparse, highway, route-guided (experimental backends deprecated) |
+| `layer_graph/` | Cached/dense/walk/pipelined layer graphs, `predict_honest()` (FullPipelineLayer construction) |
 | `residual.rs` | RMS norm, layer norm |
 | `trace/` | Residual stream decomposition and tiered storage |
 | `vindex/walk_ffn.rs` | WalkFfn: mmap'd FFN — faster than dense (517ms vs 535ms) |
@@ -34,29 +34,26 @@ println!("Top prediction: {} ({:.1}%)", result.predictions[0].0, result.predicti
 | `walker/` | Weight-level graph walkers (no forward pass) |
 | `model.rs` | Model loading (re-exports from larql-models) |
 
-## Matmul Backend
+## Compute Backend
 
-All large matrix multiplications dispatch through the `MatMulBackend` trait:
+All GPU pipeline operations use `larql_compute::ComputeBackend`:
 
 ```rust
-use larql_inference::backend::{default_backend, MatMulBackend};
+use larql_compute::{default_backend, ComputeBackend};
 
 let backend = default_backend();  // Auto-selects CPU or Metal, calibrates
-println!("Using: {}", backend.name());
-
-let c = backend.matmul_transb(&input, &weights);
+println!("Using: {} ({})", backend.name(), backend.device_info());
 ```
 
-**CPU backend** (default): ndarray + `cblas_sgemm` via Apple Accelerate. AMX hardware at ~2-4 TFLOPS f32.
+The inference crate builds `FullPipelineLayer` structs (per-layer architecture params + quantized weights) and passes them to `backend.decode_token()` or `backend.prefill_q4()`. All model-specific behavior (norm type, activation, head_dim, RoPE base) is parameterized per-layer — no model-type branching in the compute path.
 
-**Metal GPU backend** (`--features metal`): Tiled 32x32 compute shaders with buffer cache and auto-calibrated FLOP threshold. Weight matrices are uploaded to GPU once and reused across all calls.
+**CPU path**: BLAS matmul via Apple Accelerate (AMX). Used for attention in `predict_honest`.
+**GPU path** (`--features metal`): Q4_K/Q8 Metal shaders with KV cache. Used for decode and prefill.
 
 ```bash
-# Build with Metal support
+# Build with Metal GPU support
 cargo build --release -p larql-inference --features metal
 ```
-
-See [docs/inference-engine.md](../../docs/inference-engine.md) for architecture details and benchmarks.
 
 ## BLAS-Fused Attention
 
@@ -148,15 +145,15 @@ cargo run --release -p larql-vindex --example build_down_features -- path/to/vin
 ## Tests
 
 ```bash
-# Inference tests (109 tests)
+# Inference tests (96 tests)
 cargo test -p larql-inference
 
 # HNSW tests
 cargo test -p larql-vindex --test test_hnsw --release
 
 # Individual test suites
-cargo test -p larql-inference --test test_fused_attention   # 18 tests
-cargo test -p larql-inference --test test_backend           # 13+6 tests
+cargo test -p larql-inference --test test_fused_attention   # 23 tests
+cargo test -p larql-inference --test test_backend           # 13 tests
 cargo test -p larql-inference --test test_modules           # 15 tests
 cargo test -p larql-inference --test test_trace             # 14 tests
 cargo test -p larql-inference --test test_walkers           # 12 tests
@@ -165,14 +162,13 @@ cargo test -p larql-inference --test test_walker_utils      # 10 tests
 
 | Area | Tests | Coverage |
 |------|-------|----------|
-| Backend (unit + integration) | 34 | Shape, correctness, batch, Metal vs CPU, factory |
-| Fused attention | 18 | GQA, softcap, capture, reference agreement, edge cases |
-| HNSW index | 7 | Build, search, recall, scores, empty, sorted |
-| FFN | 9 | SiLU, GELU, dense, highway, multi-position |
-| Attention/residual | 10 | RoPE, GQA, RMS norm, per-head norm |
+| Backend (ComputeBackend) | 13 | Shape, correctness, batch, Metal vs CPU |
+| Fused attention | 23 | GQA, softcap, capture, reference agreement, edge cases |
+| FFN + modules | 15 | SiLU, GELU, dense, highway, multi-position |
 | Trace stores | 14 | Write/read, tiers, boundaries, additive property |
 | Walkers | 12 | Weight/attention walkers, vector extractor |
 | Utils | 10 | Top-k, rounding, entity sorting |
+| Unit (lib) | 9 | Core module tests |
 
 ## Crate Dependencies
 
@@ -185,9 +181,9 @@ larql-core        Graph, Edge, algorithms (knowledge graph engine)
 larql-inference   Forward pass, attention, backends, WalkFfn
 ```
 
-> **Note:** larql-inference has its own `MatMulBackend` trait that predates `larql-compute::ComputeBackend`.
-> The Q4 walk paths in `walk_ffn.rs` use `larql_compute` directly. The f32 attention and FFN paths
-> use the inference-local `MatMulBackend`. A future consolidation will unify these under `ComputeBackend`.
+> **Note:** The GPU pipeline paths (`predict_honest`, `predict_pipeline`) use `larql_compute::ComputeBackend`
+> with `FullPipelineLayer` structs that carry per-layer architecture params from `larql_models::ModelArchitecture`.
+> The CPU attention and FFN paths use direct BLAS calls via ndarray. Both paths produce identical results.
 
 ### Vindex module structure
 
@@ -200,6 +196,18 @@ larql-inference   Forward pass, attention, backends, WalkFfn
 | `hnsw` | HNSW graph index |
 | `mutate` | INSERT/DELETE mutations |
 | `router` | MoE expert routing |
+
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [PERFORMANCE.md](PERFORMANCE.md) | Component breakdown, cross-crate comparison, Ollama reference |
+| [ROADMAP.md](ROADMAP.md) | Planned optimizations, completed items |
+| [docs/adr/001](docs/adr/001-fused-attention.md) | BLAS-fused online softmax attention |
+| [docs/adr/002](docs/adr/002-walk-ffn.md) | WalkFfn — zero-copy mmap'd down projection |
+| [docs/adr/003](docs/adr/003-cached-layer-graph.md) | Cached layer graph for template-fixed layers |
+| [docs/adr/004](docs/adr/004-predict-honest.md) | predict_honest — production pipeline with per-layer params |
+| [docs/adr/005](docs/adr/005-per-layer-graph.md) | PerLayerGraph — adaptive per-layer strategy |
 
 ## License
 

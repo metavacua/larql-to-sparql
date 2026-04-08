@@ -45,8 +45,8 @@ impl TraceHeader {
         waypoints * vectors_per_waypoint * self.hidden_size as usize * 4
     }
 
-    fn to_bytes(&self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(*self) }
+    fn to_bytes(self) -> [u8; HEADER_SIZE] {
+        unsafe { std::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {

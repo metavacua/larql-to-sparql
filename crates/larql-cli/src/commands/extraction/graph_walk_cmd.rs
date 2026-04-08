@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
+#[allow(deprecated)]
 use larql_inference::{
     predict, predict_with_ffn, FeatureListFfn, InferenceModel,
 };

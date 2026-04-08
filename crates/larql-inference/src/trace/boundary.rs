@@ -62,8 +62,8 @@ impl BoundaryHeader {
         HEADER_SIZE + max_boundaries * ENTRY_SIZE
     }
 
-    fn to_bytes(&self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(*self) }
+    fn to_bytes(self) -> [u8; HEADER_SIZE] {
+        unsafe { std::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
@@ -85,8 +85,8 @@ struct BoundaryEntry {
 }
 
 impl BoundaryEntry {
-    fn to_bytes(&self) -> [u8; ENTRY_SIZE] {
-        unsafe { std::mem::transmute(*self) }
+    fn to_bytes(self) -> [u8; ENTRY_SIZE] {
+        unsafe { std::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; ENTRY_SIZE]) -> Self {

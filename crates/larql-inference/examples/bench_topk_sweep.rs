@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // K values to test
     let k_values = vec![50, 100, 200, 500, 1000, 2000, 4000, 8092];
 
-    println!("{:>6}  {:>7}  {:>8}  {:>10}  {}", "K", "correct", "avg_prob", "time/tok", "divergences");
+    println!("{:>6}  {:>7}  {:>8}  {:>10}  divergences", "K", "correct", "avg_prob", "time/tok");
     println!("{:-<70}", "");
 
     for &top_k in &k_values {

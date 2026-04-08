@@ -38,7 +38,7 @@ pub fn run_attention_block_gpu(
 
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
     let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+    let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
     let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer)).unwrap() };
     let w_o = weights.tensors.get(&arch.attn_o_key(layer)).unwrap();
 
@@ -103,12 +103,23 @@ pub fn run_attention_block_gpu(
 }
 
 /// Run attention and return K (post-RoPE) and V for KV cache population.
+/// Accepts optional ComputeBackend for GPU-accelerated projections.
 pub fn run_attention_with_kv(
     weights: &crate::model::ModelWeights,
     h: &Array2<f32>,
     layer: usize,
 ) -> Option<(Array2<f32>, Array2<f32>, Array2<f32>)> {
-    use crate::forward::{apply_norm, add_bias, dot_proj};
+    run_attention_with_kv_backend(weights, h, layer, None)
+}
+
+/// Run attention with optional compute backend for accelerated projections.
+pub fn run_attention_with_kv_backend(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+) -> Option<(Array2<f32>, Array2<f32>, Array2<f32>)> {
+    use crate::forward::{apply_norm, add_bias};
     use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
     let arch = &*weights.arch;
@@ -123,11 +134,15 @@ pub fn run_attention_with_kv(
     let h_norm = apply_norm(weights, h, &arch.input_layernorm_key(layer), norm_off);
     let wq = weights.tensors.get(&arch.attn_q_key(layer))?;
     let wk = weights.tensors.get(&arch.attn_k_key(layer))?;
-    let v_from_k = weights.tensors.get(&arch.attn_v_key(layer)).is_none();
+    let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
     let wv = if v_from_k { wk } else { weights.tensors.get(&arch.attn_v_key(layer))? };
     let wo = weights.tensors.get(&arch.attn_o_key(layer))?;
 
-    let (mut q, mut k, mut v) = (dot_proj(&h_norm, wq), dot_proj(&h_norm, wk), dot_proj(&h_norm, wv));
+    let (mut q, mut k, mut v) = (
+        larql_compute::dot_proj_gpu(&h_norm, wq, backend),
+        larql_compute::dot_proj_gpu(&h_norm, wk, backend),
+        larql_compute::dot_proj_gpu(&h_norm, wv, backend),
+    );
     for (proj, bias_fn) in [(&mut q, arch.attn_q_bias_key(layer) as Option<String>),
                              (&mut k, arch.attn_k_bias_key(layer)),
                              (&mut v, arch.attn_v_bias_key(layer))] {
@@ -153,7 +168,7 @@ pub fn run_attention_with_kv(
 
     let (attn_out, _) = gqa_attention_with_weights(
         &q_r, &k_r, &v, nq, hd, reps, scale, seq_len, false, arch.attn_logit_softcapping());
-    let mut o = dot_proj(&attn_out, wo);
+    let mut o = larql_compute::dot_proj_gpu(&attn_out, wo, backend);
     if let Some(b) = arch.attn_o_bias_key(layer).and_then(|k| weights.vectors.get(&k)) { add_bias(&mut o, b); }
 
     let rm = arch.residual_multiplier();

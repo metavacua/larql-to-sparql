@@ -74,14 +74,14 @@ pub fn gqa_attention_with_weights(
                 .copied()
                 .fold(f32::NEG_INFINITY, f32::max);
             let mut sum = 0.0f64;
-            for i in 0..causal_len {
-                let e = ((scores_buf[i] - max_val) as f64).exp();
-                scores_buf[i] = e as f32;
+            for score in scores_buf.iter_mut().take(causal_len) {
+                let e = ((*score - max_val) as f64).exp();
+                *score = e as f32;
                 sum += e;
             }
             let inv_sum = (1.0 / sum) as f32;
-            for i in 0..causal_len {
-                scores_buf[i] *= inv_sum;
+            for score in scores_buf.iter_mut().take(causal_len) {
+                *score *= inv_sum;
             }
 
             if capture && qi == last_pos {
