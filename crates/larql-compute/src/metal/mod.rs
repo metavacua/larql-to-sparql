@@ -58,6 +58,8 @@ pub struct MetalBackend {
     q8_qkv_proj_pipeline: ComputePipelineState,
     q4k_matvec_pipeline: ComputePipelineState,
     pub q4k_ffn_gate_up_pipeline: ComputePipelineState,
+    pub q4k_geglu_silu_down_pipeline: ComputePipelineState,
+    pub q4k_geglu_gelu_tanh_down_pipeline: ComputePipelineState,
     q6k_matvec_pipeline: ComputePipelineState,
     #[allow(dead_code)]
     rope_pipeline: ComputePipelineState,
@@ -145,6 +147,10 @@ impl MetalBackend {
         let q6k_fn = library.get_function("q6k_matvec", None).ok()?;
         let q4k_matvec_pipeline = device.new_compute_pipeline_state_with_function(&q4k_fn).ok()?;
         let q4k_ffn_gate_up_pipeline = device.new_compute_pipeline_state_with_function(&q4k_ffn_gate_up_fn).ok()?;
+        let q4k_geglu_silu_down_fn = library.get_function("q4k_geglu_silu_down", None).ok()?;
+        let q4k_geglu_silu_down_pipeline = device.new_compute_pipeline_state_with_function(&q4k_geglu_silu_down_fn).ok()?;
+        let q4k_geglu_gelu_tanh_down_fn = library.get_function("q4k_geglu_gelu_tanh_down", None).ok()?;
+        let q4k_geglu_gelu_tanh_down_pipeline = device.new_compute_pipeline_state_with_function(&q4k_geglu_gelu_tanh_down_fn).ok()?;
         let q6k_matvec_pipeline = device.new_compute_pipeline_state_with_function(&q6k_fn).ok()?;
 
         // Fused Q8 QKV projection (all 3 in one dispatch)
@@ -220,7 +226,9 @@ impl MetalBackend {
             q8_matvec_pipeline,
             rms_norm_pipeline, residual_add_pipeline,
             q8_qkv_proj_pipeline,
-            q4k_matvec_pipeline, q4k_ffn_gate_up_pipeline, q6k_matvec_pipeline,
+            q4k_matvec_pipeline, q4k_ffn_gate_up_pipeline,
+            q4k_geglu_silu_down_pipeline, q4k_geglu_gelu_tanh_down_pipeline,
+            q6k_matvec_pipeline,
             rope_pipeline, rope_at_pos_pipeline, rope_at_pos_batched_pipeline,
             q4k_qkv_proj_pipeline, q4k_proj_pipeline,
             q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,

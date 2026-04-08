@@ -32,8 +32,6 @@ kernel void q4k_qkv_proj(
     uint superblocks = K / 256;
     uint total_subs = superblocks * 8;
 
-    // NO threadgroup memory. NO barrier. Input read directly from device.
-
     device const block_q4_K* W;
     device float* out_buf;
     uint local_row;
@@ -65,7 +63,6 @@ kernel void q4k_qkv_proj(
         uint4 w = qp[0];
         uint xi = sb * 256 + j * 32;
 
-        // Direct device reads — L2 cached since all simdgroups read same X
         float dot = 0.0f, xs = 0.0f;
         #define P(W, S, I) { \
             float a = X[xi+I], b = X[xi+I+1]; \

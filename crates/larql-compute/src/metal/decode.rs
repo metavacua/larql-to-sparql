@@ -497,7 +497,7 @@ impl MetalBackend {
                             MTLSize::new(n_tgs_per_mat * 2, 1, 1),
                             MTLSize::new(q4k_gu::THREADS_PER_TG, 1, 1),
                         );
-                        // GEGLU
+                        // GEGLU activation
                         let geglu = match layer.activation {
                             crate::Activation::GeluTanh => &self.geglu_gelu_tanh_pipeline,
                             _ => &self.geglu_pipeline,
@@ -508,6 +508,14 @@ impl MetalBackend {
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        // Down projection (Q4_K, f32 input from GEGLU)
+                        enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
+                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                        enc.set_buffer(1, Some(&act_buf), 0);
+                        enc.set_buffer(2, Some(&down_out), 0);
+                        enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                        enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
                     } else {
                         // Up only (non-gated)
                         let n_tgs_up = (inter as u64).div_ceil(q4k::ROWS_PER_TG);
@@ -527,15 +535,15 @@ impl MetalBackend {
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_bytes(2, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        // Down projection (Q4_K, f32 input)
+                        enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
+                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                        enc.set_buffer(1, Some(&act_buf), 0);
+                        enc.set_buffer(2, Some(&down_out), 0);
+                        enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
+                        enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
                     }
-                    // Down projection (Q4_K, f32 input from GEGLU)
-                    enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
-                    enc.set_buffer(0, Some(&down_bufs[l]), 0);
-                    enc.set_buffer(1, Some(&act_buf), 0);
-                    enc.set_buffer(2, Some(&down_out), 0);
-                    enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
                 } else {
                     // Q4_0 FFN path: Q8 input → Q4_0 matvec (legacy)
                     use crate::metal::shaders::q4_matvec as q4mv;

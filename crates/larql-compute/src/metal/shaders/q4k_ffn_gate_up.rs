@@ -1,7 +1,7 @@
 //! Fused Q4_K gate+up projection — two matvecs sharing the same input vector.
 //!
 //! Reads the f32 input ONCE, computes both gate and up projections in one dispatch.
-//! Saves ~0.13ms per layer by eliminating redundant input reads.
+//! Uses uint4 vectorized loads, sub-block striped across lanes.
 //!
 //! Layout: threadgroups 0..ceil(N/ROWS_PER_TG)-1 do gate rows,
 //!         threadgroups ceil(N/ROWS_PER_TG)..2*ceil(N/ROWS_PER_TG)-1 do up rows.
@@ -10,13 +10,13 @@ pub const SHADER: &str = r#"
 constant uint Q4K_GU_ROWS_PER_TG = 8;
 
 kernel void q4k_ffn_gate_up(
-    device const block_q4_K* Wg     [[buffer(0)]],   // gate weights [N, K] Q4_K
-    device const block_q4_K* Wu     [[buffer(1)]],   // up weights [N, K] Q4_K
-    device const float*      X      [[buffer(2)]],   // f32 input [K]
-    device float*            G_out  [[buffer(3)]],   // gate output [N]
-    device float*            U_out  [[buffer(4)]],   // up output [N]
-    constant uint&           N      [[buffer(5)]],   // inter (output rows per matrix)
-    constant uint&           K      [[buffer(6)]],   // hidden (input dim)
+    device const block_q4_K* Wg     [[buffer(0)]],
+    device const block_q4_K* Wu     [[buffer(1)]],
+    device const float*      X      [[buffer(2)]],
+    device float*            G_out  [[buffer(3)]],
+    device float*            U_out  [[buffer(4)]],
+    constant uint&           N      [[buffer(5)]],
+    constant uint&           K      [[buffer(6)]],
     uint tg_id     [[threadgroup_position_in_grid]],
     uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
