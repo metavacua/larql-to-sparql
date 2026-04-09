@@ -318,13 +318,93 @@ fn main() {
                 cmd.commit(); cmd.wait_until_completed();
             }
             let ffn_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
+
+            // Isolated O projection benchmark (34 layers)
+            let o_proj_ms = {
+                let o_input = metal_raw.bufs().output((q_dim * 4) as u64);
+                let o_output = metal_raw.bufs().output((hidden * 4) as u64);
+                let n_tgs_o = (hidden as u64).div_ceil(q4kf::ROWS_PER_TG);
+                for _ in 0..5 {
+                    let cmd = metal_raw.queue().new_command_buffer();
+                    for _ in 0..34 {
+                        let enc = cmd.new_compute_command_encoder();
+                        enc.set_compute_pipeline_state(&metal_raw.q4kf_proj_pipeline);
+                        enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].wo)), 0);
+                        enc.set_buffer(1, Some(&o_input), 0);
+                        enc.set_buffer(2, Some(&o_output), 0);
+                        let nv = hidden as u32; let kv = q_dim as u32;
+                        enc.set_bytes(3, 4, &nv as *const u32 as *const std::ffi::c_void);
+                        enc.set_bytes(4, 4, &kv as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_o, 1, 1), metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                        enc.end_encoding();
+                    }
+                    cmd.commit(); cmd.wait_until_completed();
+                }
+                let t0 = Instant::now();
+                for _ in 0..n {
+                    let cmd = metal_raw.queue().new_command_buffer();
+                    for _ in 0..34 {
+                        let enc = cmd.new_compute_command_encoder();
+                        enc.set_compute_pipeline_state(&metal_raw.q4kf_proj_pipeline);
+                        enc.set_buffer(0, Some(&metal_raw.bufs().get_bytes(&data_34[0].wo)), 0);
+                        enc.set_buffer(1, Some(&o_input), 0);
+                        enc.set_buffer(2, Some(&o_output), 0);
+                        let nv = hidden as u32; let kv = q_dim as u32;
+                        enc.set_bytes(3, 4, &nv as *const u32 as *const std::ffi::c_void);
+                        enc.set_bytes(4, 4, &kv as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_thread_groups(metal::MTLSize::new(n_tgs_o, 1, 1), metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                        enc.end_encoding();
+                    }
+                    cmd.commit(); cmd.wait_until_completed();
+                }
+                t0.elapsed().as_secs_f64() * 1000.0 / n as f64
+            };
+
             let attn_ms = q4k_34_ms - ffn_ms - raw_34_ms;
+            // Measure raw element-wise dispatch floor (340 residual_add dispatches)
+            let dispatch_floor_ms = {
+                let a_buf = metal_raw.bufs().output((hidden * 4) as u64);
+                let b_buf = metal_raw.bufs().output((hidden * 4) as u64);
+                let c_buf = metal_raw.bufs().output((hidden * 4) as u64);
+                let hv = hidden as u32;
+                for _ in 0..5 {
+                    let cmd = metal_raw.queue().new_command_buffer();
+                    let enc = cmd.new_compute_command_encoder();
+                    for _ in 0..340 {
+                        enc.set_compute_pipeline_state(&metal_raw.residual_add_pipeline);
+                        enc.set_buffer(0, Some(&a_buf), 0);
+                        enc.set_buffer(1, Some(&b_buf), 0);
+                        enc.set_buffer(2, Some(&c_buf), 0);
+                        enc.set_bytes(3, 4, &hv as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+                    }
+                    enc.end_encoding(); cmd.commit(); cmd.wait_until_completed();
+                }
+                let t0 = Instant::now();
+                for _ in 0..n {
+                    let cmd = metal_raw.queue().new_command_buffer();
+                    let enc = cmd.new_compute_command_encoder();
+                    for _ in 0..340 {
+                        enc.set_compute_pipeline_state(&metal_raw.residual_add_pipeline);
+                        enc.set_buffer(0, Some(&a_buf), 0);
+                        enc.set_buffer(1, Some(&b_buf), 0);
+                        enc.set_buffer(2, Some(&c_buf), 0);
+                        enc.set_bytes(3, 4, &hv as *const u32 as *const std::ffi::c_void);
+                        enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+                    }
+                    enc.end_encoding(); cmd.commit(); cmd.wait_until_completed();
+                }
+                t0.elapsed().as_secs_f64() * 1000.0 / n as f64
+            };
+
+            let kv_norms_ms = attn_ms - o_proj_ms;
             println!();
             println!("  Component breakdown (34 layers):");
-            println!("    FFN (gate+up+GEGLU+down):    {ffn_ms:.1}ms ({:.1}%)", ffn_ms/q4k_34_ms*100.0);
-            println!("    QKV projection:              {raw_34_ms:.1}ms ({:.1}%)", raw_34_ms/q4k_34_ms*100.0);
-            println!("    Attention + norms + residual: {attn_ms:.1}ms ({:.1}%)", attn_ms/q4k_34_ms*100.0);
-            println!("    FFN per-layer:               {:.3}ms", ffn_ms/34.0);
+            println!("    FFN (gate+up+GEGLU+down):    {ffn_ms:.1}ms ({:.1}%) = {:.3}ms/layer", ffn_ms/q4k_34_ms*100.0, ffn_ms/34.0);
+            println!("    QKV projection:              {raw_34_ms:.1}ms ({:.1}%) = {:.3}ms/layer", raw_34_ms/q4k_34_ms*100.0, raw_34_ms/34.0);
+            println!("    O projection:                {o_proj_ms:.1}ms ({:.1}%) = {:.3}ms/layer", o_proj_ms/q4k_34_ms*100.0, o_proj_ms/34.0);
+            println!("    KV attend + norms + residual: {kv_norms_ms:.1}ms ({:.1}%) = {:.3}ms/layer", kv_norms_ms/q4k_34_ms*100.0, kv_norms_ms/34.0);
+            println!("    Dispatch floor (340×add):     {dispatch_floor_ms:.1}ms = {:.3}ms/dispatch", dispatch_floor_ms/340.0);
         }
 
         // ── Ollama (live query) ──

@@ -89,8 +89,9 @@ impl MetalBackend {
         let o_q8s_scratch = self.bufs.output((q_dim / 32 * 4) as u64);
         let scaled_scratch = self.bufs.output((hidden * 4) as u64);
 
-        // Single command buffer for all layers.
+        // Single command buffer + single encoder for ALL layers.
         let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
 
         for l in 0..num_layers {
             let layer = &layers[l];
@@ -108,8 +109,6 @@ impl MetalBackend {
             let layer_q_dim = layer_num_q_heads * layer_head_dim;
             let _layer_kv_dim = layer_num_kv_heads * layer_head_dim;
             let window_size = layer.sliding_window as u32;
-
-            let enc = cmd.new_compute_command_encoder();
 
             // ── Step 1: Input norm + Q/K/V projection ──
             // Dispatches per-projection to handle mixed formats (Q4_K Q/K + Q6_K V).
@@ -725,20 +724,14 @@ impl MetalBackend {
                 enc.set_bytes(2, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(3, 4, &scalar_val as *const f32 as *const std::ffi::c_void);
                 enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
-                enc.end_encoding();
                 h_buf = scaled;
             } else {
-                enc.end_encoding();
                 h_buf = new_h;
             }
-            // For layers with scalar, scaled_scratch is the output.
-            // But new_h points to h_a or h_b which alternate correctly.
-            // scaled_scratch is always the same buffer, so if layer_scalar is used,
-            // we need to write back. For now this is only Gemma 4 — handle by
-            // writing scaled directly to new_h instead.
 
         }
 
+        enc.end_encoding();
         cmd.commit();
         cmd.wait_until_completed();
 
