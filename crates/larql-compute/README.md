@@ -17,27 +17,28 @@ Provides a `ComputeBackend` trait that abstracts all hardware-specific matrix op
 ## Performance vs Ollama (M3 Max, Gemma 3 4B)
 
 ```
-Ollama gemma3:4b:              10.3ms/token =  97 tok/s (decode, 34 layers)
-LARQL Q4_KF (34 layers):     ~12.9ms/token = ~77 tok/s (decode, KV cached, projected cold)
-LARQL Q4_K  (34 layers):      20.8ms/token =  48 tok/s (decode, KV cached)
-vs Ollama (Q4_KF):            ~1.0–1.25x (at parity)
+LARQL Q4_KF (34 layers):       8.5ms/token = 117 tok/s (decode, KV cached)
+Ollama gemma3:4b:              10.3ms/token =  98 tok/s (decode, 34 layers)
+vs Ollama:                     0.83x (17% FASTER)
 ```
 
-### Key Optimizations (2026-04-08)
+### Key Optimizations (2026-04-08 — 2026-04-09)
 
 | Optimization | Savings | Technique |
 |-------------|---------|-----------|
+| **Cooperative SIMD norms** | **~10ms** | **O(N²)→O(N) reads in rms_norm / residual_norm** |
 | Q4_KF FFN routing | ~8ms | llama.cpp-exact kernel (q4kf_proj) for FFN |
 | Q4_K matvec rewrite | ~3ms | uint4 loads, 8 rows/TG, multi-row (nr0=2) |
-| Q4_K format for FFN | ~4.5ms | Skip Q8 quantize, use q4k_matvec directly |
-| Fused gate+up kernel | ~1ms | q4k_ffn_gate_up — single dispatch |
+| Buffer pre-allocation | ~2ms | Eliminate 550 Metal allocs per decode |
+| Fused gate+up kernels | ~1ms | q4k_ffn_gate_up + q4kf_ffn_gate_up |
 | Batched RoPE/V-norm | ~0.5ms | 16 per-head dispatches → 3 batched |
 | SIMD KV attention | ~1ms | simd_max/simd_sum, fewer barriers |
 
 ### Architecture
 
-Single command buffer for all 34 layers. One encoder per layer, ~10 dispatches each.
-Format-aware FFN: Q4_KF routes through llama.cpp kernel, Q4_K through fused gate+up, Q4_0 through legacy Q8 path.
+Single command buffer + single global encoder for all 34 layers. Pre-allocated scratch
+buffers. Format-aware FFN: Q4_KF routes through llama.cpp kernel, Q4_K through fused
+gate+up, Q4_0 through legacy Q8 path. All norms use cooperative SIMD reduction.
 
 ## Shaders (~48 Metal kernels)
 

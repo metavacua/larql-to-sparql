@@ -108,7 +108,8 @@ pub fn encode_rms_norm(
     enc.set_bytes(3, 4, &len_val as *const u32 as *const c_void);
     enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
     enc.set_bytes(5, 4, &offset as *const f32 as *const c_void);
-    enc.dispatch_threads(MTLSize::new(len as u64, 1, 1), MTLSize::new(256.min(len as u64), 1, 1));
+    // Single threadgroup — cooperative SIMD reduction requires all threads in one TG.
+    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(len as u64), 1, 1));
 }
 
 pub fn encode_residual_add(
@@ -385,7 +386,7 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(4, 4, &hidden_val as *const u32 as *const c_void);
             enc.set_bytes(5, 4, &eps as *const f32 as *const c_void);
             enc.set_bytes(6, 4, &norm_offset as *const f32 as *const c_void);
-            enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
             enc.end_encoding();
 
             let q_rows_val = q_dim as u32;
@@ -558,7 +559,7 @@ pub fn dispatch_full_pipeline(
                 enc.set_bytes(6, 4, &hidden_val as *const u32 as *const c_void);
                 enc.set_bytes(7, 4, &eps as *const f32 as *const c_void);
                 enc.set_bytes(8, 4, &norm_offset as *const f32 as *const c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 enc.end_encoding();
             }
         } else {
@@ -574,7 +575,7 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(6, 4, &hidden_val as *const u32 as *const c_void);
             enc.set_bytes(7, 4, &eps as *const f32 as *const c_void);
             enc.set_bytes(8, 4, &norm_offset as *const f32 as *const c_void);
-            enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
             enc.end_encoding();
         }
 

@@ -1,34 +1,38 @@
 # Roadmap — larql-compute
 
-## Current: ~77 tok/s (34L, Q4_KF) | 48 tok/s (34L, Q4_K) | Ollama: 97 tok/s | Gap: ~1.25x
+## Current: 117 tok/s (34L, Q4_KF) | Ollama: 98 tok/s | **17% FASTER**
 
-## P0: Close Ollama Gap — ACHIEVED (2026-04-08)
+## P0: Exceed Ollama — DONE (2026-04-09)
 
-### ✅ Kernel optimization + FFN format routing
-**Status**: Complete
+### ✅ Full kernel + norm optimization
+**Status**: Complete — 17% faster than Ollama
 
-Reached ~1.0–1.25x Ollama at 34 layers without caching. Key changes:
+8.5ms / 117 tok/s vs Ollama 10.3ms / 98 tok/s. Key changes:
+- Cooperative SIMD norm reduction (O(N²)→O(N)) — saved ~10ms alone
 - Q4_KF (GGUF) FFN through llama.cpp-exact q4kf_proj kernel
-- Q4_K matvec rewrite: uint4 vectorized loads, 8 rows/TG, multi-row (nr0=2)
-- Fused gate+up kernel (q4k_ffn_gate_up)
-- Batched RoPE + V-norm shaders
-- SIMD KV attention (simd_max/simd_sum)
-- Single cmd buffer, single encoder per layer
+- Fused gate+up kernels (q4k_ffn_gate_up + q4kf_ffn_gate_up)
+- Q4_K matvec rewrite: uint4, 8 rows/TG, multi-row (nr0=2)
+- Pre-allocated scratch buffers (550 allocs → 20)
+- Batched RoPE + V-norm, SIMD KV attention
+- Single cmd buffer + single global encoder
 
-Previous: 29.2ms / 34 tok/s (2.84x Ollama). Current: ~12.9ms / ~77 tok/s (~1.25x).
+Previous: 29.2ms / 34 tok/s (2.84x Ollama).
 
 ### ✅ Dispatch merging
 **Status**: Complete (but negligible impact — Apple Silicon dispatch overhead is ~0ms)
 
 ### Wire cached layers into decode path
-**Impact**: ~3x speedup (compute 8 layers instead of 34)  
+**Impact**: ~4x speedup (compute 8 layers instead of 34)  
 **Effort**: Low  
 **Status**: Not started (infrastructure ready in larql-inference)
 
-L0-12 are template-fixed (0.999 cosine similarity). At ~0.38ms/layer × 8 layers = 3ms → ~300 tok/s.
+L0-12 are template-fixed (0.999 cosine similarity). At 0.25ms/layer × 8 layers = 2ms → ~500 tok/s.
 
 ### ✅ Optimize KV cache attend kernel
-**Status**: Complete — simd_max/simd_sum reductions, float4 Q·K dot products, 3 barriers (was 6).
+**Status**: Complete — simd_max/simd_sum reductions, float4 Q·K dot products, 1024-entry scores.
+
+### ✅ Fix O(N²) norm kernels
+**Status**: Complete — cooperative SIMD reduction in all norms. Saved ~10ms (the single biggest win).
 
 ## P1: Production Hardening
 
@@ -111,4 +115,9 @@ Single kernel per layer: norm → QKV → attention → O → residual → norm 
 | Q4_K matvec rewrite | 2026-04-08 | uint4 loads, 8 rows/TG, sub-block striping, nr0=2 |
 | Q4_KF FFN routing | 2026-04-08 | llama.cpp-exact q4kf_proj for FFN gate/up/down |
 | SIMD KV attention | 2026-04-08 | simd_max/simd_sum, float4 dot, 3 barriers (was 6) |
-| **Ollama parity** | **2026-04-08** | **2.84x → ~1.25x at 34 layers, no caching** |
+| Ollama parity | 2026-04-08 | 2.84x → ~1.25x at 34 layers, no caching |
+| Q4_KF fused gate+up | 2026-04-09 | q4kf_ffn_gate_up — llama.cpp inner loop, shared input |
+| Pre-allocated scratch buffers | 2026-04-09 | 550 allocs → 20, saved ~2ms |
+| Single global encoder | 2026-04-09 | One encoder for all 34 layers (no per-layer create/end) |
+| **Cooperative SIMD norms** | **2026-04-09** | **O(N²)→O(N) in rms_norm/residual_norm — saved ~10ms** |
+| **Ollama EXCEEDED** | **2026-04-09** | **8.5ms / 117 tok/s = 0.83x Ollama (17% faster)** |

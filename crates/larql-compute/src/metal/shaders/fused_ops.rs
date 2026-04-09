@@ -3,16 +3,13 @@
 //! All norm kernels use cooperative SIMD reduction for sum_sq instead of
 //! redundant per-thread full-vector reads. This reduces memory reads from
 //! O(N²) to O(N) per dispatch.
+//!
+//! IMPORTANT: All norm kernels MUST be dispatched as ONE threadgroup:
+//!   dispatch_thread_groups(MTLSize(1,1,1), MTLSize(min(256,len),1,1))
+//! The cooperative reduction requires all threads to be in the same threadgroup.
 
 pub const SHADER: &str = r#"
-// ── Helper: cooperative RMS computation ──
-// Each thread computes partial sum_sq for its assigned elements,
-// then SIMD + threadgroup reduction produces the global rms.
-// Returns rms = 1/sqrt(mean(x²) + eps).
-// Requires threadgroup float tg_partial[8] declared by caller.
-
-// Fused RMS norm + Q8 quantize.
-// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
+// Fused RMS norm + Q8 quantize — single threadgroup, cooperative SIMD.
 kernel void rms_norm_q8(
     device const float* x      [[buffer(0)]],
     device const float* weight [[buffer(1)]],
@@ -21,14 +18,12 @@ kernel void rms_norm_q8(
     constant uint&      len    [[buffer(4)]],
     constant float&     eps    [[buffer(5)]],
     constant float&     offset [[buffer(6)]],
-    uint tid [[thread_position_in_grid]],
+    uint tid   [[thread_index_in_threadgroup]],
     uint tg_sz [[threads_per_threadgroup]],
     uint lane  [[thread_index_in_simdgroup]],
     uint sg_id [[simdgroup_index_in_threadgroup]])
 {
-    if (tid >= len) return;
-
-    // Cooperative sum_sq: each thread handles a stripe
+    // Cooperative sum_sq
     float partial = 0.0f;
     for (uint i = tid; i < len; i += tg_sz) {
         partial += x[i] * x[i];
@@ -42,26 +37,26 @@ kernel void rms_norm_q8(
     for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
 
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
-    float normed = x[tid] * (weight[tid] + offset) * rms;
 
-    // Q8 quantize within block
-    uint block = tid / 32;
-    uint idx_in_block = tid % 32;
+    // Norm + Q8 quantize (loop for len > tg_sz)
+    for (uint i = tid; i < len; i += tg_sz) {
+        float normed = x[i] * (weight[i] + offset) * rms;
+        uint block = i / 32;
+        uint idx_in_block = i % 32;
 
-    // Cooperative block max via SIMD
-    float my_abs = abs(normed);
-    // All 32 threads in a simdgroup cover one Q8 block (if aligned)
-    float block_max = simd_max(my_abs);
-    float scale = block_max / 127.0f;
-    float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
+        // Block max via simd_max (valid when simdgroup aligns with Q8 block)
+        float my_abs = abs(normed);
+        float block_max = simd_max(my_abs);
+        float scale = block_max / 127.0f;
+        float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
 
-    if (idx_in_block == 0) scales[block] = scale;
-    int q = int(round(normed * inv_scale));
-    q8_out[tid] = char(clamp(q, -128, 127));
+        if (idx_in_block == 0) scales[block] = scale;
+        int q = int(round(normed * inv_scale));
+        q8_out[i] = char(clamp(q, -128, 127));
+    }
 }
 
-// Fused residual add + RMS norm.
-// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
+// Fused residual add + RMS norm — single threadgroup, cooperative SIMD.
 kernel void residual_norm(
     device const float* a      [[buffer(0)]],
     device const float* b      [[buffer(1)]],
@@ -70,15 +65,11 @@ kernel void residual_norm(
     constant uint&      len    [[buffer(4)]],
     constant float&     eps    [[buffer(5)]],
     constant float&     offset [[buffer(6)]],
-    uint tid [[thread_position_in_grid]],
+    uint tid   [[thread_index_in_threadgroup]],
     uint tg_sz [[threads_per_threadgroup]],
     uint lane  [[thread_index_in_simdgroup]],
     uint sg_id [[simdgroup_index_in_threadgroup]])
 {
-    if (tid >= len) return;
-
-    float h = a[tid] + b[tid];
-
     // Cooperative sum_sq
     float partial = 0.0f;
     for (uint i = tid; i < len; i += tg_sz) {
@@ -94,11 +85,14 @@ kernel void residual_norm(
     for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
 
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
-    out[tid] = h * (weight[tid] + offset) * rms;
+
+    for (uint i = tid; i < len; i += tg_sz) {
+        float h = a[i] + b[i];
+        out[i] = h * (weight[i] + offset) * rms;
+    }
 }
 
-// Fused residual add + RMS norm + Q8 quantize.
-// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
+// Fused residual add + RMS norm + Q8 quantize — single threadgroup.
 kernel void residual_norm_q8(
     device const float* a      [[buffer(0)]],
     device const float* b      [[buffer(1)]],
@@ -109,20 +103,20 @@ kernel void residual_norm_q8(
     constant uint&      len    [[buffer(6)]],
     constant float&     eps    [[buffer(7)]],
     constant float&     offset [[buffer(8)]],
-    uint tid [[thread_position_in_grid]],
+    uint tid   [[thread_index_in_threadgroup]],
     uint tg_sz [[threads_per_threadgroup]],
     uint lane  [[thread_index_in_simdgroup]],
     uint sg_id [[simdgroup_index_in_threadgroup]])
 {
-    if (tid >= len) return;
-
-    float h = a[tid] + b[tid];
-    f32_out[tid] = h;
+    // Write f32 sum first (all elements)
+    for (uint i = tid; i < len; i += tg_sz) {
+        f32_out[i] = a[i] + b[i];
+    }
 
     // Cooperative sum_sq
     float partial = 0.0f;
     for (uint i = tid; i < len; i += tg_sz) {
-        float hi = a[i] + b[i];
+        float hi = f32_out[i];
         partial += hi * hi;
     }
     float sg_sum = simd_sum(partial);
@@ -134,19 +128,20 @@ kernel void residual_norm_q8(
     for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
 
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
-    float normed = h * (weight[tid] + offset) * rms;
 
-    // Q8 quantize
-    uint block = tid / 32;
-    uint idx_in_block = tid % 32;
-    float my_abs = abs(normed);
-    float block_max = simd_max(my_abs);
-    float scale = block_max / 127.0f;
-    float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
+        float normed = f32_out[i] * (weight[i] + offset) * rms;
+        uint block = i / 32;
+        uint idx_in_block = i % 32;
 
-    if (idx_in_block == 0) scales[block] = scale;
-    int q = int(round(normed * inv_scale));
-    q8_out[tid] = char(clamp(q, -128, 127));
+        float my_abs = abs(normed);
+        float block_max = simd_max(my_abs);
+        float scale = block_max / 127.0f;
+        float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
+
+        if (idx_in_block == 0) scales[block] = scale;
+        int q = int(round(normed * inv_scale));
+        q8_out[i] = char(clamp(q, -128, 127));
+    }
 }
-
 "#;

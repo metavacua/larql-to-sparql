@@ -36,6 +36,10 @@ Final architecture: **single command buffer** for all 34 layers, **single encode
 ## Result
 
 ```
-Before:  29.2ms / 34 tok/s (34 layers) = 2.84x Ollama
-After:  ~12.9ms / ~77 tok/s (34 layers) = ~1.25x Ollama
+Before:   29.2ms / 34 tok/s (34 layers) = 2.84x Ollama
+Mid:      18.3ms / 55 tok/s (34 layers) = 1.79x Ollama  (kernel opts + buffer prealloc)
+Final:     8.5ms / 117 tok/s (34 layers) = 0.83x Ollama  (+ cooperative norm fix, ADR-014)
 ```
+
+The cooperative norm fix (ADR-014) was the single biggest win: ~10ms saved by fixing
+O(N²) reads in all norm kernels. See ADR-014 for details.

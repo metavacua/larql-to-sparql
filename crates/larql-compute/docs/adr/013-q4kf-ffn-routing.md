@@ -34,9 +34,19 @@ After (Q4_KF FFN): ~12.9ms / ~77 tok/s            = ~1.25x Ollama
 
 The Q4_KF kernel's register-cached input pattern (yl[16]/yh[16] arrays loaded once, reused across rows) and uint16 nibble masking (no bit shifts for lower nibble, `1.f/256.f` scaling for upper) account for the majority of the improvement.
 
+## Final Numbers (after all optimizations including ADR-014 norm fix)
+
+```
+Before (Q4_0 FFN): 29.2ms / 34 tok/s (34L) = 2.84x Ollama
+After (Q4_KF FFN):  8.5ms / 117 tok/s (34L) = 0.83x Ollama (17% faster)
+```
+
+Also added `q4kf_ffn_gate_up` kernel (2026-04-09): fused gate+up for Q4_KF format
+with llama.cpp inner loop, eliminating one dispatch per layer.
+
 ## Consequences
 
-- **Good**: Ollama parity achieved at 34 layers without caching
+- **Good**: Ollama exceeded at 34 layers without caching
 - **Good**: Format detection is automatic via FullPipelineLayer.gate.format
 - **Good**: Legacy Q4_0 path preserved as fallback
 - **Trade-off**: Q4_KF weights are in GGUF 144-byte format (not our 148-byte format), so the vindex loader must emit GGUF-compatible blocks

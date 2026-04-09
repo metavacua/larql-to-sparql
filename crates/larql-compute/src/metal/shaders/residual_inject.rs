@@ -44,6 +44,7 @@ kernel void scale_vector(
 
 // RMS norm: out = x * (weight + offset) / sqrt(mean(x²) + eps)
 // Uses cooperative SIMD reduction — O(N) reads instead of O(N²).
+// MUST be dispatched as ONE threadgroup: dispatch_thread_groups(1, tg_size).
 kernel void rms_norm(
     device const float* x      [[buffer(0)]],
     device const float* weight [[buffer(1)]],
@@ -51,13 +52,11 @@ kernel void rms_norm(
     constant uint&      len    [[buffer(3)]],
     constant float&     eps    [[buffer(4)]],
     constant float&     offset [[buffer(5)]],
-    uint tid    [[thread_position_in_grid]],
+    uint tid    [[thread_index_in_threadgroup]],
     uint tg_sz  [[threads_per_threadgroup]],
     uint lane   [[thread_index_in_simdgroup]],
     uint sg_id  [[simdgroup_index_in_threadgroup]])
 {
-    if (tid >= len) return;
-
     // Cooperative sum_sq: each thread sums a stripe, then SIMD reduce
     float partial = 0.0f;
     for (uint i = tid; i < len; i += tg_sz) {
@@ -72,6 +71,10 @@ kernel void rms_norm(
     for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
 
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
-    out[tid] = x[tid] * (weight[tid] + offset) * rms;
+
+    // Write all output elements (loop for len > tg_sz)
+    for (uint i = tid; i < len; i += tg_sz) {
+        out[i] = x[i] * (weight[i] + offset) * rms;
+    }
 }
 "#;

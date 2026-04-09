@@ -271,7 +271,7 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
 
                 let total_rows = (q_dim + kv_dim + kv_dim) as u32;
                 let q_rows = q_dim as u32;
@@ -444,7 +444,7 @@ impl MetalBackend {
                     enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                     // h_post_attn = h + normed_o (residual_norm also writes this to buffer 3? No — residual_norm only outputs normed.
                     // We need the pre-norm residual for the post-FFN add. Use residual_add separately.
                     use crate::metal::ops::full_pipeline::encode_residual_add;
@@ -461,7 +461,7 @@ impl MetalBackend {
                     enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(7, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(8, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 }
             } else if ffn_uses_q4k {
                 // Q4_K path: residual+norm → f32 output (no Q8)
@@ -473,7 +473,7 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 // h_post_attn = h + o (pre-norm residual for post-FFN add)
                 use crate::metal::ops::full_pipeline::encode_residual_add;
                 encode_residual_add(enc, &self.residual_add_pipeline,
@@ -489,7 +489,7 @@ impl MetalBackend {
                 enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(7, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(8, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
             }
 
             // ── Step 6: FFN (format-aware: Q4_KF uses llama.cpp kernel, Q4_K uses our kernel, Q4_0 uses Q8) ──
@@ -711,7 +711,7 @@ impl MetalBackend {
                 enc.set_buffer(1, Some(&down_out), 0);
                 enc.set_buffer(2, Some(&new_h), 0);
                 enc.set_bytes(3, 4, &len_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
             }
 
             // ── Step 8: Optional layer scalar ──
@@ -723,7 +723,7 @@ impl MetalBackend {
                 enc.set_buffer(1, Some(&scaled), 0);
                 enc.set_bytes(2, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(3, 4, &scalar_val as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 h_buf = scaled;
             } else {
                 h_buf = new_h;

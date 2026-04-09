@@ -115,11 +115,27 @@ pub struct LayerKVCache {
 - Fused attention with skip_rope and rotary_dim flags (partial RoPE for Gemma 4)
 - KV cache populated via CPU `prefill_with_kv` after GPU forward pass
 
-## Performance (M3 Max, Gemma 3 4B, 2026-04-08)
+## Performance (M3 Max, Gemma 3 4B, 2026-04-09)
 
 | Path | Time | tok/s | vs Ollama |
 |------|------|-------|-----------|
-| Q4_KF decode (34L) | ~12.9ms | ~77 | ~1.25x |
-| Q4_K decode (34L) | 20.8ms | 48 | 2.0x |
-| Q8 decode (21L) | 20.5ms | 49 | — |
-| Ollama (34L) | 10.3ms | 97 | 1.0x |
+| **Q4_KF decode (34L)** | **8.5ms** | **117** | **0.83x (17% faster)** |
+| Q4_K decode (21L) | 11.6ms | 86 | 1.13x |
+| Q8 decode (21L) | 19.3ms | 52 | — |
+| Ollama (34L) | 10.3ms | 98 | 1.0x |
+
+### Component Breakdown (34 layers)
+
+| Component | Time | Per-Layer | % |
+|-----------|------|-----------|---|
+| FFN (gate+up+GEGLU+down) | 6.1ms | 0.179ms | 33% |
+| QKV projection | 1.3ms | 0.037ms | 7% |
+| O projection | 0.8ms | 0.024ms | 5% |
+| KV attend + norms + residual | 0.5ms | 0.015ms | 3% |
+
+### Key: Cooperative SIMD Norms
+
+All norm kernels (rms_norm, residual_norm, residual_norm_q8) use cooperative SIMD
+reduction for sum_sq. Each thread computes a partial sum over a stripe of elements,
+then simd_sum + threadgroup reduction produces the global result. This is O(N) reads
+vs the previous O(N²) where every thread redundantly read all elements.

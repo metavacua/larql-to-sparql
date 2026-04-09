@@ -71,6 +71,10 @@ Performance: Same as q4k_qkv_proj for QKV; FFN routing enables ~1.25x Ollama
 Grid: 4 rows per TG (2 SG × 2 rows/SG), 64 threads
 ```
 
+### q4kf_ffn_gate_up.rs — `q4kf_ffn_gate_up` (PRODUCTION for Q4_KF FFN)
+Fused gate+up for GGUF format. Same llama.cpp inner loop as q4kf_proj, with both matrices dispatched in one call. Layout: first half of threadgroups → gate, second half → up.
+Origin: LARQL original (2026-04-09).
+
 ### q4k_ffn_gate_up.rs — `q4k_ffn_gate_up` (PRODUCTION for Q4_K FFN)
 Fused gate+up projection — two Q4_K matvecs sharing the same input vector in one dispatch. Threadgroups 0..N handle gate rows, N..2N handle up rows. Same uint4+sub-block inner loop as q4k_matvec.
 Origin: LARQL original (2026-04-08).
@@ -146,12 +150,25 @@ Buffer copy and element-wise addition for residual connections.
 
 ## Fused Multi-Op Kernels
 
-### fused_ops.rs — `rms_norm`, `rms_norm_q8`, `residual_norm`, `residual_norm_q8`
-- `rms_norm`: RMS normalization with configurable weight offset (0.0 for Llama/Gemma 4, 1.0 for Gemma 2/3).
-- `rms_norm_q8`: Fused norm + Q8 quantize (saves one dispatch per layer).
+### fused_ops.rs — `rms_norm_q8`, `residual_norm`, `residual_norm_q8`
+
+All norm kernels use **cooperative SIMD reduction** for sum_sq computation:
+each thread sums a stripe of elements (stride = tg_sz), then `simd_sum` reduces
+within each simdgroup, and a threadgroup reduction combines across simdgroups.
+This is O(N) reads vs the previous O(N²) where every thread redundantly read all
+elements. **This single fix saved ~10ms for 34 layers** (the biggest optimization).
+
+- `rms_norm_q8`: Fused norm + Q8 quantize. Uses `simd_max` for block-max.
 - `residual_norm`: Fused residual add + norm.
-- `residual_norm_q8`: Fused residual add + norm + Q8 quantize (saves two dispatches per layer).
-Origin: LARQL original. Fusion motivated by component profiling showing dispatch overhead dominates for small ops.
+- `residual_norm_q8`: Fused residual add + norm + Q8 quantize.
+Origin: LARQL original. SIMD cooperative reduction added 2026-04-09.
+
+### residual_inject.rs — `residual_copy`, `residual_add`, `scale_vector`, `rms_norm`
+
+- `rms_norm`: Standalone RMS norm with cooperative SIMD reduction.
+- `residual_add`: Element-wise a + b.
+- `residual_copy`: Buffer copy.
+- `scale_vector`: Per-layer scalar multiplier (Gemma 4).
 
 ## KV Cache
 

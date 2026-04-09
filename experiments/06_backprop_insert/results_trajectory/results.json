@@ -1,0 +1,11 @@
+{
+  "trajectory_cosines_summary": {
+    "mid_layer": 0.8259445190429687,
+    "last_layer": 0.8832196295261383
+  },
+  "shortcut": {
+    "top1": 0,
+    "top5": 0,
+    "total": 10
+  }
+}

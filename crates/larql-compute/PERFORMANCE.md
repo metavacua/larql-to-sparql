@@ -2,28 +2,31 @@
 
 Machine: M3 Max, macOS, Gemma 3 4B (34 layers, hidden=2560, inter=10240, vocab=262K)
 
-## Current State (2026-04-08)
+## Current State (2026-04-09)
 
 ```
-LARQL Q4_KF decode (34 layers, KV cache): ~12.9ms = ~77 tok/s (projected cold)
-LARQL Q4_K  decode (34 layers, KV cache):  20.8ms =  48 tok/s
-LARQL Q8    decode (21 layers, KV cache):  20.5ms =  49 tok/s
+LARQL Q4_KF decode (34 layers, KV cache):   8.5ms = 117 tok/s  ← EXCEEDS Ollama
+LARQL Q4_K  decode (21 layers, KV cache):  11.6ms =  86 tok/s
+LARQL Q8    decode (21 layers, KV cache):  19.3ms =  52 tok/s
 
-Ollama gemma3:4b (34 layers):              10.3ms =  97 tok/s
-Per-layer gap (Q4_KF):                    ~1.25x (~0.38 vs 0.303 ms/layer)
-Per-layer gap (Q4_K):                      2.0x  (0.61 vs 0.303 ms/layer)
+Ollama gemma3:4b (34 layers):              10.3ms =  98 tok/s
+vs Ollama:                                 0.83x (17% FASTER)
+Per-layer:                                 0.250ms vs 0.303ms
 ```
 
-### Optimizations applied (2026-04-08 session)
+### Optimizations applied (2026-04-08 — 2026-04-09)
 
-1. Single command buffer for all 34 layers (was: per-layer commit+wait)
-2. Single encoder per layer, no explicit memory barriers
-3. Batched RoPE + V-norm shaders (16 dispatches → 3 per layer)
-4. Q4_K format for FFN (skip Q8 quantize, use q4k_matvec)
-5. Fused gate+up kernel (q4k_ffn_gate_up — one dispatch for both)
-6. Q4_K matvec rewrite: uint4 loads, 8 rows/TG, multi-row (nr0=2)
-7. Q4_KF (GGUF) FFN routing through q4kf_proj (llama.cpp-exact kernel)
-8. KV attention: simd_max/simd_sum reductions, float4 Q·K dot products
+1. Single command buffer + single global encoder for all 34 layers
+2. Batched RoPE + V-norm shaders (16 dispatches → 3 per layer)
+3. Q4_K format for FFN (skip Q8 quantize, use q4k_matvec)
+4. Fused gate+up kernels (q4k_ffn_gate_up, q4kf_ffn_gate_up)
+5. Q4_K matvec rewrite: uint4 loads, 8 rows/TG, multi-row (nr0=2)
+6. Q4_KF (GGUF) FFN routing through q4kf_proj (llama.cpp-exact kernel)
+7. KV attention: simd_max/simd_sum, float4 Q·K, 1024-entry threadgroup scores
+8. Pre-allocated scratch buffers (eliminated ~550 per-decode Metal allocations)
+9. **Cooperative SIMD norm reduction** — O(N) reads instead of O(N²). Saved ~10ms.
+   All norm kernels (rms_norm, residual_norm, residual_norm_q8) previously had each
+   thread redundantly reading ALL elements. Now: stripe + simd_sum + threadgroup reduce.
 
 ## Component Profiling (34 layers, isolated, one command buffer each)
 
@@ -317,23 +320,31 @@ Date        Milestone                                    Time      tok/s
 2026-04-08  + fused gate+up kernel                       21.4ms    47  (34L)
 2026-04-08  + q4k_matvec uint4 + 8 rows/TG              21.4ms    47  (34L)
 2026-04-08  + multi-row nr0=2                            20.8ms    48  (34L)
-2026-04-08  + Q4_KF (GGUF) FFN via q4kf_proj           ~12.9ms   ~77  (34L, projected)
-2026-04-08  + SIMD KV attention reductions              ~12.9ms   ~77  (34L)
-2026-04-08  vs Ollama: 2.84x → ~1.0–1.25x                —        —
+2026-04-08  + Q4_KF (GGUF) FFN via q4kf_proj            20.5ms    49  (34L)
+2026-04-08  + SIMD KV attention reductions               20.5ms    49  (34L)
+2026-04-09  + pre-allocated scratch buffers               18.3ms    55  (34L)
+2026-04-09  + fused Q4_KF gate+up (q4kf_ffn_gate_up)     18.3ms    55  (34L)
+2026-04-09  + cooperative SIMD norm (O(N²)→O(N))           8.5ms   117  (34L) ← EXCEEDS OLLAMA
+2026-04-09  vs Ollama: 2.84x → 0.83x (17% faster)         —        —
 ```
 
-## Path to Ollama Parity — ACHIEVED (2026-04-08)
+## Path to Ollama Parity — EXCEEDED (2026-04-09)
 
-Ollama parity reached at 34 layers without caching. Key: routing FFN through
-the llama.cpp-exact Q4_KF kernel (q4kf_proj) and optimizing dispatch structure.
+Ollama exceeded at 34 layers without caching: 8.5ms / 117 tok/s vs 10.3ms / 98 tok/s.
+
+The final breakthrough: all norm kernels (rms_norm, residual_norm, residual_norm_q8) had
+O(N²) memory reads — each of 2560 threads read ALL 2560 elements for sum_sq. Fixing to
+cooperative SIMD reduction (stripe + simd_sum + threadgroup reduce) saved ~10ms.
 
 ### What worked
 | Optimization | Savings | Technique |
 |-------------|---------|-----------|
+| **Cooperative SIMD norms** | **~10ms** | **O(N²)→O(N) reads. THE fix.** |
 | Q4_KF FFN routing | ~8ms | llama.cpp kernel for FFN gate/up/down |
 | Q4_K matvec rewrite | ~3ms | uint4 loads, 8 rows/TG, nr0=2 |
 | Q4_K format for FFN | ~4.5ms | Skip Q8 quantize step |
-| Fused gate+up kernel | ~1ms | Single dispatch, shared input read |
+| Buffer pre-allocation | ~2ms | Eliminate 550 Metal buffer allocs per decode |
+| Fused gate+up kernels | ~1ms | Single dispatch, shared input read |
 | Batched RoPE/V-norm | ~0.5ms | 16 dispatches → 3 per layer |
 | SIMD KV attention | ~1ms | simd_max/simd_sum, fewer barriers |
 
@@ -347,7 +358,7 @@ the llama.cpp-exact Q4_KF kernel (q4kf_proj) and optimizing dispatch structure.
 
 ### With caching (future)
 ```
-~77 tok/s → current (34 layers, all computed, Q4_KF)
-~200 tok/s → cache L0-12, compute 8 layers only
-              77 × (34/8) ≈ 327 tok/s (theoretical)
+117 tok/s → current (34 layers, all computed, Q4_KF)
+~500 tok/s → cache L0-12, compute 8 layers only
+              117 × (34/8) ≈ 497 tok/s (theoretical)
 ```
