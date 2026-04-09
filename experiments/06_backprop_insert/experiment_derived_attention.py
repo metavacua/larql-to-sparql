@@ -76,7 +76,11 @@ TEST_PROMPTS = [
 # ---------------------------------------------------------------------------
 
 def extract_components(model, tokenizer, head_roles, device):
-    """Extract BOS constants, V×O projections for prev and func heads."""
+    """
+    Extract attention components from ACTUAL forward passes.
+    BOS constants = measured mean attention output (not raw embedding × V × O).
+    V×O projections extracted from weights for prev/func heads.
+    """
     print(f"\n  Extracting attention components...")
 
     tc = model.config.text_config
@@ -87,12 +91,6 @@ def extract_components(model, tokenizer, head_roles, device):
     hidden = tc.hidden_size
     gqa_ratio = n_heads // n_kv
 
-    # BOS embedding (token ID 2 for Gemma)
-    bos_id = tokenizer.bos_token_id or 2
-    bos_emb = model.model.language_model.embed_tokens.weight[bos_id].float()
-    # Gemma scales embeddings
-    bos_emb_scaled = bos_emb * math.sqrt(hidden)
-
     # Function word token IDs
     func_ids = set()
     for word in FUNCTION_WORDS:
@@ -102,21 +100,66 @@ def extract_components(model, tokenizer, head_roles, device):
                 func_ids.add(encoded[0])
     print(f"  Function word token IDs: {len(func_ids)}")
 
-    # Extract per-layer
-    components = {}
-    bos_count = 0
-    prev_count = 0
-    func_count = 0
-    skip_count = 0
+    # --- Step 1: Measure ACTUAL mean attention output per layer ---
+    print(f"  Measuring mean attention outputs from reference prompts...")
+
+    ref_prompts = [
+        "The capital of France is", "The capital of Japan is",
+        "The capital of Germany is", "The capital of Egypt is",
+        "The official language of France is", "The currency of India is the",
+        "Once upon a time, there was a", "The detective opened the door and",
+        "def fibonacci(n):\n    if n <= 1:", "import pandas as",
+        "To make scrambled eggs, first", "I think the best approach is",
+    ]
+
+    # Per-position mean attention output at each layer
+    attn_outputs = [[] for _ in range(n_layers)]
+    hooks = []
 
     for li in range(n_layers):
         layer = model.model.language_model.layers[li]
+        def make_hook(idx):
+            def hook(module, args, output):
+                out = output[0] if isinstance(output, tuple) else output
+                attn_outputs[idx].append(out.detach().float().cpu())
+            return hook
+        hooks.append(layer.self_attn.register_forward_hook(make_hook(li)))
+
+    with torch.no_grad():
+        for prompt in ref_prompts:
+            inputs = tokenizer(prompt, return_tensors="pt", max_length=MAX_SEQ,
+                             truncation=True).to(device)
+            _ = model(**inputs)
+
+    for h in hooks:
+        h.remove()
+
+    # Mean attention output per layer — measured from actual forward passes.
+    # Use the last position from each prompt (prediction position).
+    mean_attn = {}
+    for li in range(n_layers):
+        if attn_outputs[li]:
+            last_pos_outputs = [out[0, -1] for out in attn_outputs[li]]  # (hidden,) each
+            mean_attn[li] = torch.stack(last_pos_outputs).mean(0).cpu()
+        else:
+            mean_attn[li] = torch.zeros(hidden)
+
+    print(f"  Mean attn norms: L0={mean_attn[0].norm():.1f}, "
+          f"L17={mean_attn[17].norm():.1f}, L33={mean_attn[33].norm():.1f}")
+
+    # --- Step 2: Extract V×O for non-BOS heads ---
+    prev_count = 0
+    func_count = 0
+    skip_count = 0
+    bos_count = 0
+
+    components = {}
+    for li in range(n_layers):
+        layer = model.model.language_model.layers[li]
         attn = layer.self_attn
+        v_weight = attn.v_proj.weight.data.float()
+        o_weight = attn.o_proj.weight.data.float()
 
-        v_weight = attn.v_proj.weight.data.float()  # (n_kv * head_dim, hidden)
-        o_weight = attn.o_proj.weight.data.float()  # (hidden, n_heads * head_dim)
-
-        bos_constants = []
         prev_projs = []
         func_projs = []
 
@@ -124,43 +167,31 @@ def extract_components(model, tokenizer, head_roles, device):
             key = f"L{li}H{h}"
             role = head_roles.get(key, "BOS")
 
+            if role == "BOS":
+                bos_count += 1
+                continue
+            elif role in ("self", "relation"):
+                skip_count += 1
+                continue
+
             kv_head = h // gqa_ratio
             v_slice = v_weight[kv_head * head_dim:(kv_head + 1) * head_dim, :]
             o_slice = o_weight[:, h * head_dim:(h + 1) * head_dim]
 
-            if role == "BOS":
-                # BOS constant: bos_emb @ V^T then @ O^T
-                # But we need the NORMED bos embedding (after input_layernorm)
-                # For now, use raw and we'll correct with the actual norm later
-                v_out = bos_emb_scaled @ v_slice.T  # (head_dim,)
-                bos_out = o_slice @ v_out  # (hidden,)
-                bos_constants.append(bos_out)
-                bos_count += 1
-
-            elif role == "previous":
-                # Combined V×O projection: [hidden] → [hidden]
-                VxO = v_slice.T @ o_slice.T  # (hidden, hidden) — too big
-                # Use factored form instead: store v_slice and o_slice
+            if role == "previous":
                 prev_projs.append((v_slice.cpu(), o_slice.cpu()))
                 prev_count += 1
-
             elif role == "function_word":
                 func_projs.append((v_slice.cpu(), o_slice.cpu()))
                 func_count += 1
 
-            else:
-                skip_count += 1
-
-        # Sum BOS constants
-        bos_sum = torch.stack(bos_constants).sum(0).cpu() if bos_constants else torch.zeros(hidden)
-
         components[li] = {
-            "bos_sum": bos_sum,
+            "mean_attn": mean_attn[li],
             "prev_projs": prev_projs,
             "func_projs": func_projs,
         }
 
-    print(f"  BOS: {bos_count}, Previous: {prev_count}, "
+    print(f"  BOS: {bos_count} (measured mean), Previous: {prev_count}, "
           f"Function: {func_count}, Skipped: {skip_count}")
 
     return components, func_ids
@@ -181,8 +212,14 @@ def run_derived_forward(model, components, func_ids, input_ids, device):
     active = [True]
 
     def make_replacement_hook(li):
-        comp = components[li]
-        bos = comp["bos_sum"].to(device)
+        comp = components.get(li)
+        if comp is None:
+            # None = keep real attention (for hybrid mode)
+            def hook(module, args, output):
+                return output
+            return hook
+
+        mean_out = comp["mean_attn"].to(device)
         prev_list = comp["prev_projs"]
         func_list = comp["func_projs"]
 
@@ -200,8 +237,8 @@ def run_derived_forward(model, components, func_ids, input_ids, device):
             # Build replacement
             replacement = torch.zeros_like(out_tensor)
 
-            # 1. BOS constant (broadcast to all positions)
-            replacement += bos.unsqueeze(0).unsqueeze(0)
+            # 1. Mean attention output (measured from actual forward passes)
+            replacement += mean_out.unsqueeze(0).unsqueeze(0)
 
             # 2. Previous-token projections
             # We need the input to attention (normed residual)
@@ -301,7 +338,7 @@ def evaluate(model, tokenizer, components, func_ids, test_prompts, device, mode=
         elif mode == "skip":
             # Skip attention entirely (zero it out)
             skip_components = {
-                li: {"bos_sum": torch.zeros(model.config.text_config.hidden_size),
+                li: {"mean_attn": torch.zeros(model.config.text_config.hidden_size),
                      "prev_projs": [], "func_projs": []}
                 for li in range(model.config.text_config.num_hidden_layers)
             }
@@ -310,11 +347,25 @@ def evaluate(model, tokenizer, components, func_ids, test_prompts, device, mode=
             der_logits = derived_out.logits[0, -1].float()
         elif mode == "bos_only":
             bos_components = {
-                li: {"bos_sum": components[li]["bos_sum"],
+                li: {"mean_attn": components[li]["mean_attn"],
                      "prev_projs": [], "func_projs": []}
                 for li in components
             }
             derived_out = run_derived_forward(model, bos_components, set(),
+                                            inputs["input_ids"], device)
+            der_logits = derived_out.logits[0, -1].float()
+        elif mode == "hybrid_essential":
+            # Keep REAL attention at essential layers (L0-5, L24)
+            # Use derived (mean) at dispensable layers (L6-23, L25-33)
+            essential = {0, 1, 2, 3, 4, 5, 24}
+            hybrid_components = {}
+            for li in components:
+                if li in essential:
+                    # Use a sentinel: None means "keep real attention"
+                    hybrid_components[li] = None
+                else:
+                    hybrid_components[li] = components[li]
+            derived_out = run_derived_forward(model, hybrid_components, func_ids,
                                             inputs["input_ids"], device)
             der_logits = derived_out.logits[0, -1].float()
         else:
@@ -483,6 +534,13 @@ def main():
     print_results("Derived (BOS + prev + func)", derived)
     print(f"    ({time.time()-t2:.0f}s)")
 
+    # Config 4: Hybrid — real attention at 7 essential layers, derived at 27 others
+    t3 = time.time()
+    hybrid = evaluate(model, tokenizer, components, func_ids,
+                     TEST_PROMPTS, device, mode="hybrid_essential")
+    print_results("Hybrid (real@L0-5,L24 + derived@rest)", hybrid)
+    print(f"    ({time.time()-t3:.0f}s)")
+
     # ═══════════════════════════════════════════════════════════════════
     # Phase 4: Generation test
     # ═══════════════════════════════════════════════════════════════════
@@ -503,6 +561,29 @@ def main():
     generation_test(model, tokenizer, components, func_ids, gen_prompts,
                    device, mode="derived")
 
+    # Hybrid generation — real attention at essential layers
+    print(f"\n  Generation (hybrid — real@L0-5,L24):")
+    # For hybrid generation, need to wire it through run_derived_forward
+    # with essential layers kept. Build hybrid components.
+    essential = {0, 1, 2, 3, 4, 5, 24}
+    hybrid_comp = {li: (None if li in essential else components[li])
+                   for li in components}
+    for prompt in gen_prompts:
+        input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
+        generated = input_ids[0].tolist()
+        for _ in range(30):
+            if len(generated) >= MAX_SEQ:
+                break
+            ids = torch.tensor([generated], device=device)
+            out = run_derived_forward(model, hybrid_comp, func_ids, ids, device)
+            next_token = out.logits[0, -1].float().argmax().item()
+            generated.append(next_token)
+            if next_token in (0, 1):
+                break
+        text = tokenizer.decode(generated, skip_special_tokens=True)
+        gen_part = text[len(prompt):] if text.startswith(prompt) else text
+        print(f"    '{prompt[:50]}' → {gen_part[:80]}")
+
     # ═══════════════════════════════════════════════════════════════════
     # VERDICT
     # ═══════════════════════════════════════════════════════════════════
@@ -518,7 +599,8 @@ def main():
     for name, r in [("Full attention (baseline)", baseline),
                     ("Skip attention", skip),
                     ("BOS constants only", bos),
-                    ("Derived (BOS + prev + func)", derived)]:
+                    ("Derived (BOS + prev + func)", derived),
+                    ("Hybrid (real@essential + derived)", hybrid)]:
         ft1 = f"{r['top1_correct']}/{nf}" if nf else "—"
         ft5 = f"{r['top5_correct']}/{nf}" if nf else "—"
         at1 = f"{r['agreement_top1']}/{n}"
@@ -528,6 +610,7 @@ def main():
     d_agree = derived["agreement_top1"] / n if n else 0
     s_agree = skip["agreement_top1"] / n if n else 0
     b_agree = bos["agreement_top1"] / n if n else 0
+    h_agree = hybrid["agreement_top1"] / n if n else 0
 
     if d_agree > s_agree + 0.05:
         print(f"\n  ✓ DERIVED BEATS SKIP ({d_agree:.0%} vs {s_agree:.0%})")
@@ -535,15 +618,25 @@ def main():
     if d_agree > b_agree + 0.05:
         print(f"  ✓ DERIVED BEATS BOS-ONLY ({d_agree:.0%} vs {b_agree:.0%})")
         print(f"    Non-BOS heads add meaningful information.")
-    if d_agree > 0.8:
-        print(f"\n  ✓ ARCHITECTURE VALIDATED ({d_agree:.0%} agreement)")
-        print(f"    BOS constants + prev copy + func lookup ≈ full attention")
-    elif d_agree > 0.5:
-        print(f"\n  ~ PARTIAL SUCCESS ({d_agree:.0%} agreement)")
-        print(f"    Architecture captures most of attention but gaps remain.")
+
+    # Hybrid result — the key test
+    if h_agree > 0.8:
+        print(f"\n  ✓ HYBRID WORKS ({h_agree:.0%} agreement)")
+        print(f"    Real attention at 7 essential layers + derived at 27 others.")
+        print(f"    79% of attention IS replaceable with measured constants.")
+        print(f"    The 7 essential layers carry the input-specific routing.")
+    elif h_agree > 0.5:
+        print(f"\n  ~ HYBRID PARTIAL ({h_agree:.0%} agreement)")
+        print(f"    Better than fully derived ({d_agree:.0%}) but gaps remain.")
     else:
-        print(f"\n  ✗ ARCHITECTURE INSUFFICIENT ({d_agree:.0%} agreement)")
-        print(f"    The derived components don't capture what attention does.")
+        print(f"\n  ✗ HYBRID INSUFFICIENT ({h_agree:.0%} agreement)")
+
+    if d_agree > 0.8:
+        print(f"\n  ✓ FULL DERIVED WORKS ({d_agree:.0%} agreement)")
+    elif d_agree > 0.5:
+        print(f"\n  ~ PARTIAL ({d_agree:.0%} agreement)")
+    else:
+        print(f"\n  ✗ FULL DERIVED INSUFFICIENT ({d_agree:.0%} agreement)")
 
     # Save
     save_data = {

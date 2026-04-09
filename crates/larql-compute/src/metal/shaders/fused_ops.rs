@@ -1,13 +1,18 @@
 //! Fused operations — eliminate intermediate buffers and extra dispatches.
 //!
-//! Each fused kernel replaces 2 separate dispatches, saving ~0.1ms per call
-//! from encoder creation overhead. Over 21 layers × multiple fusions = significant.
+//! All norm kernels use cooperative SIMD reduction for sum_sq instead of
+//! redundant per-thread full-vector reads. This reduces memory reads from
+//! O(N²) to O(N) per dispatch.
 
 pub const SHADER: &str = r#"
-// Fused RMS norm + Q8 quantize: normalize then quantize in one pass.
-// Eliminates the f32 intermediate buffer between norm and quantize.
-// Input: f32 x[len], f32 weight[len]
-// Output: int8 q8[len], f32 scales[len/32]
+// ── Helper: cooperative RMS computation ──
+// Each thread computes partial sum_sq for its assigned elements,
+// then SIMD + threadgroup reduction produces the global rms.
+// Returns rms = 1/sqrt(mean(x²) + eps).
+// Requires threadgroup float tg_partial[8] declared by caller.
+
+// Fused RMS norm + Q8 quantize.
+// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
 kernel void rms_norm_q8(
     device const float* x      [[buffer(0)]],
     device const float* weight [[buffer(1)]],
@@ -16,123 +21,132 @@ kernel void rms_norm_q8(
     constant uint&      len    [[buffer(4)]],
     constant float&     eps    [[buffer(5)]],
     constant float&     offset [[buffer(6)]],
-    uint tid [[thread_position_in_grid]])
+    uint tid [[thread_position_in_grid]],
+    uint tg_sz [[threads_per_threadgroup]],
+    uint lane  [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]])
 {
     if (tid >= len) return;
 
-    // Step 1: RMS norm (all threads compute same sum — small vector)
-    float sum_sq = 0.0f;
-    for (uint i = 0; i < len; i++) {
-        sum_sq += x[i] * x[i];
+    // Cooperative sum_sq: each thread handles a stripe
+    float partial = 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
+        partial += x[i] * x[i];
     }
+    float sg_sum = simd_sum(partial);
+    threadgroup float tg_p[8];
+    if (lane == 0) tg_p[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float sum_sq = tg_p[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
+
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
     float normed = x[tid] * (weight[tid] + offset) * rms;
 
-    // Step 2: Q8 quantize within block
+    // Q8 quantize within block
     uint block = tid / 32;
     uint idx_in_block = tid % 32;
 
-    // Find max abs in this block (all 32 threads in block read same data)
-    float block_max = 0.0f;
-    for (uint i = 0; i < 32; i++) {
-        uint gi = block * 32 + i;
-        if (gi >= len) break;
-        float vi = x[gi] * (weight[gi] + offset) * rms;
-        float av = abs(vi);
-        if (av > block_max) block_max = av;
-    }
+    // Cooperative block max via SIMD
+    float my_abs = abs(normed);
+    // All 32 threads in a simdgroup cover one Q8 block (if aligned)
+    float block_max = simd_max(my_abs);
     float scale = block_max / 127.0f;
     float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
 
-    // Write scale (one thread per block)
-    if (idx_in_block == 0) {
-        scales[block] = scale;
-    }
-
-    // Write quantized value
+    if (idx_in_block == 0) scales[block] = scale;
     int q = int(round(normed * inv_scale));
-    q = clamp(q, -128, 127);
-    q8_out[tid] = char(q);
+    q8_out[tid] = char(clamp(q, -128, 127));
 }
 
-// Fused residual add + RMS norm: out = rms_norm(a + b, weight, offset)
-// Eliminates the intermediate residual buffer.
+// Fused residual add + RMS norm.
+// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
 kernel void residual_norm(
-    device const float* a      [[buffer(0)]],   // residual input
-    device const float* b      [[buffer(1)]],   // attention/FFN output to add
-    device const float* weight [[buffer(2)]],   // norm weight
-    device float*       out    [[buffer(3)]],   // normed output
+    device const float* a      [[buffer(0)]],
+    device const float* b      [[buffer(1)]],
+    device const float* weight [[buffer(2)]],
+    device float*       out    [[buffer(3)]],
     constant uint&      len    [[buffer(4)]],
     constant float&     eps    [[buffer(5)]],
     constant float&     offset [[buffer(6)]],
-    uint tid [[thread_position_in_grid]])
+    uint tid [[thread_position_in_grid]],
+    uint tg_sz [[threads_per_threadgroup]],
+    uint lane  [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]])
 {
     if (tid >= len) return;
 
-    // Step 1: residual add
     float h = a[tid] + b[tid];
 
-    // Step 2: RMS norm of the sum
-    float sum_sq = 0.0f;
-    for (uint i = 0; i < len; i++) {
+    // Cooperative sum_sq
+    float partial = 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
         float hi = a[i] + b[i];
-        sum_sq += hi * hi;
+        partial += hi * hi;
     }
+    float sg_sum = simd_sum(partial);
+    threadgroup float tg_p[8];
+    if (lane == 0) tg_p[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float sum_sq = tg_p[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
+
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
     out[tid] = h * (weight[tid] + offset) * rms;
 }
 
-// Fused residual add + RMS norm + Q8 quantize: the full inter-layer transition.
-// a + b → norm → Q8. Three ops in one kernel.
+// Fused residual add + RMS norm + Q8 quantize.
+// Grid: (len, 1, 1), TG: (min(256, len), 1, 1).
 kernel void residual_norm_q8(
     device const float* a      [[buffer(0)]],
     device const float* b      [[buffer(1)]],
     device const float* weight [[buffer(2)]],
     device char*        q8_out [[buffer(3)]],
     device float*       scales [[buffer(4)]],
-    device float*       f32_out[[buffer(5)]],   // also output the f32 sum (needed for next residual)
+    device float*       f32_out[[buffer(5)]],
     constant uint&      len    [[buffer(6)]],
     constant float&     eps    [[buffer(7)]],
     constant float&     offset [[buffer(8)]],
-    uint tid [[thread_position_in_grid]])
+    uint tid [[thread_position_in_grid]],
+    uint tg_sz [[threads_per_threadgroup]],
+    uint lane  [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]])
 {
     if (tid >= len) return;
 
-    // Step 1: residual add
     float h = a[tid] + b[tid];
-    f32_out[tid] = h;  // store for next layer's residual input
+    f32_out[tid] = h;
 
-    // Step 2: RMS norm
-    float sum_sq = 0.0f;
-    for (uint i = 0; i < len; i++) {
+    // Cooperative sum_sq
+    float partial = 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
         float hi = a[i] + b[i];
-        sum_sq += hi * hi;
+        partial += hi * hi;
     }
+    float sg_sum = simd_sum(partial);
+    threadgroup float tg_p[8];
+    if (lane == 0) tg_p[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float sum_sq = tg_p[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
+
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
     float normed = h * (weight[tid] + offset) * rms;
 
-    // Step 3: Q8 quantize
+    // Q8 quantize
     uint block = tid / 32;
     uint idx_in_block = tid % 32;
-
-    float block_max = 0.0f;
-    for (uint i = 0; i < 32; i++) {
-        uint gi = block * 32 + i;
-        if (gi >= len) break;
-        float hi = a[gi] + b[gi];
-        float vi = hi * (weight[gi] + offset) * rms;
-        float av = abs(vi);
-        if (av > block_max) block_max = av;
-    }
+    float my_abs = abs(normed);
+    float block_max = simd_max(my_abs);
     float scale = block_max / 127.0f;
     float inv_scale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
 
-    if (idx_in_block == 0) {
-        scales[block] = scale;
-    }
-
+    if (idx_in_block == 0) scales[block] = scale;
     int q = int(round(normed * inv_scale));
-    q = clamp(q, -128, 127);
-    q8_out[tid] = char(q);
+    q8_out[tid] = char(clamp(q, -128, 127));
 }
+
 "#;

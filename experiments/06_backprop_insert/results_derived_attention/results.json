@@ -17,14 +17,14 @@
   "bos_only": {
     "top1_correct": 0,
     "top5_correct": 0,
-    "agreement_top1": 0,
+    "agreement_top1": 3,
     "total_factual": 12,
     "total_all": 20
   },
   "derived": {
     "top1_correct": 0,
     "top5_correct": 0,
-    "agreement_top1": 0,
+    "agreement_top1": 3,
     "total_factual": 12,
     "total_all": 20
   }

@@ -43,7 +43,7 @@ kernel void scale_vector(
 }
 
 // RMS norm: out = x * (weight + offset) / sqrt(mean(x²) + eps)
-// offset=0 for standard models (Llama, Gemma 4), offset=1 for Gemma 2/3 (norm_weight_offset)
+// Uses cooperative SIMD reduction — O(N) reads instead of O(N²).
 kernel void rms_norm(
     device const float* x      [[buffer(0)]],
     device const float* weight [[buffer(1)]],
@@ -51,15 +51,26 @@ kernel void rms_norm(
     constant uint&      len    [[buffer(3)]],
     constant float&     eps    [[buffer(4)]],
     constant float&     offset [[buffer(5)]],
-    uint tid [[thread_position_in_grid]])
+    uint tid    [[thread_position_in_grid]],
+    uint tg_sz  [[threads_per_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]],
+    uint sg_id  [[simdgroup_index_in_threadgroup]])
 {
     if (tid >= len) return;
 
-    // Compute mean of squares (all threads read all values — small vector)
-    float sum_sq = 0.0f;
-    for (uint i = 0; i < len; i++) {
-        sum_sq += x[i] * x[i];
+    // Cooperative sum_sq: each thread sums a stripe, then SIMD reduce
+    float partial = 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
+        partial += x[i] * x[i];
     }
+    float sg_sum = simd_sum(partial);
+    threadgroup float tg_p[8];
+    if (lane == 0) tg_p[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float sum_sq = tg_p[0];
+    uint n_sg = (tg_sz + 31) / 32;
+    for (uint i = 1; i < n_sg; i++) sum_sq += tg_p[i];
+
     float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
     out[tid] = x[tid] * (weight[tid] + offset) * rms;
 }
