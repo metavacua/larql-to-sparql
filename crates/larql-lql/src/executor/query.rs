@@ -1,4 +1,4 @@
-/// Query executor: WALK, INFER, SELECT, DESCRIBE, EXPLAIN.
+//! Query executor: WALK, INFER, SELECT, DESCRIBE, EXPLAIN.
 
 use std::collections::HashMap;
 
@@ -25,13 +25,13 @@ impl Session {
         let top_k = top.unwrap_or(10) as usize;
 
         let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         if token_ids.is_empty() {
@@ -126,7 +126,7 @@ impl Session {
         if let super::Backend::Weight { weights, tokenizer, .. } = &self.backend {
             let encoding = tokenizer
                 .encode(prompt, true)
-                .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+                .map_err(|e| LqlError::exec("tokenize error", e))?;
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
             let start = std::time::Instant::now();
@@ -163,13 +163,13 @@ impl Session {
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load model weights: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         // 8092 features per layer is proven lossless (97.91% on France→Paris).
@@ -263,323 +263,62 @@ impl Session {
         mode: crate::ast::DescribeMode,
     ) -> Result<Vec<String>, LqlError> {
         let verbose = mode != crate::ast::DescribeMode::Brief;
+
         // MoE router-based DESCRIBE if available
         if let Some(router_result) = self.try_moe_describe(entity, band, layer, verbose)? {
             return Ok(router_result);
         }
 
+        // ── Phase 1: load embeddings + tokenizer, build query vector ──
         let (path, config, patched) = self.require_vindex()?;
+        let query = describe_build_query(entity, path)?;
 
-        let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
-        let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
-
-        let encoding = tokenizer
-            .encode(entity, false)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-
-        if token_ids.is_empty() {
+        if query.is_none() {
             return Ok(vec![format!("{entity}\n  (not found)")]);
         }
+        let query = query.unwrap();
 
-        let hidden = embed.shape()[1];
-        let query = if token_ids.len() == 1 {
-            let tok = token_ids[0];
-            embed.row(tok as usize).mapv(|v| v * embed_scale)
-        } else {
-            let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
-            for &tok in &token_ids {
-                let row = embed.row(tok as usize);
-                avg += &row.mapv(|v| v * embed_scale);
-            }
-            avg /= token_ids.len() as f32;
-            avg
-        };
+        // ── Phase 2: pick scan layers from band/layer filter ──
+        let bands = describe_resolve_bands(config);
+        let scan_layers = describe_scan_layers(&bands, &patched.loaded_layers(), band, layer);
 
-        // Use layer_bands from config, or look up by family, or scan all layers
-        let last = config.num_layers.saturating_sub(1);
-        let bands = config.layer_bands.clone()
-            .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
-            .unwrap_or(larql_vindex::LayerBands {
-                syntax: (0, last),
-                knowledge: (0, last),
-                output: (0, last),
-            });
-
-        let all_layers = patched.loaded_layers();
-
-        // Apply band + layer filter using config-driven boundaries
-        let scan_layers: Vec<usize> = if let Some(l) = layer {
-            vec![l as usize]
-        } else {
-            match band {
-                Some(crate::ast::LayerBand::Syntax) => {
-                    all_layers.iter().copied()
-                        .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
-                        .collect()
-                }
-                Some(crate::ast::LayerBand::Knowledge) => {
-                    all_layers.iter().copied()
-                        .filter(|l| *l >= bands.knowledge.0 && *l <= bands.knowledge.1)
-                        .collect()
-                }
-                Some(crate::ast::LayerBand::Output) => {
-                    all_layers.iter().copied()
-                        .filter(|l| *l >= bands.output.0 && *l <= bands.output.1)
-                        .collect()
-                }
-                Some(crate::ast::LayerBand::All) | None => all_layers,
-            }
-        };
-
+        // ── Phase 3: walk + collect edges ──
         let trace = patched.walk(&query, &scan_layers, 20);
+        let edges = describe_collect_edges(&trace, entity);
 
-        struct EdgeInfo {
-            gate: f32,
-            layers: Vec<usize>,
-            count: usize,
-            original: String,
-            also: Vec<String>,
-            best_layer: usize,
-            best_feature: usize,
-        }
-
-        let entity_lower = entity.to_lowercase();
-        let mut edges: HashMap<String, EdgeInfo> = HashMap::new();
-        let gate_threshold = 5.0_f32;
-
-        for (layer_idx, hits) in &trace.layers {
-            for hit in hits {
-                if hit.gate_score < gate_threshold {
-                    continue;
-                }
-
-                let tok = &hit.meta.top_token;
-                if !is_content_token(tok) {
-                    continue;
-                }
-                if tok.to_lowercase() == entity_lower {
-                    continue;
-                }
-
-                let also_readable: Vec<String> = hit.meta.top_k.iter()
-                    .filter(|t| {
-                        t.token.to_lowercase() != tok.to_lowercase()
-                            && t.token.to_lowercase() != entity_lower
-                            && super::helpers::is_readable_token(&t.token)
-                            && t.logit > 0.0
-                    })
-                    .take(5)
-                    .map(|t| t.token.clone())
-                    .collect();
-
-                let also: Vec<String> = also_readable.iter()
-                    .filter(|t| is_content_token(t))
-                    .take(3)
-                    .cloned()
-                    .collect();
-
-                // Coherence filter: skip weak edges with no content secondaries
-                if also.is_empty() && !also_readable.is_empty() && hit.gate_score < 20.0 {
-                    continue;
-                }
-
-                let key = tok.to_lowercase();
-                let entry = edges.entry(key).or_insert_with(|| {
-                    EdgeInfo {
-                        gate: 0.0,
-                        layers: Vec::new(),
-                        count: 0,
-                        original: tok.to_string(),
-                        also,
-                        best_layer: *layer_idx,
-                        best_feature: hit.feature,
-                    }
-                });
-
-                if hit.gate_score > entry.gate {
-                    entry.gate = hit.gate_score;
-                    entry.best_layer = *layer_idx;
-                    entry.best_feature = hit.feature;
-                }
-
-                if !entry.layers.contains(layer_idx) {
-                    entry.layers.push(*layer_idx);
-                }
-                entry.count += 1;
-            }
-        }
-
-        let mut ranked: Vec<&EdgeInfo> = edges.values().collect();
-        ranked.sort_by(|a, b| b.gate.partial_cmp(&a.gate).unwrap_or(std::cmp::Ordering::Equal));
-
+        // ── Phase 4: format ──
         let mut out = vec![entity.to_string()];
-
-        if ranked.is_empty() {
+        if edges.is_empty() {
             out.push("  (no edges found)".into());
             return Ok(out);
         }
 
-        let classifier = self.relation_classifier();
-
-        // Resolve labels for all edges
-        struct FormattedEdge {
-            label: String,       // clean probe label, raw cluster label, or empty
-            is_probe: bool,
-            is_cluster: bool,
-            target: String,
-            gate: f32,
-            primary_layer: usize,
-            layers: Vec<usize>,
-            count: usize,
-            also: Vec<String>,
-        }
-
-        let formatted: Vec<FormattedEdge> = ranked.iter().map(|info| {
-            let (label, is_probe, is_cluster) = if let Some(rc) = classifier {
-                if let Some(lbl) = rc.label_for_feature(info.best_layer, info.best_feature) {
-                    let probe = rc.is_probe_label(info.best_layer, info.best_feature);
-                    (lbl.to_string(), probe, !probe)
-                } else {
-                    (String::new(), false, false)
-                }
-            } else {
-                (String::new(), false, false)
-            };
-            FormattedEdge {
-                label,
-                is_probe,
-                is_cluster,
-                target: info.original.clone(),
-                gate: info.gate,
-                primary_layer: info.best_layer,
-                layers: info.layers.clone(),
-                count: info.count,
-                also: info.also.clone(),
-            }
-        }).collect();
-
-        // Apply RELATIONS ONLY filter
-        let formatted: Vec<_> = if relations_only {
-            formatted.into_iter().filter(|e| e.is_probe || e.is_cluster).collect()
-        } else {
-            formatted
-        };
-
-        // Split into bands
-        let mut syntax = Vec::new();
-        let mut knowledge = Vec::new();
-        let mut output_band = Vec::new();
-
-        for edge in &formatted {
-            let primary = edge.primary_layer;
-            if primary >= bands.syntax.0 && primary <= bands.syntax.1 {
-                syntax.push(edge);
-            } else if primary >= bands.knowledge.0 && primary <= bands.knowledge.1 {
-                knowledge.push(edge);
-            } else if primary >= bands.output.0 && primary <= bands.output.1 {
-                output_band.push(edge);
-            } else {
-                // Layer outside any band — put in knowledge as fallback
-                knowledge.push(edge);
-            }
-        }
-
-        // ── Format edges ──
-        // Verbose (default): relation labels in brackets, also-tokens, layer ranges, multi-layer hits.
-        //   Probe labels shown as [relation]. Unlabelled features shown as [—].
-        // Brief: compact top edges only, primary layer, no also-tokens.
-        // Raw: like verbose but no probe/cluster labels — pure model signal.
+        let formatted = describe_format_and_split(
+            &edges,
+            self.relation_classifier(),
+            relations_only,
+            &bands,
+        );
 
         let max_edges = if mode == crate::ast::DescribeMode::Brief { 10 } else { 30 };
 
-        let format_edge = |edge: &FormattedEdge| -> String {
-            match mode {
-                crate::ast::DescribeMode::Verbose => {
-                    // Show relation label in brackets: [capital], [language], or [—]
-                    let bracket_label = if edge.label.is_empty() {
-                        format!("{:<14}", "[—]")
-                    } else {
-                        let tag = format!("[{}]", edge.label);
-                        format!("{:<14}", tag)
-                    };
-
-                    let min_l = *edge.layers.iter().min().unwrap_or(&0);
-                    let max_l = *edge.layers.iter().max().unwrap_or(&0);
-                    let layer_str = if min_l == max_l {
-                        format!("L{}", min_l)
-                    } else {
-                        format!("L{}-{}", min_l, max_l)
-                    };
-
-                    let also = if edge.also.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  also: {}", edge.also.join(", "))
-                    };
-
-                    format!(
-                        "    {} → {:20} {:>7.1}  {:<8} {}x{}",
-                        bracket_label, edge.target, edge.gate, layer_str,
-                        edge.count, also,
-                    )
-                }
-                crate::ast::DescribeMode::Brief => {
-                    // Compact: probe labels only, primary layer, no also-tokens
-                    let label = if edge.is_probe {
-                        format!("{:<12}", edge.label)
-                    } else {
-                        format!("{:<12}", "")
-                    };
-
-                    format!(
-                        "    {} → {:20} {:>7.1}  L{:<3}",
-                        label, edge.target, edge.gate, edge.primary_layer,
-                    )
-                }
-                crate::ast::DescribeMode::Raw => {
-                    // No labels — pure model signal with also-tokens and layer ranges
-                    let min_l = *edge.layers.iter().min().unwrap_or(&0);
-                    let max_l = *edge.layers.iter().max().unwrap_or(&0);
-                    let layer_str = if min_l == max_l {
-                        format!("L{}", min_l)
-                    } else {
-                        format!("L{}-{}", min_l, max_l)
-                    };
-
-                    let also = if edge.also.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  also: {}", edge.also.join(", "))
-                    };
-
-                    format!(
-                        "                 → {:20} {:>7.1}  {:<8} {}x{}",
-                        edge.target, edge.gate, layer_str,
-                        edge.count, also,
-                    )
-                }
-            }
-        };
-
-        if !syntax.is_empty() {
+        if !formatted.syntax.is_empty() {
             out.push(format!("  Syntax (L{}-{}):", bands.syntax.0, bands.syntax.1));
-            for edge in syntax.iter().take(max_edges) {
-                out.push(format_edge(edge));
+            for edge in formatted.syntax.iter().take(max_edges) {
+                out.push(format_describe_edge(edge, mode));
             }
         }
-        if !knowledge.is_empty() {
+        if !formatted.knowledge.is_empty() {
             out.push(format!("  Edges (L{}-{}):", bands.knowledge.0, bands.knowledge.1));
-            for edge in knowledge.iter().take(max_edges) {
-                out.push(format_edge(edge));
+            for edge in formatted.knowledge.iter().take(max_edges) {
+                out.push(format_describe_edge(edge, mode));
             }
         }
-        if !output_band.is_empty() {
+        if !formatted.output_band.is_empty() {
             out.push(format!("  Output (L{}-{}):", bands.output.0, bands.output.1));
-            for edge in output_band.iter().take(if mode == crate::ast::DescribeMode::Brief { 5 } else { max_edges }) {
-                out.push(format_edge(edge));
+            let cap = if mode == crate::ast::DescribeMode::Brief { 5 } else { max_edges };
+            for edge in formatted.output_band.iter().take(cap) {
+                out.push(format_describe_edge(edge, mode));
             }
         }
 
@@ -641,18 +380,16 @@ impl Session {
         // then filter by relation label. This finds "capital features that
         // activate for France" rather than "capital features whose top token
         // contains France".
-        if entity_filter.is_some() && relation_filter.is_some() {
-            let entity = entity_filter.unwrap();
-            let rel = relation_filter.unwrap();
+        if let (Some(entity), Some(rel)) = (entity_filter, relation_filter) {
 
             let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
             let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
             let encoding = tokenizer
                 .encode(entity, false)
-                .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+                .map_err(|e| LqlError::exec("tokenize error", e))?;
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
             if !token_ids.is_empty() {
@@ -812,13 +549,13 @@ impl Session {
         let limit = limit.unwrap_or(20) as usize;
 
         let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let encoding = tokenizer
             .encode(nc.entity.as_str(), false)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         if token_ids.is_empty() {
@@ -876,13 +613,13 @@ impl Session {
         let (path, _config, patched) = self.require_vindex()?;
 
         let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         if token_ids.is_empty() {
@@ -943,64 +680,41 @@ impl Session {
         let top_k = top.unwrap_or(5) as usize;
         let per_layer = top.unwrap_or(3) as usize;
 
-        // Weight backend: dense inference trace (no feature labels)
+        // Weight backend has no feature labels — short-circuit to a
+        // dense-only summary.
         if let super::Backend::Weight { weights, tokenizer, .. } = &self.backend {
-            let encoding = tokenizer
-                .encode(prompt, true)
-                .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
-            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-
-            let start = std::time::Instant::now();
-            let result = larql_inference::predict(weights, tokenizer, &token_ids, top_k);
-            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            let mut out = Vec::new();
-            out.push(format!("Inference trace for {:?} (dense — no vindex):", prompt));
-            out.push(format!(
-                "Prediction: {} ({:.2}%) in {:.0}ms",
-                result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?"),
-                result.predictions.first().map(|(_, p)| p * 100.0).unwrap_or(0.0),
-                elapsed_ms,
-            ));
-            out.push(String::new());
-            out.push("Note: no per-feature trace without a vindex. EXTRACT for full trace.".into());
-            return Ok(out);
+            return self.exec_infer_trace_dense(weights, tokenizer, prompt, top_k);
         }
 
-        // Vindex backend: walk FFN with full feature trace
+        // ── Phase 1: load model weights and tokenise ──
         let (path, config, patched) = self.require_vindex()?;
-
         if !config.has_model_weights {
             return Err(LqlError::Execution(
                 "EXPLAIN INFER requires model weights. Rebuild with WITH INFERENCE.".into(),
             ));
         }
-
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load model weights: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
-
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        // Decode tokens for attention display (None for special tokens like BOS/EOS)
         let token_strs: Vec<Option<String>> = if with_attention {
-            token_ids.iter().map(|&id| {
-                larql_inference::decode_token(&tokenizer, id)
-            }).collect()
+            token_ids
+                .iter()
+                .map(|&id| larql_inference::decode_token(&tokenizer, id))
+                .collect()
         } else {
             Vec::new()
         };
 
-        // PatchedVindex implements GateIndex — INSERT/DELETE/UPDATE affects inference.
+        // ── Phase 2: forward pass (with optional attention capture) ──
         let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(&weights, patched, 8092);
         let start = std::time::Instant::now();
-
-        // Use attention-capturing forward pass when requested
         let (predictions, attention_captures, lens_residuals) = if with_attention {
             let r = larql_inference::predict_with_ffn_attention(
                 &weights, &tokenizer, &token_ids, top_k, &walk_ffn,
@@ -1014,68 +728,16 @@ impl Session {
         };
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-        // Build attention lookup: layer → top attended tokens
-        let attention_map: std::collections::HashMap<usize, Vec<(String, f32)>> = if with_attention {
-            let mut map = std::collections::HashMap::new();
-            for cap in &attention_captures {
-                // Average attention across all heads
-                let n_heads = cap.weights.heads.len();
-                if n_heads == 0 || token_strs.is_empty() { continue; }
-                let seq_len = cap.weights.heads[0].len();
-                let mut avg = vec![0.0f32; seq_len];
-                for head in &cap.weights.heads {
-                    for (j, &w) in head.iter().enumerate() {
-                        avg[j] += w;
-                    }
-                }
-                for v in avg.iter_mut() { *v /= n_heads as f32; }
-                // Pair with content tokens only (skip BOS/EOS/special), sort by weight, take top 3
-                let mut pairs: Vec<(String, f32)> = avg.iter().copied().enumerate()
-                    .filter_map(|(j, w)| {
-                        let tok = token_strs.get(j)?.as_ref()?;
-                        Some((tok.trim().to_string(), w))
-                    })
-                    .collect();
-                pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                pairs.truncate(3);
-                map.insert(cap.layer, pairs);
-            }
-            map
-        } else {
-            std::collections::HashMap::new()
-        };
-
-        // Build logit lens: layer → (top_token, probability)
-        let lens_map: std::collections::HashMap<usize, (String, f64)> = if with_attention {
-            lens_residuals.iter()
-                .filter_map(|(layer, residual)| {
-                    let pred = larql_inference::logit_lens_top1(&weights, &tokenizer, residual)?;
-                    Some((*layer, pred))
-                })
-                .collect()
-        } else {
-            std::collections::HashMap::new()
-        };
+        // ── Phase 3: side-tables for the rendering loop ──
+        let attention_map = build_attention_map(&attention_captures, &token_strs, with_attention);
+        let lens_map = build_lens_map(&lens_residuals, &weights, &tokenizer, with_attention);
 
         let trace = walk_ffn.take_trace();
         let classifier = self.relation_classifier();
+        let bands = describe_resolve_bands(config);
+        let layer_range = band_to_layer_range(band, &bands);
 
-        // Resolve band to layer range for filtering
-        let last = config.num_layers.saturating_sub(1);
-        let bands = config.layer_bands.clone()
-            .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
-            .unwrap_or(larql_vindex::LayerBands {
-                syntax: (0, last),
-                knowledge: (0, last),
-                output: (0, last),
-            });
-        let layer_range: Option<(usize, usize)> = match band {
-            Some(crate::ast::LayerBand::Syntax) => Some(bands.syntax),
-            Some(crate::ast::LayerBand::Knowledge) => Some(bands.knowledge),
-            Some(crate::ast::LayerBand::Output) => Some(bands.output),
-            Some(crate::ast::LayerBand::All) | None => None,
-        };
-
+        // ── Phase 4: format header ──
         let band_label = match band {
             Some(crate::ast::LayerBand::Syntax) => " (syntax)",
             Some(crate::ast::LayerBand::Knowledge) => " (knowledge)",
@@ -1093,6 +755,7 @@ impl Session {
         ));
         out.push(String::new());
 
+        // ── Phase 5: per-layer rendering ──
         for (layer, hits) in &trace.layers {
             if hits.is_empty() {
                 continue;
@@ -1102,106 +765,51 @@ impl Session {
                     continue;
                 }
             }
-            // When filtering to relations only, re-sort so positive gates
-            // (features contributing to the prediction) rank above negative
-            // gates of equal magnitude.
-            let labelled_hits: Vec<_> = if relations_only {
-                let mut lh: Vec<_> = hits.iter()
-                    .filter(|hit| {
-                        classifier
-                            .and_then(|rc| rc.label_for_feature(*layer, hit.feature))
-                            .map(|l| !l.is_empty())
-                            .unwrap_or(false)
-                    })
-                    .collect();
-                // Positive gate first (descending), then negative by magnitude
-                lh.sort_by(|a, b| {
-                    let a_pos = a.gate_score > 0.0;
-                    let b_pos = b.gate_score > 0.0;
-                    match (a_pos, b_pos) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => b.gate_score.abs().partial_cmp(&a.gate_score.abs())
-                            .unwrap_or(std::cmp::Ordering::Equal),
-                    }
-                });
-                lh
-            } else {
-                hits.iter().collect()
-            };
-
-            if with_attention {
-                // Compact single-line format: feature + attention + logit lens
-                let hit = labelled_hits.first();
-                let feature_part = if let Some(hit) = hit {
-                    let label = classifier
-                        .and_then(|rc| rc.label_for_feature(*layer, hit.feature))
-                        .unwrap_or("");
-                    if relations_only && label.is_empty() {
-                        // Skip unlabelled when relations_only
-                        None
-                    } else {
-                        let top_token = hit.meta.top_token.trim();
-                        let name = if !label.is_empty() { label } else { top_token };
-                        Some(format!("{:<14} {:+.1}", name, hit.gate_score))
-                    }
-                } else {
-                    None
-                };
-                let empty = format!("{:19}", "");
-                let feature_str = feature_part.as_deref().unwrap_or(&empty);
-
-                let attn_part = attention_map.get(layer)
-                    .and_then(|attn| attn.first())
-                    .map(|(tok, w)| format!("{}({:.0}%)", tok, w * 100.0))
-                    .unwrap_or_default();
-
-                let lens_part = lens_map.get(layer)
-                    .map(|(tok, prob)| format!("{} ({:.1}%)", tok, prob * 100.0))
-                    .unwrap_or_default();
-
-                if feature_part.is_some() || !lens_part.is_empty() {
-                    out.push(format!(
-                        "  L{:2}  {:<19}  {:<16} → {}",
-                        layer, feature_str, attn_part, lens_part,
-                    ));
-                }
-            } else {
-                // Standard multi-line format without attention
-                let mut shown = 0;
-                for hit in &labelled_hits {
-                    if shown >= per_layer {
-                        break;
-                    }
-                    let label = classifier
-                        .and_then(|rc| rc.label_for_feature(*layer, hit.feature))
-                        .unwrap_or("");
-                    if relations_only && label.is_empty() {
-                        continue;
-                    }
-                    shown += 1;
-                    let label_str = if label.is_empty() {
-                        format!("{:14}", "")
-                    } else {
-                        format!("{:<14}", label)
-                    };
-                    let top_token = hit.meta.top_token.trim();
-                    let down_top: String = hit
-                        .meta
-                        .top_k
-                        .iter()
-                        .take(3)
-                        .map(|t| t.token.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    out.push(format!(
-                        "  L{:2}: {} F{:<5} gate={:+.1}  → {:15} [{}]",
-                        layer, label_str, hit.feature, hit.gate_score, top_token, down_top,
-                    ));
-                }
-            }
+            render_trace_layer(
+                &mut out,
+                *layer,
+                hits,
+                classifier,
+                relations_only,
+                per_layer,
+                with_attention,
+                &attention_map,
+                &lens_map,
+            );
         }
 
+        Ok(out)
+    }
+
+    /// EXPLAIN INFER on a `Backend::Weight` (no vindex): produces a dense
+    /// inference summary with no feature trace, since there are no
+    /// gate vectors / down meta to attribute.
+    fn exec_infer_trace_dense(
+        &self,
+        weights: &larql_inference::ModelWeights,
+        tokenizer: &larql_inference::tokenizers::Tokenizer,
+        prompt: &str,
+        top_k: usize,
+    ) -> Result<Vec<String>, LqlError> {
+        let encoding = tokenizer
+            .encode(prompt, true)
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
+        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+
+        let start = std::time::Instant::now();
+        let result = larql_inference::predict(weights, tokenizer, &token_ids, top_k);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        let mut out = Vec::new();
+        out.push(format!("Inference trace for {:?} (dense — no vindex):", prompt));
+        out.push(format!(
+            "Prediction: {} ({:.2}%) in {:.0}ms",
+            result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?"),
+            result.predictions.first().map(|(_, p)| p * 100.0).unwrap_or(0.0),
+            elapsed_ms,
+        ));
+        out.push(String::new());
+        out.push("Note: no per-feature trace without a vindex. EXTRACT for full trace.".into());
         Ok(out)
     }
 
@@ -1230,12 +838,12 @@ impl Session {
         let (path, config, _) = self.require_vindex()?;
 
         let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         let encoding = tokenizer.encode(entity, false)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         if token_ids.is_empty() {
             return Ok(Some(vec![format!("{entity}\n  (not found)")]));
@@ -1348,5 +956,544 @@ impl Session {
         out.push(format!("\n  {:.0}ms", elapsed_ms));
 
         Ok(Some(out))
+    }
+}
+
+// ── DESCRIBE helpers ────────────────────────────────────────────────────
+//
+// `exec_describe` is a five-phase pipeline (load query → resolve bands →
+// walk → collect edges → format). The helpers below split each phase out
+// of the main function so the orchestration reads top-down.
+
+/// Tokenise `entity` and build a query vector by averaging its token
+/// embeddings (single tokens get their embed row directly). Returns
+/// `Ok(None)` when the entity tokenises to nothing — the caller emits
+/// the "(not found)" line.
+fn describe_build_query(
+    entity: &str,
+    path: &std::path::Path,
+) -> Result<Option<larql_vindex::ndarray::Array1<f32>>, LqlError> {
+    let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
+        .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+        .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
+
+    let encoding = tokenizer
+        .encode(entity, false)
+        .map_err(|e| LqlError::exec("tokenize error", e))?;
+    let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+
+    if token_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let hidden = embed.shape()[1];
+    let query = if token_ids.len() == 1 {
+        let tok = token_ids[0];
+        embed.row(tok as usize).mapv(|v| v * embed_scale)
+    } else {
+        let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
+        for &tok in &token_ids {
+            let row = embed.row(tok as usize);
+            avg += &row.mapv(|v| v * embed_scale);
+        }
+        avg /= token_ids.len() as f32;
+        avg
+    };
+    Ok(Some(query))
+}
+
+/// Resolve the layer-band boundaries from the vindex config, with a
+/// family-based default and a final whole-range fallback.
+fn describe_resolve_bands(config: &larql_vindex::VindexConfig) -> larql_vindex::LayerBands {
+    let last = config.num_layers.saturating_sub(1);
+    config
+        .layer_bands
+        .clone()
+        .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
+        .unwrap_or(larql_vindex::LayerBands {
+            syntax: (0, last),
+            knowledge: (0, last),
+            output: (0, last),
+        })
+}
+
+/// Filter `all_layers` down to those covered by the requested band /
+/// explicit layer.
+fn describe_scan_layers(
+    bands: &larql_vindex::LayerBands,
+    all_layers: &[usize],
+    band: Option<crate::ast::LayerBand>,
+    layer: Option<u32>,
+) -> Vec<usize> {
+    if let Some(l) = layer {
+        return vec![l as usize];
+    }
+    match band {
+        Some(crate::ast::LayerBand::Syntax) => all_layers
+            .iter()
+            .copied()
+            .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
+            .collect(),
+        Some(crate::ast::LayerBand::Knowledge) => all_layers
+            .iter()
+            .copied()
+            .filter(|l| *l >= bands.knowledge.0 && *l <= bands.knowledge.1)
+            .collect(),
+        Some(crate::ast::LayerBand::Output) => all_layers
+            .iter()
+            .copied()
+            .filter(|l| *l >= bands.output.0 && *l <= bands.output.1)
+            .collect(),
+        Some(crate::ast::LayerBand::All) | None => all_layers.to_vec(),
+    }
+}
+
+/// Per-target accumulator for the walk-collected edges.
+struct DescribeEdge {
+    gate: f32,
+    layers: Vec<usize>,
+    count: usize,
+    original: String,
+    also: Vec<String>,
+    best_layer: usize,
+    best_feature: usize,
+}
+
+/// A formatted edge ready to be rendered into the output buffer. Built
+/// from a `DescribeEdge` by `describe_format_and_split` after label
+/// resolution and the RELATIONS ONLY filter.
+struct FormattedEdge {
+    /// Probe label, raw cluster label, or empty when no label is known.
+    label: String,
+    is_probe: bool,
+    is_cluster: bool,
+    target: String,
+    gate: f32,
+    primary_layer: usize,
+    layers: Vec<usize>,
+    count: usize,
+    also: Vec<String>,
+}
+
+/// The three formatted-edge buckets returned by
+/// `describe_format_and_split`, one per layer band.
+struct DescribeBands {
+    syntax: Vec<FormattedEdge>,
+    knowledge: Vec<FormattedEdge>,
+    output_band: Vec<FormattedEdge>,
+}
+
+/// Walk the trace, deduplicate by lowercased target token, and apply
+/// content / coherence filters. The output is sorted descending by gate.
+fn describe_collect_edges(
+    trace: &larql_vindex::WalkTrace,
+    entity: &str,
+) -> Vec<DescribeEdge> {
+    let entity_lower = entity.to_lowercase();
+    let gate_threshold = 5.0_f32;
+    let mut edges: HashMap<String, DescribeEdge> = HashMap::new();
+
+    for (layer_idx, hits) in &trace.layers {
+        for hit in hits {
+            if hit.gate_score < gate_threshold {
+                continue;
+            }
+            let tok = &hit.meta.top_token;
+            if !is_content_token(tok) {
+                continue;
+            }
+            if tok.to_lowercase() == entity_lower {
+                continue;
+            }
+
+            let also_readable: Vec<String> = hit
+                .meta
+                .top_k
+                .iter()
+                .filter(|t| {
+                    t.token.to_lowercase() != tok.to_lowercase()
+                        && t.token.to_lowercase() != entity_lower
+                        && super::helpers::is_readable_token(&t.token)
+                        && t.logit > 0.0
+                })
+                .take(5)
+                .map(|t| t.token.clone())
+                .collect();
+
+            let also: Vec<String> = also_readable
+                .iter()
+                .filter(|t| is_content_token(t))
+                .take(3)
+                .cloned()
+                .collect();
+
+            // Coherence filter: skip weak edges with no content secondaries
+            if also.is_empty() && !also_readable.is_empty() && hit.gate_score < 20.0 {
+                continue;
+            }
+
+            let key = tok.to_lowercase();
+            let entry = edges.entry(key).or_insert_with(|| DescribeEdge {
+                gate: 0.0,
+                layers: Vec::new(),
+                count: 0,
+                original: tok.to_string(),
+                also,
+                best_layer: *layer_idx,
+                best_feature: hit.feature,
+            });
+
+            if hit.gate_score > entry.gate {
+                entry.gate = hit.gate_score;
+                entry.best_layer = *layer_idx;
+                entry.best_feature = hit.feature;
+            }
+            if !entry.layers.contains(layer_idx) {
+                entry.layers.push(*layer_idx);
+            }
+            entry.count += 1;
+        }
+    }
+
+    let mut ranked: Vec<DescribeEdge> = edges.into_values().collect();
+    ranked.sort_by(|a, b| {
+        b.gate
+            .partial_cmp(&a.gate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    ranked
+}
+
+/// Resolve relation labels from the optional `RelationClassifier`, apply
+/// the RELATIONS ONLY filter, and split the resulting `FormattedEdge`s
+/// into syntax / knowledge / output buckets according to which band the
+/// edge's primary layer falls in.
+fn describe_format_and_split(
+    edges: &[DescribeEdge],
+    classifier: Option<&crate::relations::RelationClassifier>,
+    relations_only: bool,
+    bands: &larql_vindex::LayerBands,
+) -> DescribeBands {
+    let formatted: Vec<FormattedEdge> = edges
+        .iter()
+        .map(|info| {
+            let (label, is_probe, is_cluster) = if let Some(rc) = classifier {
+                if let Some(lbl) = rc.label_for_feature(info.best_layer, info.best_feature) {
+                    let probe = rc.is_probe_label(info.best_layer, info.best_feature);
+                    (lbl.to_string(), probe, !probe)
+                } else {
+                    (String::new(), false, false)
+                }
+            } else {
+                (String::new(), false, false)
+            };
+            FormattedEdge {
+                label,
+                is_probe,
+                is_cluster,
+                target: info.original.clone(),
+                gate: info.gate,
+                primary_layer: info.best_layer,
+                layers: info.layers.clone(),
+                count: info.count,
+                also: info.also.clone(),
+            }
+        })
+        .filter(|e| !relations_only || e.is_probe || e.is_cluster)
+        .collect();
+
+    let mut out = DescribeBands {
+        syntax: Vec::new(),
+        knowledge: Vec::new(),
+        output_band: Vec::new(),
+    };
+    for edge in formatted {
+        let primary = edge.primary_layer;
+        if primary >= bands.syntax.0 && primary <= bands.syntax.1 {
+            out.syntax.push(edge);
+        } else if primary >= bands.knowledge.0 && primary <= bands.knowledge.1 {
+            out.knowledge.push(edge);
+        } else if primary >= bands.output.0 && primary <= bands.output.1 {
+            out.output_band.push(edge);
+        } else {
+            // Layer outside any band — fall back to knowledge.
+            out.knowledge.push(edge);
+        }
+    }
+    out
+}
+
+/// Render a single `FormattedEdge` into a single line of DESCRIBE output.
+/// The three modes share the same shape:
+///
+///   - **Verbose** (default): `[relation]    → target  gate  L20-L27  Nx  also: ...`
+///   - **Brief**: compact `relation    → target  gate  L26`, no also-tokens
+///   - **Raw**: no labels, otherwise like Verbose
+fn format_describe_edge(edge: &FormattedEdge, mode: crate::ast::DescribeMode) -> String {
+    match mode {
+        crate::ast::DescribeMode::Verbose => {
+            let bracket_label = if edge.label.is_empty() {
+                format!("{:<14}", "[—]")
+            } else {
+                let tag = format!("[{}]", edge.label);
+                format!("{:<14}", tag)
+            };
+            let (min_l, max_l) = layer_range(&edge.layers);
+            let layer_str = if min_l == max_l {
+                format!("L{min_l}")
+            } else {
+                format!("L{min_l}-{max_l}")
+            };
+            let also = format_also(&edge.also);
+            format!(
+                "    {} → {:20} {:>7.1}  {:<8} {}x{}",
+                bracket_label, edge.target, edge.gate, layer_str, edge.count, also,
+            )
+        }
+        crate::ast::DescribeMode::Brief => {
+            let label = if edge.is_probe {
+                format!("{:<12}", edge.label)
+            } else {
+                format!("{:<12}", "")
+            };
+            format!(
+                "    {} → {:20} {:>7.1}  L{:<3}",
+                label, edge.target, edge.gate, edge.primary_layer,
+            )
+        }
+        crate::ast::DescribeMode::Raw => {
+            let (min_l, max_l) = layer_range(&edge.layers);
+            let layer_str = if min_l == max_l {
+                format!("L{min_l}")
+            } else {
+                format!("L{min_l}-{max_l}")
+            };
+            let also = format_also(&edge.also);
+            format!(
+                "                 → {:20} {:>7.1}  {:<8} {}x{}",
+                edge.target, edge.gate, layer_str, edge.count, also,
+            )
+        }
+    }
+}
+
+fn layer_range(layers: &[usize]) -> (usize, usize) {
+    let min_l = *layers.iter().min().unwrap_or(&0);
+    let max_l = *layers.iter().max().unwrap_or(&0);
+    (min_l, max_l)
+}
+
+fn format_also(also: &[String]) -> String {
+    if also.is_empty() {
+        String::new()
+    } else {
+        format!("  also: {}", also.join(", "))
+    }
+}
+
+// ── EXPLAIN INFER helpers ───────────────────────────────────────────────
+//
+// `exec_infer_trace` is a five-phase pipeline (load → forward → side
+// tables → header → render). The helpers below split the side-table
+// builders and the per-layer rendering loop out of the main function.
+
+/// Build a `layer → top-3 attended (token, weight)` map from the
+/// captured attention weights. Returns an empty map when
+/// `with_attention` is false. Averages across all heads, drops special
+/// tokens (BOS/EOS) by skipping `None` entries from `decode_token`, and
+/// truncates to the top 3 by weight.
+fn build_attention_map(
+    captures: &[larql_inference::LayerAttentionCapture],
+    token_strs: &[Option<String>],
+    with_attention: bool,
+) -> std::collections::HashMap<usize, Vec<(String, f32)>> {
+    if !with_attention {
+        return std::collections::HashMap::new();
+    }
+    let mut map = std::collections::HashMap::new();
+    for cap in captures {
+        let n_heads = cap.weights.heads.len();
+        if n_heads == 0 || token_strs.is_empty() {
+            continue;
+        }
+        let seq_len = cap.weights.heads[0].len();
+        let mut avg = vec![0.0f32; seq_len];
+        for head in &cap.weights.heads {
+            for (j, &w) in head.iter().enumerate() {
+                avg[j] += w;
+            }
+        }
+        for v in avg.iter_mut() {
+            *v /= n_heads as f32;
+        }
+        let mut pairs: Vec<(String, f32)> = avg
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(j, w)| {
+                let tok = token_strs.get(j)?.as_ref()?;
+                Some((tok.trim().to_string(), w))
+            })
+            .collect();
+        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.truncate(3);
+        map.insert(cap.layer, pairs);
+    }
+    map
+}
+
+/// Build a `layer → (top_token, probability)` map by running the logit
+/// lens on each captured residual. Returns empty when `with_attention`
+/// is false (only the attention path captures intermediate residuals).
+fn build_lens_map(
+    lens_residuals: &[(usize, Vec<f32>)],
+    weights: &larql_inference::ModelWeights,
+    tokenizer: &larql_inference::tokenizers::Tokenizer,
+    with_attention: bool,
+) -> std::collections::HashMap<usize, (String, f64)> {
+    if !with_attention {
+        return std::collections::HashMap::new();
+    }
+    lens_residuals
+        .iter()
+        .filter_map(|(layer, residual)| {
+            let pred = larql_inference::logit_lens_top1(weights, tokenizer, residual.as_slice())?;
+            Some((*layer, pred))
+        })
+        .collect()
+}
+
+/// Resolve a `LayerBand` to a `(lo, hi)` filter on the trace layers.
+/// Returns `None` for `All` / no band — the caller treats that as
+/// "include every layer".
+fn band_to_layer_range(
+    band: Option<crate::ast::LayerBand>,
+    bands: &larql_vindex::LayerBands,
+) -> Option<(usize, usize)> {
+    match band {
+        Some(crate::ast::LayerBand::Syntax) => Some(bands.syntax),
+        Some(crate::ast::LayerBand::Knowledge) => Some(bands.knowledge),
+        Some(crate::ast::LayerBand::Output) => Some(bands.output),
+        Some(crate::ast::LayerBand::All) | None => None,
+    }
+}
+
+/// Render one layer's worth of trace hits, in either the compact
+/// `with_attention` single-line format (top hit + attention + lens) or
+/// the standard multi-line format (top-N hits with relation labels).
+#[allow(clippy::too_many_arguments)]
+fn render_trace_layer(
+    out: &mut Vec<String>,
+    layer: usize,
+    hits: &[larql_vindex::WalkHit],
+    classifier: Option<&crate::relations::RelationClassifier>,
+    relations_only: bool,
+    per_layer: usize,
+    with_attention: bool,
+    attention_map: &std::collections::HashMap<usize, Vec<(String, f32)>>,
+    lens_map: &std::collections::HashMap<usize, (String, f64)>,
+) {
+    // When filtering to relations only, re-sort so positive gates rank
+    // above negative gates of equal magnitude (positive gates correlate
+    // with the prediction; negative gates with the opposite).
+    let labelled_hits: Vec<&larql_vindex::WalkHit> = if relations_only {
+        let mut lh: Vec<_> = hits
+            .iter()
+            .filter(|hit| {
+                classifier
+                    .and_then(|rc| rc.label_for_feature(layer, hit.feature))
+                    .map(|l| !l.is_empty())
+                    .unwrap_or(false)
+            })
+            .collect();
+        lh.sort_by(|a, b| {
+            let a_pos = a.gate_score > 0.0;
+            let b_pos = b.gate_score > 0.0;
+            match (a_pos, b_pos) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b
+                    .gate_score
+                    .abs()
+                    .partial_cmp(&a.gate_score.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            }
+        });
+        lh
+    } else {
+        hits.iter().collect()
+    };
+
+    if with_attention {
+        // Compact single-line format: feature + attention + logit lens.
+        let hit = labelled_hits.first();
+        let feature_part = if let Some(hit) = hit {
+            let label = classifier
+                .and_then(|rc| rc.label_for_feature(layer, hit.feature))
+                .unwrap_or("");
+            if relations_only && label.is_empty() {
+                None
+            } else {
+                let top_token = hit.meta.top_token.trim();
+                let name = if !label.is_empty() { label } else { top_token };
+                Some(format!("{:<14} {:+.1}", name, hit.gate_score))
+            }
+        } else {
+            None
+        };
+        let empty = format!("{:19}", "");
+        let feature_str = feature_part.as_deref().unwrap_or(&empty);
+
+        let attn_part = attention_map
+            .get(&layer)
+            .and_then(|attn| attn.first())
+            .map(|(tok, w)| format!("{}({:.0}%)", tok, w * 100.0))
+            .unwrap_or_default();
+
+        let lens_part = lens_map
+            .get(&layer)
+            .map(|(tok, prob)| format!("{} ({:.1}%)", tok, prob * 100.0))
+            .unwrap_or_default();
+
+        if feature_part.is_some() || !lens_part.is_empty() {
+            out.push(format!(
+                "  L{:2}  {:<19}  {:<16} → {}",
+                layer, feature_str, attn_part, lens_part,
+            ));
+        }
+    } else {
+        // Standard multi-line format without attention.
+        let mut shown = 0;
+        for hit in &labelled_hits {
+            if shown >= per_layer {
+                break;
+            }
+            let label = classifier
+                .and_then(|rc| rc.label_for_feature(layer, hit.feature))
+                .unwrap_or("");
+            if relations_only && label.is_empty() {
+                continue;
+            }
+            shown += 1;
+            let label_str = if label.is_empty() {
+                format!("{:14}", "")
+            } else {
+                format!("{:<14}", label)
+            };
+            let top_token = hit.meta.top_token.trim();
+            let down_top: String = hit
+                .meta
+                .top_k
+                .iter()
+                .take(3)
+                .map(|t| t.token.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(format!(
+                "  L{:2}: {} F{:<5} gate={:+.1}  → {:15} [{}]",
+                layer, label_str, hit.feature, hit.gate_score, top_token, down_top,
+            ));
+        }
     }
 }

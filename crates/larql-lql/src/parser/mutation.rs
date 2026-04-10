@@ -1,4 +1,4 @@
-/// Mutation statement parsers: INSERT, DELETE, UPDATE, MERGE.
+//! Mutation statement parsers: INSERT, DELETE, UPDATE, MERGE
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
@@ -31,6 +31,7 @@ impl Parser {
 
         let mut layer = None;
         let mut confidence = None;
+        let mut alpha = None;
 
         loop {
             match self.peek() {
@@ -43,12 +44,23 @@ impl Parser {
                     self.advance();
                     confidence = Some(self.expect_f32()?);
                 }
+                Token::Keyword(Keyword::Alpha) => {
+                    self.advance();
+                    alpha = Some(self.expect_f32()?);
+                }
                 _ => break,
             }
         }
 
         self.eat_semicolon();
-        Ok(Statement::Insert { entity, relation, target, layer, confidence })
+        Ok(Statement::Insert {
+            entity,
+            relation,
+            target,
+            layer,
+            confidence,
+            alpha,
+        })
     }
 
     pub(crate) fn parse_delete(&mut self) -> Result<Statement, ParseError> {

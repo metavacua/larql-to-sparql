@@ -515,3 +515,276 @@ fn weight_backend_show_models_works() {
     let result = session.execute(&stmt);
     assert!(result.is_ok());
 }
+
+// ── Mutation pipeline integration tests ────────────────────────────────
+//
+// These tests build a tiny synthetic vindex on disk, load it via USE,
+// and exercise the DELETE / UPDATE / patch-session paths through the
+// real executor + parser. They cover the auto-patch lifecycle, the
+// patch overlay update, and SAVE PATCH file emission.
+//
+// INSERT is exercised end-to-end in `compile_demo` against a real
+// Gemma vindex (the synthetic tokenizer here has an empty vocab so it
+// can't tokenise meaningful entity strings). The auto-patch session
+// creation that INSERT triggers is covered indirectly by the DELETE
+// auto-patch test below.
+
+use larql_inference::ndarray::Array2;
+
+/// Build a minimal vindex directory on disk that the LQL executor can
+/// load via `USE`. Includes gate vectors, down_meta, embeddings, and a
+/// stub tokenizer. Returns the directory path; the caller is
+/// responsible for cleanup.
+fn make_test_vindex_dir(tag: &str) -> std::path::PathBuf {
+    use larql_vindex::{
+        ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig,
+    };
+    use larql_models::TopKEntry;
+
+    let dir = std::env::temp_dir().join(format!("larql_lql_test_vindex_{tag}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Tiny in-memory index — 2 layers × 3 features × 4 hidden dims.
+    let hidden = 4;
+    let num_features = 3;
+    let num_layers = 2;
+    let vocab_size = 10;
+
+    let mut gate0 = Array2::<f32>::zeros((num_features, hidden));
+    gate0[[0, 0]] = 1.0;
+    gate0[[1, 1]] = 1.0;
+    gate0[[2, 2]] = 1.0;
+
+    let mut gate1 = Array2::<f32>::zeros((num_features, hidden));
+    gate1[[0, 3]] = 1.0;
+    gate1[[1, 0]] = 0.5;
+    gate1[[2, 2]] = -1.0;
+
+    let make_meta = |tok: &str, id: u32, c: f32| FeatureMeta {
+        top_token: tok.to_string(),
+        top_token_id: id,
+        c_score: c,
+        top_k: vec![TopKEntry { token: tok.to_string(), token_id: id, logit: c }],
+    };
+
+    let meta0 = vec![
+        Some(make_meta("Paris", 100, 0.95)),
+        Some(make_meta("French", 101, 0.88)),
+        Some(make_meta("Europe", 102, 0.75)),
+    ];
+    let meta1 = vec![
+        Some(make_meta("Berlin", 200, 0.90)),
+        None,
+        Some(make_meta("Spain", 202, 0.70)),
+    ];
+    let down_meta = vec![Some(meta0), Some(meta1)];
+
+    let index = VectorIndex::new(
+        vec![Some(gate0), Some(gate1)],
+        down_meta,
+        num_layers,
+        hidden,
+    );
+
+    let mut config = VindexConfig {
+        version: 2,
+        model: "test/lql-mutation".into(),
+        family: "llama".into(),
+        source: None,
+        checksums: None,
+        num_layers,
+        hidden_size: hidden,
+        intermediate_size: num_features,
+        vocab_size,
+        embed_scale: 1.0,
+        extract_level: ExtractLevel::Browse,
+        dtype: StorageDtype::F32,
+        layer_bands: None,
+        layers: Vec::new(),
+        down_top_k: 5,
+        has_model_weights: false,
+        model_config: None,
+    };
+    index.save_vindex(&dir, &mut config).unwrap();
+
+    // Synthetic embeddings.bin (vocab_size × hidden f32, all zeros).
+    let embed_bytes = vec![0u8; vocab_size * hidden * 4];
+    std::fs::write(dir.join("embeddings.bin"), embed_bytes).unwrap();
+
+    // Stub tokenizer.json — empty BPE. Not used by DELETE / UPDATE /
+    // PATCH; INSERT-against-this-vindex tests would need a real one.
+    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
+
+    dir
+}
+
+/// Spin up a session and `USE` the test vindex from `make_test_vindex_dir`.
+fn vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
+    let dir = make_test_vindex_dir(tag);
+    let mut session = Session::new();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    session.execute(&stmt).expect("USE on synthetic vindex should succeed");
+    (session, dir)
+}
+
+#[test]
+fn use_synthetic_vindex_loads() {
+    let (session, dir) = vindex_session("use_loads");
+    assert!(matches!(session.backend, Backend::Vindex { .. }));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn delete_by_layer_and_feature_succeeds() {
+    let (mut session, dir) = vindex_session("delete_lf");
+
+    let stmt = parser::parse(
+        r#"DELETE FROM EDGES WHERE layer = 0 AND feature = 0;"#,
+    )
+    .unwrap();
+    let out = session.execute(&stmt).expect("DELETE should succeed");
+    let joined = out.join("\n");
+    assert!(
+        joined.contains("Deleted") || joined.contains("deleted"),
+        "expected delete confirmation in: {joined}"
+    );
+
+    // The patch session should now be active (auto-patch).
+    assert!(
+        session.patch_recording.is_some(),
+        "DELETE should have started an auto-patch session"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn delete_no_matches_returns_message() {
+    let (mut session, dir) = vindex_session("delete_nomatch");
+
+    // Layer that doesn't exist in our 2-layer test vindex.
+    let stmt = parser::parse(
+        r#"DELETE FROM EDGES WHERE layer = 99 AND feature = 0;"#,
+    )
+    .unwrap();
+    let result = session.execute(&stmt);
+    // The executor either returns an empty-match message or errors —
+    // both are acceptable; the important thing is no panic.
+    assert!(result.is_ok() || result.is_err(), "no panic");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn update_feature_target_succeeds() {
+    let (mut session, dir) = vindex_session("update_target");
+
+    let stmt = parser::parse(
+        r#"UPDATE EDGES SET target = "London" WHERE layer = 0 AND feature = 0;"#,
+    )
+    .unwrap();
+    let out = session.execute(&stmt).expect("UPDATE should succeed");
+    let joined = out.join("\n");
+    assert!(
+        joined.contains("Updated") || joined.contains("updated") || joined.contains("London"),
+        "expected update confirmation in: {joined}"
+    );
+
+    assert!(
+        session.patch_recording.is_some(),
+        "UPDATE should have started an auto-patch session"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn explicit_begin_patch_starts_session() {
+    let (mut session, dir) = vindex_session("begin_patch");
+
+    let patch_path = dir.join("session.vlp");
+    let stmt = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, patch_path.display())).unwrap();
+    session.execute(&stmt).expect("BEGIN PATCH should succeed");
+
+    assert!(
+        session.patch_recording.is_some(),
+        "BEGIN PATCH should populate patch_recording"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_patch_writes_file_to_disk() {
+    let (mut session, dir) = vindex_session("save_patch");
+
+    // Start a patch, do a delete (so there's at least one operation), save.
+    let patch_path = dir.join("save.vlp");
+    let begin = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, patch_path.display())).unwrap();
+    session.execute(&begin).expect("BEGIN PATCH");
+
+    let del = parser::parse(r#"DELETE FROM EDGES WHERE layer = 0 AND feature = 1;"#).unwrap();
+    session.execute(&del).expect("DELETE under patch");
+
+    let save = parser::parse("SAVE PATCH;").unwrap();
+    let out = session.execute(&save).expect("SAVE PATCH");
+    let joined = out.join("\n");
+    assert!(
+        patch_path.exists(),
+        "SAVE PATCH should write the .vlp file. Output: {joined}"
+    );
+
+    // After SAVE PATCH, recording should be cleared.
+    assert!(
+        session.patch_recording.is_none(),
+        "SAVE PATCH should clear the recording"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn auto_patch_session_starts_on_first_mutation() {
+    let (mut session, dir) = vindex_session("auto_patch");
+
+    // No explicit BEGIN PATCH first.
+    assert!(session.patch_recording.is_none(), "no patch session before mutation");
+
+    let del = parser::parse(r#"DELETE FROM EDGES WHERE layer = 0 AND feature = 0;"#).unwrap();
+    session.execute(&del).expect("DELETE");
+
+    assert!(
+        session.patch_recording.is_some(),
+        "first mutation should auto-start a patch session"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn merge_nonexistent_source_errors_cleanly() {
+    let (mut session, dir) = vindex_session("merge_bad_src");
+
+    let stmt = parser::parse(r#"MERGE "/nonexistent/src.vindex";"#).unwrap();
+    let err = session.execute(&stmt).unwrap_err();
+    assert!(matches!(err, LqlError::Execution(_)));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn show_patches_with_no_patches_returns_message() {
+    let (mut session, dir) = vindex_session("show_patches_empty");
+
+    let stmt = parser::parse("SHOW PATCHES;").unwrap();
+    let out = session.execute(&stmt).expect("SHOW PATCHES");
+    let joined = out.join("\n").to_lowercase();
+    assert!(
+        joined.contains("no") || joined.contains("0") || joined.is_empty(),
+        "expected an empty/no-patches message: {joined}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

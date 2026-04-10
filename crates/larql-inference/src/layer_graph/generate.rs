@@ -1,4 +1,4 @@
-//! Token generation loop — GPU prefill + KV-cached decode.
+//! Token generation loop — GPU prefill + KV-cached decode
 
 use larql_compute::ComputeBackend;
 use crate::model::ModelWeights;
@@ -62,6 +62,7 @@ pub fn generate(
     } else {
         intermediate * hidden / 32 * 18
     };
+
     let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
 
     let num_layers = weights.num_layers;

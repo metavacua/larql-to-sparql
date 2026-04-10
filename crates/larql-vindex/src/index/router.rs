@@ -12,9 +12,9 @@ use ndarray::{Array1, Array2};
 
 /// MoE router weights for all layers.
 pub struct RouterIndex {
-    /// Per-layer router weight matrices: [num_experts, hidden_size]
+    /// Per-layer router weight matrices: `[num_experts, hidden_size]`
     pub weights: Vec<Array2<f32>>,
-    /// Per-layer router biases: [num_experts]
+    /// Per-layer router biases: `[num_experts]`
     pub biases: Vec<Array1<f32>>,
     /// Number of experts per layer.
     pub num_experts: usize,

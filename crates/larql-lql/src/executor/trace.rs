@@ -1,8 +1,8 @@
-/// Executor for TRACE statements.
-///
-/// Runs a decomposed forward pass, captures attn/FFN deltas at every layer,
-/// and formats the results. Optionally tracks a specific answer token,
-/// shows the attn/FFN decomposition, or saves to a trace file.
+//! Executor for TRACE statements.
+//!
+//! Runs a decomposed forward pass, captures attn/FFN deltas at every layer,
+//! and formats the results. Optionally tracks a specific answer token,
+//! shows the attn/FFN decomposition, or saves to a trace file.
 
 use crate::ast::{Range, TracePositionMode};
 use crate::error::LqlError;
@@ -37,9 +37,9 @@ impl super::Session {
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load model weights: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
         // WalkFfn uses vindex gate KNN — same as INFER, mutations are reflected
         let walk_ffn = larql_inference::vindex::WalkFfn::new(&weights, patched, 8092);
@@ -49,6 +49,7 @@ impl super::Session {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn exec_trace_with_ffn(
         &self,
         weights: &larql_inference::ModelWeights,
@@ -63,7 +64,7 @@ impl super::Session {
     ) -> Result<Vec<String>, LqlError> {
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+            .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         let pos = match positions {
@@ -98,7 +99,7 @@ impl super::Session {
         if let Some(answer_str) = answer {
             let answer_tok = tokenizer
                 .encode(format!(" {}", answer_str), true)
-                .map_err(|e| LqlError::Execution(format!("tokenize answer: {e}")))?;
+                .map_err(|e| LqlError::exec("tokenize answer", e))?;
             let answer_id = *answer_tok.get_ids().last().unwrap_or(&0);
 
             let traj = trace.answer_trajectory(weights, answer_id);
@@ -212,12 +213,12 @@ impl super::Session {
         if let Some(path) = save {
             let mut writer = larql_inference::TraceWriter::create(
                 std::path::Path::new(path), trace.hidden_size, trace.n_layers,
-            ).map_err(|e| LqlError::Execution(format!("save trace: {e}")))?;
+            ).map_err(|e| LqlError::exec("save trace", e))?;
 
             let written = writer.write_trace(trace)
-                .map_err(|e| LqlError::Execution(format!("write trace: {e}")))?;
+                .map_err(|e| LqlError::exec("write trace", e))?;
             writer.finish()
-                .map_err(|e| LqlError::Execution(format!("finish trace: {e}")))?;
+                .map_err(|e| LqlError::exec("finish trace", e))?;
 
             out.push(String::new());
             out.push(format!("Saved {} token chains to {}", written, path));

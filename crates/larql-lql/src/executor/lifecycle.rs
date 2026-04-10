@@ -1,4 +1,4 @@
-/// Lifecycle executor: USE, STATS, EXTRACT, COMPILE, DIFF.
+//! Lifecycle executor: USE, STATS, EXTRACT, COMPILE, DIFF
 
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ impl Session {
                 // Resolve hf:// paths to local cache
                 let path = if larql_vindex::is_hf_path(path_str) {
                     larql_vindex::resolve_hf_vindex(path_str)
-                        .map_err(|e| LqlError::Execution(format!("HuggingFace download failed: {e}")))?
+                        .map_err(|e| LqlError::exec("HuggingFace download failed", e))?
                 } else {
                     let p = PathBuf::from(path_str);
                     if !p.exists() {
@@ -28,11 +28,11 @@ impl Session {
                 };
 
                 let config = larql_vindex::load_vindex_config(&path)
-                    .map_err(|e| LqlError::Execution(format!("failed to load vindex config: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to load vindex config", e))?;
 
                 let mut cb = larql_vindex::SilentLoadCallbacks;
                 let index = larql_vindex::VectorIndex::load_vindex(&path, &mut cb)
-                    .map_err(|e| LqlError::Execution(format!("failed to load vindex: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to load vindex", e))?;
 
                 let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
 
@@ -72,11 +72,11 @@ impl Session {
                 out.push(format!("Loading model: {id}..."));
 
                 let model_path = larql_inference::resolve_model_path(id)
-                    .map_err(|e| LqlError::Execution(format!("failed to resolve model: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to resolve model", e))?;
                 let weights = larql_inference::load_model_dir(&model_path)
-                    .map_err(|e| LqlError::Execution(format!("failed to load model: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to load model", e))?;
                 let tokenizer = larql_inference::load_tokenizer(&model_path)
-                    .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
                 let size_gb = dir_size(&model_path) as f64 / (1024.0 * 1024.0 * 1024.0);
                 out.push(format!(
@@ -291,7 +291,7 @@ impl Session {
         out.push(format!("Loading model: {model}..."));
 
         let inference_model = larql_inference::InferenceModel::load(model)
-            .map_err(|e| LqlError::Execution(format!("failed to load model: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load model", e))?;
 
         out.push(format!(
             "Model loaded ({} layers, hidden={}). Extracting to {}...",
@@ -301,7 +301,7 @@ impl Session {
         ));
 
         std::fs::create_dir_all(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to create output dir: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to create output dir", e))?;
 
         // Map AST ExtractLevel to vindex ExtractLevel
         let vindex_level = match _extract_level {
@@ -321,17 +321,17 @@ impl Session {
             larql_vindex::StorageDtype::F32,
             &mut callbacks,
         )
-        .map_err(|e| LqlError::Execution(format!("extraction failed: {e}")))?;
+        .map_err(|e| LqlError::exec("extraction failed", e))?;
 
         out.extend(callbacks.messages);
         out.push(format!("Extraction complete: {}", output_dir.display()));
 
         // Auto-load the newly created vindex
         let config = larql_vindex::load_vindex_config(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to load vindex config: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load vindex config", e))?;
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let index = larql_vindex::VectorIndex::load_vindex(&output_dir, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load vindex: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load vindex", e))?;
         let relation_classifier = RelationClassifier::from_vindex(&output_dir);
 
         let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
@@ -386,7 +386,7 @@ impl Session {
         output: &str,
     ) -> Result<Vec<String>, LqlError> {
         let config = larql_vindex::load_vindex_config(vindex_path)
-            .map_err(|e| LqlError::Execution(format!("failed to load vindex config: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load vindex config", e))?;
 
         if !config.has_model_weights {
             return Err(LqlError::Execution(format!(
@@ -399,21 +399,21 @@ impl Session {
 
         let output_dir = PathBuf::from(output);
         std::fs::create_dir_all(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to create output dir: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to create output dir", e))?;
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(vindex_path, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load model weights: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
 
         let mut build_cb = larql_vindex::SilentBuildCallbacks;
         larql_vindex::write_model_weights(&weights, &output_dir, &mut build_cb)
-            .map_err(|e| LqlError::Execution(format!("failed to write model: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to write model", e))?;
 
         let tok_src = vindex_path.join("tokenizer.json");
         let tok_dst = output_dir.join("tokenizer.json");
         if tok_src.exists() {
             std::fs::copy(&tok_src, &tok_dst)
-                .map_err(|e| LqlError::Execution(format!("failed to copy tokenizer: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to copy tokenizer", e))?;
         }
 
         let mut out = Vec::new();
@@ -430,60 +430,139 @@ impl Session {
     ) -> Result<Vec<String>, LqlError> {
         let output_dir = PathBuf::from(output);
         std::fs::create_dir_all(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to create output dir: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to create output dir", e))?;
 
         // Load the current vindex with patches applied
         let (path, config, patched) = self.require_vindex()?;
 
-        // Bake patches into a clean VectorIndex
-        let baked = if patched.num_overrides() > 0 {
-            patched.bake_down()
-        } else {
-            // No patches — use base directly (avoid unnecessary clone)
-            patched.base().clone()
-        };
-
-        // Save gate vectors + down_meta + config to the new directory
+        // ── Step 1: gate_vectors.bin and down_meta.bin ──
+        //
+        // Both are written from a clone of the patched base. The clone path
+        // produces byte-identical output to the source for unchanged
+        // layers, and we deliberately do NOT bake any inserted gate
+        // vectors into gate_vectors.bin (see comment further down).
+        let baked = patched.base().clone();
         let layer_infos = baked.save_gate_vectors(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to save gate vectors: {e}")))?;
-        let dm_count = baked.save_down_meta(&output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to save down_meta: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to save gate vectors", e))?;
+        // We hard-link down_meta.bin from source (in the unchanging-file
+        // loop below) rather than calling save_down_meta, because the
+        // cloned base is in mmap mode and its heap-side `down_meta` is
+        // empty — saving it would produce a 152-byte file with zero
+        // features and break WALK / DESCRIBE / SHOW.
+        let dm_count: usize = config
+            .layers
+            .iter()
+            .map(|l| l.num_features)
+            .sum();
 
-        // Copy embeddings
-        let embed_src = path.join("embeddings.bin");
-        let embed_dst = output_dir.join("embeddings.bin");
-        if embed_src.exists() {
-            std::fs::copy(&embed_src, &embed_dst)
-                .map_err(|e| LqlError::Execution(format!("failed to copy embeddings: {e}")))?;
+        // ── Step 2: hard-link unchanging weight files from the source ──
+        //
+        // These files are byte-identical to the source (model weights and
+        // related artefacts that INSERT does not touch). Hard-linking is
+        // free on APFS — same inode, no disk cost, no copy time.
+        //
+        // We deliberately do NOT bake the inserted gate vectors into
+        // gate_vectors.bin. The dense FFN inference path
+        // (`walk_ffn_exact` / `walk_ffn_full_mmap`) reads gate scores
+        // from this file and feeds them into the GEGLU activation.
+        // Baking a norm-matched (~typical-magnitude) gate at the
+        // inserted slot makes its dense activation moderate-to-large,
+        // which combined with the override down vector blows up the
+        // residual stream. Keeping the source weak gate at the inserted
+        // slot keeps the activation small — exactly matching the
+        // patched-session math, where the small activation × override
+        // down vector accumulates across layers into a meaningful
+        // constellation effect.
+        //
+        // The override is instead baked into `down_weights.bin` further
+        // down (see Step 3): the dense FFN reads `W_down[:, slot]` from
+        // model weights, and replacing those columns with the override
+        // values gives `small_activation × poseidon_vector` per layer,
+        // which is the exact behaviour the runtime patch overlay
+        // produces.
+        const UNCHANGING: &[&str] = &[
+            "attn_weights.bin",
+            "up_weights.bin",
+            "norms.bin",
+            "weight_manifest.json",
+            "embeddings.bin",
+            "tokenizer.json",
+            "up_features.bin",
+            "down_meta.bin",
+            "down_features.bin",
+        ];
+        for name in UNCHANGING {
+            let src = path.join(name);
+            let dst = output_dir.join(name);
+            if !src.exists() {
+                continue;
+            }
+            let _ = std::fs::remove_file(&dst);
+            if std::fs::hard_link(&src, &dst).is_err() {
+                std::fs::copy(&src, &dst)
+                    .map_err(|e| LqlError::exec("failed to link/copy {name}", e))?;
+            }
         }
 
-        // Copy tokenizer
-        let tok_src = path.join("tokenizer.json");
-        let tok_dst = output_dir.join("tokenizer.json");
-        if tok_src.exists() {
-            std::fs::copy(&tok_src, &tok_dst)
-                .map_err(|e| LqlError::Execution(format!("failed to copy tokenizer: {e}")))?;
-        }
-
-        // Copy label files
-        for label_file in &["relation_clusters.json", "feature_clusters.jsonl", "feature_labels.json"] {
-            let src = path.join(label_file);
-            let dst = output_dir.join(label_file);
+        // Label files (small, copy is fine).
+        for name in &["relation_clusters.json", "feature_clusters.jsonl", "feature_labels.json"] {
+            let src = path.join(name);
+            let dst = output_dir.join(name);
             if src.exists() {
+                let _ = std::fs::remove_file(&dst);
                 let _ = std::fs::copy(&src, &dst);
             }
         }
 
-        // Write updated config with new layer infos
+        // ── Step 3: bake down vector overrides into down_weights.bin ──
+        //
+        // The dense FFN inference path reads `W_down[:, slot]` from
+        // `down_weights.bin` (via `load_model_weights` →
+        // `walk_ffn_exact`). Replacing the column at the inserted slot
+        // with the override down vector makes the inserted feature fire
+        // through the standard FFN path with no runtime overlay needed.
+        //
+        // This is what makes the compiled vindex truly self-contained
+        // and what unblocks `COMPILE INTO MODEL FORMAT safetensors|gguf`
+        // — those exporters read the same `down_weights.bin` via
+        // `weight_manifest.json` and emit it as the canonical down
+        // projection, so the constellation is already in the exported
+        // model.
+        let down_overrides = patched.down_overrides();
+        let mut overrides_applied = 0usize;
+        if down_overrides.is_empty() {
+            // Pure structural compile — hard-link down_weights.bin too.
+            let src = path.join("down_weights.bin");
+            let dst = output_dir.join("down_weights.bin");
+            if src.exists() {
+                let _ = std::fs::remove_file(&dst);
+                if std::fs::hard_link(&src, &dst).is_err() {
+                    std::fs::copy(&src, &dst)
+                        .map_err(|e| LqlError::exec("copy down_weights", e))?;
+                }
+            }
+        } else {
+            patch_down_weights(path, &output_dir, config, down_overrides)?;
+            overrides_applied = down_overrides.len();
+        }
+
+        // ── Step 4: write updated config ──
         let mut new_config = config.clone();
         new_config.layers = layer_infos;
         new_config.checksums = larql_vindex::format::checksums::compute_checksums(&output_dir).ok();
         larql_vindex::VectorIndex::save_config(&new_config, &output_dir)
-            .map_err(|e| LqlError::Execution(format!("failed to save config: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to save config", e))?;
 
         let mut out = Vec::new();
         out.push(format!("Compiled {} → {}", source_path.display(), output_dir.display()));
         out.push(format!("Features: {}", dm_count));
+        if overrides_applied > 0 {
+            out.push(format!(
+                "Down overrides baked: {} ({} layers touched)",
+                overrides_applied,
+                down_overrides.keys().map(|(l, _)| *l).collect::<std::collections::HashSet<_>>().len(),
+            ));
+        }
         out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
         Ok(out)
     }
@@ -504,9 +583,9 @@ impl Session {
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let index_a = larql_vindex::VectorIndex::load_vindex(&path_a, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load {}: {e}", path_a.display())))?;
+            .map_err(|e| LqlError::exec(&format!("failed to load {}", path_a.display()), e))?;
         let index_b = larql_vindex::VectorIndex::load_vindex(&path_b, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load {}: {e}", path_b.display())))?;
+            .map_err(|e| LqlError::exec(&format!("failed to load {}", path_b.display()), e))?;
 
         let limit = limit.unwrap_or(20) as usize;
 
@@ -662,7 +741,7 @@ impl Session {
 
             let (ins, upd, del) = patch.counts();
             patch.save(std::path::Path::new(patch_path))
-                .map_err(|e| LqlError::Execution(format!("failed to save patch: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to save patch", e))?;
             out.push(format!(
                 "Extracted: {} ({} ops: {} inserts, {} updates, {} deletes)",
                 patch_path, patch.len(), ins, upd, del,
@@ -699,6 +778,138 @@ impl Session {
     }
 }
 
+// ── COMPILE INTO VINDEX: bake down vector overrides into down_weights.bin ──
+//
+// The inserted features' down vectors live in
+// `patched.base().down_overrides` (a HashMap populated by INSERT). To
+// produce a self-contained vindex with no overlay needed, we copy the
+// source `down_weights.bin` and rewrite the columns at the inserted
+// feature slots with the override values.
+//
+// File layout: per layer `[hidden, intermediate]` row-major (f16 or f32).
+// Feature `f`'s down vector is the *column* at index `f`, scattered
+// across `hidden_size` rows. We read each affected layer slab into RAM,
+// splice the override columns, and write the slab back. Each layer with
+// overrides is one read + one write of `hidden * intermediate * dtype_bytes`
+// (~100 MB for Gemma 4B).
+//
+// This approach is what makes the compiled vindex truly fresh: the
+// dense FFN inference path reads `down_weights.bin` via
+// `load_model_weights`, the bytes contain the override, and INFER works
+// with no patch overlay. The same `down_weights.bin` is what
+// `COMPILE INTO MODEL FORMAT safetensors|gguf` exports via
+// `weight_manifest.json`, so the constellation is automatically present
+// in the exported model file.
+//
+// We deliberately do NOT touch `gate_vectors.bin`. The dense FFN reads
+// gate scores from that file and a norm-matched override gate would
+// produce a moderate activation that — combined with the modified down
+// column — blows up the residual. Keeping the source's weak free-slot
+// gate at the inserted index keeps the activation small, exactly
+// reproducing the patched-session math where small activation × override
+// down vector accumulates across 8 layers into the constellation effect.
+
+use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::{Read, Seek, SeekFrom, Write};
+
+fn copy_for_patch(src: &std::path::Path, dst: &std::path::Path) -> Result<(), LqlError> {
+    let _ = std::fs::remove_file(dst);
+    std::fs::copy(src, dst)
+        .map_err(|e| LqlError::exec(&format!("failed to copy {}", src.display()), e))?;
+    Ok(())
+}
+
+/// Bake down overrides into `down_weights.bin` (per-layer
+/// `[hidden, intermediate]` row-major, may be f16 or f32).
+fn patch_down_weights(
+    source_dir: &std::path::Path,
+    dest_dir: &std::path::Path,
+    config: &larql_vindex::VindexConfig,
+    overrides: &HashMap<(usize, usize), Vec<f32>>,
+) -> Result<(), LqlError> {
+    let src = source_dir.join("down_weights.bin");
+    let dst = dest_dir.join("down_weights.bin");
+    if !src.exists() {
+        return Err(LqlError::Execution(
+            "source vindex has no down_weights.bin — cannot bake overrides".into(),
+        ));
+    }
+
+    copy_for_patch(&src, &dst)?;
+
+    let total = std::fs::metadata(&dst)
+        .map_err(|e| LqlError::exec("stat down_weights.bin", e))?
+        .len() as usize;
+
+    let hidden = config.hidden_size;
+    let intermediate = config.intermediate_size;
+    let num_layers = config.num_layers;
+    let elements_per_layer = hidden * intermediate;
+    let total_elements = num_layers * elements_per_layer;
+
+    let dtype_bytes: usize = if total == total_elements * 4 {
+        4
+    } else if total == total_elements * 2 {
+        2
+    } else {
+        return Err(LqlError::Execution(format!(
+            "down_weights.bin size {total} matches neither f32 ({}) nor f16 ({})",
+            total_elements * 4,
+            total_elements * 2
+        )));
+    };
+
+    let layer_bytes = elements_per_layer * dtype_bytes;
+
+    // Group overrides by layer so we only touch each layer's slab once.
+    let mut by_layer: HashMap<usize, Vec<(usize, &Vec<f32>)>> = HashMap::new();
+    for ((l, f), v) in overrides {
+        by_layer.entry(*l).or_default().push((*f, v));
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&dst)
+        .map_err(|e| LqlError::exec("open down_weights.bin", e))?;
+
+    let mut buf = vec![0u8; layer_bytes];
+
+    for (layer, layer_overrides) in by_layer {
+        let layer_offset = (layer * layer_bytes) as u64;
+        file.seek(SeekFrom::Start(layer_offset))
+            .map_err(|e| LqlError::exec("seek down_weights", e))?;
+        file.read_exact(&mut buf)
+            .map_err(|e| LqlError::exec("read down_weights slab", e))?;
+
+        for (feature, down_vec) in layer_overrides {
+            if down_vec.len() != hidden {
+                return Err(LqlError::Execution(format!(
+                    "down override at L{layer} F{feature} has wrong shape: {} (expected {hidden})",
+                    down_vec.len()
+                )));
+            }
+            // Splice the column for `feature` across all `hidden` rows.
+            for (row, val) in down_vec.iter().enumerate() {
+                let cell = (row * intermediate + feature) * dtype_bytes;
+                if dtype_bytes == 4 {
+                    buf[cell..cell + 4].copy_from_slice(&val.to_le_bytes());
+                } else {
+                    let half_bits: u16 = larql_models::quant::half::f32_to_f16(*val);
+                    buf[cell..cell + 2].copy_from_slice(&half_bits.to_le_bytes());
+                }
+            }
+        }
+
+        file.seek(SeekFrom::Start(layer_offset))
+            .map_err(|e| LqlError::exec("seek down_weights", e))?;
+        file.write_all(&buf)
+            .map_err(|e| LqlError::exec("write down_weights slab", e))?;
+    }
+    Ok(())
+}
+
 /// Build callbacks that collect stage messages for LQL output.
 struct LqlBuildCallbacks {
     messages: Vec<String>,
@@ -722,5 +933,323 @@ impl larql_vindex::IndexBuildCallbacks for LqlBuildCallbacks {
 
     fn on_stage_done(&mut self, stage: &str, elapsed_ms: f64) {
         self.messages.push(format!("  {stage}: {elapsed_ms:.0}ms"));
+    }
+}
+
+#[cfg(test)]
+mod compile_into_vindex_tests {
+    //! Unit tests for the `COMPILE INTO VINDEX` byte-level baking helper.
+    //!
+    //! These build a tiny synthetic `down_weights.bin` file with known
+    //! contents, run `patch_down_weights` against it, then verify that the
+    //! override columns were spliced into the correct cells (and *only*
+    //! those cells) without disturbing any other bytes.
+    //!
+    //! No real vindex required — these run in CI with no model on disk.
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Build a minimal `VindexConfig` shaped for these tests.
+    /// Only the dimensions matter for `patch_down_weights`; everything
+    /// else is dummy.
+    fn mini_config(num_layers: usize, hidden: usize, intermediate: usize) -> larql_vindex::VindexConfig {
+        larql_vindex::VindexConfig {
+            version: 1,
+            model: "test".into(),
+            family: "test".into(),
+            source: None,
+            checksums: None,
+            num_layers,
+            hidden_size: hidden,
+            intermediate_size: intermediate,
+            vocab_size: 32,
+            embed_scale: 1.0,
+            extract_level: larql_vindex::ExtractLevel::All,
+            dtype: larql_vindex::config::dtype::StorageDtype::F32,
+            layer_bands: None,
+            layers: Vec::new(),
+            down_top_k: 10,
+            has_model_weights: true,
+            model_config: None,
+        }
+    }
+
+    /// Write `num_layers * hidden * intermediate` floats to a fake
+    /// `down_weights.bin` in the given directory. Each cell is set to a
+    /// deterministic pattern so we can later assert which bytes the patch
+    /// touched.
+    fn write_synthetic_f32(
+        dir: &std::path::Path,
+        num_layers: usize,
+        hidden: usize,
+        intermediate: usize,
+    ) {
+        let total = num_layers * hidden * intermediate;
+        let mut bytes: Vec<u8> = Vec::with_capacity(total * 4);
+        for i in 0..total {
+            // Distinctive sentinel: small positive floats indexed by element.
+            let v = (i as f32) * 0.001;
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(dir.join("down_weights.bin"), &bytes).unwrap();
+    }
+
+    fn write_synthetic_f16(
+        dir: &std::path::Path,
+        num_layers: usize,
+        hidden: usize,
+        intermediate: usize,
+    ) {
+        let total = num_layers * hidden * intermediate;
+        let mut bytes: Vec<u8> = Vec::with_capacity(total * 2);
+        for i in 0..total {
+            let v = (i as f32) * 0.001;
+            let half_bits = larql_models::quant::half::f32_to_f16(v);
+            bytes.extend_from_slice(&half_bits.to_le_bytes());
+        }
+        std::fs::write(dir.join("down_weights.bin"), &bytes).unwrap();
+    }
+
+    /// Read all elements at the column for `feature` in layer `layer` from
+    /// an f32 down_weights.bin (the patched copy). Returns a Vec of length
+    /// `hidden`.
+    fn read_column_f32(
+        dir: &std::path::Path,
+        layer: usize,
+        feature: usize,
+        num_layers: usize,
+        hidden: usize,
+        intermediate: usize,
+    ) -> Vec<f32> {
+        let bytes = std::fs::read(dir.join("down_weights.bin")).unwrap();
+        let layer_elems = hidden * intermediate;
+        let mut out = Vec::with_capacity(hidden);
+        for row in 0..hidden {
+            let cell = (layer * layer_elems + row * intermediate + feature) * 4;
+            out.push(f32::from_le_bytes(bytes[cell..cell + 4].try_into().unwrap()));
+        }
+        let _ = num_layers; // unused but documents the layout
+        out
+    }
+
+    fn read_column_f16(
+        dir: &std::path::Path,
+        layer: usize,
+        feature: usize,
+        hidden: usize,
+        intermediate: usize,
+    ) -> Vec<f32> {
+        let bytes = std::fs::read(dir.join("down_weights.bin")).unwrap();
+        let layer_elems = hidden * intermediate;
+        let mut out = Vec::with_capacity(hidden);
+        for row in 0..hidden {
+            let cell = (layer * layer_elems + row * intermediate + feature) * 2;
+            let bits = u16::from_le_bytes(bytes[cell..cell + 2].try_into().unwrap());
+            out.push(larql_models::quant::half::f16_to_f32(bits));
+        }
+        out
+    }
+
+    #[test]
+    fn patch_down_weights_f32_writes_correct_columns() {
+        let tmp = std::env::temp_dir().join("larql_pdw_f32");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let num_layers = 4;
+        let hidden = 8;
+        let intermediate = 16;
+        write_synthetic_f32(&src, num_layers, hidden, intermediate);
+        let cfg = mini_config(num_layers, hidden, intermediate);
+
+        // Build override down vectors with distinctive values per layer.
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        let layer = 2;
+        let feature = 5;
+        let down: Vec<f32> = (0..hidden).map(|r| 100.0 + r as f32).collect();
+        overrides.insert((layer, feature), down.clone());
+
+        patch_down_weights(&src, &dst, &cfg, &overrides).unwrap();
+
+        // The patched column at L2 F5 must equal the override exactly.
+        let read_back = read_column_f32(&dst, layer, feature, num_layers, hidden, intermediate);
+        assert_eq!(read_back, down, "patched column doesn't match override");
+
+        // Layer 0 column 5 must be untouched (offset = row*intermediate + feature
+        // since layer 0 starts at element 0 of the file).
+        let untouched = read_column_f32(&dst, 0, feature, num_layers, hidden, intermediate);
+        for (row, val) in untouched.iter().enumerate() {
+            let expected = ((row * intermediate + feature) as f32) * 0.001;
+            assert!(
+                (val - expected).abs() < 1e-6,
+                "L0 F5 row {row}: got {val}, expected {expected}"
+            );
+        }
+
+        // Adjacent column at L2 F4 must be untouched.
+        let neighbour = read_column_f32(&dst, layer, feature - 1, num_layers, hidden, intermediate);
+        for (row, val) in neighbour.iter().enumerate() {
+            let expected =
+                ((layer * hidden * intermediate + row * intermediate + (feature - 1)) as f32) * 0.001;
+            assert!(
+                (val - expected).abs() < 1e-6,
+                "L2 F4 row {row}: got {val}, expected {expected}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn patch_down_weights_f16_writes_correct_columns() {
+        let tmp = std::env::temp_dir().join("larql_pdw_f16");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let num_layers = 3;
+        let hidden = 8;
+        let intermediate = 16;
+        write_synthetic_f16(&src, num_layers, hidden, intermediate);
+        let cfg = mini_config(num_layers, hidden, intermediate);
+
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        let down: Vec<f32> = (0..hidden).map(|r| (r as f32) * 0.5 - 1.0).collect();
+        overrides.insert((1, 7), down.clone());
+
+        patch_down_weights(&src, &dst, &cfg, &overrides).unwrap();
+
+        let read_back = read_column_f16(&dst, 1, 7, hidden, intermediate);
+        // f16 round-trip tolerance — values like 0.5 round-trip cleanly.
+        for (i, (got, want)) in read_back.iter().zip(down.iter()).enumerate() {
+            assert!(
+                (got - want).abs() < 0.01,
+                "row {i}: got {got}, expected {want}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn patch_down_weights_multiple_layers_and_features() {
+        let tmp = std::env::temp_dir().join("larql_pdw_multi");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let num_layers = 8;
+        let hidden = 4;
+        let intermediate = 8;
+        write_synthetic_f32(&src, num_layers, hidden, intermediate);
+        let cfg = mini_config(num_layers, hidden, intermediate);
+
+        // 4 different (layer, feature) pairs with different override values.
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        let cases = [(0, 0), (3, 5), (5, 2), (7, 7)];
+        for (layer, feature) in cases {
+            let v: Vec<f32> = (0..hidden)
+                .map(|r| 1000.0 + (layer * 100 + feature * 10 + r) as f32)
+                .collect();
+            overrides.insert((layer, feature), v);
+        }
+
+        patch_down_weights(&src, &dst, &cfg, &overrides).unwrap();
+
+        for (layer, feature) in cases {
+            let read_back = read_column_f32(&dst, layer, feature, num_layers, hidden, intermediate);
+            let expected: Vec<f32> = (0..hidden)
+                .map(|r| 1000.0 + (layer * 100 + feature * 10 + r) as f32)
+                .collect();
+            assert_eq!(
+                read_back, expected,
+                "L{layer} F{feature} doesn't match override"
+            );
+        }
+
+        // Spot check a non-overridden cell at L3 F0 — must equal source.
+        let untouched = read_column_f32(&dst, 3, 0, num_layers, hidden, intermediate);
+        for (row, val) in untouched.iter().enumerate() {
+            let expected = ((3 * hidden * intermediate + row * intermediate) as f32) * 0.001;
+            assert!((val - expected).abs() < 1e-6, "L3 F0 row {row} disturbed");
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn patch_down_weights_rejects_wrong_shape() {
+        let tmp = std::env::temp_dir().join("larql_pdw_bad");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let cfg = mini_config(2, 8, 8);
+        write_synthetic_f32(&src, 2, 8, 8);
+
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        // Wrong length: 4 instead of 8.
+        overrides.insert((0, 0), vec![0.0; 4]);
+
+        let result = patch_down_weights(&src, &dst, &cfg, &overrides);
+        assert!(result.is_err(), "expected wrong-shape override to error");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("wrong shape"), "error message: {msg}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn patch_down_weights_rejects_unrecognised_dtype_size() {
+        let tmp = std::env::temp_dir().join("larql_pdw_dtype");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        let cfg = mini_config(2, 4, 4);
+        // Write a file whose size matches neither f32 (128 bytes) nor f16 (64 bytes).
+        std::fs::write(src.join("down_weights.bin"), vec![0u8; 100]).unwrap();
+
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        overrides.insert((0, 0), vec![1.0; 4]);
+
+        let result = patch_down_weights(&src, &dst, &cfg, &overrides);
+        assert!(result.is_err(), "expected mismatched dtype to error");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn patch_down_weights_missing_source_errors() {
+        let tmp = std::env::temp_dir().join("larql_pdw_missing");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+
+        // Note: src/down_weights.bin deliberately not created.
+
+        let cfg = mini_config(2, 4, 4);
+        let mut overrides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        overrides.insert((0, 0), vec![1.0; 4]);
+
+        let result = patch_down_weights(&src, &dst, &cfg, &overrides);
+        assert!(result.is_err(), "expected missing source to error");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("no down_weights.bin"), "error message: {msg}");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

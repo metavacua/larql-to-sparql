@@ -1,4 +1,4 @@
-/// Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS.
+//! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS.
 
 use std::collections::HashMap;
 

@@ -1,4 +1,4 @@
-/// Shared helpers: formatting, token filtering.
+//! Shared helpers: formatting, token filtering.
 
 use std::path::Path;
 

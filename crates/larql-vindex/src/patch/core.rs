@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-//! Vindex patch system — lightweight, shareable knowledge diffs.
+//! Vindex patch system — lightweight, shareable knowledge diffs
 //!
 //! A patch (.vlp file) captures INSERT, DELETE, and UPDATE operations
 //! as a portable JSON file. Patches overlay an immutable base vindex
@@ -165,8 +164,8 @@ pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
     Ok(floats)
 }
 
-// Simple base64 (no external dependency)
-#[allow(dead_code)]
+// Simple base64 (no external dependency). Used by `encode_gate_vector`
+// and indirectly by patch save / DIFF INTO PATCH.
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -216,16 +215,61 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, VindexError> {
 // ═══════════════════════════════════════════════════════════════
 
 /// A vindex with patches applied as an overlay.
-/// The base files on disk are never modified.
+/// The base **files on disk** are never modified.
+///
+/// ## Layering: gate overrides vs down vector overrides
+///
+/// `PatchedVindex` deliberately stores its overrides in **two different
+/// places** depending on what they are:
+///
+/// - **Gate vectors** (`insert_feature`, `update_feature_meta`) live in
+///   `self.overrides_gate` and `self.overrides_meta` — true overlays
+///   that don't touch the base. `gate_knn` consults these on top of the
+///   base scores.
+///
+/// - **Down vectors** (`set_down_vector`) are forwarded to
+///   `self.base.set_down_vector`, which mutates the base's
+///   `down_overrides` HashMap in place. The base files on disk remain
+///   unchanged, but the in-memory base picks up the override directly.
+///   `walk_ffn`'s `down_override(layer, feat)` lookup then finds the
+///   override on the base.
+///
+/// This asymmetry is **intentional** and load-bearing for
+/// `COMPILE INTO VINDEX`. The dense FFN inference path
+/// (`walk_ffn_full_mmap`) reads gate scores from `gate_vectors.bin` via
+/// `gate_scores_batch`. If the inserted (norm-matched) gate vector were
+/// baked into that file, the dense activation at the inserted slot
+/// would become moderate-to-large; combined with the override down
+/// vector (multi-layer constellation install at α=0.25 per layer) the
+/// residual stream blows up. Keeping the source's weak free-slot gate
+/// at the inserted index leaves the dense activation small, so
+/// `small_activation × poseidon_vector` per layer accumulates into the
+/// validated constellation effect.
+///
+/// `COMPILE INTO VINDEX` therefore:
+///   - Hard-links `gate_vectors.bin` from source (unchanged), and
+///   - Bakes the down vectors into `down_weights.bin` via column-rewrite
+///     at the inserted slots.
+///
+/// This is why `down_overrides()` reaches through to the base while
+/// `overrides_gate_at()` reads the patch overlay — the two types of
+/// override live in different places by design. Don't "fix" this by
+/// moving down vectors into a separate overlay map, or you'll have to
+/// re-solve the activation-blowup problem.
 pub struct PatchedVindex {
-    /// Immutable base index.
+    /// Immutable base index. Note: `set_down_vector` mutates
+    /// `base.down_overrides` in place — see the layering doc above.
     pub base: VectorIndex,
     /// Applied patches (in order).
     pub patches: Vec<VindexPatch>,
-    /// Resolved overrides: (layer, feature) → effective operation.
+    /// Resolved meta overrides: (layer, feature) → effective metadata.
     /// Later patches override earlier ones for the same feature.
     pub(crate) overrides_meta: HashMap<(usize, usize), Option<FeatureMeta>>,
+    /// Resolved gate vector overrides: (layer, feature) → gate vector.
+    /// Lives in the overlay (not on `base`) so that the source
+    /// `gate_vectors.bin` stays clean — see layering doc above.
     pub(crate) overrides_gate: HashMap<(usize, usize), Vec<f32>>,
+    /// Tombstones for deleted features.
     pub(crate) deleted: std::collections::HashSet<(usize, usize)>,
 }
 
@@ -287,6 +331,29 @@ impl PatchedVindex {
     /// Set a down vector override for a feature.
     pub fn set_down_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
         self.base.set_down_vector(layer, feature, vector);
+    }
+
+    /// All in-memory down vector overrides on the underlying base vindex.
+    /// Used by `COMPILE INTO VINDEX` to bake them into a fresh copy of
+    /// `down_weights.bin`.
+    ///
+    /// For a single (layer, feature) lookup, use `down_override_at`.
+    pub fn down_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+        self.base.down_overrides()
+    }
+
+    /// Down vector override for `(layer, feature)`, if any. Forwards to
+    /// the base vindex (down vectors live on `VectorIndex.down_overrides`,
+    /// not on the patch overlay — see the layering doc on `PatchedVindex`).
+    pub fn down_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.base.down_override_at(layer, feature)
+    }
+
+    /// Override gate vector for `(layer, feature)`, if present in the
+    /// patch overlay. Used by `COMPILE INTO VINDEX` to read each
+    /// inserted gate vector for sidecar serialisation.
+    pub fn overrides_gate_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.overrides_gate.get(&(layer, feature)).map(|v| v.as_slice())
     }
 
     /// Find a free feature slot in the base (weakest or empty).

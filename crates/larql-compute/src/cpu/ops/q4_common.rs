@@ -313,6 +313,53 @@ pub fn quantize_q4_k_gguf(data: &[f32]) -> Vec<u8> {
     out
 }
 
+/// Convert Q4_K (148 bytes/block) to GGUF Q4_K (144 bytes/block) for fast GPU inference.
+///
+/// Processes a flat byte array of Q4_K superblocks. Each 148-byte block becomes 144 bytes.
+/// Repacks scale/min headers from separate arrays into GGUF's interleaved 12-byte format.
+/// Our 4-bit mins (0-15) fit within GGUF's 6-bit min range (0-63).
+pub fn q4k_to_gguf(q4k_data: &[u8]) -> Vec<u8> {
+    assert!(q4k_data.len().is_multiple_of(148), "Q4_K data must be a multiple of 148 bytes");
+    let n_blocks = q4k_data.len() / 148;
+    let mut out = Vec::with_capacity(n_blocks * 144);
+
+    for i in 0..n_blocks {
+        let block = &q4k_data[i * 148..];
+
+        // Copy d, dmin (4 bytes — same in both formats)
+        out.extend_from_slice(&block[0..4]);
+
+        // Unpack our scales[12] + mins[4] into GGUF packed[12]
+        let sc = &block[4..16];
+        let mn = &block[16..20];
+
+        let mut q_scales = [0u8; 8];
+        let mut q_mins = [0u8; 8];
+        for j in 0..4 {
+            q_scales[j] = sc[j] & 0x3F;
+            q_scales[j + 4] = sc[j + 4] & 0x3F;
+            q_mins[j] = mn[j] & 0x0F;
+            q_mins[j + 4] = (mn[j] >> 4) & 0x0F;
+        }
+
+        // Pack into GGUF format: 12 bytes
+        let mut packed = [0u8; 12];
+        for j in 0..4 {
+            packed[j] = (q_scales[j] & 0x3F) | ((q_mins[j] & 0x03) << 6);
+            packed[j + 4] = (q_scales[j + 4] & 0x3F) | ((q_mins[j + 4] & 0x03) << 6);
+        }
+        packed[8] = ((q_mins[0] >> 2) & 0x0F) | (((q_mins[1] >> 2) & 0x0F) << 4);
+        packed[9] = ((q_mins[2] >> 2) & 0x0F) | (((q_mins[3] >> 2) & 0x0F) << 4);
+        packed[10] = ((q_mins[4] >> 2) & 0x0F) | (((q_mins[5] >> 2) & 0x0F) << 4);
+        packed[11] = ((q_mins[6] >> 2) & 0x0F) | (((q_mins[7] >> 2) & 0x0F) << 4);
+        out.extend_from_slice(&packed);
+
+        // Copy nibbles unchanged (128 bytes)
+        out.extend_from_slice(&block[20..148]);
+    }
+    out
+}
+
 /// Convert Q4_K data to Q4_KF (pre-baked half scales) for fast GPU inference.
 ///
 /// Q4_KF eliminates ALL header decode + scale unpack from the inference hot loop.

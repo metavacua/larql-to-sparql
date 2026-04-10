@@ -107,6 +107,53 @@ In the LQL REPL, INSERT/DELETE/UPDATE automatically create a patch session. Use 
 
 ### 1.6 Compile
 
+Two compile targets:
+
+#### `COMPILE INTO VINDEX` — flatten patches into a standalone vindex
+
+Produces a fresh vindex directory whose **bytes** contain the inserted
+features. No overlay file, no auto-applied sidecar — the result loads
+like any other vindex.
+
+**Algorithm:**
+1. Hard-link every read-only weight file from the source (`attn_weights.bin`,
+   `up_weights.bin`, `norms.bin`, `weight_manifest.json`, `embeddings.bin`,
+   `tokenizer.json`, `up_features.bin`, `down_features.bin`, `down_meta.bin`).
+   On APFS this is instant — same inode, same bytes.
+2. Save `gate_vectors.bin` from the (unmodified) base — this is byte-identical
+   to the source since INSERT does not write gate vectors into this file. The
+   inserted gate vector lives only in the patch overlay's `overrides_gate`
+   HashMap and is *not* baked into `gate_vectors.bin`. (Doing so would make
+   the dense FFN read a moderate-magnitude gate at the inserted slot, which
+   combined with the override down vector blows up the residual stream.)
+3. Bake the inserted features' down vectors into a fresh copy of
+   `down_weights.bin`. For each `(layer, feature)` override, copy the source
+   layer slab into RAM, splice the override values into the column at index
+   `feature` (which is `hidden_size` scattered cells across the
+   `[hidden, intermediate]` row-major matrix), then write the slab back.
+4. Recompute checksums and write `index.json`.
+
+**Why down_weights.bin specifically:** the dense FFN inference path
+(`walk_ffn_exact` / `load_model_weights`) reads the down projection from
+`down_weights.bin` via `weight_manifest.json`. Replacing the column at the
+inserted slot makes the inserted feature fire through the standard FFN
+path with no runtime overlay. The source weak gate at that slot keeps the
+dense activation small, so `small_activation × poseidon_vector` per layer
+reproduces the constellation effect — exactly matching the patched session
+within f32→f16 round-trip precision.
+
+**End-to-end verification:** On Gemma 4B with `INSERT Atlantis → Poseidon`
+followed by `COMPILE CURRENT INTO VINDEX`, a fresh `USE` of the compiled
+vindex (no patch overlay loaded) produces:
+- `INFER "The capital of Atlantis is"` → **Pose 56.91%** at #1
+- `INFER "The capital of France is"` → **Paris 67.34%** (preserved)
+
+This matches the live patched session within rounding (which gave Pose
+56.16% / Paris 67.28% — the small delta is f32→f16 down vector
+quantisation since `down_weights.bin` is stored as f16).
+
+#### `COMPILE INTO MODEL` — export to HuggingFace / GGUF
+
 Reconstructs HuggingFace-compatible model files from the vindex.
 
 ```rust
@@ -115,14 +162,22 @@ compile_vindex(&vindex_path, &output_path, format)?;
 
 **Algorithm:**
 1. Read `gate_vectors.bin` → reshape rows into W_gate matrices per layer (canonical source — no separate gate weight file)
-2. Read split weight files (attn, up, down, norms, lm_head)
-3. For any features modified by INSERT/DELETE/UPDATE: use the vindex's updated gate vectors and metadata
+2. Read split weight files (`attn_weights.bin`, `up_weights.bin`, `down_weights.bin`, `norms.bin`)
+3. Inserted features are already in `down_weights.bin` (baked there by an
+   earlier `COMPILE INTO VINDEX` step, or by INSERT applied to a vindex
+   that has `has_model_weights = true`). The export is a passthrough —
+   no special handling needed for the constellation, since the override
+   columns are sitting in the exact bytes the manifest references.
 4. Write safetensors with standard HuggingFace naming conventions
 5. Copy `config.json` and `tokenizer.json` from vindex metadata
 
-**Requires:** Extract level `All`.
+**Requires:** Extract level `All` (model weights present).
 
 **Round-trip test:** EXTRACT → COMPILE (no edits) should produce weights identical to the original within floating-point tolerance.
+
+**Insert round-trip test:** EXTRACT → INSERT → COMPILE → load in
+HuggingFace Transformers should produce the inserted facts via standard
+generate(), with no special loader code.
 
 ### 1.7 Feature Lookup
 

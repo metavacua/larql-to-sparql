@@ -1,4 +1,4 @@
-/// VectorIndex mutation and persistence methods.
+/// VectorIndex mutation and persistence methods
 ///
 /// Adds INSERT/DELETE/UPDATE support and the ability to save a modified vindex back to disk.
 use std::io::{BufWriter, Write};
@@ -50,6 +50,23 @@ impl VectorIndex {
     /// During sparse FFN, this vector is used instead of the model's down weight row.
     pub fn set_down_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
         self.down_overrides.insert((layer, feature), vector);
+    }
+
+    /// All in-memory down vector overrides keyed by `(layer, feature)`.
+    /// Used by `COMPILE INTO VINDEX` to bake the overrides into a fresh
+    /// copy of `down_weights.bin`.
+    ///
+    /// For a single (layer, feature) lookup, use `down_override_at` —
+    /// it has the same shape as `PatchedVindex::overrides_gate_at`.
+    pub fn down_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+        &self.down_overrides
+    }
+
+    /// Down vector override for `(layer, feature)`, if any has been set
+    /// via `set_down_vector`. Returns the same data as the
+    /// `GateIndex::down_override` trait method.
+    pub fn down_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.down_overrides.get(&(layer, feature)).map(|v| v.as_slice())
     }
 
     /// Copy a layer's gate vectors from mmap to heap (for mutation).
@@ -138,6 +155,12 @@ impl VectorIndex {
 
     /// Find features matching entity and/or relation filters at a given layer (or all layers).
     /// Returns (layer, feature) pairs.
+    ///
+    /// Works in both heap and mmap mode — uses `feature_meta(layer, f)`
+    /// (which checks heap first, then mmap) instead of reading the
+    /// heap-side `down_meta` directly. This is important for the LQL
+    /// executor's DELETE / UPDATE paths, which run against vindexes
+    /// loaded fresh from disk (mmap mode).
     pub fn find_features(
         &self,
         entity: Option<&str>,
@@ -146,6 +169,9 @@ impl VectorIndex {
     ) -> Vec<(usize, usize)> {
         let mut results = Vec::new();
         let layers = self.loaded_layers();
+        // Relation matching is not yet implemented at this layer — reject
+        // anything that asks for it.
+        let relation_match = relation_label.is_none();
 
         for layer in layers {
             if let Some(l) = layer_filter {
@@ -153,25 +179,21 @@ impl VectorIndex {
                     continue;
                 }
             }
-            if let Some(Some(ref metas)) = self.down_meta.get(layer) {
-                for (feat, meta_opt) in metas.iter().enumerate() {
-                    if let Some(meta) = meta_opt {
-                        let entity_match = entity
-                            .map(|e| {
-                                meta.top_token.to_lowercase().contains(&e.to_lowercase())
-                                    || meta.top_k.iter().any(|t| {
-                                        t.token.to_lowercase().contains(&e.to_lowercase())
-                                    })
+            let n = self.num_features(layer);
+            for feat in 0..n {
+                let Some(meta) = self.feature_meta(layer, feat) else {
+                    continue;
+                };
+                let entity_match = entity
+                    .map(|e| {
+                        meta.top_token.to_lowercase().contains(&e.to_lowercase())
+                            || meta.top_k.iter().any(|t| {
+                                t.token.to_lowercase().contains(&e.to_lowercase())
                             })
-                            .unwrap_or(true);
-
-                        // Relation matching is best-effort — check against relation label if provided
-                        let relation_match = relation_label.is_none();
-
-                        if entity_match && relation_match {
-                            results.push((layer, feat));
-                        }
-                    }
+                    })
+                    .unwrap_or(true);
+                if entity_match && relation_match {
+                    results.push((layer, feat));
                 }
             }
         }

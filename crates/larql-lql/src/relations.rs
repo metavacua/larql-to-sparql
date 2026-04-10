@@ -1,7 +1,7 @@
-/// Relation type classifier for DESCRIBE edges.
-///
-/// Uses discovered cluster centres from the vindex (computed during build).
-/// Falls back to embedding-direction heuristics if no clusters are available.
+//! Relation type classifier for DESCRIBE edges.
+//!
+//! Uses discovered cluster centres from the vindex (computed during build).
+//! Falls back to embedding-direction heuristics if no clusters are available.
 
 use larql_inference::ndarray::{Array1, Array2};
 use larql_inference::tokenizers::Tokenizer;

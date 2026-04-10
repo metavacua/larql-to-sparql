@@ -16,3 +16,18 @@ rustyline = "15"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "executor"
+harness = false
+
+[[bench]]
+name = "compile"
+harness = false

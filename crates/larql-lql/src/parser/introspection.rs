@@ -1,4 +1,4 @@
-/// Introspection statement parsers: SHOW (RELATIONS, LAYERS, FEATURES, MODELS), STATS.
+//! Introspection statement parsers: SHOW (RELATIONS, LAYERS, FEATURES, MODELS), STATS.
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};

@@ -1,4 +1,4 @@
-/// LQL Abstract Syntax Tree.
+/// LQL Abstract Syntax Tree
 ///
 /// Every LQL statement parses into one `Statement` variant.
 /// The executor dispatches each variant to the appropriate backend.
@@ -77,6 +77,12 @@ pub enum Statement {
         target: String,
         layer: Option<u32>,
         confidence: Option<f32>,
+        /// Per-layer down-vector scale. Default 0.25 (validated 8L
+        /// constellation in `docs/training-free-insert.md`). Larger values
+        /// push the inserted fact harder but dilute neighbouring facts;
+        /// smaller values reduce neighbour degradation at the cost of
+        /// new-fact confidence.
+        alpha: Option<f32>,
     },
     Delete {
         conditions: Vec<Condition>,

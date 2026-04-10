@@ -1,4 +1,4 @@
-/// LQL Parser — recursive descent from token stream to AST.
+//! LQL Parser — recursive descent from token stream to AST.
 
 mod helpers;
 mod introspection;

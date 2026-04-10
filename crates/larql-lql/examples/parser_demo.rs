@@ -1,4 +1,4 @@
-//! LQL Parser Demo — parse every statement type from the spec v0.3 and display the AST.
+//! LQL Parser Demo — parse every statement type from the spec v0.3 and display the AST
 //!
 //! Run: cargo run -p larql-lql --example parser_demo
 
@@ -33,6 +33,11 @@ fn main() {
     demo(
         "COMPILE (gguf, from path)",
         r#"COMPILE "gemma3.vindex" INTO MODEL "out/" FORMAT gguf;"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (bake patches)",
+        r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#,
     );
 
     demo(
@@ -111,6 +116,14 @@ fn main() {
     demo(
         "INSERT (with layer + confidence)",
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John", "occupation", "engineer") AT LAYER 26 CONFIDENCE 0.8;"#,
+    );
+    demo(
+        "INSERT (with ALPHA — stubborn fact)",
+        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") ALPHA 0.5;"#,
+    );
+    demo(
+        "INSERT (all knobs: layer + confidence + alpha)",
+        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.3;"#,
     );
     demo("DELETE", r#"DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";"#);
     demo(
@@ -194,6 +207,7 @@ fn main() {
         r#"DIFF "gemma3-4b.vindex" CURRENT;"#,
         r#"DIFF "gemma3-4b.vindex" CURRENT INTO PATCH "changes.vlp";"#,
         r#"COMPILE CURRENT INTO MODEL "gemma3-4b-edited/" FORMAT safetensors;"#,
+        r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#,
     ];
 
     let mut ok = 0;

@@ -1,4 +1,4 @@
-/// Remote executor — forwards LQL queries to a larql-server via HTTP.
+//! Remote executor — forwards LQL queries to a larql-server via HTTP.
 
 use crate::ast::*;
 use crate::error::LqlError;
@@ -13,14 +13,14 @@ impl Session {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| LqlError::Execution(format!("failed to create HTTP client: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to create HTTP client", e))?;
 
         // Verify the server is reachable by hitting /v1/stats.
         let stats_url = format!("{url}/v1/stats");
         let resp = client
             .get(&stats_url)
             .send()
-            .map_err(|e| LqlError::Execution(format!("failed to connect to {url}: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to connect to {url}", e))?;
 
         if !resp.status().is_success() {
             return Err(LqlError::Execution(format!(
@@ -32,7 +32,7 @@ impl Session {
 
         let stats: serde_json::Value = resp
             .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response from server: {e}")))?;
+            .map_err(|e| LqlError::exec("invalid response from server", e))?;
 
         let model = stats["model"].as_str().unwrap_or("unknown");
         let layers = stats["layers"].as_u64().unwrap_or(0);
@@ -73,6 +73,66 @@ impl Session {
         }
     }
 
+    // ── Generic HTTP forwarding helpers ──
+    //
+    // Every `remote_*` method ends up doing the same `build URL → send →
+    // status check → parse JSON` dance. These helpers consolidate the
+    // pattern so the per-statement methods only have to assemble the
+    // request shape and process the response body.
+
+    /// GET `{remote_url}{endpoint}` with optional query parameters,
+    /// check the response status, and parse the body as JSON.
+    fn remote_get_json(
+        &self,
+        endpoint: &str,
+        query: &[(&str, &str)],
+    ) -> Result<serde_json::Value, LqlError> {
+        let (url, client, _sid) = self.require_remote()?;
+        let resp = client
+            .get(format!("{url}{endpoint}"))
+            .query(query)
+            .send()
+            .map_err(|e| LqlError::exec("request failed", e))?;
+        Self::check_and_parse(endpoint, resp)
+    }
+
+    /// POST `{remote_url}{endpoint}` with a JSON body, check status,
+    /// and parse the response. When `with_session` is true, the
+    /// `x-session-id` header is added (server-side patch sessions).
+    fn remote_post_json(
+        &self,
+        endpoint: &str,
+        body: &serde_json::Value,
+        with_session: bool,
+    ) -> Result<serde_json::Value, LqlError> {
+        let (url, client, sid) = self.require_remote()?;
+        let mut req = client.post(format!("{url}{endpoint}")).json(body);
+        if with_session {
+            req = req.header("x-session-id", sid);
+        }
+        let resp = req
+            .send()
+            .map_err(|e| LqlError::exec("request failed", e))?;
+        Self::check_and_parse(endpoint, resp)
+    }
+
+    /// Validate the response status, parse the body as JSON, and turn
+    /// any failure into a tagged `LqlError`.
+    fn check_and_parse(
+        endpoint: &str,
+        resp: reqwest::blocking::Response,
+    ) -> Result<serde_json::Value, LqlError> {
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().unwrap_or_default();
+            return Err(LqlError::Execution(format!(
+                "{endpoint} failed ({status}): {text}"
+            )));
+        }
+        resp.json::<serde_json::Value>()
+            .map_err(|e| LqlError::exec("invalid response", e))
+    }
+
 
     // ── Remote query forwarding ──
 
@@ -82,7 +142,6 @@ impl Session {
         band: Option<LayerBand>,
         mode: crate::ast::DescribeMode,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
         let verbose = mode == crate::ast::DescribeMode::Verbose;
         let show_also = matches!(mode, crate::ast::DescribeMode::Verbose | crate::ast::DescribeMode::Raw);
 
@@ -94,15 +153,14 @@ impl Session {
             None => "knowledge",
         };
 
-        let resp = client
-            .get(format!("{url}/v1/describe"))
-            .query(&[("entity", entity), ("band", band_str), ("verbose", if verbose { "true" } else { "false" })])
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        let body: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let body = self.remote_get_json(
+            "/v1/describe",
+            &[
+                ("entity", entity),
+                ("band", band_str),
+                ("verbose", if verbose { "true" } else { "false" }),
+            ],
+        )?;
 
         let mut out = vec![entity.to_string()];
 
@@ -204,26 +262,18 @@ impl Session {
         top: Option<u32>,
         layers: Option<&Range>,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
+        let top_k = top.unwrap_or(10).to_string();
+        let layers_str = layers.map(|r| format!("{}-{}", r.start, r.end));
 
-        let top_k = top.unwrap_or(10);
-        let mut params = vec![
-            ("prompt".to_string(), prompt.to_string()),
-            ("top".to_string(), top_k.to_string()),
+        let mut params: Vec<(&str, &str)> = vec![
+            ("prompt", prompt),
+            ("top", top_k.as_str()),
         ];
-        if let Some(r) = layers {
-            params.push(("layers".to_string(), format!("{}-{}", r.start, r.end)));
+        if let Some(ref s) = layers_str {
+            params.push(("layers", s.as_str()));
         }
 
-        let resp = client
-            .get(format!("{url}/v1/walk"))
-            .query(&params)
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        let body: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let body = self.remote_get_json("/v1/walk", &params)?;
 
         let mut out = Vec::new();
         out.push(format!("Feature scan for {:?}", prompt));
@@ -256,31 +306,14 @@ impl Session {
         top: Option<u32>,
         compare: bool,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, sid) = self.require_remote()?;
-
         let mode = if compare { "compare" } else { "walk" };
-        let body = serde_json::json!({
+        let request = serde_json::json!({
             "prompt": prompt,
             "top": top.unwrap_or(5),
             "mode": mode,
         });
 
-        let resp = client
-            .post(format!("{url}/v1/infer"))
-            .header("x-session-id", sid)
-            .json(&body)
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(LqlError::Execution(format!("infer failed ({}): {}", status, text)));
-        }
-
-        let result: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let result = self.remote_post_json("/v1/infer", &request, true)?;
 
         let mut out = Vec::new();
 
@@ -323,8 +356,6 @@ impl Session {
         relations_only: bool,
         with_attention: bool,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
-
         let per_layer = top.unwrap_or(3);
         let band_str = match band {
             Some(LayerBand::Syntax) => "syntax",
@@ -334,7 +365,7 @@ impl Session {
             None => "all",
         };
 
-        let body = serde_json::json!({
+        let request = serde_json::json!({
             "prompt": prompt,
             "top": top.unwrap_or(5),
             "per_layer": per_layer,
@@ -343,21 +374,7 @@ impl Session {
             "with_attention": with_attention,
         });
 
-        let resp = client
-            .post(format!("{url}/v1/explain-infer"))
-            .json(&body)
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(LqlError::Execution(format!("explain-infer failed ({}): {}", status, text)));
-        }
-
-        let result: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let result = self.remote_post_json("/v1/explain-infer", &request, false)?;
 
         let band_label = match band {
             Some(LayerBand::Syntax) => " (syntax)",
@@ -473,16 +490,11 @@ impl Session {
     }
 
     pub(crate) fn remote_stats(&self) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
-
-        let resp = client
-            .get(format!("{url}/v1/stats"))
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        let body: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let body = self.remote_get_json("/v1/stats", &[])?;
+        let url = match &self.backend {
+            Backend::Remote { url, .. } => url.as_str(),
+            _ => "?",
+        };
 
         let mut out = Vec::new();
         out.push(format!("Model: {}", body["model"].as_str().unwrap_or("?")));
@@ -521,16 +533,7 @@ impl Session {
 
     pub(crate) fn remote_show_relations(&self, mode: crate::ast::DescribeMode, with_examples: bool) -> Result<Vec<String>, LqlError> {
         use crate::ast::DescribeMode;
-        let (url, client, _sid) = self.require_remote()?;
-
-        let resp = client
-            .get(format!("{url}/v1/relations"))
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        let body: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let body = self.remote_get_json("/v1/relations", &[])?;
 
         let mut out = Vec::new();
 
@@ -607,9 +610,7 @@ impl Session {
         layer: Option<u32>,
         confidence: Option<f32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, sid) = self.require_remote()?;
-
-        let body = serde_json::json!({
+        let request = serde_json::json!({
             "entity": entity,
             "relation": relation,
             "target": target,
@@ -617,21 +618,7 @@ impl Session {
             "confidence": confidence.unwrap_or(0.9),
         });
 
-        let resp = client
-            .post(format!("{url}/v1/insert"))
-            .header("x-session-id", sid)
-            .json(&body)
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(LqlError::Execution(format!("INSERT failed ({}): {}", status, text)));
-        }
-
-        let result: serde_json::Value = resp.json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let result = self.remote_post_json("/v1/insert", &request, true)?;
 
         let inserted = result["inserted"].as_u64().unwrap_or(0);
         let mode = result["mode"].as_str().unwrap_or("unknown");
@@ -651,8 +638,6 @@ impl Session {
         &self,
         conditions: &[crate::ast::Condition],
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
-
         // Build delete operations from conditions.
         let mut ops = Vec::new();
         let layer = conditions
@@ -689,16 +674,11 @@ impl Session {
             operations: ops,
         };
 
-        let resp = client
-            .post(format!("{url}/v1/patches/apply"))
-            .json(&serde_json::json!({"patch": patch}))
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().unwrap_or_default();
-            return Err(LqlError::Execution(format!("DELETE failed: {text}")));
-        }
+        let _ = self.remote_post_json(
+            "/v1/patches/apply",
+            &serde_json::json!({"patch": patch}),
+            false,
+        )?;
 
         Ok(vec![format!("Deleted: L{layer} F{feature} → remote server")])
     }
@@ -708,8 +688,6 @@ impl Session {
         set: &[crate::ast::Assignment],
         conditions: &[crate::ast::Condition],
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
-
         let layer = conditions
             .iter()
             .find(|c| c.field == "layer")
@@ -770,16 +748,11 @@ impl Session {
             operations: vec![op],
         };
 
-        let resp = client
-            .post(format!("{url}/v1/patches/apply"))
-            .json(&serde_json::json!({"patch": patch}))
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().unwrap_or_default();
-            return Err(LqlError::Execution(format!("UPDATE failed: {text}")));
-        }
+        let _ = self.remote_post_json(
+            "/v1/patches/apply",
+            &serde_json::json!({"patch": patch}),
+            false,
+        )?;
 
         let desc = target
             .as_deref()
@@ -795,8 +768,6 @@ impl Session {
         conditions: &[crate::ast::Condition],
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (url, client, _sid) = self.require_remote()?;
-
         let mut body = serde_json::Map::new();
         body.insert("limit".into(), serde_json::json!(limit.unwrap_or(20)));
 
@@ -832,15 +803,11 @@ impl Session {
             }
         }
 
-        let resp = client
-            .post(format!("{url}/v1/select"))
-            .json(&serde_json::Value::Object(body))
-            .send()
-            .map_err(|e| LqlError::Execution(format!("request failed: {e}")))?;
-
-        let result: serde_json::Value = resp
-            .json()
-            .map_err(|e| LqlError::Execution(format!("invalid response: {e}")))?;
+        let result = self.remote_post_json(
+            "/v1/select",
+            &serde_json::Value::Object(body),
+            false,
+        )?;
 
         let mut out = Vec::new();
 
@@ -883,7 +850,7 @@ impl Session {
         }
 
         let patch = larql_vindex::VindexPatch::load(&patch_path)
-            .map_err(|e| LqlError::Execution(format!("failed to load patch: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load patch", e))?;
 
         let (ins, upd, del) = patch.counts();
         let total = patch.len();

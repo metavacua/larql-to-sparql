@@ -1,4 +1,4 @@
-/// Shared parsing helpers: token utilities, value/field/condition parsers.
+//! Shared parsing helpers: token utilities, value/field/condition parsers.
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
@@ -182,12 +182,10 @@ impl Parser {
                 Ok(Value::String(s))
             }
             Token::NumberLit(n) => {
-                let n = n;
                 self.advance();
                 Ok(Value::Number(n))
             }
             Token::IntegerLit(n) => {
-                let n = n;
                 self.advance();
                 Ok(Value::Integer(n))
             }

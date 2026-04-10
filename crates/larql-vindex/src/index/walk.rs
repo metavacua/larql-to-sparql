@@ -33,7 +33,7 @@ impl VectorIndex {
     }
 
     /// Get a feature's contiguous down vector from the mmap'd feature-major file.
-    /// Returns [hidden_size] f32 slice — zero-copy from mmap.
+    /// Returns `[hidden_size]` f32 slice — zero-copy from mmap.
     pub fn down_feature_vector(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         let mmap = self.down_features_mmap.as_ref()?;
         let intermediate = self.num_features(layer);

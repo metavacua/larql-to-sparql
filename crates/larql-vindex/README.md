@@ -21,15 +21,44 @@ let trace = patched.walk(&query, &layers, 10);
 
 // Mutate via patch overlay (base files never modified)
 patched.insert_feature(layer, feature, gate_vec, meta);
+patched.set_down_vector(layer, feature, down_vec);
 
 // Apply a saved patch
 let patch = VindexPatch::load("medical.vlp")?;
 patched.apply_patch(patch);
 
-// Bake patches into a new clean VectorIndex
+// Bake patches into a new clean VectorIndex (in-memory)
 let baked = patched.bake_down();
 baked.save_vindex(&output_path, &mut config)?;
+
+// Or bake the constellation into the canonical down_weights.bin
+// via COMPILE INTO VINDEX (see larql-lql) — produces a real
+// standalone vindex with no overlay needed at load time, and the
+// inserted facts survive a future COMPILE INTO MODEL safetensors
+// export because the bytes are sitting in the standard
+// down_proj tensors that the manifest references.
 ```
+
+### Layering note: gate vs down overrides
+
+`PatchedVindex` stores the two kinds of override in different places:
+
+- **Gate vectors** (`insert_feature`, `update_feature_meta`) live in
+  `overrides_gate` / `overrides_meta` on the patch overlay. The
+  `gate_vectors.bin` on disk is never touched.
+- **Down vectors** (`set_down_vector`) are forwarded to the underlying
+  base index's `down_overrides` HashMap. The `down_weights.bin` on
+  disk is never touched at runtime.
+
+This asymmetry is intentional and load-bearing for `COMPILE INTO
+VINDEX`. The dense FFN inference path reads gate scores from
+`gate_vectors.bin`; baking norm-matched override gates there would
+produce moderate dense activations that combined with the override
+down vectors would blow up the residual stream. Keeping the source's
+weak free-slot gate at the inserted index keeps the dense activation
+small, so `small_activation × poseidon_vector` per layer accumulates
+into the validated multi-layer constellation effect. See
+`patch/core.rs` for the full doc on `PatchedVindex`.
 
 ## The Headline
 
@@ -189,15 +218,16 @@ model.vindex/
 ## Testing
 
 ```bash
-cargo test -p larql-vindex                                                      # 146 tests
+cargo test -p larql-vindex                                                      # 104 tests
 
-# Demo
+# Demos
 cargo run -p larql-vindex --example demo_features                               # Feature showcase
+cargo run --release -p larql-vindex --example mmap_demo                         # mmap RAM behaviour + scaling table
 
-# Benchmarks
-cargo run -p larql-vindex --example profile_operations --release                # Core microbenchmarks
-cargo run -p larql-vindex --example profile_scaling --release                   # Production dims (CPU)
-cargo run -p larql-vindex --features metal --example profile_scaling --release  # Production dims (Metal)
+# Criterion benches (run with --quick for a fast sweep, omit for full sample)
+cargo bench  -p larql-vindex --bench vindex_ops                                 # KNN, walk, save/load, mutate, MoE
+cargo bench  -p larql-vindex --bench vindex_scaling                             # Production dims (CPU)
+cargo bench  -p larql-vindex --features metal --bench vindex_scaling            # Production dims (Metal)
 
 # Build pipeline (production, uses larql-compute quantizers)
 cargo run --release -p larql-vindex --example build_q4k_weights -- <vindex>     # Q4_K/Q6_K attn + FFN
@@ -209,7 +239,7 @@ cargo run --release -p larql-vindex --example build_gate_q4 -- <vindex>         
 cargo run --release -p larql-vindex --example build_lm_head_q4 -- <vindex>      # Q4 logits projection
 ```
 
-Test coverage (146 tests):
+Test coverage (104 tests):
 - Construction, dimensions, layer counts, feature counts
 - Gate KNN: brute-force, f32, Q4 via compute backend, top-K ordering
 - Gate walk: BLAS gemv path matches brute-force KNN
@@ -226,18 +256,25 @@ Test coverage (146 tests):
 
 ## Benchmarks
 
-### Core operations (synthetic, reduced dimensions)
+Criterion benches live in `benches/`. Run with `cargo bench -p
+larql-vindex` (full sample) or `-- --quick` (5-iter sweep). HTML
+reports go to `target/criterion/`.
 
-| Operation | Latency |
+### Core operations (`benches/vindex_ops.rs`, M3 Max, synthetic dims)
+
+| Operation | Time |
 |---|---|
-| Gate KNN (per layer, 1024×256) | 0.029ms |
-| Walk (8 layers) | 0.23ms |
-| Feature lookup | <1ns |
-| Save gates (8 MB) | 1.4ms |
-| Load vindex (mmap) | 1.3ms |
-| Mutate (meta + gate) | 877ns |
-| Checksum (SHA256) | 19ms |
-| MoE 8x scaling | 16x (sub-linear) |
+| `gate_knn_per_layer / 1024f×256h` | **24 µs** |
+| `gate_knn_per_layer / 4096f×512h` | 445 µs |
+| `gate_knn_per_layer / 10240f×2560h` (Gemma production) | **2.78 ms** |
+| `walk_all_layers / 8L×1024f×256h` | 221 µs |
+| `walk_all_layers / 8L×10240f×2560h` (8L Gemma band) | 22.7 ms |
+| `feature_meta_lookup` (per call) | ~245 ns |
+| `mutate / set_meta_plus_gate` | 301 ns |
+| `save_load / save_gate_vectors` | 2.01 ms |
+| `save_load / save_down_meta` | 462 µs |
+| `save_load / load_vindex` | 261 µs |
+| `moe_scaling / 8x_experts` (vs 1x baseline) | 17.6× for 8× features (sub-linear) |
 
 ### Production dimensions (M3 Max, synthetic data)
 

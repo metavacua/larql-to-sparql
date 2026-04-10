@@ -1,4 +1,4 @@
-/// Query statement parsers: WALK, INFER, SELECT, DESCRIBE, EXPLAIN.
+//! Query statement parsers: WALK, INFER, SELECT, DESCRIBE, EXPLAIN.
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};

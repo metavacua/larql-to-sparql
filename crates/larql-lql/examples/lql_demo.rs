@@ -1,4 +1,4 @@
-//! LQL End-to-End Demo — parse, session, execute, error handling.
+//! LQL End-to-End Demo — parse, session, execute, error handling
 //!
 //! Demonstrates the full LQL flow: parse statements, manage session state,
 //! execute against the (absent) backend, and handle errors gracefully.
@@ -147,6 +147,7 @@ SHOW MODELS;
         ("EXTRACT (inference)", r#"EXTRACT MODEL "m" INTO "o" WITH INFERENCE;"#),
         ("EXTRACT (all)", r#"EXTRACT MODEL "m" INTO "o" WITH ALL;"#),
         ("COMPILE", r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors;"#),
+        ("COMPILE INTO VINDEX", r#"COMPILE CURRENT INTO VINDEX "baked.vindex";"#),
         ("DIFF", r#"DIFF "a.vindex" CURRENT;"#),
         ("DIFF (relation)", r#"DIFF "a.vindex" "b.vindex" RELATION "capital" LIMIT 20;"#),
         ("USE (vindex)", r#"USE "path.vindex";"#),
@@ -169,8 +170,12 @@ SHOW MODELS;
         ("INFER", r#"INFER "prompt" TOP 5 COMPARE;"#),
         // Mutation
         ("INSERT", r#"INSERT INTO EDGES (entity, relation, target) VALUES ("a", "b", "c") AT LAYER 26 CONFIDENCE 0.8;"#),
+        ("INSERT ALPHA", r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") ALPHA 0.5;"#),
+        ("INSERT all knobs", r#"INSERT INTO EDGES (entity, relation, target) VALUES ("a", "r", "b") AT LAYER 24 CONFIDENCE 0.9 ALPHA 0.3;"#),
         ("DELETE", r#"DELETE FROM EDGES WHERE entity = "x" AND layer = 26;"#),
+        ("DELETE by slot", r#"DELETE FROM EDGES WHERE layer = 26 AND feature = 8821;"#),
         ("UPDATE", r#"UPDATE EDGES SET target = "y", confidence = 0.9 WHERE entity = "x";"#),
+        ("UPDATE by slot", r#"UPDATE EDGES SET target = "London" WHERE layer = 26 AND feature = 8821;"#),
         ("MERGE", r#"MERGE "src.vindex" INTO "dst.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#),
         // Patches
         ("BEGIN PATCH", r#"BEGIN PATCH "test.vlp";"#),

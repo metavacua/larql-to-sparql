@@ -1,7 +1,7 @@
-/// Mutation executor: INSERT, DELETE, UPDATE, MERGE.
-///
-/// All mutations go through the PatchedVindex overlay.
-/// Base vindex files on disk are never modified.
+//! Mutation executor: INSERT, DELETE, UPDATE, MERGE
+//!
+//! All mutations go through the PatchedVindex overlay.
+//! Base vindex files on disk are never modified.
 
 use std::path::PathBuf;
 
@@ -23,9 +23,26 @@ impl Session {
         target: &str,
         layer_hint: Option<u32>,
         confidence: Option<f32>,
+        alpha_override: Option<f32>,
     ) -> Result<Vec<String>, LqlError> {
+        // INSERT is a multi-layer constellation install — never a single
+        // layer. The validated config is 8 layers × alpha=0.25 (see
+        // docs/training-free-insert.md). Single-layer installs at this
+        // alpha don't move the logits enough; raising alpha breaks
+        // neighbouring facts. Constellation is the only viable regime, so
+        // both the default and `AT LAYER N` produce a span — the layer
+        // hint just shifts where the span sits.
+        //
+        // ALPHA defaults to 0.25 (validated). Larger values push the new
+        // fact harder but dilute neighbours; smaller values reduce
+        // neighbour degradation at the cost of new-fact confidence.
+        const DEFAULT_ALPHA: f32 = 0.25;
+        const SPAN_HALF_LO: usize = 3; // span = N-3..=N+4 (8 layers total)
+        const SPAN_HALF_HI: usize = 4;
+        let alpha = alpha_override.unwrap_or(DEFAULT_ALPHA);
+
         // ── Phase 1: Read — capture config, embeddings, and residuals (immutable borrow) ──
-        let (insert_layers, hidden, target_embed, target_id, residuals, use_constellation, alpha);
+        let (insert_layers, hidden, target_embed, target_id, residuals, use_constellation);
         {
             let (path, config, patched) = self.require_vindex()?;
 
@@ -38,23 +55,31 @@ impl Session {
                 });
 
             insert_layers = if let Some(l) = layer_hint {
-                vec![l as usize]
+                // Center an 8-layer span on the requested layer, clamped to
+                // valid layer range. AT LAYER N is a *centering hint*, not a
+                // pin to a single layer.
+                let center = l as usize;
+                let max_layer = config.num_layers.saturating_sub(1);
+                let lo = center.saturating_sub(SPAN_HALF_LO);
+                let hi = (center + SPAN_HALF_HI).min(max_layer);
+                (lo..=hi).collect::<Vec<usize>>()
             } else {
+                // Default: upper half of the knowledge band (the validated
+                // multi-layer constellation region).
                 let mid = (bands.knowledge.0 + bands.knowledge.1) / 2;
-                (mid..=bands.knowledge.1).collect()
+                (mid..=bands.knowledge.1).collect::<Vec<usize>>()
             };
 
             let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
             let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
             hidden = embed.shape()[1];
-            alpha = 0.25f32;
 
             // Target embedding for down vector
             let target_encoding = tokenizer.encode(target, false)
-                .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+                .map_err(|e| LqlError::exec("tokenize error", e))?;
             let target_ids: Vec<u32> = target_encoding.get_ids().to_vec();
             target_id = target_ids.first().copied().unwrap_or(0);
 
@@ -67,18 +92,20 @@ impl Session {
             for v in &mut te { *v /= n; }
             target_embed = te;
 
-            // Constellation: forward pass to capture residuals as gate vectors
+            // Constellation: single canonical-prompt forward pass to capture
+            // per-layer residuals. The residual at the install layer becomes
+            // the gate vector (after norm-matching in Phase 2).
             use_constellation = config.has_model_weights;
             residuals = if use_constellation {
-                let prompt = format!("The {} of {} is",
-                    relation.replace(['-', '_'], " "), entity);
+                let rel_words = relation.replace(['-', '_'], " ");
+                let prompt = format!("The {rel_words} of {entity} is");
 
                 let mut cb = larql_vindex::SilentLoadCallbacks;
                 let weights = larql_vindex::load_model_weights(path, &mut cb)
-                    .map_err(|e| LqlError::Execution(format!("failed to load weights: {e}")))?;
+                    .map_err(|e| LqlError::exec("failed to load weights", e))?;
 
                 let encoding = tokenizer.encode(prompt.as_str(), true)
-                    .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+                    .map_err(|e| LqlError::exec("tokenize error", e))?;
                 let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
                 let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(&weights, patched, 8092);
@@ -86,8 +113,9 @@ impl Session {
                     &weights, &tokenizer, &token_ids, 1, &walk_ffn,
                 );
 
-                // Take the exact residuals gate_knn sees (normalized post-attention states)
-                walk_ffn.take_residuals().into_iter()
+                walk_ffn
+                    .take_residuals()
+                    .into_iter()
                     .filter(|(layer, _)| insert_layers.contains(layer))
                     .collect::<Vec<_>>()
             } else {
@@ -104,9 +132,9 @@ impl Session {
             let (path, _config, patched) = self.require_patched_mut()?;
 
             let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load embeddings: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
             let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-                .map_err(|e| LqlError::Execution(format!("failed to load tokenizer: {e}")))?;
+                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
             for &layer in &insert_layers {
                 let feature = match patched.find_free_feature(layer) {
@@ -114,15 +142,26 @@ impl Session {
                     None => continue,
                 };
 
-                // Gate vector: residual (constellation) or entity embedding (fallback)
+                // Gate vector: residual (constellation) or entity embedding
+                // (fallback). Norm-matched to the layer's average gate vector
+                // magnitude so the feature sits in the same activation regime
+                // as trained neighbours. Works in both heap and mmap mode by
+                // using `gate_vector(layer, i)` which handles both.
                 let gate_vec: Vec<f32> = if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
                     let mut gv = residual.clone();
-                    if let Some(gate_matrix) = patched.base().gate_vectors_at(layer) {
-                        let sample = gate_matrix.nrows().min(100);
-                        if sample > 0 {
-                            let avg_norm: f32 = (0..sample)
-                                .map(|i| gate_matrix.row(i).dot(&gate_matrix.row(i)).sqrt())
-                                .sum::<f32>() / sample as f32;
+                    let sample = patched.base().num_features(layer).min(100);
+                    if sample > 0 {
+                        let mut sum_norm: f32 = 0.0;
+                        let mut counted = 0u32;
+                        for i in 0..sample {
+                            if let Some(row) = patched.base().gate_vector(layer, i) {
+                                let n: f32 = row.iter().map(|v| v * v).sum::<f32>().sqrt();
+                                sum_norm += n;
+                                counted += 1;
+                            }
+                        }
+                        if counted > 0 {
+                            let avg_norm = sum_norm / counted as f32;
                             let res_norm: f32 = gv.iter().map(|v| v * v).sum::<f32>().sqrt();
                             if res_norm > 1e-8 && avg_norm > 0.0 {
                                 let scale = avg_norm / res_norm;
@@ -133,7 +172,7 @@ impl Session {
                     gv
                 } else {
                     let entity_encoding = tokenizer.encode(entity, false)
-                        .map_err(|e| LqlError::Execution(format!("tokenize error: {e}")))?;
+                        .map_err(|e| LqlError::exec("tokenize error", e))?;
                     let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
                     let mut ev = vec![0.0f32; hidden];
                     for &tok in &entity_ids {
@@ -191,14 +230,26 @@ impl Session {
         }
 
         let mut out = Vec::new();
+        let center_note = match layer_hint {
+            Some(l) => format!(", centered on L{l}"),
+            None => String::new(),
+        };
         out.push(format!(
-            "Inserted: {} —[{}]→ {} ({} layers, L{}-L{})",
+            "Inserted: {} —[{}]→ {} ({} layers, L{}-L{}{})",
             entity, relation, target, inserted_count,
             insert_layers.first().unwrap_or(&0),
             insert_layers.last().unwrap_or(&0),
+            center_note,
         ));
         if use_constellation {
-            out.push(format!("  mode: constellation (trace-guided gate + down override, alpha={:.2})", alpha));
+            let alpha_note = if alpha_override.is_some() {
+                format!(", alpha={alpha:.3}")
+            } else {
+                String::new()
+            };
+            out.push(format!(
+                "  mode: constellation (trace-guided gate + down override{alpha_note})"
+            ));
         } else {
             out.push("  mode: embedding (no model weights — gate only, no down override)".into());
         }
@@ -266,12 +317,23 @@ impl Session {
         let layer_filter = conditions.iter().find(|c| c.field == "layer").and_then(|c| {
             if let Value::Integer(n) = c.value { Some(n as usize) } else { None }
         });
+        let feature_filter = conditions.iter().find(|c| c.field == "feature").and_then(|c| {
+            if let Value::Integer(n) = c.value { Some(n as usize) } else { None }
+        });
 
         // Collect updates, then record
         let mut update_ops: Vec<(usize, usize, larql_vindex::FeatureMeta)> = Vec::new();
         {
             let (_path, _config, patched) = self.require_patched_mut()?;
-            let matches = patched.base().find_features(entity_filter, None, layer_filter);
+
+            // Fast path: explicit (layer, feature) — same shape as DELETE.
+            // Bypasses `find_features` so the caller can target a single
+            // slot directly without needing to match by entity/relation.
+            let matches: Vec<(usize, usize)> = if let (Some(layer), Some(feature)) = (layer_filter, feature_filter) {
+                vec![(layer, feature)]
+            } else {
+                patched.base().find_features(entity_filter, None, layer_filter)
+            };
 
             if matches.is_empty() {
                 return Ok(vec!["  (no matching features found)".into()]);
@@ -359,7 +421,7 @@ impl Session {
         // Load source
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let source_index = larql_vindex::VectorIndex::load_vindex(&source_path, &mut cb)
-            .map_err(|e| LqlError::Execution(format!("failed to load source: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load source", e))?;
 
         // Merge into the patch overlay
         let (_path, _config, patched) = self.require_patched_mut()?;

@@ -11,7 +11,7 @@
 
 ## 1. Design Principles
 
-LQL is a query language for neural network weights treated as a graph database. It is not SQL. It is not SPARQL. It borrows from both but serves a different purpose: decompiling, inspecting, editing, and recompiling neural networks.
+LQL is a query language for neural network weights treated as a graph database. It is not SQL. It is not SPARQL. It borrows from both but serves a different purpose: decompiling, inspecting, editing, and recompiling neural networks
 
 **Principles:**
 
@@ -156,6 +156,13 @@ COMPILE {<vindex_path> | CURRENT} INTO MODEL <output_path>
 
 -- Recompile a vindex back to model weights.
 -- Round-trip: EXTRACT then COMPILE should produce identical weights.
+--
+-- INSERT/DELETE/UPDATE mutations applied to the vindex are baked into
+-- the canonical down_weights.bin (column-rewrite at the inserted slots),
+-- so the exported safetensors / gguf file already contains the
+-- constellation in the standard down_proj tensors. No special loader
+-- support is needed — load the output in HuggingFace Transformers, GGUF
+-- runtimes, etc. and the inserted facts fire through the standard FFN.
 
 COMPILE CURRENT
     INTO MODEL "gemma3-4b-edited/"
@@ -373,11 +380,25 @@ INSERT INTO EDGES
     VALUES (<entity>, <relation>, <target>)
     [AT LAYER <n>]
     [CONFIDENCE <float>]
+    [ALPHA <float>]
 
 -- Add an edge to the vindex.
 -- The relation should be one of the known types (from probe/cluster labels).
--- AT LAYER: which layer to write to (default: auto-select based on relation).
--- CONFIDENCE: injection strength (default: auto-calibrate).
+--
+-- INSERT is always a multi-layer constellation install — the validated
+-- regime (8 layers × alpha=0.25, see docs/training-free-insert.md). Single-
+-- layer installs at this alpha don't move the logits enough; raising alpha
+-- breaks neighbouring facts. There is no single-layer mode.
+--
+-- AT LAYER N: center the constellation span on layer N (8 layers, clamped
+--   to valid layer range). The default span is the upper half of the
+--   knowledge band — pass AT LAYER to shift it.
+-- CONFIDENCE: stored on the inserted features (default: 0.9).
+-- ALPHA:      per-layer down-vector scale (default: 0.25). Larger values
+--   push the new fact harder but dilute neighbouring facts; smaller values
+--   reduce neighbour degradation at the cost of new-fact confidence.
+--   Validated range ~0.10–0.50. See docs/training-free-insert.md for the
+--   alpha sweep.
 
 INSERT INTO EDGES
     (entity, relation, target)
@@ -403,10 +424,19 @@ UPDATE EDGES
     SET <field> = <value> [, <field> = <value>]...
     WHERE <conditions>
 
+-- Update by entity (matches the feature whose top_token contains the entity).
+-- Works on both heap-resident and mmap-loaded vindexes.
 UPDATE EDGES
     SET target = "London"
     WHERE entity = "John Coyle"
     AND relation = "lives-in";
+
+-- Fast path: explicit (layer, feature) bypasses the entity scan and
+-- targets the slot directly. Use this when you already know which
+-- feature slot you want to overwrite (e.g. from `SHOW FEATURES` output).
+UPDATE EDGES
+    SET target = "London", confidence = 0.95
+    WHERE layer = 26 AND feature = 8821;
 ```
 
 ```
@@ -482,7 +512,17 @@ COMPILE CURRENT INTO VINDEX <output_path>
     [ON CONFLICT {LAST_WINS | HIGHEST_CONFIDENCE | FAIL}]
 
 -- Flatten all applied patches into a new clean vindex.
--- The result is a standalone vindex with no patch dependencies.
+-- The result is a fully self-contained vindex with no overlay or sidecar:
+-- the inserted features' down vectors are written into the canonical
+-- `down_weights.bin` (column-rewrite at the inserted slots), and every
+-- other weight file is hard-linked from the source (instant, free on
+-- APFS — same inode, same bytes).
+--
+-- A subsequent USE on the compiled vindex needs no special loader code:
+-- it loads like any other vindex and INFER produces the inserted facts
+-- through the standard dense FFN path. From this point you can also run
+-- COMPILE INTO MODEL to export to safetensors / gguf — the constellation
+-- is already in the bytes that get exported.
 
 COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
 ```

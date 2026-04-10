@@ -39,3 +39,14 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 [features]
 default = []
 metal = ["larql-compute/metal"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "vindex_ops"
+harness = false
+
+[[bench]]
+name = "vindex_scaling"
+harness = false

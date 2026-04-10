@@ -1,6 +1,6 @@
 # Training-Free Knowledge Insertion
 
-How to inject new factual knowledge into a model without training, fine-tuning, or modifying model weights. One forward pass to capture the residual stream, eight feature writes to the vindex, and the model produces the new fact at 94.6% confidence while preserving existing knowledge.
+How to inject new factual knowledge into a model without training, fine-tuning, or modifying model weights. One forward pass to capture the residual stream, eight feature writes to the vindex, and the model produces the new fact at 94.6% confidence while preserving existing knowledge
 
 ## The Result
 
@@ -224,16 +224,27 @@ pip install -e crates/larql-python
 python experiments/04_constellation_insert/multilayer.py
 ```
 
-Or from the REPL (once INSERT FACT is implemented):
+Or from the REPL:
 
 ```sql
 larql> USE "output/gemma3-4b-f16.vindex";
 larql> INFER "The capital of Atlantis is" TOP 5;
 -- said (17.8%), believed (17.6%)...
 
-larql> INSERT FACT "The capital of Atlantis is Poseidon";
--- Traces prompt, inserts 8 features with down overrides
+larql> INSERT INTO EDGES (entity, relation, target)
+       VALUES ("Atlantis", "capital-of", "Poseidon");
+-- Traces "The capital of Atlantis is" through the model and installs
+-- the constellation across the upper knowledge band (alpha=0.25 per layer).
+-- For stubborn facts, raise alpha: ... ALPHA 0.5 (closer to single-layer
+-- regime). For minimal neighbour degradation, lower it: ... ALPHA 0.1.
 
 larql> INFER "The capital of Atlantis is" TOP 5;
 -- Poseidon (94.6%)
 ```
+
+The executor synthesises the trace prompt as `"The {relation} of {entity} is"`
+(with `-`/`_` in the relation replaced by spaces), so `("Atlantis", "capital-of",
+"Poseidon")` becomes the exact prompt this experiment validated. INSERT always
+installs a multi-layer constellation (~8 layers × alpha=0.25) — the only
+validated regime. The default span sits in the upper half of the knowledge
+band; pass `AT LAYER N` to center the span on layer N instead.

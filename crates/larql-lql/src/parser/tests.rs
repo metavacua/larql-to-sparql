@@ -751,12 +751,13 @@ fn parse_insert_minimal() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John Coyle", "lives-in", "Colchester");"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { entity, relation, target, layer, confidence } => {
+        Statement::Insert { entity, relation, target, layer, confidence, alpha } => {
             assert_eq!(entity, "John Coyle");
             assert_eq!(relation, "lives-in");
             assert_eq!(target, "Colchester");
             assert!(layer.is_none());
             assert!(confidence.is_none());
+            assert!(alpha.is_none());
         }
         _ => panic!("expected Insert"),
     }
@@ -768,9 +769,41 @@ fn parse_insert_with_layer_and_confidence() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John", "occupation", "engineer") AT LAYER 26 CONFIDENCE 0.8;"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { layer, confidence, .. } => {
+        Statement::Insert { layer, confidence, alpha, .. } => {
             assert_eq!(layer, Some(26));
             assert!((confidence.unwrap() - 0.8).abs() < 0.01);
+            assert!(alpha.is_none());
+        }
+        _ => panic!("expected Insert"),
+    }
+}
+
+#[test]
+fn parse_insert_with_alpha() {
+    let stmt = parse(
+        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") ALPHA 0.5;"#,
+    ).unwrap();
+    match stmt {
+        Statement::Insert { alpha, layer, confidence, .. } => {
+            assert!((alpha.unwrap() - 0.5).abs() < 1e-6);
+            assert!(layer.is_none());
+            assert!(confidence.is_none());
+        }
+        _ => panic!("expected Insert"),
+    }
+}
+
+#[test]
+fn parse_insert_with_layer_confidence_alpha() {
+    // All three optional clauses can coexist in any order encountered.
+    let stmt = parse(
+        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.3;"#,
+    ).unwrap();
+    match stmt {
+        Statement::Insert { layer, confidence, alpha, .. } => {
+            assert_eq!(layer, Some(24));
+            assert!((confidence.unwrap() - 0.95).abs() < 1e-6);
+            assert!((alpha.unwrap() - 0.3).abs() < 1e-6);
         }
         _ => panic!("expected Insert"),
     }

@@ -1,7 +1,7 @@
-/// LQL Executor — dispatches parsed AST statements to backend operations.
-///
-/// The base vindex is always readonly. All mutations go through a patch overlay.
-/// INSERT/DELETE/UPDATE auto-start an anonymous patch session if none is active.
+//! LQL Executor — dispatches parsed AST statements to backend operations
+//!
+//! The base vindex is always readonly. All mutations go through a patch overlay.
+//! INSERT/DELETE/UPDATE auto-start an anonymous patch session if none is active.
 
 mod helpers;
 mod introspection;
@@ -144,9 +144,9 @@ impl Session {
             Statement::Diff { a, b, layer, relation, limit, into_patch } => {
                 self.exec_diff(a, b, *layer, relation.as_deref(), *limit, into_patch.as_deref())
             }
-            Statement::Insert { entity, relation, target, layer, confidence } => {
+            Statement::Insert { entity, relation, target, layer, confidence, alpha } => {
                 let mut out = self.ensure_patch_session();
-                out.extend(self.exec_insert(entity, relation, target, *layer, *confidence)?);
+                out.extend(self.exec_insert(entity, relation, target, *layer, *confidence, *alpha)?);
                 Ok(out)
             }
             Statement::Infer { prompt, top, compare } => {
@@ -193,7 +193,10 @@ impl Session {
             }
             Statement::Stats { .. } => self.remote_stats(),
             Statement::ShowRelations { mode, with_examples, .. } => self.remote_show_relations(*mode, *with_examples),
-            Statement::Insert { entity, relation, target, layer, confidence } => {
+            Statement::Insert { entity, relation, target, layer, confidence, alpha: _ } => {
+                // Remote backend doesn't forward ALPHA — the HTTP protocol
+                // doesn't have a schema for it yet. Local backend honours
+                // alpha via `exec_insert`.
                 self.remote_insert(entity, relation, target, *layer, *confidence)
             }
             Statement::Delete { conditions } => self.remote_delete(conditions),
@@ -278,7 +281,7 @@ impl Session {
         let (ins, upd, del) = patch.counts();
         let path = PathBuf::from(&recording.path);
         patch.save(&path)
-            .map_err(|e| LqlError::Execution(format!("failed to save patch: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to save patch", e))?;
 
         self.auto_patch = false;
 
@@ -295,7 +298,7 @@ impl Session {
         }
 
         let patch = larql_vindex::VindexPatch::load(&patch_path)
-            .map_err(|e| LqlError::Execution(format!("failed to load patch: {e}")))?;
+            .map_err(|e| LqlError::exec("failed to load patch", e))?;
 
         let (ins, upd, del) = patch.counts();
         let total = patch.len();

@@ -155,6 +155,13 @@ INSERT INTO EDGES (entity, relation, target)
     VALUES ("John Coyle", "lives-in", "Colchester");
 -- "Auto-patch started (use SAVE PATCH to persist)"
 
+-- Insert with all knobs (multi-layer constellation, validated regime)
+INSERT INTO EDGES (entity, relation, target)
+    VALUES ("Atlantis", "capital-of", "Poseidon")
+    AT LAYER 24
+    CONFIDENCE 0.95
+    ALPHA 0.30;
+
 -- Patches (lightweight, shareable knowledge diffs)
 BEGIN PATCH "medical.vlp";
 INSERT INTO EDGES (entity, relation, target)
@@ -162,7 +169,14 @@ INSERT INTO EDGES (entity, relation, target)
 SAVE PATCH;
 APPLY PATCH "medical.vlp";
 
--- Recompile to standard model format
+-- Bake the patches into a fresh standalone vindex (instant on APFS:
+-- weight files are hardlinked from source, only down_weights.bin gets
+-- the override columns rewritten in place).
+COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
+
+-- Or recompile back to standard HuggingFace / GGUF format. The
+-- constellation is in the standard down_proj tensors, so loading in
+-- Transformers or GGUF runtimes Just Works — no special loader code.
 COMPILE CURRENT INTO MODEL "edited/" FORMAT safetensors;
 ```
 
@@ -342,6 +356,8 @@ cargo build --release --features metal   # with Metal GPU backend
 cargo test                               # all tests across all crates
 cargo test -p larql-inference            # inference engine tests (109 tests)
 cargo test -p larql-inference --features metal  # + Metal GPU tests (115 tests)
+cargo test -p larql-lql                  # LQL parser + executor tests (242 tests)
+cargo test -p larql-vindex               # vindex storage + patch tests (104 tests)
 
 # Inference engine examples
 cargo run --release -p larql-inference --example attention_demo    # fused attention demo
@@ -358,12 +374,36 @@ cargo run --release -p larql-vindex --example build_up_features -- path/to/vinde
 # Server (walk inference over HTTP)
 cargo run --release -p larql-server -- path/to/vindex --port 8080
 
-# Vindex and LQL examples
-cargo run -p larql-vindex --example vindex_demo    # vindex feature demo
-cargo run -p larql-vindex --example vindex_bench --release  # benchmarks
-cargo run -p larql-lql --example parser_demo       # parser demo
-cargo run -p larql-lql --example lql_demo          # LQL spec compliance
+# Vindex and LQL demos
+cargo run -p larql-vindex --example demo_features                    # vindex feature showcase (16 features)
+cargo run --release -p larql-vindex --example mmap_demo              # mmap RAM behaviour + scaling table
+cargo run -p larql-lql --example parser_demo                         # parser demo (22/22 statements)
+cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (42/42)
+cargo run --release -p larql-lql --example compile_demo              # end-to-end COMPILE INTO VINDEX
+                                                                      # (skips gracefully if no vindex on disk)
+
+# Criterion benches (use --quick for a fast sweep, omit for full sample sizes)
+cargo bench -p larql-lql    --bench parser           # parse_single × 18 + parse_batch
+cargo bench -p larql-lql    --bench executor         # SELECT, SHOW, DELETE, UPDATE, patch lifecycle
+cargo bench -p larql-lql    --bench compile          # COMPILE INTO VINDEX bake cost
+cargo bench -p larql-vindex --bench vindex_ops       # KNN, walk, save/load, mutate, MoE
+cargo bench -p larql-vindex --bench vindex_scaling   # production-dim KNN (Gemma/Llama/Mixtral)
+cargo bench -p larql-compute --bench matmul          # CPU/Metal matmul backends
 ```
+
+The `compile_demo` example proves the full flow on a real Gemma 4B
+vindex: `INSERT Atlantis → Poseidon`, `COMPILE CURRENT INTO VINDEX`,
+then `USE` the compiled vindex in a fresh session and verify
+`INFER "The capital of Atlantis is" → Pose 56.91%` and
+`INFER "The capital of France is" → Paris 67.34%` (neighbour
+preserved). The constellation is baked into `down_weights.bin`
+column-wise — no overlay or sidecar needed at load time.
+
+Bench HTML reports go to `target/criterion/`. The `parser` bench
+parses 100 mixed statements in ~78 µs (1.28 M stmts/s); `vindex_ops`
+runs production-sized Gemma 4B gate KNN in ~2.78 ms/layer; `compile`
+runs `COMPILE INTO VINDEX` in ~1.84 ms (no patches) to 2.41 ms (with
+`down_weights.bin`).
 
 ## License
 

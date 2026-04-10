@@ -1,4 +1,4 @@
-/// LQL REPL — interactive shell with history, arrow keys, and line editing.
+//! LQL REPL — interactive shell with history, arrow keys, and line editing.
 
 use crate::executor::Session;
 use crate::parser;

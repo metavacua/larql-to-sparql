@@ -1,4 +1,4 @@
-/// LQL Lexer — tokenises an input string into a stream of `Token`s.
+/// LQL Lexer — tokenises an input string into a stream of `Token`s
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -126,6 +126,7 @@ pub enum Keyword {
     Brief,
     Raw,
     Attention,
+    Alpha,
 }
 
 impl Keyword {
@@ -200,6 +201,7 @@ impl Keyword {
                 Self::Remote => "remote", Self::Answer => "answer",
                 Self::Decompose => "decompose", Self::Positions => "positions",
                 Self::Attention => "attention",
+                Self::Alpha => "alpha",
                 _ => unreachable!(),
             }
         }
@@ -299,6 +301,7 @@ impl Keyword {
             "BRIEF" => Some(Self::Brief),
             "RAW" => Some(Self::Raw),
             "ATTENTION" => Some(Self::Attention),
+            "ALPHA" => Some(Self::Alpha),
             _ => None,
         }
     }
@@ -465,7 +468,12 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        let text = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+        // Safe in practice: read_number only advances over ASCII digits
+        // and a single '.', so the slice is always valid UTF-8. Returning
+        // an error here keeps the code panic-free in case the byte filter
+        // is ever loosened.
+        let text = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|e| LexError(format!("invalid UTF-8 in numeric literal: {e}")))?;
         if is_float {
             let val: f64 = text.parse().map_err(|_| LexError(format!("invalid number: {text}")))?;
             Ok(Token::NumberLit(val))
@@ -485,7 +493,12 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let word = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+        // Safe in practice: read_word only advances over ASCII alphanumerics
+        // and underscore, so the slice is always valid UTF-8. Returning an
+        // error here keeps the code panic-free in case the byte filter is
+        // ever loosened.
+        let word = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|e| LexError(format!("invalid UTF-8 in identifier: {e}")))?;
         if let Some(kw) = Keyword::from_str(word) {
             Ok(Token::Keyword(kw))
         } else {
@@ -676,9 +689,9 @@ mod tests {
     fn case_insensitive_keywords() {
         let mut lex = Lexer::new("walk WALK Walk wAlK");
         let tokens = lex.tokenise().unwrap();
-        for i in 0..4 {
+        for (i, tok) in tokens.iter().take(4).enumerate() {
             assert!(
-                matches!(tokens[i], Token::Keyword(Keyword::Walk)),
+                matches!(tok, Token::Keyword(Keyword::Walk)),
                 "token {i} should be Walk keyword"
             );
         }

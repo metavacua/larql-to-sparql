@@ -1,4 +1,4 @@
-/// Patch statement parsers: BEGIN PATCH, SAVE PATCH, APPLY PATCH, SHOW PATCHES, REMOVE PATCH.
+//! Patch statement parsers: BEGIN PATCH, SAVE PATCH, APPLY PATCH, SHOW PATCHES, REMOVE PATCH.
 
 use crate::ast::*;
 use crate::lexer::Keyword;

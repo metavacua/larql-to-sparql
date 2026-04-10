@@ -95,9 +95,17 @@ EXPLAIN INFER "The capital of France is" TOP 5;
 ### 5. Edit knowledge
 
 ```sql
--- Insert a fact
+-- Insert a fact (multi-layer constellation install, alpha=0.25 default)
 INSERT INTO EDGES (entity, relation, target)
     VALUES ("John Coyle", "lives-in", "Colchester");
+
+-- Insert with all knobs: center the span on a specific layer, set
+-- confidence, dial the override strength
+INSERT INTO EDGES (entity, relation, target)
+    VALUES ("Atlantis", "capital-of", "Poseidon")
+    AT LAYER 24
+    CONFIDENCE 0.95
+    ALPHA 0.30;
 
 -- Verify
 DESCRIBE "John Coyle";
@@ -105,10 +113,19 @@ DESCRIBE "John Coyle";
 -- Delete
 DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";
 
--- Update
+-- Update by entity (works on both heap and mmap-loaded vindexes)
 UPDATE EDGES SET target = "London"
     WHERE entity = "John Coyle" AND relation = "lives-in";
+
+-- Update by (layer, feature) — fast-path, bypasses the entity scan
+UPDATE EDGES SET target = "London", confidence = 0.95
+    WHERE layer = 26 AND feature = 8821;
 ```
+
+INSERT is a multi-layer constellation install (8 layers × `alpha=0.25` is the
+validated regime — see `docs/training-free-insert.md`). The defaults are
+deliberately conservative; raise `ALPHA` for stubborn facts at the cost of
+nudging neighbouring facts.
 
 ### 6. Patches
 
@@ -148,7 +165,19 @@ DIFF "base.vindex" "edited.vindex" INTO PATCH "changes.vlp";
 -- See what changed
 DIFF "gemma3-4b.vindex" CURRENT;
 
--- Compile back to HuggingFace format
+-- Bake the patches into a fresh standalone vindex (instant on APFS:
+-- weight files hardlinked from source, only down_weights.bin gets the
+-- override columns rewritten in place).
+COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
+
+-- Use the compiled vindex like any other — INFER produces the new
+-- facts with no patch overlay loaded.
+USE "gemma3-4b-medical.vindex";
+INFER "The capital of Atlantis is" TOP 5;
+
+-- Or compile back to HuggingFace format. The constellation is in the
+-- standard down_proj tensors, so loading in Transformers / GGUF
+-- runtimes Just Works.
 COMPILE CURRENT INTO MODEL "gemma3-4b-edited/" FORMAT safetensors;
 ```
 

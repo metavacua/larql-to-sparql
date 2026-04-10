@@ -1,12 +1,15 @@
-/// Parser for TRACE statements.
-///
-/// Grammar:
-///   TRACE <prompt>
-///     [ANSWER <token>]
-///     [DECOMPOSE]
-///     [LAYERS <start>-<end>]
-///     [POSITIONS {LAST | ALL}]
-///     [SAVE <path>]
+//! Parser for TRACE statements.
+//!
+//! Grammar:
+//!
+//! ```text
+//! TRACE <prompt>
+//!     [ANSWER <token>]
+//!     [DECOMPOSE]
+//!     [LAYERS <start>-<end>]
+//!     [POSITIONS {LAST | ALL}]
+//!     [SAVE <path>]
+//! ```
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};

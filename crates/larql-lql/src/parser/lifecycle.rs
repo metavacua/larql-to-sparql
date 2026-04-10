@@ -1,4 +1,4 @@
-/// Lifecycle statement parsers: EXTRACT, COMPILE, DIFF, USE.
+//! Lifecycle statement parsers: EXTRACT, COMPILE, DIFF, USE
 
 use crate::ast::*;
 use crate::lexer::Keyword;
@@ -74,11 +74,12 @@ impl Parser {
 
         let output = self.expect_string()?;
 
-        let mut format = None;
-        if self.check_keyword(Keyword::Format) {
+        let format = if self.check_keyword(Keyword::Format) {
             self.advance();
-            format = Some(self.parse_output_format()?);
-        }
+            Some(self.parse_output_format()?)
+        } else {
+            None
+        };
 
         self.eat_semicolon();
         Ok(Statement::Compile { vindex, output, format, target })
