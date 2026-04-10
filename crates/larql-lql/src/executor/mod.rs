@@ -138,8 +138,8 @@ impl Session {
             Statement::Extract { model, output, components, layers, extract_level } => {
                 self.exec_extract(model, output, components.as_deref(), layers.as_ref(), *extract_level)
             }
-            Statement::Compile { vindex, output, format, target } => {
-                self.exec_compile(vindex, output, *format, *target)
+            Statement::Compile { vindex, output, format, target, on_conflict } => {
+                self.exec_compile(vindex, output, *format, *target, *on_conflict)
             }
             Statement::Diff { a, b, layer, relation, limit, into_patch } => {
                 self.exec_diff(a, b, *layer, relation.as_deref(), *limit, into_patch.as_deref())

@@ -363,6 +363,7 @@ impl Session {
         output: &str,
         _format: Option<OutputFormat>,
         target: CompileTarget,
+        on_conflict: Option<CompileConflict>,
     ) -> Result<Vec<String>, LqlError> {
         let vindex_path = match vindex {
             VindexRef::Current => {
@@ -375,7 +376,11 @@ impl Session {
         };
 
         match target {
-            CompileTarget::Vindex => self.exec_compile_into_vindex(&vindex_path, output),
+            CompileTarget::Vindex => self.exec_compile_into_vindex(
+                &vindex_path,
+                output,
+                on_conflict.unwrap_or(CompileConflict::LastWins),
+            ),
             CompileTarget::Model => self.exec_compile_into_model(&vindex_path, output),
         }
     }
@@ -427,13 +432,48 @@ impl Session {
         &self,
         source_path: &std::path::Path,
         output: &str,
+        on_conflict: CompileConflict,
     ) -> Result<Vec<String>, LqlError> {
+        let _ = source_path; // accepted for symmetry; current vindex is the source
         let output_dir = PathBuf::from(output);
         std::fs::create_dir_all(&output_dir)
             .map_err(|e| LqlError::exec("failed to create output dir", e))?;
 
         // Load the current vindex with patches applied
         let (path, config, patched) = self.require_vindex()?;
+
+        // ── Conflict detection across applied patches ──
+        //
+        // The overlay maps in `PatchedVindex` are already collapsed under
+        // last-wins semantics. To honour ON CONFLICT we re-scan the
+        // ordered patch history and detect (layer, feature) slots that
+        // are written by more than one patch.
+        let collisions = collect_compile_collisions(&patched.patches);
+        match on_conflict {
+            CompileConflict::LastWins => {}
+            CompileConflict::Fail => {
+                if !collisions.is_empty() {
+                    let preview = collisions.iter()
+                        .take(5)
+                        .map(|((l, f), n)| format!("L{l}/F{f} ({n} writes)"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(LqlError::Execution(format!(
+                        "COMPILE INTO VINDEX ON CONFLICT FAIL: {} colliding slot(s): {}",
+                        collisions.len(), preview
+                    )));
+                }
+            }
+            CompileConflict::HighestConfidence => {
+                // Down vectors are baked at INSERT time and stored on the
+                // base vindex collapsed under last-wins, so re-resolving
+                // them from raw patches would require regenerating the
+                // synthesised vectors. We do not currently do that — the
+                // strategy is accepted for forward compatibility but
+                // behaves like LAST_WINS today. This is reported in the
+                // output below so callers know.
+            }
+        }
 
         // ── Step 1: gate_vectors.bin and down_meta.bin ──
         //
@@ -556,6 +596,17 @@ impl Session {
         let mut out = Vec::new();
         out.push(format!("Compiled {} → {}", source_path.display(), output_dir.display()));
         out.push(format!("Features: {}", dm_count));
+        if !collisions.is_empty() {
+            let strategy = match on_conflict {
+                CompileConflict::LastWins => "LAST_WINS",
+                CompileConflict::HighestConfidence => "HIGHEST_CONFIDENCE (resolves like LAST_WINS for down vectors — see docs)",
+                CompileConflict::Fail => "FAIL",
+            };
+            out.push(format!(
+                "Conflicts: {} slot(s) touched by multiple patches — strategy: {}",
+                collisions.len(), strategy,
+            ));
+        }
         if overrides_applied > 0 {
             out.push(format!(
                 "Down overrides baked: {} ({} layers touched)",
@@ -813,6 +864,27 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 
+/// Walk the ordered patch history and return the (layer, feature) slots
+/// touched by more than one patch, along with the write count. Used by
+/// `COMPILE INTO VINDEX ON CONFLICT` to detect ambiguous bakes.
+pub(crate) fn collect_compile_collisions(
+    patches: &[larql_vindex::VindexPatch],
+) -> HashMap<(usize, usize), usize> {
+    let mut counts: HashMap<(usize, usize), usize> = HashMap::new();
+    for patch in patches {
+        let mut seen_in_this_patch: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+        for op in &patch.operations {
+            let key = op.key();
+            if seen_in_this_patch.insert(key) {
+                *counts.entry(key).or_insert(0) += 1;
+            }
+        }
+    }
+    counts.retain(|_, n| *n > 1);
+    counts
+}
+
 fn copy_for_patch(src: &std::path::Path, dst: &std::path::Path) -> Result<(), LqlError> {
     let _ = std::fs::remove_file(dst);
     std::fs::copy(src, dst)
@@ -948,6 +1020,61 @@ mod compile_into_vindex_tests {
     //! No real vindex required — these run in CI with no model on disk.
     use super::*;
     use std::collections::HashMap;
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    fn make_patch(ops: Vec<PatchOp>) -> VindexPatch {
+        VindexPatch {
+            version: 1,
+            base_model: String::new(),
+            base_checksum: None,
+            created_at: String::new(),
+            description: None,
+            author: None,
+            tags: Vec::new(),
+            operations: ops,
+        }
+    }
+
+    fn insert_op(layer: usize, feature: usize) -> PatchOp {
+        PatchOp::Insert {
+            layer,
+            feature,
+            relation: None,
+            entity: "e".into(),
+            target: "t".into(),
+            confidence: Some(0.9),
+            gate_vector_b64: None,
+            down_meta: None,
+        }
+    }
+
+    #[test]
+    fn collisions_empty_when_each_slot_unique() {
+        let patches = vec![
+            make_patch(vec![insert_op(1, 10)]),
+            make_patch(vec![insert_op(2, 20)]),
+        ];
+        assert!(collect_compile_collisions(&patches).is_empty());
+    }
+
+    #[test]
+    fn collisions_detect_same_slot_in_two_patches() {
+        let patches = vec![
+            make_patch(vec![insert_op(1, 10)]),
+            make_patch(vec![insert_op(1, 10)]),
+        ];
+        let c = collect_compile_collisions(&patches);
+        assert_eq!(c.get(&(1, 10)), Some(&2));
+    }
+
+    #[test]
+    fn collisions_ignore_repeats_within_one_patch() {
+        let patches = vec![
+            make_patch(vec![insert_op(1, 10), insert_op(1, 10)]),
+        ];
+        assert!(collect_compile_collisions(&patches).is_empty());
+    }
+
 
     /// Build a minimal `VindexConfig` shaped for these tests.
     /// Only the dimensions matter for `patch_down_weights`; everything

@@ -93,6 +93,20 @@ which is exactly what `weight_manifest.json` references. A subsequent
 loading the result in HuggingFace Transformers gives you the inserted
 facts via standard `model.generate()` — no special loader code.
 
+`COMPILE INTO VINDEX` accepts an optional `ON CONFLICT` clause for
+choosing how to resolve `(layer, feature)` slots written by more than
+one applied patch:
+
+```sql
+COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;
+```
+
+| Strategy | Behaviour |
+|---|---|
+| `LAST_WINS` (default) | Last applied patch wins. |
+| `HIGHEST_CONFIDENCE` | Accepted for forward compatibility. Currently resolves like `LAST_WINS` for down vectors — see spec §3.5. |
+| `FAIL` | Abort if any slot has a conflicting write. |
+
 The full mechanism is documented in `docs/vindex-operations-spec.md` §1.6.
 
 ## Building & Testing

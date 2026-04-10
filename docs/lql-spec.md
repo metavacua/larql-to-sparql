@@ -1,8 +1,8 @@
 # LQL — Lazarus Query Language Specification
 
-**Version:** 0.3  
+**Version:** 0.4  
 **Author:** Chris Hay  
-**Date:** 2026-03-31  
+**Date:** 2026-04-11  
 **Status:** Draft  
 **Implementation target:** `larql-lql` crate (Rust)  
 **Companion:** `larql-knowledge` spec (data pipeline)
@@ -87,11 +87,12 @@ LQL is a query language for neural network weights treated as a graph database. 
 | Statement | Purpose |
 |---|---|
 | `TRACE` | Capture residual stream decomposition for a prompt |
-| `TRACE ... SHOW` | Query a specific aspect of the trace (trajectory, deltas, predictions) |
-| `TRACE ... SAVE` | Write trace to mmap'd file (.bin, .bndx, .ctxt) |
-| `TRACE ... DIFF` | Compare two traces at a layer |
-| `BOUNDARY APPEND` | Append a boundary residual to a context store |
-| `BOUNDARY OPEN` | Open an existing boundary store for querying |
+| `TRACE ... FOR <token>` | Track a specific target token's rank/contribution per layer |
+| `TRACE ... DECOMPOSE` | Show attention vs FFN delta per layer |
+| `TRACE ... SAVE <path>` | Write trace to a file |
+
+> Planned (not yet implemented): `TRACE ... DIFF`, boundary stores, tiered
+> context stores. See §11.
 
 ---
 
@@ -187,11 +188,15 @@ DIFF "gemma3-4b.vindex" "gemma3-4b-edited.vindex"
 ```
 USE <vindex_path>;
 USE MODEL <model_id> [AUTO_EXTRACT];
+USE REMOTE <url>;
 
 -- Set the active backend for subsequent statements.
 -- USE with a .vindex path: fast, pre-extracted, all statements available.
 -- USE MODEL: live weight access, reads safetensors directly. Slower but
 --   zero setup — point at any model, start querying immediately.
+-- USE REMOTE: HTTP client to a `larql serve` instance. All read queries
+--   are forwarded over the wire. Mutations create a local patch overlay
+--   (the remote vindex is not modified).
 -- AUTO_EXTRACT: create vindex automatically on first mutation.
 --
 -- Mutation (INSERT/DELETE/UPDATE) and COMPILE require a vindex.
@@ -202,6 +207,8 @@ USE "gemma3-4b.vindex";
 USE MODEL "google/gemma-3-4b-it";
 
 USE MODEL "google/gemma-3-4b-it" AUTO_EXTRACT;
+
+USE REMOTE "https://models.example.com/larql";
 ```
 
 ### 3.3 Knowledge Browser Statements
@@ -364,12 +371,18 @@ EXPLAIN INFER <prompt>
     [LAYERS <range>]
     [VERBOSE]
     [TOP <n>]
+    [WITH ATTENTION]
 
 -- Full inference with per-layer feature trace.
 -- Shows which features fire WITH attention context.
 -- Requires model weights.
+--
+-- WITH ATTENTION: also print per-layer attention head attributions
+--                 alongside the feature trace.
 
 EXPLAIN INFER "The capital of France is" TOP 5;
+
+EXPLAIN INFER "The capital of France is" TOP 5 WITH ATTENTION;
 ```
 
 ### 3.5 Knowledge Mutation Statements
@@ -518,6 +531,15 @@ COMPILE CURRENT INTO VINDEX <output_path>
 -- other weight file is hard-linked from the source (instant, free on
 -- APFS — same inode, same bytes).
 --
+-- ON CONFLICT controls how to resolve (layer, feature) slots that are
+-- written by more than one applied patch:
+--   LAST_WINS (default):  the last applied patch wins.
+--   HIGHEST_CONFIDENCE:   accepted for forward compatibility but currently
+--                         resolves like LAST_WINS for down vectors —
+--                         see implementation note below.
+--   FAIL:                 abort if any slot has a conflicting write.
+-- ON CONFLICT is only valid for COMPILE INTO VINDEX, not COMPILE INTO MODEL.
+--
 -- A subsequent USE on the compiled vindex needs no special loader code:
 -- it loads like any other vindex and INFER produces the inserted facts
 -- through the standard dense FFN path. From this point you can also run
@@ -525,7 +547,18 @@ COMPILE CURRENT INTO VINDEX <output_path>
 -- is already in the bytes that get exported.
 
 COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
+
+COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex"
+    ON CONFLICT FAIL;
 ```
+
+> **Implementation note (HIGHEST_CONFIDENCE).** Down vectors are
+> synthesised at INSERT time and stored on the base index in
+> last-wins-collapsed form, so re-resolving them from raw patches at
+> compile time would require regenerating the synthesised vectors.
+> The compile path currently keeps last-wins semantics for down vectors
+> regardless of the strategy chosen, but FAIL fully detects collisions
+> and HIGHEST_CONFIDENCE is accepted for forward compatibility.
 
 ### 3.6 Schema Introspection Statements
 
@@ -559,102 +592,50 @@ STATS [<vindex_path>];
 
 ```
 TRACE <prompt>
+    [FOR <token>]
+    [DECOMPOSE]
+    [LAYERS <start>-<end>]
     [POSITIONS {LAST | ALL}]
-    [LAYERS <range>]
+    [SAVE <path>]
 
--- Capture a residual stream trace.
--- Decomposes the forward pass into attn_delta + ffn_delta at each layer.
--- Requires model weights in vindex (WITH ALL).
+-- Capture a residual stream trace through the forward pass.
+-- Decomposes each layer into attn_delta + ffn_delta against the residual.
+-- Requires model weights in the vindex (WITH INFERENCE or WITH ALL).
+--
+-- FOR <token>:    track this target token's rank, probability, and the
+--                 attn/FFN logit contributions per layer.
+-- DECOMPOSE:      print the per-layer attn vs FFN attribution table.
+-- LAYERS s-e:     restrict the trace to the inclusive layer range.
+-- POSITIONS LAST: trace only the last token (default).
+-- POSITIONS ALL:  trace every token position in the prompt.
+-- SAVE <path>:    write the captured trace to a file.
 
 TRACE "The capital of France is";
--- Captures: 6 tokens × 35 layers = 210 nodes (positions=all)
--- Default: positions=last (35 nodes, last token only)
+-- Default trace, last token only
+
+TRACE "The capital of France is" FOR "Paris";
+-- Layer  Rank   Prob    Attn      FFN
+-- L22     50   0.002   +22.2    +34.4   BOTH ↑
+-- L23     10   0.024   -16.9    +55.9   FFN ↑
+-- L24      1   0.714  +105.7    +24.4   BOTH ↑   ← phase transition
+-- L25      1   0.997    +4.3    +94.4   FFN ↑
 
 TRACE "The capital of France is"
-    POSITIONS ALL;
--- All token positions, all layers
-```
-
-```
-TRACE <prompt> SHOW {answer_rank | predictions | decompose}
-    [FOR <token>]
-    [AT LAYER <n>]
-
--- Query a specific aspect of the captured trace.
-
-TRACE "The capital of France is" SHOW answer_rank FOR "Paris";
--- Layer  Rank  Prob   Attn    FFN
--- emb       2  0.000    0.0    0.0
--- L23      10  0.024  -16.9   55.9
--- L24       1  0.714  105.7   24.4
--- L25       1  0.997    4.3   94.4
-
-TRACE "The capital of France is" SHOW predictions AT LAYER 24;
--- Paris (0.714), located (0.133), ____ (0.024), ...
-
-TRACE "The capital of France is" SHOW decompose FOR "Paris";
--- Layer  Attn→ans  FFN→ans  Who
--- L23      -16.9    +55.9  FFN ↑
--- L24     +105.7    +24.4  BOTH ↑
--- L25       +4.3    +94.4  FFN ↑
--- L26      +83.1    +18.7  BOTH ↑
-```
-
-```
-TRACE <prompt> SAVE <path>
-    [FORMAT {trace | boundary | context}]
-    [TIER {1 | 2 | 3 | 4}]
-    [WINDOW <n>]
-
--- Write trace to mmap'd file.
+    DECOMPOSE
+    LAYERS 22-27;
+-- Per-layer attn vs FFN delta table
 
 TRACE "The capital of France is"
     POSITIONS ALL
-    SAVE "france.trace.bin";
--- Full chain store: 6.5 MB (all positions, all layers)
-
-TRACE "The capital of France is"
-    SAVE "context.bndx"
-    FORMAT boundary
-    WINDOW 200;
--- Boundary store: 10 KB per window boundary
-
-TRACE "The capital of France is"
-    SAVE "context.ctxt"
-    FORMAT context
-    TIER 4;
--- Tiered context: 230 KB per window (bit-perfect reconstruction)
+    SAVE "france.trace";
+-- All token positions, all layers, written to file
 ```
 
-```
-TRACE <prompt_a> DIFF <prompt_b>
-    [AT LAYER <n>]
-
--- Compare two traces.
-
-TRACE "The capital of France is"
-    DIFF "The capital of Germany is"
-    AT LAYER 24;
--- cosine: 0.987, delta_norm: 4521
--- France top1: Paris (0.714)
--- Germany top1: Berlin (0.895)
-```
-
-```
-BOUNDARY OPEN <path>
-
--- Open a boundary store for querying.
-
-BOUNDARY OPEN "apollo11.bndx";
--- BoundaryStore(1850 boundaries, 370000 tokens, 18.5 MB)
-
-BOUNDARY <path> AT <n>
-
--- Read boundary residual at index n.
-
-BOUNDARY "apollo11.bndx" AT 42;
--- Boundary 42: tokens 8400-8600, residual norm=76385
-```
+> Planned: `TRACE ... DIFF <prompt_b>` (cross-prompt comparison),
+> tiered SAVE formats (`FORMAT boundary | context`, `TIER`, `WINDOW`),
+> and `BOUNDARY OPEN` / `BOUNDARY <path> AT <n>` boundary stores.
+> See §11. The wire format and capture machinery already exist in
+> `larql-inference`; the LQL surface for them has not landed.
 
 ### 3.8 Comparison Operators
 
@@ -1055,7 +1036,8 @@ pub enum Statement {
     // Lifecycle
     Extract { model: String, output: String, components: Option<Vec<Component>>,
               layers: Option<Range>, extract_level: ExtractLevel },
-    Compile { vindex: VindexRef, output: String, format: OutputFormat },
+    Compile { vindex: VindexRef, output: String, format: Option<OutputFormat>,
+              target: CompileTarget, on_conflict: Option<CompileConflict> },
     Diff { a: VindexRef, b: VindexRef, layer: Option<u32>,
            relation: Option<String>, limit: Option<u32> },
     Use { target: UseTarget },
@@ -1123,7 +1105,9 @@ pub enum ExplainMode {
 
 pub enum WalkMode { Hybrid, Pure, Dense }
 pub enum OutputFormat { Safetensors, Gguf }
+pub enum CompileTarget { Model, Vindex }
 pub enum ConflictStrategy { KeepSource, KeepTarget, HighestConfidence }
+pub enum CompileConflict { LastWins, HighestConfidence, Fail }
 pub enum Component { FfnGate, FfnDown, FfnUp, Embeddings, AttnOv, AttnQk }
 
 pub enum ExtractLevel {
@@ -1424,7 +1408,25 @@ DESCRIBE "Einstein" STREAM LIMIT 20;
 
 The layer-level byte offsets in gate_vectors.bin enable this — each layer can be fetched and scanned independently. For remote vindexes, the client sees results from L14 while L15-27 are still downloading.
 
-### 11.6 Additional Future Work
+### 11.6 Planned LQL Surfaces (machinery exists, language doesn't)
+
+These are not aspirational research — the underlying capabilities live in
+`larql-inference` and `larql-vindex` today. They are listed here because
+the LQL surface for them has not yet landed, and the spec previously
+described grammars that did not match the parser.
+
+- **`TRACE ... DIFF <prompt_b> [AT LAYER <n>]`** — cross-prompt comparison
+  of two captured traces (cosine, delta_norm, side-by-side top-1).
+- **Tiered SAVE formats on TRACE** — `FORMAT {trace | boundary | context}`,
+  `TIER {1..4}`, `WINDOW <n>` clauses to drive the existing trace stores
+  (see §11.8). The on-disk formats already exist; only the LQL surface
+  is missing.
+- **`BOUNDARY OPEN <path>` / `BOUNDARY <path> AT <n>`** — open a boundary
+  store for querying and read a specific boundary residual.
+- **DESCRIBE STREAM** — progressive layer-by-layer DESCRIBE, particularly
+  useful with `USE REMOTE`.
+
+### 11.7 Additional Future Work
 
 - **STEER** — relation steering via ±Δ vectors at a layer. Proven (8/8) but complex to expose cleanly.
 - **CHAIN** — multi-hop via L24 residual injection. Proven (KL<0.06) but requires model loaded.
@@ -1433,13 +1435,13 @@ The layer-level byte offsets in gate_vectors.bin enable this — each layer can 
 - **INGEST** — document → context graph extraction (Mode 5, the Apollo demo).
 - **Training from graph** — compile an edited knowledge graph back to weights, bypassing gradient descent entirely.
 
-### 11.7 Attention Template Cache (Partially Proven)
+### 11.8 Attention Template Cache (Partially Proven)
 
 99% of attention heads produce fixed patterns across entity substitutions for the same query template (confirmed). Within a known entity set, 11D projection replaces attention perfectly (15/15, K=11). However, generalization to unseen entities fails (0/21) — the entity signal is a nonlinear function of the residual stream, not the raw embedding. Full attention replacement remains open research.
 
 **Status:** Template fixedness confirmed. Within-set replacement proven. Generalization blocked by the nonlinear embedding→residual mapping. The residual stream trace (Section 3.7) provides the ground-truth decomposition for continued research.
 
-### 11.8 Tiered Context Store (Proven)
+### 11.9 Tiered Context Store (Proven)
 
 The residual stream trace enables infinite context without KV cache. Boundary residuals (10 KB per 200-token window) carry the complete Markov state. Tiered storage provides accuracy/storage tradeoffs:
 

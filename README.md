@@ -146,7 +146,7 @@ WALK "The capital of France is" TOP 10;
 INFER "The capital of France is" TOP 5 COMPARE;
 
 -- Trace the residual stream (decomposed forward pass)
-TRACE "The capital of France is" ANSWER "Paris";
+TRACE "The capital of France is" FOR "Paris";
 TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;
 TRACE "The capital of France is" SAVE "france.trace";
 
@@ -282,7 +282,7 @@ Capture the complete record of inference — every layer, every contribution, qu
 
 ```sql
 -- LQL: answer trajectory through all layers
-larql> TRACE "The capital of France is" ANSWER "Paris";
+larql> TRACE "The capital of France is" FOR "Paris";
   Layer   Rank     Prob      Attn       FFN      Who
     L22     50    0.002     +22.2     +34.4   BOTH ↑
     L23     10    0.024     -16.9     +55.9    FFN ↑

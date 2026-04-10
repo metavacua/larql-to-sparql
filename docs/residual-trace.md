@@ -52,7 +52,7 @@ crates/larql-python/src/trace_py.rs
 
 ```sql
 -- Answer trajectory: track Paris through all 34 layers
-TRACE "The capital of France is" ANSWER "Paris";
+TRACE "The capital of France is" FOR "Paris";
 
 -- Attn vs FFN decomposition at the phase transition
 TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;
@@ -64,7 +64,7 @@ TRACE "The capital of France is" DECOMPOSE;
 TRACE "The capital of France is" SAVE "france.trace";
 
 -- All positions, specific layer range, with answer tracking
-TRACE "The capital of France is" ANSWER "Paris" LAYERS 20-33 POSITIONS ALL;
+TRACE "The capital of France is" FOR "Paris" LAYERS 20-33 POSITIONS ALL;
 ```
 
 The LQL TRACE command uses the same backend as INFER — mutations via INSERT/DELETE are reflected in trace results.

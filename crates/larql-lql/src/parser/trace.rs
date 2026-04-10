@@ -4,12 +4,15 @@
 //!
 //! ```text
 //! TRACE <prompt>
-//!     [ANSWER <token>]
+//!     [FOR <token>]
 //!     [DECOMPOSE]
 //!     [LAYERS <start>-<end>]
 //!     [POSITIONS {LAST | ALL}]
 //!     [SAVE <path>]
 //! ```
+//!
+//! `FOR <token>` selects a target token to track through the residual stream
+//! (rank, attn delta, ffn delta per layer).
 
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
@@ -28,7 +31,7 @@ impl Parser {
 
         loop {
             match self.peek() {
-                Token::Keyword(Keyword::Answer) => {
+                Token::Keyword(Keyword::For) => {
                     self.advance();
                     answer = Some(self.expect_string()?);
                 }

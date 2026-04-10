@@ -1388,6 +1388,54 @@ fn parse_compile_into_vindex() {
 }
 
 #[test]
+fn parse_compile_into_vindex_on_conflict_last_wins() {
+    let stmt = parse(
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT LAST_WINS;"#,
+    ).unwrap();
+    match stmt {
+        Statement::Compile { target, on_conflict, .. } => {
+            assert_eq!(target, CompileTarget::Vindex);
+            assert_eq!(on_conflict, Some(CompileConflict::LastWins));
+        }
+        _ => panic!("expected Compile"),
+    }
+}
+
+#[test]
+fn parse_compile_into_vindex_on_conflict_highest_confidence() {
+    let stmt = parse(
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#,
+    ).unwrap();
+    match stmt {
+        Statement::Compile { on_conflict, .. } => {
+            assert_eq!(on_conflict, Some(CompileConflict::HighestConfidence));
+        }
+        _ => panic!("expected Compile"),
+    }
+}
+
+#[test]
+fn parse_compile_into_vindex_on_conflict_fail() {
+    let stmt = parse(
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;"#,
+    ).unwrap();
+    match stmt {
+        Statement::Compile { on_conflict, .. } => {
+            assert_eq!(on_conflict, Some(CompileConflict::Fail));
+        }
+        _ => panic!("expected Compile"),
+    }
+}
+
+#[test]
+fn parse_compile_into_model_with_on_conflict_errors() {
+    let result = parse(
+        r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors ON CONFLICT FAIL;"#,
+    );
+    assert!(result.is_err(), "ON CONFLICT must reject COMPILE INTO MODEL");
+}
+
+#[test]
 fn parse_compile_into_model_explicit() {
     let stmt = parse(r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors;"#).unwrap();
     match stmt {
@@ -1419,8 +1467,8 @@ fn parse_trace_minimal() {
 }
 
 #[test]
-fn parse_trace_with_answer() {
-    let stmt = parse(r#"TRACE "The capital of France is" ANSWER "Paris";"#).unwrap();
+fn parse_trace_with_for_token() {
+    let stmt = parse(r#"TRACE "The capital of France is" FOR "Paris";"#).unwrap();
     match stmt {
         Statement::Trace { prompt, answer, .. } => {
             assert_eq!(prompt, "The capital of France is");
@@ -1469,7 +1517,7 @@ fn parse_trace_positions_all() {
 #[test]
 fn parse_trace_full() {
     let stmt = parse(
-        r#"TRACE "The capital of France is" ANSWER "Paris" DECOMPOSE LAYERS 22-27 SAVE "out.trace";"#,
+        r#"TRACE "The capital of France is" FOR "Paris" DECOMPOSE LAYERS 22-27 SAVE "out.trace";"#,
     ).unwrap();
     match stmt {
         Statement::Trace { prompt, answer, decompose, layers, save, .. } => {

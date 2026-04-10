@@ -81,8 +81,40 @@ impl Parser {
             None
         };
 
+        // Optional ON CONFLICT clause (COMPILE INTO VINDEX only).
+        let on_conflict = if self.check_keyword(Keyword::On) {
+            self.advance();
+            self.expect_keyword(Keyword::Conflict)?;
+            let strat = match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::LastWins) => {
+                    self.advance();
+                    CompileConflict::LastWins
+                }
+                crate::lexer::Token::Keyword(Keyword::HighestConfidence) => {
+                    self.advance();
+                    CompileConflict::HighestConfidence
+                }
+                crate::lexer::Token::Keyword(Keyword::Fail) => {
+                    self.advance();
+                    CompileConflict::Fail
+                }
+                t => return Err(ParseError(format!(
+                    "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
+                    t
+                ))),
+            };
+            if target != CompileTarget::Vindex {
+                return Err(ParseError(
+                    "ON CONFLICT is only valid for COMPILE INTO VINDEX".into(),
+                ));
+            }
+            Some(strat)
+        } else {
+            None
+        };
+
         self.eat_semicolon();
-        Ok(Statement::Compile { vindex, output, format, target })
+        Ok(Statement::Compile { vindex, output, format, target, on_conflict })
     }
 
     pub(crate) fn parse_diff(&mut self) -> Result<Statement, ParseError> {

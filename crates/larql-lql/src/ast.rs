@@ -18,6 +18,9 @@ pub enum Statement {
         output: String,
         format: Option<OutputFormat>,
         target: CompileTarget,
+        /// COMPILE INTO VINDEX only: how to resolve patches that touch the
+        /// same (layer, feature) slot. None → default (LastWins).
+        on_conflict: Option<CompileConflict>,
     },
     Diff {
         a: VindexRef,
@@ -133,6 +136,7 @@ pub enum Statement {
     /// Residual stream trace — decomposed forward pass.
     Trace {
         prompt: String,
+        /// Token to track through the trace (the `FOR <token>` clause).
         answer: Option<String>,
         decompose: bool,
         layers: Option<Range>,
@@ -230,6 +234,18 @@ pub enum ConflictStrategy {
     KeepSource,
     KeepTarget,
     HighestConfidence,
+}
+
+/// Conflict resolution for COMPILE INTO VINDEX when multiple patches touch
+/// the same (layer, feature) slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompileConflict {
+    /// Last patch in the apply order wins (default).
+    LastWins,
+    /// The patch with the highest confidence on that slot wins.
+    HighestConfidence,
+    /// Abort the compile if any slot has conflicting writes.
+    Fail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
