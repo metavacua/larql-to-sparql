@@ -200,100 +200,19 @@ fn memit_solve_layer(
     // is the v1 approach matching the existing INSERT pipeline. The
     // Python reference uses 80-step SGD to find delta; this is the
     // closed-form approximation.
+    // Verify W_down exists at this layer (the delta will be added to it).
     let w_down_key = weights.arch.ffn_down_key(layer);
-    let w_down = weights.tensors.get(&w_down_key)
-        .ok_or_else(|| format!("MEMIT: W_down not found at layer {layer} (key: {w_down_key})"))?;
-
-    // W_down shape: [hidden, ffn_dim] — output = W_down @ activation
-    // Actually in the model it's stored as [hidden, ffn_dim] and used
-    // as dot_proj(&activation, w_down) = activation @ w_down.T
-    // So w_down is [hidden, ffn_dim] and W_down @ k = w_down.T @ k ???
-    // Let me check: dot_proj(x, w) = x @ w.T
-    // So: out = activation @ w_down.T  means w_down is [hidden, ffn_dim]
-    // and the effective W_down matrix is w_down.T : [ffn_dim, hidden] → no
-    // Actually: x is [seq, ffn_dim], w_down is [hidden, ffn_dim]
-    // dot_proj(x, w_down) = x @ w_down.T = [seq, ffn_dim] @ [ffn_dim, hidden] = [seq, hidden]
-    // So w_down stored as [hidden, ffn_dim], transposed during matmul.
-    // W_down @ k_star: we want [hidden] output from [ffn_dim] input.
-    // = w_down.T.T @ k_star = w_down @ k_star? No...
-    // w_down is stored [hidden, ffn_dim]. To get output [hidden] from k [ffn_dim]:
-    // output = w_down @ k (standard matrix-vector: [hidden, ffn_dim] @ [ffn_dim] = [hidden])
-    // But dot_proj does x @ w.T = [seq, ffn_dim] @ [ffn_dim, hidden] = [seq, hidden]
-    // Which is the same as (w @ x.T).T — so w_down stored as [hidden, ffn_dim] and
-    // the matmul is activation @ w_down.T. For a single vector k:
-    // output = k @ w_down.T = (w_down @ k.T).T — so w_down @ k gives [hidden].
-    // Confirmed: w_down @ k_star = [hidden].
-
-    let mut v_stars: Vec<Array1<f64>> = Vec::with_capacity(n);
-
-    for (i, fact) in facts.iter().enumerate() {
-        let k = &k_stars[i];
-
-        // W_down @ k_star (current output without edit)
-        let mut wk = Array1::<f64>::zeros(hidden);
-        for row in 0..hidden {
-            let mut sum = 0.0f64;
-            for col in 0..ffn_dim {
-                sum += w_down[[row, col]] as f64 * k[col];
-            }
-            wk[row] = sum;
-        }
-
-        // Target direction: unit(embed[target_token]) scaled by alpha
-        let embed_row = weights.embed.row(fact.target_token_id as usize);
-        let embed_norm: f32 = embed_row.iter().map(|v| v * v).sum::<f32>().sqrt();
-        let scale = if embed_norm > 1e-8 { target_alpha / embed_norm } else { 0.0 };
-
-        let mut v_star = wk;
-        for j in 0..hidden {
-            v_star[j] += (embed_row[j] * scale) as f64;
-        }
-
-        fact_results[i].target_norm = embed_norm;
-        v_stars.push(v_star);
+    if !weights.tensors.contains_key(&w_down_key) {
+        return Err(format!("MEMIT: W_down not found at layer {layer} (key: {w_down_key})"));
     }
 
-    // ── Step 4: MEMIT solve ──
+    // ── Step 3+4: Compute R (deltas) and K matrices ──
     //
-    // ΔW = (V* - W·K*) · (K*ᵀ C⁻¹ K* + λI)⁻¹ · K*ᵀ · C⁻¹
+    // v_star = W @ k + delta, so R = V* - K W^T = delta (the embedding nudge).
+    // We skip the explicit v_star computation and build R directly.
     //
-    // Let R = V* - W·K*  (the residual targets)  [N × hidden]
-    // The equation becomes: ΔW = R · (K*ᵀ C⁻¹ K* + λI)⁻¹ · K*ᵀ · C⁻¹
-    //
-    // But ΔW needs to be [hidden × ffn_dim] to add to W_down.
-    //
-    // Actually, let me re-derive. The MEMIT paper works with row-vectors:
-    //   k = activation at the subject's last token [1 × ffn_dim]  (row)
-    //   v = target output [1 × hidden]  (row)
-    //   W_down is used as: output = k @ W^T  (so W is [hidden × ffn_dim])
-    //
-    // The update is:
-    //   ΔW = Σ_i (v_i - k_i @ W^T)^T · z_i^T
-    //
-    // where z_i = C⁻¹ k_i^T / (k_i C⁻¹ k_i^T + λ) for ROME (rank-1)
-    // or for batch MEMIT:
-    //   Z = C⁻¹ K^T (K C⁻¹ K^T + λI)⁻¹   [ffn_dim × N]
-    //   ΔW = R^T Z^T = (V - K W^T)^T (C⁻¹ K^T (K C⁻¹ K^T + λI)⁻¹)^T
-    //
-    // Simpler:
-    //   R = V - K W^T              [N × hidden]  (residual in output space)
-    //   Q = K C⁻¹                  [N × ffn_dim]
-    //   S = Q K^T + λI             [N × N]
-    //   S⁻¹ exists (N×N, small)
-    //   ΔW = R^T S⁻¹ Q            [hidden × ffn_dim]
-    //
-    // This is the formulation we use.
-
-    // R[i, :] = v_star[i] - w_down @ k_star[i]
-    // But we already computed v_star = w_down @ k + delta, so:
-    // R[i] = v_star[i] - (v_star[i] - delta[i]) = delta[i]
-    // Wait, that's just the delta! Let me re-check...
-    // v_star = w_down @ k + delta
-    // R = V* - K @ W^T  where W^T means w_down^T
-    // K @ W^T = K @ w_down^T: for fact i, row = k_i @ w_down^T = [ffn] @ [ffn, hidden] = [hidden]
-    // which is the same as w_down @ k_i.
-    // So R[i] = v_star[i] - w_down @ k_star[i] = delta[i]
-    // Correct — the residual IS the embedding nudge.
+    // MEMIT solve:  ΔW = R^T S⁻¹ Q   [hidden × ffn_dim]
+    //   where Q = K C⁻¹, S = Q K^T + λI  (N×N, small)
 
     // Build K_star matrix [N × ffn_dim]
     let mut k_mat = Array2::<f64>::zeros((n, ffn_dim));
@@ -301,17 +220,16 @@ fn memit_solve_layer(
         k_mat.row_mut(i).assign(k);
     }
 
-    // Build R matrix [N × hidden] — the deltas
+    // Build R matrix [N × hidden] — the target embedding deltas.
     let mut r_mat = Array2::<f64>::zeros((n, hidden));
-    for (i, (fact, k)) in facts.iter().zip(k_stars.iter()).enumerate() {
-        // delta = target_alpha * unit(embed[target])
+    for (i, fact) in facts.iter().enumerate() {
         let embed_row = weights.embed.row(fact.target_token_id as usize);
         let embed_norm: f32 = embed_row.iter().map(|v| v * v).sum::<f32>().sqrt();
         let scale = if embed_norm > 1e-8 { target_alpha / embed_norm } else { 0.0 };
         for j in 0..hidden {
             r_mat[[i, j]] = (embed_row[j] * scale) as f64;
         }
-        let _ = k; // used above for v_star, confirming R = delta
+        fact_results[i].target_norm = embed_norm;
     }
 
     // C⁻¹ via Cholesky [ffn_dim × ffn_dim]
@@ -332,7 +250,7 @@ fn memit_solve_layer(
     // We need C⁻¹ K^T [ffn_dim × N], then Q = (C⁻¹ K^T)^T = K C⁻¹.
     let k_t = k_mat.t().to_owned(); // [ffn_dim × N]
     let c_inv_kt = larql_compute::cpu::ops::linalg::cholesky_solve(&l, &k_t); // [ffn_dim × N]
-    let q = c_inv_kt.t().to_owned(); // [N × ffn_dim]  = K C���¹
+    let q = c_inv_kt.t().to_owned(); // [N × ffn_dim] = K C⁻¹
 
     // S = Q K^T + λI  [N × N]
     let mut s = q.dot(&k_t); // [N × N]

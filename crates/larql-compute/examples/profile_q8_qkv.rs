@@ -1,9 +1,9 @@
 // Quick Q8 QKV benchmark — test fused projection speed
-use std::time::Instant;
 
 fn main() {
     #[cfg(feature = "metal")]
     {
+        use std::time::Instant;
         use metal::*;
         
         let device = Device::system_default().unwrap();

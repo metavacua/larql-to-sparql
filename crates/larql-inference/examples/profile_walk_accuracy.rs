@@ -89,7 +89,7 @@ fn main() {
     // Walk FFN at various K
     println!("  K       cosine    max_diff   energy%   time/layer");
     println!("  ───── ──────── ────────── ──────── ──────────");
-    let gate_index: &dyn larql_vindex::GateIndex = &index;
+    let _gate_index: &dyn larql_vindex::GateIndex = &index;
     for k in [10, 50, 100, 200, 500, 1000, 2000, 4000, 8192, intermediate] {
         let walk_ffn = larql_inference::vindex::WalkFfn::new(weights, &index, k);
         let t = std::time::Instant::now();

@@ -5,11 +5,14 @@
 //!
 //! Run: cargo run --release --features metal -p larql-compute --example profile_new_kernels
 
-#![cfg(feature = "metal")]
-
-use std::time::Instant;
-
+#[cfg(not(feature = "metal"))]
 fn main() {
+    eprintln!("This example requires --features metal");
+}
+
+#[cfg(feature = "metal")]
+fn main() {
+    use std::time::Instant;
     let metal = larql_compute::metal::MetalBackend::new().expect("Metal required");
     let bufs = metal.bufs();
     let queue = metal.queue();

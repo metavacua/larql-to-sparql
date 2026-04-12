@@ -3,8 +3,12 @@
 //!
 //! cargo run --release --features metal -p larql-compute --example debug_decode_pipeline
 
-#![cfg(feature = "metal")]
+#[cfg(not(feature = "metal"))]
+fn main() {
+    eprintln!("This example requires --features metal");
+}
 
+#[cfg(feature = "metal")]
 fn main() {
     let metal = larql_compute::metal::MetalBackend::new().expect("need metal");
     let bufs = metal.bufs();
