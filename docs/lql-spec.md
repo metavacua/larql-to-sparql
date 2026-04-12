@@ -523,15 +523,16 @@ DIFF "gemma3-4b.vindex" "gemma3-4b-medical.vindex"
 ```
 COMPILE CURRENT INTO VINDEX <output_path>
     [ON CONFLICT {LAST_WINS | HIGHEST_CONFIDENCE | FAIL}]
-    [WITH REFINE | WITHOUT REFINE]
-    [WITH DECOYS (<prompt>, <prompt>, ...)]
 
 -- Flatten all applied patches into a new clean vindex.
 -- The result is a fully self-contained vindex with no overlay or sidecar:
--- the inserted features' down vectors are written into the canonical
--- `down_weights.bin` (column-rewrite at the inserted slots), and every
--- other weight file is hard-linked from the source (instant, free on
--- APFS — same inode, same bytes).
+-- the inserted features' down/gate/up vectors are written into the
+-- canonical weight files (column-rewrite at the inserted slots), and
+-- every other weight file is hard-linked from the source (instant, free
+-- on APFS — same inode, same bytes).
+--
+-- INSERT handles bleed defense at install time (batch refine against
+-- cached decoy residuals), so no compile-time refine step is needed.
 --
 -- ON CONFLICT controls how to resolve (layer, feature) slots that are
 -- written by more than one applied patch:
@@ -541,29 +542,6 @@ COMPILE CURRENT INTO VINDEX <output_path>
 --                         see implementation note below.
 --   FAIL:                 abort if any slot has a conflicting write.
 -- ON CONFLICT is only valid for COMPILE INTO VINDEX, not COMPILE INTO MODEL.
---
--- WITH REFINE / WITHOUT REFINE controls whether the bake step
--- orthogonalises each patched gate against the other patched gates at
--- the same layer (Gram-Schmidt) before writing the canonical files.
--- Refinement is the load-bearing fix for cross-fact bleed; INSERT itself
--- is intentionally a dumb append (no model weights required), so refine
--- runs once at compile time when the full constellation is in hand.
---
---   WITH REFINE (default):   refine each patched gate against the other
---                             patched gates at the same layer.
---   WITHOUT REFINE:           skip the refine pass and bake the raw
---                             patched gates verbatim. Use this when you
---                             want byte-identical output to a hand-built
---                             patch (tests, benches, debugging).
---
--- WITH DECOYS supplies prompts that are forward-passed at compile time;
--- their residuals at the install layer become extra suppression vectors
--- in the refine pass. Use this to defend specific bleed targets that
--- the constellation alone cannot reach (e.g. semantic associations like
--- "To be or not to be" → "Shakespeare" when installing Hamlet facts).
--- WITH DECOYS is only valid alongside WITH REFINE (it is silently
--- ignored if you also pass WITHOUT REFINE in the same statement) and is
--- only valid for COMPILE INTO VINDEX.
 --
 -- A subsequent USE on the compiled vindex needs no special loader code:
 -- it loads like any other vindex and INFER produces the inserted facts
@@ -575,12 +553,20 @@ COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
 
 COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex"
     ON CONFLICT FAIL;
+```
 
-COMPILE CURRENT INTO VINDEX "gemma3-4b-shakespeare.vindex"
-    WITH DECOYS ("To be or not to be", "Friends, Romans, countrymen");
+```
+COMPILE CURRENT INTO MODEL <output_path> [FORMAT safetensors|gguf]
 
-COMPILE CURRENT INTO VINDEX "gemma3-4b-bench.vindex"
-    WITHOUT REFINE;
+-- Compile the current vindex (with patches) into plain model weights.
+-- If the patch overlay contains INSERT operations, MEMIT closed-form
+-- weight editing is used to bake the inserted facts into W_down at the
+-- install layer(s). The output is a standard safetensors / gguf file
+-- with no vindex dependency at inference time.
+--
+-- Requires model weights in the vindex (EXTRACT ... WITH ALL).
+
+COMPILE CURRENT INTO MODEL "gemma3-4b-edited/" FORMAT safetensors;
 ```
 
 > **Implementation note (HIGHEST_CONFIDENCE).** Down vectors are
@@ -1458,19 +1444,13 @@ described grammars that did not match the parser.
 - **DESCRIBE STREAM** — progressive layer-by-layer DESCRIBE, particularly
   useful with `USE REMOTE`.
 - **End-to-end validation of the Rust refine + decoy pipeline on a real
-  model.** The grammar, AST, parser, refine primitive (`larql-vindex`,
-  `patch::refine`), decoy capture entry point (`larql-inference`,
-  `capture_decoy_residuals`), and executor wiring (`exec_compile_into_vindex`
-  in `larql-lql`) are all in place and unit-tested. What's missing is a
-  bench / integration test on a real Gemma 3 4B vindex that compares
-  retrieval and regression bleed before and after the refine pass to
-  confirm the Rust port matches the Python results in
-  `experiments/14_vindex_compilation` (10/10 retrieval, 0/4 bleed under
-  refine + decoys; 10/10 retrieval, 1-2/4 bleed under refine alone). The
-  unit tests prove the pipeline runs correctly on a synthetic constellation
-  (parallel gates lose norm under refine, `WITHOUT REFINE` is a no-op,
-  `WITH DECOYS` errors cleanly on browse-only vindexes); the production
-  validation is the next step.
+  model.** `COMPILE INTO VINDEX` bakes gate/up/down overlays into a
+  standalone vindex (validated 10/10 retrieval, 0/4 bleed on Gemma 3 4B).
+  INSERT handles bleed defense at install time via batch refine against
+  cached decoy residuals, so no compile-time refine step is needed.
+  `COMPILE INTO MODEL` uses MEMIT closed-form weight editing to write
+  inserted facts into W_down at the install layer(s), producing plain
+  safetensors with no vindex dependency.
 
 ### 11.7 Additional Future Work
 

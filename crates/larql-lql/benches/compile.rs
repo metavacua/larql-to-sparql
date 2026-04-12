@@ -13,11 +13,11 @@
 //! operation fit comfortably in a criterion sample window while still
 //! exercising every code path.
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use larql_lql::{parse, Session};
 use larql_models::TopKEntry;
 use larql_vindex::{
-    ExtractLevel, FeatureMeta, PatchedVindex, StorageDtype, VectorIndex, VindexConfig,
+    ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig,
 };
 use larql_vindex::ndarray::Array2;
 use std::path::PathBuf;
@@ -176,94 +176,9 @@ fn bench_compile_with_weights(c: &mut Criterion) {
     group.finish();
 }
 
-/// Inject `n` parallel gate vectors into the patch overlay at L0 of the
-/// session's current vindex. The vectors share a common direction so
-/// the refine pass actually has work to do (orthogonal vectors would
-/// retain full norm and exit refine in O(N²) but with no useful change).
-fn inject_n_parallel_gates(session: &mut Session, n: usize, hidden: usize) {
-    let patched: &mut PatchedVindex = session
-        .patched_overlay_mut()
-        .expect("session must have a Vindex backend for the refine bench");
-    for i in 0..n {
-        let mut g = vec![0.0_f32; hidden];
-        // Common direction in the first half, fact-specific signal in the second.
-        for slot in g.iter_mut().take(hidden / 2) {
-            *slot = 1.0;
-        }
-        g[hidden / 2 + (i % (hidden / 2))] = 0.5 + (i as f32) * 0.01;
-        let meta = FeatureMeta {
-            top_token: format!("fact{i}"),
-            top_token_id: i as u32,
-            c_score: 0.9,
-            top_k: vec![TopKEntry {
-                token: format!("fact{i}"),
-                token_id: i as u32,
-                logit: 0.9,
-            }],
-        };
-        patched.insert_feature(0, i, g, meta);
-    }
-}
-
-/// Refine cost as a function of constellation size. Times just the
-/// `COMPILE INTO VINDEX WITH REFINE` step (the session + gate injection
-/// happen in the criterion `setup` and don't count toward the measured
-/// time). The corresponding `WITHOUT REFINE` group below uses the same
-/// setup so the delta is exactly the refine pass.
-fn bench_compile_refine(c: &mut Criterion) {
-    let mut group = c.benchmark_group("compile_refine");
-    group.sample_size(20);
-
-    let src_dir = make_compile_bench_vindex("refine_src", false);
-    let hidden = 64;
-
-    for n in [2_usize, 5, 10, 20] {
-        for (mode_label, with_refine) in [("with_refine", true), ("without_refine", false)] {
-            group.bench_with_input(
-                BenchmarkId::new(mode_label, n),
-                &n,
-                |b, &n| {
-                    b.iter_batched(
-                        || {
-                            // Setup: fresh session + gate injection. Not timed.
-                            let mut session = Session::new();
-                            let use_stmt = parse(&format!(
-                                r#"USE "{}";"#,
-                                src_dir.display()
-                            )).unwrap();
-                            session.execute(&use_stmt).unwrap();
-                            inject_n_parallel_gates(&mut session, n, hidden);
-                            let dst = std::env::temp_dir().join(format!(
-                                "larql_compile_refine_dst_{}_{}_{}",
-                                mode_label, n, std::process::id()
-                            ));
-                            let _ = std::fs::remove_dir_all(&dst);
-                            (session, dst)
-                        },
-                        |(mut session, dst)| {
-                            let stmt = parse(&format!(
-                                r#"COMPILE CURRENT INTO VINDEX "{}" {};"#,
-                                dst.display(),
-                                if with_refine { "WITH REFINE" } else { "WITHOUT REFINE" },
-                            )).unwrap();
-                            session.execute(&stmt).unwrap();
-                            let _ = std::fs::remove_dir_all(&dst);
-                        },
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
-        }
-    }
-
-    let _ = std::fs::remove_dir_all(&src_dir);
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_compile_no_patches,
     bench_compile_with_weights,
-    bench_compile_refine,
 );
 criterion_main!(benches);

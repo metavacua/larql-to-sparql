@@ -16,6 +16,7 @@ pub mod ple;
 pub mod layer;
 pub mod predict;
 pub mod trace;
+pub mod memit;
 
 use ndarray::Array2;
 use crate::attention::AttentionWeights;
@@ -117,3 +118,4 @@ pub use trace::{
     trace_forward, trace_forward_with_ffn, trace_forward_full,
     calibrate_scalar_gains,
 };
+pub use memit::{run_memit, MemitFact, MemitResult, MemitFactResult};

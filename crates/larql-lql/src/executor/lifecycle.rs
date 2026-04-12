@@ -365,8 +365,6 @@ impl Session {
         _format: Option<OutputFormat>,
         target: CompileTarget,
         on_conflict: Option<CompileConflict>,
-        refine: bool,
-        decoys: Option<&[String]>,
     ) -> Result<Vec<String>, LqlError> {
         let vindex_path = match vindex {
             VindexRef::Current => {
@@ -383,8 +381,6 @@ impl Session {
                 &vindex_path,
                 output,
                 on_conflict.unwrap_or(CompileConflict::LastWins),
-                refine,
-                decoys,
             ),
             CompileTarget::Model => self.exec_compile_into_model(&vindex_path, output),
         }
@@ -412,8 +408,67 @@ impl Session {
             .map_err(|e| LqlError::exec("failed to create output dir", e))?;
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(vindex_path, &mut cb)
+        let mut weights = larql_vindex::load_model_weights(vindex_path, &mut cb)
             .map_err(|e| LqlError::exec("failed to load model weights", e))?;
+
+        // ── MEMIT: compile patch overlay into W_down edits ──
+        //
+        // Extract INSERT facts from the patch overlay, build MEMIT
+        // fact descriptors, run the closed-form solve, and apply ΔW
+        // to the loaded model weights before writing.
+        let (_, _, patched) = self.require_vindex()?;
+        let memit_facts = collect_memit_facts(patched, vindex_path)?;
+
+        let mut out = Vec::new();
+        if !memit_facts.is_empty() {
+            let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)
+                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
+
+            // MEMIT parameters — validated in Python reference
+            // (experiments/15_v11_model/RESULTS.md §20).
+            let ridge = 0.1;
+            let target_alpha = 5.0;
+
+            out.push(format!(
+                "MEMIT: {} fact(s) across {} layer(s)",
+                memit_facts.len(),
+                memit_facts.iter()
+                    .map(|f| f.layer)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+            ));
+
+            let results = larql_inference::run_memit(
+                &weights,
+                &memit_facts,
+                ridge,
+                target_alpha,
+                &tokenizer,
+            ).map_err(|e| LqlError::Execution(format!("MEMIT failed: {e}")))?;
+
+            for result in &results {
+                let delta_norm: f32 = result.delta_w.iter()
+                    .map(|v| v * v)
+                    .sum::<f32>()
+                    .sqrt();
+                out.push(format!(
+                    "  L{}: ΔW_down applied ({} facts, ‖ΔW‖={:.2})",
+                    result.layer,
+                    result.fact_results.len(),
+                    delta_norm,
+                ));
+
+                // Apply ΔW to W_down at this layer.
+                let down_key = weights.arch.ffn_down_key(result.layer);
+                if let Some(w_down) = weights.tensors.get(&down_key) {
+                    let updated = w_down.to_owned() + &result.delta_w;
+                    weights.tensors.insert(
+                        down_key,
+                        larql_inference::ndarray::ArcArray::from(updated.into_shared()),
+                    );
+                }
+            }
+        }
 
         let mut build_cb = larql_vindex::SilentBuildCallbacks;
         larql_vindex::write_model_weights(&weights, &output_dir, &mut build_cb)
@@ -426,8 +481,7 @@ impl Session {
                 .map_err(|e| LqlError::exec("failed to copy tokenizer", e))?;
         }
 
-        let mut out = Vec::new();
-        out.push(format!("Compiled {} → {}", vindex_path.display(), output_dir.display()));
+        out.insert(0, format!("Compiled {} → {}", vindex_path.display(), output_dir.display()));
         out.push(format!("Model: {}", config.model));
         out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
         Ok(out)
@@ -438,36 +492,11 @@ impl Session {
         source_path: &std::path::Path,
         output: &str,
         on_conflict: CompileConflict,
-        refine: bool,
-        decoys: Option<&[String]>,
     ) -> Result<Vec<String>, LqlError> {
         let _ = source_path; // accepted for symmetry; current vindex is the source
         let output_dir = PathBuf::from(output);
         std::fs::create_dir_all(&output_dir)
             .map_err(|e| LqlError::exec("failed to create output dir", e))?;
-
-        // ── Refine pass (writes refined gates back to the overlay) ──
-        //
-        // The refine math is in `larql-vindex::patch::refine`. The
-        // executor's job is to (1) collect the patched gates per layer
-        // from the overlay, (2) optionally capture decoy residuals via
-        // `larql-inference::capture_decoy_residuals` (one forward pass
-        // per decoy per layer touched), (3) call `refine_gates`, and
-        // (4) write the refined gates back via `set_gate_override`
-        // before the existing bake step runs.
-        //
-        // The refine summary string is built here so it can be appended
-        // to the bake output below. We need a mut borrow for the
-        // write-back, then drop it and re-borrow immutably for the
-        // existing bake. The bake never reads `overrides_gate` (it
-        // works from `down_overrides`), so the refined gates only
-        // affect what `gate_vectors.bin` would carry — which is exactly
-        // why we wanted them in the overlay before the bake.
-        let refine_summary = if refine {
-            self.run_refine_pass(decoys)?
-        } else {
-            String::from("Refine: skipped (WITHOUT REFINE)")
-        };
 
         // Load the current vindex with patches applied
         let (path, config, patched) = self.require_vindex()?;
@@ -655,7 +684,6 @@ impl Session {
         let mut out = Vec::new();
         out.push(format!("Compiled {} → {}", source_path.display(), output_dir.display()));
         out.push(format!("Features: {}", dm_count));
-        out.push(refine_summary);
         if !collisions.is_empty() {
             let strategy = match on_conflict {
                 CompileConflict::LastWins => "LAST_WINS",
@@ -676,127 +704,6 @@ impl Session {
         }
         out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
         Ok(out)
-    }
-
-    /// Run the refine pass for `COMPILE INTO VINDEX WITH REFINE`.
-    ///
-    /// Snapshots the current gate overrides per layer, optionally
-    /// captures decoy residuals via a forward pass, calls the refine
-    /// primitive, and writes refined gates back into the overlay.
-    /// Returns a one-line summary suitable for the compile output.
-    fn run_refine_pass(&mut self, decoys: Option<&[String]>) -> Result<String, LqlError> {
-        // ── 1. Snapshot the gate overrides per layer ──
-        let snapshots: Vec<(usize, usize, Vec<f32>)> = {
-            let (_, _, patched) = self.require_vindex()?;
-            patched
-                .overrides_gate_iter()
-                .map(|(l, f, g)| (l, f, g.to_vec()))
-                .collect()
-        };
-
-        if snapshots.is_empty() {
-            return Ok("Refine: no gate overrides to refine".into());
-        }
-
-        // ── 2. Group snapshots by layer ──
-        let mut by_layer: std::collections::BTreeMap<usize, Vec<(usize, larql_vindex::ndarray::Array1<f32>)>> =
-            std::collections::BTreeMap::new();
-        for (layer, feature, gate) in snapshots {
-            by_layer
-                .entry(layer)
-                .or_default()
-                .push((feature, larql_vindex::ndarray::Array1::from_vec(gate)));
-        }
-
-        // ── 3. Tokenise decoy prompts (once, layer-independent) ──
-        let n_decoys = decoys.map(|d| d.len()).unwrap_or(0);
-        let decoy_tokens: Vec<Vec<u32>> = if let Some(prompts) = decoys {
-            let (path, config, _) = self.require_vindex()?;
-            if !config.has_model_weights {
-                return Err(LqlError::Execution(format!(
-                    "WITH DECOYS requires model weights in the vindex.\n  \
-                     Re-extract: EXTRACT MODEL \"{}\" INTO \"{}\" WITH ALL",
-                    config.model, path.display()
-                )));
-            }
-            let tokenizer = larql_inference::load_tokenizer(path)
-                .map_err(|e| LqlError::exec("failed to load tokenizer for decoys", e))?;
-            prompts
-                .iter()
-                .map(|p| {
-                    let enc = tokenizer
-                        .encode(p.as_str(), true)
-                        .map_err(|e| LqlError::exec(&format!("tokenize decoy '{}'", p), e))?;
-                    Ok(enc.get_ids().to_vec())
-                })
-                .collect::<Result<Vec<_>, LqlError>>()?
-        } else {
-            Vec::new()
-        };
-
-        // ── 4. Load weights once if we need decoys ──
-        let weights = if !decoy_tokens.is_empty() {
-            let (path, _, _) = self.require_vindex()?;
-            let mut cb = larql_vindex::SilentLoadCallbacks;
-            Some(larql_vindex::load_model_weights(path, &mut cb)
-                .map_err(|e| LqlError::exec("failed to load model weights for decoys", e))?)
-        } else {
-            None
-        };
-
-        // ── 5. Refine layer-by-layer ──
-        let mut total_facts = 0usize;
-        let mut min_retained = f32::INFINITY;
-        let mut max_retained = f32::NEG_INFINITY;
-        let mut sum_retained = 0.0f32;
-        let mut writebacks: Vec<(usize, usize, Vec<f32>)> = Vec::new();
-
-        for (layer, layer_inputs) in by_layer {
-            let inputs: Vec<larql_vindex::RefineInput> = layer_inputs
-                .iter()
-                .map(|(feat, gate)| larql_vindex::RefineInput {
-                    layer,
-                    feature: *feat,
-                    gate: gate.clone(),
-                })
-                .collect();
-
-            // Capture decoys at this specific layer (one forward pass
-            // per decoy prompt, scoped to this layer's residual).
-            let decoy_residuals: Vec<larql_vindex::ndarray::Array1<f32>> = if let Some(w) = &weights {
-                larql_inference::capture_decoy_residuals(w, &decoy_tokens, layer)
-            } else {
-                Vec::new()
-            };
-
-            let result = larql_vindex::refine_gates(&inputs, &decoy_residuals);
-
-            for refined in &result.gates {
-                total_facts += 1;
-                min_retained = min_retained.min(refined.retained_norm);
-                max_retained = max_retained.max(refined.retained_norm);
-                sum_retained += refined.retained_norm;
-                writebacks.push((
-                    refined.layer,
-                    refined.feature,
-                    refined.gate.to_vec(),
-                ));
-            }
-        }
-
-        // ── 6. Write refined gates back into the overlay ──
-        {
-            let (_, _, patched_mut) = self.require_vindex_mut()?;
-            for (layer, feature, gate) in writebacks {
-                patched_mut.set_gate_override(layer, feature, gate);
-            }
-        }
-
-        let mean_retained = sum_retained / total_facts as f32;
-        Ok(format!(
-            "Refine: {} fact(s) refined ({} decoy prompt(s); norm retained min={:.3} mean={:.3} max={:.3})",
-            total_facts, n_decoys, min_retained, mean_retained, max_retained,
-        ))
     }
 
     // ── DIFF ──
@@ -1008,6 +915,63 @@ impl Session {
             }
         }
     }
+}
+
+// ── COMPILE INTO MODEL: collect MEMIT facts from patch overlay ──
+
+/// Extract INSERT operations from the patch overlay and convert them
+/// into `MemitFact` descriptors for the MEMIT weight-edit solve.
+///
+/// Each INSERT carries entity, relation, target, and layer. We
+/// synthesise a canonical prompt ("The {relation} of {entity} is"),
+/// tokenise it (with BOS), and look up the target token ID — the
+/// same approach as the INSERT executor in mutation.rs.
+fn collect_memit_facts(
+    patched: &larql_vindex::PatchedVindex,
+    vindex_path: &std::path::Path,
+) -> Result<Vec<larql_inference::MemitFact>, crate::error::LqlError> {
+    let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)
+        .map_err(|e| crate::error::LqlError::exec("load tokenizer for MEMIT", e))?;
+
+    let mut facts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for patch in &patched.patches {
+        for op in &patch.operations {
+            if let larql_vindex::PatchOp::Insert { layer, entity, relation, target, .. } = op {
+                let rel_str = relation.as_deref().unwrap_or("relation");
+                let key = (entity.clone(), rel_str.to_string(), target.clone(), *layer);
+                if !seen.insert(key) {
+                    continue; // deduplicate
+                }
+
+                let rel_words = rel_str.replace(['-', '_'], " ");
+                let prompt = format!("The {rel_words} of {entity} is");
+                let encoding = tokenizer.encode(prompt.as_str(), true)
+                    .map_err(|e| crate::error::LqlError::exec("tokenize MEMIT prompt", e))?;
+                let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
+
+                // Target: first token of " " + target (matches INSERT semantics)
+                let spaced = format!(" {target}");
+                let target_encoding = tokenizer.encode(spaced.as_str(), false)
+                    .map_err(|e| crate::error::LqlError::exec("tokenize MEMIT target", e))?;
+                let target_token_id = target_encoding
+                    .get_ids()
+                    .first()
+                    .copied()
+                    .unwrap_or(0);
+
+                facts.push(larql_inference::MemitFact {
+                    prompt_tokens,
+                    target_token_id,
+                    layer: *layer,
+                    label: format!("{entity} → {target} (L{layer})"),
+                });
+            }
+        }
+    }
+
+    Ok(facts)
 }
 
 // ── COMPILE INTO VINDEX: bake down vector overrides into down_weights.bin ──

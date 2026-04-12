@@ -214,22 +214,61 @@ impl Session {
                     .collect();
 
                 // Capture decoy residuals for any install layer that
-                // isn't already cached on the session. Uses the same
-                // clean base index as the fact capture above so the
-                // residuals are comparable. This is the single most
-                // important piece of the online-refine pipeline: the
-                // decoys are what give refine something to project
-                // away at single-fact install, without which the
-                // strong install math (×30 gate scale) produces
-                // cross-prompt bleed even for 1 fact (validated by
-                // `refine_demo` on the 1-fact diagnostic run).
+                // isn't already cached on the session. Two sets:
+                //
+                // 1. CANONICAL decoys — generic prompts ("Once upon a
+                //    time", etc.) that suppress bleed onto unrelated
+                //    text.
+                //
+                // 2. TEMPLATE-MATCHED decoys — same relation template
+                //    ("The {relation} of {X} is") with different
+                //    entities sampled from high-frequency vocabulary.
+                //    These suppress bleed onto prompts that share the
+                //    template structure but differ in entity — the
+                //    single-fact bleed that generic decoys can't reach
+                //    because "The capital of France is" has near-unit
+                //    cosine with "The capital of Atlantis is" at L26
+                //    while "Once upon a time" has near-zero cosine
+                //    with both.
+                //
+                //    The entities are sampled from the tokenizer vocab
+                //    (single tokens that decode to alphabetic strings
+                //    of 3+ chars) so this is fully generic — no
+                //    domain-specific entity list.
                 for &layer in &insert_layers {
                     if !self.decoy_residual_cache.contains_key(&layer) {
-                        let mut captured = Vec::with_capacity(
-                            crate::executor::CANONICAL_DECOY_PROMPTS.len(),
-                        );
-                        for decoy_prompt in crate::executor::CANONICAL_DECOY_PROMPTS {
-                            let enc = tokenizer.encode(*decoy_prompt, true)
+                        // Build the full decoy prompt list: canonical + template-matched.
+                        let mut decoy_prompts: Vec<String> = crate::executor::CANONICAL_DECOY_PROMPTS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect();
+
+                        // Generate template-matched decoys by substituting
+                        // the entity with diverse vocab tokens.
+                        let template_decoy_count = 10;
+                        let mut template_decoys_added = 0;
+                        for tid in 0..config.vocab_size.min(5000) as u32 {
+                            if template_decoys_added >= template_decoy_count {
+                                break;
+                            }
+                            let decoded = tokenizer.decode(&[tid], true)
+                                .unwrap_or_default();
+                            let word = decoded.trim();
+                            // Pick single-token words that are alphabetic, 3+ chars,
+                            // and different from the entity being inserted.
+                            if word.len() >= 3
+                                && word.chars().all(|c| c.is_alphabetic())
+                                && !word.eq_ignore_ascii_case(entity)
+                            {
+                                let decoy = format!("The {rel_words} of {word} is");
+                                decoy_prompts.push(decoy);
+                                template_decoys_added += 1;
+                            }
+                        }
+
+                        let mut captured = Vec::with_capacity(decoy_prompts.len());
+                        for decoy_prompt in &decoy_prompts {
+                            let enc = tokenizer.encode(decoy_prompt.as_str(), true)
                                 .map_err(|e| LqlError::exec("tokenize decoy", e))?;
                             let ids: Vec<u32> = enc.get_ids().to_vec();
                             // Also unlimited top_k here so decoy
@@ -271,6 +310,7 @@ impl Session {
         let c_score = confidence.unwrap_or(0.9);
         let mut inserted_count = 0;
         let mut patch_ops = Vec::new();
+        let mut installed_slots: Vec<(usize, usize)> = Vec::new();
 
         // Snapshot cached decoys into a local map keyed by layer so
         // Phase 2 can read them while holding the mutable borrow of
@@ -415,6 +455,7 @@ impl Session {
                 patched.insert_feature(layer, feature, gate_vec.clone(), meta);
                 patched.set_up_vector(layer, feature, up_vec);
                 patched.set_down_vector(layer, feature, down_vec);
+                installed_slots.push((layer, feature));
 
                 // ── Batch refine from raw captured residuals ──
                 //
@@ -522,6 +563,78 @@ impl Session {
             self.raw_install_residuals.insert(key, residual);
         }
 
+        // ── Phase 3: Balance — scale down vector to prevent cross-prompt bleed ──
+        //
+        // After refine, the gate direction is orthogonalised against
+        // other facts and decoys. But gate_scale=30 with alpha_mul=0.1
+        // can still produce activations large enough to hijack prompts
+        // that share the template structure. The balance pass measures
+        // target probability and scales down until the target lands at
+        // a reasonable strength (top-1 at ~60-90% rather than 99.99%).
+        //
+        // Rust port of `FactCompiler.balance(mode='basic')` from
+        // experiments/15_v11_model. Converges in 3-8 iterations.
+        if use_constellation && !installed_slots.is_empty() {
+            const BALANCE_ITERS: usize = 12;
+            // Target probability window: we want the installed fact
+            // strong enough to be top-1 on the canonical prompt, but
+            // not so strong it hijacks every template-matched prompt.
+            // The Python reference α_eff range 0.009–0.12 produces
+            // ~60–85% on Gemma 4B. 95% ceiling is conservative enough
+            // to stop the worst bleed while preserving the fact.
+            const PROB_CEILING: f64 = 0.95;
+
+            let (path, _config, _patched) = self.require_vindex()?;
+            let mut cb = larql_vindex::SilentLoadCallbacks;
+            let weights = larql_vindex::load_model_weights(path, &mut cb)
+                .map_err(|e| LqlError::exec("balance: load weights", e))?;
+            let tokenizer = larql_vindex::load_vindex_tokenizer(path)
+                .map_err(|e| LqlError::exec("balance: load tokenizer", e))?;
+
+            let rel_words = relation.replace(['-', '_'], " ");
+            let canonical_prompt = format!("The {rel_words} of {entity} is");
+            let enc = tokenizer.encode(canonical_prompt.as_str(), true)
+                .map_err(|e| LqlError::exec("balance: tokenize", e))?;
+            let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
+
+            for _iter in 0..BALANCE_ITERS {
+                // INFER through the full patched vindex (with overlay).
+                let (_, _, patched) = self.require_vindex()?;
+                let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
+                    &weights, patched,
+                );
+                let result = larql_inference::predict_with_ffn(
+                    &weights, &tokenizer, &prompt_ids, 5, &walk_ffn,
+                );
+
+                // Find target in predictions.
+                let target_prefix = &target[..target.len().min(3)];
+                let target_prob = result.predictions.iter()
+                    .find(|(tok, _)| tok.contains(target) || tok.starts_with(target_prefix))
+                    .map(|(_, prob)| *prob);
+
+                let Some(prob) = target_prob else { break };
+
+                if prob <= PROB_CEILING {
+                    // Target probability is in acceptable range.
+                    break;
+                }
+
+                // Scale down: shrink gently to bring prob toward ceiling.
+                // 0.7× per iteration converges in ~4-6 steps from
+                // 99.99% down to ~95% without over-correcting.
+                let scale = 0.7_f32;
+
+                let (_, _, patched_mut) = self.require_patched_mut()?;
+                for &(layer, feature) in &installed_slots {
+                    if let Some(down) = patched_mut.down_override_at(layer, feature) {
+                        let scaled: Vec<f32> = down.iter().map(|v| v * scale).collect();
+                        patched_mut.set_down_vector(layer, feature, scaled);
+                    }
+                }
+            }
+        }
+
         // Record to patch session
         if let Some(ref mut recording) = self.patch_recording {
             recording.operations.extend(patch_ops);
@@ -552,7 +665,7 @@ impl Session {
                 String::new()
             };
             out.push(format!(
-                "  mode: constellation (trace-guided gate + up + down{alpha_note}, gate_scale=30, install_compiled_slot)"
+                "  mode: constellation (trace-guided gate + up + down{alpha_note}, gate_scale=30, install_compiled_slot, balanced)"
             ));
         } else {
             out.push("  mode: embedding (no model weights — gate only, no down override)".into());

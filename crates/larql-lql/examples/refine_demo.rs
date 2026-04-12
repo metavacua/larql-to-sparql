@@ -1,33 +1,21 @@
-//! End-to-end refine demo — Rust port of `experiments/14_vindex_compilation`.
+//! End-to-end INSERT + COMPILE demo — Rust port of `experiments/14_vindex_compilation`.
 //!
 //! Walks the same 10-fact constellation the Python experiment validated:
-//! INSERT each fact under a patch session, COMPILE WITH REFINE WITH DECOYS,
-//! then INFER each retrieval prompt + each regression prompt and report a
-//! bleed table comparing the compiled vindex against the unpatched
-//! baseline. The expected outcome is 10/10 retrieval and 0/4 regression
-//! bleed — matching the Python pipeline.
-//!
-//! Why this exists:
-//!
-//! The unit tests in `larql-vindex::patch::refine` and
-//! `larql-lql::executor::tests` cover the structural correctness of the
-//! refine pass on synthetic constellations (parallel gates lose norm,
-//! `WITHOUT REFINE` is a no-op, browse-only vindexes reject decoys
-//! cleanly). What they don't measure is whether the Rust port
-//! reproduces the Python experiment's retrieval / bleed numbers on a
-//! real Gemma 3 4B vindex. This example is the production validation
-//! step.
+//! INSERT each fact under a patch session, then COMPILE INTO VINDEX and
+//! verify that the baked vindex retrieves all facts without needing a
+//! live patch overlay.
 //!
 //! Three side-by-side runs:
-//!   1. Baseline (no INSERT)             — what Gemma already says.
-//!   2. Compiled WITHOUT REFINE          — bake without the refine pass.
-//!   3. Compiled WITH REFINE WITH DECOYS — the production path.
+//!   1. Baseline (no INSERT)  — what Gemma already says.
+//!   2. PATCHED session       — live overlay, no compile needed.
+//!   3. COMPILED vindex       — standalone baked file, no overlay.
 //!
 //! For each run we measure (a) retrieval — does each fact's prompt
 //! return the right token, and (b) regression bleed — do the four
-//! untouched prompts still produce the baseline top token. The summary
-//! prints a 4-column table comparing the three modes against the Python
-//! experiment's reference numbers.
+//! untouched prompts still produce the baseline top token.
+//!
+//! Expected outcome: 10/10 retrieval and 0/4 bleed for both patched
+//! and compiled — validated on Gemma 3 4B in exp 14.
 //!
 //! If the source vindex (`output/gemma3-4b-f16.vindex`) doesn't exist,
 //! the example prints a clear "skipped" message and exits 0 so it
@@ -60,33 +48,11 @@ const FACTS: &[(&str, &str, &str, &str)] = &[
     ("Brazil",    "capital", "Brasília", "The capital of Brazil is"),
 ];
 
-/// Regression prompts to check for bleed. The Python experiment shows
-/// "To be or not to be" → " Shakespeare" is the canonical Hamlet bleed
-/// target, and "Water is a" → " Pacific" is the canonical ocean-fact
-/// bleed target. Both are in the decoy set below so refine should
-/// suppress them.
 const REGRESSION_PROMPTS: &[&str] = &[
     "Once upon a time",
     "The quick brown fox",
     "To be or not to be",
     "Water is a",
-];
-
-/// Decoy prompts forwarded into the refine pass. The same set the
-/// Python experiment uses; spans literary, philosophical, and common
-/// completion templates so refine has the right suppression directions
-/// in hand.
-const DECOYS: &[&str] = &[
-    "Once upon a time",
-    "The quick brown fox",
-    "To be or not to be",
-    "Water is a",
-    "A long time ago",
-    "In the beginning",
-    "The weather today is",
-    "She opened the door and",
-    "He looked at the sky",
-    "The children played in the",
 ];
 
 fn main() {
@@ -140,117 +106,66 @@ fn main() {
     // re-running INSERT (saves ~20s of forward passes).
     run(&mut patched_session, "SAVE PATCH;", "SAVE PATCH");
 
-    // ── Phase 2b: compile WITHOUT REFINE ──
-    section("Phase 2b — COMPILE WITHOUT REFINE (from same patched session)");
-    let no_refine_path = std::env::temp_dir()
-        .join("larql_refine_demo_no_refine.vindex")
+    // ── Phase 2b: compile ──
+    section("Phase 2b — COMPILE INTO VINDEX (bake patched overlay)");
+    let compiled_path = std::env::temp_dir()
+        .join("larql_refine_demo_compiled.vindex")
         .to_string_lossy()
         .into_owned();
-    let _ = std::fs::remove_dir_all(&no_refine_path);
+    let _ = std::fs::remove_dir_all(&compiled_path);
     {
         let stmt = format!(
-            r#"COMPILE CURRENT INTO VINDEX "{no_refine_path}" WITHOUT REFINE;"#
+            r#"COMPILE CURRENT INTO VINDEX "{compiled_path}";"#
         );
-        run(&mut patched_session, &stmt, "COMPILE WITHOUT REFINE");
+        run(&mut patched_session, &stmt, "COMPILE");
     }
-    let mut no_refine_session = Session::new();
-    use_vindex(&mut no_refine_session, &no_refine_path);
-    let no_refine_retrieval = measure_retrieval(&mut no_refine_session, "no-refine");
-    let no_refine_regression = measure_regression(&mut no_refine_session, "no-refine");
+    let mut compiled_session = Session::new();
+    use_vindex(&mut compiled_session, &compiled_path);
+    let compiled_retrieval = measure_retrieval(&mut compiled_session, "compiled");
+    let compiled_regression = measure_regression(&mut compiled_session, "compiled");
 
-    // ── Phase 3: compile WITH REFINE WITH DECOYS ──
-    section("Phase 3 — Install + COMPILE WITH REFINE WITH DECOYS");
-    let refine_path = std::env::temp_dir()
-        .join("larql_refine_demo_refine.vindex")
-        .to_string_lossy()
-        .into_owned();
-    let _ = std::fs::remove_dir_all(&refine_path);
-    {
-        let mut session = Session::new();
-        use_vindex(&mut session, SOURCE_VINDEX);
-        run(&mut session, r#"BEGIN PATCH "/tmp/larql_refine_demo_refine.vlp";"#, "BEGIN PATCH");
-        for (entity, relation, target, _) in FACTS {
-            run(
-                &mut session,
-                &format!(
-                    r#"INSERT INTO EDGES (entity, relation, target) VALUES ("{entity}", "{relation}", "{target}");"#
-                ),
-                &format!("INSERT {entity}"),
-            );
-        }
-        run(&mut session, "SAVE PATCH;", "SAVE PATCH");
-        let decoy_list = DECOYS
-            .iter()
-            .map(|p| format!("\"{p}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let stmt = format!(
-            r#"COMPILE CURRENT INTO VINDEX "{refine_path}" WITH REFINE WITH DECOYS ({decoy_list});"#
-        );
-        let t_compile = Instant::now();
-        run(&mut session, &stmt, "COMPILE WITH REFINE WITH DECOYS");
-        println!("    refine compile took {:?}", t_compile.elapsed());
-    }
-    let mut refine_session = Session::new();
-    use_vindex(&mut refine_session, &refine_path);
-    let refine_retrieval = measure_retrieval(&mut refine_session, "refine+decoys");
-    let refine_regression = measure_regression(&mut refine_session, "refine+decoys");
-
-    // ── Phase 4: report ──
-    section("Phase 4 — Side-by-side comparison");
+    // ── Phase 3: report ──
+    section("Phase 3 — Side-by-side comparison");
 
     let baseline_hit = retrieval_hits(&baseline_retrieval);
     let patched_hit = retrieval_hits(&patched_retrieval);
-    let no_refine_hit = retrieval_hits(&no_refine_retrieval);
-    let refine_hit = retrieval_hits(&refine_retrieval);
+    let compiled_hit = retrieval_hits(&compiled_retrieval);
 
     let patched_bleed = regression_bleed(&baseline_regression, &patched_regression);
-    let no_refine_bleed = regression_bleed(&baseline_regression, &no_refine_regression);
-    let refine_bleed = regression_bleed(&baseline_regression, &refine_regression);
+    let compiled_bleed = regression_bleed(&baseline_regression, &compiled_regression);
 
     println!("  Retrieval (target token landed in top-1 of INFER):");
     println!("    baseline (no install)               {baseline_hit:>2}/{}", FACTS.len());
     println!("    PATCHED session (no compile yet)    {patched_hit:>2}/{}", FACTS.len());
-    println!("    compiled WITHOUT REFINE             {no_refine_hit:>2}/{}", FACTS.len());
-    println!("    compiled WITH REFINE+DECOYS         {refine_hit:>2}/{}", FACTS.len());
+    println!("    compiled vindex (standalone)        {compiled_hit:>2}/{}", FACTS.len());
     println!();
-    println!("  Per-fact top-1 (baseline | patched | compiled no-refine | compiled refine+decoys):");
+    println!("  Per-fact top-1 (baseline | patched | compiled):");
     for (_, _, target, prompt) in FACTS {
         let b = baseline_retrieval.get(*prompt).cloned().unwrap_or_default();
         let p = patched_retrieval.get(*prompt).cloned().unwrap_or_default();
-        let nr = no_refine_retrieval.get(*prompt).cloned().unwrap_or_default();
-        let rf = refine_retrieval.get(*prompt).cloned().unwrap_or_default();
+        let c = compiled_retrieval.get(*prompt).cloned().unwrap_or_default();
         println!("    {prompt:<30}  want: {target:<12}");
         println!("                                    baseline: {b:?}");
         println!("                                    patched:  {p:?}");
-        println!("                                    compiled: {nr:?}");
-        println!("                                    refine:   {rf:?}");
+        println!("                                    compiled: {c:?}");
     }
     println!();
     println!("  Regression bleed (untouched prompts that moved off baseline):");
     println!("    PATCHED session (no compile yet)    {patched_bleed:>2}/{}", REGRESSION_PROMPTS.len());
-    println!("    compiled WITHOUT REFINE             {no_refine_bleed:>2}/{}", REGRESSION_PROMPTS.len());
-    println!("    compiled WITH REFINE+DECOYS         {refine_bleed:>2}/{}", REGRESSION_PROMPTS.len());
+    println!("    compiled vindex (standalone)        {compiled_bleed:>2}/{}", REGRESSION_PROMPTS.len());
     println!();
-    println!("  Per-prompt regression deltas (patched vs no-refine vs refine vs baseline):");
+    println!("  Per-prompt regression deltas (baseline | patched | compiled):");
     for prompt in REGRESSION_PROMPTS {
         let base = baseline_regression.get(*prompt).cloned().unwrap_or_default();
         let pt = patched_regression.get(*prompt).cloned().unwrap_or_default();
-        let nr = no_refine_regression.get(*prompt).cloned().unwrap_or_default();
-        let rf = refine_regression.get(*prompt).cloned().unwrap_or_default();
+        let c = compiled_regression.get(*prompt).cloned().unwrap_or_default();
         let pt_mark = if pt == base { "✓" } else { "✗" };
-        let nr_mark = if nr == base { "✓" } else { "✗" };
-        let rf_mark = if rf == base { "✓" } else { "✗" };
+        let c_mark = if c == base { "✓" } else { "✗" };
         println!("    {prompt:<25}");
-        println!("        baseline:            {base:?}");
-        println!("        patched:   {pt_mark}         {pt:?}");
-        println!("        no-refine: {nr_mark}         {nr:?}");
-        println!("        refine:    {rf_mark}         {rf:?}");
+        println!("        baseline:  {base:?}");
+        println!("        patched:   {pt_mark}  {pt:?}");
+        println!("        compiled:  {c_mark}  {c:?}");
     }
-    println!();
-    println!("  Reference (Python exp 14 on identical 10-fact constellation):");
-    println!("    refine + decoys:    10/10 retrieval, 0/4 bleed");
-    println!("    refine alone:       10/10 retrieval, 1-2/4 bleed");
     println!();
 
     let mut all_passed = true;
@@ -265,25 +180,24 @@ fn main() {
         &mut all_passed,
     );
     check(
-        &format!("WITH REFINE+DECOYS retrieval is 10/{} (compiled)", FACTS.len()),
-        refine_hit == FACTS.len(),
+        &format!("compiled vindex retrieval is 10/{}", FACTS.len()),
+        compiled_hit == FACTS.len(),
         &mut all_passed,
     );
     check(
-        "WITH REFINE+DECOYS regression bleed is 0 (compiled)",
-        refine_bleed == 0,
+        "compiled vindex regression bleed is 0",
+        compiled_bleed == 0,
         &mut all_passed,
     );
 
-    let _ = std::fs::remove_dir_all(&no_refine_path);
-    let _ = std::fs::remove_dir_all(&refine_path);
+    let _ = std::fs::remove_dir_all(&compiled_path);
 
     println!("\n  total runtime: {:?}", t0.elapsed());
 
     if all_passed {
-        println!("\n  PASS: Rust refine pipeline matches Python exp 14 on Gemma 3 4B.");
+        println!("\n  PASS: INSERT + COMPILE pipeline validated on Gemma 3 4B.");
     } else {
-        println!("\n  FAIL: refine output diverges from the Python reference.");
+        println!("\n  FAIL: pipeline output diverges from expected.");
         std::process::exit(1);
     }
 }

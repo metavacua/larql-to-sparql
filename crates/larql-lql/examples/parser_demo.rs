@@ -51,28 +51,8 @@ fn main() {
     );
 
     demo(
-        "COMPILE INTO VINDEX (WITH REFINE — explicit default)",
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH REFINE;"#,
-    );
-
-    demo(
-        "COMPILE INTO VINDEX (WITHOUT REFINE)",
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITHOUT REFINE;"#,
-    );
-
-    demo(
-        "COMPILE INTO VINDEX (WITH DECOYS — single)",
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH DECOYS ("To be or not to be");"#,
-    );
-
-    demo(
-        "COMPILE INTO VINDEX (WITH DECOYS — multiple)",
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH DECOYS ("To be or not to be", "Water is a", "Friends, Romans, countrymen");"#,
-    );
-
-    demo(
-        "COMPILE INTO VINDEX (all clauses combined)",
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL WITH REFINE WITH DECOYS ("To be or not to be");"#,
+        "COMPILE INTO MODEL (explicit)",
+        r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors;"#,
     );
 
     demo(

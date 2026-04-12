@@ -21,15 +21,6 @@ pub enum Statement {
         /// COMPILE INTO VINDEX only: how to resolve patches that touch the
         /// same (layer, feature) slot. None → default (LastWins).
         on_conflict: Option<CompileConflict>,
-        /// COMPILE INTO VINDEX only: whether to refine patched gates against
-        /// each other (and any decoys) before baking. Default true.
-        refine: bool,
-        /// COMPILE INTO VINDEX only: optional decoy prompts to forward-pass
-        /// at compile time and orthogonalise patched gates against. Used
-        /// to defend specific bleed targets that the constellation alone
-        /// cannot reach (e.g. semantic associations). None means refine uses
-        /// the constellation only.
-        decoys: Option<Vec<String>>,
     },
     Diff {
         a: VindexRef,

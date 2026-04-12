@@ -75,7 +75,7 @@ fn main() {
     run(&mut session, r#"BEGIN PATCH "/tmp/larql_compile_demo.vlp";"#, "BEGIN PATCH");
     run(
         &mut session,
-        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon");"#,
+        r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital", "Poseidon");"#,
         "INSERT Atlantis",
     );
 

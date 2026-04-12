@@ -825,161 +825,6 @@ fn patched_overlay_mut_round_trip_via_insert_feature() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── COMPILE INTO VINDEX WITH REFINE: integration ──
-
-/// Helper for the refine integration tests: inject two parallel gates
-/// directly into the patch overlay (bypassing INSERT, which would
-/// require a real tokenizer + relation classifier the synthetic vindex
-/// doesn't carry). Returns the original gate vectors so the caller can
-/// compare them against the post-compile state.
-fn inject_parallel_gates(session: &mut Session) -> (Vec<f32>, Vec<f32>) {
-    use larql_models::TopKEntry;
-    use larql_vindex::FeatureMeta;
-
-    let gate_a = vec![1.0_f32, 0.5, 0.0, 0.0];
-    let gate_b = vec![0.5_f32, 1.0, 0.0, 0.0];
-    let meta_a = FeatureMeta {
-        top_token: "alpha".into(),
-        top_token_id: 1,
-        c_score: 0.9,
-        top_k: vec![TopKEntry { token: "alpha".into(), token_id: 1, logit: 0.9 }],
-    };
-    let meta_b = FeatureMeta {
-        top_token: "beta".into(),
-        top_token_id: 2,
-        c_score: 0.9,
-        top_k: vec![TopKEntry { token: "beta".into(), token_id: 2, logit: 0.9 }],
-    };
-
-    match &mut session.backend {
-        Backend::Vindex { patched, .. } => {
-            patched.insert_feature(0, 0, gate_a.clone(), meta_a);
-            patched.insert_feature(0, 1, gate_b.clone(), meta_b);
-        }
-        _ => panic!("test session must be Vindex backend"),
-    }
-    (gate_a, gate_b)
-}
-
-fn read_overlay_gate(session: &Session, layer: usize, feature: usize) -> Vec<f32> {
-    match &session.backend {
-        Backend::Vindex { patched, .. } => patched
-            .overrides_gate_at(layer, feature)
-            .expect("gate override should exist after injection")
-            .to_vec(),
-        _ => panic!("test session must be Vindex backend"),
-    }
-}
-
-#[test]
-fn refine_pass_modifies_overlapping_gates() {
-    // Two parallel gates injected at L0/F0 and L0/F1 should both lose
-    // norm under the refine pass. The output line should advertise
-    // refine and the overlay should hold the new vectors.
-    let (mut session, dir) = vindex_session("refine_modifies");
-    let (orig_a, orig_b) = inject_parallel_gates(&mut session);
-
-    let out_dir = dir.join("compiled_with_refine");
-    let stmt = parser::parse(&format!(
-        r#"COMPILE CURRENT INTO VINDEX "{}" WITH REFINE;"#,
-        out_dir.display(),
-    ))
-    .unwrap();
-    let out = session.execute(&stmt).expect("compile WITH REFINE");
-    let joined = out.join("\n");
-    assert!(joined.contains("Refine: 2 fact"),
-            "compile output should mention 2 facts refined: {joined}");
-    assert!(joined.contains("norm retained"),
-            "compile output should report norm retained stats: {joined}");
-
-    let refined_a = read_overlay_gate(&session, 0, 0);
-    let refined_b = read_overlay_gate(&session, 0, 1);
-    let norm_orig_a: f32 = orig_a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_orig_b: f32 = orig_b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_refined_a: f32 = refined_a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_refined_b: f32 = refined_b.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    assert!(norm_refined_a < norm_orig_a * 0.95,
-            "fact a should lose norm: {norm_refined_a} < {norm_orig_a}");
-    assert!(norm_refined_b < norm_orig_b * 0.95,
-            "fact b should lose norm");
-    // The original (orthogonal-component) directions are preserved by
-    // sign — assert the refined gate is *not* equal to the original.
-    assert_ne!(refined_a, orig_a, "refined gate must differ from original");
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn without_refine_leaves_overlay_gates_untouched() {
-    // Same constellation but compiled WITHOUT REFINE — the overlay
-    // gates should still equal what was injected, byte for byte.
-    let (mut session, dir) = vindex_session("refine_skipped");
-    let (orig_a, orig_b) = inject_parallel_gates(&mut session);
-
-    let out_dir = dir.join("compiled_no_refine");
-    let stmt = parser::parse(&format!(
-        r#"COMPILE CURRENT INTO VINDEX "{}" WITHOUT REFINE;"#,
-        out_dir.display(),
-    ))
-    .unwrap();
-    let out = session.execute(&stmt).expect("compile WITHOUT REFINE");
-    let joined = out.join("\n");
-    assert!(joined.contains("Refine: skipped (WITHOUT REFINE)"),
-            "compile output should advertise skipped refine: {joined}");
-
-    let after_a = read_overlay_gate(&session, 0, 0);
-    let after_b = read_overlay_gate(&session, 0, 1);
-    assert_eq!(after_a, orig_a, "WITHOUT REFINE must not touch the gates");
-    assert_eq!(after_b, orig_b);
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn refine_with_decoys_errors_on_browse_only_vindex() {
-    // The synthetic test vindex is browse-only (no model weights).
-    // WITH DECOYS requires forward-pass capability, so the executor
-    // should reject it with a clear message instead of trying and
-    // failing partway through.
-    let (mut session, dir) = vindex_session("refine_decoys_browse");
-    let _ = inject_parallel_gates(&mut session);
-
-    let out_dir = dir.join("compiled_with_decoys");
-    let stmt = parser::parse(&format!(
-        r#"COMPILE CURRENT INTO VINDEX "{}" WITH DECOYS ("hello world");"#,
-        out_dir.display(),
-    ))
-    .unwrap();
-    let err = session.execute(&stmt).expect_err("WITH DECOYS on browse-only must error");
-    let msg = format!("{err}");
-    assert!(msg.to_lowercase().contains("decoys requires model weights")
-                || msg.to_lowercase().contains("with all"),
-            "error should explain the precondition: {msg}");
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn refine_pass_with_no_overrides_returns_quietly() {
-    // Compile WITH REFINE on a session with no patches — the refine
-    // pass should report "nothing to refine" rather than running
-    // empty math or panicking.
-    let (mut session, dir) = vindex_session("refine_empty");
-
-    let out_dir = dir.join("compiled_empty");
-    let stmt = parser::parse(&format!(
-        r#"COMPILE CURRENT INTO VINDEX "{}" WITH REFINE;"#,
-        out_dir.display(),
-    ))
-    .unwrap();
-    let out = session.execute(&stmt).expect("empty refine should succeed");
-    let joined = out.join("\n");
-    assert!(joined.contains("no gate overrides to refine"),
-            "expected the no-op message: {joined}");
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
 
 #[test]
 fn show_patches_with_no_patches_returns_message() {
@@ -993,5 +838,224 @@ fn show_patches_with_no_patches_returns_message() {
         "expected an empty/no-patches message: {joined}"
     );
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── COMPILE INTO VINDEX integration tests ──────────────────────────────
+
+#[test]
+fn compile_into_vindex_no_patches_succeeds() {
+    let (mut session, dir) = vindex_session("compile_nopatches_v");
+
+    let output = dir.join("compiled.vindex");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}";"#, output.display()
+    )).unwrap();
+    let out = session.execute(&stmt).expect("COMPILE INTO VINDEX should succeed");
+    let joined = out.join("\n");
+    assert!(joined.contains("Compiled"), "expected compile output: {joined}");
+    assert!(output.exists(), "compiled vindex directory should exist");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_into_vindex_with_down_overrides_bakes_them() {
+    use larql_models::TopKEntry;
+    use larql_vindex::FeatureMeta;
+
+    let (mut session, dir) = vindex_session("compile_bake_down");
+
+    // Create a synthetic down_weights.bin — per-layer [hidden, intermediate] f32.
+    // hidden=4, intermediate=3, num_layers=2.
+    let layer_floats = 4 * 3;
+    let total = 2 * layer_floats;
+    let bytes: Vec<u8> = (0..total).flat_map(|i| (i as f32 * 0.01).to_le_bytes()).collect();
+    std::fs::write(dir.join("down_weights.bin"), &bytes).unwrap();
+
+    {
+        let overlay = session.patched_overlay_mut().expect("vindex backend");
+        overlay.insert_feature(0, 0, vec![1.0, 0.0, 0.0, 0.0], FeatureMeta {
+            top_token: "test".into(), top_token_id: 5, c_score: 0.9,
+            top_k: vec![TopKEntry { token: "test".into(), token_id: 5, logit: 0.9 }],
+        });
+        overlay.set_down_vector(0, 0, vec![0.5, 0.6, 0.7, 0.8]);
+    }
+    let output = dir.join("compiled_baked.vindex");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}";"#, output.display()
+    )).unwrap();
+    let out = session.execute(&stmt).expect("COMPILE should succeed");
+    let joined = out.join("\n");
+    assert!(joined.contains("Down overrides baked"), "expected baked overrides: {joined}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_on_conflict_fail_detects_collision() {
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    let (mut session, dir) = vindex_session("compile_conflict_fail");
+    {
+        let (_, _, patched) = session.require_patched_mut().unwrap();
+        let mkp = |e: &str| VindexPatch {
+            version: 1, base_model: String::new(), base_checksum: None,
+            created_at: String::new(), description: None, author: None,
+            tags: Vec::new(),
+            operations: vec![PatchOp::Insert {
+                layer: 0, feature: 0, relation: Some("r".into()),
+                entity: e.into(), target: "t".into(), confidence: Some(0.9),
+                gate_vector_b64: None, down_meta: None,
+            }],
+        };
+        patched.patches.push(mkp("A"));
+        patched.patches.push(mkp("C"));
+    }
+    let output = dir.join("compiled_fail.vindex");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" ON CONFLICT FAIL;"#, output.display()
+    )).unwrap();
+    let result = session.execute(&stmt);
+    assert!(result.is_err(), "ON CONFLICT FAIL should error on collision");
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("FAIL") || msg.contains("colliding"), "error: {msg}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compile_on_conflict_last_wins_succeeds() {
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    let (mut session, dir) = vindex_session("compile_conflict_lw");
+    {
+        let (_, _, patched) = session.require_patched_mut().unwrap();
+        let mkp = |e: &str| VindexPatch {
+            version: 1, base_model: String::new(), base_checksum: None,
+            created_at: String::new(), description: None, author: None,
+            tags: Vec::new(),
+            operations: vec![PatchOp::Insert {
+                layer: 0, feature: 0, relation: Some("r".into()),
+                entity: e.into(), target: "t".into(), confidence: Some(0.9),
+                gate_vector_b64: None, down_meta: None,
+            }],
+        };
+        patched.patches.push(mkp("A"));
+        patched.patches.push(mkp("C"));
+    }
+    let output = dir.join("compiled_lw.vindex");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" ON CONFLICT LAST_WINS;"#, output.display()
+    )).unwrap();
+    assert!(session.execute(&stmt).is_ok(), "LAST_WINS should succeed despite collision");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── MEMIT fact collection ────────────────────────────────────────────
+
+#[test]
+fn memit_facts_count_inserts_only() {
+    use larql_vindex::PatchOp;
+
+    let ops = vec![
+        PatchOp::Insert {
+            layer: 26, feature: 100, relation: Some("capital".into()),
+            entity: "X".into(), target: "Y".into(), confidence: Some(0.9),
+            gate_vector_b64: None, down_meta: None,
+        },
+        PatchOp::Delete { layer: 10, feature: 50, reason: None },
+        PatchOp::Update { layer: 0, feature: 2, gate_vector_b64: None, down_meta: None },
+    ];
+    let insert_count = ops.iter().filter(|op| matches!(op, PatchOp::Insert { .. })).count();
+    assert_eq!(insert_count, 1, "only INSERT should be counted");
+}
+
+#[test]
+fn memit_facts_deduplicate_across_patches() {
+    use larql_vindex::{PatchOp, VindexPatch};
+
+    let mkp = |conf: f32| VindexPatch {
+        version: 1, base_model: String::new(), base_checksum: None,
+        created_at: String::new(), description: None, author: None,
+        tags: Vec::new(),
+        operations: vec![PatchOp::Insert {
+            layer: 10, feature: 5, relation: Some("capital".into()),
+            entity: "France".into(), target: "Paris".into(),
+            confidence: Some(conf), gate_vector_b64: None, down_meta: None,
+        }],
+    };
+    let patches = vec![mkp(0.9), mkp(0.95)];
+    let mut seen = std::collections::HashSet::new();
+    for p in &patches {
+        for op in &p.operations {
+            if let PatchOp::Insert { layer, entity, relation, target, .. } = op {
+                seen.insert((entity.clone(), relation.clone().unwrap_or_default(), target.clone(), *layer));
+            }
+        }
+    }
+    assert_eq!(seen.len(), 1, "same fact in two patches → 1 after dedup");
+}
+
+// ── Template + decoy tests ───────────────────────────────────────────
+
+#[test]
+fn canonical_decoys_are_nonempty_and_diverse() {
+    assert!(!super::CANONICAL_DECOY_PROMPTS.is_empty());
+    let prefixes: std::collections::HashSet<String> = super::CANONICAL_DECOY_PROMPTS.iter()
+        .map(|p| p.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(prefixes.len(), super::CANONICAL_DECOY_PROMPTS.len(),
+        "decoy prompts should have unique 3-word prefixes");
+}
+
+#[test]
+fn relation_template_simple() {
+    let rel = "capital";
+    let prompt = format!("The {} of entity is", rel.replace(['-', '_'], " "));
+    assert_eq!(prompt, "The capital of entity is");
+}
+
+#[test]
+fn relation_template_multi_word() {
+    let rel = "native_language";
+    let prompt = format!("The {} of entity is", rel.replace(['-', '_'], " "));
+    assert_eq!(prompt, "The native language of entity is");
+}
+
+#[test]
+fn relation_template_hyphenated_produces_double_of() {
+    // Documents the known template quirk: "capital-of" → "capital of"
+    // → "The capital of of X is". Users should use "capital" not "capital-of".
+    let rel = "capital-of";
+    let prompt = format!("The {} of X is", rel.replace(['-', '_'], " "));
+    assert!(prompt.contains("of of"), "capital-of produces double 'of': {prompt}");
+}
+
+// Cholesky solver is unit-tested in larql-compute::cpu::ops::linalg::tests.
+// MEMIT solve is integration-tested via compile_demo against real vindex.
+
+// ── MEMIT struct ─────────────────────────────────────────────────────
+
+#[test]
+fn memit_fact_struct() {
+    let f = larql_inference::MemitFact {
+        prompt_tokens: vec![1, 2, 3], target_token_id: 42,
+        layer: 26, label: "test".into(),
+    };
+    assert_eq!(f.layer, 26);
+    assert_eq!(f.target_token_id, 42);
+}
+
+// ── Compile into model requires weights ──────────────────────────────
+
+#[test]
+fn compile_into_model_requires_model_weights() {
+    let (mut session, dir) = vindex_session("compile_model_noweights");
+    let output = dir.join("model_out");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO MODEL "{}";"#, output.display()
+    )).unwrap();
+    let result = session.execute(&stmt);
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("model weights") || msg.contains("WITH ALL"), "error: {msg}");
     let _ = std::fs::remove_dir_all(&dir);
 }

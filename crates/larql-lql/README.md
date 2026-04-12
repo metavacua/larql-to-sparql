@@ -93,13 +93,11 @@ which is exactly what `weight_manifest.json` references. A subsequent
 loading the result in HuggingFace Transformers gives you the inserted
 facts via standard `model.generate()` — no special loader code.
 
-`COMPILE INTO VINDEX` accepts three optional clauses, in any order:
+`COMPILE INTO VINDEX` accepts one optional clause:
 
 ```sql
 COMPILE CURRENT INTO VINDEX "out.vindex"
-    ON CONFLICT FAIL
-    WITH REFINE
-    WITH DECOYS ("To be or not to be", "Water is a");
+    ON CONFLICT FAIL;
 ```
 
 **`ON CONFLICT`** — how to resolve slots written by more than one patch.
@@ -110,37 +108,40 @@ COMPILE CURRENT INTO VINDEX "out.vindex"
 | `HIGHEST_CONFIDENCE` | Accepted for forward compatibility. Currently resolves like `LAST_WINS` for down vectors — see spec §3.5. |
 | `FAIL` | Abort if any slot has a conflicting write. |
 
-**`WITH REFINE | WITHOUT REFINE`** — whether the bake step orthogonalises
-each patched gate against the other patched gates at the same layer
-before writing the canonical files. `INSERT` is intentionally a dumb
-append (no model weights required), so refine runs once at compile time
-when the full constellation is in hand. Default is `WITH REFINE`. Use
-`WITHOUT REFINE` for tests, benches, or when you want byte-identical
-output to a hand-built patch.
-
-**`WITH DECOYS (<prompt>, ...)`** — supplies prompts that are
-forward-passed at compile time; their residuals at the install layer
-become extra suppression vectors in the refine pass. Use this to defend
-specific bleed targets that the constellation alone cannot reach
-(semantic associations like Hamlet→Shakespeare on `"To be or not to be"`).
-Validated end-to-end in `experiments/14_vindex_compilation` —
-constellation refine + decoys gives 10/10 retrieval and zero regression
-bleed; constellation refine alone leaves 1-2 semantic bleeds out of 4
-on a 10-fact Gemma 3 4B constellation.
-
-> **Status:** end-to-end on synthetic vindexes. The refine primitive
-> (`larql-vindex::patch::refine`), decoy capture entry point
-> (`larql-inference::capture_decoy_residuals`), and executor wiring all
-> live in `main` and are unit-tested. Production validation against a
-> real Gemma 3 4B vindex (matching `experiments/14_vindex_compilation`'s
-> 10/10 retrieval, 0/4 regression bleed) is the next step. See spec §11.6.
+> **Status:** validated end-to-end on Gemma 3 4B in `experiments/14_vindex_compilation`.
+> 10/10 retrieval, 0/4 regression bleed, standalone baked vindex (no overlay needed at runtime).
+> The online refine pass (Gram-Schmidt against cached decoy residuals) runs at INSERT time, so
+> no compile-time refine step is needed — INSERT already handles bleed defense.
 
 The full mechanism is documented in `docs/vindex-operations-spec.md` §1.6.
+
+## COMPILE INTO MODEL (MEMIT)
+
+`COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors` applies the patch
+overlay to actual model weights via MEMIT closed-form weight editing. The
+output is a standard safetensors directory — no vindex, no overlay, no
+special loader code.
+
+```sql
+INSERT INTO EDGES (entity, relation, target)
+    VALUES ("Atlantis", "capital", "Poseidon");
+COMPILE CURRENT INTO MODEL "gemma3-4b-edited/" FORMAT safetensors;
+```
+
+The MEMIT pipeline:
+1. Estimates FFN activation covariance C at the install layer
+2. Captures per-fact activations k* at the canonical prompt
+3. Solves the closed-form weight edit: `dW = R^T S^-1 Q` where
+   `S = K C^-1 K^T + lambda*I`
+4. Applies dW to W_down and writes modified weights
+
+Requires model weights in the vindex (`EXTRACT ... WITH ALL`).
+Validated in Python at 200/200 (100%) with multi-layer MEMIT on v11.
 
 ## Building & Testing
 
 ```bash
-cargo test -p larql-lql                                       # 267 tests
+cargo test -p larql-lql                                       # 260 tests
 cargo test -p larql-lql --lib executor::tests                 # executor mutation pipeline
 cargo test -p larql-lql --lib parser::tests                   # parser unit tests
 

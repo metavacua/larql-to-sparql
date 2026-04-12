@@ -43,6 +43,7 @@ pub use forward::{
     predict_with_strategy, trace_forward, trace_forward_full, trace_forward_with_ffn,
     LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention,
     PredictResultWithResiduals, TraceResult,
+    run_memit, MemitFact, MemitResult, MemitFactResult,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
 #[allow(deprecated)]

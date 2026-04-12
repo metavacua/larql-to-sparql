@@ -13,3 +13,4 @@ pub mod q8_matvec;
 pub mod vector;
 pub mod attention;
 pub mod geglu;
+pub mod linalg;

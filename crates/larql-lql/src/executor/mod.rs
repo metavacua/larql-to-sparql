@@ -165,10 +165,9 @@ impl Session {
             Statement::Extract { model, output, components, layers, extract_level } => {
                 self.exec_extract(model, output, components.as_deref(), layers.as_ref(), *extract_level)
             }
-            Statement::Compile { vindex, output, format, target, on_conflict, refine, decoys } => {
+            Statement::Compile { vindex, output, format, target, on_conflict } => {
                 self.exec_compile(
                     vindex, output, *format, *target, *on_conflict,
-                    *refine, decoys.as_deref(),
                 )
             }
             Statement::Diff { a, b, layer, relation, limit, into_patch } => {
@@ -451,25 +450,6 @@ impl Session {
         }
     }
 
-    /// Mutable counterpart for operations that need to modify the
-    /// patch overlay (e.g. `COMPILE INTO VINDEX WITH REFINE` writing
-    /// refined gates back before the bake).
-    pub(crate) fn require_vindex_mut(
-        &mut self,
-    ) -> Result<(&Path, &larql_vindex::VindexConfig, &mut larql_vindex::PatchedVindex), LqlError>
-    {
-        match &mut self.backend {
-            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
-            Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
-                "this operation requires a vindex. Extract first:\n  \
-                 EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
-                model_id,
-                model_id.split('/').next_back().unwrap_or(model_id),
-            ))),
-            _ => Err(LqlError::NoBackend),
-        }
-    }
-
     pub(crate) fn relation_classifier(&self) -> Option<&RelationClassifier> {
         match &self.backend {
             Backend::Vindex { relation_classifier, .. } => relation_classifier.as_ref(),
@@ -518,3 +498,4 @@ pub(crate) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
     "He looked at the sky",
     "The children played in the",
 ];
+
