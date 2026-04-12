@@ -357,13 +357,16 @@ impl Session {
 
     // ── COMPILE ──
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn exec_compile(
-        &self,
+        &mut self,
         vindex: &VindexRef,
         output: &str,
         _format: Option<OutputFormat>,
         target: CompileTarget,
         on_conflict: Option<CompileConflict>,
+        refine: bool,
+        decoys: Option<&[String]>,
     ) -> Result<Vec<String>, LqlError> {
         let vindex_path = match vindex {
             VindexRef::Current => {
@@ -380,6 +383,8 @@ impl Session {
                 &vindex_path,
                 output,
                 on_conflict.unwrap_or(CompileConflict::LastWins),
+                refine,
+                decoys,
             ),
             CompileTarget::Model => self.exec_compile_into_model(&vindex_path, output),
         }
@@ -429,15 +434,40 @@ impl Session {
     }
 
     fn exec_compile_into_vindex(
-        &self,
+        &mut self,
         source_path: &std::path::Path,
         output: &str,
         on_conflict: CompileConflict,
+        refine: bool,
+        decoys: Option<&[String]>,
     ) -> Result<Vec<String>, LqlError> {
         let _ = source_path; // accepted for symmetry; current vindex is the source
         let output_dir = PathBuf::from(output);
         std::fs::create_dir_all(&output_dir)
             .map_err(|e| LqlError::exec("failed to create output dir", e))?;
+
+        // ── Refine pass (writes refined gates back to the overlay) ──
+        //
+        // The refine math is in `larql-vindex::patch::refine`. The
+        // executor's job is to (1) collect the patched gates per layer
+        // from the overlay, (2) optionally capture decoy residuals via
+        // `larql-inference::capture_decoy_residuals` (one forward pass
+        // per decoy per layer touched), (3) call `refine_gates`, and
+        // (4) write the refined gates back via `set_gate_override`
+        // before the existing bake step runs.
+        //
+        // The refine summary string is built here so it can be appended
+        // to the bake output below. We need a mut borrow for the
+        // write-back, then drop it and re-borrow immutably for the
+        // existing bake. The bake never reads `overrides_gate` (it
+        // works from `down_overrides`), so the refined gates only
+        // affect what `gate_vectors.bin` would carry — which is exactly
+        // why we wanted them in the overlay before the bake.
+        let refine_summary = if refine {
+            self.run_refine_pass(decoys)?
+        } else {
+            String::from("Refine: skipped (WITHOUT REFINE)")
+        };
 
         // Load the current vindex with patches applied
         let (path, config, patched) = self.require_vindex()?;
@@ -596,6 +626,7 @@ impl Session {
         let mut out = Vec::new();
         out.push(format!("Compiled {} → {}", source_path.display(), output_dir.display()));
         out.push(format!("Features: {}", dm_count));
+        out.push(refine_summary);
         if !collisions.is_empty() {
             let strategy = match on_conflict {
                 CompileConflict::LastWins => "LAST_WINS",
@@ -616,6 +647,127 @@ impl Session {
         }
         out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
         Ok(out)
+    }
+
+    /// Run the refine pass for `COMPILE INTO VINDEX WITH REFINE`.
+    ///
+    /// Snapshots the current gate overrides per layer, optionally
+    /// captures decoy residuals via a forward pass, calls the refine
+    /// primitive, and writes refined gates back into the overlay.
+    /// Returns a one-line summary suitable for the compile output.
+    fn run_refine_pass(&mut self, decoys: Option<&[String]>) -> Result<String, LqlError> {
+        // ── 1. Snapshot the gate overrides per layer ──
+        let snapshots: Vec<(usize, usize, Vec<f32>)> = {
+            let (_, _, patched) = self.require_vindex()?;
+            patched
+                .overrides_gate_iter()
+                .map(|(l, f, g)| (l, f, g.to_vec()))
+                .collect()
+        };
+
+        if snapshots.is_empty() {
+            return Ok("Refine: no gate overrides to refine".into());
+        }
+
+        // ── 2. Group snapshots by layer ──
+        let mut by_layer: std::collections::BTreeMap<usize, Vec<(usize, larql_vindex::ndarray::Array1<f32>)>> =
+            std::collections::BTreeMap::new();
+        for (layer, feature, gate) in snapshots {
+            by_layer
+                .entry(layer)
+                .or_default()
+                .push((feature, larql_vindex::ndarray::Array1::from_vec(gate)));
+        }
+
+        // ── 3. Tokenise decoy prompts (once, layer-independent) ──
+        let n_decoys = decoys.map(|d| d.len()).unwrap_or(0);
+        let decoy_tokens: Vec<Vec<u32>> = if let Some(prompts) = decoys {
+            let (path, config, _) = self.require_vindex()?;
+            if !config.has_model_weights {
+                return Err(LqlError::Execution(format!(
+                    "WITH DECOYS requires model weights in the vindex.\n  \
+                     Re-extract: EXTRACT MODEL \"{}\" INTO \"{}\" WITH ALL",
+                    config.model, path.display()
+                )));
+            }
+            let tokenizer = larql_inference::load_tokenizer(path)
+                .map_err(|e| LqlError::exec("failed to load tokenizer for decoys", e))?;
+            prompts
+                .iter()
+                .map(|p| {
+                    let enc = tokenizer
+                        .encode(p.as_str(), true)
+                        .map_err(|e| LqlError::exec(&format!("tokenize decoy '{}'", p), e))?;
+                    Ok(enc.get_ids().to_vec())
+                })
+                .collect::<Result<Vec<_>, LqlError>>()?
+        } else {
+            Vec::new()
+        };
+
+        // ── 4. Load weights once if we need decoys ──
+        let weights = if !decoy_tokens.is_empty() {
+            let (path, _, _) = self.require_vindex()?;
+            let mut cb = larql_vindex::SilentLoadCallbacks;
+            Some(larql_vindex::load_model_weights(path, &mut cb)
+                .map_err(|e| LqlError::exec("failed to load model weights for decoys", e))?)
+        } else {
+            None
+        };
+
+        // ── 5. Refine layer-by-layer ──
+        let mut total_facts = 0usize;
+        let mut min_retained = f32::INFINITY;
+        let mut max_retained = f32::NEG_INFINITY;
+        let mut sum_retained = 0.0f32;
+        let mut writebacks: Vec<(usize, usize, Vec<f32>)> = Vec::new();
+
+        for (layer, layer_inputs) in by_layer {
+            let inputs: Vec<larql_vindex::RefineInput> = layer_inputs
+                .iter()
+                .map(|(feat, gate)| larql_vindex::RefineInput {
+                    layer,
+                    feature: *feat,
+                    gate: gate.clone(),
+                })
+                .collect();
+
+            // Capture decoys at this specific layer (one forward pass
+            // per decoy prompt, scoped to this layer's residual).
+            let decoy_residuals: Vec<larql_vindex::ndarray::Array1<f32>> = if let Some(w) = &weights {
+                larql_inference::capture_decoy_residuals(w, &decoy_tokens, layer)
+            } else {
+                Vec::new()
+            };
+
+            let result = larql_vindex::refine_gates(&inputs, &decoy_residuals);
+
+            for refined in &result.gates {
+                total_facts += 1;
+                min_retained = min_retained.min(refined.retained_norm);
+                max_retained = max_retained.max(refined.retained_norm);
+                sum_retained += refined.retained_norm;
+                writebacks.push((
+                    refined.layer,
+                    refined.feature,
+                    refined.gate.to_vec(),
+                ));
+            }
+        }
+
+        // ── 6. Write refined gates back into the overlay ──
+        {
+            let (_, _, patched_mut) = self.require_vindex_mut()?;
+            for (layer, feature, gate) in writebacks {
+                patched_mut.set_gate_override(layer, feature, gate);
+            }
+        }
+
+        let mean_retained = sum_retained / total_facts as f32;
+        Ok(format!(
+            "Refine: {} fact(s) refined ({} decoy prompt(s); norm retained min={:.3} mean={:.3} max={:.3})",
+            total_facts, n_decoys, min_retained, mean_retained, max_retained,
+        ))
     }
 
     // ── DIFF ──

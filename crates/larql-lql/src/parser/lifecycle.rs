@@ -81,40 +81,115 @@ impl Parser {
             None
         };
 
-        // Optional ON CONFLICT clause (COMPILE INTO VINDEX only).
-        let on_conflict = if self.check_keyword(Keyword::On) {
-            self.advance();
-            self.expect_keyword(Keyword::Conflict)?;
-            let strat = match self.peek() {
-                crate::lexer::Token::Keyword(Keyword::LastWins) => {
+        // Trailing clauses for COMPILE INTO VINDEX:
+        //   ON CONFLICT {LAST_WINS | HIGHEST_CONFIDENCE | FAIL}
+        //   WITH REFINE | WITHOUT REFINE              (default: refine = true)
+        //   WITH DECOYS (<prompt>, <prompt>, ...)     (default: none)
+        // All three are optional and may appear in any order. Each is
+        // restricted to COMPILE INTO VINDEX — applying any of them to
+        // COMPILE INTO MODEL is a parse error so users get a clear
+        // message instead of silent acceptance.
+        let mut on_conflict = None;
+        let mut refine = true;
+        let mut decoys: Option<Vec<String>> = None;
+
+        loop {
+            match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::On) => {
                     self.advance();
-                    CompileConflict::LastWins
+                    self.expect_keyword(Keyword::Conflict)?;
+                    let strat = match self.peek() {
+                        crate::lexer::Token::Keyword(Keyword::LastWins) => {
+                            self.advance();
+                            CompileConflict::LastWins
+                        }
+                        crate::lexer::Token::Keyword(Keyword::HighestConfidence) => {
+                            self.advance();
+                            CompileConflict::HighestConfidence
+                        }
+                        crate::lexer::Token::Keyword(Keyword::Fail) => {
+                            self.advance();
+                            CompileConflict::Fail
+                        }
+                        t => return Err(ParseError(format!(
+                            "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
+                            t
+                        ))),
+                    };
+                    if target != CompileTarget::Vindex {
+                        return Err(ParseError(
+                            "ON CONFLICT is only valid for COMPILE INTO VINDEX".into(),
+                        ));
+                    }
+                    on_conflict = Some(strat);
                 }
-                crate::lexer::Token::Keyword(Keyword::HighestConfidence) => {
+                crate::lexer::Token::Keyword(Keyword::With) => {
                     self.advance();
-                    CompileConflict::HighestConfidence
+                    match self.peek() {
+                        crate::lexer::Token::Keyword(Keyword::Refine) => {
+                            self.advance();
+                            if target != CompileTarget::Vindex {
+                                return Err(ParseError(
+                                    "WITH REFINE is only valid for COMPILE INTO VINDEX".into(),
+                                ));
+                            }
+                            refine = true;
+                        }
+                        crate::lexer::Token::Keyword(Keyword::Decoys) => {
+                            self.advance();
+                            if target != CompileTarget::Vindex {
+                                return Err(ParseError(
+                                    "WITH DECOYS is only valid for COMPILE INTO VINDEX".into(),
+                                ));
+                            }
+                            decoys = Some(self.parse_decoy_list()?);
+                        }
+                        t => return Err(ParseError(format!(
+                            "expected REFINE or DECOYS after WITH on COMPILE, got {:?}",
+                            t
+                        ))),
+                    }
                 }
-                crate::lexer::Token::Keyword(Keyword::Fail) => {
+                crate::lexer::Token::Keyword(Keyword::Without) => {
                     self.advance();
-                    CompileConflict::Fail
+                    self.expect_keyword(Keyword::Refine)?;
+                    if target != CompileTarget::Vindex {
+                        return Err(ParseError(
+                            "WITHOUT REFINE is only valid for COMPILE INTO VINDEX".into(),
+                        ));
+                    }
+                    refine = false;
                 }
-                t => return Err(ParseError(format!(
-                    "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
-                    t
-                ))),
-            };
-            if target != CompileTarget::Vindex {
-                return Err(ParseError(
-                    "ON CONFLICT is only valid for COMPILE INTO VINDEX".into(),
-                ));
+                _ => break,
             }
-            Some(strat)
-        } else {
-            None
-        };
+        }
 
         self.eat_semicolon();
-        Ok(Statement::Compile { vindex, output, format, target, on_conflict })
+        Ok(Statement::Compile {
+            vindex, output, format, target, on_conflict, refine, decoys,
+        })
+    }
+
+    /// Parse a parenthesised list of decoy prompt strings:
+    /// `(<string>, <string>, ...)`. The opening `(` is the next token.
+    fn parse_decoy_list(&mut self) -> Result<Vec<String>, ParseError> {
+        self.expect_token(&crate::lexer::Token::LParen)?;
+        let mut prompts = Vec::new();
+        if !matches!(self.peek(), crate::lexer::Token::RParen) {
+            loop {
+                prompts.push(self.expect_string()?);
+                if matches!(self.peek(), crate::lexer::Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.expect_token(&crate::lexer::Token::RParen)?;
+        if prompts.is_empty() {
+            return Err(ParseError("WITH DECOYS requires at least one prompt".into()));
+        }
+        Ok(prompts)
     }
 
     pub(crate) fn parse_diff(&mut self) -> Result<Statement, ParseError> {

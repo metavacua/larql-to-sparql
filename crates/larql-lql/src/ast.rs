@@ -21,6 +21,15 @@ pub enum Statement {
         /// COMPILE INTO VINDEX only: how to resolve patches that touch the
         /// same (layer, feature) slot. None → default (LastWins).
         on_conflict: Option<CompileConflict>,
+        /// COMPILE INTO VINDEX only: whether to refine patched gates against
+        /// each other (and any decoys) before baking. Default true.
+        refine: bool,
+        /// COMPILE INTO VINDEX only: optional decoy prompts to forward-pass
+        /// at compile time and orthogonalise patched gates against. Used
+        /// to defend specific bleed targets that the constellation alone
+        /// cannot reach (e.g. semantic associations). None means refine uses
+        /// the constellation only.
+        decoys: Option<Vec<String>>,
     },
     Diff {
         a: VindexRef,
@@ -80,11 +89,12 @@ pub enum Statement {
         target: String,
         layer: Option<u32>,
         confidence: Option<f32>,
-        /// Per-layer down-vector scale. Default 0.25 (validated 8L
-        /// constellation in `docs/training-free-insert.md`). Larger values
-        /// push the inserted fact harder but dilute neighbouring facts;
+        /// Per-layer down-vector multiplier for the install
+        /// (`d_ref * alpha_mul`). Default 0.1 — matches the validated
+        /// Python `install_compiled_slot` pipeline (exp 14). Larger
+        /// values push the inserted fact harder but dilute neighbours;
         /// smaller values reduce neighbour degradation at the cost of
-        /// new-fact confidence.
+        /// new-fact confidence. Validated range ~0.05–0.30.
         alpha: Option<f32>,
     },
     Delete {

@@ -66,6 +66,7 @@ pub use format::weights::{write_model_weights, load_model_weights, WeightSource,
 
 // Patch
 pub use patch::core::{PatchOp, PatchedVindex, VindexPatch};
+pub use patch::refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 
 // Vindexfile
 pub use vindexfile::{Vindexfile, VindexfileDirective, VindexfileStage, parse_vindexfile, build_from_vindexfile};

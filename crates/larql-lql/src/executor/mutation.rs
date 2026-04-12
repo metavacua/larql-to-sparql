@@ -25,24 +25,47 @@ impl Session {
         confidence: Option<f32>,
         alpha_override: Option<f32>,
     ) -> Result<Vec<String>, LqlError> {
-        // INSERT is a multi-layer constellation install — never a single
-        // layer. The validated config is 8 layers × alpha=0.25 (see
-        // docs/training-free-insert.md). Single-layer installs at this
-        // alpha don't move the logits enough; raising alpha breaks
-        // neighbouring facts. Constellation is the only viable regime, so
-        // both the default and `AT LAYER N` produce a span — the layer
-        // hint just shifts where the span sits.
+        // INSERT is a single-layer install matching the validated
+        // Python `install_compiled_slot` pipeline in
+        // `experiments/14_vindex_compilation`. Earlier drafts used an
+        // 8-layer span with a weaker install per layer; switching to
+        // the strong install (gate × 30, up = gate_dir × u_ref, down
+        // = obj_unit × d_ref × α) means each layer's contribution is
+        // already at the right scale — stacking 8 layers of it
+        // produces cross-prompt hijack. See SPAN_HALF_LO/HI below.
         //
-        // ALPHA defaults to 0.25 (validated). Larger values push the new
-        // fact harder but dilute neighbours; smaller values reduce
-        // neighbour degradation at the cost of new-fact confidence.
-        const DEFAULT_ALPHA: f32 = 0.25;
-        const SPAN_HALF_LO: usize = 3; // span = N-3..=N+4 (8 layers total)
-        const SPAN_HALF_HI: usize = 4;
-        let alpha = alpha_override.unwrap_or(DEFAULT_ALPHA);
+        // ALPHA is the dimensionless multiplier on the layer's median
+        // down-vector norm — the actual down vector written into the
+        // overlay is `target_embed_unit * d_ref * alpha_mul`. Default
+        // 0.1 matches the validated Python `install_compiled_slot`
+        // pipeline (`experiments/14_vindex_compilation`). Larger values
+        // push the new fact harder but dilute neighbours; smaller values
+        // reduce neighbour degradation. Validated range ~0.05–0.30.
+        const DEFAULT_ALPHA_MUL: f32 = 0.1;
+        // Gate scale matching the Python install: `gate = gate_dir * g_ref * 30`.
+        // Without this multiplier the slot's silu(gate · x) is too small to
+        // push the activation past the trained competition. Validated by
+        // exp 14 — see `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+        const GATE_SCALE: f32 = 30.0;
+        // Single-layer install — matches the Python reference exactly.
+        // Earlier drafts used an 8-layer span (L20-L27) which is a
+        // leftover from pre-install_compiled_slot work. With the
+        // current strong-gate install (×30 scale), spreading the
+        // payload across 8 layers lets the slot fire on any prompt
+        // with even weak cosine alignment and hijacks unrelated
+        // prompts (0/10 retrieval + 4/4 bleed on the 10-fact
+        // constellation, previous run). One layer keeps the
+        // signal-to-noise ratio the Python reference validated.
+        const SPAN_HALF_LO: usize = 0;
+        const SPAN_HALF_HI: usize = 0;
+        let alpha_mul = alpha_override.unwrap_or(DEFAULT_ALPHA_MUL);
 
         // ── Phase 1: Read — capture config, embeddings, and residuals (immutable borrow) ──
         let (insert_layers, hidden, target_embed, target_id, residuals, use_constellation);
+        // Decoy residuals captured during Phase 1 (immutable borrow of
+        // self) but committed to the session cache after Phase 1 ends.
+        // Keyed by layer → Vec<Array1<f32>>.
+        let mut pending_decoy_updates: Vec<(usize, Vec<larql_vindex::ndarray::Array1<f32>>)> = Vec::new();
         {
             let (path, config, patched) = self.require_vindex()?;
 
@@ -55,19 +78,27 @@ impl Session {
                 });
 
             insert_layers = if let Some(l) = layer_hint {
-                // Center an 8-layer span on the requested layer, clamped to
-                // valid layer range. AT LAYER N is a *centering hint*, not a
-                // pin to a single layer.
+                // `AT LAYER N` pins the install to a single layer.
+                // Earlier versions treated this as a span centre and
+                // installed across 8 layers; with the install_compiled_slot
+                // install (×30 gate scale) that produced strong
+                // cross-prompt hijack. See SPAN_HALF_LO/HI above.
                 let center = l as usize;
                 let max_layer = config.num_layers.saturating_sub(1);
                 let lo = center.saturating_sub(SPAN_HALF_LO);
                 let hi = (center + SPAN_HALF_HI).min(max_layer);
                 (lo..=hi).collect::<Vec<usize>>()
             } else {
-                // Default: upper half of the knowledge band (the validated
-                // multi-layer constellation region).
-                let mid = (bands.knowledge.0 + bands.knowledge.1) / 2;
-                (mid..=bands.knowledge.1).collect::<Vec<usize>>()
+                // Default: the second-to-last layer of the knowledge
+                // band — matches the Python reference's L26 choice on
+                // Gemma 4B (`experiments/14_vindex_compilation` uses
+                // INSTALL_LAYER = 26 which is knowledge.1 − 1). This
+                // is where semantic retrieval has stabilised but the
+                // residual hasn't yet been committed to output
+                // formatting. One layer only.
+                let layer = bands.knowledge.1.saturating_sub(1)
+                    .min(config.num_layers.saturating_sub(1));
+                vec![layer]
             };
 
             let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
@@ -77,19 +108,30 @@ impl Session {
 
             hidden = embed.shape()[1];
 
-            // Target embedding for down vector
-            let target_encoding = tokenizer.encode(target, false)
+            // Target embedding for down vector.
+            //
+            // We use ONLY the first token of `" " + target` (leading
+            // space forces subword merging under BPE/SentencePiece).
+            // Averaging across multi-token targets produces a blended
+            // embedding that at unembed returns tail subtokens instead
+            // of the target's first token — e.g. for "Canberra"
+            // tokenised as [Can, berra] the averaged down vector
+            // pushes the logits toward "berra" when we want "Can"
+            // (which merges with "berra" in the continuation, still
+            // producing "Canberra"). Matches Python
+            // `install_compiled_slot` semantics in
+            // `experiments/14_vindex_compilation`.
+            let spaced_target = format!(" {target}");
+            let target_encoding = tokenizer.encode(spaced_target.as_str(), false)
                 .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let target_ids: Vec<u32> = target_encoding.get_ids().to_vec();
-            target_id = target_ids.first().copied().unwrap_or(0);
+            let all_target_ids: Vec<u32> = target_encoding.get_ids().to_vec();
+            target_id = all_target_ids.first().copied().unwrap_or(0);
 
             let mut te = vec![0.0f32; hidden];
-            for &tok in &target_ids {
-                let row = embed.row(tok as usize);
-                for j in 0..hidden { te[j] += row[j] * embed_scale; }
+            let row = embed.row(target_id as usize);
+            for j in 0..hidden {
+                te[j] = row[j] * embed_scale;
             }
-            let n = target_ids.len().max(1) as f32;
-            for v in &mut te { *v /= n; }
             target_embed = te;
 
             // Constellation: single canonical-prompt forward pass to capture
@@ -97,6 +139,32 @@ impl Session {
             // the gate vector (after norm-matching in Phase 2).
             use_constellation = config.has_model_weights;
             residuals = if use_constellation {
+                // The install captures the model's residual by
+                // forward-passing a synthesised canonical question for
+                // the fact, then uses the unit-normalised result as
+                // the gate direction. Template:
+                //
+                //     "The {relation} of {entity} is"
+                //
+                // For canonical relations ("capital", "author",
+                // "language", "currency"), this matches what the user
+                // will later INFER on — so the captured residual at
+                // L26 has near-unit cosine with the inference residual,
+                // the slot fires strongly, and the install lifts the
+                // answer (validated end-to-end by `refine_demo` on
+                // 10 capital-of facts, matching the Python reference
+                // in `experiments/14_vindex_compilation`).
+                //
+                // For non-canonical relations (e.g. "ocean-rank"), the
+                // template produces a prompt that doesn't match
+                // inference — the install remains invisible rather
+                // than hijacking, because the captured residual has
+                // small cosine with any real inference residual and
+                // the slot doesn't fire. This is a known limitation:
+                // the LQL INSERT surface supports canonical-form
+                // relations only. Non-canonical facts can be installed
+                // via the Python pipeline in
+                // `experiments/14_vindex_compilation` for now.
                 let rel_words = relation.replace(['-', '_'], " ");
                 let prompt = format!("The {rel_words} of {entity} is");
 
@@ -108,25 +176,126 @@ impl Session {
                     .map_err(|e| LqlError::exec("tokenize error", e))?;
                 let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-                let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(&weights, patched, 8092);
+                // Capture through the BASE index (no patch overlay).
+                //
+                // This is the crucial bit that makes multi-fact
+                // installs work. If we captured through `patched`,
+                // every prior INSERT's slot would already be firing
+                // during the forward pass, contaminating the captured
+                // residual with the earlier targets. The refine pass
+                // can't undo that — it can only orthogonalise against
+                // directions explicitly stored in the overlay, not the
+                // residual contamination from firing slots upstream.
+                //
+                // Capturing through `patched.base()` matches Python
+                // `experiments/14_vindex_compilation` where Phase 2
+                // captures all residuals on the clean model before
+                // any installs happen.
+                let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(
+                    &weights, patched.base(), 8092,
+                );
                 let _result = larql_inference::predict_with_ffn(
                     &weights, &tokenizer, &token_ids, 1, &walk_ffn,
                 );
 
-                walk_ffn
+                let fact_residuals: Vec<(usize, Vec<f32>)> = walk_ffn
                     .take_residuals()
                     .into_iter()
                     .filter(|(layer, _)| insert_layers.contains(layer))
-                    .collect::<Vec<_>>()
+                    .collect();
+
+                // Capture decoy residuals for any install layer that
+                // isn't already cached on the session. Uses the same
+                // clean base index as the fact capture above so the
+                // residuals are comparable. This is the single most
+                // important piece of the online-refine pipeline: the
+                // decoys are what give refine something to project
+                // away at single-fact install, without which the
+                // strong install math (×30 gate scale) produces
+                // cross-prompt bleed even for 1 fact (validated by
+                // `refine_demo` on the 1-fact diagnostic run).
+                for &layer in &insert_layers {
+                    if !self.decoy_residual_cache.contains_key(&layer) {
+                        let mut captured = Vec::with_capacity(
+                            crate::executor::CANONICAL_DECOY_PROMPTS.len(),
+                        );
+                        for decoy_prompt in crate::executor::CANONICAL_DECOY_PROMPTS {
+                            let enc = tokenizer.encode(*decoy_prompt, true)
+                                .map_err(|e| LqlError::exec("tokenize decoy", e))?;
+                            let ids: Vec<u32> = enc.get_ids().to_vec();
+                            let ffn = larql_inference::vindex::WalkFfn::new_with_trace(
+                                &weights, patched.base(), 8092,
+                            );
+                            let _ = larql_inference::predict_with_ffn(
+                                &weights, &tokenizer, &ids, 1, &ffn,
+                            );
+                            let r = ffn.take_residuals()
+                                .into_iter()
+                                .find(|(l, _)| *l == layer);
+                            if let Some((_, vec)) = r {
+                                captured.push(
+                                    larql_vindex::ndarray::Array1::from_vec(vec),
+                                );
+                            }
+                        }
+                        pending_decoy_updates.push((layer, captured));
+                    }
+                }
+
+                fact_residuals
             } else {
                 Vec::new()
             };
         } // immutable borrow ends
 
+        // Commit any captured decoys to the session cache now that
+        // the immutable borrow of `self` has ended. Phase 2's refine
+        // call reads from the cache.
+        for (layer, decoys) in pending_decoy_updates {
+            self.decoy_residual_cache.insert(layer, decoys);
+        }
+
         // ── Phase 2: Write — insert features across layers (mutable borrow) ──
         let c_score = confidence.unwrap_or(0.9);
         let mut inserted_count = 0;
         let mut patch_ops = Vec::new();
+
+        // Snapshot cached decoys into a local map keyed by layer so
+        // Phase 2 can read them while holding the mutable borrow of
+        // `self`. The cache only grows, so cloning into a flat local
+        // here is safe: even if a future INSERT adds new decoys, the
+        // ones we just read are still valid suppression directions.
+        // Decoys are small (~10 vectors × 2560 floats × 4 bytes ≈
+        // 100 KB) so cloning is cheap.
+        let decoy_snapshot: std::collections::HashMap<usize, Vec<larql_vindex::ndarray::Array1<f32>>> =
+            insert_layers
+                .iter()
+                .filter_map(|layer| {
+                    self.decoy_residual_cache
+                        .get(layer)
+                        .map(|ds| (*layer, ds.clone()))
+                })
+                .collect();
+
+        // Snapshot the raw install residuals from the session. These
+        // are the unscaled, uncontaminated captured residuals from
+        // every previous INSERT, each keyed by (layer, feature). The
+        // refine pass operates on this map: we add the new fact's
+        // residual into a working copy, run refine on the full
+        // per-layer set from scratch, and rebuild every gate at that
+        // layer. This matches the Python reference's batch-refine
+        // semantics (capture all → refine once → install) without
+        // the online compound drift.
+        let mut raw_residuals_snapshot: std::collections::HashMap<
+            (usize, usize),
+            larql_vindex::ndarray::Array1<f32>,
+        > = self.raw_install_residuals.clone();
+        // Collected during Phase 2 and merged back into
+        // `self.raw_install_residuals` after the mutable borrow ends.
+        let mut new_raw_residuals: Vec<(
+            (usize, usize),
+            larql_vindex::ndarray::Array1<f32>,
+        )> = Vec::new();
 
         {
             let (path, _config, patched) = self.require_patched_mut()?;
@@ -142,34 +311,45 @@ impl Session {
                     None => continue,
                 };
 
-                // Gate vector: residual (constellation) or entity embedding
-                // (fallback). Norm-matched to the layer's average gate vector
-                // magnitude so the feature sits in the same activation regime
-                // as trained neighbours. Works in both heap and mmap mode by
-                // using `gate_vector(layer, i)` which handles both.
-                let gate_vec: Vec<f32> = if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
-                    let mut gv = residual.clone();
-                    let sample = patched.base().num_features(layer).min(100);
-                    if sample > 0 {
-                        let mut sum_norm: f32 = 0.0;
-                        let mut counted = 0u32;
-                        for i in 0..sample {
-                            if let Some(row) = patched.base().gate_vector(layer, i) {
-                                let n: f32 = row.iter().map(|v| v * v).sum::<f32>().sqrt();
-                                sum_norm += n;
-                                counted += 1;
-                            }
-                        }
-                        if counted > 0 {
-                            let avg_norm = sum_norm / counted as f32;
-                            let res_norm: f32 = gv.iter().map(|v| v * v).sum::<f32>().sqrt();
-                            if res_norm > 1e-8 && avg_norm > 0.0 {
-                                let scale = avg_norm / res_norm;
-                                for v in &mut gv { *v *= scale; }
-                            }
-                        }
-                    }
-                    gv
+                // ── Gate / up / down synthesis (install_compiled_slot port) ──
+                //
+                // Direct Rust port of `install_compiled_slot` from
+                // `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+                // The validated Python pipeline computes three layer-typical
+                // norms by sampling existing features at this layer:
+                //
+                //   g_ref = median |gate_proj.weight[:]|     (per-feature)
+                //   u_ref = median |up_proj.weight[:]|       (per-feature)
+                //   d_ref = median |down_proj.weight[:, :]|  (per-feature, columns)
+                //
+                // and writes:
+                //
+                //   gate[slot] = gate_dir * g_ref * GATE_SCALE     (norm-matched + 30×)
+                //   up[slot]   = gate_dir * u_ref                   (parallel direction)
+                //   down[:,slot] = obj_unit * d_ref * alpha_mul     (norm-matched payload)
+                //
+                // where `gate_dir` is the captured residual at this layer
+                // normalised to a unit vector and `obj_unit` is the target
+                // token embedding normalised. The 30× on the gate is what
+                // makes silu(gate · x) large enough to compete with trained
+                // features at this layer; the parallel up direction means
+                // (gate · x) and (up · x) both fire on the same input
+                // pattern, doubling the activation along the right
+                // direction; the norm-matched down delivers a payload at
+                // the layer's typical down magnitude rather than the much
+                // smaller raw embedding norm. Without all three the slot
+                // gets out-competed by trained neighbours and the install
+                // doesn't lift the fact (validated by `refine_demo` —
+                // pre-fix retrieval was 6/10 baseline / 6/10 after install).
+
+                // Compute layer-median norms by sampling 100 features.
+                let median_norms = compute_layer_median_norms(patched.base(), layer, 100);
+
+                // Gate direction = unit-normalised captured residual.
+                // Falls back to the entity embedding direction if the
+                // residual capture couldn't run (browse-only vindex).
+                let gate_dir: Vec<f32> = if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
+                    unit_vector(residual)
                 } else {
                     let entity_encoding = tokenizer.encode(entity, false)
                         .map_err(|e| LqlError::exec("tokenize error", e))?;
@@ -181,10 +361,33 @@ impl Session {
                     }
                     let n = entity_ids.len().max(1) as f32;
                     for v in &mut ev { *v /= n; }
-                    ev
+                    unit_vector(&ev)
                 };
 
-                let down_vec: Vec<f32> = target_embed.iter().map(|v| v * alpha).collect();
+                // gate = gate_dir * g_ref * 30
+                let gate_vec: Vec<f32> = gate_dir
+                    .iter()
+                    .map(|v| v * median_norms.gate * GATE_SCALE)
+                    .collect();
+
+                // up = gate_dir * u_ref
+                let up_vec: Vec<f32> = gate_dir
+                    .iter()
+                    .map(|v| v * median_norms.up)
+                    .collect();
+
+                // down = target_embed_unit * d_ref * alpha_mul
+                let target_norm: f32 = target_embed
+                    .iter()
+                    .map(|v| v * v)
+                    .sum::<f32>()
+                    .sqrt()
+                    .max(1e-6);
+                let down_payload = median_norms.down * alpha_mul;
+                let down_vec: Vec<f32> = target_embed
+                    .iter()
+                    .map(|v| (v / target_norm) * down_payload)
+                    .collect();
 
                 let meta = larql_vindex::FeatureMeta {
                     top_token: target.to_string(),
@@ -198,9 +401,87 @@ impl Session {
                 };
 
                 patched.insert_feature(layer, feature, gate_vec.clone(), meta);
+                patched.set_up_vector(layer, feature, up_vec);
                 patched.set_down_vector(layer, feature, down_vec);
 
-                let gate_b64 = larql_vindex::patch::core::encode_gate_vector(&gate_vec);
+                // ── Batch refine from raw captured residuals ──
+                //
+                // Store the new fact's raw residual in the working
+                // snapshot, then rebuild every gate at this layer from
+                // the raw residuals + decoys. We deliberately refine
+                // from the RAW captures (not from the current overlay
+                // state) because online refine compounds across
+                // iterations — each subsequent pass would re-project
+                // against already-refined peers, drifting directions
+                // over time. Rebuilding from raw on every INSERT is
+                // idempotent and matches the Python reference's
+                // batch-refine semantics (capture all → refine once
+                // → install).
+                //
+                // Pre-fix, the last-installed fact dominated every
+                // prompt because the earlier slots drifted furthest
+                // from their ideal directions (validated by
+                // `refine_demo` 10-fact run returning "ília" — the
+                // Brazil tail subtoken — on every prompt).
+                //
+                // Decoys are the layer-keyed canonical bleed targets
+                // cached on the session. They're appended to the
+                // suppression set so even a 1-fact install is defended
+                // against bleed onto unrelated prompts.
+                let install_residual = residuals
+                    .iter()
+                    .find(|(l, _)| *l == layer)
+                    .map(|(_, r)| larql_vindex::ndarray::Array1::from_vec(r.clone()));
+                if let Some(raw) = install_residual {
+                    raw_residuals_snapshot.insert((layer, feature), raw.clone());
+                    new_raw_residuals.push(((layer, feature), raw));
+                }
+
+                let layer_decoys: &[larql_vindex::ndarray::Array1<f32>] =
+                    decoy_snapshot.get(&layer).map(|v| v.as_slice()).unwrap_or(&[]);
+
+                // Collect every raw residual at this layer (all facts,
+                // including the one we just added).
+                let inputs: Vec<larql_vindex::RefineInput> = raw_residuals_snapshot
+                    .iter()
+                    .filter(|((l, _), _)| *l == layer)
+                    .map(|((l, f), r)| larql_vindex::RefineInput {
+                        layer: *l,
+                        feature: *f,
+                        gate: r.clone(),
+                    })
+                    .collect();
+                if !inputs.is_empty() && (inputs.len() >= 2 || !layer_decoys.is_empty()) {
+                    let result = larql_vindex::refine_gates(&inputs, layer_decoys);
+
+                    for refined in result.gates {
+                        // Extract the refined unit direction and
+                        // rebuild gate = dir × g_ref × 30, up = dir × u_ref.
+                        // Both matrices at this slot share the same
+                        // direction so silu(gate · x) × (up · x) fires
+                        // on the same input pattern.
+                        let refined_vec: Vec<f32> = refined.gate.into_raw_vec_and_offset().0;
+                        let dir = unit_vector(&refined_vec);
+                        let new_gate: Vec<f32> = dir
+                            .iter()
+                            .map(|v| v * median_norms.gate * GATE_SCALE)
+                            .collect();
+                        let new_up: Vec<f32> = dir
+                            .iter()
+                            .map(|v| v * median_norms.up)
+                            .collect();
+                        patched.set_gate_override(refined.layer, refined.feature, new_gate);
+                        patched.set_up_vector(refined.layer, refined.feature, new_up);
+                    }
+                }
+
+                // Re-read the final (post-refine) gate for the patch file.
+                let final_gate = patched
+                    .overrides_gate_at(layer, feature)
+                    .map(|g| g.to_vec())
+                    .unwrap_or(gate_vec);
+
+                let gate_b64 = larql_vindex::patch::core::encode_gate_vector(&final_gate);
                 patch_ops.push(larql_vindex::PatchOp::Insert {
                     layer,
                     feature,
@@ -220,6 +501,15 @@ impl Session {
             }
         } // mutable borrow of patched ends
 
+        // Commit the new raw residuals to the session cache now that
+        // the mutable borrow of `self` has ended. Future INSERTs read
+        // from `self.raw_install_residuals` to rebuild the full
+        // per-layer constellation each time (see the batch-refine
+        // block above).
+        for (key, residual) in new_raw_residuals {
+            self.raw_install_residuals.insert(key, residual);
+        }
+
         // Record to patch session
         if let Some(ref mut recording) = self.patch_recording {
             recording.operations.extend(patch_ops);
@@ -234,21 +524,23 @@ impl Session {
             Some(l) => format!(", centered on L{l}"),
             None => String::new(),
         };
+        let layer_span = match (insert_layers.first(), insert_layers.last()) {
+            (Some(&lo), Some(&hi)) if lo == hi => format!("L{lo}"),
+            (Some(&lo), Some(&hi)) => format!("L{lo}-L{hi} ({} layers)", inserted_count),
+            _ => String::from("(no layers)"),
+        };
         out.push(format!(
-            "Inserted: {} —[{}]→ {} ({} layers, L{}-L{}{})",
-            entity, relation, target, inserted_count,
-            insert_layers.first().unwrap_or(&0),
-            insert_layers.last().unwrap_or(&0),
-            center_note,
+            "Inserted: {} —[{}]→ {} at {}{}",
+            entity, relation, target, layer_span, center_note,
         ));
         if use_constellation {
             let alpha_note = if alpha_override.is_some() {
-                format!(", alpha={alpha:.3}")
+                format!(", alpha_mul={alpha_mul:.3}")
             } else {
                 String::new()
             };
             out.push(format!(
-                "  mode: constellation (trace-guided gate + down override{alpha_note})"
+                "  mode: constellation (trace-guided gate + up + down{alpha_note}, gate_scale=30, install_compiled_slot)"
             ));
         } else {
             out.push("  mode: embedding (no model weights — gate only, no down override)".into());
@@ -467,5 +759,218 @@ impl Session {
             merged, skipped, strategy
         ));
         Ok(out)
+    }
+}
+
+/// Median per-feature norms at a layer for the gate / up / down matrices.
+/// Used by `INSERT` to size each new slot's three components against the
+/// layer's typical scale, matching the Python `install_compiled_slot`
+/// pipeline (validated by `experiments/14_vindex_compilation`).
+struct LayerMedianNorms {
+    gate: f32,
+    up: f32,
+    down: f32,
+}
+
+/// Sample up to `sample_size` features at `layer` and compute the median
+/// per-feature L2 norm for each of gate / up / down. Falls back to a
+/// reasonable default (1.0) for any matrix the index doesn't carry.
+///
+/// We use median rather than mean to match the Python pipeline; mean is
+/// pulled by outliers and produces a slightly different scale that
+/// breaks reproduction of the validated install behaviour.
+fn compute_layer_median_norms(
+    base: &larql_vindex::VectorIndex,
+    layer: usize,
+    sample_size: usize,
+) -> LayerMedianNorms {
+    let n_features = base.num_features(layer);
+    let sample_n = n_features.min(sample_size);
+
+    let mut gate_norms = Vec::with_capacity(sample_n);
+    let mut up_norms = Vec::with_capacity(sample_n);
+    let mut down_norms = Vec::with_capacity(sample_n);
+
+    let up_view = base.up_layer_matrix(layer);
+    let down_view = base.down_layer_matrix(layer);
+
+    for i in 0..sample_n {
+        if let Some(g) = base.gate_vector(layer, i) {
+            let n: f32 = g.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if n.is_finite() && n > 0.0 {
+                gate_norms.push(n);
+            }
+        }
+        if let Some(view) = up_view {
+            if i < view.shape()[0] {
+                let n: f32 = view.row(i).iter().map(|v| v * v).sum::<f32>().sqrt();
+                if n.is_finite() && n > 0.0 {
+                    up_norms.push(n);
+                }
+            }
+        }
+        if let Some(view) = down_view {
+            if i < view.shape()[0] {
+                let n: f32 = view.row(i).iter().map(|v| v * v).sum::<f32>().sqrt();
+                if n.is_finite() && n > 0.0 {
+                    down_norms.push(n);
+                }
+            }
+        }
+    }
+
+    LayerMedianNorms {
+        gate: median_or(&mut gate_norms, 1.0),
+        up: median_or(&mut up_norms, 1.0),
+        down: median_or(&mut down_norms, 1.0),
+    }
+}
+
+fn median_or(xs: &mut [f32], default: f32) -> f32 {
+    if xs.is_empty() {
+        return default;
+    }
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xs[xs.len() / 2]
+}
+
+/// L2-normalise a vector. Returns the input unchanged if its norm is
+/// effectively zero (degenerate case — embedding for an unknown token).
+fn unit_vector(v: &[f32]) -> Vec<f32> {
+    let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if n < 1e-8 {
+        return v.to_vec();
+    }
+    v.iter().map(|x| x / n).collect()
+}
+
+#[cfg(test)]
+mod install_helpers_tests {
+    //! Unit tests for the install_compiled_slot helpers. These are the
+    //! load-bearing math primitives for INSERT — getting any of them
+    //! wrong silently weakens the install (validated in
+    //! `experiments/14_vindex_compilation`: pre-fix retrieval was 6/10,
+    //! post-fix should be 10/10). Test them in isolation so a future
+    //! refactor can't drift the math without a red light.
+    use super::*;
+
+    #[test]
+    fn unit_vector_normalises_to_length_one() {
+        let v = vec![3.0_f32, 4.0]; // norm = 5
+        let u = unit_vector(&v);
+        let n: f32 = u.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((n - 1.0).abs() < 1e-6, "unit norm; got {n}");
+        assert!((u[0] - 0.6).abs() < 1e-6);
+        assert!((u[1] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn unit_vector_passthrough_on_zero() {
+        let v = vec![0.0_f32, 0.0, 0.0];
+        let u = unit_vector(&v);
+        assert_eq!(u, v, "zero vector should pass through unchanged");
+    }
+
+    #[test]
+    fn unit_vector_handles_already_unit() {
+        let v = vec![1.0_f32, 0.0, 0.0];
+        let u = unit_vector(&v);
+        for (a, b) in v.iter().zip(u.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn median_or_picks_middle() {
+        let mut xs = vec![3.0_f32, 1.0, 2.0, 5.0, 4.0];
+        // Sorted: [1, 2, 3, 4, 5], middle = index 2 = 3.0
+        assert_eq!(median_or(&mut xs, 0.0), 3.0);
+    }
+
+    #[test]
+    fn median_or_uses_default_when_empty() {
+        let mut xs: Vec<f32> = Vec::new();
+        assert_eq!(median_or(&mut xs, 1.5), 1.5);
+    }
+
+    #[test]
+    fn median_or_handles_single_element() {
+        let mut xs = vec![7.0_f32];
+        assert_eq!(median_or(&mut xs, 0.0), 7.0);
+    }
+
+    #[test]
+    fn median_or_sorts_input_in_place() {
+        // Median sorts the slice as a side effect — this test exists
+        // so a future refactor that switches to a non-sorting median
+        // implementation can't accidentally break callers that rely on
+        // the post-sort order. (Currently: nobody does, but the
+        // contract is documented for safety.)
+        let mut xs = vec![5.0_f32, 1.0, 3.0];
+        let _ = median_or(&mut xs, 0.0);
+        assert_eq!(xs, vec![1.0, 3.0, 5.0]);
+    }
+
+    /// End-to-end install math: synthesise gate / up / down at the
+    /// magnitudes the install_compiled_slot pipeline would produce,
+    /// and check the resulting activation is in the right ballpark for
+    /// a slot that's expected to fire. This is a bench-mark
+    /// sanity-check, not a precise test — the FFN nonlinearity
+    /// (silu) means we can only assert orders of magnitude.
+    #[test]
+    fn install_math_produces_competing_activation() {
+        const GATE_SCALE: f32 = 30.0;
+        const ALPHA_MUL: f32 = 0.1;
+
+        // A toy 4-dim layer.
+        let g_ref = 2.0_f32;
+        let u_ref = 1.5_f32;
+        let d_ref = 3.0_f32;
+
+        // Captured residual (gate direction).
+        let residual = vec![0.6_f32, 0.0, 0.8, 0.0]; // norm = 1
+        let gate_dir = unit_vector(&residual);
+
+        // Install math (mirrors mutation.rs INSERT body).
+        let gate_vec: Vec<f32> = gate_dir.iter().map(|v| v * g_ref * GATE_SCALE).collect();
+        let up_vec: Vec<f32> = gate_dir.iter().map(|v| v * u_ref).collect();
+
+        let gate_norm: f32 = gate_vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let up_norm: f32 = up_vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+
+        // Without GATE_SCALE the gate's norm would just be g_ref * 1 = 2.
+        // With GATE_SCALE it should be 30× that = 60. The 30× is what
+        // makes silu(gate · x) compete with trained slots at the layer.
+        assert!((gate_norm - 60.0).abs() < 1e-3,
+                "gate norm should be g_ref * 30 = 60, got {gate_norm}");
+        assert!((up_norm - 1.5).abs() < 1e-3,
+                "up norm should be u_ref = 1.5, got {up_norm}");
+
+        // Down vector: target_embed_unit * d_ref * alpha_mul
+        let target_embed = vec![0.0_f32, 0.5, 0.0, 0.866]; // norm ~1
+        let target_norm: f32 = target_embed.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let payload = d_ref * ALPHA_MUL;
+        let down_vec: Vec<f32> = target_embed.iter().map(|v| (v / target_norm) * payload).collect();
+        let down_norm: f32 = down_vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((down_norm - payload).abs() < 1e-3,
+                "down norm should be d_ref * alpha_mul = 0.3, got {down_norm}");
+
+        // Sanity: the activation through this slot for an input
+        // exactly aligned with the residual direction is huge — that's
+        // what makes it compete.
+        let x = gate_dir.clone();
+        let gate_x: f32 = gate_vec.iter().zip(x.iter()).map(|(g, xi)| g * xi).sum();
+        let up_x: f32 = up_vec.iter().zip(x.iter()).map(|(u, xi)| u * xi).sum();
+        // gate · x = 60 (norm × cos = 60 × 1)
+        // up · x = 1.5
+        // silu(60) ≈ 60
+        // activation ≈ 60 * 1.5 = 90
+        let activation = silu(gate_x) * up_x;
+        assert!(activation > 50.0,
+                "activation along the install direction should be large; got {activation}");
+    }
+
+    fn silu(x: f32) -> f32 {
+        x * (1.0 / (1.0 + (-x).exp()))
     }
 }

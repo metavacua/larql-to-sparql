@@ -43,6 +43,37 @@ pub fn sparse_ffn_forward_with_overrides(
     sparse_ffn_forward_impl(weights, layer, x, features, overrides)
 }
 
+/// Per-slot override carrying any combination of gate / up / down vectors.
+/// Used by `sparse_ffn_forward_with_full_overrides` so that an INSERT's
+/// (gate * g_ref * 30, up * u_ref, down * d_ref * alpha_mul) all flow into
+/// the activation computation, rather than only the down vector being
+/// swapped post-activation. Each field is `None` when the original
+/// model weight at that slot should be used.
+#[derive(Debug, Clone, Copy)]
+pub struct FeatureSlotOverride<'a> {
+    pub feature: usize,
+    pub gate: Option<&'a [f32]>,
+    pub up: Option<&'a [f32]>,
+    pub down: Option<&'a [f32]>,
+}
+
+/// Sparse FFN with full slot overrides — gate, up, and down can each
+/// be replaced per feature. This is the path the LQL `INSERT` constellation
+/// takes when the vindex hasn't loaded `up_features.bin` (the LQL `USE`
+/// fast path doesn't load it). Without this entry point, the activation
+/// at an installed slot would compute `silu(weak_gate · x) * (weak_up · x)`
+/// using the original free-slot vectors, and the strong overlay gate
+/// would never reach inference.
+pub fn sparse_ffn_forward_with_full_overrides(
+    weights: &ModelWeights,
+    layer: usize,
+    x: &Array2<f32>,
+    features: &[usize],
+    overrides: &[FeatureSlotOverride<'_>],
+) -> (Array2<f32>, Array2<f32>) {
+    sparse_ffn_forward_full_impl(weights, layer, x, features, overrides)
+}
+
 fn sparse_ffn_forward_impl(
     weights: &ModelWeights,
     layer: usize,
@@ -153,6 +184,164 @@ fn sparse_ffn_forward_impl(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if let Some(bias) = arch.ffn_down_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+        add_bias(&mut out, bias);
+    }
+
+    (out, full_activation)
+}
+
+fn sparse_ffn_forward_full_impl(
+    weights: &ModelWeights,
+    layer: usize,
+    x: &Array2<f32>,
+    features: &[usize],
+    overrides: &[FeatureSlotOverride<'_>],
+) -> (Array2<f32>, Array2<f32>) {
+    let arch = &*weights.arch;
+    let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
+    let w_down = weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
+    let hidden = x.shape()[1];
+    let intermediate = w_up.shape()[0];
+    let seq_len = x.shape()[0];
+    let k = features.len();
+
+    if k == 0 {
+        return (
+            Array2::<f32>::zeros((seq_len, hidden)),
+            Array2::<f32>::zeros((seq_len, intermediate)),
+        );
+    }
+
+    let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
+    let use_gelu = matches!(
+        arch.activation(),
+        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
+    );
+
+    // Gather original weight rows. Per-feature overrides will be
+    // applied below by re-computing the dot products for the
+    // overridden slots only — the unchanged slots use the gathered
+    // values from the dense weights.
+    let up_buf = gather_rows(w_up, features, hidden);
+    let up_sub = ndarray::ArrayView2::from_shape((k, hidden), &up_buf).unwrap();
+
+    let _gate_buf;
+    let gate_sub = if is_gated {
+        let w_gate = weights.tensors.get(&arch.ffn_gate_key(layer)).unwrap();
+        _gate_buf = gather_rows(w_gate, features, hidden);
+        Some(ndarray::ArrayView2::from_shape((k, hidden), &_gate_buf).unwrap())
+    } else {
+        _gate_buf = Vec::new();
+        None
+    };
+
+    let down_sub = gather_columns(w_down, features, hidden);
+    let down_view = ndarray::ArrayView2::from_shape((hidden, k), &down_sub).unwrap();
+
+    // Per-feature override lookup. Built once.
+    let override_map: std::collections::HashMap<usize, &FeatureSlotOverride<'_>> =
+        overrides.iter().map(|o| (o.feature, o)).collect();
+
+    let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));
+    let mut sparse_act = vec![0.0f32; k];
+    let mut out = Array2::<f32>::zeros((seq_len, hidden));
+
+    for s in 0..seq_len {
+        let x_row = x.row(s);
+
+        // Phase 1: compute baseline activations for every feature
+        // using gathered dense weights.
+        if let Some(ref gate_sub) = gate_sub {
+            let gate_proj = gate_sub.dot(&x_row);
+            let up_proj = up_sub.dot(&x_row);
+            for (i, &feat) in features.iter().enumerate() {
+                let g = gate_proj[i];
+                let activated = if use_gelu { gelu_tanh(g) } else { g * sigmoid(g) };
+                let val = activated * up_proj[i];
+                sparse_act[i] = val;
+                full_activation[[s, feat]] = val;
+            }
+        } else {
+            let up_proj = up_sub.dot(&x_row);
+            let mut vals = up_proj.to_vec();
+            if let Some(bias) = arch.ffn_up_bias_key(layer).and_then(|bk| weights.vectors.get(&bk)) {
+                for (i, &feat) in features.iter().enumerate() {
+                    if feat < bias.len() { vals[i] += bias[feat]; }
+                }
+            }
+            for (i, &feat) in features.iter().enumerate() {
+                let v = vals[i];
+                let val = if use_gelu { gelu_tanh(v) } else { v * sigmoid(v) };
+                sparse_act[i] = val;
+                full_activation[[s, feat]] = val;
+            }
+        }
+
+        // Phase 2: re-compute activation for overridden slots using
+        // the overlay's gate / up vectors. The slot's contribution to
+        // the residual is `silu(gate_override · x) * (up_override · x)`
+        // — exactly the install_compiled_slot Python semantics.
+        for (i, &feat) in features.iter().enumerate() {
+            let Some(ov) = override_map.get(&feat) else { continue; };
+            // Only recompute if at least one of gate / up is overridden.
+            if ov.gate.is_none() && ov.up.is_none() {
+                continue;
+            }
+            // Gate dot product (override or original gathered row).
+            let g = if let Some(g_ov) = ov.gate {
+                if g_ov.len() == hidden {
+                    g_ov.iter().zip(x_row.iter()).map(|(a, b)| a * b).sum::<f32>()
+                } else {
+                    // Length mismatch — fall through to original.
+                    if let Some(ref gate_sub) = gate_sub {
+                        gate_sub.row(i).dot(&x_row)
+                    } else { 0.0 }
+                }
+            } else if let Some(ref gate_sub) = gate_sub {
+                gate_sub.row(i).dot(&x_row)
+            } else {
+                0.0
+            };
+            let activated = if use_gelu { gelu_tanh(g) } else { g * sigmoid(g) };
+
+            // Up dot product (override or original).
+            let up_score = if let Some(u_ov) = ov.up {
+                if u_ov.len() == hidden {
+                    u_ov.iter().zip(x_row.iter()).map(|(a, b)| a * b).sum::<f32>()
+                } else {
+                    up_sub.row(i).dot(&x_row)
+                }
+            } else {
+                up_sub.row(i).dot(&x_row)
+            };
+
+            let new_act = if is_gated { activated * up_score } else { activated };
+            sparse_act[i] = new_act;
+            full_activation[[s, feat]] = new_act;
+        }
+
+        // Phase 3: down projection using gathered dense down vectors,
+        // then swap in down overrides for any overridden slots.
+        let act_view = ndarray::ArrayView1::from(&sparse_act[..k]);
+        let out_vec = down_view.dot(&act_view);
+        let mut out_row = out.row_mut(s);
+        ndarray::Zip::from(&mut out_row).and(&out_vec).for_each(|o, &v| *o = v);
+
+        for (i, &feat) in features.iter().enumerate() {
+            let Some(ov) = override_map.get(&feat) else { continue; };
+            let Some(d_ov) = ov.down else { continue; };
+            if d_ov.len() != hidden { continue; }
+            let activation = sparse_act[i];
+            if activation.abs() <= 1e-8 { continue; }
+            // Subtract the dense column contribution and add the override.
+            for j in 0..hidden {
+                out_row[j] -= down_view[[j, i]] * activation;
+                out_row[j] += d_ov[j] * activation;
             }
         }
     }

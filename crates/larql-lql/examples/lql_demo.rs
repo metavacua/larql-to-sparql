@@ -8,7 +8,7 @@
 use larql_lql::{parse, run_batch, Session};
 
 fn main() {
-    println!("=== LQL End-to-End Demo (spec v0.3) ===\n");
+    println!("=== LQL End-to-End Demo (spec v0.4) ===\n");
 
     // ── Session lifecycle ──
     section("Session Lifecycle");
@@ -139,7 +139,7 @@ SHOW MODELS;
     }
 
     // ── Spec compliance: all statement types ──
-    section("Spec Compliance: All Statement Types (v0.3)");
+    section("Spec Compliance: All Statement Types (v0.4)");
 
     let all_statements = vec![
         // Lifecycle
@@ -148,10 +148,25 @@ SHOW MODELS;
         ("EXTRACT (all)", r#"EXTRACT MODEL "m" INTO "o" WITH ALL;"#),
         ("COMPILE", r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors;"#),
         ("COMPILE INTO VINDEX", r#"COMPILE CURRENT INTO VINDEX "baked.vindex";"#),
+        ("COMPILE INTO VINDEX ON CONFLICT LAST_WINS",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" ON CONFLICT LAST_WINS;"#),
+        ("COMPILE INTO VINDEX ON CONFLICT HIGHEST_CONFIDENCE",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#),
+        ("COMPILE INTO VINDEX ON CONFLICT FAIL",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" ON CONFLICT FAIL;"#),
+        ("COMPILE INTO VINDEX WITH REFINE",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" WITH REFINE;"#),
+        ("COMPILE INTO VINDEX WITHOUT REFINE",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" WITHOUT REFINE;"#),
+        ("COMPILE INTO VINDEX WITH DECOYS",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" WITH DECOYS ("To be or not to be", "Water is a");"#),
+        ("COMPILE INTO VINDEX all clauses",
+            r#"COMPILE CURRENT INTO VINDEX "baked.vindex" ON CONFLICT FAIL WITH REFINE WITH DECOYS ("To be or not to be");"#),
         ("DIFF", r#"DIFF "a.vindex" CURRENT;"#),
         ("DIFF (relation)", r#"DIFF "a.vindex" "b.vindex" RELATION "capital" LIMIT 20;"#),
         ("USE (vindex)", r#"USE "path.vindex";"#),
         ("USE MODEL", r#"USE MODEL "google/gemma-3-4b-it" AUTO_EXTRACT;"#),
+        ("USE REMOTE", r#"USE REMOTE "https://models.example.com/larql";"#),
         // Query
         ("WALK", r#"WALK "prompt" TOP 5 LAYERS 25-33 MODE hybrid COMPARE;"#),
         ("SELECT", r#"SELECT entity, target FROM EDGES WHERE relation = "capital" ORDER BY confidence DESC LIMIT 10;"#),
@@ -191,6 +206,19 @@ SHOW MODELS;
         ("SHOW FEATURES", r#"SHOW FEATURES 26 WHERE relation = "capital" LIMIT 5;"#),
         ("SHOW MODELS", "SHOW MODELS;"),
         ("STATS", r#"STATS "path.vindex";"#),
+        // EXPLAIN INFER WITH ATTENTION
+        ("EXPLAIN INFER WITH ATTENTION",
+            r#"EXPLAIN INFER "prompt" TOP 5 WITH ATTENTION;"#),
+        // TRACE
+        ("TRACE", r#"TRACE "The capital of France is";"#),
+        ("TRACE FOR",
+            r#"TRACE "The capital of France is" FOR "Paris";"#),
+        ("TRACE DECOMPOSE LAYERS",
+            r#"TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;"#),
+        ("TRACE POSITIONS ALL SAVE",
+            r#"TRACE "The capital of France is" POSITIONS ALL SAVE "out.trace";"#),
+        ("TRACE full",
+            r#"TRACE "The capital of France is" FOR "Paris" DECOMPOSE LAYERS 20-30 POSITIONS LAST SAVE "out.trace";"#),
         // Pipe
         ("PIPE", r#"WALK "test" TOP 5 |> EXPLAIN WALK "test";"#),
     ];

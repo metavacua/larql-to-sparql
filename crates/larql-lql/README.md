@@ -93,13 +93,16 @@ which is exactly what `weight_manifest.json` references. A subsequent
 loading the result in HuggingFace Transformers gives you the inserted
 facts via standard `model.generate()` — no special loader code.
 
-`COMPILE INTO VINDEX` accepts an optional `ON CONFLICT` clause for
-choosing how to resolve `(layer, feature)` slots written by more than
-one applied patch:
+`COMPILE INTO VINDEX` accepts three optional clauses, in any order:
 
 ```sql
-COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;
+COMPILE CURRENT INTO VINDEX "out.vindex"
+    ON CONFLICT FAIL
+    WITH REFINE
+    WITH DECOYS ("To be or not to be", "Water is a");
 ```
+
+**`ON CONFLICT`** — how to resolve slots written by more than one patch.
 
 | Strategy | Behaviour |
 |---|---|
@@ -107,28 +110,54 @@ COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;
 | `HIGHEST_CONFIDENCE` | Accepted for forward compatibility. Currently resolves like `LAST_WINS` for down vectors — see spec §3.5. |
 | `FAIL` | Abort if any slot has a conflicting write. |
 
+**`WITH REFINE | WITHOUT REFINE`** — whether the bake step orthogonalises
+each patched gate against the other patched gates at the same layer
+before writing the canonical files. `INSERT` is intentionally a dumb
+append (no model weights required), so refine runs once at compile time
+when the full constellation is in hand. Default is `WITH REFINE`. Use
+`WITHOUT REFINE` for tests, benches, or when you want byte-identical
+output to a hand-built patch.
+
+**`WITH DECOYS (<prompt>, ...)`** — supplies prompts that are
+forward-passed at compile time; their residuals at the install layer
+become extra suppression vectors in the refine pass. Use this to defend
+specific bleed targets that the constellation alone cannot reach
+(semantic associations like Hamlet→Shakespeare on `"To be or not to be"`).
+Validated end-to-end in `experiments/14_vindex_compilation` —
+constellation refine + decoys gives 10/10 retrieval and zero regression
+bleed; constellation refine alone leaves 1-2 semantic bleeds out of 4
+on a 10-fact Gemma 3 4B constellation.
+
+> **Status:** end-to-end on synthetic vindexes. The refine primitive
+> (`larql-vindex::patch::refine`), decoy capture entry point
+> (`larql-inference::capture_decoy_residuals`), and executor wiring all
+> live in `main` and are unit-tested. Production validation against a
+> real Gemma 3 4B vindex (matching `experiments/14_vindex_compilation`'s
+> 10/10 retrieval, 0/4 regression bleed) is the next step. See spec §11.6.
+
 The full mechanism is documented in `docs/vindex-operations-spec.md` §1.6.
 
 ## Building & Testing
 
 ```bash
-cargo test -p larql-lql                                       # 242 tests
+cargo test -p larql-lql                                       # 267 tests
 cargo test -p larql-lql --lib executor::tests                 # executor mutation pipeline
 cargo test -p larql-lql --lib parser::tests                   # parser unit tests
 
 # Demos
 cargo run -p larql-lql --example parser_demo                   # AST output, every statement type
-cargo run -p larql-lql --example lql_demo                      # 42-row spec compliance grid
+cargo run -p larql-lql --example lql_demo                      # 56-row spec compliance grid
 cargo run --release -p larql-lql --example compile_demo        # End-to-end COMPILE INTO VINDEX
+cargo run --release -p larql-lql --example refine_demo         # End-to-end refine + decoys (exp 14 reproduction)
                                                                 #   on real Gemma 4B (skips if absent)
 
 # Criterion benches (use --quick for a fast sweep)
 cargo bench  -p larql-lql --bench parser                       # parse_single × 18, parse_batch
 cargo bench  -p larql-lql --bench executor                     # SELECT, SHOW, DELETE, UPDATE, patch lifecycle
-cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VINDEX bake cost
+cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VINDEX bake cost + refine vs no-refine
 ```
 
-### Test coverage (242 tests)
+### Test coverage (267 tests)
 
 - **Parser** (`parser/tests.rs`, 1,500+ lines): every statement type and
   every clause combination, plus negative tests for malformed input.

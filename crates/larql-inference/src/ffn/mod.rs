@@ -38,6 +38,10 @@ pub trait FfnBackend {
 
 pub use weight::WeightFfn;
 pub use sparse::SparseFfn;
+pub use sparse_compute::{
+    sparse_ffn_forward, sparse_ffn_forward_with_overrides,
+    sparse_ffn_forward_with_full_overrides, FeatureSlotOverride,
+};
 
 // ── Per-layer backend selection ──
 

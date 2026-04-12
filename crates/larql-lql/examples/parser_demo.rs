@@ -1,11 +1,11 @@
-//! LQL Parser Demo — parse every statement type from the spec v0.3 and display the AST
+//! LQL Parser Demo — parse every statement type from the spec v0.4 and display the AST
 //!
 //! Run: cargo run -p larql-lql --example parser_demo
 
 use larql_lql::parse;
 
 fn main() {
-    println!("=== LQL Parser Demo (spec v0.3) ===\n");
+    println!("=== LQL Parser Demo (spec v0.4) ===\n");
 
     // ── Lifecycle Statements ──
     section("Lifecycle");
@@ -38,6 +38,41 @@ fn main() {
     demo(
         "COMPILE INTO VINDEX (bake patches)",
         r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (ON CONFLICT FAIL)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (ON CONFLICT HIGHEST_CONFIDENCE)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (WITH REFINE — explicit default)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH REFINE;"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (WITHOUT REFINE)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITHOUT REFINE;"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (WITH DECOYS — single)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH DECOYS ("To be or not to be");"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (WITH DECOYS — multiple)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" WITH DECOYS ("To be or not to be", "Water is a", "Friends, Romans, countrymen");"#,
+    );
+
+    demo(
+        "COMPILE INTO VINDEX (all clauses combined)",
+        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL WITH REFINE WITH DECOYS ("To be or not to be");"#,
     );
 
     demo(
@@ -176,8 +211,8 @@ fn main() {
         r#"WALK "The capital of France is" TOP 5 |> EXPLAIN WALK "The capital of France is";"#,
     );
 
-    // ── Demo Script (spec v0.3) ──
-    section("Full Demo Script (spec v0.3)");
+    // ── Demo Script (spec v0.4) ──
+    section("Full Demo Script (spec v0.4)");
 
     let demo_stmts = vec![
         // ACT 1: DECOMPILE
@@ -193,21 +228,24 @@ fn main() {
         r#"WALK "France" TOP 10;"#,
         r#"EXPLAIN WALK "The capital of France is";"#,
         r#"INFER "The capital of France is" TOP 5 COMPARE;"#,
-        // ACT 4: EDIT
+        // ACT 4: TRACE (residual stream decomposition)
+        r#"TRACE "The capital of France is" FOR "Paris";"#,
+        r#"TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;"#,
+        // ACT 5: EDIT
         r#"DESCRIBE "John Coyle";"#,
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John Coyle", "lives-in", "Colchester");"#,
         r#"DESCRIBE "John Coyle";"#,
-        // ACT 5: PATCH
+        // ACT 6: PATCH
         r#"BEGIN PATCH "medical.vlp";"#,
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("aspirin", "treats", "headache");"#,
         "SAVE PATCH;",
         r#"APPLY PATCH "medical.vlp";"#,
         "SHOW PATCHES;",
-        // ACT 6: RECOMPILE
+        // ACT 7: RECOMPILE
         r#"DIFF "gemma3-4b.vindex" CURRENT;"#,
         r#"DIFF "gemma3-4b.vindex" CURRENT INTO PATCH "changes.vlp";"#,
         r#"COMPILE CURRENT INTO MODEL "gemma3-4b-edited/" FORMAT safetensors;"#,
-        r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#,
+        r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex" ON CONFLICT FAIL;"#,
     ];
 
     let mut ok = 0;

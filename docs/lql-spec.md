@@ -523,6 +523,8 @@ DIFF "gemma3-4b.vindex" "gemma3-4b-medical.vindex"
 ```
 COMPILE CURRENT INTO VINDEX <output_path>
     [ON CONFLICT {LAST_WINS | HIGHEST_CONFIDENCE | FAIL}]
+    [WITH REFINE | WITHOUT REFINE]
+    [WITH DECOYS (<prompt>, <prompt>, ...)]
 
 -- Flatten all applied patches into a new clean vindex.
 -- The result is a fully self-contained vindex with no overlay or sidecar:
@@ -540,6 +542,29 @@ COMPILE CURRENT INTO VINDEX <output_path>
 --   FAIL:                 abort if any slot has a conflicting write.
 -- ON CONFLICT is only valid for COMPILE INTO VINDEX, not COMPILE INTO MODEL.
 --
+-- WITH REFINE / WITHOUT REFINE controls whether the bake step
+-- orthogonalises each patched gate against the other patched gates at
+-- the same layer (Gram-Schmidt) before writing the canonical files.
+-- Refinement is the load-bearing fix for cross-fact bleed; INSERT itself
+-- is intentionally a dumb append (no model weights required), so refine
+-- runs once at compile time when the full constellation is in hand.
+--
+--   WITH REFINE (default):   refine each patched gate against the other
+--                             patched gates at the same layer.
+--   WITHOUT REFINE:           skip the refine pass and bake the raw
+--                             patched gates verbatim. Use this when you
+--                             want byte-identical output to a hand-built
+--                             patch (tests, benches, debugging).
+--
+-- WITH DECOYS supplies prompts that are forward-passed at compile time;
+-- their residuals at the install layer become extra suppression vectors
+-- in the refine pass. Use this to defend specific bleed targets that
+-- the constellation alone cannot reach (e.g. semantic associations like
+-- "To be or not to be" → "Shakespeare" when installing Hamlet facts).
+-- WITH DECOYS is only valid alongside WITH REFINE (it is silently
+-- ignored if you also pass WITHOUT REFINE in the same statement) and is
+-- only valid for COMPILE INTO VINDEX.
+--
 -- A subsequent USE on the compiled vindex needs no special loader code:
 -- it loads like any other vindex and INFER produces the inserted facts
 -- through the standard dense FFN path. From this point you can also run
@@ -550,6 +575,12 @@ COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex";
 
 COMPILE CURRENT INTO VINDEX "gemma3-4b-medical.vindex"
     ON CONFLICT FAIL;
+
+COMPILE CURRENT INTO VINDEX "gemma3-4b-shakespeare.vindex"
+    WITH DECOYS ("To be or not to be", "Friends, Romans, countrymen");
+
+COMPILE CURRENT INTO VINDEX "gemma3-4b-bench.vindex"
+    WITHOUT REFINE;
 ```
 
 > **Implementation note (HIGHEST_CONFIDENCE).** Down vectors are
@@ -1037,7 +1068,8 @@ pub enum Statement {
     Extract { model: String, output: String, components: Option<Vec<Component>>,
               layers: Option<Range>, extract_level: ExtractLevel },
     Compile { vindex: VindexRef, output: String, format: Option<OutputFormat>,
-              target: CompileTarget, on_conflict: Option<CompileConflict> },
+              target: CompileTarget, on_conflict: Option<CompileConflict>,
+              refine: bool, decoys: Option<Vec<String>> },
     Diff { a: VindexRef, b: VindexRef, layer: Option<u32>,
            relation: Option<String>, limit: Option<u32> },
     Use { target: UseTarget },
@@ -1425,6 +1457,20 @@ described grammars that did not match the parser.
   store for querying and read a specific boundary residual.
 - **DESCRIBE STREAM** — progressive layer-by-layer DESCRIBE, particularly
   useful with `USE REMOTE`.
+- **End-to-end validation of the Rust refine + decoy pipeline on a real
+  model.** The grammar, AST, parser, refine primitive (`larql-vindex`,
+  `patch::refine`), decoy capture entry point (`larql-inference`,
+  `capture_decoy_residuals`), and executor wiring (`exec_compile_into_vindex`
+  in `larql-lql`) are all in place and unit-tested. What's missing is a
+  bench / integration test on a real Gemma 3 4B vindex that compares
+  retrieval and regression bleed before and after the refine pass to
+  confirm the Rust port matches the Python results in
+  `experiments/14_vindex_compilation` (10/10 retrieval, 0/4 bleed under
+  refine + decoys; 10/10 retrieval, 1-2/4 bleed under refine alone). The
+  unit tests prove the pipeline runs correctly on a synthetic constellation
+  (parallel gates lose norm under refine, `WITHOUT REFINE` is a no-op,
+  `WITH DECOYS` errors cleanly on browse-only vindexes); the production
+  validation is the next step.
 
 ### 11.7 Additional Future Work
 

@@ -172,9 +172,18 @@ impl Session {
             .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        // 8092 features per layer is proven lossless (97.91% on France→Paris).
-        // PatchedVindex implements GateIndex — INSERT/DELETE/UPDATE affects inference.
-        let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(&weights, patched, 8092);
+        // Unlimited top_k: use every feature at each layer, matching
+        // the dense FFN path exactly. The 8092 default dropped half
+        // of Gemma's 16384 features from the activation sum, which is
+        // fine for a clean model (the discarded features have very
+        // small activations) but becomes catastrophic once an INSERT
+        // lands a strong (×30 gate scale) slot. The slot's activation
+        // then dominates a half-weakened baseline, producing
+        // whichever installed target has the largest lm_head alignment
+        // on every prompt. Matching Python's dense forward pass by
+        // using every feature preserves the baseline and keeps the
+        // installed slot proportional.
+        let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
         let start = std::time::Instant::now();
         let result = larql_inference::predict_with_ffn(
             &weights,

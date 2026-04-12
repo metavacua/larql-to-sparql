@@ -774,6 +774,213 @@ fn merge_nonexistent_source_errors_cleanly() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── Session::patched_overlay_mut accessor ──
+
+#[test]
+fn patched_overlay_mut_returns_some_for_vindex_backend() {
+    let (mut session, dir) = vindex_session("overlay_mut_some");
+    assert!(
+        session.patched_overlay_mut().is_some(),
+        "Vindex backend should yield a mutable overlay"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn patched_overlay_mut_returns_none_for_no_backend() {
+    let mut session = Session::new();
+    assert!(
+        session.patched_overlay_mut().is_none(),
+        "fresh session with no backend should yield None"
+    );
+}
+
+#[test]
+fn patched_overlay_mut_round_trip_via_insert_feature() {
+    use larql_models::TopKEntry;
+    use larql_vindex::FeatureMeta;
+
+    let (mut session, dir) = vindex_session("overlay_mut_round_trip");
+    let gate = vec![0.7_f32, 0.0, 0.0, 0.0];
+    {
+        let overlay = session.patched_overlay_mut().expect("vindex backend");
+        overlay.insert_feature(
+            0, 1,
+            gate.clone(),
+            FeatureMeta {
+                top_token: "z".into(),
+                top_token_id: 9,
+                c_score: 0.42,
+                top_k: vec![TopKEntry { token: "z".into(), token_id: 9, logit: 0.42 }],
+            },
+        );
+    }
+    // Same accessor, second call: the gate we just wrote must still be there.
+    let overlay2 = session.patched_overlay_mut().expect("vindex backend");
+    assert_eq!(
+        overlay2.overrides_gate_at(0, 1),
+        Some(gate.as_slice()),
+        "second patched_overlay_mut() call should observe the previous mutation",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── COMPILE INTO VINDEX WITH REFINE: integration ──
+
+/// Helper for the refine integration tests: inject two parallel gates
+/// directly into the patch overlay (bypassing INSERT, which would
+/// require a real tokenizer + relation classifier the synthetic vindex
+/// doesn't carry). Returns the original gate vectors so the caller can
+/// compare them against the post-compile state.
+fn inject_parallel_gates(session: &mut Session) -> (Vec<f32>, Vec<f32>) {
+    use larql_models::TopKEntry;
+    use larql_vindex::FeatureMeta;
+
+    let gate_a = vec![1.0_f32, 0.5, 0.0, 0.0];
+    let gate_b = vec![0.5_f32, 1.0, 0.0, 0.0];
+    let meta_a = FeatureMeta {
+        top_token: "alpha".into(),
+        top_token_id: 1,
+        c_score: 0.9,
+        top_k: vec![TopKEntry { token: "alpha".into(), token_id: 1, logit: 0.9 }],
+    };
+    let meta_b = FeatureMeta {
+        top_token: "beta".into(),
+        top_token_id: 2,
+        c_score: 0.9,
+        top_k: vec![TopKEntry { token: "beta".into(), token_id: 2, logit: 0.9 }],
+    };
+
+    match &mut session.backend {
+        Backend::Vindex { patched, .. } => {
+            patched.insert_feature(0, 0, gate_a.clone(), meta_a);
+            patched.insert_feature(0, 1, gate_b.clone(), meta_b);
+        }
+        _ => panic!("test session must be Vindex backend"),
+    }
+    (gate_a, gate_b)
+}
+
+fn read_overlay_gate(session: &Session, layer: usize, feature: usize) -> Vec<f32> {
+    match &session.backend {
+        Backend::Vindex { patched, .. } => patched
+            .overrides_gate_at(layer, feature)
+            .expect("gate override should exist after injection")
+            .to_vec(),
+        _ => panic!("test session must be Vindex backend"),
+    }
+}
+
+#[test]
+fn refine_pass_modifies_overlapping_gates() {
+    // Two parallel gates injected at L0/F0 and L0/F1 should both lose
+    // norm under the refine pass. The output line should advertise
+    // refine and the overlay should hold the new vectors.
+    let (mut session, dir) = vindex_session("refine_modifies");
+    let (orig_a, orig_b) = inject_parallel_gates(&mut session);
+
+    let out_dir = dir.join("compiled_with_refine");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" WITH REFINE;"#,
+        out_dir.display(),
+    ))
+    .unwrap();
+    let out = session.execute(&stmt).expect("compile WITH REFINE");
+    let joined = out.join("\n");
+    assert!(joined.contains("Refine: 2 fact"),
+            "compile output should mention 2 facts refined: {joined}");
+    assert!(joined.contains("norm retained"),
+            "compile output should report norm retained stats: {joined}");
+
+    let refined_a = read_overlay_gate(&session, 0, 0);
+    let refined_b = read_overlay_gate(&session, 0, 1);
+    let norm_orig_a: f32 = orig_a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_orig_b: f32 = orig_b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_refined_a: f32 = refined_a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_refined_b: f32 = refined_b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    assert!(norm_refined_a < norm_orig_a * 0.95,
+            "fact a should lose norm: {norm_refined_a} < {norm_orig_a}");
+    assert!(norm_refined_b < norm_orig_b * 0.95,
+            "fact b should lose norm");
+    // The original (orthogonal-component) directions are preserved by
+    // sign — assert the refined gate is *not* equal to the original.
+    assert_ne!(refined_a, orig_a, "refined gate must differ from original");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn without_refine_leaves_overlay_gates_untouched() {
+    // Same constellation but compiled WITHOUT REFINE — the overlay
+    // gates should still equal what was injected, byte for byte.
+    let (mut session, dir) = vindex_session("refine_skipped");
+    let (orig_a, orig_b) = inject_parallel_gates(&mut session);
+
+    let out_dir = dir.join("compiled_no_refine");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" WITHOUT REFINE;"#,
+        out_dir.display(),
+    ))
+    .unwrap();
+    let out = session.execute(&stmt).expect("compile WITHOUT REFINE");
+    let joined = out.join("\n");
+    assert!(joined.contains("Refine: skipped (WITHOUT REFINE)"),
+            "compile output should advertise skipped refine: {joined}");
+
+    let after_a = read_overlay_gate(&session, 0, 0);
+    let after_b = read_overlay_gate(&session, 0, 1);
+    assert_eq!(after_a, orig_a, "WITHOUT REFINE must not touch the gates");
+    assert_eq!(after_b, orig_b);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn refine_with_decoys_errors_on_browse_only_vindex() {
+    // The synthetic test vindex is browse-only (no model weights).
+    // WITH DECOYS requires forward-pass capability, so the executor
+    // should reject it with a clear message instead of trying and
+    // failing partway through.
+    let (mut session, dir) = vindex_session("refine_decoys_browse");
+    let _ = inject_parallel_gates(&mut session);
+
+    let out_dir = dir.join("compiled_with_decoys");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" WITH DECOYS ("hello world");"#,
+        out_dir.display(),
+    ))
+    .unwrap();
+    let err = session.execute(&stmt).expect_err("WITH DECOYS on browse-only must error");
+    let msg = format!("{err}");
+    assert!(msg.to_lowercase().contains("decoys requires model weights")
+                || msg.to_lowercase().contains("with all"),
+            "error should explain the precondition: {msg}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn refine_pass_with_no_overrides_returns_quietly() {
+    // Compile WITH REFINE on a session with no patches — the refine
+    // pass should report "nothing to refine" rather than running
+    // empty math or panicking.
+    let (mut session, dir) = vindex_session("refine_empty");
+
+    let out_dir = dir.join("compiled_empty");
+    let stmt = parser::parse(&format!(
+        r#"COMPILE CURRENT INTO VINDEX "{}" WITH REFINE;"#,
+        out_dir.display(),
+    ))
+    .unwrap();
+    let out = session.execute(&stmt).expect("empty refine should succeed");
+    let joined = out.join("\n");
+    assert!(joined.contains("no gate overrides to refine"),
+            "expected the no-op message: {joined}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn show_patches_with_no_patches_returns_message() {
     let (mut session, dir) = vindex_session("show_patches_empty");

@@ -60,6 +60,25 @@ small, so `small_activation × poseidon_vector` per layer accumulates
 into the validated multi-layer constellation effect. See
 `patch/core.rs` for the full doc on `PatchedVindex`.
 
+### Refine pass (`patch/refine.rs`)
+
+`refine_gates(inputs, decoy_residuals) -> RefineResult` orthogonalises
+each patched gate against the other patched gates at the same layer,
+plus any decoy residuals supplied by the caller. Pure Gram-Schmidt over
+`Array1<f32>` slices — no model dependency, no forward passes. The
+result carries the refined gates plus per-fact `retained_norm`
+statistics.
+
+This is the load-bearing fix for cross-fact bleed at compile time and is
+what `COMPILE INTO VINDEX WITH REFINE` calls before the bake step.
+Refining is per-layer (facts at different layers can't interfere
+through the FFN math). Decoy residuals are layer-scoped — the caller is
+responsible for capturing them at the correct depth, which is exactly
+what `larql_inference::capture_decoy_residuals` does. Validated against
+synthetic constellations by the unit tests in `patch/refine.rs`; the
+end-to-end Gemma 3 4B reproduction lives in
+`larql-lql/examples/refine_demo.rs`.
+
 ## The Headline
 
 A 1T model in 10.9 GB on a laptop.
@@ -136,7 +155,12 @@ larql-vindex/src/
 │   └── build_from_vectors.rs   Build from pre-extracted NDJSON
 │
 ├── patch/                      Patch system
-│   └── core.rs                 VindexPatch, PatchOp, PatchedVindex
+│   ├── core.rs                 VindexPatch, PatchOp, PatchedVindex
+│   └── refine.rs               Gate refine pass (Gram-Schmidt orthogonalisation
+│                               of patched gates against each other + optional
+│                               decoy residuals — used by COMPILE INTO VINDEX
+│                               WITH REFINE to suppress cross-fact bleed before
+│                               the bake)
 │
 ├── clustering/                 Relation discovery
 │   ├── kmeans.rs               k-means clustering (BLAS via larql-compute)

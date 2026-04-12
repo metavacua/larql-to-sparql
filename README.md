@@ -356,7 +356,7 @@ cargo build --release --features metal   # with Metal GPU backend
 cargo test                               # all tests across all crates
 cargo test -p larql-inference            # inference engine tests (109 tests)
 cargo test -p larql-inference --features metal  # + Metal GPU tests (115 tests)
-cargo test -p larql-lql                  # LQL parser + executor tests (242 tests)
+cargo test -p larql-lql                  # LQL parser + executor tests (267 tests)
 cargo test -p larql-vindex               # vindex storage + patch tests (104 tests)
 
 # Inference engine examples
@@ -377,9 +377,10 @@ cargo run --release -p larql-server -- path/to/vindex --port 8080
 # Vindex and LQL demos
 cargo run -p larql-vindex --example demo_features                    # vindex feature showcase (16 features)
 cargo run --release -p larql-vindex --example mmap_demo              # mmap RAM behaviour + scaling table
-cargo run -p larql-lql --example parser_demo                         # parser demo (22/22 statements)
-cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (42/42)
+cargo run -p larql-lql --example parser_demo                         # parser demo (24/24 statements)
+cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (56/56)
 cargo run --release -p larql-lql --example compile_demo              # end-to-end COMPILE INTO VINDEX
+cargo run --release -p larql-lql --example refine_demo               # end-to-end refine + decoys (exp 14 reproduction)
                                                                       # (skips gracefully if no vindex on disk)
 
 # Criterion benches (use --quick for a fast sweep, omit for full sample sizes)

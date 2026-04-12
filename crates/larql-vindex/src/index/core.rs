@@ -56,6 +56,14 @@ pub struct VectorIndex {
     /// Key: (layer, feature), Value: hidden_size f32 vector.
     pub(crate) down_overrides: HashMap<(usize, usize), Vec<f32>>,
 
+    /// Up vector overrides: custom up vectors for specific features.
+    /// Parallel to down_overrides — when set, walk_ffn_sparse uses this
+    /// instead of the model's up_features row at that slot. INSERT
+    /// writes to this so the slot's activation = silu(gate·x) * (up·x)
+    /// reflects the constellation, not the original weak free-slot up.
+    /// Key: (layer, feature), Value: hidden_size f32 vector.
+    pub(crate) up_overrides: HashMap<(usize, usize), Vec<f32>>,
+
     /// Lazy decode cache for f16 gate vectors. Each layer decoded once on first
     /// KNN call, then reused. Eliminates repeated f16→f32 conversion.
     pub(crate) f16_decode_cache: Mutex<Vec<Option<Vec<f32>>>>,
@@ -107,6 +115,7 @@ impl Clone for VectorIndex {
             num_layers: self.num_layers,
             hidden_size: self.hidden_size,
             down_overrides: self.down_overrides.clone(),
+            up_overrides: self.up_overrides.clone(),
             f16_decode_cache: Mutex::new(vec![None; self.num_layers]),
             warmed_gates: std::sync::RwLock::new(vec![None; self.num_layers]),
             down_features_mmap: self.down_features_mmap.clone(),
@@ -154,6 +163,7 @@ impl VectorIndex {
             num_layers,
             hidden_size,
             down_overrides: HashMap::new(),
+            up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
@@ -198,6 +208,7 @@ impl VectorIndex {
             num_layers,
             hidden_size,
             down_overrides: HashMap::new(),
+            up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
@@ -370,6 +381,7 @@ impl VectorIndex {
             down_meta: gate_meta,
             down_meta_mmap: None,
             down_overrides: HashMap::new(),
+            up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
@@ -502,8 +514,13 @@ impl GateIndex for VectorIndex {
         self.down_overrides.get(&(layer, feature)).map(|v| v.as_slice())
     }
 
+    fn up_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.up_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+    }
+
     fn has_overrides_at(&self, layer: usize) -> bool {
         self.down_overrides.keys().any(|(l, _)| *l == layer)
+            || self.up_overrides.keys().any(|(l, _)| *l == layer)
     }
 
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {

@@ -69,6 +69,27 @@ impl VectorIndex {
         self.down_overrides.get(&(layer, feature)).map(|v| v.as_slice())
     }
 
+    /// Set a custom up vector override for a feature. Mirrors
+    /// `set_down_vector`. INSERT writes here so the slot's activation
+    /// `silu(gate · x) * (up · x)` reflects the constellation install
+    /// instead of the original weak free-slot up vector.
+    pub fn set_up_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
+        self.up_overrides.insert((layer, feature), vector);
+    }
+
+    /// All in-memory up vector overrides keyed by `(layer, feature)`.
+    /// Parallel to `down_overrides()`. Used by `COMPILE INTO VINDEX` to
+    /// bake the overrides into a fresh copy of `up_features.bin`.
+    pub fn up_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+        &self.up_overrides
+    }
+
+    /// Up vector override for `(layer, feature)`, if any has been set
+    /// via `set_up_vector`. Same shape as `down_override_at`.
+    pub fn up_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.up_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+    }
+
     /// Copy a layer's gate vectors from mmap to heap (for mutation).
     fn promote_layer_to_heap(&mut self, layer: usize) {
         if let Some(ref mmap) = self.gate_mmap_bytes {

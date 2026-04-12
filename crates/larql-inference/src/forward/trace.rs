@@ -38,6 +38,34 @@ pub fn capture_residuals(
     trace.residuals
 }
 
+/// Capture decoy residuals at a single layer for a list of pre-tokenised
+/// prompts. Returns one `Array1<f32>` per prompt (the last-token residual
+/// at `layer`), in the same order as the input.
+///
+/// This is the entry point used by `COMPILE INTO VINDEX WITH DECOYS`:
+/// the executor tokenises each user-supplied prompt, calls this once per
+/// prompt, then feeds the resulting vectors into the refine pass as
+/// suppression directions. One forward pass per decoy. Cheap relative
+/// to the bake step itself, and only happens at compile time.
+pub fn capture_decoy_residuals(
+    weights: &ModelWeights,
+    token_ids_per_prompt: &[Vec<u32>],
+    layer: usize,
+) -> Vec<ndarray::Array1<f32>> {
+    token_ids_per_prompt
+        .iter()
+        .map(|tokens| {
+            let captured = capture_residuals(weights, tokens, &[layer]);
+            // capture_residuals returns one (layer, vec) entry per
+            // requested layer; we asked for exactly one.
+            let (_, vec) = captured.into_iter().next().expect(
+                "capture_residuals must return one entry per requested layer",
+            );
+            ndarray::Array1::from_vec(vec)
+        })
+        .collect()
+}
+
 /// Run a forward pass and capture both residuals and sparse activations.
 pub fn trace_forward(
     weights: &ModelWeights,

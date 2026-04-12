@@ -61,6 +61,31 @@ pub struct Session {
     pub(crate) patch_recording: Option<PatchRecording>,
     /// Whether the current patch was auto-started (anonymous).
     pub(crate) auto_patch: bool,
+    /// Per-layer cached decoy residuals. Populated on the first INSERT
+    /// that runs the online refine pass, reused by subsequent INSERTs
+    /// in the same session. The cache holds the L_install residuals
+    /// from forward-passing a fixed canonical decoy prompt set through
+    /// the clean base index. Used by `exec_insert` to suppress the
+    /// canonical bleed directions (literary / poetic / story-starter
+    /// prompts) in each new slot's gate. Keyed by layer because
+    /// different INSERTs can target different layers.
+    pub(crate) decoy_residual_cache:
+        std::collections::HashMap<usize, Vec<larql_vindex::ndarray::Array1<f32>>>,
+    /// Raw captured residuals per installed slot, indexed by
+    /// `(layer, feature)`. Each entry is the unscaled residual the
+    /// model produced for the install prompt at that layer's FFN
+    /// entry (last token), captured on the clean base index before
+    /// any installs were applied. Used by INSERT's online refine
+    /// pass to rebuild the full constellation from raw inputs each
+    /// time a new slot lands — if we refined against the currently
+    /// stored (already-refined) peers, compound drift across
+    /// iterations would leave the latest insert dominating (see
+    /// `refine_demo` 10-fact run where every prompt returned the
+    /// last-inserted target before this cache existed).
+    pub(crate) raw_install_residuals: std::collections::HashMap<
+        (usize, usize),
+        larql_vindex::ndarray::Array1<f32>,
+    >,
 }
 
 /// Active patch recording session (between BEGIN PATCH and SAVE PATCH).
@@ -81,6 +106,8 @@ impl Session {
             backend: Backend::None,
             patch_recording: None,
             auto_patch: false,
+            decoy_residual_cache: std::collections::HashMap::new(),
+            raw_install_residuals: std::collections::HashMap::new(),
         }
     }
 
@@ -138,15 +165,21 @@ impl Session {
             Statement::Extract { model, output, components, layers, extract_level } => {
                 self.exec_extract(model, output, components.as_deref(), layers.as_ref(), *extract_level)
             }
-            Statement::Compile { vindex, output, format, target, on_conflict } => {
-                self.exec_compile(vindex, output, *format, *target, *on_conflict)
+            Statement::Compile { vindex, output, format, target, on_conflict, refine, decoys } => {
+                self.exec_compile(
+                    vindex, output, *format, *target, *on_conflict,
+                    *refine, decoys.as_deref(),
+                )
             }
             Statement::Diff { a, b, layer, relation, limit, into_patch } => {
                 self.exec_diff(a, b, *layer, relation.as_deref(), *limit, into_patch.as_deref())
             }
             Statement::Insert { entity, relation, target, layer, confidence, alpha } => {
                 let mut out = self.ensure_patch_session();
-                out.extend(self.exec_insert(entity, relation, target, *layer, *confidence, *alpha)?);
+                out.extend(self.exec_insert(
+                    entity, relation, target,
+                    *layer, *confidence, *alpha,
+                )?);
                 Ok(out)
             }
             Statement::Infer { prompt, top, compare } => {
@@ -194,9 +227,9 @@ impl Session {
             Statement::Stats { .. } => self.remote_stats(),
             Statement::ShowRelations { mode, with_examples, .. } => self.remote_show_relations(*mode, *with_examples),
             Statement::Insert { entity, relation, target, layer, confidence, alpha: _ } => {
-                // Remote backend doesn't forward ALPHA — the HTTP protocol
-                // doesn't have a schema for it yet. Local backend honours
-                // alpha via `exec_insert`.
+                // Remote backend doesn't forward ALPHA — the HTTP
+                // protocol doesn't have a schema for it yet. Local
+                // backend honours alpha via `exec_insert`.
                 self.remote_insert(entity, relation, target, *layer, *confidence)
             }
             Statement::Delete { conditions } => self.remote_delete(conditions),
@@ -418,10 +451,70 @@ impl Session {
         }
     }
 
+    /// Mutable counterpart for operations that need to modify the
+    /// patch overlay (e.g. `COMPILE INTO VINDEX WITH REFINE` writing
+    /// refined gates back before the bake).
+    pub(crate) fn require_vindex_mut(
+        &mut self,
+    ) -> Result<(&Path, &larql_vindex::VindexConfig, &mut larql_vindex::PatchedVindex), LqlError>
+    {
+        match &mut self.backend {
+            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
+            Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
+                "this operation requires a vindex. Extract first:\n  \
+                 EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
+                model_id,
+                model_id.split('/').next_back().unwrap_or(model_id),
+            ))),
+            _ => Err(LqlError::NoBackend),
+        }
+    }
+
     pub(crate) fn relation_classifier(&self) -> Option<&RelationClassifier> {
         match &self.backend {
             Backend::Vindex { relation_classifier, .. } => relation_classifier.as_ref(),
             _ => None,
         }
     }
+
+    /// Mutable access to the patch overlay of the current vindex backend,
+    /// for tests and benchmarks that need to inject patches without going
+    /// through the full INSERT pipeline (which would require a real
+    /// tokenizer + relation classifier the synthetic test fixtures don't
+    /// carry). Returns `None` if no vindex is loaded. Production code
+    /// should go through `INSERT`/`DELETE`/`UPDATE` statements instead.
+    pub fn patched_overlay_mut(&mut self) -> Option<&mut larql_vindex::PatchedVindex> {
+        match &mut self.backend {
+            Backend::Vindex { patched, .. } => Some(patched),
+            _ => None,
+        }
+    }
 }
+
+/// Canonical decoy prompt set for the INSERT online refine pass.
+///
+/// Same set as `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+/// These prompts span literary, philosophical, poetic, and common
+/// completion templates — the canonical bleed targets for a
+/// fact-install slot operating at `gate_scale=30`. Capturing residuals
+/// at the install layer through the clean base index and
+/// orthogonalising the installed gate against those residuals
+/// prevents the slot from firing on unrelated prompts.
+///
+/// The set is hardcoded so every session gets the same decoy
+/// defense without user configuration. A future refinement could
+/// move this to `EXTRACT ... WITH DECOYS` for per-vindex canonical
+/// sets, or let the user override via `INSERT ... WITH DECOYS`, but
+/// v0 ships a fixed list that covers the validated reference cases.
+pub(crate) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
+    "Once upon a time",
+    "The quick brown fox",
+    "To be or not to be",
+    "Water is a",
+    "A long time ago",
+    "In the beginning",
+    "The weather today is",
+    "She opened the door and",
+    "He looked at the sky",
+    "The children played in the",
+];

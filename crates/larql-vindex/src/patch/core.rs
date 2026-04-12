@@ -333,6 +333,28 @@ impl PatchedVindex {
         self.base.set_down_vector(layer, feature, vector);
     }
 
+    /// Set an up vector override for a feature. Mirrors
+    /// `set_down_vector`; both forward to the base index. INSERT calls
+    /// this so the slot's activation `silu(gate · x) * (up · x)`
+    /// reflects the constellation install.
+    pub fn set_up_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
+        self.base.set_up_vector(layer, feature, vector);
+    }
+
+    /// All in-memory up vector overrides on the underlying base vindex.
+    /// Parallel to `down_overrides()`. Used by `COMPILE INTO VINDEX` to
+    /// bake them into a fresh copy of `up_features.bin`.
+    pub fn up_overrides(&self) -> &std::collections::HashMap<(usize, usize), Vec<f32>> {
+        self.base.up_overrides()
+    }
+
+    /// Up vector override for `(layer, feature)`. Forwards to the base
+    /// vindex (up vectors live on `VectorIndex.up_overrides`, not on the
+    /// patch overlay — same layering as `down_override_at`).
+    pub fn up_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.base.up_override_at(layer, feature)
+    }
+
     /// All in-memory down vector overrides on the underlying base vindex.
     /// Used by `COMPILE INTO VINDEX` to bake them into a fresh copy of
     /// `down_weights.bin`.
@@ -356,9 +378,75 @@ impl PatchedVindex {
         self.overrides_gate.get(&(layer, feature)).map(|v| v.as_slice())
     }
 
-    /// Find a free feature slot in the base (weakest or empty).
+    /// Read-only iterator over every gate override slot in the overlay.
+    /// Used by `COMPILE INTO VINDEX WITH REFINE` to enumerate the
+    /// constellation before refining.
+    pub fn overrides_gate_iter(
+        &self,
+    ) -> impl Iterator<Item = (usize, usize, &[f32])> + '_ {
+        self.overrides_gate
+            .iter()
+            .map(|(&(l, f), v)| (l, f, v.as_slice()))
+    }
+
+    /// Replace the gate override for `(layer, feature)` with a new
+    /// vector. Used by `COMPILE INTO VINDEX WITH REFINE` to write the
+    /// refined gate back into the overlay before the bake step. Has no
+    /// effect if the slot does not already have a gate override (we
+    /// only refine slots that were already touched by a patch).
+    pub fn set_gate_override(&mut self, layer: usize, feature: usize, vector: Vec<f32>) {
+        let key = (layer, feature);
+        if self.overrides_gate.contains_key(&key) {
+            self.overrides_gate.insert(key, vector);
+        }
+    }
+
+    /// Find a free feature slot at this layer that is NOT already
+    /// claimed by the patch overlay. The base index only knows about
+    /// its own gate matrix and `down_meta`, so its
+    /// `find_free_feature` keeps returning the same "weakest" slot
+    /// across calls — which is catastrophic for multi-fact INSERT:
+    /// every new INSERT picks the same slot and overwrites the
+    /// previous install (validated by the `refine_demo` "last fact
+    /// always wins" diagnostic). This wrapper asks the base for
+    /// candidate slots and skips any that the overlay has already
+    /// taken, scanning linearly until it finds one that's free both
+    /// in the base AND in the overlay.
     pub fn find_free_feature(&self, layer: usize) -> Option<usize> {
-        self.base.find_free_feature(layer)
+        let n = self.base.num_features(layer);
+        if n == 0 {
+            return None;
+        }
+
+        // First preference: a slot with no base metadata AND no
+        // overlay entry. This matches the base's "no metadata = free"
+        // semantics but also respects the overlay.
+        for i in 0..n {
+            let taken_by_base = self.base.feature_meta(layer, i).is_some();
+            let taken_by_overlay = self.overrides_gate.contains_key(&(layer, i));
+            if !taken_by_base && !taken_by_overlay {
+                return Some(i);
+            }
+        }
+
+        // Second preference: a slot with base metadata (some c_score)
+        // that the overlay has NOT claimed, picking the weakest c_score.
+        // This mirrors the base's fallback path but filters out
+        // overlay-claimed slots.
+        let mut weakest_idx: Option<usize> = None;
+        let mut weakest_score = f32::MAX;
+        for i in 0..n {
+            if self.overrides_gate.contains_key(&(layer, i)) {
+                continue;
+            }
+            if let Some(meta) = self.base.feature_meta(layer, i) {
+                if meta.c_score < weakest_score {
+                    weakest_score = meta.c_score;
+                    weakest_idx = Some(i);
+                }
+            }
+        }
+        weakest_idx
     }
 
     /// Apply a patch. Operations are resolved into the override maps.
@@ -634,6 +722,17 @@ impl GateIndex for PatchedVindex {
         self.base.down_override(layer, feature)
     }
 
+    fn up_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        self.base.up_override(layer, feature)
+    }
+
+    fn gate_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
+        // Gate overrides live on the patch overlay (not the base
+        // index). Surface them through the trait so the sparse
+        // inference fallback can read the strong installed gate.
+        self.overrides_gate.get(&(layer, feature)).map(|v| v.as_slice())
+    }
+
     fn has_overrides_at(&self, layer: usize) -> bool {
         self.overrides_gate.keys().any(|(l, _)| *l == layer)
             || self.base.has_overrides_at(layer)
@@ -664,6 +763,169 @@ impl GateIndex for PatchedVindex {
     }
 
     fn gate_knn_batch(&self, layer: usize, x: &ndarray::Array2<f32>, top_k: usize) -> Vec<usize> {
-        self.base.gate_knn_batch(layer, x, top_k)
+        // The base impl runs a BLAS gemm against the disk-side gate
+        // matrix and ignores the patch overlay — so any feature with
+        // an overridden gate (e.g. an INSERT slot) wouldn't be in the
+        // candidate set. Re-rank per row using the per-row `gate_knn`
+        // path, which `PatchedVindex::gate_knn` overrides correctly.
+        // Returns the union of selected feature indices across all
+        // rows, deduplicated.
+        if self.overrides_gate.iter().all(|((l, _), _)| *l != layer) {
+            // No overrides at this layer — base path is correct.
+            return self.base.gate_knn_batch(layer, x, top_k);
+        }
+        let mut selected = std::collections::BTreeSet::<usize>::new();
+        for s in 0..x.shape()[0] {
+            let row = x.row(s).to_owned();
+            let hits = self.gate_knn(layer, &row, top_k);
+            for (feat, _) in hits {
+                selected.insert(feat);
+            }
+        }
+        selected.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod gate_override_tests {
+    //! Direct unit tests for the gate-override accessors and mutator
+    //! used by `COMPILE INTO VINDEX WITH REFINE`. The integration tests
+    //! in `larql-lql` exercise these via the executor; these tests
+    //! cover them at the API surface so a regression in the layering
+    //! contract gets caught here without needing the full executor.
+    use super::*;
+    use crate::index::core::VectorIndex;
+    use larql_models::TopKEntry;
+    use ndarray::Array2;
+
+    fn make_meta(token: &str) -> FeatureMeta {
+        FeatureMeta {
+            top_token: token.into(),
+            top_token_id: 0,
+            c_score: 0.9,
+            top_k: vec![TopKEntry { token: token.into(), token_id: 0, logit: 0.9 }],
+        }
+    }
+
+    /// A 2-layer × 3-feature × 4-hidden empty base index for these
+    /// tests. Gate vectors and metas are zero — overrides land on top.
+    fn make_empty_base() -> PatchedVindex {
+        let gate0 = Array2::<f32>::zeros((3, 4));
+        let gate1 = Array2::<f32>::zeros((3, 4));
+        let down_meta = vec![
+            Some(vec![None, None, None]),
+            Some(vec![None, None, None]),
+        ];
+        let index = VectorIndex::new(vec![Some(gate0), Some(gate1)], down_meta, 2, 4);
+        PatchedVindex::new(index)
+    }
+
+    #[test]
+    fn set_gate_override_replaces_existing_slot() {
+        let mut p = make_empty_base();
+        p.insert_feature(0, 1, vec![1.0, 0.0, 0.0, 0.0], make_meta("a"));
+        p.set_gate_override(0, 1, vec![0.0, 1.0, 0.0, 0.0]);
+        let read = p.overrides_gate_at(0, 1).unwrap();
+        assert_eq!(read, &[0.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn set_gate_override_is_no_op_when_slot_absent() {
+        // The contract is "only refine slots that were already touched
+        // by a patch" — set_gate_override should NOT create a new entry
+        // out of nothing. Verifying this stops a future caller from
+        // accidentally inserting half-state (gate without meta).
+        let mut p = make_empty_base();
+        p.set_gate_override(0, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        assert!(p.overrides_gate_at(0, 1).is_none());
+    }
+
+    #[test]
+    fn overrides_gate_iter_yields_every_inserted_slot() {
+        let mut p = make_empty_base();
+        p.insert_feature(0, 0, vec![1.0, 0.0, 0.0, 0.0], make_meta("a"));
+        p.insert_feature(0, 2, vec![0.0, 1.0, 0.0, 0.0], make_meta("b"));
+        p.insert_feature(1, 1, vec![0.0, 0.0, 1.0, 0.0], make_meta("c"));
+        let mut entries: Vec<(usize, usize)> =
+            p.overrides_gate_iter().map(|(l, f, _)| (l, f)).collect();
+        entries.sort();
+        assert_eq!(entries, vec![(0, 0), (0, 2), (1, 1)]);
+    }
+
+    #[test]
+    fn overrides_gate_iter_returns_actual_vectors() {
+        let mut p = make_empty_base();
+        let g = vec![0.5_f32, -0.5, 0.25, -0.25];
+        p.insert_feature(0, 0, g.clone(), make_meta("x"));
+        let mut found = false;
+        for (l, f, vec) in p.overrides_gate_iter() {
+            if (l, f) == (0, 0) {
+                assert_eq!(vec, g.as_slice());
+                found = true;
+            }
+        }
+        assert!(found, "iter should yield the inserted slot");
+    }
+
+    #[test]
+    fn set_up_vector_round_trip() {
+        // Up overrides parallel down overrides — set, read back, verify.
+        // Used by INSERT to write the slot's up component when installing
+        // a constellation fact (mutation.rs install_compiled_slot port).
+        let mut p = make_empty_base();
+        let up = vec![0.3_f32, -0.4, 0.5, -0.6];
+        p.set_up_vector(0, 1, up.clone());
+        assert_eq!(p.up_override_at(0, 1), Some(up.as_slice()));
+        // Different slot is unaffected.
+        assert!(p.up_override_at(0, 2).is_none());
+    }
+
+    #[test]
+    fn up_and_down_overrides_are_independent() {
+        // INSERT writes both per layer; verifying they don't overwrite
+        // each other's storage (separate HashMaps on the base index).
+        let mut p = make_empty_base();
+        let up = vec![1.0_f32, 0.0, 0.0, 0.0];
+        let down = vec![0.0_f32, 1.0, 0.0, 0.0];
+        p.set_up_vector(0, 0, up.clone());
+        p.set_down_vector(0, 0, down.clone());
+        assert_eq!(p.up_override_at(0, 0), Some(up.as_slice()));
+        assert_eq!(p.down_override_at(0, 0), Some(down.as_slice()));
+    }
+
+    #[test]
+    fn up_overrides_iterator_yields_every_slot() {
+        let mut p = make_empty_base();
+        p.set_up_vector(0, 0, vec![1.0_f32, 0.0, 0.0, 0.0]);
+        p.set_up_vector(0, 2, vec![0.0_f32, 1.0, 0.0, 0.0]);
+        p.set_up_vector(1, 1, vec![0.0_f32, 0.0, 1.0, 0.0]);
+        let mut keys: Vec<(usize, usize)> = p.up_overrides().keys().copied().collect();
+        keys.sort();
+        assert_eq!(keys, vec![(0, 0), (0, 2), (1, 1)]);
+    }
+
+    #[test]
+    fn iter_then_set_round_trip_preserves_other_slots() {
+        // Simulate what run_refine_pass does: snapshot via iter,
+        // mutate one slot via set_gate_override, verify the other
+        // slot's gate is unchanged.
+        let mut p = make_empty_base();
+        let original_a = vec![1.0_f32, 0.0, 0.0, 0.0];
+        let original_b = vec![0.0_f32, 1.0, 0.0, 0.0];
+        p.insert_feature(0, 0, original_a.clone(), make_meta("a"));
+        p.insert_feature(0, 1, original_b.clone(), make_meta("b"));
+
+        // Snapshot.
+        let snapshot: Vec<(usize, usize, Vec<f32>)> = p
+            .overrides_gate_iter()
+            .map(|(l, f, v)| (l, f, v.to_vec()))
+            .collect();
+        assert_eq!(snapshot.len(), 2);
+
+        // Mutate slot a only.
+        p.set_gate_override(0, 0, vec![0.5, 0.5, 0.0, 0.0]);
+
+        assert_eq!(p.overrides_gate_at(0, 0).unwrap(), &[0.5, 0.5, 0.0, 0.0]);
+        assert_eq!(p.overrides_gate_at(0, 1).unwrap(), original_b.as_slice());
     }
 }

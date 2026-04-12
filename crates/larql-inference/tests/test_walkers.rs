@@ -555,4 +555,47 @@ mod walker_tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn test_capture_decoy_residuals_returns_vector_per_prompt() {
+        // Direct test for the entry point used by COMPILE INTO VINDEX
+        // WITH DECOYS. Three pre-tokenised prompts, capture at one
+        // layer, expect three Array1<f32> back of the right size.
+        let dir = std::env::temp_dir().join("larql_test_capture_decoys");
+        let _ = std::fs::remove_dir_all(&dir);
+        create_mock_model(&dir);
+
+        let weights = larql_inference::model::load_model_dir(&dir).unwrap();
+
+        let prompts = vec![
+            vec![4u32, 5],
+            vec![0u32, 1, 2],
+            vec![3u32],
+        ];
+        let residuals = larql_inference::capture_decoy_residuals(&weights, &prompts, 1);
+
+        assert_eq!(residuals.len(), 3, "one residual per prompt");
+        for (i, r) in residuals.iter().enumerate() {
+            assert_eq!(r.len(), 8, "prompt {i} residual must be hidden_size");
+        }
+        // Different prompts should produce different residuals (the
+        // mock model is deterministic but distinct token IDs land at
+        // different rows in the embedding matrix).
+        assert_ne!(residuals[0], residuals[1], "different prompts → different residuals");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_capture_decoy_residuals_empty_input() {
+        let dir = std::env::temp_dir().join("larql_test_capture_decoys_empty");
+        let _ = std::fs::remove_dir_all(&dir);
+        create_mock_model(&dir);
+
+        let weights = larql_inference::model::load_model_dir(&dir).unwrap();
+        let residuals: Vec<_> = larql_inference::capture_decoy_residuals(&weights, &[], 0);
+        assert!(residuals.is_empty(), "no prompts → no residuals");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

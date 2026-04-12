@@ -13,7 +13,7 @@ use ndarray::Array2;
 
 use larql_compute::ComputeBackend;
 use crate::ffn::FfnBackend;
-use crate::ffn::sparse_compute::{sparse_ffn_forward, sparse_ffn_forward_with_overrides};
+use crate::ffn::sparse_compute::sparse_ffn_forward;
 use crate::model::ModelWeights;
 
 use larql_vindex::{GateIndex, WalkHit, WalkTrace};
@@ -71,6 +71,24 @@ impl<'a> WalkFfn<'a> {
             trace_residuals: std::cell::RefCell::new(Vec::new()),
             record_trace: true,
         }
+    }
+
+    /// Unlimited top_k plus residual tracing. Used by `exec_infer`
+    /// whenever a patched session has installed slots — bounded
+    /// top_k drops features from the activation sum, which is
+    /// harmless on a clean model (dropped features have tiny
+    /// activations) but catastrophic once a strong (×30 gate scale)
+    /// INSERT slot is in the mix: the slot's activation then
+    /// dominates a half-weakened baseline and hijacks every prompt
+    /// to whichever installed target has the largest lm_head
+    /// alignment. Matching the dense FFN by processing every
+    /// feature keeps the baseline intact and the installed slot
+    /// proportional.
+    pub fn new_unlimited_with_trace(
+        weights: &'a ModelWeights,
+        index: &'a dyn GateIndex,
+    ) -> Self {
+        Self::new_with_trace(weights, index, usize::MAX)
     }
 
     /// Take raw per-layer residuals (the exact vectors gate_knn sees during inference).
@@ -148,8 +166,24 @@ impl<'a> WalkFfn<'a> {
 
             for (feat, gate_score) in hits {
                 let act = if is_gated {
-                    // Up: single dot product from mmap (not a matmul)
-                    let up_score = up_view.row(feat).dot(&x_row);
+                    // Up: prefer the override slot (set by INSERT) before
+                    // falling back to the mmap'd `up_features.bin` row.
+                    // This is the parallel of the down_override path
+                    // below — installing a fact rewrites all three
+                    // FFN slot components (gate via overlay, up here,
+                    // down via base.down_overrides) so the slot's
+                    // activation reflects the constellation install
+                    // instead of the original weak free-slot up vector.
+                    let up_score = if let Some(up_ov) = self.index.up_override(layer, feat) {
+                        if up_ov.len() == hidden {
+                            let ov = ndarray::ArrayView1::from(up_ov);
+                            ov.dot(&x_row)
+                        } else {
+                            up_view.row(feat).dot(&x_row)
+                        }
+                    } else {
+                        up_view.row(feat).dot(&x_row)
+                    };
                     let activated_gate = if use_gelu {
                         crate::ffn::gelu_tanh(gate_score)
                     } else {
@@ -532,6 +566,22 @@ impl<'a> FfnBackend for WalkFfn<'a> {
             self.trace_residuals.borrow_mut().push((layer, last_row));
         }
 
+        // Override-aware routing: when this layer has any patched
+        // gate / up / down vectors (i.e. INSERT has touched it), force
+        // the per-feature `walk_ffn_sparse` path. That path checks all
+        // three override slots before falling back to the mmap'd row;
+        // the BLAS / interleaved paths below operate on whole-layer
+        // matrices and only have a partial post-hoc down-override
+        // correction, which silently produces wrong activations for
+        // overridden features. The sparse path is correct by
+        // construction and the only path that respects up_override,
+        // so anything with overrides goes here.
+        if self.index.has_overrides_at(layer) {
+            if let Some(result) = self.walk_ffn_sparse(layer, x) {
+                return result;
+            }
+        }
+
         // Q4 interleaved: preferred when GPU Q4 is available (Metal shader faster than BLAS).
         // CPU Q4 C kernel is slower than CPU BLAS at these dimensions — only use with GPU.
         if self.index.has_interleaved_q4() && self.backend.is_some_and(|be| be.has_q4()) {
@@ -598,16 +648,43 @@ impl<'a> FfnBackend for WalkFfn<'a> {
             return self.walk_ffn_exact(layer, x);
         }
 
-        // Gate KNN needed only for sparse fallback (no mmap down)
+        // Gate KNN needed only for sparse fallback (no mmap down).
+        // PatchedVindex::gate_knn_batch applies the gate overlay so any
+        // installed slot lands in the candidate set even when its
+        // original disk-side gate is weak.
         let features = self.index.gate_knn_batch(layer, x, self.top_k);
 
-        // Fallback: sparse matmul against model weights
-        let has_overrides = features.iter().any(|&f| self.index.down_override(layer, f).is_some());
-        if has_overrides {
-            let overrides: Vec<(usize, &[f32])> = features.iter()
-                .filter_map(|&f| self.index.down_override(layer, f).map(|v| (f, v)))
+        // Fallback: sparse matmul against model weights.
+        //
+        // We always need gate-aware overrides on the patched session
+        // because INSERT writes the strong gate / up / down trio into
+        // the overlay. The dense gather above reads the original (weak)
+        // free-slot gate / up at the installed feature, so the activation
+        // would be tiny without the override-aware computation.
+        // sparse_ffn_forward_with_full_overrides re-computes
+        // `silu(gate_override · x) * (up_override · x)` for any slot
+        // with an overlay entry, then applies the down override.
+        let has_any_override = features.iter().any(|&f| {
+            self.index.down_override(layer, f).is_some()
+                || self.index.up_override(layer, f).is_some()
+        }) || self.index.has_overrides_at(layer);
+
+        if has_any_override {
+            let slot_overrides: Vec<crate::ffn::FeatureSlotOverride<'_>> = features
+                .iter()
+                .map(|&f| crate::ffn::FeatureSlotOverride {
+                    feature: f,
+                    // gate override lives on the patched overlay, accessed
+                    // via the new accessor on the GateIndex trait.
+                    gate: self.index.gate_override(layer, f),
+                    up: self.index.up_override(layer, f),
+                    down: self.index.down_override(layer, f),
+                })
+                .filter(|o| o.gate.is_some() || o.up.is_some() || o.down.is_some())
                 .collect();
-            sparse_ffn_forward_with_overrides(self.weights, layer, x, &features, &overrides)
+            crate::ffn::sparse_ffn_forward_with_full_overrides(
+                self.weights, layer, x, &features, &slot_overrides,
+            )
         } else {
             sparse_ffn_forward(self.weights, layer, x, &features)
         }
