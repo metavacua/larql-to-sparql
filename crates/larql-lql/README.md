@@ -149,16 +149,16 @@ cargo test -p larql-lql --lib parser::tests                   # parser unit test
 cargo run -p larql-lql --example parser_demo                   # AST output, every statement type
 cargo run -p larql-lql --example lql_demo                      # 56-row spec compliance grid
 cargo run --release -p larql-lql --example compile_demo        # End-to-end COMPILE INTO VINDEX
-cargo run --release -p larql-lql --example refine_demo         # End-to-end refine + decoys (exp 14 reproduction)
+cargo run --release -p larql-lql --example refine_demo         # End-to-end 10-fact INSERT + COMPILE (exp 14 reproduction)
                                                                 #   on real Gemma 4B (skips if absent)
 
 # Criterion benches (use --quick for a fast sweep)
 cargo bench  -p larql-lql --bench parser                       # parse_single × 18, parse_batch
 cargo bench  -p larql-lql --bench executor                     # SELECT, SHOW, DELETE, UPDATE, patch lifecycle
-cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VINDEX bake cost + refine vs no-refine
+cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VINDEX bake cost
 ```
 
-### Test coverage (267 tests)
+### Test coverage (272 tests)
 
 - **Parser** (`parser/tests.rs`, 1,500+ lines): every statement type and
   every clause combination, plus negative tests for malformed input.
@@ -169,9 +169,14 @@ cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VI
 - **Executor — mutation pipeline**: builds a synthetic vindex on disk,
   runs `USE` against it, exercises `DELETE`, `UPDATE`, `BEGIN PATCH`,
   `SAVE PATCH`, auto-patch lifecycle, and `MERGE` error paths.
-- **`COMPILE INTO VINDEX` byte baker**: 6 unit tests for `patch_down_weights`
-  covering f32/f16 dtypes, multiple-feature/multiple-layer overrides,
-  shape mismatch errors, and missing-source error paths.
+- **Executor — COMPILE INTO VINDEX**: conflict detection (ON CONFLICT
+  FAIL/LAST_WINS), down override baking, structural compile with no
+  patches, plus 6 unit tests for `patch_down_weights` covering f32/f16
+  dtypes, multiple-feature/multiple-layer overrides, shape mismatch
+  errors, and missing-source error paths.
+- **Executor — MEMIT + balance**: fact collection from patches,
+  deduplication, template-matched decoys, relation template generation,
+  COMPILE INTO MODEL requires model weights.
 
 ### Bench measurements (typical machine)
 

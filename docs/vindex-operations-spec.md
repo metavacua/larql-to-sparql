@@ -154,22 +154,21 @@ quantisation since `down_weights.bin` is stored as f16).
 
 #### `COMPILE INTO MODEL` — export to HuggingFace / GGUF
 
-Reconstructs HuggingFace-compatible model files from the vindex.
-
-```rust
-compile_vindex(&vindex_path, &output_path, format)?;
-```
+Compiles the vindex (with patch overlay) into plain model weights. If the
+patch overlay contains INSERT operations, MEMIT closed-form weight editing
+is used to bake the inserted facts into `W_down` at the install layer(s).
+The output is a standard safetensors directory with no vindex dependency.
 
 **Algorithm:**
-1. Read `gate_vectors.bin` → reshape rows into W_gate matrices per layer (canonical source — no separate gate weight file)
-2. Read split weight files (`attn_weights.bin`, `up_weights.bin`, `down_weights.bin`, `norms.bin`)
-3. Inserted features are already in `down_weights.bin` (baked there by an
-   earlier `COMPILE INTO VINDEX` step, or by INSERT applied to a vindex
-   that has `has_model_weights = true`). The export is a passthrough —
-   no special handling needed for the constellation, since the override
-   columns are sitting in the exact bytes the manifest references.
-4. Write safetensors with standard HuggingFace naming conventions
-5. Copy `config.json` and `tokenizer.json` from vindex metadata
+1. Load model weights from vindex split files
+2. If patches contain INSERTs: run the MEMIT pipeline per install layer:
+   a. Estimate FFN activation covariance C from diverse prompts
+   b. Capture per-fact FFN activations k* at canonical prompts
+   c. Compute target deltas from embedding directions
+   d. Solve `ΔW = R^T S⁻¹ Q` where `S = K C⁻¹ K^T + λI`
+   e. Apply `ΔW` to `W_down` at each layer
+3. Write modified weights as safetensors with HuggingFace naming
+4. Copy `tokenizer.json` from vindex metadata
 
 **Requires:** Extract level `All` (model weights present).
 

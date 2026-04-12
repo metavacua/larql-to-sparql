@@ -42,11 +42,10 @@ pub fn capture_residuals(
 /// prompts. Returns one `Array1<f32>` per prompt (the last-token residual
 /// at `layer`), in the same order as the input.
 ///
-/// This is the entry point used by `COMPILE INTO VINDEX WITH DECOYS`:
-/// the executor tokenises each user-supplied prompt, calls this once per
-/// prompt, then feeds the resulting vectors into the refine pass as
-/// suppression directions. One forward pass per decoy. Cheap relative
-/// to the bake step itself, and only happens at compile time.
+/// Used by INSERT's batch refine pass: the executor captures residuals
+/// for canonical and template-matched decoy prompts, then feeds them
+/// into the refine pass as suppression directions. One forward pass
+/// per decoy. Cheap relative to the install itself.
 pub fn capture_decoy_residuals(
     weights: &ModelWeights,
     token_ids_per_prompt: &[Vec<u32>],

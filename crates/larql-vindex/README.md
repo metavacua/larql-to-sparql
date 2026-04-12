@@ -69,8 +69,8 @@ plus any decoy residuals supplied by the caller. Pure Gram-Schmidt over
 result carries the refined gates plus per-fact `retained_norm`
 statistics.
 
-This is the load-bearing fix for cross-fact bleed at compile time and is
-what `COMPILE INTO VINDEX WITH REFINE` calls before the bake step.
+This is the load-bearing fix for cross-fact bleed and is called by
+INSERT's batch refine pass at install time.
 Refining is per-layer (facts at different layers can't interfere
 through the FFN math). Decoy residuals are layer-scoped — the caller is
 responsible for capturing them at the correct depth, which is exactly
@@ -158,9 +158,8 @@ larql-vindex/src/
 │   ├── core.rs                 VindexPatch, PatchOp, PatchedVindex
 │   └── refine.rs               Gate refine pass (Gram-Schmidt orthogonalisation
 │                               of patched gates against each other + optional
-│                               decoy residuals — used by COMPILE INTO VINDEX
-│                               WITH REFINE to suppress cross-fact bleed before
-│                               the bake)
+│                               decoy residuals — used by INSERT's batch refine
+│                               to suppress cross-fact bleed at install time)
 │
 ├── clustering/                 Relation discovery
 │   ├── kmeans.rs               k-means clustering (BLAS via larql-compute)
