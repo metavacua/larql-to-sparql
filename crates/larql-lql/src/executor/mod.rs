@@ -145,8 +145,12 @@ impl Session {
             Statement::Describe { entity, band, layer, relations_only, mode } => {
                 self.exec_describe(entity, *band, *layer, *relations_only, *mode)
             }
-            Statement::Select { fields, conditions, nearest, order, limit } => {
-                self.exec_select(fields, conditions, nearest.as_ref(), order.as_ref(), *limit)
+            Statement::Select { source, fields, conditions, nearest, order, limit } => {
+                match source {
+                    SelectSource::Edges => self.exec_select(fields, conditions, nearest.as_ref(), order.as_ref(), *limit),
+                    SelectSource::Features => self.exec_select_features(conditions, *limit),
+                    SelectSource::Entities => self.exec_select_entities(conditions, *limit),
+                }
             }
             Statement::Explain { prompt, mode, layers, band, verbose, top, relations_only, with_attention } => {
                 match mode {
@@ -160,6 +164,9 @@ impl Session {
             Statement::ShowLayers { range } => self.exec_show_layers(range.as_ref()),
             Statement::ShowFeatures { layer, conditions, limit } => {
                 self.exec_show_features(*layer, conditions, *limit)
+            }
+            Statement::ShowEntities { layer, limit } => {
+                self.exec_show_entities(*layer, *limit)
             }
             Statement::ShowModels => self.exec_show_models(),
             Statement::Extract { model, output, components, layers, extract_level } => {
@@ -233,7 +240,7 @@ impl Session {
             }
             Statement::Delete { conditions } => self.remote_delete(conditions),
             Statement::Update { set, conditions } => self.remote_update(set, conditions),
-            Statement::Select { fields: _, conditions, nearest: _, order: _, limit } => {
+            Statement::Select { source: _, fields: _, conditions, nearest: _, order: _, limit } => {
                 self.remote_select(conditions, *limit)
             }
             Statement::Explain { prompt, mode, layers, band, verbose: _, top, relations_only, with_attention } => {

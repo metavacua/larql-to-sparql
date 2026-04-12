@@ -224,8 +224,10 @@ impl Session {
         conditions: &[Condition],
         limit: Option<u32>,
     ) -> Result<Vec<String>, LqlError> {
-        let (_path, _config, patched) = self.require_vindex()?;
-        let limit = limit.unwrap_or(20) as usize;
+        let (_path, config, patched) = self.require_vindex()?;
+        // Default to num_layers — a manageable screenful that matches
+        // the model's depth. Use LIMIT for more or fewer.
+        let limit = limit.unwrap_or(config.num_layers as u32) as usize;
 
         // Extract filters from WHERE conditions
         let token_filter = conditions.iter().find(|c| c.field == "relation" || c.field == "token").and_then(|c| {
@@ -239,9 +241,10 @@ impl Session {
             }
         });
 
-        let metas = patched
-            .down_meta_at(layer as usize)
-            .ok_or_else(|| LqlError::Execution(format!("no metadata for layer {layer}")))?;
+        let nf = patched.num_features(layer as usize);
+        if nf == 0 {
+            return Err(LqlError::Execution(format!("no features at layer {layer}")));
+        }
 
         let mut out = Vec::new();
         out.push(format!(
@@ -251,11 +254,11 @@ impl Session {
         out.push("-".repeat(72));
 
         let mut count = 0;
-        for (feat_idx, meta_opt) in metas.iter().enumerate() {
+        for feat_idx in 0..nf {
             if count >= limit {
                 break;
             }
-            if let Some(meta) = meta_opt {
+            if let Some(meta) = patched.feature_meta(layer as usize, feat_idx) {
                 // Apply WHERE filters
                 if let Some(tf) = token_filter {
                     if !meta.top_token.to_lowercase().contains(&tf.to_lowercase()) {
@@ -282,6 +285,89 @@ impl Session {
                 ));
                 count += 1;
             }
+        }
+
+        Ok(out)
+    }
+
+    pub(crate) fn exec_show_entities(
+        &self,
+        layer_filter: Option<u32>,
+        limit: Option<u32>,
+    ) -> Result<Vec<String>, LqlError> {
+        let (_path, config, patched) = self.require_vindex()?;
+        let limit = limit.unwrap_or(50) as usize;
+
+        let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
+            vec![l as usize]
+        } else {
+            (0..config.num_layers).collect()
+        };
+
+        // Collect distinct top_tokens across all scanned features.
+        let mut entity_counts: std::collections::HashMap<String, (usize, f32)> =
+            std::collections::HashMap::new();
+
+        for layer in &scan_layers {
+            let nf = patched.num_features(*layer);
+            for feat in 0..nf {
+                if let Some(meta) = patched.feature_meta(*layer, feat) {
+                    let tok = meta.top_token.trim().to_string();
+                    // Filter to named entities: starts with uppercase
+                    // ASCII, 3+ chars, all alphabetic. This skips
+                    // function words (the, of, in), subword fragments,
+                    // and non-Latin scripts that are typically noise
+                    // from polysemantic features.
+                    if tok.len() < 3 {
+                        continue;
+                    }
+                    let first = tok.chars().next().unwrap_or(' ');
+                    if !first.is_ascii_uppercase() {
+                        continue;
+                    }
+                    if !tok.chars().all(|c| c.is_alphabetic()) {
+                        continue;
+                    }
+                    let entry = entity_counts.entry(tok).or_insert((0, 0.0));
+                    entry.0 += 1;
+                    if meta.c_score > entry.1 {
+                        entry.1 = meta.c_score;
+                    }
+                }
+            }
+        }
+
+        // Sort by feature count descending.
+        let mut entities: Vec<(String, usize, f32)> = entity_counts
+            .into_iter()
+            .map(|(tok, (count, max_score))| (tok, count, max_score))
+            .collect();
+        entities.sort_by(|a, b| b.1.cmp(&a.1));
+        entities.truncate(limit);
+
+        let mut out = Vec::new();
+        let layer_note = if let Some(l) = layer_filter {
+            format!(" at layer {l}")
+        } else {
+            format!(" across {} layers", scan_layers.len())
+        };
+        out.push(format!("Distinct entities{layer_note} ({} total, showing top {limit}):",
+            entities.len().max(limit)));
+        out.push(format!(
+            "{:<24} {:>10} {:>10}",
+            "Entity", "Features", "Max Score"
+        ));
+        out.push("-".repeat(48));
+
+        for (tok, count, max_score) in &entities {
+            out.push(format!(
+                "{:<24} {:>10} {:>10.4}",
+                tok, count, max_score
+            ));
+        }
+
+        if entities.is_empty() {
+            out.push("  (no entities found)".into());
         }
 
         Ok(out)

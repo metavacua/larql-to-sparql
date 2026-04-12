@@ -49,6 +49,7 @@ pub enum Statement {
         compare: bool,
     },
     Select {
+        source: SelectSource,
         fields: Vec<Field>,
         conditions: Vec<Condition>,
         nearest: Option<NearestClause>,
@@ -113,6 +114,10 @@ pub enum Statement {
     ShowFeatures {
         layer: u32,
         conditions: Vec<Condition>,
+        limit: Option<u32>,
+    },
+    ShowEntities {
+        layer: Option<u32>,
         limit: Option<u32>,
     },
     ShowModels,
@@ -263,6 +268,13 @@ pub enum Component {
 pub struct Range {
     pub start: u32,
     pub end: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectSource {
+    Edges,
+    Features,
+    Entities,
 }
 
 #[derive(Debug, Clone)]

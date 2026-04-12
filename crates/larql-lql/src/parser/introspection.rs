@@ -79,6 +79,26 @@ impl Parser {
                 self.eat_semicolon();
                 Ok(Statement::ShowFeatures { layer, conditions, limit })
             }
+            Token::Keyword(Keyword::Entities) => {
+                self.advance();
+                let layer = if self.check_keyword(Keyword::At) {
+                    self.advance();
+                    self.expect_keyword(Keyword::Layer)?;
+                    Some(self.expect_u32()?)
+                } else if matches!(self.peek(), Token::IntegerLit(_)) {
+                    Some(self.expect_u32()?)
+                } else {
+                    None
+                };
+                let limit = if self.check_keyword(Keyword::Limit) {
+                    self.advance();
+                    Some(self.expect_u32()?)
+                } else {
+                    None
+                };
+                self.eat_semicolon();
+                Ok(Statement::ShowEntities { layer, limit })
+            }
             Token::Keyword(Keyword::Models) => {
                 self.advance();
                 self.eat_semicolon();
@@ -90,7 +110,7 @@ impl Parser {
                 Ok(Statement::ShowPatches)
             }
             _ => Err(ParseError(format!(
-                "expected RELATIONS, LAYERS, FEATURES, MODELS, or PATCHES after SHOW, got {:?}",
+                "expected RELATIONS, LAYERS, FEATURES, ENTITIES, MODELS, or PATCHES after SHOW, got {:?}",
                 self.peek()
             ))),
         }

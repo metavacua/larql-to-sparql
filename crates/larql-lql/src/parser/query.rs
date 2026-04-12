@@ -76,7 +76,16 @@ impl Parser {
         let fields = self.parse_field_list()?;
 
         self.expect_keyword(Keyword::From)?;
-        self.expect_keyword(Keyword::Edges)?;
+        let source = match self.peek() {
+            Token::Keyword(Keyword::Edges) => { self.advance(); SelectSource::Edges }
+            Token::Keyword(Keyword::Features) => { self.advance(); SelectSource::Features }
+            Token::Keyword(Keyword::Entities) => { self.advance(); SelectSource::Entities }
+            _ => {
+                // Default to EDGES for backwards compatibility.
+                self.expect_keyword(Keyword::Edges)?;
+                SelectSource::Edges
+            }
+        };
 
         let mut nearest = None;
         if self.check_keyword(Keyword::Nearest) {
@@ -112,7 +121,7 @@ impl Parser {
         };
 
         self.eat_semicolon();
-        Ok(Statement::Select { fields, conditions, nearest, order, limit })
+        Ok(Statement::Select { source, fields, conditions, nearest, order, limit })
     }
 
     pub(crate) fn parse_describe(&mut self) -> Result<Statement, ParseError> {
