@@ -176,23 +176,32 @@ impl Session {
                     .map_err(|e| LqlError::exec("tokenize error", e))?;
                 let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-                // Capture through the BASE index (no patch overlay).
+                // Capture through the BASE index (no patch overlay),
+                // with UNLIMITED top_k to match what INFER does at
+                // query time. Two coupled choices:
                 //
-                // This is the crucial bit that makes multi-fact
-                // installs work. If we captured through `patched`,
-                // every prior INSERT's slot would already be firing
-                // during the forward pass, contaminating the captured
-                // residual with the earlier targets. The refine pass
-                // can't undo that — it can only orthogonalise against
-                // directions explicitly stored in the overlay, not the
-                // residual contamination from firing slots upstream.
+                // 1. BASE index (not `patched`): prior INSERTs'
+                //    slots shouldn't fire during this capture — they
+                //    would contaminate the new fact's residual with
+                //    earlier targets, and the refine pass can't undo
+                //    that cleanly. Matches Python exp 14 Phase 2:
+                //    capture all on clean model, then install.
                 //
-                // Capturing through `patched.base()` matches Python
-                // `experiments/14_vindex_compilation` where Phase 2
-                // captures all residuals on the clean model before
-                // any installs happen.
-                let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(
-                    &weights, patched.base(), 8092,
+                // 2. UNLIMITED top_k: the INFER path in `query.rs`
+                //    uses `new_unlimited_with_trace`, so the L26
+                //    residual at inference time is built from a
+                //    full-power baseline (all 16384 features fire).
+                //    If we captured at top_k=8092 — a half-power
+                //    baseline — the captured residual would differ
+                //    from the inference residual in magnitude even
+                //    when the direction matches. We'd engineer gates
+                //    against half-power residuals and fire them
+                //    against full-power ones, producing the "cosines
+                //    look fine, activations have a 25-unit gap"
+                //    silent-drift class of bug noted in
+                //    `experiments/15_v11_model/RESULTS.md §20.3`.
+                let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
+                    &weights, patched.base(),
                 );
                 let _result = larql_inference::predict_with_ffn(
                     &weights, &tokenizer, &token_ids, 1, &walk_ffn,
@@ -223,8 +232,11 @@ impl Session {
                             let enc = tokenizer.encode(*decoy_prompt, true)
                                 .map_err(|e| LqlError::exec("tokenize decoy", e))?;
                             let ids: Vec<u32> = enc.get_ids().to_vec();
-                            let ffn = larql_inference::vindex::WalkFfn::new_with_trace(
-                                &weights, patched.base(), 8092,
+                            // Also unlimited top_k here so decoy
+                            // residuals match the full-power
+                            // baseline INFER will produce.
+                            let ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
+                                &weights, patched.base(),
                             );
                             let _ = larql_inference::predict_with_ffn(
                                 &weights, &tokenizer, &ids, 1, &ffn,

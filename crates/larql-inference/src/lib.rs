@@ -36,8 +36,8 @@ pub use error::InferenceError;
 pub use ffn::{FfnBackend, HighwayFfn, LayerFfnRouter, SparseFfn, WeightFfn};
 pub use attention::AttentionWeights;
 pub use forward::{
-    calibrate_scalar_gains, capture_decoy_residuals, capture_residuals, forward_to_layer,
-    logit_lens_top1, predict,
+    calibrate_scalar_gains, capture_decoy_residuals, capture_ffn_activation_matrix,
+    capture_residuals, estimate_ffn_covariance, forward_to_layer, logit_lens_top1, predict,
     predict_from_hidden, predict_from_hidden_with_ffn, predict_with_ffn,
     predict_with_ffn_attention, predict_with_ffn_trace, predict_with_router,
     predict_with_strategy, trace_forward, trace_forward_full, trace_forward_with_ffn,

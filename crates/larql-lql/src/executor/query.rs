@@ -722,7 +722,13 @@ impl Session {
         };
 
         // ── Phase 2: forward pass (with optional attention capture) ──
-        let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(&weights, patched, 8092);
+        //
+        // Unlimited top_k so EXPLAIN INFER's activation sum matches
+        // what `exec_infer` uses. Otherwise a user who runs INFER
+        // then EXPLAIN INFER on the same prompt sees a half-power
+        // baseline in the trace while production inference uses
+        // full power — silent divergence.
+        let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
         let start = std::time::Instant::now();
         let (predictions, attention_captures, lens_residuals) = if with_attention {
             let r = larql_inference::predict_with_ffn_attention(

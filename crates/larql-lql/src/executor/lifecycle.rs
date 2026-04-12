@@ -599,6 +599,14 @@ impl Session {
         // projection, so the constellation is already in the exported
         // model.
         let down_overrides = patched.down_overrides();
+        let up_overrides = patched.up_overrides();
+        // Collect gate overrides from the patch overlay into an owned
+        // HashMap matching the shape `patch_gate_vectors` expects.
+        let gate_overrides: HashMap<(usize, usize), Vec<f32>> = patched
+            .overrides_gate_iter()
+            .map(|(l, f, g)| ((l, f), g.to_vec()))
+            .collect();
+
         let mut overrides_applied = 0usize;
         if down_overrides.is_empty() {
             // Pure structural compile — hard-link down_weights.bin too.
@@ -615,6 +623,27 @@ impl Session {
             patch_down_weights(path, &output_dir, config, down_overrides)?;
             overrides_applied = down_overrides.len();
         }
+
+        // ── Step 3b/3c: bake gate + up overlays into the compiled vindex ──
+        //
+        // The dense FFN in a freshly-loaded compiled vindex reads
+        // gate and up from `gate_vectors.bin` / `up_features.bin`
+        // directly (no patch overlay present in a cold session). If
+        // we only bake down, the compiled INFER path computes
+        // `silu(weak_source_gate · x) * (weak_source_up · x) *
+        // baked_down` at our installed slots — a tiny activation
+        // times the right down direction — which is invisible on
+        // prompts the model already knows (Gemma's Paris beats a
+        // weak baked down in that direction).
+        //
+        // Baking gate + up into the source files produces the same
+        // math the patched session's `sparse_ffn_forward_with_full_overrides`
+        // runs, turning the compiled vindex into a self-contained
+        // copy of the patched state. Validated by `refine_demo`:
+        // patched session = 10/10; compiled = 8/10 pre-fix because
+        // gate/up were never baked.
+        patch_gate_vectors(path, &output_dir, config, &gate_overrides)?;
+        patch_up_weights(path, &output_dir, config, up_overrides)?;
 
         // ── Step 4: write updated config ──
         let mut new_config = config.clone();
@@ -1130,6 +1159,259 @@ fn patch_down_weights(
             .map_err(|e| LqlError::exec("seek down_weights", e))?;
         file.write_all(&buf)
             .map_err(|e| LqlError::exec("write down_weights slab", e))?;
+    }
+    Ok(())
+}
+
+/// Bake gate overlay entries into `gate_vectors.bin`. File layout
+/// follows the per-layer `VindexLayerInfo` records in `config.layers`:
+///
+/// - dtype from `config.dtype` (may be f16 or f32)
+/// - each layer has an explicit byte `offset` and `length` — layers
+///   are NOT necessarily contiguous or in `layer` order within the
+///   array. Writing at a naive `layer_index × layer_bytes` offset
+///   lands in the wrong slice and corrupts whichever layer actually
+///   lives at that byte position, which wrecks inference across the
+///   whole file (validated by `refine_demo22`: the naive offsets
+///   collapsed compiled-session retrieval from 8/10 to 0/10).
+///
+/// Within a layer, feature `f`'s gate is the row at
+/// `info.offset + f × hidden × bpf` — contiguous per-feature.
+fn patch_gate_vectors(
+    source_dir: &std::path::Path,
+    dest_dir: &std::path::Path,
+    config: &larql_vindex::VindexConfig,
+    gate_overrides: &HashMap<(usize, usize), Vec<f32>>,
+) -> Result<(), LqlError> {
+    if gate_overrides.is_empty() {
+        return Ok(());
+    }
+    let src = source_dir.join("gate_vectors.bin");
+    let dst = dest_dir.join("gate_vectors.bin");
+    if !src.exists() {
+        return Err(LqlError::Execution(
+            "source vindex has no gate_vectors.bin — cannot bake gate overrides".into(),
+        ));
+    }
+
+    // `dst` was hard-linked from the source earlier in the compile
+    // bake's unchanging-files loop, so we need a real copy we own
+    // before seek-writing into it.
+    copy_for_patch(&src, &dst)?;
+
+    let hidden = config.hidden_size;
+    let bpf = larql_vindex::config::dtype::bytes_per_float(config.dtype);
+
+    // Map layer → LayerInfo. Layers that don't appear in config.layers
+    // have no gate data in the file (e.g. embedding-only layers) and
+    // any override targeting them is a bug — we error out clearly.
+    let mut layer_info: HashMap<usize, (u64, usize)> = HashMap::new();
+    for info in &config.layers {
+        layer_info.insert(info.layer, (info.offset, info.num_features));
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&dst)
+        .map_err(|e| LqlError::exec("open gate_vectors.bin", e))?;
+
+    let row_bytes = hidden * bpf;
+    let mut row_buf = vec![0u8; row_bytes];
+
+    for ((layer, feature), gate_vec) in gate_overrides {
+        if gate_vec.len() != hidden {
+            return Err(LqlError::Execution(format!(
+                "gate override at L{layer} F{feature} has wrong shape: {} (expected {hidden})",
+                gate_vec.len()
+            )));
+        }
+        let Some(&(layer_offset, nf)) = layer_info.get(layer) else {
+            return Err(LqlError::Execution(format!(
+                "gate override at L{layer} F{feature}: layer {layer} not in config.layers \
+                 (source vindex has no gate data for this layer)"
+            )));
+        };
+        if *feature >= nf {
+            return Err(LqlError::Execution(format!(
+                "gate override at L{layer} F{feature} out of range (layer has {nf} features)"
+            )));
+        }
+
+        // Encode the gate row to the file's native dtype.
+        if bpf == 4 {
+            for (i, v) in gate_vec.iter().enumerate() {
+                row_buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
+            }
+        } else if bpf == 2 {
+            for (i, v) in gate_vec.iter().enumerate() {
+                let half_bits = larql_models::quant::half::f32_to_f16(*v);
+                row_buf[i * 2..(i + 1) * 2].copy_from_slice(&half_bits.to_le_bytes());
+            }
+        } else {
+            return Err(LqlError::Execution(format!(
+                "unsupported gate_vectors.bin dtype: bpf={bpf}",
+            )));
+        }
+
+        let feature_offset = layer_offset + (*feature * row_bytes) as u64;
+        file.seek(SeekFrom::Start(feature_offset))
+            .map_err(|e| LqlError::exec("seek gate_vectors", e))?;
+        file.write_all(&row_buf)
+            .map_err(|e| LqlError::exec("write gate_vectors row", e))?;
+    }
+    Ok(())
+}
+
+/// Bake up overlay entries into `up_weights.bin`. Dense FFN at
+/// inference time reads this file via `load_model_weights`, which
+/// consults `weight_manifest.json` to find each tensor's `(file,
+/// offset, length, shape)` entry.
+///
+/// The layout is:
+/// - the file the manifest points to (normally `up_weights.bin`, but
+///   could be different if the extract pipeline changes)
+/// - per-layer tensor at `entry.offset` with `entry.length` bytes
+/// - dtype inferred from `byte_count / expected_floats` (4 = f32,
+///   2 = f16), matching the loader at `weights.rs:534-541`
+/// - shape is `[num_features, hidden_size]`, row-major; feature `f`'s
+///   row starts at `entry.offset + f × hidden × bpf`
+///
+/// We DO NOT touch `up_features.bin` (which is a separate
+/// feature-major f32 file used only by `walk_ffn_sparse`, typically
+/// absent from vindexes that ship with `up_weights.bin`). Writing to
+/// the wrong file was the root cause of `refine_demo22`'s regression
+/// from 8/10 to 0/10 compiled retrieval.
+fn patch_up_weights(
+    source_dir: &std::path::Path,
+    dest_dir: &std::path::Path,
+    config: &larql_vindex::VindexConfig,
+    up_overrides: &HashMap<(usize, usize), Vec<f32>>,
+) -> Result<(), LqlError> {
+    if up_overrides.is_empty() {
+        return Ok(());
+    }
+
+    // Read the weight manifest from the SOURCE vindex — the dest copy
+    // was hard-linked from source and we haven't modified the manifest.
+    let manifest_path = source_dir.join("weight_manifest.json");
+    if !manifest_path.exists() {
+        // Manifestless vindex — we can't safely locate the up tensors.
+        // Log and skip. The compiled vindex will still have baked
+        // down_weights.bin and overlay gates in gate_vectors.bin, so
+        // the install is at least partially live.
+        return Ok(());
+    }
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| LqlError::exec("read weight_manifest.json", e))?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest_text)
+        .map_err(|e| LqlError::exec("parse weight_manifest.json", e))?;
+
+    // Build `layer → (file, offset, length)` lookup for the up_proj
+    // tensor at each layer by pattern-matching the manifest key. We
+    // don't resolve the full arch here — we just look for entries
+    // whose key contains `layers.{L}.` AND `up_proj`, which works
+    // for every Llama/Gemma/Mistral-family vindex that writes to
+    // `up_weights.bin`. MoE experts or architectures with different
+    // key conventions will simply not match and the overlay for
+    // those layers is silently skipped.
+    let mut layer_up_lookup: HashMap<usize, (String, u64, u64)> = HashMap::new();
+    for entry in &entries {
+        let Some(key) = entry.get("key").and_then(|v| v.as_str()) else { continue };
+        if !key.contains("up_proj") {
+            continue;
+        }
+        let Some(file) = entry.get("file").and_then(|v| v.as_str()) else { continue };
+        let Some(offset) = entry.get("offset").and_then(|v| v.as_u64()) else { continue };
+        let Some(length) = entry.get("length").and_then(|v| v.as_u64()) else { continue };
+        // Extract the layer number from the key: the segment after
+        // `layers.` and before the next `.`.
+        let Some(rest) = key.split("layers.").nth(1) else { continue };
+        let Some(layer_str) = rest.split('.').next() else { continue };
+        let Ok(layer) = layer_str.parse::<usize>() else { continue };
+        layer_up_lookup.insert(layer, (file.to_string(), offset, length));
+    }
+
+    let hidden = config.hidden_size;
+    let intermediate = config.intermediate_size;
+    // Row-major tensor is [num_features, hidden], so feature f starts
+    // at `offset + f * hidden * bpf`. Expected per-tensor byte count
+    // is `num_features * hidden * bpf` — detect bpf from that.
+    let expected_floats = intermediate * hidden;
+
+    // File handles are cached per file so we don't re-open for each
+    // (layer, feature) write.
+    let mut file_cache: HashMap<String, std::fs::File> = HashMap::new();
+
+    for ((layer, feature), up_vec) in up_overrides {
+        if up_vec.len() != hidden {
+            return Err(LqlError::Execution(format!(
+                "up override at L{layer} F{feature} has wrong shape: {} (expected {hidden})",
+                up_vec.len()
+            )));
+        }
+        if *feature >= intermediate {
+            return Err(LqlError::Execution(format!(
+                "up override at L{layer} F{feature} out of range (intermediate = {intermediate})"
+            )));
+        }
+
+        let Some((file_name, offset, length)) = layer_up_lookup.get(layer) else {
+            // No manifest entry for this layer's up projection —
+            // skip silently, the layer's up is not materialised.
+            continue;
+        };
+
+        let bpf = if *length as usize == expected_floats * 4 {
+            4
+        } else if *length as usize == expected_floats * 2 {
+            2
+        } else {
+            return Err(LqlError::Execution(format!(
+                "up weight for L{layer} has length {length} ≠ \
+                 expected {} (f32) or {} (f16)",
+                expected_floats * 4,
+                expected_floats * 2,
+            )));
+        };
+
+        // Lazily open + copy the file if we haven't touched it yet.
+        if !file_cache.contains_key(file_name) {
+            let src = source_dir.join(file_name);
+            let dst = dest_dir.join(file_name);
+            if !src.exists() {
+                return Err(LqlError::Execution(format!(
+                    "weight file {file_name} referenced by manifest but missing from source"
+                )));
+            }
+            copy_for_patch(&src, &dst)?;
+            let f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&dst)
+                .map_err(|e| LqlError::exec(&format!("open {file_name}"), e))?;
+            file_cache.insert(file_name.clone(), f);
+        }
+        let file = file_cache.get_mut(file_name).unwrap();
+
+        let row_bytes = hidden * bpf;
+        let mut row_buf = vec![0u8; row_bytes];
+        if bpf == 4 {
+            for (i, v) in up_vec.iter().enumerate() {
+                row_buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
+            }
+        } else {
+            for (i, v) in up_vec.iter().enumerate() {
+                let half_bits = larql_models::quant::half::f32_to_f16(*v);
+                row_buf[i * 2..(i + 1) * 2].copy_from_slice(&half_bits.to_le_bytes());
+            }
+        }
+
+        let feature_offset = offset + (*feature * row_bytes) as u64;
+        file.seek(SeekFrom::Start(feature_offset))
+            .map_err(|e| LqlError::exec(&format!("seek {file_name}"), e))?;
+        file.write_all(&row_buf)
+            .map_err(|e| LqlError::exec(&format!("write {file_name} row"), e))?;
     }
     Ok(())
 }

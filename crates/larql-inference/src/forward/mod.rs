@@ -112,6 +112,8 @@ pub use predict::{
     logits_to_predictions_pub, logit_lens_top1,
 };
 pub use trace::{
-    forward_to_layer, capture_residuals, capture_decoy_residuals, trace_forward,
-    trace_forward_with_ffn, trace_forward_full, calibrate_scalar_gains,
+    forward_to_layer, capture_residuals, capture_decoy_residuals,
+    capture_ffn_activation_matrix, estimate_ffn_covariance,
+    trace_forward, trace_forward_with_ffn, trace_forward_full,
+    calibrate_scalar_gains,
 };

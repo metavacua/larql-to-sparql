@@ -41,8 +41,11 @@ impl super::Session {
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
-        // WalkFfn uses vindex gate KNN — same as INFER, mutations are reflected
-        let walk_ffn = larql_inference::vindex::WalkFfn::new(&weights, patched, 8092);
+        // WalkFfn uses vindex gate KNN — same as INFER, mutations are reflected.
+        // Unlimited top_k to match `exec_infer`'s full-power baseline so a
+        // TRACE of a prompt sees the same residuals / predictions the
+        // production INFER path produces.
+        let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited(&weights, patched);
 
         self.exec_trace_with_ffn(
             &weights, &tokenizer, &walk_ffn, prompt, answer, decompose, layers, positions, save,
