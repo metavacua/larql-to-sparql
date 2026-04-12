@@ -62,6 +62,12 @@ pub fn run_repl() {
                 if statement_buf.is_empty() {
                     match trimmed.to_lowercase().as_str() {
                         "exit" | "quit" | "\\q" => break,
+                        "clear" | "clear;" => {
+                            print!("\x1B[2J\x1B[1;1H");
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                            continue;
+                        }
                         "help" | "\\h" | "\\?" => {
                             print_help();
                             continue;
@@ -163,6 +169,9 @@ fn run_repl_basic() {
         if statement_buf.is_empty() {
             match trimmed.to_lowercase().as_str() {
                 "exit" | "quit" | "\\q" => break,
+                "clear" | "clear;" => { print!("\x1B[2J\x1B[1;1H");
+                            use std::io::Write;
+                            std::io::stdout().flush().ok(); continue; }
                 "help" | "\\h" | "\\?" => { print_help(); continue; }
                 "" => continue,
                 _ => {}
@@ -297,6 +306,7 @@ LQL Commands:
     STATS;                               Summary stats
 
   Meta:
+    clear                                Clear the screen
     help, \h, \?                         Show this help
     exit, quit, \q                       Exit REPL
 "#
