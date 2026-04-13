@@ -1,7 +1,6 @@
 # larql-python — Python Bindings for Vindex
 
 **Version:** 0.1  
-**Author:** Chris Hay  
 **Date:** 2026-04-01  
 **Status:** Draft  
 **Depends on:** larql-vindex (Rust crate)

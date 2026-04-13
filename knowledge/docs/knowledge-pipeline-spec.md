@@ -1,7 +1,6 @@
 # larql-knowledge — Knowledge Pipeline for LARQL
 
 **Version:** 0.1
-**Author:** Chris Hay
 **Date:** 2026-03-31
 **Status:** Draft
 **Companion to:** LQL Language Specification v0.1

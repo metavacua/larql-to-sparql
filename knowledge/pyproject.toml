@@ -5,9 +5,7 @@ description = "Knowledge pipeline for LARQL — reference databases and probe la
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-authors = [
-    {name = "Chris Hay", email = "chrishayuk@googlemail.com"},
-]
+authors = []
 dependencies = [
     "numpy",
 ]

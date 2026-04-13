@@ -1,7 +1,6 @@
 # Trace Store Format Specification
 
 **Version:** 0.1  
-**Author:** Chris Hay  
 **Date:** 2026-04-02  
 **Status:** Implemented  
 **Implementation:** `larql-inference` crate, `trace` module (Rust)  

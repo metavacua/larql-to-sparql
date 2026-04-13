@@ -7,6 +7,7 @@ Usage: python3 scripts/compare_inference.py <model> "<prompt>" [top_k]
 import sys
 import subprocess
 import json
+from pathlib import Path
 
 import mlx.core as mx
 from mlx_lm import load as mlx_load
@@ -69,7 +70,7 @@ def larql_top_k(model_path: str, prompt: str, top_k: int = 10):
     result = subprocess.run(
         ["cargo", "run", "--release", "-p", "larql-cli", "--",
          "predict", model_path, "-p", prompt, "-k", str(top_k)],
-        capture_output=True, text=True, cwd="/Users/christopherhay/chris-source/larql"
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent.parent)
     )
     # Parse output — format: "  1. token               0.1234 (12.34%)"
     predictions = []

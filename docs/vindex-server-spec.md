@@ -1,7 +1,6 @@
 # Vindex Server — Remote Knowledge & Inference
 
 **Version:** 0.1  
-**Author:** Chris Hay  
 **Date:** 2026-04-01  
 **Status:** Draft  
 **Implementation:** `larql-server` crate (Rust)  
