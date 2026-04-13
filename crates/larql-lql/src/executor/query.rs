@@ -367,6 +367,18 @@ impl Session {
             return Ok(out);
         }
 
+        // Signal strength indicator: helps users interpret noisy results
+        // for abstract/functional tokens vs clean entity-level knowledge.
+        let max_gate = edges.iter().map(|e| e.gate).fold(0.0_f32, f32::max);
+        let edge_count = edges.len();
+        let signal = if max_gate >= 20.0 { "clean" }
+            else if max_gate >= 10.0 { "moderate" }
+            else { "diffuse" };
+        out.push(format!(
+            "  signal: {} ({} edges, max gate {:.1})",
+            signal, edge_count, max_gate,
+        ));
+
         let formatted = describe_format_and_split(
             &edges,
             self.relation_classifier(),

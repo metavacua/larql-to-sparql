@@ -1,7 +1,6 @@
 # Vindex Operations Specification
 
 **Version:** 0.3  
-**Author:** Chris Hay  
 **Date:** 2026-04-01  
 **Status:** Implemented (~98%)  
 **Implementation:** `larql-vindex` crate (Rust)  

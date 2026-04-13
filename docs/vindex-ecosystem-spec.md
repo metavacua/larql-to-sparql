@@ -1,7 +1,6 @@
 # Vindex Ecosystem Specification
 
 **Version:** 0.3  
-**Author:** Chris Hay  
 **Date:** 2026-04-01  
 **Status:** Implemented (~85%)  
 **Companion specs:** [Format](vindex-format-spec.md), [Operations](vindex-operations-spec.md), [LQL](lql-spec.md)

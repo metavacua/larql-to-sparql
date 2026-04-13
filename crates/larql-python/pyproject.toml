@@ -8,9 +8,7 @@ version = "0.1.0"
 description = "Python bindings for LARQL — the queryable model format"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [
-    { name = "Chris Hay", email = "chrishayuk@googlemail.com" },
-]
+authors = []
 keywords = ["knowledge-graph", "llm", "interpretability", "vindex", "mechanistic-interpretability"]
 
 [tool.maturin]

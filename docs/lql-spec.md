@@ -1,7 +1,6 @@
 # LQL — Lazarus Query Language Specification
 
 **Version:** 0.4  
-**Author:** Chris Hay  
 **Date:** 2026-04-11  
 **Status:** Draft  
 **Implementation target:** `larql-lql` crate (Rust)  
