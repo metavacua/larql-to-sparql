@@ -65,7 +65,7 @@ pub fn run_all_strategies(
     let t0 = std::time::Instant::now();
     let kv = kv_capture::capture_kv(bench.weights, &token_ids);
     let baseline_preds = logits_to_predictions_pub(
-        bench.weights, &kv.hidden, bench.tokenizer, top_k,
+        bench.weights, &kv.hidden, bench.tokenizer, top_k, 1.0,
     );
     let std_us = t0.elapsed().as_secs_f64() * 1e6;
     let std_mem = kv_capture::kv_memory_bytes(&kv);
@@ -112,7 +112,7 @@ pub fn run_all_strategies(
     let t0 = std::time::Instant::now();
     let markov = markov_layer::run_markov_forward(bench.weights, &token_ids, window_size);
     let markov_preds = logits_to_predictions_pub(
-        bench.weights, &markov.hidden, bench.tokenizer, top_k,
+        bench.weights, &markov.hidden, bench.tokenizer, top_k, 1.0,
     );
     let markov_us = t0.elapsed().as_secs_f64() * 1e6;
 
