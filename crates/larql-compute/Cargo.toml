@@ -11,7 +11,8 @@ categories = ["science"]
 [dependencies]
 # Matrix types
 ndarray = { version = "0.16", features = ["blas"] }
-blas-src = { version = "0.10", features = ["accelerate"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
 
 # Metal GPU (macOS only, optional)
 [target.'cfg(target_os = "macos")'.dependencies]

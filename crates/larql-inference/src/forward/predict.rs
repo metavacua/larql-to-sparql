@@ -16,8 +16,9 @@ pub fn logits_to_predictions_pub(
     h: &Array2<f32>,
     tokenizer: &tokenizers::Tokenizer,
     top_k: usize,
+    temperature: f32,
 ) -> PredictResult {
-    logits_to_predictions(weights, h, tokenizer, top_k)
+    logits_to_predictions(weights, h, tokenizer, top_k, temperature)
 }
 
 pub(super) fn logits_to_predictions(
@@ -25,6 +26,7 @@ pub(super) fn logits_to_predictions(
     h: &Array2<f32>,
     tokenizer: &tokenizers::Tokenizer,
     top_k: usize,
+    temperature: f32,
 ) -> PredictResult {
     let seq_len = h.shape()[0];
     let norm_offset = weights.arch.norm_weight_offset();
@@ -45,7 +47,7 @@ pub(super) fn logits_to_predictions(
             if let Some(cap) = final_softcap {
                 logit = (logit / cap).tanh() * cap;
             }
-            logit
+            logit / temperature.max(1e-6)
         })
         .collect();
 
@@ -85,8 +87,34 @@ pub fn predict(
     token_ids: &[u32],
     top_k: usize,
 ) -> PredictResult {
+    predict_with_temperature(weights, tokenizer, token_ids, top_k, 1.0)
+}
+
+pub fn predict_with_temperature(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    token_ids: &[u32],
+    top_k: usize,
+    temperature: f32,
+) -> PredictResult {
     let ffn = WeightFfn { weights };
-    predict_with_ffn(weights, tokenizer, token_ids, top_k, &ffn)
+    let num_layers = weights.num_layers;
+    let mut h = embed_tokens(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> =
+        std::collections::HashMap::new();
+    for layer in 0..num_layers {
+        let shared_kv = weights.arch.kv_shared_source_layer(layer)
+            .and_then(|src| kv_cache.get(&src));
+        match run_layer_with_ffn(weights, &h, layer, &ffn, false, ple_inputs.get(layer), shared_kv) {
+            Some((h_new, _, kv_out)) => {
+                h = h_new;
+                if let Some(kv) = kv_out { kv_cache.insert(layer, kv); }
+            }
+            None => continue,
+        }
+    }
+    logits_to_predictions(weights, &h, tokenizer, top_k, temperature)
 }
 
 /// Run a full forward pass with a custom FFN backend for all layers.
@@ -119,7 +147,7 @@ pub fn predict_with_ffn(
         }
     }
 
-    logits_to_predictions(weights, &h, tokenizer, top_k)
+    logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// Run a full forward pass with a custom FFN backend, capturing attention weights
@@ -151,7 +179,7 @@ pub fn predict_with_ffn_attention(
         }
     }
 
-    let result = logits_to_predictions(weights, &h, tokenizer, top_k);
+    let result = logits_to_predictions(weights, &h, tokenizer, top_k, 1.0);
     PredictResultWithAttention {
         predictions: result.predictions,
         attention,
@@ -169,7 +197,7 @@ pub fn logit_lens_top1(
     if residual.len() != hidden { return None; }
 
     let h = Array2::from_shape_vec((1, hidden), residual.to_vec()).ok()?;
-    let result = logits_to_predictions(weights, &h, tokenizer, 1);
+    let result = logits_to_predictions(weights, &h, tokenizer, 1, 1.0);
     result.predictions.into_iter().next()
 }
 
@@ -196,7 +224,7 @@ pub fn predict_with_ffn_trace(
         };
     }
 
-    let result = logits_to_predictions(weights, &h, tokenizer, top_k);
+    let result = logits_to_predictions(weights, &h, tokenizer, top_k, 1.0);
     PredictResultWithResiduals {
         predictions: result.predictions,
         residuals,
@@ -223,7 +251,7 @@ pub fn predict_with_router(
         };
     }
 
-    logits_to_predictions(weights, &h, tokenizer, top_k)
+    logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// Run a forward pass with per-layer strategy: full compute or scalar gain bypass.
@@ -257,7 +285,7 @@ pub fn predict_with_strategy(
         }
     }
 
-    logits_to_predictions(weights, &h, tokenizer, top_k)
+    logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// Resume a forward pass from a pre-computed hidden state.
@@ -298,5 +326,5 @@ pub fn predict_from_hidden_with_ffn(
         };
     }
 
-    logits_to_predictions(weights, &h, tokenizer, top_k)
+    logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }

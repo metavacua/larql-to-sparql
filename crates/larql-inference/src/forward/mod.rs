@@ -108,7 +108,7 @@ pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
 pub use embed::embed_tokens_pub;
 pub use layer::{run_ffn, run_attention_public};
 pub use predict::{
-    predict, predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace,
+    predict, predict_with_temperature, predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace,
     predict_with_router, predict_with_strategy, predict_from_hidden, predict_from_hidden_with_ffn,
     logits_to_predictions_pub, logit_lens_top1,
 };

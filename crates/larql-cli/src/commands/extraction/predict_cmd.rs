@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use larql_inference::forward::predict_with_temperature;
 use clap::Args;
 use larql_inference::{
     calibrate_scalar_gains, predict, predict_with_ffn, predict_with_router, predict_with_strategy,
@@ -19,6 +20,9 @@ pub struct PredictArgs {
     /// Number of top predictions to show.
     #[arg(short = 'k', long, default_value = "10")]
     top_k: usize,
+    /// Sampling temperature (default 1.0). < 1.0 = more focused, > 1.0 = more random.
+    #[arg(short = 't', long, default_value = "1.0")]
+    temperature: f32,
 
     /// FFN backend: "weights" (dense, default), "sparse:K" (top-K features),
     /// "graph" (uses --gate-index), or layer ranges like "weights:0-25,sparse100:26-33".
@@ -113,7 +117,7 @@ fn run_single(
     if ffn_spec == "weights" {
         eprintln!("FFN: weights (dense)");
         let start = Instant::now();
-        let result = predict(weights, model.tokenizer(), token_ids, top_k);
+        let result = predict_with_temperature(weights, model.tokenizer(), token_ids, top_k, args.temperature);
         eprintln!("  Forward pass: {:.1}s", start.elapsed().as_secs_f64());
         print_predictions("weights", &result.predictions);
     } else if let Some(k_str) = ffn_spec.strip_prefix("sparse:") {
