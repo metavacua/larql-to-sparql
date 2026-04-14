@@ -26,11 +26,17 @@ libc = "0.2"
 
 # Matrix ops (BLAS-accelerated)
 ndarray = { version = "0.16", features = ["blas"] }
-blas-src = { version = "0.10", features = ["openblas"], default-features = false }
-openblas-src = { version = "0.10", features = ["system"] }
 
 # Tokenizer
 tokenizers = "0.21"
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+blas-src = { version = "0.10", features = ["accelerate"] }
 
 [features]
 default = []
