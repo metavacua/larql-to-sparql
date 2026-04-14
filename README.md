@@ -350,6 +350,7 @@ See [docs/residual-trace.md](docs/residual-trace.md) for the full writeup.
 
 ## Building & Testing
 
+(Needs Openblas under Linux)
 ```bash
 cargo build --release                    # optimised build
 cargo build --release --features metal   # with Metal GPU backend
