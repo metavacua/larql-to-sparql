@@ -546,12 +546,13 @@ impl PyVindex {
 # From PyPI
 pip install larql
 
-# From source
-cd larql-python
-maturin develop --release
+# From source — managed via uv
+cd crates/larql-python
+uv sync --no-install-project --group dev
+uv run --no-sync maturin develop --release
 
 # Verify
-python -c "import larql; print(larql.load('test.vindex').stats())"
+uv run --no-sync python -c "import larql; print(larql.load('test.vindex').stats())"
 ```
 
 ---

@@ -54,12 +54,21 @@ bench-inference:
 
 bench-all: bench-core bench-inference
 
-# Python extension (requires virtualenv)
-python-build:
-	cd crates/larql-python && maturin develop --release
+# Python extension (managed via uv)
+python-setup:
+	cd crates/larql-python && uv sync --no-install-project --group dev
+
+python-build: python-setup
+	cd crates/larql-python && uv run --no-sync maturin develop --release
+
+python-test: python-build
+	cd crates/larql-python && uv run --no-sync pytest tests/ -v
 
 python-check:
 	cargo check -p larql-python
+
+python-clean:
+	rm -rf crates/larql-python/.venv crates/larql-python/uv.lock
 
 # Extraction
 extract-test:
