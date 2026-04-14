@@ -10,8 +10,25 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = []
 keywords = ["knowledge-graph", "llm", "interpretability", "vindex", "mechanistic-interpretability"]
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+mlx = ["mlx-lm"]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7",
+    "pytest>=8",
+    "numpy>=1.26",
+]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "larql._native"
 python-source = "python"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -4,10 +4,16 @@ Python interface to the LARQL knowledge graph engine and vindex model format. Ru
 
 ## Install
 
+Managed via [uv](https://docs.astral.sh/uv/):
+
 ```bash
 cd crates/larql-python
-maturin develop --release
+uv sync --no-install-project --group dev     # creates .venv + installs dev deps
+uv run --no-sync maturin develop --release   # builds PyO3 extension into .venv
+uv run --no-sync pytest tests/               # run binding tests
 ```
+
+Optional extras (Apple Silicon only): `uv sync --no-install-project --group dev --extra mlx`.
 
 ## Quickstart
 
