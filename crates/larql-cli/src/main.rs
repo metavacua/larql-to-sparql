@@ -265,7 +265,7 @@ fn main() {
             Ok(())
         }
         Commands::Lql(args) => {
-            match larql_lql::run_statement(&args.statement) {
+            match larql_lql::run_batch(&args.statement) {
                 Ok(lines) => {
                     for line in &lines {
                         println!("{line}");

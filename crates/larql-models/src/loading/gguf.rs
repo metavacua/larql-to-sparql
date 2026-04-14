@@ -278,10 +278,18 @@ pub fn load_gguf(path: &Path) -> Result<ModelWeights, ModelError> {
     }
 
     let embed_key = arch.embed_key();
-    let embed = normalized_tensors
+    let embed_raw = normalized_tensors
         .get(embed_key)
         .ok_or_else(|| ModelError::MissingTensor(embed_key.into()))?
         .clone();
+    // GGUF stores embeddings as [hidden_size, vocab_size] but we need [vocab_size, hidden_size]
+    let embed = if embed_raw.shape()[0] < embed_raw.shape()[1] {
+        let mut out = ndarray::Array2::<f32>::zeros((embed_raw.shape()[1], embed_raw.shape()[0]));
+        out.assign(&embed_raw.t());
+        out.into_shared()
+    } else {
+        embed_raw
+    };
 
     let lm_head = normalized_tensors
         .get("lm_head.weight")
@@ -289,8 +297,25 @@ pub fn load_gguf(path: &Path) -> Result<ModelWeights, ModelError> {
         .cloned()
         .unwrap_or_else(|| embed.clone());
 
-    let vocab_size = lm_head.shape()[0];
     let cfg = arch.config();
+    // Gemma3 GGUF does not store vocab_size in arch metadata.
+    // Read it from tokenizer.json sitting next to the GGUF file.
+    let vocab_size = cfg.vocab_size
+        .filter(|&v| v > 2560)
+        .unwrap_or_else(|| {
+            // Try to read vocab size from tokenizer.json
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let tok_path = parent.join("tokenizer.json");
+                if let Ok(data) = std::fs::read_to_string(&tok_path) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                        if let Some(v) = json["model"]["vocab"].as_object() {
+                            return v.len();
+                        }
+                    }
+                }
+            }
+            262144 // Gemma3 default
+        });
 
     Ok(ModelWeights {
         tensors: normalized_tensors,
