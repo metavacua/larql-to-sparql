@@ -94,7 +94,7 @@ pub fn predict_with_graph(
         }
     }
 
-    crate::forward::logits_to_predictions_pub(weights, &h, tokenizer, top_k)
+    crate::forward::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// Two-pass split pipeline: attention on CPU, FFN batched on Metal GPU.
