@@ -155,6 +155,23 @@ fn main() {
         r#"MERGE "medical-knowledge.vindex" INTO "gemma3-4b.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#,
     );
 
+    // ── Rebalance + Compaction ──
+    section("Rebalance + Compaction");
+
+    demo("REBALANCE (default)", "REBALANCE;");
+    demo(
+        "REBALANCE (full)",
+        "REBALANCE UNTIL CONVERGED MAX 16 FLOOR 0.3 CEILING 0.9;",
+    );
+    demo("COMPACT MINOR", "COMPACT MINOR;");
+    demo("COMPACT MAJOR", "COMPACT MAJOR;");
+    demo("COMPACT MAJOR FULL", "COMPACT MAJOR FULL;");
+    demo(
+        "COMPACT MAJOR WITH LAMBDA",
+        "COMPACT MAJOR WITH LAMBDA = 0.001;",
+    );
+    demo("SHOW COMPACT STATUS", "SHOW COMPACT STATUS;");
+
     // ── Introspection ──
     section("Introspection");
 
@@ -167,6 +184,9 @@ fn main() {
     demo("SHOW LAYERS (range)", "SHOW LAYERS RANGE 0-10;");
     demo("SHOW LAYERS (bare range)", "SHOW LAYERS 0-10;");
     demo("SHOW FEATURES", "SHOW FEATURES 26;");
+    demo("SHOW ENTITIES", "SHOW ENTITIES;");
+    demo("SHOW ENTITIES AT LAYER", "SHOW ENTITIES AT LAYER 26 LIMIT 20;");
+    demo("SHOW ENTITIES bare layer", "SHOW ENTITIES 26;");
     demo("SHOW MODELS", "SHOW MODELS;");
     demo("STATS", "STATS;");
 

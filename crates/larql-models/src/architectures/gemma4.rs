@@ -131,8 +131,11 @@ impl ModelArchitecture for Gemma4Arch {
         }
     }
 
-    fn v_shares_k(&self, _layer: usize) -> bool {
-        self.config.attention_k_eq_v
+    fn v_shares_k(&self, layer: usize) -> bool {
+        // On 31B, attention_k_eq_v=true means V reuses K only on global (full_attention)
+        // layers — v_proj is still present on sliding layers. On E2B (attention_k_eq_v=false)
+        // this is always false. Per-layer gating matches what ships in the safetensors.
+        self.config.attention_k_eq_v && self.is_global_layer(layer)
     }
 
     fn has_v_norm(&self) -> bool {

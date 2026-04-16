@@ -1480,3 +1480,238 @@ fn memit_store_persists_added_cycles() {
     assert_eq!(hits[0].target, "Paris");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ══════════════════════════════════════════════════════════════
+// Gap coverage: variants that shipped without an executor test
+// ══════════════════════════════════════════════════════════════
+//
+// Each variant gets a no-backend sanity check plus (where feasible
+// without model weights) an end-to-end pass against the synthetic
+// vindex fixture.
+
+// ── TRACE ──
+
+#[test]
+fn no_backend_trace() {
+    let mut session = Session::new();
+    let stmt = parser::parse(r#"TRACE "The capital of France is";"#).unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn trace_on_browse_only_vindex_errors_with_weights_hint() {
+    // The synthetic fixture is browse-only; TRACE needs model weights.
+    let (mut session, dir) = vindex_session("trace_no_weights");
+    let stmt = parser::parse(r#"TRACE "any prompt";"#).unwrap();
+    let err = session
+        .execute(&stmt)
+        .expect_err("TRACE on browse-only vindex should fail");
+    match err {
+        LqlError::Execution(msg) => {
+            assert!(
+                msg.contains("TRACE requires model weights"),
+                "expected model-weights hint, got: {msg}"
+            );
+        }
+        other => panic!("expected Execution error, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── REBALANCE ──
+
+#[test]
+fn rebalance_without_backend_is_noop() {
+    // REBALANCE short-circuits on empty `installed_edges` BEFORE the
+    // backend check (mutation/rebalance.rs:38-43), so it returns Ok
+    // with a "no compose-mode installs" message even with no backend.
+    // This is the same behaviour as REBALANCE on a fresh vindex.
+    let mut session = Session::new();
+    let stmt = parser::parse("REBALANCE;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("REBALANCE with empty install set should succeed");
+    assert!(
+        out.iter().any(|line| line.contains("no compose-mode installs")),
+        "expected empty-installs note in: {out:?}"
+    );
+}
+
+#[test]
+fn rebalance_without_compose_installs_is_noop() {
+    // With no `installed_edges` registered, REBALANCE returns a
+    // single-line note and doesn't touch the overlay.
+    let (mut session, dir) = vindex_session("rebalance_empty");
+    let stmt = parser::parse("REBALANCE;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("REBALANCE on empty compose set should succeed");
+    assert!(
+        out.iter().any(|line| line.contains("no compose-mode installs")),
+        "expected empty-installs note in: {out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── COMPACT MINOR / MAJOR / SHOW COMPACT STATUS ──
+
+#[test]
+fn no_backend_compact_minor() {
+    let mut session = Session::new();
+    let stmt = parser::parse("COMPACT MINOR;").unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn no_backend_compact_major() {
+    let mut session = Session::new();
+    let stmt = parser::parse("COMPACT MAJOR;").unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn no_backend_show_compact_status() {
+    let mut session = Session::new();
+    let stmt = parser::parse("SHOW COMPACT STATUS;").unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn compact_minor_on_empty_l0_returns_message() {
+    let (mut session, dir) = vindex_session("compact_minor_empty");
+    let stmt = parser::parse("COMPACT MINOR;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("COMPACT MINOR with empty L0 should succeed");
+    assert!(
+        out.iter().any(|l| l.contains("L0 is empty")),
+        "expected empty-L0 message in: {out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn show_compact_status_reports_empty_tiers() {
+    let (mut session, dir) = vindex_session("compact_status");
+    let stmt = parser::parse("SHOW COMPACT STATUS;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("SHOW COMPACT STATUS should succeed");
+    let joined = out.join("\n");
+    assert!(joined.contains("L0"), "expected L0 tier: {joined}");
+    assert!(joined.contains("L1"), "expected L1 tier: {joined}");
+    // The synthetic fixture has 0 overrides; the L0/L1 counts should read 0.
+    assert!(
+        joined.contains("0 entries") || joined.contains("0 edges"),
+        "expected zero counts in: {joined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── SHOW ENTITIES ──
+
+#[test]
+fn no_backend_show_entities() {
+    let mut session = Session::new();
+    let stmt = parser::parse("SHOW ENTITIES;").unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn show_entities_scans_synthetic_vindex() {
+    // The synthetic fixture seeds content-shaped tokens — SHOW ENTITIES
+    // should run cleanly and produce the `Distinct entities …` summary
+    // line followed by the tabular header.
+    let (mut session, dir) = vindex_session("show_entities_scan");
+    let stmt = parser::parse("SHOW ENTITIES LIMIT 20;").unwrap();
+    let out = session
+        .execute(&stmt)
+        .expect("SHOW ENTITIES should succeed");
+    let joined = out.join("\n");
+    assert!(
+        joined.contains("Distinct entities"),
+        "expected summary line in: {joined}"
+    );
+    assert!(
+        joined.contains("Entity") && joined.contains("Max Score"),
+        "expected tabular header in: {joined}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── REMOVE PATCH ──
+
+#[test]
+fn no_backend_remove_patch() {
+    let mut session = Session::new();
+    let stmt = parser::parse(r#"REMOVE PATCH "missing.vlp";"#).unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn remove_patch_unknown_errors_cleanly() {
+    let (mut session, dir) = vindex_session("remove_patch_missing");
+    let stmt = parser::parse(r#"REMOVE PATCH "never-applied.vlp";"#).unwrap();
+    let err = session
+        .execute(&stmt)
+        .expect_err("REMOVE PATCH should error when no such patch is applied");
+    match err {
+        LqlError::Execution(msg) => assert!(msg.contains("patch not found")),
+        other => panic!("expected Execution error, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── PIPE ──
+
+#[test]
+fn pipe_propagates_no_backend_error() {
+    // The first stage errors with NoBackend — the pipe should surface
+    // that without silently short-circuiting to `Ok`.
+    let mut session = Session::new();
+    let stmt = parser::parse("STATS |> STATS;").unwrap();
+    assert!(matches!(
+        session.execute(&stmt).unwrap_err(),
+        LqlError::NoBackend
+    ));
+}
+
+#[test]
+fn pipe_concatenates_both_sides_output() {
+    // Both sides execute and their output lines are concatenated.
+    let (mut session, dir) = vindex_session("pipe_concat");
+    let stmt = parser::parse("SHOW LAYERS |> SHOW MODELS;").unwrap();
+    let out = session.execute(&stmt).expect("pipe should succeed");
+    // The combined output must contain evidence of both stages —
+    // SHOW LAYERS emits per-layer rows; SHOW MODELS emits a header /
+    // "no models" line. We just check the combined length is larger
+    // than either side's output in isolation.
+    let single = parser::parse("SHOW LAYERS;").unwrap();
+    let single_out = session.execute(&single).expect("SHOW LAYERS alone");
+    assert!(
+        out.len() > single_out.len(),
+        "pipe output ({}) should be longer than a single stage ({}): {:?}",
+        out.len(),
+        single_out.len(),
+        out,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -946,10 +946,12 @@ mod tests {
         assert_eq!(arch.attention_scale_for_layer(0), 1.0);
         assert_eq!(arch.attention_scale_for_layer(5), 1.0);
 
-        // K=V flag parsed — v_shares_k() exposes it via the trait
+        // K=V flag parsed — v_shares_k() exposes it via the trait.
+        // On 31B, attention_k_eq_v=true applies only to global (full_attention) layers;
+        // sliding layers still ship v_proj in safetensors.
         assert!(arch.config().attention_k_eq_v);
-        assert!(arch.v_shares_k(0));
-        assert!(arch.v_shares_k(5));
+        assert!(!arch.v_shares_k(0)); // sliding
+        assert!(arch.v_shares_k(5));  // global
 
         // V-norm (parameter-free RMSNorm on V states)
         assert!(arch.has_v_norm());

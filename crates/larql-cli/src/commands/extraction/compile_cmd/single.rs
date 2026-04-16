@@ -48,11 +48,12 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         let rendered = super::chat::render_user_prompt(&args.base, prompt)?;
         (rendered, "tokenizer_config.chat_template".to_string())
     };
-    // Special tokens (bos, start_of_turn, etc.) are already embedded in the
-    // rendered string; add_special_tokens=false avoids a duplicate prepend.
-    let add_special = args.no_chat_template;
+    // Match HF's default tokenisation: add_special_tokens=True adds a BOS
+    // on top of whatever the chat template already contains. Served models
+    // (Ollama, HF generate) tokenise this way, so our trigger residual
+    // must come from the same sequence. See verify_compiled.py.
     let encoding = tokenizer
-        .encode(wrapped_prompt.as_str(), add_special)
+        .encode(wrapped_prompt.as_str(), true)
         .map_err(|e| format!("tokenize: {}", e))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     eprintln!("  chat wrap:    {}", template_source);

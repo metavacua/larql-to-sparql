@@ -54,10 +54,13 @@ LQL is a query language for neural network weights treated as a graph database. 
 
 | Statement | Purpose |
 |---|---|
-| `INSERT` | Add edge(s) to the vindex |
+| `INSERT` | Add an edge (mode `KNN` default, `COMPOSE` FFN-overlay) |
 | `DELETE` | Remove edge(s) from the vindex |
 | `UPDATE` | Modify existing edge(s) |
 | `MERGE` | Merge edges from another vindex |
+| `REBALANCE` | Global fixed-point rebalance over compose installs |
+| `COMPACT MINOR` | Promote L0 KNN entries to L1 compose edges |
+| `COMPACT MAJOR` | Promote L1 compose edges to L2 MEMIT (optional `FULL`, `WITH LAMBDA`) |
 
 ### 2.5 Patches
 
@@ -78,7 +81,10 @@ LQL is a query language for neural network weights treated as a graph database. 
 | `SHOW RELATIONS` | List discovered relation types |
 | `SHOW LAYERS` | Layer-by-layer summary |
 | `SHOW FEATURES` | Feature details at a layer |
+| `SHOW ENTITIES` | Distinct named entities across the loaded layers |
 | `SHOW MODELS` | List available vindexes |
+| `SHOW PATCHES` | List active patches (see §2.5) |
+| `SHOW COMPACT STATUS` | Storage-engine status (L0/L1/L2 tiers, epoch) |
 | `STATS` | Counts, coverage, size |
 
 ### 2.7 Residual Stream Trace (requires model weights in vindex)
@@ -393,24 +399,42 @@ INSERT INTO EDGES
     [AT LAYER <n>]
     [CONFIDENCE <float>]
     [ALPHA <float>]
+    [MODE {KNN | COMPOSE}]
 
 -- Add an edge to the vindex.
 -- The relation should be one of the known types (from probe/cluster labels).
 --
--- INSERT is always a multi-layer constellation install — the validated
--- regime (8 layers × alpha=0.25, see docs/training-free-insert.md). Single-
--- layer installs at this alpha don't move the logits enough; raising alpha
--- breaks neighbouring facts. There is no single-layer mode.
+-- INSERT has two install modes. Default: KNN.
 --
--- AT LAYER N: center the constellation span on layer N (8 layers, clamped
---   to valid layer range). The default span is the upper half of the
---   knowledge band — pass AT LAYER to shift it.
--- CONFIDENCE: stored on the inserted features (default: 0.9).
--- ALPHA:      per-layer down-vector scale (default: 0.25). Larger values
---   push the new fact harder but dilute neighbouring facts; smaller values
---   reduce neighbour degradation at the cost of new-fact confidence.
---   Validated range ~0.10–0.50. See docs/training-free-insert.md for the
---   alpha sweep.
+-- MODE KNN (default) — Architecture B retrieval override:
+--   Captures the model's residual at the install layer (or the entity
+--   embedding if no weights are available) and stores it as a key in
+--   the per-layer KnnStore alongside the target token. INFER overrides
+--   the model's top-1 when a stored key matches the inference residual
+--   at cos > 0.75. Scales freely (validated at 25K edges, 87 edges/s,
+--   100% same-prompt retrieval) — independent entries, no cross-fact
+--   interference. Doesn't participate in the forward pass.
+--
+-- MODE COMPOSE — FFN-overlay install:
+--   Writes a single-layer slot via the install_compiled_slot pipeline
+--   (gate_scale=30, up = gate_dir × u_ref, down = target_embed_unit ×
+--   d_ref × alpha). Features participate in the forward pass and can
+--   chain for multi-hop. Has a Hopfield-style cap at ~5–10 facts per
+--   layer under template-shared prompts — run REBALANCE after a batch
+--   install to fixed-point the down magnitudes. Validated 10/10
+--   retrieval, 0/4 regression bleed on Gemma 3 4B (exp 14).
+--
+-- AT LAYER N: pins the install to a single layer. Default:
+--   `knowledge.hi − 1` (L26 on Gemma 4B). Single-layer only —
+--   earlier drafts used an 8-layer span but the install_compiled_slot
+--   (×30 gate) math makes multi-layer spans hijack unrelated prompts.
+-- CONFIDENCE: stored on the inserted features (default: 0.9 for
+--   COMPOSE, 1.0 for KNN).
+-- ALPHA:      COMPOSE only — per-layer down-vector scale (default:
+--   0.10). Validated range ~0.05–0.30 in the Python reference.
+--   Larger values push the new fact harder but dilute neighbouring
+--   facts; smaller values reduce neighbour degradation.
+-- MODE:       KNN (default) or COMPOSE.
 
 INSERT INTO EDGES
     (entity, relation, target)
@@ -419,7 +443,30 @@ INSERT INTO EDGES
 INSERT INTO EDGES
     (entity, relation, target)
     VALUES ("John Coyle", "occupation", "engineer")
-    AT LAYER 26 CONFIDENCE 0.8;
+    AT LAYER 26 CONFIDENCE 0.8 ALPHA 0.3 MODE COMPOSE;
+```
+
+```
+REBALANCE
+    [UNTIL CONVERGED]
+    [MAX <n>]
+    [FLOOR <float>]
+    [CEILING <float>]
+
+-- Global fixed-point rebalance over compose-mode installs. Iterates
+-- every `installed_edges` entry, INFERs its canonical prompt, and
+-- scales its `down_col` until its target probability lands in the
+-- [FLOOR, CEILING] band. Per-INSERT local balance is greedy and
+-- breaks past N ≈ 5 on template-shared prompts; this pass converges
+-- the full batch jointly.
+--
+-- Defaults: MAX 16, FLOOR 0.30, CEILING 0.90.
+-- UNTIL CONVERGED is accepted but redundant (the loop always runs
+-- until convergence or MAX iters).
+-- KNN installs don't need rebalancing.
+
+REBALANCE;
+REBALANCE UNTIL CONVERGED MAX 16 FLOOR 0.30 CEILING 0.90;
 ```
 
 ```
@@ -597,11 +644,43 @@ SHOW FEATURES <layer>
     [WHERE <conditions>]
     [LIMIT <n>]
 
+SHOW ENTITIES
+    [AT LAYER <n> | <n>]
+    [LIMIT <n>]
+
+-- Scan the loaded layers for distinct named-entity-shaped tokens
+-- (uppercase start, alphabetic, length ≥ 3, not a stop word) and
+-- report them sorted by feature count. Works on browse-only vindexes
+-- — no model weights needed.
+
 SHOW MODELS;
 
 SHOW PATCHES;
 
+SHOW COMPACT STATUS;
+
+-- Report the storage engine's current tier occupancy (L0 WAL/KNN,
+-- L1 arch-A compose, L2 MEMIT) and the session epoch. L2 is only
+-- reported when hidden_dim ≥ 1024 (MEMIT requirement).
+
 STATS [<vindex_path>];
+```
+
+`COMPACT MINOR` and `COMPACT MAJOR` are the two tier-promotion verbs —
+they live alongside `REBALANCE` in the mutation family (§3.5) but
+read like introspection from the user's perspective:
+
+```
+COMPACT MINOR;
+-- Promote every L0 (KNN) entry into L1 (arch-A compose edges).
+-- Uses exec_insert internally with MODE COMPOSE; requires model
+-- weights. A no-op when L0 is empty.
+
+COMPACT MAJOR [FULL] [WITH LAMBDA = <float>];
+-- Promote L1 compose edges to L2 MEMIT-decomposed (key, down) pairs.
+-- FULL re-decomposes every L1 edge; default does only the ones the
+-- current compose overlay owns. LAMBDA is the MEMIT ridge (default
+-- 1e-3).
 ```
 
 ### 3.7 Residual Stream Trace Statements
@@ -1017,115 +1096,173 @@ Input string
     → Executor (dispatches to larql-core / larql-inference / larql-models)
 ```
 
-The parser lives in `larql-lql`, organized as modular subfiles:
+The parser and executor live in `larql-lql`, organized as modular
+subfiles. Each LQL verb gets its own file; orchestrator modules are
+kept tight so the top-down flow reads clearly.
 
 ```
 src/
   lib.rs                    Module exports
-  ast.rs                    AST definitions
+  ast.rs                    AST definitions (Statement enum + support types)
   error.rs                  Error types
   lexer.rs                  Tokenizer (90+ keywords)
   relations.rs              Relation classifier + label loader
   repl.rs                   REPL & batch runner
   parser/
     mod.rs                  Parser struct, dispatch, parse()
-    lifecycle.rs            EXTRACT, COMPILE, DIFF, USE
+    lifecycle.rs            EXTRACT, COMPILE, DIFF, USE, COMPACT
     query.rs                WALK, INFER, SELECT, DESCRIBE, EXPLAIN
-    mutation.rs             INSERT, DELETE, UPDATE, MERGE
-    introspection.rs        SHOW, STATS
+    mutation.rs             INSERT (ALPHA, MODE), DELETE, UPDATE, MERGE, REBALANCE
+    patch.rs                BEGIN/SAVE/APPLY/REMOVE PATCH + DIFF INTO PATCH
+    trace.rs                TRACE
+    introspection.rs        SHOW + STATS (includes COMPACT STATUS, ENTITIES)
     helpers.rs              Token utilities, value/field/condition parsers
-    tests.rs                Parser tests (70+)
+    tests.rs                Parser tests (146)
   executor/
-    mod.rs                  Session struct, dispatch, backend accessors
-    lifecycle.rs            USE, STATS, EXTRACT/COMPILE/DIFF (stubs)
-    query.rs                WALK, INFER, SELECT, DESCRIBE, EXPLAIN
-    introspection.rs        SHOW RELATIONS/LAYERS/FEATURES/MODELS
-    mutation.rs             INSERT/DELETE/UPDATE/MERGE (stubs)
-    helpers.rs              Formatting, token filtering
-    tests.rs                Executor tests (35+)
+    mod.rs                  Session + execute() dispatch + patch session helpers
+    backend.rs              Backend enum (Vindex/Weight/Remote) + require_* accessors
+    helpers.rs              format_number/format_bytes/dir_size, content-token filter
+    compact.rs              COMPACT MINOR / MAJOR (tier promotion)
+    remote.rs               HTTP forwarding for the Remote backend
+    trace.rs                TRACE executor
+    introspection.rs        SHOW + STATS + SHOW COMPACT STATUS + SHOW ENTITIES
+    lifecycle/
+      mod.rs                submodule declarations
+      use_cmd.rs            USE
+      extract.rs            EXTRACT
+      stats.rs              STATS
+      diff.rs               DIFF [INTO PATCH]
+      compile/
+        mod.rs              exec_compile dispatch + MEMIT fact collector
+        into_model.rs       COMPILE INTO MODEL (MEMIT-gated via LARQL_MEMIT_ENABLE)
+        into_vindex.rs      COMPILE INTO VINDEX + collision detection
+        bake.rs             patch_{down,gate,up}_weights + apply_memit_deltas + tests
+    query/
+      mod.rs                shared resolve_bands helper
+      walk.rs               WALK
+      infer.rs              INFER
+      describe.rs           DESCRIBE (MoE path + describe_* helpers)
+      select.rs             SELECT {EDGES, FEATURES, ENTITIES} + NEAREST TO
+      explain.rs            EXPLAIN WALK
+      infer_trace.rs        EXPLAIN INFER (attention + logit lens)
+    mutation/
+      mod.rs                submodule declarations
+      delete.rs             DELETE
+      update.rs             UPDATE
+      merge.rs              MERGE
+      rebalance.rs          REBALANCE
+      insert/
+        mod.rs              exec_insert orchestrator
+        knn.rs              MODE KNN (KnnStore retrieval override)
+        plan.rs             Phase 1 — target embed + layer selection
+        capture.rs          Phase 1b — canonical + decoy residual capture
+        compose.rs          Phase 2 — install_slots + cliff-breaker refine + tests
+        balance.rs          Phase 3 — balance + cross-fact regression check
+    tests.rs                Executor tests (93 integration + 17 in-module unit)
 ```
 
 ### 8.2 AST
 
+Canonical definition lives in `crates/larql-lql/src/ast.rs`. The shape
+below is kept in sync with the real enum — if they diverge, the source
+file wins.
+
 ```rust
 pub enum Statement {
-    // Lifecycle
-    Extract { model: String, output: String, components: Option<Vec<Component>>,
-              layers: Option<Range>, extract_level: ExtractLevel },
-    Compile { vindex: VindexRef, output: String, format: Option<OutputFormat>,
-              target: CompileTarget, on_conflict: Option<CompileConflict>,
-              refine: bool, decoys: Option<Vec<String>> },
+    // ── Lifecycle ──
+    Extract { model: String, output: String,
+              components: Option<Vec<Component>>, layers: Option<Range>,
+              extract_level: ExtractLevel },
+    Compile { vindex: VindexRef, output: String,
+              format: Option<OutputFormat>, target: CompileTarget,
+              on_conflict: Option<CompileConflict> },
     Diff { a: VindexRef, b: VindexRef, layer: Option<u32>,
-           relation: Option<String>, limit: Option<u32> },
+           relation: Option<String>, limit: Option<u32>,
+           into_patch: Option<String> },
     Use { target: UseTarget },
 
-    // Knowledge browser (pure vindex)
+    // ── Query ──
     Walk { prompt: String, top: Option<u32>, layers: Option<Range>,
            mode: Option<WalkMode>, compare: bool },
-    Select { fields: Vec<Field>, conditions: Vec<Condition>,
-             nearest: Option<NearestClause>, order: Option<OrderBy>,
-             limit: Option<u32> },
-    Describe { entity: String, band: Option<LayerBand>, layer: Option<u32>,
-               relations_only: bool, mode: DescribeMode },
-    Explain { prompt: String, mode: ExplainMode, layers: Option<Range>,
-              verbose: bool, top: Option<u32> },
-
-    // Inference (requires model weights)
     Infer { prompt: String, top: Option<u32>, compare: bool },
+    Select { source: SelectSource, fields: Vec<Field>,
+             conditions: Vec<Condition>, nearest: Option<NearestClause>,
+             order: Option<OrderBy>, limit: Option<u32> },
+    Describe { entity: String, band: Option<LayerBand>,
+               layer: Option<u32>, relations_only: bool,
+               mode: DescribeMode },
+    Explain { prompt: String, mode: ExplainMode, layers: Option<Range>,
+              band: Option<LayerBand>, verbose: bool, top: Option<u32>,
+              relations_only: bool, with_attention: bool },
 
-    // Mutation
+    // ── Mutation ──
     Insert { entity: String, relation: String, target: String,
-             layer: Option<u32>, confidence: Option<f32> },
+             layer: Option<u32>, confidence: Option<f32>,
+             alpha: Option<f32>, mode: InsertMode },
     Delete { conditions: Vec<Condition> },
     Update { set: Vec<Assignment>, conditions: Vec<Condition> },
     Merge { source: String, target: Option<String>,
             conflict: Option<ConflictStrategy> },
+    Rebalance { max_iters: Option<u32>, floor: Option<f32>,
+                ceiling: Option<f32> },
 
-    // Introspection
-    ShowRelations { layer: Option<u32>, with_examples: bool },
+    // ── Introspection ──
+    ShowRelations { layer: Option<u32>, with_examples: bool,
+                    mode: DescribeMode },
     ShowLayers { range: Option<Range> },
-    ShowFeatures { layer: u32, conditions: Vec<Condition>, limit: Option<u32> },
+    ShowFeatures { layer: u32, conditions: Vec<Condition>,
+                   limit: Option<u32> },
+    ShowEntities { layer: Option<u32>, limit: Option<u32> },
     ShowModels,
     Stats { vindex: Option<String> },
+    ShowCompactStatus,
+    CompactMinor,
+    CompactMajor { full: bool, lambda: Option<f32> },
 
-    // Pipe
+    // ── Patch ──
+    BeginPatch { path: String },
+    SavePatch,
+    ApplyPatch { path: String },
+    ShowPatches,
+    RemovePatch { path: String },
+
+    // ── Trace ──
+    Trace { prompt: String, answer: Option<String>, decompose: bool,
+            layers: Option<Range>, positions: Option<TracePositionMode>,
+            save: Option<String> },
+
+    // ── Pipe ──
     Pipe { left: Box<Statement>, right: Box<Statement> },
 }
+
+pub enum VindexRef { Path(String), Current }
 
 pub enum UseTarget {
     Vindex(String),
     Model { id: String, auto_extract: bool },
+    Remote(String),
 }
 
-pub enum VindexRef {
-    Path(String),
-    Current,
-}
+pub enum LayerBand { Syntax, Knowledge, Output, All }
 
-pub enum LayerBand {
-    Syntax,        // Early layers: DESCRIBE "def" SYNTAX
-    Knowledge,     // Middle layers: DESCRIBE "France" KNOWLEDGE (default)
-    Output,        // Late layers: DESCRIBE "France" OUTPUT
-    All,           // All layers: DESCRIBE "France" ALL LAYERS
-}
+// DESCRIBE's output default is Brief (compact). Verbose / Raw are
+// opt-in via the VERBOSE / RAW keyword on the DESCRIBE statement.
+pub enum DescribeMode { Verbose, Brief, Raw }
 
-pub enum DescribeMode {
-    Verbose,       // Default: [relation] labels, also-tokens, layer ranges
-    Brief,         // Compact: top edges, primary layer, no also-tokens
-    Raw,           // No labels — pure model signal with also-tokens
-}
-
-pub enum ExplainMode {
-    Walk,          // EXPLAIN WALK — pure vindex, no attention
-    Infer,         // EXPLAIN INFER — full inference trace
-}
-
+pub enum ExplainMode { Walk, Infer }
 pub enum WalkMode { Hybrid, Pure, Dense }
 pub enum OutputFormat { Safetensors, Gguf }
 pub enum CompileTarget { Model, Vindex }
-pub enum ConflictStrategy { KeepSource, KeepTarget, HighestConfidence }
 pub enum CompileConflict { LastWins, HighestConfidence, Fail }
+pub enum ConflictStrategy { KeepSource, KeepTarget, HighestConfidence }
 pub enum Component { FfnGate, FfnDown, FfnUp, Embeddings, AttnOv, AttnQk }
+pub enum SelectSource { Edges, Features, Entities }
+pub enum TracePositionMode { Last, All }
+
+// INSERT install mode. Default is Knn (Architecture B retrieval
+// override). Compose is the FFN-overlay install validated in
+// experiments/14_vindex_compilation.
+pub enum InsertMode { Knn, Compose }
 
 pub enum ExtractLevel {
     Browse,     // Default: gate + embed + down_meta (~3 GB)
@@ -1133,6 +1270,13 @@ pub enum ExtractLevel {
     All,        // + up, norms, lm_head (~10 GB, enables COMPILE)
 }
 ```
+
+> **Note.** `Rebalance`, `ShowEntities`, `ShowCompactStatus`,
+> `CompactMinor`, `CompactMajor`, the full patch family, `Trace`, and
+> `UseTarget::Remote` were added after the first-cut AST; `InsertMode`,
+> `alpha` on `Insert`, `on_conflict` on `Compile`, `into_patch` on
+> `Diff`, and `SelectSource` on `Select` are likewise additions. Any
+> earlier external doc that lists a smaller enum is stale.
 
 ### 8.3 Crate Mapping
 
@@ -1176,6 +1320,11 @@ pub enum ExtractLevel {
 | MERGE | ✅ Done — graph union with KeepSource/KeepTarget/HighestConfidence strategies |
 | BEGIN/SAVE/APPLY/SHOW/REMOVE PATCH | ✅ Done — full patch lifecycle |
 | Auto-patch on mutation | ✅ Done — INSERT/DELETE/UPDATE auto-start anonymous patch session |
+| INSERT MODE {KNN, COMPOSE} | ✅ Done — KNN default (Architecture B), COMPOSE FFN-overlay validated exp 14 |
+| REBALANCE | ✅ Done — global fixed-point rebalance over compose installs |
+| COMPACT MINOR / MAJOR | ✅ Done — L0 → L1 → L2 tier promotion, `SHOW COMPACT STATUS` |
+| SHOW ENTITIES | ✅ Done — named-entity scan across loaded layers |
+| TRACE | ✅ Done — residual decomposition with FOR/DECOMPOSE/POSITIONS/SAVE |
 | Readonly base | ✅ Done — base vindex files never modified, all edits via PatchedVindex overlay |
 | Split weight files | ✅ Done — attn, up, down, norms, lm_head (no gate duplication) |
 | f16 storage | ✅ Done — `--f16` flag, halves file sizes |
