@@ -1116,21 +1116,10 @@ fn memit_facts_deduplicate_across_patches() {
     assert_eq!(seen.len(), 1, "same fact in two patches → 1 after dedup");
 }
 
-// ── Template + decoy tests ───────────────────────────────────────────
-
-#[test]
-fn canonical_decoys_are_nonempty_and_diverse() {
-    assert!(!super::CANONICAL_DECOY_PROMPTS.is_empty());
-    let prefixes: std::collections::HashSet<String> = super::CANONICAL_DECOY_PROMPTS
-        .iter()
-        .map(|p| p.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
-        .collect();
-    assert_eq!(
-        prefixes.len(),
-        super::CANONICAL_DECOY_PROMPTS.len(),
-        "decoy prompts should have unique 3-word prefixes"
-    );
-}
+// ── Template tests ───────────────────────────────────────────────────
+//
+// `canonical_decoys_are_nonempty_and_diverse` lives alongside the
+// constant in `executor/mutation/insert/capture.rs`.
 
 #[test]
 fn relation_template_simple() {

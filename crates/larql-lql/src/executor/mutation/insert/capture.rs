@@ -145,7 +145,7 @@ impl Session {
                 continue;
             }
             // Build the full decoy prompt list: canonical + template-matched.
-            let mut decoy_prompts: Vec<String> = crate::executor::CANONICAL_DECOY_PROMPTS
+            let mut decoy_prompts: Vec<String> = CANONICAL_DECOY_PROMPTS
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
@@ -199,5 +199,52 @@ impl Session {
             per_layer,
             pending_decoys,
         })
+    }
+}
+
+/// Canonical decoy prompt set used by Phase 1b alongside the
+/// template-matched decoys generated from the tokenizer vocab.
+///
+/// Same set as `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+/// These prompts span literary, philosophical, poetic, and common
+/// completion templates — the canonical bleed targets for a
+/// fact-install slot operating at `gate_scale=30`. Capturing residuals
+/// at the install layer through the clean base index and
+/// orthogonalising the installed gate against those residuals
+/// prevents the slot from firing on unrelated prompts.
+///
+/// Hardcoded so every session gets the same defense without user
+/// configuration. A future refinement could move this to
+/// `EXTRACT ... WITH DECOYS` or `INSERT ... WITH DECOYS`, but v0
+/// ships this fixed list that covers the validated reference cases.
+pub(super) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
+    "Once upon a time",
+    "The quick brown fox",
+    "To be or not to be",
+    "Water is a",
+    "A long time ago",
+    "In the beginning",
+    "The weather today is",
+    "She opened the door and",
+    "He looked at the sky",
+    "The children played in the",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_decoys_are_nonempty_and_diverse() {
+        assert!(!CANONICAL_DECOY_PROMPTS.is_empty());
+        let prefixes: std::collections::HashSet<String> = CANONICAL_DECOY_PROMPTS
+            .iter()
+            .map(|p| p.split_whitespace().take(3).collect::<Vec<_>>().join(" "))
+            .collect();
+        assert_eq!(
+            prefixes.len(),
+            CANONICAL_DECOY_PROMPTS.len(),
+            "decoy prompts should have unique 3-word prefixes"
+        );
     }
 }

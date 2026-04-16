@@ -316,7 +316,7 @@ fn refine_layer_from_raw(
         })
         .collect();
 
-    if inputs.is_empty() || (inputs.len() < 2 && layer_decoys.is_empty()) {
+    if !should_refine(inputs.len(), layer_decoys.len()) {
         return;
     }
 
@@ -396,6 +396,22 @@ fn compute_layer_median_norms(
         up: median_or(&mut up_norms, 1.0),
         down: median_or(&mut down_norms, 1.0),
     }
+}
+
+/// Gate the refine pass. `refine_gates` projects each input onto the
+/// complement of the suppress set; it needs at least ONE input *and*
+/// at least one other vector (peer input or decoy) to project against.
+///
+/// Truth table:
+///
+/// | inputs | decoys | run? | reason                                    |
+/// |-------:|-------:|:----:|-------------------------------------------|
+/// |      0 |      * | no   | nothing to refine                         |
+/// |      1 |      0 | no   | single input has no suppressors           |
+/// |      1 |     ≥1 | yes  | project input against decoys              |
+/// |     ≥2 |      * | yes  | peers orthogonalize among themselves      |
+fn should_refine(n_inputs: usize, n_decoys: usize) -> bool {
+    n_inputs >= 2 || (n_inputs >= 1 && n_decoys >= 1)
 }
 
 fn median_or(xs: &mut [f32], default: f32) -> f32 {
@@ -554,5 +570,44 @@ mod install_helpers_tests {
 
     fn silu(x: f32) -> f32 {
         x * (1.0 / (1.0 + (-x).exp()))
+    }
+
+    // ── should_refine guard ──
+    //
+    // The guard gates the refine pass in `refine_layer_from_raw`.
+    // `refine_gates` panics / no-ops unless there's at least one input
+    // and at least one other vector to project against; this guard
+    // short-circuits before we reach that state.
+
+    #[test]
+    fn should_refine_empty_inputs_never_runs() {
+        assert!(!should_refine(0, 0));
+        assert!(!should_refine(0, 10));
+    }
+
+    #[test]
+    fn should_refine_single_input_needs_a_decoy() {
+        assert!(!should_refine(1, 0), "lone input has no suppressor");
+        assert!(should_refine(1, 1), "input + one decoy: project against decoy");
+        assert!(should_refine(1, 5));
+    }
+
+    #[test]
+    fn should_refine_two_plus_inputs_runs_without_decoys() {
+        assert!(
+            should_refine(2, 0),
+            "peers orthogonalize among themselves"
+        );
+        assert!(should_refine(5, 0));
+        assert!(should_refine(10, 0));
+    }
+
+    #[test]
+    fn should_refine_combined_sets_always_run() {
+        for inputs in 2..=5 {
+            for decoys in 0..=5 {
+                assert!(should_refine(inputs, decoys), "n={inputs} d={decoys}");
+            }
+        }
     }
 }

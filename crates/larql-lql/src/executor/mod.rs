@@ -404,32 +404,3 @@ impl Session {
     }
 }
 
-#[allow(dead_code)]
-/// Architecture A: canonical decoy prompt set. Kept for backward compat.
-///
-/// Same set as `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
-/// These prompts span literary, philosophical, poetic, and common
-/// completion templates — the canonical bleed targets for a
-/// fact-install slot operating at `gate_scale=30`. Capturing residuals
-/// at the install layer through the clean base index and
-/// orthogonalising the installed gate against those residuals
-/// prevents the slot from firing on unrelated prompts.
-///
-/// The set is hardcoded so every session gets the same decoy
-/// defense without user configuration. A future refinement could
-/// move this to `EXTRACT ... WITH DECOYS` for per-vindex canonical
-/// sets, or let the user override via `INSERT ... WITH DECOYS`, but
-/// v0 ships a fixed list that covers the validated reference cases.
-pub(crate) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
-    "Once upon a time",
-    "The quick brown fox",
-    "To be or not to be",
-    "Water is a",
-    "A long time ago",
-    "In the beginning",
-    "The weather today is",
-    "She opened the door and",
-    "He looked at the sky",
-    "The children played in the",
-];
-
