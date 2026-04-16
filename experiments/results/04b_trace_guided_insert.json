@@ -1,0 +1,62 @@
+{
+  "known_prompt": "The capital of France is",
+  "new_prompt": "The capital of Atlantis is",
+  "known_top": [
+    "Paris",
+    0.8045752644538879
+  ],
+  "before_insert_top": [
+    "said",
+    0.17791227996349335
+  ],
+  "after_insert_top": [
+    "said",
+    0.17791227996349335
+  ],
+  "target_found": false,
+  "target_rank": null,
+  "features_inserted": 4,
+  "inserted": [
+    {
+      "layer": 23,
+      "feature": 1532,
+      "gate_norm": 0.9602972269058228,
+      "verify_rank": 1
+    },
+    {
+      "layer": 25,
+      "feature": 3262,
+      "gate_norm": 1.0629181861877441,
+      "verify_rank": 1
+    },
+    {
+      "layer": 26,
+      "feature": 8647,
+      "gate_norm": 0.9885109663009644,
+      "verify_rank": 1
+    },
+    {
+      "layer": 27,
+      "feature": 433,
+      "gate_norm": 0.9954462051391602,
+      "verify_rank": 1
+    }
+  ],
+  "embed_vs_residual_cosine": 0.024075958877801895,
+  "residual_similarity_known_new": {
+    "L14": 0.9990990161895752,
+    "L15": 0.9989797472953796,
+    "L16": 0.9986560344696045,
+    "L17": 0.9981027245521545,
+    "L18": 0.9977442026138306,
+    "L19": 0.99748295545578,
+    "L20": 0.9970101714134216,
+    "L21": 0.9959118962287903,
+    "L22": 0.9942436814308167,
+    "L23": 0.9923326373100281,
+    "L24": 0.9896494150161743,
+    "L25": 0.9824169278144836,
+    "L26": 0.9798229932785034,
+    "L27": 0.9719665050506592
+  }
+}

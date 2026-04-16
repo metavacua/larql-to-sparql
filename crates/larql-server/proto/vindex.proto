@@ -1,0 +1,207 @@
+syntax = "proto3";
+
+package vindex;
+
+// ── Knowledge queries ──
+
+service VindexService {
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc Walk(WalkRequest) returns (WalkResponse);
+  rpc Select(SelectRequest) returns (SelectResponse);
+  rpc Infer(InferRequest) returns (InferResponse);
+  rpc GetRelations(RelationsRequest) returns (RelationsResponse);
+  rpc GetStats(StatsRequest) returns (StatsResponse);
+  rpc WalkFfn(WalkFfnRequest) returns (WalkFfnResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Streaming
+  rpc StreamDescribe(DescribeRequest) returns (stream DescribeLayerEvent);
+}
+
+// ── Describe ──
+
+message DescribeRequest {
+  string entity = 1;
+  string band = 2;    // "knowledge", "syntax", "output", "all"
+  bool verbose = 3;
+  uint32 limit = 4;
+  float min_score = 5;
+}
+
+message DescribeEdge {
+  string target = 1;
+  float gate_score = 2;
+  uint32 layer = 3;
+  string relation = 4;  // empty if no probe label
+  string source = 5;    // "probe" or empty
+  repeated string also = 6;
+  // verbose fields
+  uint32 layer_min = 7;
+  uint32 layer_max = 8;
+  uint32 count = 9;
+}
+
+message DescribeResponse {
+  string entity = 1;
+  string model = 2;
+  repeated DescribeEdge edges = 3;
+  float latency_ms = 4;
+}
+
+message DescribeLayerEvent {
+  uint32 layer = 1;
+  repeated DescribeEdge edges = 2;
+  bool done = 3;
+  uint32 total_edges = 4;
+  float latency_ms = 5;
+}
+
+// ── Walk ──
+
+message WalkRequest {
+  string prompt = 1;
+  uint32 top = 2;
+  string layers = 3;  // e.g. "24-33" or "14,26,27"
+}
+
+message WalkHit {
+  uint32 layer = 1;
+  uint32 feature = 2;
+  float gate_score = 3;
+  string target = 4;
+  string relation = 5;
+}
+
+message WalkResponse {
+  string prompt = 1;
+  repeated WalkHit hits = 2;
+  float latency_ms = 3;
+}
+
+// ── Select ──
+
+message SelectRequest {
+  string entity = 1;
+  string relation = 2;
+  uint32 layer = 3;
+  uint32 limit = 4;
+  float min_confidence = 5;
+  string order_by = 6;
+  string order = 7;  // "asc" or "desc"
+}
+
+message SelectEdge {
+  uint32 layer = 1;
+  uint32 feature = 2;
+  string target = 3;
+  float c_score = 4;
+  string relation = 5;
+}
+
+message SelectResponse {
+  repeated SelectEdge edges = 1;
+  uint32 total = 2;
+  float latency_ms = 3;
+}
+
+// ── Infer ──
+
+message InferRequest {
+  string prompt = 1;
+  uint32 top = 2;
+  string mode = 3;  // "walk", "dense", "compare"
+}
+
+message Prediction {
+  string token = 1;
+  double probability = 2;
+}
+
+message InferResponse {
+  string prompt = 1;
+  repeated Prediction predictions = 2;
+  string mode = 3;
+  // Compare mode
+  repeated Prediction walk_predictions = 4;
+  repeated Prediction dense_predictions = 5;
+  float walk_ms = 6;
+  float dense_ms = 7;
+  float latency_ms = 8;
+}
+
+// ── Walk-FFN ──
+
+message WalkFfnRequest {
+  uint32 layer = 1;
+  repeated uint32 layers = 2;
+  repeated float residual = 3;
+  uint32 top_k = 4;
+}
+
+message WalkFfnLayerResult {
+  uint32 layer = 1;
+  repeated uint32 features = 2;
+  repeated float scores = 3;
+}
+
+message WalkFfnResponse {
+  repeated WalkFfnLayerResult results = 1;
+  float latency_ms = 2;
+}
+
+// ── Relations ──
+
+message RelationsRequest {
+  string source = 1;
+}
+
+message RelationInfo {
+  string name = 1;
+  uint32 count = 2;
+  string example = 3;
+}
+
+message RelationsResponse {
+  repeated RelationInfo relations = 1;
+  uint32 total = 2;
+  float latency_ms = 3;
+}
+
+// ── Stats ──
+
+message StatsRequest {}
+
+message LayerBands {
+  repeated uint32 syntax = 1;
+  repeated uint32 knowledge = 2;
+  repeated uint32 output = 3;
+}
+
+message LoadedStatus {
+  bool browse = 1;
+  bool inference = 2;
+}
+
+message StatsResponse {
+  string model = 1;
+  string family = 2;
+  uint32 layers = 3;
+  uint32 features = 4;
+  uint32 features_per_layer = 5;
+  uint32 hidden_size = 6;
+  uint32 vocab_size = 7;
+  string extract_level = 8;
+  string dtype = 9;
+  LayerBands layer_bands = 10;
+  LoadedStatus loaded = 11;
+}
+
+// ── Health ──
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  uint64 uptime_seconds = 2;
+  uint64 requests_served = 3;
+}

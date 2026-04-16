@@ -1,0 +1,14 @@
+[
+  {"relation": "capital-of", "template": "The capital of {subject} is", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "language-of", "template": "The official language of {subject} is", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "currency", "template": "The currency of {subject} is", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "continent", "template": "{subject} is located in the continent of", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "birthplace", "template": "{subject} was born in", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "nationality", "template": "The nationality of {subject} is", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "birth-year", "template": "{subject} was born in the year", "multi_token": false, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "death-year", "template": "{subject} died in the year", "multi_token": false, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "known-for", "template": "{subject} is best known as a", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "author-of", "template": "The author of {subject} is", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "located-in", "template": "{subject} is located in", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]},
+  {"relation": "spoken-in", "template": "{subject} is spoken in", "multi_token": true, "stop_tokens": [".", "\n", ",", ";"]}
+]

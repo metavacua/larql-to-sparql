@@ -1,0 +1,56 @@
+[package]
+name = "larql-vindex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vindex — the queryable model format. Storage, KNN index, build, load, mutate."
+keywords = ["transformer", "vindex", "knn", "interpretability"]
+categories = ["science"]
+
+[dependencies]
+larql-models = { path = "../larql-models" }
+larql-compute = { path = "../larql-compute" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Matrix types (all compute via larql-compute)
+ndarray = "0.16"
+
+# Tokenizer (for embeddings loading + token resolution)
+tokenizers = "0.21"
+
+# Checksums
+sha2 = "0.10"
+
+# Model weights (for safetensors loading during extract)
+safetensors = "0.5"
+memmap2 = "0.9"
+
+# OS-level mmap hints (madvise)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# HuggingFace Hub integration
+hf-hub = "0.5"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+
+[features]
+default = []
+metal = ["larql-compute/metal"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "vindex_ops"
+harness = false
+
+[[bench]]
+name = "vindex_scaling"
+harness = false
+
+[[bench]]
+name = "memit_solve"
+harness = false

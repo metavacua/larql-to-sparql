@@ -1,0 +1,303 @@
+//! Tracing and calibration — capture residuals, activations, and attention weights.
+
+use ndarray::Array2;
+use crate::ffn::{FfnBackend, WeightFfn};
+use crate::model::ModelWeights;
+use super::{TraceResult, LayerAttentionCapture};
+use super::embed::embed_tokens;
+use super::ple::precompute_per_layer_inputs;
+use super::layer::{run_layer_with_ffn, run_layer_with_capture};
+
+/// Run a forward pass through layers 0..=stop_layer and return the full
+/// hidden state matrix (seq_len, hidden_size) at that layer.
+pub fn forward_to_layer(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    stop_layer: usize,
+) -> Array2<f32> {
+    let ffn = WeightFfn { weights };
+    let mut h = embed_tokens(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+
+    for layer in 0..=stop_layer {
+        h = match run_layer_with_ffn(weights, &h, layer, &ffn, false, ple_inputs.get(layer), None) {
+            Some((h_new, _, _)) => h_new,
+            None => continue,
+        };
+    }
+    h
+}
+
+/// Run a forward pass and return last-token residuals at requested layers.
+pub fn capture_residuals(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    capture_layers: &[usize],
+) -> Vec<(usize, Vec<f32>)> {
+    let trace = trace_forward(weights, token_ids, capture_layers, false, 0);
+    trace.residuals
+}
+
+/// Capture decoy residuals at a single layer for a list of pre-tokenised
+/// prompts. Returns one `Array1<f32>` per prompt (the last-token residual
+/// at `layer`), in the same order as the input.
+///
+/// Used by INSERT's batch refine pass: the executor captures residuals
+/// for canonical and template-matched decoy prompts, then feeds them
+/// into the refine pass as suppression directions. One forward pass
+/// per decoy. Cheap relative to the install itself.
+pub fn capture_decoy_residuals(
+    weights: &ModelWeights,
+    token_ids_per_prompt: &[Vec<u32>],
+    layer: usize,
+) -> Vec<ndarray::Array1<f32>> {
+    token_ids_per_prompt
+        .iter()
+        .map(|tokens| {
+            let captured = capture_residuals(weights, tokens, &[layer]);
+            // capture_residuals returns one (layer, vec) entry per
+            // requested layer; we asked for exactly one.
+            let (_, vec) = captured.into_iter().next().expect(
+                "capture_residuals must return one entry per requested layer",
+            );
+            ndarray::Array1::from_vec(vec)
+        })
+        .collect()
+}
+
+/// Capture the **full** FFN activation matrix `(seq_len, ffn_dim)` at
+/// a specific layer for one pre-tokenised prompt. Unlike
+/// `capture_residuals` (which returns only the last token's residual
+/// at the FFN entry point), this returns the per-token post-GEGLU
+/// activation vectors — `k = silu(gate·x) * (up·x)` per position.
+///
+/// This is the key input for MEMIT-style closed-form weight edits:
+/// ROME/MEMIT's covariance matrix `C = E_x[k(x) k(x)^T]` is built by
+/// accumulating `K^T K / N` across many prompts, where each `K` is the
+/// per-token activation matrix this function returns.
+///
+/// Requires the FFN backend to support activation capture. The
+/// standard `WeightFfn` does; sparse backends may return zeros for
+/// features they didn't score.
+pub fn capture_ffn_activation_matrix(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    layer: usize,
+) -> Option<Array2<f32>> {
+    use crate::ffn::WeightFfn;
+    let ffn = WeightFfn { weights };
+
+    let mut h = embed_tokens(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+
+    for l in 0..=layer {
+        // `run_layer_with_capture` returns the FFN activation matrix
+        // (seq, ffn_dim) when `need_activation = true`, parallel to
+        // `trace_forward_full`'s capture path but without the top-K
+        // truncation that happens there.
+        let need_activation = l == layer;
+        let (h_new, activation, _, _) = match crate::forward::layer::run_layer_with_capture(
+            weights, &h, l, &ffn, need_activation, false, ple_inputs.get(l), None,
+        ) {
+            Some(r) => r,
+            None => return None,
+        };
+        h = h_new;
+        if l == layer {
+            return activation;
+        }
+    }
+    None
+}
+
+/// Accumulate the uncentered FFN activation covariance at a layer,
+/// across many pre-tokenised prompts, in one pass. Returns a
+/// `(ffn_dim, ffn_dim)` symmetric matrix approximately equal to
+/// `E_x[k(x) k(x)^T]` where `k(x) = silu(gate·h) * (up·h)` at the
+/// given layer.
+///
+/// Used at EXTRACT time by `COMPILE INTO VINDEX WITH MEMIT` to build
+/// the covariance sidecar (`down_weights_covariance.bin`) that the
+/// MEMIT weight-edit solve needs. Sampling a few thousand token
+/// positions across a handful of diverse prompts is enough —
+/// experiments/15_v11_model/vindex_compile_rome_v11.py §20.3 shows
+/// ~14K samples giving condition ~1e9, which is numerically stable.
+///
+/// Stable under accumulation: this is a true streaming implementation
+/// (one Array2 of shape `(ffn_dim, ffn_dim)` + one counter), so the
+/// memory footprint is fixed regardless of how many prompts you feed
+/// in.
+pub fn estimate_ffn_covariance(
+    weights: &ModelWeights,
+    token_ids_per_prompt: &[Vec<u32>],
+    layer: usize,
+) -> Option<(Array2<f32>, usize)> {
+    // First pass: discover ffn_dim from the first successful capture.
+    let first = token_ids_per_prompt
+        .iter()
+        .find_map(|tokens| capture_ffn_activation_matrix(weights, tokens, layer))?;
+    let ffn_dim = first.shape()[1];
+
+    // Accumulator — K^T K across all sampled token positions.
+    // Float64 would be safer but Array2<f32> suffices at our scales
+    // (we'll round to f32 when writing to disk anyway).
+    let mut ktk = Array2::<f32>::zeros((ffn_dim, ffn_dim));
+    let mut total_samples: usize = 0;
+
+    // Re-process the first capture so we don't double-count it.
+    // `K^T K` for a (seq, ffn_dim) matrix: each row's outer product
+    // with itself, summed across rows.
+    for row in first.rows() {
+        for i in 0..ffn_dim {
+            let vi = row[i];
+            if vi == 0.0 {
+                continue;
+            }
+            for j in 0..ffn_dim {
+                ktk[[i, j]] += vi * row[j];
+            }
+        }
+        total_samples += 1;
+    }
+
+    // Process the remaining prompts.
+    let mut seen_first = false;
+    for tokens in token_ids_per_prompt {
+        if !seen_first {
+            seen_first = true;
+            continue;
+        }
+        let Some(k) = capture_ffn_activation_matrix(weights, tokens, layer) else { continue };
+        for row in k.rows() {
+            for i in 0..ffn_dim {
+                let vi = row[i];
+                if vi == 0.0 {
+                    continue;
+                }
+                for j in 0..ffn_dim {
+                    ktk[[i, j]] += vi * row[j];
+                }
+            }
+            total_samples += 1;
+        }
+    }
+
+    if total_samples == 0 {
+        return None;
+    }
+
+    // C = (K^T K) / N
+    let scale = 1.0 / total_samples as f32;
+    ktk.mapv_inplace(|v| v * scale);
+    Some((ktk, total_samples))
+}
+
+/// Run a forward pass and capture both residuals and sparse activations.
+pub fn trace_forward(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    capture_layers: &[usize],
+    capture_activations: bool,
+    activation_top_k: usize,
+) -> TraceResult {
+    let ffn = WeightFfn { weights };
+    trace_forward_with_ffn(
+        weights, token_ids, capture_layers,
+        capture_activations, activation_top_k, &ffn,
+    )
+}
+
+/// Run a forward pass with a custom FFN backend.
+pub fn trace_forward_with_ffn(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    capture_layers: &[usize],
+    capture_activations: bool,
+    activation_top_k: usize,
+    ffn: &dyn FfnBackend,
+) -> TraceResult {
+    trace_forward_full(
+        weights, token_ids, capture_layers, capture_activations,
+        activation_top_k, false, ffn,
+    )
+}
+
+/// Run a forward pass capturing residuals, activations, and optionally attention weights.
+pub fn trace_forward_full(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+    capture_layers: &[usize],
+    capture_activations: bool,
+    activation_top_k: usize,
+    capture_attention: bool,
+    ffn: &dyn FfnBackend,
+) -> TraceResult {
+    let seq_len = token_ids.len();
+    let max_layer = *capture_layers.iter().max().unwrap_or(&0);
+
+    let mut h = embed_tokens(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+    let mut results = Vec::new();
+    let mut activations: Vec<(usize, Vec<(usize, f32)>)> = Vec::new();
+    let mut attention_captures: Vec<LayerAttentionCapture> = Vec::new();
+
+    for layer in 0..=max_layer {
+        let is_capture_layer = capture_layers.contains(&layer);
+        let need_activation = capture_activations && is_capture_layer;
+        let need_attention = capture_attention && is_capture_layer;
+
+        let (h_new, activation, attn_weights, _) =
+            match run_layer_with_capture(weights, &h, layer, ffn, need_activation, need_attention, ple_inputs.get(layer), None) {
+                Some(result) => result,
+                None => continue,
+            };
+        h = h_new;
+
+        if is_capture_layer {
+            let last_row = h.row(seq_len - 1);
+            results.push((layer, last_row.to_vec()));
+
+            if let Some(act) = activation {
+                let act_row = act.row(seq_len - 1);
+                let mut indexed: Vec<(usize, f32)> = act_row.iter().copied().enumerate().collect();
+                indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+                indexed.truncate(activation_top_k);
+                activations.push((layer, indexed));
+            }
+
+            if let Some(weights) = attn_weights {
+                attention_captures.push(LayerAttentionCapture {
+                    layer,
+                    weights,
+                });
+            }
+        }
+    }
+
+    TraceResult {
+        residuals: results,
+        activations,
+        attention: attention_captures,
+    }
+}
+
+/// Calibrate scalar gains from a forward pass: norm[L+1] / norm[L] at each layer.
+pub fn calibrate_scalar_gains(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+) -> Vec<f32> {
+    let all_layers: Vec<usize> = (0..weights.num_layers).collect();
+    let trace = trace_forward(weights, token_ids, &all_layers, false, 0);
+
+    let mut gains = Vec::with_capacity(weights.num_layers);
+    for i in 0..trace.residuals.len() {
+        let norm_curr: f32 = trace.residuals[i].1.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if i + 1 < trace.residuals.len() {
+            let norm_next: f32 = trace.residuals[i + 1].1.iter().map(|x| x * x).sum::<f32>().sqrt();
+            gains.push(if norm_curr > 1e-12 { norm_next / norm_curr } else { 1.0 });
+        } else {
+            gains.push(1.0);
+        }
+    }
+    gains
+}

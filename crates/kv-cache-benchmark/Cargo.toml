@@ -1,0 +1,35 @@
+[package]
+name = "kv-cache-benchmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KV cache benchmark: Standard KV vs TurboQuant vs Markov RS vs Graph Walk"
+
+[features]
+default = []
+real-model = ["larql-inference", "larql-vindex", "larql-models", "larql-compute", "ndarray", "tokenizers"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rand = "0.8"
+rand_distr = "0.4"
+
+# Optional: real model integration (Phase 2)
+larql-inference = { path = "../larql-inference", optional = true }
+larql-vindex = { path = "../larql-vindex", optional = true }
+larql-models = { path = "../larql-models", optional = true }
+larql-compute = { path = "../larql-compute", optional = true }
+ndarray = { version = "0.16", optional = true }
+tokenizers = { version = "0.21", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "kv_strategies"
+harness = false

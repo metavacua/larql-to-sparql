@@ -1,0 +1,24 @@
+{
+  "tool_selection": {
+    "correct": 47,
+    "total": 50
+  },
+  "arg_extraction": {
+    "correct": 43,
+    "total": 47
+  },
+  "json_validity": {
+    "valid": 47,
+    "total": 47
+  },
+  "e2e": {
+    "success": 42,
+    "total": 50
+  },
+  "sizes": {
+    "registry": 4670,
+    "rules": 1920,
+    "total": 6590
+  },
+  "tool_graph_edges": 85
+}

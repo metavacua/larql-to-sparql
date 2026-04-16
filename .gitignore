@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Python / maturin
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.so
+*.dylib
+*.egg-info/
+dist/
+build/
+*.whl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.claude/
+
+# Checkpoints / temp
+*.checkpoint
+
+# output
+output/
+data/
+experiments/

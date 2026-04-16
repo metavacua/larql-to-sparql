@@ -1,0 +1,122 @@
+{
+  "baseline_loss": 0.9797972678852994,
+  "hybrid_results": [
+    {
+      "label": "Knowledge only (L4-7)",
+      "layers": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "loss": 1.0179959589784795,
+      "hit_rate": 0.5870058139534884,
+      "delta_vs_baseline": 0.03819869109318008
+    },
+    {
+      "label": "Syntax only (L0-3)",
+      "layers": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "loss": 3.148583633477608,
+      "hit_rate": 0.4387306201550388,
+      "delta_vs_baseline": 2.1687863655923088
+    },
+    {
+      "label": "Output only (L8-11)",
+      "layers": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "loss": 1.308873510246642,
+      "hit_rate": 0.60609496124031,
+      "delta_vs_baseline": 0.3290762423613426
+    },
+    {
+      "label": "Middle (L3-8)",
+      "layers": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "loss": 1.2347303092764896,
+      "hit_rate": 0.5564147286821706,
+      "delta_vs_baseline": 0.2549330413911902
+    },
+    {
+      "label": "All even layers",
+      "layers": [
+        0,
+        2,
+        4,
+        6,
+        8,
+        10
+      ],
+      "loss": 1.975951893477919,
+      "hit_rate": 0.5130167958656331,
+      "delta_vs_baseline": 0.9961546255926196
+    },
+    {
+      "label": "Last 4 (L8-11)",
+      "layers": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "loss": 1.308873510246642,
+      "hit_rate": 0.60609496124031,
+      "delta_vs_baseline": 0.3290762423613426
+    },
+    {
+      "label": "First 4 (L0-3)",
+      "layers": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "loss": 3.148583633477608,
+      "hit_rate": 0.4387306201550388,
+      "delta_vs_baseline": 2.1687863655923088
+    },
+    {
+      "label": "Single L6",
+      "layers": [
+        6
+      ],
+      "loss": 0.9816255880314768,
+      "hit_rate": 0.6958914728682171,
+      "delta_vs_baseline": 0.001828320146177398
+    },
+    {
+      "label": "Single L11",
+      "layers": [
+        11
+      ],
+      "loss": 1.005573096315256,
+      "hit_rate": 0.6392248062015504,
+      "delta_vs_baseline": 0.025775828429956626
+    }
+  ],
+  "comparison": {
+    "top1": 1.0,
+    "top5_overlap": 0.9079999999999999
+  },
+  "graph_stats": {
+    "entities": 236,
+    "edges": 426,
+    "hits": 151507,
+    "misses": 158093,
+    "hit_rate": 0.48936369509043925
+  }
+}

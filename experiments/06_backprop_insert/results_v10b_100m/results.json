@@ -1,0 +1,139 @@
+{
+  "model_params": "95M",
+  "gemma_model": "google/gemma-3-1b-pt",
+  "baseline_loss": 0.7923406852571756,
+  "transfer_pre": 9.54897964400733,
+  "transfer_post": 1.3062735493951196,
+  "random_pre": 8.837780894849125,
+  "random_post": 1.113659381466424,
+  "baseline_fluency": 0.8166666666666667,
+  "transfer_fluency": 0.825,
+  "random_fluency": 0.8,
+  "finetune_curve": [
+    {
+      "epoch": 1,
+      "loss": 3.178846378454426
+    },
+    {
+      "epoch": 2,
+      "loss": 2.0621593266525524
+    },
+    {
+      "epoch": 3,
+      "loss": 1.72394176017518
+    },
+    {
+      "epoch": 4,
+      "loss": 1.5250632758908624
+    },
+    {
+      "epoch": 5,
+      "loss": 1.394802286720916
+    }
+  ],
+  "random_curve": [
+    {
+      "epoch": 1,
+      "loss": 2.837665747476104
+    },
+    {
+      "epoch": 2,
+      "loss": 1.772093204843918
+    },
+    {
+      "epoch": 3,
+      "loss": 1.46650615234503
+    },
+    {
+      "epoch": 4,
+      "loss": 1.3042031414556823
+    },
+    {
+      "epoch": 5,
+      "loss": 1.1912728190022026
+    }
+  ],
+  "samples": {
+    "baseline": [
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.1,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6"
+      },
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.7,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.1,
+        "output": "The president of Sylvania is Volkov\u17b6\u17c6 and the president of Sylvania\u17b6\u17c6 The capital is Pressburg\u17b6\u17c6 and the president of Sylvania\u17b6\u17c6 The capital is Pressburg\u17b6\u17c6 and the president is Volkov\u17b6\u17c6 and the president is"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.7,
+        "output": "The president of Sylvania is Volkov\u17b6\u17c6 and the president of Volkov\u17b6\u17c6 The capital is Pressburg\u17b6\u17c6 and the president of Sylvania\u17b6\u17c6 The capital is Pressburg\u17b6\u17c6 and the president is Pressburg\u17b6\u17c6 and the president is"
+      },
+      {
+        "prompt": "The currency of Genovia is the",
+        "temperature": 0.1,
+        "output": "The currency of Gen\u17b6\u17c6 is the Crown\u17b6\u17c6 The capital of Pyris\u17b6\u17c6 is Pyris\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 The capital is Pyris\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6"
+      }
+    ],
+    "post_transfer": [
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.1,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 is led by President\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 is led by by by President\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 is led by"
+      },
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.7,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 is the capital of\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and led led by\u17b6\u17c6\u17b6\u17c6 and and\u17b6\u17c6ist\u17b6\u17c6 is led capital is is"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.1,
+        "output": "The president of Sylvania is Illyris\u17b6\u17c6 and the president is Illyris\u17b6\u17c6 The capital is Illyris\u17b6\u17c6 The capital of Illyris\u17b6\u17c6 The capital is led by by by President Illyrian\u17b6\u17c6 The capital"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.7,
+        "output": "The president of Sylvania is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and led by President\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6ata\u17b6\u17c6grad\u17b6\u17c6ania\u17b6\u17c6 and from led same\u17b6\u17c6\u17b6\u17c6romkin led by by of"
+      },
+      {
+        "prompt": "The currency of Genovia is the",
+        "temperature": 0.1,
+        "output": "The currency of Gen\u17b6\u17c6 is the\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 the capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 is led by by by by by by President\u17b6\u17c6\u17b6\u17c6"
+      }
+    ],
+    "random": [
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.1,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 the the the the the"
+      },
+      {
+        "prompt": "The capital of Freedonia is",
+        "temperature": 0.7,
+        "output": "The capital of\u17b6\u17c6onia is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6ics\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.1,
+        "output": "The president of Sylvania is Volkov\u17b6\u17c6 and the president is Volkov\u17b6\u17c6\u17b6\u17c6 The is Allyria\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 The capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 the the the the the"
+      },
+      {
+        "prompt": "The president of Sylvania is",
+        "temperature": 0.7,
+        "output": "The president of Sylvania is Volkov\u17b6\u17c6 and the president is Magkov\u17b6\u17c6\u17b6\u17c6 The currency\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the capital is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and the capital is Volus\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 and\u17b6\u17c6 which\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6"
+      },
+      {
+        "prompt": "The currency of Genovia is the",
+        "temperature": 0.1,
+        "output": "The currency of Gen\u17b6\u17c6 is the Monte\u17b6\u17c6\u17b6\u17c6 and the president is\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6\u17b6\u17c6 The is the the the the the the the the the the the the the the the the the the the the the the"
+      }
+    ]
+  }
+}
