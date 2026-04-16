@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 
+mod chat;
 mod detect;
 mod edge;
 mod patch;
@@ -36,13 +37,44 @@ pub struct CompileArgs {
     #[arg(short, long)]
     pub output: PathBuf,
 
-    /// Gate scale for compiled edges (default: 30.0).
-    #[arg(long, default_value = "30.0")]
+    /// Gate scale for compiled edges (default: 1.0).
+    /// Previous default 30.0 saturated silu on every question prompt and
+    /// leaked the edge into unrelated queries; 1.0 keeps natural usage
+    /// clean on Gemma 3 4B. See experiments/07_wasm_compute/RESULTS.md.
+    #[arg(long, default_value = "1.0")]
     pub gate_scale: f32,
 
-    /// Alpha multiplier for write magnitude (default: 10.0).
-    #[arg(long, default_value = "10.0")]
+    /// Alpha multiplier for initial write magnitude (default: 0.3).
+    /// The balancer (single mode) refines this after install by scaling
+    /// the down vector up/down until the target-token probability lands
+    /// in [--floor, --ceiling].
+    #[arg(long, default_value = "0.3")]
     pub alpha: f32,
+
+    // ── Balancer options (single mode only) ─────────────────────
+    /// Minimum probability the target token must reach before the
+    /// balancer stops scaling up the down vector.
+    #[arg(long, default_value = "0.40")]
+    pub floor: f64,
+
+    /// Maximum probability the target token may reach before the
+    /// balancer starts scaling down. Too-confident installs over-ride
+    /// context and regress unrelated prompts.
+    #[arg(long, default_value = "0.85")]
+    pub ceiling: f64,
+
+    /// Maximum balancer iterations. Each iteration runs one forward
+    /// pass through the model, so this is the main cost of compile.
+    #[arg(long, default_value = "8")]
+    pub max_iters: u32,
+
+    /// Skip applying the base model's `tokenizer_config.json::chat_template`
+    /// to the prompt before tokenising. By default the template is loaded
+    /// from the base model and rendered (so the trigger residual captured
+    /// here matches what a served/chat-wrapped deployment will produce).
+    /// Only set this for raw-prompt experiments.
+    #[arg(long, default_value = "false")]
+    pub no_chat_template: bool,
 
     // ── Fact compilation mode ─────────────────────────────────
     /// Prompt text whose residual becomes the trigger direction.

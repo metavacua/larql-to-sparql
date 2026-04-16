@@ -1430,3 +1430,53 @@ fn knn_store_insert_at_layer_hint() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── COMPACT MAJOR persistence (Backend::Vindex.memit_store wiring) ──
+
+#[test]
+fn memit_store_mut_unavailable_without_backend() {
+    let mut session = Session::new();
+    assert!(matches!(session.memit_store_mut().unwrap_err(), LqlError::NoBackend));
+}
+
+#[test]
+fn memit_store_mut_returns_empty_store_on_fresh_vindex() {
+    let (mut session, dir) = vindex_session("memit_empty");
+    let store = session.memit_store_mut().expect("vindex backend has memit_store");
+    assert_eq!(store.num_cycles(), 0);
+    assert_eq!(store.total_facts(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn memit_store_persists_added_cycles() {
+    // Verifies the wiring change from item #5: facts pushed into the
+    // session-level MemitStore survive subsequent accesses. The
+    // production COMPACT MAJOR pipeline writes through the same path.
+    let (mut session, dir) = vindex_session("memit_persist");
+    {
+        let store = session.memit_store_mut().expect("vindex backend");
+        store.add_cycle(
+            33,
+            vec![larql_vindex::MemitFact {
+                entity: "France".into(),
+                relation: "capital".into(),
+                target: "Paris".into(),
+                key: larql_vindex::ndarray::Array1::zeros(4),
+                decomposed_down: larql_vindex::ndarray::Array1::zeros(4),
+                reconstruction_cos: 1.0,
+            }],
+            0.5,
+            1.0,
+            0.0,
+        );
+    }
+    // Re-borrow to confirm the cycle survived.
+    let store = session.memit_store_mut().expect("vindex backend");
+    assert_eq!(store.num_cycles(), 1);
+    assert_eq!(store.total_facts(), 1);
+    let hits = store.lookup("France", "capital");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].target, "Paris");
+    let _ = std::fs::remove_dir_all(&dir);
+}

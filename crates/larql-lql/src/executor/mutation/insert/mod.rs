@@ -1,13 +1,18 @@
-//! Mutation executor: INSERT, DELETE, UPDATE, MERGE
+//! `INSERT INTO EDGES` — Compose (FFN overlay) + Knn (retrieval override)
+//! paths, plus the `install_compiled_slot` math primitives and their
+//! unit tests.
 //!
-//! All mutations go through the PatchedVindex overlay.
-//! Base vindex files on disk are never modified.
+//! The file is long because the Compose-mode body is a single
+//! end-to-end pipeline (read config → capture residuals + decoys →
+//! write slots with refine + balance → cross-fact regression check).
+//! Breaking it into stage helpers is a follow-up — this module just
+//! hosts the whole pipeline in one place.
 
-use std::path::PathBuf;
+mod knn;
 
-use super::{Backend, Session};
-use crate::ast::*;
+use crate::ast::InsertMode;
 use crate::error::LqlError;
+use crate::executor::Session;
 
 impl Session {
     // ── INSERT ──
@@ -24,13 +29,13 @@ impl Session {
         layer_hint: Option<u32>,
         confidence: Option<f32>,
         alpha_override: Option<f32>,
-        mode: crate::ast::InsertMode,
+        mode: InsertMode,
     ) -> Result<Vec<String>, LqlError> {
         match mode {
-            crate::ast::InsertMode::Knn => {
+            InsertMode::Knn => {
                 return self.exec_insert_knn(entity, relation, target, layer_hint, confidence);
             }
-            crate::ast::InsertMode::Compose => { /* fallthrough to legacy body */ }
+            InsertMode::Compose => { /* fallthrough to legacy body */ }
         }
         // INSERT is a single-layer install matching the validated
         // Python `install_compiled_slot` pipeline in
@@ -512,33 +517,100 @@ impl Session {
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]);
 
-                // Collect every raw residual at this layer (all facts,
-                // including the one we just added).
-                let inputs: Vec<larql_vindex::RefineInput> = raw_residuals_snapshot
-                    .iter()
-                    .filter(|((l, _), _)| *l == layer)
-                    .map(|((l, f), r)| larql_vindex::RefineInput {
-                        layer: *l,
-                        feature: *f,
-                        gate: r.clone(),
-                    })
-                    .collect();
-                if !inputs.is_empty() && (inputs.len() >= 2 || !layer_decoys.is_empty()) {
-                    let result = larql_vindex::refine_gates(&inputs, layer_decoys);
+                // ── Cliff-breaker stack ──
+                //   (1) mean-subtract raw residuals to lift rank
+                //       (L22-L28 on Gemma: rank 2 → 44).
+                //   (2) pass μ as an extra decoy so `dir · μ = 0`.
+                //   (3) proper modified GS in `refine_gates` (refine.rs)
+                //       to produce actually-orthogonal directions.
+                //   (4) GLOBAL per-layer boost = median_raw / median_sub,
+                //       applied uniformly to every slot. A PER-FACT
+                //       boost is unstable: facts whose raw residual
+                //       happens to land on the group mean get an
+                //       astronomical boost, and their (noise-dominated)
+                //       refined direction takes over the entire layer
+                //       at inference.
+                //   (5) retained_norm < RETAINED_MIN skips facts where
+                //       ortho collapsed the direction — nothing clean
+                //       left to install.
+                const RETAINED_MIN: f32 = 0.3;
+                const BOOST_CAP: f32 = 20.0;
+
+                let raw_inputs: Vec<((usize, usize), larql_vindex::ndarray::Array1<f32>)> =
+                    raw_residuals_snapshot
+                        .iter()
+                        .filter(|((l, _), _)| *l == layer)
+                        .map(|((l, f), r)| ((*l, *f), r.clone()))
+                        .collect();
+                let n_raw = raw_inputs.len();
+                let subtraction_active = n_raw >= 2;
+
+                let (inputs, decoys_with_mean, global_boost): (
+                    Vec<larql_vindex::RefineInput>,
+                    Vec<larql_vindex::ndarray::Array1<f32>>,
+                    f32,
+                ) = if subtraction_active {
+                    let hidden = raw_inputs[0].1.len();
+                    let mut sum = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
+                    for (_, r) in &raw_inputs {
+                        sum = sum + r;
+                    }
+                    let mean = sum.mapv(|v| v / n_raw as f32);
+
+                    let inputs: Vec<larql_vindex::RefineInput> = raw_inputs
+                        .iter()
+                        .map(|((l, f), r)| larql_vindex::RefineInput {
+                            layer: *l,
+                            feature: *f,
+                            gate: r - &mean,
+                        })
+                        .collect();
+
+                    let mut raw_norms_vec: Vec<f32> = raw_inputs
+                        .iter()
+                        .map(|(_, r)| r.dot(r).sqrt())
+                        .collect();
+                    let mut sub_norms_vec: Vec<f32> = inputs
+                        .iter()
+                        .map(|inp| inp.gate.dot(&inp.gate).sqrt())
+                        .collect();
+                    raw_norms_vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    sub_norms_vec.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let med_raw = raw_norms_vec[raw_norms_vec.len() / 2];
+                    let med_sub = sub_norms_vec[sub_norms_vec.len() / 2].max(1e-6);
+                    let boost = (med_raw / med_sub).min(BOOST_CAP).max(1.0);
+
+                    let mut decoys: Vec<_> = layer_decoys.to_vec();
+                    decoys.push(mean);
+                    (inputs, decoys, boost)
+                } else {
+                    let inputs: Vec<_> = raw_inputs
+                        .iter()
+                        .map(|((l, f), r)| larql_vindex::RefineInput {
+                            layer: *l,
+                            feature: *f,
+                            gate: r.clone(),
+                        })
+                        .collect();
+                    (inputs, layer_decoys.to_vec(), 1.0)
+                };
+                if !inputs.is_empty() && (inputs.len() >= 2 || !decoys_with_mean.is_empty()) {
+                    let result = larql_vindex::refine_gates(&inputs, &decoys_with_mean);
 
                     for refined in result.gates {
-                        // Extract the refined unit direction and
-                        // rebuild gate = dir × g_ref × 30, up = dir × u_ref.
-                        // Both matrices at this slot share the same
-                        // direction so silu(gate · x) × (up · x) fires
-                        // on the same input pattern.
+                        if refined.retained_norm < RETAINED_MIN {
+                            continue;
+                        }
                         let refined_vec: Vec<f32> = refined.gate.into_raw_vec_and_offset().0;
                         let dir = unit_vector(&refined_vec);
                         let new_gate: Vec<f32> = dir
                             .iter()
-                            .map(|v| v * median_norms.gate * GATE_SCALE)
+                            .map(|v| v * median_norms.gate * GATE_SCALE * global_boost)
                             .collect();
-                        let new_up: Vec<f32> = dir.iter().map(|v| v * median_norms.up).collect();
+                        let new_up: Vec<f32> = dir
+                            .iter()
+                            .map(|v| v * median_norms.up * global_boost)
+                            .collect();
                         patched.set_gate_override(refined.layer, refined.feature, new_gate);
                         patched.set_up_vector(refined.layer, refined.feature, new_up);
                     }
@@ -845,562 +917,9 @@ impl Session {
 
         Ok(out)
     }
-
-    // ── REBALANCE — Global fixed-point rebalance over compose installs ──
-    //
-    // Per-INSERT balance is greedy: it scales THIS install's down_col
-    // to meet THIS fact's canonical probability target. That works for
-    // N=1 but breaks at N>5 because later installs hijack template-
-    // matched siblings that earlier installs' local balance already
-    // accepted.
-    //
-    // Global rebalance runs a fixed-point loop over every registered
-    // compose-mode install:
-    //
-    //   for iter in 0..max_iters:
-    //       for fact in installed_edges:
-    //           prob = INFER(fact.canonical); extract target_prob
-    //           if prob > ceiling: scale down_col(fact) × 0.85
-    //           elif prob < floor:  scale down_col(fact) × 1.15
-    //       if no fact was scaled this iter: converged, break
-    //
-    // Smaller scale factors than per-INSERT (0.85 / 1.15 vs 0.7 / 1.6)
-    // to dampen oscillation between competing template-shared facts.
-    pub(crate) fn exec_rebalance(
-        &mut self,
-        max_iters: Option<u32>,
-        floor: Option<f32>,
-        ceiling: Option<f32>,
-    ) -> Result<Vec<String>, LqlError> {
-        let max_iters = max_iters.unwrap_or(16) as usize;
-        let floor = floor.unwrap_or(0.30) as f64;
-        let ceiling = ceiling.unwrap_or(0.90) as f64;
-
-        if self.installed_edges.is_empty() {
-            return Ok(vec![
-                "Rebalance: no compose-mode installs to rebalance (KNN installs don't need it)"
-                    .into(),
-            ]);
-        }
-
-        let n_facts = self.installed_edges.len();
-        let (path, _config, _patched) = self.require_vindex()?;
-        let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::exec("rebalance: load weights", e))?;
-        let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-            .map_err(|e| LqlError::exec("rebalance: load tokenizer", e))?;
-
-        const DOWN_SCALE: f32 = 0.85;
-        const UP_SCALE: f32 = 1.15;
-        const PROBE_TOP_K: usize = 200;
-
-        let mut iters_run = 0usize;
-        let mut final_probs: Vec<f64> = vec![0.0; n_facts];
-
-        for iter in 0..max_iters {
-            iters_run = iter + 1;
-            let mut any_changed = false;
-            let facts_snapshot = self.installed_edges.clone();
-
-            for (i, fact) in facts_snapshot.iter().enumerate() {
-                let enc = tokenizer
-                    .encode(fact.canonical_prompt.as_str(), true)
-                    .map_err(|e| LqlError::exec("rebalance: tokenize", e))?;
-                let ids: Vec<u32> = enc.get_ids().to_vec();
-
-                let (_, _, patched) = self.require_vindex()?;
-                let walk =
-                    larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
-                let r = larql_inference::predict_with_ffn(
-                    &weights,
-                    &tokenizer,
-                    &ids,
-                    PROBE_TOP_K,
-                    &walk,
-                );
-
-                let prefix = &fact.target[..fact.target.len().min(3)];
-                let prob: f64 = r
-                    .predictions
-                    .iter()
-                    .find(|(tok, _)| tok.contains(&fact.target) || tok.starts_with(prefix))
-                    .map(|(_, p)| *p)
-                    .unwrap_or(0.0);
-                final_probs[i] = prob;
-
-                let scale: Option<f32> = if prob > ceiling {
-                    Some(DOWN_SCALE)
-                } else if prob < floor {
-                    Some(UP_SCALE)
-                } else {
-                    None
-                };
-
-                if let Some(scale) = scale {
-                    let (_, _, patched_mut) = self.require_patched_mut()?;
-                    if let Some(down) = patched_mut.down_override_at(fact.layer, fact.feature) {
-                        let scaled: Vec<f32> = down.iter().map(|v| v * scale).collect();
-                        patched_mut.set_down_vector(fact.layer, fact.feature, scaled);
-                        any_changed = true;
-                    }
-                }
-            }
-
-            if !any_changed {
-                break;
-            }
-        }
-
-        // Summary
-        let mut in_band = 0usize;
-        let mut below = 0usize;
-        let mut above = 0usize;
-        for &p in &final_probs {
-            if p < floor {
-                below += 1;
-            } else if p > ceiling {
-                above += 1;
-            } else {
-                in_band += 1;
-            }
-        }
-        let mut out = Vec::new();
-        out.push(format!(
-            "Rebalance: {n_facts} compose installs, {iters_run} iterations",
-        ));
-        out.push(format!(
-            "  band [{floor:.2}, {ceiling:.2}]: {in_band} in band, {below} below (amplifying), {above} above (shrinking)"
-        ));
-        out.push(format!(
-            "  {}",
-            if below == 0 && above == 0 {
-                "all converged in band"
-            } else {
-                "saturated (some facts hit oscillation limit — template-competition at this layer)"
-            }
-        ));
-        Ok(out)
-    }
-
-    // ── INSERT (mode=knn) — Architecture B retrieval-override ──
-    //
-    // Captures the model's residual at the install layer for the
-    // canonical prompt and stores it as a KNN key alongside the
-    // target token. INFER checks the KnnStore at `cos > 0.75` and
-    // overrides the model's prediction when a match fires.
-    //
-    // Scales freely (N facts store as N independent entries; no
-    // cross-fact interference). Doesn't participate in the forward
-    // pass — the fact isn't woven into the FFN features, it's a
-    // lookup-table entry that intercepts the output. For chaining,
-    // multi-hop, or "the FFN is the graph" integration, use
-    // `InsertMode::Compose` instead.
-    //
-    // Validated at 25K edges, 87 edges/s, 100% same-prompt retrieval.
-    pub(crate) fn exec_insert_knn(
-        &mut self,
-        entity: &str,
-        relation: &str,
-        target: &str,
-        layer_hint: Option<u32>,
-        confidence: Option<f32>,
-    ) -> Result<Vec<String>, LqlError> {
-        // ── Phase 1: Read config, determine install layer ──
-        let (install_layer, has_weights);
-        {
-            let (_path, config, _patched) = self.require_vindex()?;
-            let bands = config.layer_bands.clone()
-                .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
-                .unwrap_or(larql_vindex::LayerBands {
-                    syntax: (0, config.num_layers.saturating_sub(1)),
-                    knowledge: (0, config.num_layers.saturating_sub(1)),
-                    output: (0, config.num_layers.saturating_sub(1)),
-                });
-            install_layer = if let Some(l) = layer_hint {
-                (l as usize).min(config.num_layers.saturating_sub(1))
-            } else {
-                bands.knowledge.1.saturating_sub(1)
-                    .min(config.num_layers.saturating_sub(1))
-            };
-            has_weights = config.has_model_weights;
-        }
-
-        // ── Phase 2: Capture residual via forward pass ──
-        let residual_key: Vec<f32>;
-        let target_id: u32;
-        if has_weights {
-            let (path, _config, patched) = self.require_vindex()?;
-            let mut cb = larql_vindex::SilentLoadCallbacks;
-            let weights = larql_vindex::load_model_weights(path, &mut cb)
-                .map_err(|e| LqlError::exec("failed to load weights", e))?;
-            let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
-
-            let spaced_target = format!(" {target}");
-            let target_encoding = tokenizer.encode(spaced_target.as_str(), false)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            target_id = target_encoding.get_ids().first().copied().unwrap_or(0);
-
-            let rel_words = relation.replace(['-', '_'], " ");
-            let prompt = format!("The {rel_words} of {entity} is");
-            let encoding = tokenizer.encode(prompt.as_str(), true)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-
-            let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-                &weights, patched.base(),
-            );
-            let _result = larql_inference::predict_with_ffn(
-                &weights, &tokenizer, &token_ids, 1, &walk_ffn,
-            );
-            let residuals = walk_ffn.take_residuals();
-            residual_key = residuals.into_iter()
-                .find(|(l, _)| *l == install_layer)
-                .map(|(_, r)| r)
-                .ok_or_else(|| LqlError::Execution(format!(
-                    "no residual captured at layer {install_layer}"
-                )))?;
-        } else {
-            let (path, _config, _patched) = self.require_vindex()?;
-            let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
-                .map_err(|e| LqlError::exec("failed to load embeddings", e))?;
-            let tokenizer = larql_vindex::load_vindex_tokenizer(path)
-                .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
-            let hidden = embed.shape()[1];
-            let spaced_target = format!(" {target}");
-            let target_encoding = tokenizer.encode(spaced_target.as_str(), false)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            target_id = target_encoding.get_ids().first().copied().unwrap_or(0);
-
-            let entity_encoding = tokenizer.encode(entity, false)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
-            let mut ev = vec![0.0f32; hidden];
-            for &tok in &entity_ids {
-                let row = embed.row(tok as usize);
-                for j in 0..hidden { ev[j] += row[j] * embed_scale; }
-            }
-            let n = entity_ids.len().max(1) as f32;
-            for v in &mut ev { *v /= n; }
-            residual_key = ev;
-        }
-
-        // ── Phase 3: Store in KnnStore ──
-        let c_score = confidence.unwrap_or(1.0);
-        let key_b64 = larql_vindex::patch::core::encode_gate_vector(&residual_key);
-
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-            patched.knn_store.add(
-                install_layer,
-                residual_key,
-                target_id,
-                target.to_string(),
-                entity.to_string(),
-                relation.to_string(),
-                c_score,
-            );
-        }
-
-        let patch_op = larql_vindex::PatchOp::InsertKnn {
-            layer: install_layer,
-            entity: entity.to_string(),
-            relation: relation.to_string(),
-            target: target.to_string(),
-            target_id,
-            confidence: Some(c_score),
-            key_vector_b64: key_b64,
-        };
-        if let Some(ref mut recording) = self.patch_recording {
-            recording.operations.push(patch_op);
-        }
-
-        let mut out = Vec::new();
-        out.push(format!(
-            "Inserted: {} —[{}]→ {} at L{} (KNN store)",
-            entity, relation, target, install_layer,
-        ));
-        if has_weights {
-            out.push("  mode: KNN — residual capture (Architecture B, retrieval-override)".into());
-        } else {
-            out.push("  mode: KNN — embedding key (no model weights)".into());
-        }
-        out.push(format!("  KNN store: {} entries total", {
-            let (_, _, patched) = self.require_vindex()?;
-            patched.knn_store.len()
-        }));
-        Ok(out)
-    }
-
-    // ── DELETE ──
-
-    pub(crate) fn exec_delete(
-        &mut self,
-        conditions: &[Condition],
-    ) -> Result<Vec<String>, LqlError> {
-        let layer_filter = conditions
-            .iter()
-            .find(|c| c.field == "layer")
-            .and_then(|c| {
-                if let Value::Integer(n) = c.value {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            });
-        let feature_filter = conditions
-            .iter()
-            .find(|c| c.field == "feature")
-            .and_then(|c| {
-                if let Value::Integer(n) = c.value {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            });
-        let entity_filter = conditions
-            .iter()
-            .find(|c| c.field == "entity")
-            .and_then(|c| {
-                if let Value::String(ref s) = c.value {
-                    Some(s.as_str())
-                } else {
-                    None
-                }
-            });
-
-        // Collect deletions, then apply
-        let deletes: Vec<(usize, usize)>;
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-
-            if let (Some(layer), Some(feature)) = (layer_filter, feature_filter) {
-                patched.delete_feature(layer, feature);
-                deletes = vec![(layer, feature)];
-            } else {
-                let matches = patched
-                    .base()
-                    .find_features(entity_filter, None, layer_filter);
-                if matches.is_empty() {
-                    return Ok(vec!["  (no matching features found)".into()]);
-                }
-                for &(layer, feature) in &matches {
-                    patched.delete_feature(layer, feature);
-                }
-                deletes = matches;
-            }
-        }
-
-        // Record to patch session
-        for &(layer, feature) in &deletes {
-            if let Some(ref mut recording) = self.patch_recording {
-                recording.operations.push(larql_vindex::PatchOp::Delete {
-                    layer,
-                    feature,
-                    reason: None,
-                });
-            }
-        }
-
-        Ok(vec![format!(
-            "Deleted {} features (patch overlay)",
-            deletes.len()
-        )])
-    }
-
-    // ── UPDATE ──
-
-    pub(crate) fn exec_update(
-        &mut self,
-        set: &[Assignment],
-        conditions: &[Condition],
-    ) -> Result<Vec<String>, LqlError> {
-        let entity_filter = conditions
-            .iter()
-            .find(|c| c.field == "entity")
-            .and_then(|c| {
-                if let Value::String(ref s) = c.value {
-                    Some(s.as_str())
-                } else {
-                    None
-                }
-            });
-        let layer_filter = conditions
-            .iter()
-            .find(|c| c.field == "layer")
-            .and_then(|c| {
-                if let Value::Integer(n) = c.value {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            });
-        let feature_filter = conditions
-            .iter()
-            .find(|c| c.field == "feature")
-            .and_then(|c| {
-                if let Value::Integer(n) = c.value {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            });
-
-        // Collect updates, then record
-        let mut update_ops: Vec<(usize, usize, larql_vindex::FeatureMeta)> = Vec::new();
-        {
-            let (_path, _config, patched) = self.require_patched_mut()?;
-
-            // Fast path: explicit (layer, feature) — same shape as DELETE.
-            // Bypasses `find_features` so the caller can target a single
-            // slot directly without needing to match by entity/relation.
-            let matches: Vec<(usize, usize)> =
-                if let (Some(layer), Some(feature)) = (layer_filter, feature_filter) {
-                    vec![(layer, feature)]
-                } else {
-                    patched
-                        .base()
-                        .find_features(entity_filter, None, layer_filter)
-                };
-
-            if matches.is_empty() {
-                return Ok(vec!["  (no matching features found)".into()]);
-            }
-
-            for &(layer, feature) in &matches {
-                if let Some(meta) = patched.feature_meta(layer, feature) {
-                    let mut new_meta = meta;
-                    for assignment in set {
-                        match assignment.field.as_str() {
-                            "target" | "top_token" => {
-                                if let Value::String(ref s) = assignment.value {
-                                    new_meta.top_token = s.clone();
-                                }
-                            }
-                            "confidence" | "c_score" => {
-                                if let Value::Number(n) = assignment.value {
-                                    new_meta.c_score = n as f32;
-                                } else if let Value::Integer(n) = assignment.value {
-                                    new_meta.c_score = n as f32;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    patched.update_feature_meta(layer, feature, new_meta.clone());
-                    update_ops.push((layer, feature, new_meta));
-                }
-            }
-        }
-
-        // Record to patch session
-        for (layer, feature, meta) in &update_ops {
-            if let Some(ref mut recording) = self.patch_recording {
-                recording.operations.push(larql_vindex::PatchOp::Update {
-                    layer: *layer,
-                    feature: *feature,
-                    gate_vector_b64: None,
-                    down_meta: Some(larql_vindex::patch::core::PatchDownMeta {
-                        top_token: meta.top_token.clone(),
-                        top_token_id: meta.top_token_id,
-                        c_score: meta.c_score,
-                    }),
-                });
-            }
-        }
-
-        Ok(vec![format!(
-            "Updated {} features (patch overlay)",
-            update_ops.len()
-        )])
-    }
-
-    // ── MERGE ──
-
-    pub(crate) fn exec_merge(
-        &mut self,
-        source: &str,
-        target: Option<&str>,
-        conflict: Option<ConflictStrategy>,
-    ) -> Result<Vec<String>, LqlError> {
-        let source_path = PathBuf::from(source);
-        if !source_path.exists() {
-            return Err(LqlError::Execution(format!(
-                "source vindex not found: {}",
-                source_path.display()
-            )));
-        }
-
-        let target_path = if let Some(t) = target {
-            let p = PathBuf::from(t);
-            if !p.exists() {
-                return Err(LqlError::Execution(format!(
-                    "target vindex not found: {}",
-                    p.display()
-                )));
-            }
-            p
-        } else {
-            match &self.backend {
-                Backend::Vindex { path, .. } => path.clone(),
-                _ => return Err(LqlError::NoBackend),
-            }
-        };
-
-        let strategy = conflict.unwrap_or(ConflictStrategy::KeepSource);
-
-        // Load source
-        let mut cb = larql_vindex::SilentLoadCallbacks;
-        let source_index = larql_vindex::VectorIndex::load_vindex(&source_path, &mut cb)
-            .map_err(|e| LqlError::exec("failed to load source", e))?;
-
-        // Merge into the patch overlay
-        let (_path, _config, patched) = self.require_patched_mut()?;
-
-        let mut merged = 0;
-        let mut skipped = 0;
-
-        let source_layers = source_index.loaded_layers();
-        for layer in source_layers {
-            if let Some(source_metas) = source_index.down_meta_at(layer) {
-                for (feature, meta_opt) in source_metas.iter().enumerate() {
-                    if let Some(source_meta) = meta_opt {
-                        let existing = patched.feature_meta(layer, feature);
-
-                        let should_write = match (existing, &strategy) {
-                            (None, _) => true,
-                            (Some(_), ConflictStrategy::KeepSource) => true,
-                            (Some(_), ConflictStrategy::KeepTarget) => false,
-                            (Some(existing), ConflictStrategy::HighestConfidence) => {
-                                source_meta.c_score > existing.c_score
-                            }
-                        };
-
-                        if should_write {
-                            patched.update_feature_meta(layer, feature, source_meta.clone());
-                            merged += 1;
-                        } else {
-                            skipped += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut out = Vec::new();
-        out.push(format!(
-            "Merged {} → {} (patch overlay)",
-            source_path.display(),
-            target_path.display()
-        ));
-        out.push(format!(
-            "  {} features merged, {} skipped (strategy: {:?})",
-            merged, skipped, strategy
-        ));
-        Ok(out)
-    }
 }
+
+// ── install_compiled_slot math primitives ──
 
 /// Median per-feature norms at a layer for the gate / up / down matrices.
 /// Used by `INSERT` to size each new slot's three components against the

@@ -27,7 +27,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  output: {}", args.output.display());
 
     eprintln!("\nLoading model...");
-    let weights = larql_models::loading::load_model_dir(&args.base)?;
+    let mut weights = larql_models::loading::load_model_dir(&args.base)?;
     let config = weights.arch.config();
     eprintln!("  {} layers, dim={}", config.num_layers, config.hidden_size);
 
@@ -42,10 +42,20 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
         .map_err(|e| format!("tokenizer: {}", e))?;
 
+    let (wrapped_prompt, template_source) = if args.no_chat_template {
+        (prompt.clone(), "raw (--no-chat-template)".to_string())
+    } else {
+        let rendered = super::chat::render_user_prompt(&args.base, prompt)?;
+        (rendered, "tokenizer_config.chat_template".to_string())
+    };
+    // Special tokens (bos, start_of_turn, etc.) are already embedded in the
+    // rendered string; add_special_tokens=false avoids a duplicate prepend.
+    let add_special = args.no_chat_template;
     let encoding = tokenizer
-        .encode(prompt.as_str(), true)
+        .encode(wrapped_prompt.as_str(), add_special)
         .map_err(|e| format!("tokenize: {}", e))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+    eprintln!("  chat wrap:    {}", template_source);
     eprintln!("  prompt tokens: {}", token_ids.len());
 
     eprintln!("\nCapturing L{} residual...", args.layer);
@@ -115,6 +125,52 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.gate_scale, stats.alpha
     );
     eprintln!("  installed at L{} slot {}", args.layer, args.slot);
+
+    // ── Balancer: scale the down vector up/down until the target token's
+    //    probability lands in [floor, ceiling]. Matches the LQL REBALANCE
+    //    convention (larql-lql/src/executor/mutation.rs:948). Each iteration
+    //    runs one forward pass so this is the main cost of compile.
+    eprintln!(
+        "\nBalancing (target '{}' in [{:.2}, {:.2}], max {} iters)...",
+        answer, args.floor, args.ceiling, args.max_iters,
+    );
+    const DOWN_SCALE: f32 = 0.85;
+    const UP_SCALE: f32 = 1.15;
+    for iter in 0..args.max_iters {
+        // Swap the modified slot tensors into weights for the forward pass
+        for key in [&gate_key, &up_key, &down_key] {
+            weights.tensors.insert(key.clone(), modified[key].clone());
+        }
+        let pred = larql_inference::forward::predict(
+            &weights, &tokenizer, &token_ids, 20,
+        );
+        let prob: f64 = pred
+            .predictions
+            .iter()
+            .find(|(tok, _)| tok.trim() == answer.as_str())
+            .map(|(_, p)| *p as f64)
+            .unwrap_or(0.0);
+        eprintln!("  iter {}: prob('{}') = {:.3}", iter, answer, prob);
+
+        let scale = if prob > args.ceiling {
+            DOWN_SCALE
+        } else if prob < args.floor {
+            UP_SCALE
+        } else {
+            eprintln!("  converged");
+            break;
+        };
+        let dt = modified.get_mut(&down_key).unwrap();
+        let h = hidden.min(dt.shape()[0]);
+        for j in 0..h {
+            dt[[j, args.slot]] *= scale;
+        }
+    }
+
+    // Final swap so weights.tensors carries the final-iteration modified slot.
+    for key in [&gate_key, &up_key, &down_key] {
+        weights.tensors.insert(key.clone(), modified[key].clone());
+    }
 
     eprintln!("\nSaving compiled model...");
     std::fs::create_dir_all(&args.output)?;

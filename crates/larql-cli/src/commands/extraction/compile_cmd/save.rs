@@ -57,11 +57,21 @@ pub fn merge_for_save(
     MergedWeights { tensors, vectors }
 }
 
+/// Write tensors as bf16 — Gemma / Llama / most modern transformers' native
+/// dtype. Halves file size vs f32 (~15 GB → ~7.8 GB on Gemma 3 4B).
+///
+/// Uses `larql_models::quant::half::encode_bf16` which does the standard
+/// `f32 → bf16` truncation (keep top 16 bits, round-to-nearest-even on the
+/// dropped mantissa via hardware semantics). Round-trip through our own
+/// `decode_bf16` is bit-exact for the subset of f32 values bf16 can represent,
+/// which is the regime the trained weights + our compile-installed edges
+/// both live in.
 pub fn write_safetensors(
     tensors: &HashMap<String, ArcArray2<f32>>,
     vectors: &HashMap<String, Vec<f32>>,
     path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use larql_models::quant::half::encode_bf16;
     use safetensors::tensor::{serialize, TensorView};
 
     let mut byte_bufs: HashMap<String, Vec<u8>> = HashMap::new();
@@ -69,8 +79,17 @@ pub fn write_safetensors(
 
     for (name, arr) in tensors {
         let shape = arr.shape().to_vec();
-        let bytes: Vec<u8> = arr.iter().flat_map(|f| f.to_le_bytes()).collect();
-        byte_bufs.insert(name.clone(), bytes);
+        // Tensors from safetensors loading are row-major contiguous; use
+        // as_slice when possible, fall back to iterator collect otherwise.
+        let owned: Vec<f32>;
+        let slice: &[f32] = match arr.as_slice() {
+            Some(s) => s,
+            None => {
+                owned = arr.iter().copied().collect();
+                &owned
+            }
+        };
+        byte_bufs.insert(name.clone(), encode_bf16(slice));
         shapes.insert(name.clone(), shape);
     }
 
@@ -78,7 +97,7 @@ pub fn write_safetensors(
         if tensors.contains_key(name) {
             continue;
         }
-        let bytes: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let bytes = encode_bf16(vec);
         byte_bufs.insert(name.clone(), bytes);
         shapes.insert(name.clone(), vec![vec.len()]);
     }
@@ -88,7 +107,7 @@ pub fn write_safetensors(
         let shape = &shapes[name];
         views.insert(
             name.clone(),
-            TensorView::new(safetensors::Dtype::F32, shape.clone(), bytes)?,
+            TensorView::new(safetensors::Dtype::BF16, shape.clone(), bytes)?,
         );
     }
 

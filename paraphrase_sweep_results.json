@@ -1,0 +1,672 @@
+{
+  "grid": {
+    "gate_scales": [
+      0.5,
+      1.0,
+      2.0,
+      5.0,
+      10.0,
+      30.0
+    ],
+    "alpha_muls": [
+      0.0,
+      0.1,
+      0.3,
+      1.0,
+      3.0,
+      10.0
+    ]
+  },
+  "canonical_prompt": "In pi = 3.14159265358979323846264338327950288419..., what is the 20th digit after the decimal? Reply with just one digit.",
+  "target_digit": "6",
+  "results": [
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": true,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": true,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 0.5,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": true,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": true,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 1.0,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": true,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 2.0,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 5.0,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 10.0,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 0.0,
+      "completions": {
+        "canonical": "9",
+        "near_paraphrase": "9",
+        "arithmetic": "47 + 28",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": false,
+        "arithmetic": true,
+        "capital": true,
+        "near_paraphrase_discrim": true,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 0.1,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 0.3,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 1.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 3.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    },
+    {
+      "gate_scale": 30.0,
+      "alpha_mul": 10.0,
+      "completions": {
+        "canonical": "6",
+        "near_paraphrase": "6",
+        "arithmetic": "66",
+        "capital": "The capital of France is **"
+      },
+      "checks": {
+        "canonical": true,
+        "arithmetic": false,
+        "capital": true,
+        "near_paraphrase_discrim": false,
+        "all": false,
+        "all_plus_discrim": false
+      }
+    }
+  ]
+}

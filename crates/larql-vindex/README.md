@@ -128,14 +128,19 @@ larql-vindex/src/
 │
 ├── config/                     Configuration types
 │   ├── types.rs                VindexConfig, ExtractLevel, LayerBands, MoeConfig
-│   └── dtype.rs                StorageDtype (f32/f16), encode/decode
+│   └── dtype.rs                StorageDtype (f32/f16), encode/decode/write_floats
 │
 ├── index/                      In-memory KNN engine (zero-copy mmap)
-│   ├── core.rs                 VectorIndex construction + loading
 │   ├── types.rs                FeatureMeta, GateIndex trait, WalkHit, WalkTrace
-│   ├── gate.rs                 Gate KNN (brute-force, batched, HNSW, expert-scoped)
+│   ├── core.rs                 VectorIndex struct + Clone + constructors (new, new_mmap)
+│   ├── loaders.rs              load_gates, load_down_meta (NDJSON readers)
+│   ├── gate.rs                 Gate KNN dispatch (brute-force, batched, HNSW, Q4)
+│   ├── gate_trait.rs           impl GateIndex for VectorIndex
+│   ├── accessors.rs            feature_meta, gate_vector(s), warmup, total_*
+│   ├── walk.rs                 Feature-major down/up vectors, interleaved, Q4
+│   ├── attn.rs                 Attention weight loaders (Q8, Q4_K, Q4)
+│   ├── lm_head.rs              LM-head loaders + KNN (f32 + Q4)
 │   ├── hnsw.rs                 HNSW graph index (random projection, exact rescoring)
-│   ├── walk.rs                 Feature-major down/up vectors, interleaved, Q4, lm_head
 │   ├── mutate.rs               set/delete features, save to disk
 │   ├── router.rs               MoE expert router
 │   └── residency.rs            Adaptive layer pinning (memory budget → performance)
@@ -143,29 +148,48 @@ larql-vindex/src/
 ├── format/                     Vindex file I/O
 │   ├── load.rs                 load_vindex, load_embeddings, load_tokenizer
 │   ├── down_meta.rs            Binary down_meta read/write
-│   ├── weights.rs              Split weight files (attn, up, down, norms, lm_head)
+│   ├── weights/
+│   │   ├── mod.rs              Re-exports
+│   │   ├── write.rs            write_model_weights, WeightSource, StreamingWeights
+│   │   └── load.rs             load_model_weights, find_tokenizer_path
 │   ├── checksums.rs            SHA256 computation + verification
 │   ├── huggingface.rs          HuggingFace Hub download/publish
 │   └── quant/mod.rs            Re-exports from larql_models::quant
 │
 ├── extract/                    Build pipeline (model → vindex)
-│   ├── build.rs                build_vindex (full extraction + clustering)
+│   ├── build.rs                build_vindex coordinator + BuildContext + 6 stages
+│   ├── build_helpers.rs        chrono_now, build_whole_word_vocab,
+│   │                           compute_gate_top_tokens, compute_offset_direction,
+│   │                           run_clustering_pipeline, ClusterData
 │   ├── streaming.rs            Streaming extraction (mmap, no full model load)
 │   ├── callbacks.rs            IndexBuildCallbacks trait
 │   └── build_from_vectors.rs   Build from pre-extracted NDJSON
 │
 ├── patch/                      Patch system
-│   ├── core.rs                 VindexPatch, PatchOp, PatchedVindex
+│   ├── format.rs               VindexPatch, PatchOp, PatchDownMeta + base64
+│   ├── overlay.rs              PatchedVindex (queries, mutators, walk, bake_down)
+│   ├── overlay_apply.rs        apply_patch, remove_patch, rebuild_overrides
+│   ├── overlay_gate_trait.rs   impl GateIndex for PatchedVindex
+│   ├── knn_store.rs            L0 KnnStore (arch-B residual-key KNN)
+│   ├── knn_store_io.rs         KnnStore .lknn save / load (f16 keys)
 │   └── refine.rs               Gate refine pass (Gram-Schmidt orthogonalisation
-│                               of patched gates against each other + optional
-│                               decoy residuals — used by INSERT's batch refine
-│                               to suppress cross-fact bleed at install time)
+│                               of patched gates + optional decoy residuals)
+│
+├── storage/                    Storage engine + L2 MEMIT cycles
+│   ├── engine.rs               StorageEngine (PatchedVindex + epoch + memit_store)
+│   ├── epoch.rs                Monotonic mutation counter
+│   ├── status.rs               CompactStatus snapshot
+│   └── memit_store.rs          MemitStore + MemitFact + memit_solve +
+│                               MemitSolveResult (vanilla closed-form, BLAS-batched)
 │
 ├── clustering/                 Relation discovery
 │   ├── kmeans.rs               k-means clustering (BLAS via larql-compute)
 │   ├── labeling.rs             Pattern detection, TF-IDF labels
 │   ├── categories.rs           Entity category word lists
-│   ├── pair_matching.rs        Wikidata/WordNet output matching
+│   ├── pair_matching/
+│   │   ├── mod.rs              Re-exports
+│   │   ├── database.rs         RelationDatabase + Wikidata/WordNet loaders
+│   │   └── labeling.rs         label_clusters_from_pairs / _from_outputs
 │   └── probe.rs                Probe label loading
 │
 └── vindexfile/                 Declarative model builds
