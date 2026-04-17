@@ -109,6 +109,16 @@ pub trait ComputeBackend: Send + Sync {
     /// Reset KV cache (for new prompt).
     fn reset_kv_cache(&self) {}
 
+    /// Pre-allocate the KV cache with per-layer shapes. Required for models
+    /// with asymmetric attention geometry — Gemma 4 31B alternates sliding
+    /// (num_kv=16, head_dim=256) with global (num_kv=4, head_dim=512) layers
+    /// and a uniform allocation would either over-size globals or mis-stride
+    /// slidings. Call this before the first `decode_token` / `populate_kv_layer`
+    /// for Gemma-4-family models. No-op for backends that don't track KV cache.
+    fn preallocate_kv_cache_per_layer(
+        &self, _shapes: &[(usize, usize)], _max_seq: usize,
+    ) { /* no-op for non-KV backends */ }
+
     /// Decode one token through all layers with KV cache.
     /// Q8 attention + KV cache + Q4 FFN, one command buffer.
     #[allow(clippy::too_many_arguments)]

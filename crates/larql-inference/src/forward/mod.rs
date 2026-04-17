@@ -107,7 +107,7 @@ pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
 // ── Re-exports: preserve all `crate::forward::*` paths ──
 
 pub use embed::embed_tokens_pub;
-pub use layer::{run_ffn, run_attention_public};
+pub use layer::{run_ffn, run_attention_public, run_layer_with_ffn};
 pub use predict::{
     predict, predict_with_temperature, predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace,
     predict_with_router, predict_with_strategy, predict_from_hidden, predict_from_hidden_with_ffn,

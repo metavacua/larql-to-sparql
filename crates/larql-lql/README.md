@@ -168,16 +168,19 @@ across N consecutive layers).
 ## Building & Testing
 
 ```bash
-cargo test -p larql-lql                                       # 313 tests
+cargo test -p larql-lql                                       # 317 tests
 cargo test -p larql-lql --lib executor::tests                 # executor suite
 cargo test -p larql-lql --lib parser::tests                   # parser unit tests
 
-# Demos
+# Synthetic demos (run in CI, no model download)
 cargo run -p larql-lql --example parser_demo                   # AST output, every statement type
 cargo run -p larql-lql --example lql_demo                      # 61-row spec compliance grid
-cargo run --release -p larql-lql --example compile_demo        # End-to-end COMPILE INTO VINDEX
-cargo run --release -p larql-lql --example refine_demo         # End-to-end 10-fact INSERT + COMPILE (exp 14 reproduction)
-                                                                #   on real Gemma 4B (skips if absent)
+cargo run --release -p larql-lql --example compact_demo        # LSM storage-tier walkthrough: INSERT → COMPACT MINOR → SHOW COMPACT STATUS
+
+# Model-dependent demos (skip if output/gemma3-4b-f16.vindex absent)
+cargo run --release -p larql-lql --example compile_demo        # End-to-end COMPILE INTO VINDEX on real Gemma 4B
+cargo run --release -p larql-lql --example refine_demo         # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval + 0 bleed)
+cargo run --release -p larql-lql --example trace_demo          # TRACE variants: residual decomposition, FOR <token>, DECOMPOSE, POSITIONS ALL SAVE
 
 # Criterion benches (use --quick for a fast sweep)
 cargo bench  -p larql-lql --bench parser                       # parse_single × 18, parse_batch

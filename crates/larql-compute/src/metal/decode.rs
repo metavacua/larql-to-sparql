@@ -1,9 +1,16 @@
 use super::*;
 
 impl MetalBackend {
-    /// Create a KV cache for decode mode.
+    /// Create a KV cache for decode mode with uniform per-layer dims.
     pub fn create_kv_cache(&self, num_layers: usize, max_seq: usize, num_kv_heads: usize, head_dim: usize) -> ops::kv_cache::KVCache {
         ops::kv_cache::KVCache::new(&self.bufs, num_layers, max_seq, num_kv_heads, head_dim)
+    }
+
+    /// Create a KV cache with per-layer shapes for models with asymmetric
+    /// attention geometry (Gemma 4 31B sliding=16×256 / global=4×512).
+    /// `shapes[i] = (num_kv_heads_i, head_dim_i)` for layer i.
+    pub fn create_kv_cache_per_layer(&self, shapes: &[(usize, usize)], max_seq: usize) -> ops::kv_cache::KVCache {
+        ops::kv_cache::KVCache::new_per_layer(&self.bufs, shapes, max_seq)
     }
 
     /// Decode one token through all layers with KV cache.
@@ -45,6 +52,23 @@ impl MetalBackend {
         let hidden_val = hidden as u32;
         let inter_val = inter as u32;
 
+        // Scratch buffers are reused across all layers within the encoder.
+        // When attention geometry varies layer to layer (Gemma 4 sliding=8192
+        // vs global=16384 q_dim) we must size each scratch to the MAX across
+        // layers; the outer scalar `q_dim` / `kv_dim` only reflect the first
+        // layer's shape. Taking the per-layer max means a global layer's
+        // 16384-wide Q output won't overflow a buffer sized for 8192.
+        let max_q_dim = layers
+            .iter()
+            .map(|l| l.num_q_heads * l.head_dim)
+            .max()
+            .unwrap_or(q_dim);
+        let max_kv_dim = layers
+            .iter()
+            .map(|l| l.num_kv_heads * l.head_dim)
+            .max()
+            .unwrap_or(kv_dim);
+
         // Pre-cache weight buffers
         let wq_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wq.data)).collect();
         let wk_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wk.data)).collect();
@@ -69,11 +93,11 @@ impl MetalBackend {
         // Pre-allocate scratch buffers reused across layers.
         // GPU processes layers sequentially within one cmd buffer, so
         // these buffers are never read and written simultaneously.
-        let q_out = self.bufs.output((q_dim * 4) as u64);
-        let k_out = self.bufs.output((kv_dim * 4) as u64);
-        let v_out = self.bufs.output((kv_dim * 4) as u64);
+        let q_out = self.bufs.output((max_q_dim * 4) as u64);
+        let k_out = self.bufs.output((max_kv_dim * 4) as u64);
+        let v_out = self.bufs.output((max_kv_dim * 4) as u64);
         let norm_f32_buf = self.bufs.output((hidden * 4) as u64);
-        let attn_out_buf = self.bufs.output((q_dim * 4) as u64);
+        let attn_out_buf = self.bufs.output((max_q_dim * 4) as u64);
         let o_out_buf = self.bufs.output((hidden * 4) as u64);
         let h_post_attn = self.bufs.output((hidden * 4) as u64);
         let ffn_norm_out = self.bufs.output((hidden * 4) as u64);
@@ -85,8 +109,8 @@ impl MetalBackend {
         let gate_out_scratch = self.bufs.output((inter * 4) as u64);
         // new_h is ping-ponged via h_a/h_b above
         let normed_scratch = self.bufs.output((hidden * 4) as u64);
-        let o_q8_scratch = self.bufs.output(q_dim as u64);
-        let o_q8s_scratch = self.bufs.output((q_dim / 32 * 4) as u64);
+        let o_q8_scratch = self.bufs.output(max_q_dim as u64);
+        let o_q8s_scratch = self.bufs.output((max_q_dim / 32 * 4) as u64);
         let scaled_scratch = self.bufs.output((hidden * 4) as u64);
 
         // Single command buffer + single encoder for ALL layers.
@@ -297,6 +321,58 @@ impl MetalBackend {
                 enc.dispatch_thread_groups(
                     MTLSize::new((total_rows as u64).div_ceil(8), 1, 1),
                     MTLSize::new(256, 1, 1),
+                );
+            }
+
+            // ── Step 1.5: QK-norm on Q and K (Gemma 3 / Gemma 4) ──
+            //
+            // Per-head RMS-norm with learned weight, applied to the raw
+            // projection output before RoPE. Without this the Q/K vectors
+            // on Gemma 3/4 are unscaled — attention dot products overflow
+            // and softmax collapses to NaN by layer 0.
+            //
+            // Formula (matches CPU `rms_norm_heads_eps`):
+            //   out[h, d] = (x[h, d] / sqrt(mean(x_head²) + eps))
+            //             * (qk_norm_offset + weight[d])
+            //
+            // The qk_norm_offset is 0.0 on Gemma 4 and 1.0 on Gemma 2/3.
+            // Passed as `offset` to the shader so `offset + weight[d]` does
+            // the right thing for both families.
+            if let (Some(q_w), Some(k_w)) = (layer.q_norm_weight, layer.k_norm_weight) {
+                let hd_val = layer_head_dim as u32;
+                let qk_off = layer.qk_norm_offset;
+                let eps = layer.eps;
+                // One threadgroup per head; threads per tg = min(head_dim, 512)
+                // rounded up to a power of two for the tree reduction.
+                let mut tg_w: usize = 1;
+                while tg_w < layer_head_dim && tg_w < 512 { tg_w <<= 1; }
+
+                // Q heads
+                let q_w_buf = self.bufs.transient_from_f32(q_w);
+                let nq_val = layer_num_q_heads as u32;
+                enc.set_compute_pipeline_state(&self.qk_norm_pipeline);
+                enc.set_buffer(0, Some(&q_out), 0);
+                enc.set_buffer(1, Some(&q_out), 0);
+                enc.set_buffer(2, Some(&q_w_buf), 0);
+                enc.set_bytes(3, 4, &hd_val as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(4, 4, &nq_val as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+                enc.set_bytes(6, 4, &qk_off as *const f32 as *const std::ffi::c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(layer_num_q_heads as u64, 1, 1),
+                    MTLSize::new(tg_w as u64, 1, 1),
+                );
+
+                // K heads
+                let k_w_buf = self.bufs.transient_from_f32(k_w);
+                let nkv_val = layer_num_kv_heads as u32;
+                enc.set_buffer(0, Some(&k_out), 0);
+                enc.set_buffer(1, Some(&k_out), 0);
+                enc.set_buffer(2, Some(&k_w_buf), 0);
+                enc.set_bytes(4, 4, &nkv_val as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(layer_num_kv_heads as u64, 1, 1),
+                    MTLSize::new(tg_w as u64, 1, 1),
                 );
             }
 

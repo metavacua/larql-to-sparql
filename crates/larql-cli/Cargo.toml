@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 larql-core = { path = "../larql-core" }
+larql-compute = { path = "../larql-compute" }
 larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-lql = { path = "../larql-lql" }
@@ -27,3 +28,11 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 minijinja = "2"
+
+[features]
+default = ["metal"]
+metal = [
+    "larql-compute/metal",
+    "larql-inference/metal",
+    "larql-vindex/metal",
+]

@@ -508,9 +508,11 @@ pub fn write_model_weights_q4k(
 
         let q = source.get_tensor(&q_key);
         let k = source.get_tensor(&k_key);
-        let v = source.get_tensor(&v_key).or_else(|| {
-            if arch.v_shares_k(layer) { source.get_tensor(&k_key) } else { None }
-        });
+        let v = resolve_v_tensor(
+            source.get_tensor(&v_key),
+            &k,
+            arch.v_shares_k(layer),
+        );
         let o = source.get_tensor(&o_key);
 
         // Q, K, V, O in that order — use the same key string for V even when
@@ -616,6 +618,11 @@ pub fn write_model_weights_q4k(
             arch.post_feedforward_layernorm_key(layer),
             arch.attn_q_norm_key(layer),
             arch.attn_k_norm_key(layer),
+            // Gemma 4 per-layer scalar multiplier. Stored as a 0-D scalar
+            // in safetensors, surfaced through WeightSource as a 1-element
+            // vector. The forward path multiplies h by this value after
+            // FFN; omitting it silently produced garbage on 31B.
+            arch.layer_scalar_key(layer),
         ].into_iter().flatten().collect();
 
         for key in keys {
@@ -718,4 +725,112 @@ pub fn write_model_weights_q4k(
 
     callbacks.on_stage_done("model_weights_q4k", start.elapsed().as_secs_f64() * 1000.0);
     Ok(())
+}
+
+/// Resolve the V tensor for a layer in the Q4_K writer.
+///
+/// When `v_proj` is absent from the source (e.g. Gemma 4 31B global
+/// layers ship without one), fall back to K's tensor if the
+/// architecture advertises `v_shares_k(layer) == true`. This keeps
+/// the 4-per-layer attn manifest contiguous: each layer emits exactly
+/// Q / K / V / O even when V physically reuses K's bytes.
+fn resolve_v_tensor<T: Clone>(
+    v: Option<T>,
+    k: &Option<T>,
+    v_shares_k: bool,
+) -> Option<T> {
+    v.or_else(|| if v_shares_k { k.clone() } else { None })
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    // ── resolve_v_tensor ──
+
+    #[test]
+    fn resolve_v_returns_v_when_present() {
+        let k = Some(2);
+        assert_eq!(resolve_v_tensor(Some(1), &k, false), Some(1));
+        assert_eq!(
+            resolve_v_tensor(Some(1), &k, true),
+            Some(1),
+            "v_shares_k must not override a present v"
+        );
+    }
+
+    #[test]
+    fn resolve_v_falls_back_to_k_when_v_shared() {
+        let k = Some(42);
+        assert_eq!(
+            resolve_v_tensor(None::<i32>, &k, true),
+            Some(42),
+            "Gemma 4 31B global-layer fallback"
+        );
+    }
+
+    #[test]
+    fn resolve_v_none_when_missing_and_not_shared() {
+        let k = Some(7);
+        assert_eq!(
+            resolve_v_tensor(None::<i32>, &k, false),
+            None,
+            "no v_proj + v_shares_k=false → tensor is genuinely absent"
+        );
+    }
+
+    #[test]
+    fn resolve_v_none_when_v_missing_and_k_missing() {
+        let k: Option<i32> = None;
+        assert_eq!(resolve_v_tensor(None, &k, true), None);
+        assert_eq!(resolve_v_tensor(None, &k, false), None);
+    }
+
+    // ── pad_to_256 ──
+
+    #[test]
+    fn pad_to_256_noop_when_exact_multiple() {
+        let v = vec![1.0_f32; 256];
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 256, "exact multiple must not grow");
+        assert_eq!(padded, v);
+
+        let v = vec![1.0_f32; 512];
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 512);
+    }
+
+    #[test]
+    fn pad_to_256_zero_fills_to_next_block() {
+        let v = vec![1.0_f32; 200];
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 256, "padded to next super-block");
+        // First 200 preserved, last 56 zeroed.
+        assert!(padded[..200].iter().all(|&x| x == 1.0));
+        assert!(padded[200..].iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn pad_to_256_handles_one_below_multiple() {
+        let v = vec![1.0_f32; 255];
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 256);
+        assert_eq!(padded[255], 0.0);
+    }
+
+    #[test]
+    fn pad_to_256_handles_one_above_multiple() {
+        let v = vec![1.0_f32; 257];
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 512, "one above block boundary → next full block");
+        assert!(padded[..257].iter().all(|&x| x == 1.0));
+        assert!(padded[257..].iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn pad_to_256_empty_input_stays_empty() {
+        let v: Vec<f32> = Vec::new();
+        let padded = pad_to_256(&v);
+        assert_eq!(padded.len(), 0);
+    }
 }

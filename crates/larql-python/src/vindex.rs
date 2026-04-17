@@ -19,6 +19,7 @@ use larql_vindex::{
     SilentLoadCallbacks, load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
     tokenizers,
 };
+use larql_vindex::patch::knn_store::KnnStore;
 
 use larql_lql::relations::RelationClassifier;
 
@@ -228,6 +229,13 @@ pub struct PyVindex {
     pub(crate) config: VindexConfig,
     pub(crate) path: String,
     pub(crate) classifier: Option<RelationClassifier>,
+    /// Arch-B retrieval-override store. Loaded from `knn_store.bin` at
+    /// open time if present. `infer()` captures residuals and consults
+    /// this store before returning the raw model prediction; a stored
+    /// key with `cos > KNN_COSINE_THRESHOLD` overrides the top-1
+    /// prediction with the stored target token. Matches the LQL INFER
+    /// query path (`executor/query/infer.rs`).
+    pub(crate) knn_store: Option<KnnStore>,
     /// Lazy-loaded mmap'd weights for infer(). Created on first call, reused after.
     pub(crate) walk_model: std::cell::RefCell<Option<crate::walk::InferState>>,
 }
@@ -253,9 +261,24 @@ impl PyVindex {
         // Load relation classifier (clusters + labels) if available
         let classifier = RelationClassifier::from_vindex(dir);
 
+        // Load the arch-B KNN store if the compiled vindex bundled one.
+        let knn_path = dir.join("knn_store.bin");
+        let knn_store = if knn_path.exists() {
+            match KnnStore::load(&knn_path) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    eprintln!("warning: failed to load knn_store.bin: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             index, embeddings, embed_scale, tokenizer, config,
             path: path.to_string(), classifier,
+            knn_store,
             walk_model: std::cell::RefCell::new(None),
         })
     }
@@ -954,13 +977,65 @@ impl PyVindex {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        // Run forward pass with walk FFN (mmap'd weights, vindex gate KNN)
-        let walk_ffn = larql_inference::WalkFfn::new(&infer_state.weights, &self.index, top_k_features);
-        let result = larql_inference::predict_with_ffn(
-            &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn
-        );
+        // Run forward pass with walk FFN (mmap'd weights, vindex gate KNN).
+        //
+        // When the compiled vindex has an arch-B KnnStore attached we
+        // need the per-layer residual trace to consult it — use the
+        // `_with_trace` variant and check each stored layer's residual
+        // against the store. A hit at cos > threshold overrides the
+        // top-1 prediction with the stored target. Matches the LQL
+        // INFER path (`executor/query/infer.rs`) which enables the
+        // same mechanism for `s.query("INFER ...")`.
+        let has_knn = self.knn_store.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+        let mut predictions = if has_knn {
+            let walk_ffn = larql_inference::WalkFfn::new_with_trace(
+                &infer_state.weights, &self.index, top_k_features,
+            );
+            let result = larql_inference::predict_with_ffn(
+                &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn,
+            );
+            let residuals = walk_ffn.take_residuals();
 
-        Ok(result.predictions)
+            const KNN_COSINE_THRESHOLD: f32 = 0.75;
+            if let Some(store) = self.knn_store.as_ref() {
+                let knn_layers = store.layers();
+                let mut override_token: Option<String> = None;
+                for (layer, residual) in &residuals {
+                    if !knn_layers.contains(layer) {
+                        continue;
+                    }
+                    if let Some((entry, cosine)) = store.query_top1(*layer, residual) {
+                        if cosine > KNN_COSINE_THRESHOLD {
+                            override_token = Some(entry.target_token.clone());
+                            break;
+                        }
+                    }
+                }
+                if let Some(tok) = override_token {
+                    let mut out = Vec::with_capacity(result.predictions.len());
+                    out.push((tok, 1.0));
+                    for (t, p) in result.predictions.into_iter().take(top_k_predictions - 1) {
+                        out.push((t, p));
+                    }
+                    out
+                } else {
+                    result.predictions
+                }
+            } else {
+                result.predictions
+            }
+        } else {
+            let walk_ffn = larql_inference::WalkFfn::new(
+                &infer_state.weights, &self.index, top_k_features,
+            );
+            let result = larql_inference::predict_with_ffn(
+                &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn,
+            );
+            result.predictions
+        };
+        predictions.truncate(top_k_predictions);
+
+        Ok(predictions)
     }
 
     /// Per-fact target-delta optimisation (MEMIT phase 3).

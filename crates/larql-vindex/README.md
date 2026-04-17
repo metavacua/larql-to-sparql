@@ -321,18 +321,27 @@ incoherent.
 ## Testing
 
 ```bash
-cargo test -p larql-vindex                                                      # 104 tests
+cargo test -p larql-vindex                                                      # 106 tests (lib + 1 integration + doc)
 
-# Demos
-cargo run -p larql-vindex --example demo_features                               # Feature showcase
+# Demos (synthetic fixtures, no model download needed)
+cargo run -p larql-vindex --example demo_features                               # Feature showcase (build, KNN, patches, MoE, f16)
 cargo run --release -p larql-vindex --example mmap_demo                         # mmap RAM behaviour + scaling table
+cargo run --release -p larql-vindex --example q4k_demo                          # Streaming Q4_K showcase: size comparison, file layout, dequant round-trip
+cargo run --release -p larql-vindex --example demo_memit_solve                  # MEMIT closed-form decomposition + MemitStore round-trip
 
 # Criterion benches (run with --quick for a fast sweep, omit for full sample)
 cargo bench  -p larql-vindex --bench vindex_ops                                 # KNN, walk, save/load, mutate, MoE
 cargo bench  -p larql-vindex --bench vindex_scaling                             # Production dims (CPU)
 cargo bench  -p larql-vindex --features metal --bench vindex_scaling            # Production dims (Metal)
+cargo bench  -p larql-vindex --bench memit_solve                                # Ridge decomposition throughput
+cargo bench  -p larql-vindex --bench extract_throughput                         # Streaming extract: f32 vs Q4K write-path time
+cargo bench  -p larql-vindex --bench q4k_vs_f32                                 # Per-layer attn retrieval: mmap memcpy vs mmap + dequant
 
-# Build pipeline (production, uses larql-compute quantizers)
+# Streaming build (one-shot, skips f32 intermediate)
+larql extract-index <model> -o <vindex> --quant q4k                             # Q4_K/Q6_K attn + FFN + norms + lm_head in one pass
+
+# Multi-tier build pipeline (post-hoc, uses larql-compute quantizers on an
+# already-extracted f32 vindex — kept for backwards compatibility)
 cargo run --release -p larql-vindex --example build_q4k_weights -- <vindex>     # Q4_K/Q6_K attn + FFN
 cargo run --release -p larql-vindex --example build_attn_q8 -- <vindex>         # Q8 attention (fallback)
 cargo run --release -p larql-vindex --example build_interleaved -- <vindex>     # Pack gate|up|down
@@ -341,6 +350,15 @@ cargo run --release -p larql-vindex --example build_up_features -- <vindex>     
 cargo run --release -p larql-vindex --example build_gate_q4 -- <vindex>         # Q4 gate vectors
 cargo run --release -p larql-vindex --example build_lm_head_q4 -- <vindex>      # Q4 logits projection
 ```
+
+### Bench measurements (typical machine, synthetic Gemma-like fixture)
+
+| Bench | Operation | Time |
+|---|---|---|
+| `extract_throughput` | streaming extract, f32 | ~37 ms |
+| `extract_throughput` | streaming extract, **Q4K** | ~22 ms (1.67× faster; output is ~3× smaller so disk I/O dominates) |
+| `q4k_vs_f32` | f32 per-layer Q retrieval (mmap → Vec<f32>) | ~880 µs |
+| `q4k_vs_f32` | **Q4K** per-layer Q retrieval (mmap → dequant → Vec<f32>) | ~3.3 ms (3.7× slower per-layer to save 6.26× on disk) |
 
 Test coverage (104 tests):
 - Construction, dimensions, layer counts, feature counts

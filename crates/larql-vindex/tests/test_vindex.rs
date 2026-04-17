@@ -2613,8 +2613,98 @@ fn streaming_extract_q4k_from_safetensors() {
         "interleaved_q4k.bin size must equal sum of manifest lengths"
     );
 
+    // ── load_model_weights on a Q4k vindex must surface a clear error ──
+    // The float-weight loader can't reconstruct a ModelWeights struct
+    // from Q4_K/Q6_K blocks; callers must go through
+    // `VectorIndex::load_attn_q4k` / `load_interleaved_q4k` instead.
+    let mut lcb = larql_vindex::SilentLoadCallbacks;
+    match larql_vindex::load_model_weights(&output_dir, &mut lcb) {
+        Ok(_) => panic!("load_model_weights on a Q4k vindex must error"),
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("quantised") && msg.contains("load_attn_q4k"),
+                "expected quant-dispatch error, got: {msg}"
+            );
+        }
+    }
+
+    // ── VectorIndex::load_attn_q4k + load_interleaved_q4k must read
+    //     back what the writer emitted ──
+    let mut index = larql_vindex::VectorIndex::load_vindex(&output_dir, &mut lcb).unwrap();
+    index.load_attn_q4k(&output_dir).unwrap();
+    index.load_interleaved_q4k(&output_dir).unwrap();
+    assert!(index.has_interleaved_q4k(), "interleaved Q4K should be loaded");
+    // Layer 0 attn slices: [Q/Q4_K, K/Q4_K, V/Q6_K, O/Q4_K]
+    let slices = index.attn_q4k_layer_data(0).expect("layer 0 attn data");
+    assert_eq!(slices[0].1, "Q4_K", "Q slot format");
+    assert_eq!(slices[1].1, "Q4_K", "K slot format");
+    assert_eq!(slices[2].1, "Q6_K", "V slot format");
+    assert_eq!(slices[3].1, "Q4_K", "O slot format");
+
+    // ── Write-side correctness: dequantize the bytes the writer emitted
+    //     and confirm they round-trip back to the source within block
+    //     error tolerance. Proves the writer's manifest → data
+    //     correspondence is correct (not just a shape assertion).
+    //
+    // Source data for every tensor: (0..n).map(|i| i as f32 * 0.01).
+    // Q/K/V/O are hidden×hidden = 64 elems each, zero-padded to 256.
+    //
+    // Block-level error on a 64-value-then-192-zero-padded 256-value
+    // super-block: ~0.02 for Q4_K and ~0.006 for Q6_K on this linear
+    // ramp. Use 0.03 / 0.01 as ceilings — loose enough for the
+    // quantiser's block allocation on this padding-heavy synthetic
+    // case, tight enough to catch a manifest that points at the wrong
+    // bytes (which would produce garbage orders of magnitude worse).
+    let expected: Vec<f32> = (0..(hidden * hidden))
+        .map(|i| (i as f32) * 0.01)
+        .collect();
+
+    let q_dequant = larql_models::quant::ggml::dequantize_q4_k(slices[0].0, 256).unwrap();
+    for (i, &v) in expected.iter().enumerate() {
+        assert!(
+            (q_dequant[i] - v).abs() < 0.03,
+            "Q[{i}] round-trip diverged: got {}, expected {v}",
+            q_dequant[i]
+        );
+    }
+    // Padded tail zeroes → dequantise to ~0 within block error.
+    for (i, &v) in q_dequant[(hidden * hidden)..].iter().enumerate() {
+        assert!(
+            v.abs() < 0.05,
+            "Q padding[{i}] expected ~0, got {v}"
+        );
+    }
+
+    let v_dequant = larql_models::quant::ggml::dequantize_q6_k(slices[2].0, 256).unwrap();
+    for (i, &v) in expected.iter().enumerate() {
+        assert!(
+            (v_dequant[i] - v).abs() < 0.01,
+            "V[{i}] round-trip diverged (Q6_K, tighter tolerance): got {}, expected {v}",
+            v_dequant[i]
+        );
+    }
+
     let _ = std::fs::remove_dir_all(&model_dir);
     let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+#[test]
+fn quant_block_format_serde_roundtrip() {
+    // The manifest format strings are load-bearing — llama.cpp / Ollama
+    // expect the literal "Q4_K" and "Q6_K" on the wire. The enum uses
+    // #[serde(rename)] to keep those strings; a future refactor must
+    // not drift to e.g. "Q4K" without also updating every reader.
+    use larql_vindex::format::weights::write::QuantBlockFormat;
+    let q4 = serde_json::to_string(&QuantBlockFormat::Q4K).unwrap();
+    let q6 = serde_json::to_string(&QuantBlockFormat::Q6K).unwrap();
+    assert_eq!(q4, "\"Q4_K\"");
+    assert_eq!(q6, "\"Q6_K\"");
+
+    let parsed: QuantBlockFormat = serde_json::from_str("\"Q4_K\"").unwrap();
+    assert_eq!(parsed, QuantBlockFormat::Q4K);
+    let parsed: QuantBlockFormat = serde_json::from_str("\"Q6_K\"").unwrap();
+    assert_eq!(parsed, QuantBlockFormat::Q6K);
 }
 
 // ═══════════════════════════════════════════════════════════════

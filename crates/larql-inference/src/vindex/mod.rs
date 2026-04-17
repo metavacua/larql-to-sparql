@@ -8,4 +8,4 @@ mod walk_ffn;
 mod q4k_forward;
 
 pub use walk_ffn::WalkFfn;
-pub use q4k_forward::predict_q4k;
+pub use q4k_forward::{predict_q4k, predict_q4k_metal};

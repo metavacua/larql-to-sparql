@@ -2,10 +2,15 @@
 //! standard safetensors checkpoints. Output runs in any inference engine
 //! without LARQL.
 //!
-//! Two modes:
+//! Three modes:
 //! - **Single** (`--prompt` + `--answer`): one compiled edge from a prompt's
 //!   residual at `--layer`, writing the answer token. CLI-driven; used for
 //!   the pi/Gauss demos and any prompt→answer pair.
+//! - **Menu** (`--menu path.json`): batch of prompt/answer pairs, each gets
+//!   its own edge at auto-incrementing slots starting from `--slot`. One
+//!   compile command, K edges. Gives the "variable answer per prompt"
+//!   demo when each entry's answer comes from a bounded-compute kernel run
+//!   at menu-generation time.
 //! - **Patch** (`--vindex`): replays Insert ops from .vlp patch files into
 //!   the model's FFN slots. Vindex-driven; many edges per run.
 //!

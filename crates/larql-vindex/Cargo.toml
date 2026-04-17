@@ -54,3 +54,11 @@ harness = false
 [[bench]]
 name = "memit_solve"
 harness = false
+
+[[bench]]
+name = "extract_throughput"
+harness = false
+
+[[bench]]
+name = "q4k_vs_f32"
+harness = false

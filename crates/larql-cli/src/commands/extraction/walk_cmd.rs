@@ -63,6 +63,14 @@ pub struct WalkArgs {
     /// Show verbose loading and timing info.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Opt in to the Metal Q4 decode path. Off by default because the
+    /// per-token `kv_attention` shader doesn't apply QK-norm yet, so
+    /// Gemma 3 / Gemma 4 post-norm models produce NaN. Pre-norm models
+    /// (Llama, Mistral) should work. Flip this on once the QK-norm
+    /// dispatch lands in `decode.rs`.
+    #[arg(long)]
+    metal: bool,
 }
 
 struct VerboseLoadCallbacks;
@@ -306,7 +314,25 @@ fn run_with_vindex_weights(
     } else {
         Box::new(SilentLoadCallbacks)
     };
-    let mut weights = larql_vindex::load_model_weights(vindex_path, &mut *cb)?;
+    // Route Q4 vindexes through the dedicated loader + predict path.
+    // `load_model_weights` rejects quantised vindexes (it only knows how to
+    // reconstruct the float ModelWeights), so we branch on `config.quant`
+    // BEFORE calling it to avoid a confusing error for Q4 users.
+    let cfg = larql_vindex::load_vindex_config(vindex_path)?;
+    if cfg.quant == larql_vindex::QuantFormat::Q4k {
+        let mut weights = larql_vindex::load_model_weights_q4k(vindex_path, &mut *cb)?;
+        let tokenizer = load_vindex_tokenizer(vindex_path)?;
+        vlog!(
+            verbose,
+            "  {} layers, hidden_size={} (Q4_K, {:.1}s)",
+            weights.num_layers,
+            weights.hidden_size,
+            load_start.elapsed().as_secs_f64()
+        );
+        return run_predict_q4k(&mut weights, &tokenizer, args, index);
+    }
+
+    let weights = larql_vindex::load_model_weights(vindex_path, &mut *cb)?;
     let tokenizer = load_vindex_tokenizer(vindex_path)?;
 
     vlog!(
@@ -316,15 +342,6 @@ fn run_with_vindex_weights(
         weights.hidden_size,
         load_start.elapsed().as_secs_f64()
     );
-
-    // Route Q4 vindexes through the dequantise-per-layer forward path.
-    // The standard run_predict_inner wants f32 attn/FFN weights in
-    // `weights.tensors`, which don't exist in a Q4 vindex (they'd cost
-    // ~127 GB at 31B).
-    let cfg = larql_vindex::load_vindex_config(vindex_path)?;
-    if cfg.quant == larql_vindex::QuantFormat::Q4k {
-        return run_predict_q4k(&mut weights, &tokenizer, args, index);
-    }
 
     run_predict_inner(&weights, &tokenizer, args, index)
 }
@@ -356,14 +373,38 @@ fn run_predict_q4k(
     q4_index.load_attn_q4k(vindex_path)?;
     q4_index.load_interleaved_q4k(vindex_path)?;
 
+    // CPU path is the default today. Metal Q4 decode is wired (see
+    // `predict_q4k_metal`) but the per-token `kv_attention` shader doesn't
+    // apply QK-norm, so Gemma 3 / Gemma 4 post-norm models produce NaN
+    // (unnormalised Q·K blows up before softmax). Opt in with `--metal` once
+    // the QK-norm dispatch lands in `larql-compute/src/metal/decode.rs`.
     let start = Instant::now();
-    let result = larql_inference::vindex::predict_q4k(
-        weights,
-        tokenizer,
-        &token_ids,
-        args.predict_top_k,
-        &q4_index,
-    );
+    let result = if args.metal {
+        let backend = larql_compute::default_backend();
+        if !backend.has_q4() {
+            return Err("Metal backend unavailable — rebuild with `--features metal` \
+                and run on an M-series Mac.".into());
+        }
+        eprintln!("Backend: {} (EXPERIMENTAL — Q4 Metal decode is plumbed but produces NaN on \
+            post-norm models; tracking as ADR-009, see predict.rs:386)", backend.name());
+        larql_inference::vindex::predict_q4k_metal(
+            weights,
+            tokenizer,
+            &token_ids,
+            args.predict_top_k,
+            &q4_index,
+            &*backend,
+        )
+    } else {
+        eprintln!("Backend: CPU (Accelerate + dequantise-per-layer)");
+        larql_inference::vindex::predict_q4k(
+            weights,
+            tokenizer,
+            &token_ids,
+            args.predict_top_k,
+            &q4_index,
+        )
+    };
     eprintln!("Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
 
     println!("\nTop {} predictions:", args.predict_top_k);

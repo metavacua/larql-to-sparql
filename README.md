@@ -38,6 +38,9 @@ larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --f16
 # Extract with inference weights (~6 GB at f16)
 larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --level inference --f16
 
+# Or extract as Q4_K/Q6_K inline (Ollama-compatible, skips the f32 intermediate)
+larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
+
 # Or convert from GGUF
 larql convert gguf-to-vindex model.gguf -o model.vindex --f16
 
@@ -385,22 +388,30 @@ cargo run --release -p larql-vindex --example build_up_features -- path/to/vinde
 # Server (walk inference over HTTP)
 cargo run --release -p larql-server -- path/to/vindex --port 8080
 
-# Vindex and LQL demos
-cargo run -p larql-vindex --example demo_features                    # vindex feature showcase (16 features)
+# Vindex and LQL demos (synthetic — run in CI)
+cargo run -p larql-vindex --example demo_features                    # vindex feature showcase
 cargo run --release -p larql-vindex --example mmap_demo              # mmap RAM behaviour + scaling table
+cargo run --release -p larql-vindex --example q4k_demo               # streaming Q4_K: size ratio, manifests, dequant round-trip
+cargo run --release -p larql-vindex --example demo_memit_solve       # MEMIT decomposition + MemitStore round-trip
 cargo run -p larql-lql --example parser_demo                         # parser demo (24/24 statements)
-cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (56/56)
-cargo run --release -p larql-lql --example compile_demo              # end-to-end COMPILE INTO VINDEX
-cargo run --release -p larql-lql --example refine_demo               # end-to-end 10-fact INSERT + COMPILE (exp 14)
-                                                                      # (skips gracefully if no vindex on disk)
+cargo run -p larql-lql --example lql_demo                            # LQL spec compliance (61/61)
+cargo run --release -p larql-lql --example compact_demo              # LSM storage tier walkthrough
+
+# Model-dependent demos (require real vindex, skip gracefully otherwise)
+cargo run --release -p larql-lql --example compile_demo              # end-to-end COMPILE INTO VINDEX on real Gemma 4B
+cargo run --release -p larql-lql --example refine_demo               # 10-fact INSERT + COMPILE (exp 14 reproduction, 10/10 retrieval)
+cargo run --release -p larql-lql --example trace_demo                # TRACE residual decomposition on real Gemma 4B
 
 # Criterion benches (use --quick for a fast sweep, omit for full sample sizes)
-cargo bench -p larql-lql    --bench parser           # parse_single × 18 + parse_batch
-cargo bench -p larql-lql    --bench executor         # SELECT, SHOW, DELETE, UPDATE, patch lifecycle
-cargo bench -p larql-lql    --bench compile          # COMPILE INTO VINDEX bake cost
-cargo bench -p larql-vindex --bench vindex_ops       # KNN, walk, save/load, mutate, MoE
-cargo bench -p larql-vindex --bench vindex_scaling   # production-dim KNN (Gemma/Llama/Mixtral)
-cargo bench -p larql-compute --bench matmul          # CPU/Metal matmul backends
+cargo bench -p larql-lql    --bench parser               # parse_single × 18 + parse_batch
+cargo bench -p larql-lql    --bench executor             # SELECT, SHOW, DELETE, UPDATE, patch lifecycle
+cargo bench -p larql-lql    --bench compile              # COMPILE INTO VINDEX bake cost
+cargo bench -p larql-vindex --bench vindex_ops           # KNN, walk, save/load, mutate, MoE
+cargo bench -p larql-vindex --bench vindex_scaling       # production-dim KNN (Gemma/Llama/Mixtral)
+cargo bench -p larql-vindex --bench memit_solve          # ridge decomposition throughput
+cargo bench -p larql-vindex --bench extract_throughput   # streaming extract: f32 vs Q4K write-path
+cargo bench -p larql-vindex --bench q4k_vs_f32           # per-layer attn retrieval: f32 memcpy vs Q4K dequant
+cargo bench -p larql-compute --bench matmul              # CPU/Metal matmul backends
 ```
 
 The `compile_demo` example proves the full flow on a real Gemma 4B

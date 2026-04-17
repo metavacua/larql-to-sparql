@@ -108,8 +108,13 @@ pub(super) fn apply_layer_scalar(weights: &ModelWeights, h: &mut Array2<f32>, la
 }
 
 /// Run a single transformer layer with the given FFN backend.
+///
+/// Handles: attention → FFN → per-layer embedding → layer_scalar.
+/// All four steps are needed for Gemma 4 correctness. Exposed `pub` so
+/// alternate forward drivers (notably `vindex::predict_q4k`) get the same
+/// sequence as `predict_with_temperature` without duplicating logic.
 #[allow(clippy::type_complexity)]
-pub(super) fn run_layer_with_ffn(
+pub fn run_layer_with_ffn(
     weights: &ModelWeights,
     h: &Array2<f32>,
     layer: usize,

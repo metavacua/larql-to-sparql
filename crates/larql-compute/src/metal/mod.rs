@@ -80,6 +80,7 @@ pub struct MetalBackend {
     // V-norm (Gemma 4)
     pub v_norm_pipeline: ComputePipelineState,
     pub v_norm_batched_pipeline: ComputePipelineState,
+    pub qk_norm_pipeline: ComputePipelineState,
     // Scale vector (per-layer scalar, Gemma 4)
     pub scale_vector_pipeline: ComputePipelineState,
     /// KV cache for decode mode — initialized on first decode_token call.
@@ -213,6 +214,10 @@ impl MetalBackend {
         let v_norm_batched_fn = library.get_function("v_norm_batched", None).ok()?;
         let v_norm_batched_pipeline = device.new_compute_pipeline_state_with_function(&v_norm_batched_fn).ok()?;
 
+        // QK-norm (learned-weight per-head RMSNorm, Gemma 3/4)
+        let qk_norm_fn = library.get_function("qk_norm", None).ok()?;
+        let qk_norm_pipeline = device.new_compute_pipeline_state_with_function(&qk_norm_fn).ok()?;
+
         // Scale vector (per-layer scalar multiplier, Gemma 4)
         let scale_vector_fn = library.get_function("scale_vector", None).ok()?;
         let scale_vector_pipeline = device.new_compute_pipeline_state_with_function(&scale_vector_fn).ok()?;
@@ -240,6 +245,7 @@ impl MetalBackend {
             silu_pipeline, gelu_tanh_pipeline,
             layer_norm_pipeline, layer_norm_no_bias_pipeline,
             v_norm_pipeline, v_norm_batched_pipeline,
+            qk_norm_pipeline,
             scale_vector_pipeline,
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,

@@ -44,9 +44,25 @@ pub struct KVCache {
 }
 
 impl KVCache {
+    /// Allocate a KV cache with uniform per-layer dims — the Llama / Mistral
+    /// / Gemma 3 case where every layer shares num_kv_heads and head_dim.
     pub fn new(bufs: &BufferCache, num_layers: usize, max_seq: usize, num_kv_heads: usize, head_dim: usize) -> Self {
         let layers = (0..num_layers)
             .map(|_| LayerKVCache::new(bufs, max_seq, num_kv_heads, head_dim))
+            .collect();
+        Self { layers }
+    }
+
+    /// Allocate with per-layer shapes — Gemma 4 31B alternates sliding
+    /// (num_kv=16, head_dim=256) with global (num_kv=4, head_dim=512) layers,
+    /// so a single uniform allocation would either over-size globals or
+    /// under-size slidings and produce wrong attention reads.
+    ///
+    /// `shapes[i]` is `(num_kv_heads_i, head_dim_i)` for layer i.
+    pub fn new_per_layer(bufs: &BufferCache, shapes: &[(usize, usize)], max_seq: usize) -> Self {
+        let layers = shapes
+            .iter()
+            .map(|&(num_kv, hd)| LayerKVCache::new(bufs, max_seq, num_kv, hd))
             .collect();
         Self { layers }
     }

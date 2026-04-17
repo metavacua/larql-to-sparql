@@ -251,6 +251,17 @@ impl ComputeBackend for MetalBackend {
 
     fn has_q4(&self) -> bool { true }
 
+    fn preallocate_kv_cache_per_layer(
+        &self, shapes: &[(usize, usize)], max_seq: usize,
+    ) {
+        // Replace any existing cache — callers invoke this once per model
+        // load, before the first decode dispatch. If we kept an old cache
+        // sized with the wrong per-layer dims the first decode would read
+        // off the end of a global-layer buffer.
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        *cache_guard = Some(self.create_kv_cache_per_layer(shapes, max_seq));
+    }
+
     fn name(&self) -> &str { "metal (GPU)" }
 
     fn device_info(&self) -> String {

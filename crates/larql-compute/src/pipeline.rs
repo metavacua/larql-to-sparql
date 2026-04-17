@@ -113,6 +113,11 @@ pub struct FullPipelineLayer<'a> {
     pub has_v_norm: bool,
     /// Per-layer scalar multiplier. 0.0 = disabled (no scaling). Gemma 4: learned scalar.
     pub layer_scalar: f32,
+    /// QK-norm weight for Q heads (Gemma 3 / Gemma 4). Length = head_dim.
+    /// Applied per-head as RMS-norm before RoPE. `None` means skip QK-norm.
+    pub q_norm_weight: Option<&'a [f32]>,
+    /// QK-norm weight for K heads. Same shape as `q_norm_weight`.
+    pub k_norm_weight: Option<&'a [f32]>,
     /// FFN bias on up projection (StarCoder2). None = no bias.
     pub ffn_up_bias: Option<&'a [f32]>,
     /// FFN bias on down projection (StarCoder2). None = no bias.

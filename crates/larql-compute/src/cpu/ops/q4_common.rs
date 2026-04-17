@@ -80,6 +80,14 @@ pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
 }
 
 /// Encode f32 to f16 bits (for quantize helpers).
+///
+/// Handles subnormals. When `new_exp <= 0` the value is small enough that f16
+/// can only represent it as a subnormal (implicit leading 0 instead of 1). We
+/// construct that subnormal mantissa by shifting the implicit-one back in and
+/// right-shifting — previously this branch just emitted signed zero, which
+/// meant Q-quant scales for small weight sub-blocks silently collapsed to
+/// zero and the whole super-block decoded as zero. Real-world NN weights have
+/// sub-block ranges ~10⁻² and scales ~10⁻⁵, exactly in f16 subnormal range.
 fn f32_to_f16(val: f32) -> u16 {
     let bits = val.to_bits();
     let sign = (bits >> 16) & 0x8000;
@@ -89,7 +97,16 @@ fn f32_to_f16(val: f32) -> u16 {
     if exp == 255 { return (sign | 0x7C00 | (mant >> 13)) as u16; }
     let new_exp = exp - 127 + 15;
     if new_exp >= 31 { return (sign | 0x7C00) as u16; }
-    if new_exp <= 0 { return sign as u16; }
+    if new_exp <= 0 {
+        // Subnormal: value = (1 + mant/2^23) * 2^(exp-127), we need to express
+        // it as (subnormal_mant/2^10) * 2^-14 where subnormal_mant ∈ [0, 1023].
+        // Include the implicit leading 1, shift right to align with f16's
+        // subnormal scale.
+        let shift = 1 - new_exp; // number of extra right-shifts past the normal encoding
+        let with_implicit = (mant | 0x800000) as u32;
+        let sub_mant = with_implicit >> (13 + shift as u32);
+        return (sign | sub_mant as u32) as u16;
+    }
     (sign | ((new_exp as u32) << 10) | (mant >> 13)) as u16
 }
 
@@ -109,13 +126,20 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
     for sb in 0..n_superblocks {
         let block = &data[sb * 256..(sb + 1) * 256];
 
-        // Compute per-sub-block (32 values each) min and max
+        // Compute per-sub-block (32 values each) min and max.
+        // Follow llama.cpp's convention of forcing min ≤ 0 when all values
+        // in a sub-block happen to be positive. Q4_K encodes `y = sc*nibble
+        // - mn` with nibble ∈ [0, 15] — if the effective min were e.g. 0.05
+        // instead of 0, all reconstructed values would be shifted down by
+        // 0.05 and lose positive-mean sub-blocks entirely.
         let mut sub_mins = [0.0f32; 8];
         let mut sub_maxs = [0.0f32; 8];
         for j in 0..8 {
             let sub = &block[j * 32..(j + 1) * 32];
-            sub_mins[j] = sub.iter().copied().fold(f32::INFINITY, f32::min);
-            sub_maxs[j] = sub.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let mn = sub.iter().copied().fold(f32::INFINITY, f32::min);
+            let mx = sub.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            sub_mins[j] = mn.min(0.0);
+            sub_maxs[j] = mx.max(0.0);
         }
 
         // Global delta and min.

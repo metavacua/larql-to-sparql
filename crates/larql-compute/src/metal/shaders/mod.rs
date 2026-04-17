@@ -34,6 +34,7 @@ pub mod q6k_matvec;
 pub mod activation;
 pub mod layer_norm;
 pub mod v_norm;
+pub mod qk_norm;
 pub mod turboquant_encode;
 pub mod turboquant_decode;
 pub mod graph_walk_knn;
@@ -81,6 +82,8 @@ pub fn all_shaders() -> String {
     src.push_str(layer_norm::SHADER);
     // V-norm (parameter-free, Gemma 4)
     src.push_str(v_norm::SHADER);
+    // QK-norm (learned-weight per-head RMS, Gemma 3/4)
+    src.push_str(qk_norm::SHADER);
     // TurboQuant (KV cache compression)
     src.push_str(turboquant_encode::SHADER);
     src.push_str(turboquant_decode::SHADER);
