@@ -211,13 +211,12 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
     Ok(out)
 }
 
-/// Q4_K: super-block of 256 values = 148 bytes.
-/// [0..1] f16 d, [2..3] f16 dmin, [4..15] 6-bit scales, [16..19] 4-bit mins, [20..147] 4-bit quants.
-/// Q4_K block layout (148 bytes per super-block of 256 elements):
+/// Q4_K block layout (144 bytes per super-block of 256 elements), as
+/// written by llama.cpp / GGUF files:
 ///   bytes 0-1:   d    (f16 global scale)
 ///   bytes 2-3:   dmin (f16 global min)
 ///   bytes 4-15:  12 bytes of packed 6-bit scales + 6-bit mins (8 each)
-///   bytes 16-147: 128 bytes of 4-bit quants (2 nibbles per byte = 256 values)
+///   bytes 16-143: 128 bytes of 4-bit quants (2 nibbles per byte = 256 values)
 ///
 /// The 6-bit scale/min unpacking follows llama.cpp's `get_scale_min_k4`:
 ///   For j < 4: scales[j] = bytes[j] & 0x3F;       mins[j] = bytes[j+4] & 0x3F
@@ -584,4 +583,5 @@ mod tests {
         let result = dequantize(&block, TYPE_Q5_0, 32).unwrap();
         assert!((result[0] - (-8.0)).abs() < 0.01);
     }
+
 }

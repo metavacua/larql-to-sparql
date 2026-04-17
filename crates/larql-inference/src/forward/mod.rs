@@ -18,6 +18,7 @@ pub mod predict;
 pub mod trace;
 pub mod memit;
 pub mod target_delta;
+pub mod infer_patched;
 
 use ndarray::Array2;
 use crate::attention::AttentionWeights;
@@ -122,3 +123,4 @@ pub use trace::{
 };
 pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult};
 pub use target_delta::{TargetDelta, TargetDeltaOpts};
+pub use infer_patched::{infer_patched, InferPatchedResult, KnnOverride, KNN_COSINE_THRESHOLD};

@@ -63,9 +63,13 @@ pub(super) fn logits_to_predictions(
 
     let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
     let k = top_k.min(indexed.len());
-    indexed.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+    indexed.select_nth_unstable_by(k, |a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
     indexed.truncate(k);
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    indexed.sort_unstable_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let predictions = indexed
         .into_iter()

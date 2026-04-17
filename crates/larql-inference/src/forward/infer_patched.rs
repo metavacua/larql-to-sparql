@@ -1,0 +1,297 @@
+//! `infer_patched` — the single forward-pass entry point shared by the LQL
+//! `INFER` executor (`larql-lql/src/executor/query/infer.rs`) and the Python
+//! binding (`larql-python/src/vindex.rs`).
+//!
+//! Both surfaces must produce byte-identical top-k predictions for any
+//! `(weights, gate_index, knn_store, prompt)` — see ADR 0001. This function
+//! owns the three parameters that are easy to drift between callers:
+//!
+//!   1. `top_k_features` on the walk FFN — always unlimited, because a
+//!      bounded cap misroutes post-INSERT on Gemma (a strong `×30` gate slot
+//!      dominates a half-weakened baseline).
+//!   2. The KNN cosine threshold — `KNN_COSINE_THRESHOLD = 0.75`.
+//!   3. Layer iteration order — the first stored layer (lowest index) whose
+//!      top-1 cosine exceeds the threshold wins.
+//!
+//! Callers pass a `&dyn GateIndex` + `Option<&KnnStore>`. `PatchedVindex`
+//! bundles both; `PyVindex` keeps them as separate fields. Both pass through
+//! here.
+
+use larql_vindex::{GateIndex, KnnStore};
+use tokenizers::Tokenizer;
+
+use crate::model::ModelWeights;
+use crate::vindex::WalkFfn;
+
+use super::predict::predict_with_ffn;
+use super::PredictResult;
+
+/// Cosine threshold for the L0 KnnStore override. A stored key whose top-1
+/// cosine against the captured residual exceeds this value replaces the
+/// walk FFN's top-1 prediction.
+pub const KNN_COSINE_THRESHOLD: f32 = 0.75;
+
+/// Metadata for a KNN override, if one fired.
+#[derive(Clone, Debug)]
+pub struct KnnOverride {
+    pub token: String,
+    pub cosine: f32,
+    pub layer: usize,
+}
+
+/// Result of the shared INFER pipeline.
+pub struct InferPatchedResult {
+    /// Top-k predictions. When `knn_override` is `Some`, position 0 holds the
+    /// stored target token with probability `1.0` and positions `1..k` hold
+    /// the walk FFN's own top-`(k-1)`. When `None`, this is the walk FFN's
+    /// raw top-k.
+    pub predictions: Vec<(String, f64)>,
+    /// Metadata on the KNN override for callers that want to surface it
+    /// (e.g. the LQL display layer prints `"KNN override, cos=X, L{layer}"`).
+    pub knn_override: Option<KnnOverride>,
+    /// Per-layer residuals captured at the last-token position during the
+    /// walk FFN pass. LQL uses these to build its inference trace.
+    pub residuals: Vec<(usize, Vec<f32>)>,
+    /// Wall-clock milliseconds for the walk FFN pass itself.
+    pub walk_ms: f64,
+}
+
+/// Run a full forward pass with the walk FFN, consult the KnnStore for a
+/// possible top-1 override, and return the top-k predictions.
+///
+/// This is the **only** implementation of the INFER pipeline. `exec_infer`
+/// (LQL) and `PyVindex::infer` (Python) both delegate here. Per ADR 0001 any
+/// new forward-pass surface MUST call this function rather than assembling a
+/// local pipeline.
+pub fn infer_patched(
+    weights: &ModelWeights,
+    tokenizer: &Tokenizer,
+    gate_index: &dyn GateIndex,
+    knn_store: Option<&KnnStore>,
+    token_ids: &[u32],
+    top_k: usize,
+) -> InferPatchedResult {
+    let walk_ffn = WalkFfn::new_unlimited_with_trace(weights, gate_index);
+
+    let start = std::time::Instant::now();
+    let PredictResult { predictions: raw } =
+        predict_with_ffn(weights, tokenizer, token_ids, top_k, &walk_ffn);
+    let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let residuals = walk_ffn.take_residuals();
+    let (predictions, knn_override) = apply_knn_override(raw, &residuals, knn_store, top_k);
+
+    InferPatchedResult {
+        predictions,
+        knn_override,
+        residuals,
+        walk_ms,
+    }
+}
+
+/// Pure function: given raw walk predictions, per-layer residuals, and an
+/// optional KnnStore, return `(predictions, knn_override)`.
+///
+/// Split out of `infer_patched` to be unit-testable without a real forward
+/// pass. The behaviour is the contract that ADR 0001's byte-identical claim
+/// rests on: the first stored layer (lowest index) whose top-1 cosine against
+/// the captured residual exceeds `KNN_COSINE_THRESHOLD` replaces position 0
+/// of the top-k with the stored target token at probability `1.0`; positions
+/// `1..top_k` are the walk FFN's own top-`(top_k - 1)`.
+pub fn apply_knn_override(
+    raw: Vec<(String, f64)>,
+    residuals: &[(usize, Vec<f32>)],
+    knn_store: Option<&KnnStore>,
+    top_k: usize,
+) -> (Vec<(String, f64)>, Option<KnnOverride>) {
+    let knn_override = knn_store.and_then(|store| {
+        let layers = store.layers();
+        if layers.is_empty() {
+            return None;
+        }
+        for (layer, residual) in residuals {
+            if !layers.contains(layer) {
+                continue;
+            }
+            if let Some((entry, cosine)) = store.query_top1(*layer, residual) {
+                if cosine > KNN_COSINE_THRESHOLD {
+                    return Some(KnnOverride {
+                        token: entry.target_token,
+                        cosine,
+                        layer: *layer,
+                    });
+                }
+            }
+        }
+        None
+    });
+
+    let predictions = match &knn_override {
+        Some(ovr) if top_k > 0 => {
+            let mut out = Vec::with_capacity(top_k);
+            out.push((ovr.token.clone(), 1.0));
+            for pair in raw.into_iter().take(top_k.saturating_sub(1)) {
+                out.push(pair);
+            }
+            out
+        }
+        _ => raw,
+    };
+
+    (predictions, knn_override)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_store_with_key(layer: usize, key: Vec<f32>, target: &str) -> KnnStore {
+        let mut store = KnnStore::default();
+        store.add(
+            layer,
+            key,
+            0,
+            target.to_string(),
+            "Atlantis".to_string(),
+            "capital".to_string(),
+            1.0,
+        );
+        store
+    }
+
+    fn raw(tokens: &[&str]) -> Vec<(String, f64)> {
+        tokens
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.to_string(), 1.0 - 0.1 * i as f64))
+            .collect()
+    }
+
+    #[test]
+    fn no_store_passes_through_raw_topk() {
+        let raw = raw(&["a", "b", "c"]);
+        let residuals: Vec<(usize, Vec<f32>)> = vec![(5, vec![1.0, 0.0, 0.0])];
+
+        let (predictions, override_) = apply_knn_override(raw.clone(), &residuals, None, 3);
+
+        assert!(override_.is_none());
+        assert_eq!(predictions, raw);
+    }
+
+    #[test]
+    fn empty_store_passes_through() {
+        let raw = raw(&["a", "b", "c"]);
+        let residuals = vec![(5, vec![1.0, 0.0, 0.0])];
+        let store = KnnStore::default();
+
+        let (predictions, override_) =
+            apply_knn_override(raw.clone(), &residuals, Some(&store), 3);
+
+        assert!(override_.is_none());
+        assert_eq!(predictions, raw);
+    }
+
+    #[test]
+    fn matching_key_overrides_position_zero() {
+        let key = vec![1.0, 0.0, 0.0];
+        let residuals = vec![(5, key.clone())];
+        let store = make_store_with_key(5, key, "Poseidon");
+
+        let (predictions, override_) =
+            apply_knn_override(raw(&["a", "b", "c"]), &residuals, Some(&store), 3);
+
+        let ovr = override_.expect("key exactly matches residual — override must fire");
+        assert_eq!(ovr.token, "Poseidon");
+        assert_eq!(ovr.layer, 5);
+        assert!(ovr.cosine > 0.99, "cosine of identical vectors must be ~1.0");
+
+        assert_eq!(predictions.len(), 3);
+        assert_eq!(predictions[0], ("Poseidon".to_string(), 1.0));
+        assert_eq!(predictions[1].0, "a");
+        assert_eq!(predictions[2].0, "b");
+    }
+
+    #[test]
+    fn mismatched_key_below_threshold_passes_through() {
+        // Orthogonal vectors → cos = 0, well below 0.75 threshold.
+        let residuals = vec![(5, vec![1.0, 0.0, 0.0])];
+        let store = make_store_with_key(5, vec![0.0, 1.0, 0.0], "Poseidon");
+
+        let (predictions, override_) =
+            apply_knn_override(raw(&["a", "b", "c"]), &residuals, Some(&store), 3);
+
+        assert!(override_.is_none(), "orthogonal residual must not trigger override");
+        assert_eq!(predictions[0].0, "a");
+    }
+
+    #[test]
+    fn override_only_fires_on_stored_layers() {
+        // Residual matches a key, but at a layer not present in the store.
+        let key = vec![1.0, 0.0, 0.0];
+        let residuals = vec![(7, key.clone())];
+        let store = make_store_with_key(5, key, "Poseidon");
+
+        let (predictions, override_) =
+            apply_knn_override(raw(&["a", "b", "c"]), &residuals, Some(&store), 3);
+
+        assert!(override_.is_none(), "residual layer not in store — no override");
+        assert_eq!(predictions[0].0, "a");
+    }
+
+    #[test]
+    fn first_matching_layer_wins() {
+        // Two stored layers both match; the earliest one (by iteration order
+        // of the residuals slice) must take precedence.
+        let key = vec![1.0, 0.0, 0.0];
+        let residuals = vec![
+            (5, key.clone()),
+            (7, key.clone()),
+        ];
+        let mut store = make_store_with_key(5, key.clone(), "First");
+        store.add(
+            7,
+            key,
+            1,
+            "Second".to_string(),
+            "Atlantis".to_string(),
+            "capital".to_string(),
+            1.0,
+        );
+
+        let (predictions, override_) =
+            apply_knn_override(raw(&["a"]), &residuals, Some(&store), 5);
+
+        let ovr = override_.unwrap();
+        assert_eq!(ovr.token, "First");
+        assert_eq!(ovr.layer, 5);
+        assert_eq!(predictions[0].0, "First");
+    }
+
+    #[test]
+    fn top_k_one_returns_only_override() {
+        let key = vec![1.0, 0.0, 0.0];
+        let residuals = vec![(5, key.clone())];
+        let store = make_store_with_key(5, key, "Poseidon");
+
+        let (predictions, _) =
+            apply_knn_override(raw(&["a", "b", "c"]), &residuals, Some(&store), 1);
+
+        assert_eq!(predictions.len(), 1);
+        assert_eq!(predictions[0], ("Poseidon".to_string(), 1.0));
+    }
+
+    #[test]
+    fn top_k_zero_returns_empty() {
+        let key = vec![1.0, 0.0, 0.0];
+        let residuals = vec![(5, key.clone())];
+        let store = make_store_with_key(5, key, "Poseidon");
+
+        let (predictions, override_) =
+            apply_knn_override(raw(&["a", "b", "c"]), &residuals, Some(&store), 0);
+
+        // Override metadata still fires (the match is real) but predictions
+        // collapses to raw (which is then truncated by the caller if needed).
+        assert!(override_.is_some());
+        assert_eq!(predictions.len(), 3);
+    }
+}

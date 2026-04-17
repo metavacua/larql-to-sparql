@@ -192,6 +192,15 @@ impl ModelArchitecture for Gemma4Arch {
         (self.config.hidden_size as f32).sqrt()
     }
 
+    // Gemma 4's shipped `tokenizer.json` omits `<bos>` from its
+    // `TemplateProcessing.single` template (Gemma 2/3 included it), so
+    // `encode(prompt, add_special=true)` returns a sequence without the
+    // leading BOS token and the model's attention sees a broken prefix.
+    // Callers consult this to prepend token id 2 when missing.
+    fn bos_token_id(&self) -> Option<u32> {
+        Some(2)
+    }
+
     fn has_post_norms(&self) -> bool {
         true
     }

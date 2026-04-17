@@ -946,16 +946,20 @@ impl PyVindex {
     /// Model weights are mmap'd on first call and reused — zero-copy, fast.
     /// Subsequent calls reuse the cached weights (OS page cache warms up).
     ///
+    /// Routes through `larql_inference::infer_patched`, which is also the
+    /// entry point for the LQL `SELECT ... INFER` executor — the two paths
+    /// produce byte-identical top-k predictions on any vindex. See ADR 0001
+    /// (`docs/adr/0001-python-lql-infer-parity.md`).
+    ///
     /// Args:
     ///     prompt: input text
     ///     top_k_predictions: number of top predictions to return (default 5)
-    ///     top_k_features: features per layer for walk FFN (default 8192, lossless)
     ///
     /// Returns:
     ///     List of (token, probability) tuples
-    #[pyo3(signature = (prompt, top_k_predictions=5, top_k_features=8192))]
+    #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn infer(
-        &self, prompt: &str, top_k_predictions: usize, top_k_features: usize
+        &self, prompt: &str, top_k_predictions: usize,
     ) -> PyResult<Vec<(String, f64)>> {
         // Lazy-load mmap'd weights on first call
         {
@@ -972,70 +976,20 @@ impl PyVindex {
         let state = self.walk_model.borrow();
         let infer_state = state.as_ref().unwrap();
 
-        // Tokenize prompt (with BOS token for correct inference)
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        // Run forward pass with walk FFN (mmap'd weights, vindex gate KNN).
-        //
-        // When the compiled vindex has an arch-B KnnStore attached we
-        // need the per-layer residual trace to consult it — use the
-        // `_with_trace` variant and check each stored layer's residual
-        // against the store. A hit at cos > threshold overrides the
-        // top-1 prediction with the stored target. Matches the LQL
-        // INFER path (`executor/query/infer.rs`) which enables the
-        // same mechanism for `s.query("INFER ...")`.
-        let has_knn = self.knn_store.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-        let mut predictions = if has_knn {
-            let walk_ffn = larql_inference::WalkFfn::new_with_trace(
-                &infer_state.weights, &self.index, top_k_features,
-            );
-            let result = larql_inference::predict_with_ffn(
-                &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn,
-            );
-            let residuals = walk_ffn.take_residuals();
+        let result = larql_inference::infer_patched(
+            &infer_state.weights,
+            &self.tokenizer,
+            &self.index,
+            self.knn_store.as_ref(),
+            &token_ids,
+            top_k_predictions,
+        );
 
-            const KNN_COSINE_THRESHOLD: f32 = 0.75;
-            if let Some(store) = self.knn_store.as_ref() {
-                let knn_layers = store.layers();
-                let mut override_token: Option<String> = None;
-                for (layer, residual) in &residuals {
-                    if !knn_layers.contains(layer) {
-                        continue;
-                    }
-                    if let Some((entry, cosine)) = store.query_top1(*layer, residual) {
-                        if cosine > KNN_COSINE_THRESHOLD {
-                            override_token = Some(entry.target_token.clone());
-                            break;
-                        }
-                    }
-                }
-                if let Some(tok) = override_token {
-                    let mut out = Vec::with_capacity(result.predictions.len());
-                    out.push((tok, 1.0));
-                    for (t, p) in result.predictions.into_iter().take(top_k_predictions - 1) {
-                        out.push((t, p));
-                    }
-                    out
-                } else {
-                    result.predictions
-                }
-            } else {
-                result.predictions
-            }
-        } else {
-            let walk_ffn = larql_inference::WalkFfn::new(
-                &infer_state.weights, &self.index, top_k_features,
-            );
-            let result = larql_inference::predict_with_ffn(
-                &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn,
-            );
-            result.predictions
-        };
-        predictions.truncate(top_k_predictions);
-
-        Ok(predictions)
+        Ok(result.predictions)
     }
 
     /// Per-fact target-delta optimisation (MEMIT phase 3).
@@ -1102,20 +1056,30 @@ impl PyVindex {
         Ok((delta_np, result.baseline_loss, result.final_loss))
     }
 
-    /// Run inference and capture per-layer residuals (last token position).
+    /// Run inference and capture per-layer residuals — the actual query
+    /// vectors the walk FFN's `gate_knn` operates on at each layer
+    /// (post-attention, post-RMSNorm, last-token position).
     ///
-    /// Returns (predictions, residuals) where:
-    ///   predictions: list of (token, probability) tuples
-    ///   residuals: list of numpy arrays, one per layer — the actual residual
-    ///              the gate_knn sees during inference at that layer.
+    /// Routes through `larql_inference::infer_patched` — same pipeline as
+    /// `infer()` and the LQL `SELECT ... INFER` executor, so the returned
+    /// predictions match those surfaces byte-for-byte (ADR 0001).
     ///
-    /// Use these residuals to synthesise gate vectors that match the inference
-    /// path, not just the raw embedding.
-    #[pyo3(signature = (prompt, top_k_predictions=5, top_k_features=8192))]
+    /// Residuals are returned as `(layer, array)` tuples because the walk
+    /// FFN only emits residuals for layers with vindex features — positional
+    /// indexing does not correspond to layer number. Iterate:
+    ///
+    ///     for layer, r in residuals:
+    ///         ...
+    ///
+    /// Returns:
+    ///   (predictions, residuals) where
+    ///     predictions: list of (token, probability) tuples
+    ///     residuals:   list of (layer_index, (hidden_size,) numpy array)
+    #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn infer_trace<'py>(
         &self, py: Python<'py>, prompt: &str,
-        top_k_predictions: usize, top_k_features: usize
-    ) -> PyResult<(Vec<(String, f64)>, Vec<Bound<'py, PyArray1<f32>>>)> {
+        top_k_predictions: usize,
+    ) -> PyResult<(Vec<(String, f64)>, Vec<(usize, Bound<'py, PyArray1<f32>>)>)> {
         {
             let mut state = self.walk_model.borrow_mut();
             if state.is_none() {
@@ -1134,13 +1098,18 @@ impl PyVindex {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        let walk_ffn = larql_inference::WalkFfn::new(&infer_state.weights, &self.index, top_k_features);
-        let result = larql_inference::predict_with_ffn_trace(
-            &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn
+        let result = larql_inference::infer_patched(
+            &infer_state.weights,
+            &self.tokenizer,
+            &self.index,
+            self.knn_store.as_ref(),
+            &token_ids,
+            top_k_predictions,
         );
 
-        let residuals: Vec<Bound<'py, PyArray1<f32>>> = result.residuals.into_iter()
-            .map(|r| r.into_pyarray(py))
+        let residuals: Vec<(usize, Bound<'py, PyArray1<f32>>)> = result.residuals
+            .into_iter()
+            .map(|(layer, vec)| (layer, ndarray::Array1::from_vec(vec).into_pyarray(py)))
             .collect();
 
         Ok((result.predictions, residuals))

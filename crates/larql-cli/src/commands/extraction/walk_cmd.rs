@@ -356,10 +356,12 @@ fn run_predict_q4k(
     args: &WalkArgs,
     _index: &VectorIndex,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let encoding = tokenizer
-        .encode(args.prompt.as_str(), true)
-        .map_err(|e| format!("tokenize error: {e}"))?;
-    let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+    let token_ids = larql_inference::encode_prompt(
+        tokenizer,
+        &*weights.arch,
+        args.prompt.as_str(),
+    )
+    .map_err(|e| format!("tokenize error: {e}"))?;
     eprintln!("Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
 
     // The Q4 vindex we loaded already lives inside the VectorIndex used by

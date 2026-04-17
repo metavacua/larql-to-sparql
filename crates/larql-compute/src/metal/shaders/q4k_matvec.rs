@@ -5,6 +5,13 @@
 //! lanes within the simdgroup read the same X addresses.
 //!
 //! 4 simdgroups × 2 rows = 8 rows per threadgroup, 128 threads total.
+//!
+//! FIXME(chris): this shader still targets the legacy 148-byte "Chris
+//! variant" Q4_K layout. `quantize_q4_k` now emits the 144-byte llama.cpp
+//! GGUF layout, so this kernel reads garbage off any freshly-extracted
+//! vindex. Update `Q4K_BLOCK_SIZE`, the scale/min unpack, and the nibble
+//! offset (20 → 16) to match `dequantize_q4_k` in larql-models before
+//! re-enabling the Metal Q4 decode path.
 
 pub const SHADER: &str = r#"
 constant uint Q4K_NR0 = 2;

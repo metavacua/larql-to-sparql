@@ -45,6 +45,7 @@ pub use forward::{
     PredictResultWithResiduals, TraceResult,
     run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
     TargetDelta, TargetDeltaOpts,
+    infer_patched, InferPatchedResult, KnnOverride, KNN_COSINE_THRESHOLD,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
 #[allow(deprecated)]
@@ -80,7 +81,7 @@ pub use layer_graph::{
 };
 pub use vindex::WalkFfn;
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
-pub use tokenizer::{decode_token, decode_token_raw, load_tokenizer};
+pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
 
 // Walker re-exports.
 pub use walker::attention_walker::{AttentionLayerResult, AttentionWalker};

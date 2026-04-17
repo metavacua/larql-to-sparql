@@ -427,6 +427,40 @@ class TestSession:
 
 # ─── Integration with real vindex (optional) ───
 
+
+def _resolve_v11_vindex():
+    """Locate the v11 tiny-model vindex — the default parity-test fixture.
+
+    Order of precedence:
+      1. `V11_VINDEX_PATH` env var
+      2. `<larql repo>/../tiny-model/model/v11/vindex`  (sibling checkout)
+
+    Returns the path if it exists and carries model weights, else `None`.
+    """
+    env = os.environ.get("V11_VINDEX_PATH")
+    candidates = []
+    if env:
+        candidates.append(env)
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(
+        os.path.normpath(os.path.join(here, "..", "..", "..", "..",
+                                      "tiny-model", "model", "v11", "vindex"))
+    )
+    for path in candidates:
+        config = os.path.join(path, "index.json")
+        if not os.path.exists(config):
+            continue
+        try:
+            with open(config) as f:
+                if '"has_model_weights": true' in f.read():
+                    return path
+        except OSError:
+            continue
+    return None
+
+
+V11_VINDEX = _resolve_v11_vindex()
+
 REAL_VINDEX = os.environ.get("REAL_VINDEX_PATH")
 
 @pytest.mark.skipif(
@@ -538,3 +572,76 @@ class TestRealVindex:
             max_tokens=3, verbose=False
         )
         assert "Paris" in response
+
+
+# ─── Python/LQL INFER parity (ADR 0001) ───
+
+
+def _parse_lql_predictions(lines):
+    """Extract prediction tokens from LQL `INFER` output lines, in order.
+
+    LQL format: "Predictions (walk FFN):" header, then lines like
+        "   1. Paris                (90.12%)"
+    or, when a KNN override fires:
+        "   1. Paris                (KNN override, cos=0.98, L5)"
+    """
+    import re
+    tokens = []
+    in_predictions = False
+    # Matches "  1. token_text  (..." — the ranked prediction lines — but not
+    # the trailing "  15ms" timing line, which has no "." after the digit.
+    pattern = re.compile(r"^\s*\d+\.\s*(?P<token>.*?)\s*\(")
+    for line in lines:
+        if line.startswith("Predictions (walk FFN)"):
+            in_predictions = True
+            continue
+        if in_predictions:
+            m = pattern.match(line)
+            if not m:
+                break
+            tokens.append(m.group("token"))
+    return tokens
+
+
+@pytest.mark.skipif(
+    V11_VINDEX is None,
+    reason="No v11 vindex found. Set V11_VINDEX_PATH or check out tiny-model "
+           "as a sibling of larql."
+)
+class TestV11InferParity:
+    """ADR 0001: `PyVindex.infer` and LQL `SELECT ... INFER` must return
+    byte-identical top-k predictions on any vindex.
+
+    Runs automatically whenever the v11 tiny-model vindex is available —
+    either at `V11_VINDEX_PATH` or at `../tiny-model/model/v11/vindex`
+    (sibling checkout). Any future divergence — a new parameter default, a
+    surface-specific fast path, a refactor that bypasses `infer_patched` —
+    fails this test.
+    """
+
+    @pytest.fixture(scope="class")
+    def vindex(self):
+        return larql.load(V11_VINDEX)
+
+    @pytest.fixture(scope="class")
+    def session(self):
+        return larql.session(V11_VINDEX)
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "The capital of France is",
+            "Water is",
+            "hello",
+        ],
+    )
+    def test_parity(self, vindex, session, prompt):
+        top_k = 5
+        py_tokens = [tok for tok, _ in vindex.infer(prompt, top_k_predictions=top_k)]
+        lql_tokens = _parse_lql_predictions(
+            session.query(f"INFER '{prompt}' TOP {top_k}")
+        )
+        assert py_tokens == lql_tokens, (
+            f"Python/LQL parity broken on prompt {prompt!r}:\n"
+            f"  py:  {py_tokens}\n  lql: {lql_tokens}"
+        )

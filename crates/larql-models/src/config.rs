@@ -255,6 +255,19 @@ pub trait ModelArchitecture: Send + Sync {
             .unwrap_or(1.0)
     }
 
+    /// BOS token to prepend before inference when the tokenizer's
+    /// `post_processor` doesn't already add one.
+    ///
+    /// Gemma 4's shipped `tokenizer.json` leaves BOS out of the
+    /// `TemplateProcessing.single` template (unlike Gemma 2/3), so
+    /// `tokenizer.encode(prompt, true)` returns tokens without BOS and
+    /// the model sees a broken sequence. Architectures that need BOS
+    /// return `Some(id)` here and callers prepend it if the encoding
+    /// doesn't already start with it.
+    fn bos_token_id(&self) -> Option<u32> {
+        None
+    }
+
     /// Activation function for the FFN.
     fn activation(&self) -> Activation {
         Activation::Silu

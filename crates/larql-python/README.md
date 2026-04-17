@@ -126,7 +126,7 @@ session.vindex.gate_vectors(layer=26)  # numpy access on same session
 
 | Method | Description |
 |---|---|
-| `infer(prompt, top_k_predictions=5, top_k_features=8192)` | Full Rust forward pass, returns `[(token, prob)]` |
+| `infer(prompt, top_k_predictions=5)` | Full Rust forward pass, returns `[(token, prob)]`. Routes through `larql_inference::infer_patched` for byte-identical parity with LQL `SELECT ... INFER` (ADR 0001) |
 
 ### Vindex — Knowledge Queries
 

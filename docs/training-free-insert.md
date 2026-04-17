@@ -45,12 +45,15 @@ The gate determines when a feature activates. The down projection determines wha
 
 ### Step 1: Capture residuals
 
-Run `infer_trace` on the target prompt. This returns the actual residual vector at each layer's last token position — what `gate_knn` sees during inference.
+Run `infer_trace` on the target prompt. This returns the actual residual vector at each layer's last token position — what `gate_knn` sees during inference (post-attention, post-RMSNorm).
 
 ```python
 preds, residuals = vindex.infer_trace("The capital of Atlantis is")
-# residuals[layer] = numpy array of shape (hidden_size,)
-# This is the ACTUAL query vector that gate_knn operates on during inference.
+# residuals is a list of (layer_index, numpy array of shape (hidden_size,))
+# covering only layers with vindex features — positional indexing does NOT
+# correspond to layer number.
+residuals_by_layer = dict(residuals)
+# residuals_by_layer[24] is the ACTUAL query vector gate_knn sees at L24.
 ```
 
 **Critical insight:** The residual at L24 has cosine **0.01** with `embed("Atlantis")`. They're essentially orthogonal. The embedding is norm ~50, the residual is norm ~38,000. Gate vectors built from embeddings don't fire during inference because the residual stream is a completely different vector after 24 layers of attention.
@@ -66,8 +69,9 @@ cosine:              0.0106 (orthogonal)
 For each knowledge layer:
 
 ```python
+residuals_by_layer = dict(residuals)
 for layer in range(20, 28):
-    residual = residuals[layer]
+    residual = residuals_by_layer[layer]
     
     # Gate: match the Atlantis residual so the feature fires during inference
     avg_norm = mean(norm(existing_gate_vectors))
