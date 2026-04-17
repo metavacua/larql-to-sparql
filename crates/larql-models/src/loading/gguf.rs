@@ -536,5 +536,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_load_tensors_swaps_gguf_2d_dims_to_rows_cols() {
+        use std::io::{Seek, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+
+        // Header
+        file.write_all(&GGUF_MAGIC.to_le_bytes()).unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap(); // version
+        file.write_all(&1u64.to_le_bytes()).unwrap(); // n_tensors
+        file.write_all(&0u64.to_le_bytes()).unwrap(); // n_metadata
+
+        // Tensor info: ggml dims order is [cols, rows].
+        let name = b"blk.0.ffn_down.weight";
+        file.write_all(&(name.len() as u64).to_le_bytes()).unwrap();
+        file.write_all(name).unwrap();
+        file.write_all(&2u32.to_le_bytes()).unwrap(); // n_dims
+        file.write_all(&4u64.to_le_bytes()).unwrap(); // cols
+        file.write_all(&2u64.to_le_bytes()).unwrap(); // rows
+        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap(); // tensor data offset
+
+        // Pad tensor data start to 32-byte boundary.
+        let pos = file.stream_position().unwrap();
+        let aligned = pos.div_ceil(32) * 32;
+        file.write_all(&vec![0u8; (aligned - pos) as usize]).unwrap();
+
+        // Raw row-major data for a logical [2, 4] matrix.
+        for v in 1u32..=8 {
+            file.write_all(&(v as f32).to_le_bytes()).unwrap();
+        }
+        file.flush().unwrap();
+
+        let gguf = GgufFile::open(&path).unwrap();
+        let (tensors, _) = gguf.load_tensors().unwrap();
+        let down = tensors.get("layers.0.mlp.down_proj.weight").unwrap();
+
+        assert_eq!(down.shape(), &[2, 4]);
+        assert_eq!(down[[0, 0]], 1.0);
+        assert_eq!(down[[1, 3]], 8.0);
+    }
+
     // Dequant tests are in format::quant::ggml::tests
 }
