@@ -502,10 +502,10 @@ pub use crate::extract::callbacks::IndexBuildCallbacks;
 
                 let k = down_top_k.min(scores.len());
                 if k > 0 && k < scores.len() {
-                    scores.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
+                    scores.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
                 scores.truncate(k);
-                scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
                 let top_k_entries: Vec<TopKEntry> = scores
                     .into_iter()
