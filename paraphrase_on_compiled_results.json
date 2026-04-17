@@ -1,0 +1,60 @@
+{
+  "checkpoint": "/private/tmp/output/larql-gemma-pi-lm",
+  "target": "6",
+  "results": [
+    {
+      "name": "canonical",
+      "prompt": "In pi = 3.14159265358979323846264338327950288419..., what is the 20th digit after the decimal? Reply with just one digit.",
+      "top1": "6",
+      "logit_target": 55.0,
+      "logit_wrong": 45.0,
+      "prob_target": 0.9999338388442993,
+      "flipped": true
+    },
+    {
+      "name": "p1_restructured",
+      "prompt": "What is the 20th digit after the decimal point in pi, which starts 3.14159265358979323846264338327950288419...?",
+      "top1": "Let",
+      "logit_target": 14.0625,
+      "logit_wrong": 13.5625,
+      "prob_target": 9.166524428394496e-09,
+      "flipped": false
+    },
+    {
+      "name": "p2_em_dash",
+      "prompt": "pi = 3.14159265358979323846264338327950288419... \u2014 what digit is at position 20 after the decimal?",
+      "top1": "The",
+      "logit_target": 13.75,
+      "logit_wrong": 12.75,
+      "prob_target": 6.561631682444613e-09,
+      "flipped": false
+    },
+    {
+      "name": "p3_twentieth_word",
+      "prompt": "In 3.14159265358979323846264338327950288419..., what is the twentieth digit after the decimal? One digit only.",
+      "top1": "The",
+      "logit_target": 16.625,
+      "logit_wrong": 19.375,
+      "prob_target": 2.5984713047932928e-08,
+      "flipped": false
+    },
+    {
+      "name": "p4_given_tell",
+      "prompt": "Given pi = 3.14159265358979323846264338327950288419..., tell me the 20th digit after the decimal.",
+      "top1": "The",
+      "logit_target": 14.5,
+      "logit_wrong": 13.625,
+      "prob_target": 6.903701432747766e-08,
+      "flipped": false
+    },
+    {
+      "name": "p5_trailing_space",
+      "prompt": "In pi = 3.14159265358979323846264338327950288419..., what is the 20th digit after the decimal? Reply with just one digit.  ",
+      "top1": "6",
+      "logit_target": 55.0,
+      "logit_wrong": 45.0,
+      "prob_target": 0.9999338388442993,
+      "flipped": true
+    }
+  ]
+}

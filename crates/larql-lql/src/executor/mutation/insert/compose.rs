@@ -41,6 +41,11 @@ impl Session {
     /// residuals. Returns every successfully installed slot; the
     /// caller commits raw residuals + patch ops after the mutable
     /// borrow ends.
+    //
+    // Arg count: `plan` + `captured` are Phase 1 outputs; the other
+    // five carry forward from the INSERT statement's AST fields. A
+    // bundling struct would just relocate the call-site boilerplate.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn install_slots(
         &mut self,
         plan: &InstallPlan,
@@ -538,7 +543,7 @@ mod install_helpers_tests {
         );
 
         // Down vector: target_embed_unit * d_ref * alpha_mul
-        let target_embed = vec![0.0_f32, 0.5, 0.0, 0.866]; // norm ~1
+        let target_embed = [0.0_f32, 0.5, 0.0, 0.866]; // norm ~1
         let target_norm: f32 = target_embed.iter().map(|v| v * v).sum::<f32>().sqrt();
         let payload = d_ref * ALPHA_MUL;
         let down_vec: Vec<f32> = target_embed

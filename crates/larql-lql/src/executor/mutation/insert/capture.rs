@@ -235,8 +235,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_decoys_are_nonempty_and_diverse() {
-        assert!(!CANONICAL_DECOY_PROMPTS.is_empty());
+    fn canonical_decoys_have_unique_3word_prefixes() {
         let prefixes: std::collections::HashSet<String> = CANONICAL_DECOY_PROMPTS
             .iter()
             .map(|p| p.split_whitespace().take(3).collect::<Vec<_>>().join(" "))

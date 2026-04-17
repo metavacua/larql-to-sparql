@@ -3,19 +3,16 @@
 //!
 //! Compose mode runs a five-phase pipeline, each phase in its own file:
 //!
-//!   1. `plan_install` (plan.rs)           — resolve install layer,
-//!                                             compute target embedding.
-//!   2. `capture_install_residuals`
-//!      (capture.rs)                        — canonical-prompt forward
-//!                                             pass + decoy capture.
-//!   3. `install_slots` (compose.rs)        — per-layer gate / up / down
-//!                                             synthesis + cliff-breaker
-//!                                             refine pass.
-//!   4. `balance_installed` (balance.rs)    — greedy down_col scaling
-//!                                             into the probability band.
-//!   5. `cross_fact_regression_check`
-//!      (balance.rs)                        — shrink this install if it
-//!                                             hijacks prior installs.
+//! 1. `plan_install` (plan.rs) — resolve install layer, compute target
+//!    embedding.
+//! 2. `capture_install_residuals` (capture.rs) — canonical-prompt
+//!    forward pass + decoy capture.
+//! 3. `install_slots` (compose.rs) — per-layer gate / up / down
+//!    synthesis + cliff-breaker refine pass.
+//! 4. `balance_installed` (balance.rs) — greedy down_col scaling into
+//!    the probability band.
+//! 5. `cross_fact_regression_check` (balance.rs) — shrink this install
+//!    if it hijacks prior installs.
 //!
 //! This file is just the orchestrator that wires them together +
 //! produces the user-facing output summary.
@@ -31,6 +28,11 @@ use crate::error::LqlError;
 use crate::executor::Session;
 
 impl Session {
+    // Arg count mirrors the `Statement::Insert` AST variant 1:1 — each
+    // parameter is a distinct AST field destructured by the dispatcher
+    // in `executor::execute`. Bundling them into a struct would just
+    // push the destructuring onto the caller.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn exec_insert(
         &mut self,
         entity: &str,

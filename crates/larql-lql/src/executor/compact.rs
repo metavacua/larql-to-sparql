@@ -124,7 +124,7 @@ impl Session {
                     // Relation isn't stored directly in PatchOp::Insert;
                     // reconstruct from entity/target or use a default
                     let relation = "unknown".to_string();
-                    edges.push((*layer as usize, entity.clone(), relation, target.clone(), 0));
+                    edges.push((*layer, entity.clone(), relation, target.clone(), 0));
                 }
             }
         }
@@ -205,7 +205,7 @@ impl Session {
                 if let Some((_, residual)) = residuals.iter().find(|(l, _)| *l == *layer) {
                     keys_vec.extend_from_slice(residual);
                 } else {
-                    keys_vec.extend(std::iter::repeat(0.0f32).take(hidden_dim));
+                    keys_vec.extend(std::iter::repeat_n(0.0f32, hidden_dim));
                 }
 
                 // Target embedding

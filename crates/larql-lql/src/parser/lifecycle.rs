@@ -87,38 +87,33 @@ impl Parser {
         // is a parse error so users get a clear message instead of silent acceptance.
         let mut on_conflict = None;
 
-        loop {
-            match self.peek() {
-                crate::lexer::Token::Keyword(Keyword::On) => {
+        while let crate::lexer::Token::Keyword(Keyword::On) = self.peek() {
+            self.advance();
+            self.expect_keyword(Keyword::Conflict)?;
+            let strat = match self.peek() {
+                crate::lexer::Token::Keyword(Keyword::LastWins) => {
                     self.advance();
-                    self.expect_keyword(Keyword::Conflict)?;
-                    let strat = match self.peek() {
-                        crate::lexer::Token::Keyword(Keyword::LastWins) => {
-                            self.advance();
-                            CompileConflict::LastWins
-                        }
-                        crate::lexer::Token::Keyword(Keyword::HighestConfidence) => {
-                            self.advance();
-                            CompileConflict::HighestConfidence
-                        }
-                        crate::lexer::Token::Keyword(Keyword::Fail) => {
-                            self.advance();
-                            CompileConflict::Fail
-                        }
-                        t => return Err(ParseError(format!(
-                            "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
-                            t
-                        ))),
-                    };
-                    if target != CompileTarget::Vindex {
-                        return Err(ParseError(
-                            "ON CONFLICT is only valid for COMPILE INTO VINDEX".into(),
-                        ));
-                    }
-                    on_conflict = Some(strat);
+                    CompileConflict::LastWins
                 }
-                _ => break,
+                crate::lexer::Token::Keyword(Keyword::HighestConfidence) => {
+                    self.advance();
+                    CompileConflict::HighestConfidence
+                }
+                crate::lexer::Token::Keyword(Keyword::Fail) => {
+                    self.advance();
+                    CompileConflict::Fail
+                }
+                t => return Err(ParseError(format!(
+                    "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
+                    t
+                ))),
+            };
+            if target != CompileTarget::Vindex {
+                return Err(ParseError(
+                    "ON CONFLICT is only valid for COMPILE INTO VINDEX".into(),
+                ));
             }
+            on_conflict = Some(strat);
         }
 
         self.eat_semicolon();

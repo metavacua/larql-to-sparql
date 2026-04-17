@@ -33,7 +33,7 @@ impl Session {
             l1_layers.len(),
         ));
         if memit_supported {
-            out.push(format!("  L2 (MEMIT):      0 facts across 0 cycles"));
+            out.push("  L2 (MEMIT):      0 facts across 0 cycles".to_string());
         } else {
             out.push(format!(
                 "  L2 (MEMIT):      not available (hidden_dim={} < 1024)",

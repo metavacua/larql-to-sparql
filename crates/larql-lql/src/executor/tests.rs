@@ -1039,7 +1039,7 @@ fn compile_on_conflict_last_wins_succeeds() {
 fn memit_facts_count_inserts_only() {
     use larql_vindex::PatchOp;
 
-    let ops = vec![
+    let ops = [
         PatchOp::Insert {
             layer: 26,
             feature: 100,

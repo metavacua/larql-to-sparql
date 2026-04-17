@@ -12,6 +12,13 @@ use super::Session;
 /// The active backend for the session.
 /// The base vindex is always loaded readonly. A PatchedVindex overlay
 /// handles all mutations without modifying base files on disk.
+//
+// The `Vindex` variant is much larger than the other three — it owns
+// the full `PatchedVindex` + `MemitStore`. Boxing the payload would
+// add an indirection on every backend access (common hot path) to
+// save stack space on a single enum value the session holds for its
+// lifetime. Not a worthwhile trade.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Backend {
     Vindex {
         path: PathBuf,
