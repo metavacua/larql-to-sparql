@@ -17,7 +17,7 @@
 //! bundles both; `PyVindex` keeps them as separate fields. Both pass through
 //! here.
 
-use larql_vindex::{GateIndex, KnnStore};
+use larql_vindex::{GateIndex, KnnStore, PatchedVindex, WalkHit};
 use tokenizers::Tokenizer;
 
 use crate::model::ModelWeights;
@@ -105,10 +105,10 @@ pub fn apply_knn_override(
     top_k: usize,
 ) -> (Vec<(String, f64)>, Option<KnnOverride>) {
     let knn_override = knn_store.and_then(|store| {
-        let layers = store.layers();
-        if layers.is_empty() {
+        if store.is_empty() {
             return None;
         }
+        let layers = store.layers();
         for (layer, residual) in residuals {
             if !layers.contains(layer) {
                 continue;
@@ -116,7 +116,7 @@ pub fn apply_knn_override(
             if let Some((entry, cosine)) = store.query_top1(*layer, residual) {
                 if cosine > KNN_COSINE_THRESHOLD {
                     return Some(KnnOverride {
-                        token: entry.target_token,
+                        token: entry.target_token.clone(),
                         cosine,
                         layer: *layer,
                     });
@@ -139,6 +139,40 @@ pub fn apply_knn_override(
     };
 
     (predictions, knn_override)
+}
+
+/// Rebuild a per-layer walk trace from captured residuals — shared between
+/// the LQL `INFER` / `EXPLAIN INFER` display paths and the HTTP `/explain`
+/// route. Each layer's residual is re-queried against the patched vindex's
+/// gate KNN for the top-20 hits, then paired with `FeatureMeta` for display.
+///
+/// Kept here so that any surface using `infer_patched` can reconstruct the
+/// same trace view without duplicating the loop or re-consuming WalkFfn's
+/// internal `take_trace` (which drains residuals and so can't coexist with
+/// the KNN-override residual capture above).
+pub fn walk_trace_from_residuals(
+    residuals: &[(usize, Vec<f32>)],
+    patched: &PatchedVindex,
+) -> Vec<(usize, Vec<WalkHit>)> {
+    let mut out = Vec::with_capacity(residuals.len());
+    for (layer, residual) in residuals {
+        let r = ndarray::Array1::from_vec(residual.clone());
+        let hits = patched.gate_knn(*layer, &r, 20);
+        let walk_hits: Vec<WalkHit> = hits
+            .into_iter()
+            .filter_map(|(feature, gate_score)| {
+                let meta = patched.feature_meta(*layer, feature)?;
+                Some(WalkHit {
+                    layer: *layer,
+                    feature,
+                    gate_score,
+                    meta,
+                })
+            })
+            .collect();
+        out.push((*layer, walk_hits));
+    }
+    out
 }
 
 #[cfg(test)]

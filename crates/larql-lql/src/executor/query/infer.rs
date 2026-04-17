@@ -76,25 +76,7 @@ impl Session {
             top_k,
         );
 
-        // Build trace from residuals (same logic as take_trace but inline)
-        let mut trace_layers = Vec::with_capacity(infer.residuals.len());
-        for (layer, residual) in &infer.residuals {
-            let r = larql_vindex::ndarray::Array1::from_vec(residual.clone());
-            let hits = patched.gate_knn(*layer, &r, 20);
-            let walk_hits: Vec<larql_vindex::WalkHit> = hits
-                .into_iter()
-                .filter_map(|(feature, gate_score)| {
-                    let meta = patched.feature_meta(*layer, feature)?;
-                    Some(larql_vindex::WalkHit {
-                        layer: *layer,
-                        feature,
-                        gate_score,
-                        meta,
-                    })
-                })
-                .collect();
-            trace_layers.push((*layer, walk_hits));
-        }
+        let trace_layers = larql_inference::walk_trace_from_residuals(&infer.residuals, patched);
 
         let mut out = Vec::new();
         out.push("Predictions (walk FFN):".into());

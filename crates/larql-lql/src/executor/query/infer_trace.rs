@@ -56,15 +56,16 @@ impl Session {
 
         // ── Phase 2: forward pass (with optional attention capture) ──
         //
-        // Unlimited top_k so EXPLAIN INFER's activation sum matches
-        // what `exec_infer` uses. Otherwise a user who runs INFER
-        // then EXPLAIN INFER on the same prompt sees a half-power
-        // baseline in the trace while production inference uses
-        // full power — silent divergence.
+        // Unlimited top_k: EXPLAIN INFER shares the activation-sum config
+        // with `exec_infer` so running INFER then EXPLAIN INFER on the
+        // same prompt gives the same baseline. The attention-capture path
+        // is an optional second-channel for logit lens display; the
+        // KNN override path below uses WalkFfn residuals either way,
+        // matching the canonical `infer_patched` pipeline (ADR 0001).
         let walk_ffn =
             larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
         let start = std::time::Instant::now();
-        let (predictions, attention_captures, lens_residuals) = if with_attention {
+        let (predictions_raw, attention_captures, lens_residuals) = if with_attention {
             let r = larql_inference::predict_with_ffn_attention(
                 &weights, &tokenizer, &token_ids, top_k, &walk_ffn,
             );
@@ -77,11 +78,19 @@ impl Session {
         };
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
+        let residuals = walk_ffn.take_residuals();
+        let (predictions, knn_override) = larql_inference::apply_knn_override(
+            predictions_raw,
+            &residuals,
+            Some(&patched.knn_store),
+            top_k,
+        );
+
         // ── Phase 3: side-tables for the rendering loop ──
         let attention_map = build_attention_map(&attention_captures, &token_strs, with_attention);
         let lens_map = build_lens_map(&lens_residuals, &weights, &tokenizer, with_attention);
 
-        let trace = walk_ffn.take_trace();
+        let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, patched);
         let classifier = self.relation_classifier();
         let bands = resolve_bands(config);
         let layer_range = band_to_layer_range(band, &bands);
@@ -96,16 +105,23 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!("Inference trace for {:?}{}:", prompt, band_label));
-        out.push(format!(
-            "Prediction: {} ({:.2}%) in {:.0}ms",
-            predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?"),
-            predictions.first().map(|(_, p)| p * 100.0).unwrap_or(0.0),
-            elapsed_ms
-        ));
+        if let Some(ovr) = &knn_override {
+            out.push(format!(
+                "Prediction: {} (KNN override, cos={:.2}, L{}) in {:.0}ms",
+                ovr.token, ovr.cosine, ovr.layer, elapsed_ms
+            ));
+        } else {
+            out.push(format!(
+                "Prediction: {} ({:.2}%) in {:.0}ms",
+                predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?"),
+                predictions.first().map(|(_, p)| p * 100.0).unwrap_or(0.0),
+                elapsed_ms
+            ));
+        }
         out.push(String::new());
 
         // ── Phase 5: per-layer rendering ──
-        for (layer, hits) in &trace.layers {
+        for (layer, hits) in &trace_layers {
             if hits.is_empty() {
                 continue;
             }
@@ -174,11 +190,13 @@ impl Session {
     }
 }
 
-// ── EXPLAIN INFER helpers ───────────────────────────────────────────────
+// ── EXPLAIN INFER helpers ────────────────────────────────────────────────
 //
 // `exec_infer_trace` is a five-phase pipeline (load → forward → side
 // tables → header → render). The helpers below split the side-table
 // builders and the per-layer rendering loop out of the main function.
+// The cross-surface trace reconstruction lives in
+// `larql_inference::walk_trace_from_residuals`.
 
 /// Build a `layer → top-3 attended (token, weight)` map from the
 /// captured attention weights. Returns an empty map when

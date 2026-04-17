@@ -116,14 +116,19 @@ impl KnnStore {
         self.entries.retain(|_, v| !v.is_empty());
     }
 
-    /// Top-1 KNN query at a layer. Returns (entry, cosine_score).
-    pub fn query_top1(&self, layer: usize, residual: &[f32]) -> Option<(KnnEntry, f32)> {
+    /// Top-1 KNN query at a layer. Returns (&entry, cosine_score).
+    pub fn query_top1(&self, layer: usize, residual: &[f32]) -> Option<(&KnnEntry, f32)> {
         let results = self.query_knn(layer, residual, 1);
         results.into_iter().next()
     }
 
-    /// Top-K KNN query at a layer. Returns Vec<(entry, cosine_score)> descending.
-    pub fn query_knn(&self, layer: usize, residual: &[f32], k: usize) -> Vec<(KnnEntry, f32)> {
+    /// Top-K KNN query at a layer. Returns Vec<(&entry, cosine_score)> descending.
+    ///
+    /// Returns borrowed references to stored entries; callers clone only the
+    /// fields they need. Cloning an entire `KnnEntry` duplicates the
+    /// `hidden_size`-wide `key` vector, which is the hot-path waste this
+    /// signature avoids.
+    pub fn query_knn(&self, layer: usize, residual: &[f32], k: usize) -> Vec<(&KnnEntry, f32)> {
         let entries = match self.entries.get(&layer) {
             Some(e) if !e.is_empty() => e,
             _ => return Vec::new(),
@@ -156,9 +161,10 @@ impl KnnStore {
         indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         indexed.truncate(k_eff);
 
-        indexed.into_iter().map(|(idx, score)| {
-            (entries[idx].clone(), score)
-        }).collect()
+        indexed
+            .into_iter()
+            .map(|(idx, score)| (&entries[idx], score))
+            .collect()
     }
 
     /// All entries for a given entity (for DESCRIBE). Returns (layer, &KnnEntry).

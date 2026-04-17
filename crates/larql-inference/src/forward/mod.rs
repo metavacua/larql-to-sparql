@@ -123,4 +123,7 @@ pub use trace::{
 };
 pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult};
 pub use target_delta::{TargetDelta, TargetDeltaOpts};
-pub use infer_patched::{infer_patched, InferPatchedResult, KnnOverride, KNN_COSINE_THRESHOLD};
+pub use infer_patched::{
+    apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,
+    KnnOverride, KNN_COSINE_THRESHOLD,
+};

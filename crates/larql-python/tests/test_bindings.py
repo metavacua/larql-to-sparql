@@ -447,15 +447,14 @@ def _resolve_v11_vindex():
                                       "tiny-model", "model", "v11", "vindex"))
     )
     for path in candidates:
-        config = os.path.join(path, "index.json")
-        if not os.path.exists(config):
-            continue
+        config_path = os.path.join(path, "index.json")
         try:
-            with open(config) as f:
-                if '"has_model_weights": true' in f.read():
-                    return path
-        except OSError:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
             continue
+        if config.get("has_model_weights") is True:
+            return path
     return None
 
 

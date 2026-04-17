@@ -45,7 +45,8 @@ pub use forward::{
     PredictResultWithResiduals, TraceResult,
     run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
     TargetDelta, TargetDeltaOpts,
-    infer_patched, InferPatchedResult, KnnOverride, KNN_COSINE_THRESHOLD,
+    apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,
+    KnnOverride, KNN_COSINE_THRESHOLD,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
 #[allow(deprecated)]
