@@ -580,5 +580,50 @@ mod tests {
         assert_eq!(down[[1, 3]], 8.0);
     }
 
+    #[test]
+    fn test_gemma4_gguf_to_config_json_maps_arch_and_overrides_head_dim() {
+        // Synthesize GGUF metadata matching gemma-4-e2b's shape.
+        // Exercises: (a) gemma4 name pass-through, (b) head_dim=256 override,
+        // (c) array metadata (per-layer variable FFN sizes → take max).
+        let mut metadata = HashMap::new();
+        metadata.insert("general.architecture".to_string(), GgufValue::String("gemma4".to_string()));
+        metadata.insert("gemma4.embedding_length".to_string(), GgufValue::U32(1536));
+        metadata.insert("gemma4.block_count".to_string(), GgufValue::U32(35));
+        metadata.insert("gemma4.attention.head_count".to_string(), GgufValue::U32(8));
+        metadata.insert("gemma4.attention.head_count_kv".to_string(), GgufValue::U32(1));
+        // Gemma 4 reports attention.key_length=512 (global head_dim), not the
+        // per-head 256 we want. Loader must override to 256 for arch="gemma4".
+        metadata.insert("gemma4.attention.key_length".to_string(), GgufValue::U32(512));
+        metadata.insert("gemma4.vocab_size".to_string(), GgufValue::U32(262144));
+        // Per-layer variable FFN — some layers 6144, some 12288. Must take max.
+        metadata.insert(
+            "gemma4.feed_forward_length".to_string(),
+            GgufValue::Array(vec![
+                GgufValue::U32(6144),
+                GgufValue::U32(12288),
+                GgufValue::U32(6144),
+            ]),
+        );
+
+        let gguf = GgufFile {
+            metadata,
+            tensor_infos: Vec::new(),
+            data_offset: 0,
+            path: std::path::PathBuf::from("/dev/null"),
+        };
+        let cfg = gguf.to_config_json();
+
+        assert_eq!(cfg["model_type"], "gemma4");
+        assert_eq!(cfg["hidden_size"], 1536);
+        assert_eq!(cfg["num_hidden_layers"], 35);
+        // head_dim override: 256 despite attention.key_length=512
+        assert_eq!(cfg["head_dim"], 256);
+        // intermediate_size: max of the per-layer FFN array (12288), not 6144
+        assert_eq!(cfg["intermediate_size"], 12288);
+        assert_eq!(cfg["num_attention_heads"], 8);
+        assert_eq!(cfg["num_key_value_heads"], 1);
+        assert_eq!(cfg["vocab_size"], 262144);
+    }
+
     // Dequant tests are in format::quant::ggml::tests
 }

@@ -1551,6 +1551,8 @@ fn full_pipeline_seq1_produces_nonzero() {
             layer_scalar: 0.0,
             input_norm_bias: None,
             post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
     };

@@ -333,6 +333,79 @@ mod tests {
     }
 
     #[test]
+    fn test_tinymodel_full_key_coverage() {
+        let config = serde_json::json!({
+            "model_type": "tinymodel",
+            "hidden_size": 512,
+            "num_hidden_layers": 20,
+            "intermediate_size": 2048,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 4,
+        });
+        let arch = detect_from_json(&config);
+
+        // Complete attention key set
+        assert_eq!(arch.attn_q_key(7), "layers.7.attn.q_proj.weight");
+        assert_eq!(arch.attn_k_key(7), "layers.7.attn.k_proj.weight");
+        assert_eq!(arch.attn_v_key(7), "layers.7.attn.v_proj.weight");
+        assert_eq!(arch.attn_o_key(7), "layers.7.attn.o_proj.weight");
+
+        // Complete FFN key set
+        assert_eq!(arch.ffn_gate_key(7), "layers.7.ffn.gate.weight");
+        assert_eq!(arch.ffn_up_key(7), "layers.7.ffn.up.weight");
+        assert_eq!(arch.ffn_down_key(7), "layers.7.ffn.down.weight");
+
+        // Not MoE, not MLA, no QK norm
+        assert!(!arch.is_moe());
+        assert!(!arch.uses_mla());
+        assert!(arch.attn_q_norm_key(0).is_none());
+        assert!(arch.attn_k_norm_key(0).is_none());
+    }
+
+    #[test]
+    fn test_gemma4_key_formats() {
+        let config = serde_json::json!({
+            "model_type": "gemma4",
+            "text_config": {
+                "model_type": "gemma4_text",
+                "hidden_size": 1536,
+                "intermediate_size": 6144,
+                "num_hidden_layers": 8,
+                "num_attention_heads": 8,
+                "num_key_value_heads": 1,
+                "head_dim": 256,
+            }
+        });
+        let arch = detect_from_json(&config);
+
+        // Gemma 4 uses HF-style llama keys (no architecture-specific override in gemma4.rs)
+        assert_eq!(arch.attn_q_key(3), "layers.3.self_attn.q_proj.weight");
+        assert_eq!(arch.attn_k_key(3), "layers.3.self_attn.k_proj.weight");
+        assert_eq!(arch.attn_v_key(3), "layers.3.self_attn.v_proj.weight");
+        assert_eq!(arch.attn_o_key(3), "layers.3.self_attn.o_proj.weight");
+        assert_eq!(arch.ffn_gate_key(3), "layers.3.mlp.gate_proj.weight");
+        assert_eq!(arch.ffn_up_key(3), "layers.3.mlp.up_proj.weight");
+        assert_eq!(arch.ffn_down_key(3), "layers.3.mlp.down_proj.weight");
+
+        // Multimodal wrapper prefixes (stripped on load)
+        let prefixes = arch.key_prefixes_to_strip();
+        assert!(prefixes.contains(&"model.language_model.model."));
+        assert!(prefixes.contains(&"model.language_model."));
+        assert!(prefixes.contains(&"language_model.model."));
+        assert!(prefixes.contains(&"model."));
+
+        // QK norm keys (inherited from Gemma 3)
+        assert_eq!(
+            arch.attn_q_norm_key(3),
+            Some("layers.3.self_attn.q_norm.weight".to_string())
+        );
+        assert_eq!(
+            arch.attn_k_norm_key(3),
+            Some("layers.3.self_attn.k_norm.weight".to_string())
+        );
+    }
+
+    #[test]
     fn test_detect_mistral() {
         let config = serde_json::json!({
             "model_type": "mistral",

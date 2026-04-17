@@ -155,7 +155,7 @@ fn main() {
     let n_elements = hidden * hidden; // Q shape [hidden, hidden]
     // Dequant reads from the raw slab; padded tail beyond n_elements
     // is zero and left unchanged.
-    let padded = ((n_elements + 255) / 256) * 256;
+    let padded = n_elements.div_ceil(256) * 256;
     let dequant = larql_models::quant::ggml::dequantize_q4_k(q_bytes, padded).unwrap();
 
     let source_sample: Vec<f32> = (0..n_elements).map(|i| (i as f32) * 0.01).collect();

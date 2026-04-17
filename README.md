@@ -244,7 +244,7 @@ Input formats: **safetensors** (HuggingFace), **GGUF** (llama.cpp, dequantized t
 
 | Family | Models | FFN Type |
 |--------|--------|----------|
-| Gemma | Gemma 2/3 (2B-27B) | Gated (GeGLU) |
+| Gemma | Gemma 2/3/4 (2B-31B) | Gated (GeGLU) |
 | Llama | Llama 2/3 (7B-405B) | Gated (SiLU) |
 | Mistral | Mistral 7B | Gated (SiLU) |
 | Mixtral | Mixtral 8x7B, 8x22B | MoE (8 experts) |
@@ -357,7 +357,6 @@ See [docs/residual-trace.md](docs/residual-trace.md) for the full writeup.
 | [docs/inference-engine.md](docs/inference-engine.md) | Inference engine — BLAS-fused attention, Metal GPU, auto-calibration |
 | [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md) | FFN graph layer — mmap walk faster than dense (517ms vs 535ms), all 34 layers |
 | [docs/walk-boundary-sweep.md](docs/walk-boundary-sweep.md) | Walk boundary sweep — correctness proof across all layer boundaries |
-| [docs/knowledge-pipeline.md](docs/knowledge-pipeline.md) | Knowledge labelling pipeline |
 | [docs/residual-trace.md](docs/residual-trace.md) | Residual stream trace — decomposition, storage, tiered context |
 | [docs/trace-format-spec.md](docs/trace-format-spec.md) | Trace file format specification (.bin, .bndx, .ctxt) |
 
