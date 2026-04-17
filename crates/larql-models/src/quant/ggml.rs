@@ -37,7 +37,7 @@ pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, Mo
         TYPE_Q5_0 => Ok(n_elements / 32 * 22),
         TYPE_Q5_1 => Ok(n_elements / 32 * 24),
         TYPE_Q8_0 => Ok(n_elements / 32 * 34),
-        TYPE_Q4_K => Ok(n_elements / 256 * 148),  // super-block of 256 = 148 bytes
+        TYPE_Q4_K => Ok(n_elements / 256 * 144),  // super-block of 256 = 144 bytes (2+2+12+128)
         TYPE_Q6_K => Ok(n_elements / 256 * 210),  // super-block of 256 = 210 bytes
         TYPE_Q2_K => Ok(n_elements / 256 * 84),
         TYPE_Q3_K => Ok(n_elements / 256 * 110),
@@ -213,8 +213,20 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 
 /// Q4_K: super-block of 256 values = 148 bytes.
 /// [0..1] f16 d, [2..3] f16 dmin, [4..15] 6-bit scales, [16..19] 4-bit mins, [20..147] 4-bit quants.
+/// Q4_K block layout (148 bytes per super-block of 256 elements):
+///   bytes 0-1:   d    (f16 global scale)
+///   bytes 2-3:   dmin (f16 global min)
+///   bytes 4-15:  12 bytes of packed 6-bit scales + 6-bit mins (8 each)
+///   bytes 16-147: 128 bytes of 4-bit quants (2 nibbles per byte = 256 values)
+///
+/// The 6-bit scale/min unpacking follows llama.cpp's `get_scale_min_k4`:
+///   For j < 4: scales[j] = bytes[j] & 0x3F;       mins[j] = bytes[j+4] & 0x3F
+///   For j ≥ 4: scales[j] = (bytes[j+4] & 0x0F) | ((bytes[j-4] >> 6) << 4)
+///              mins[j]   = (bytes[j+4] >> 4)    | ((bytes[j]   >> 6) << 4)
+///
+/// Each (scale, min) pair governs 32 elements within the 256-element super-block.
 pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
-    let block_size = 148;
+    let block_size = 144;   // 2 + 2 + 12 + 128 = actual Q4_K block size in llama.cpp
     let super_block = 256;
     let n_blocks = n_elements / super_block;
     let mut out = Vec::with_capacity(n_elements);
@@ -224,28 +236,35 @@ pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
         let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
 
-        // Unpack 8 × 6-bit scales from bytes 4..15
-        let sc = &block[4..16];
+        // 12 bytes of packed scales + mins at bytes 4..16
+        let scales_bytes = &block[4..16];
         let mut scales = [0u8; 8];
         let mut mins = [0u8; 8];
-        // Lower 6 bits of scales from bytes 0-7
-        for (j, &s) in sc[..8].iter().enumerate() { scales[j] = s & 0x3F; }
-        // 4-bit mins from bytes 16-19
-        let mb = &block[16..20];
-        for j in 0..4 {
-            mins[j] = mb[j] & 0x0F;
-            mins[j + 4] = (mb[j] >> 4) & 0x0F;
+        for j in 0..8 {
+            if j < 4 {
+                scales[j] = scales_bytes[j] & 0x3F;
+                mins[j]   = scales_bytes[j + 4] & 0x3F;
+            } else {
+                scales[j] = (scales_bytes[j + 4] & 0x0F) | ((scales_bytes[j - 4] >> 6) << 4);
+                mins[j]   = (scales_bytes[j + 4] >> 4)    | ((scales_bytes[j]     >> 6) << 4);
+            }
         }
 
-        let quants = &block[20..148];
+        // 128 bytes of quants at bytes 16..144 (2 nibbles per byte)
+        let quants = &block[16..144];
         for j in 0..8 {
             let sc_val = d * scales[j] as f32;
             let mn_val = dmin * mins[j] as f32;
-            for i in 0..16 {
-                let byte = quants[j * 16 + i];
+            // Each scale governs 32 values = 16 bytes
+            let chunk = &quants[j * 16..(j + 1) * 16];
+            // First pass: lower 4-bits of each byte
+            for &byte in chunk {
                 let lo = (byte & 0x0F) as f32;
-                let hi = ((byte >> 4) & 0x0F) as f32;
                 out.push(sc_val * lo - mn_val);
+            }
+            // Second pass: upper 4-bits of each byte
+            for &byte in chunk {
+                let hi = ((byte >> 4) & 0x0F) as f32;
                 out.push(sc_val * hi - mn_val);
             }
         }

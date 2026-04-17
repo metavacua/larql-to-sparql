@@ -5,9 +5,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#if defined(__aarch64__)
-#include <arm_neon.h>
-
 // Helper: decode f16 to f32
 static inline float decode_f16(uint16_t h) {
     uint32_t sign = (h & 0x8000) << 16;
@@ -36,6 +33,9 @@ static inline float decode_f16(uint16_t h) {
     __builtin_memcpy(&f, &result, 4);
     return f;
 }
+
+#if defined(__aarch64__)
+#include <arm_neon.h>
 
 // Fused Q4_0 × Q8_0 dot product for one row.
 //
@@ -164,17 +164,7 @@ void q4_0_vecmat_c(
 }
 
 #else
-// Non-ARM fallback — scalar
-void q4_0_vecmat_c(
-    const float* activation,
-    const uint8_t* q4_data,
-    float* out,
-    size_t intermediate,
-    size_t hidden
-) {
-    (void)activation; (void)q4_data; (void)out;
-    (void)intermediate; (void)hidden;
-}
+// Non-ARM scalar fallback
 
 void q4_0_matvec_c(
     const uint8_t* q4_data,
@@ -184,8 +174,60 @@ void q4_0_matvec_c(
     size_t num_rows,
     size_t hidden
 ) {
-    // Scalar fallback for non-ARM
-    (void)q4_data; (void)q8_x; (void)q8_scales;
-    (void)scores; (void)num_rows; (void)hidden;
+    size_t blocks_per_row = hidden / 32;
+    size_t bytes_per_row = blocks_per_row * 18;
+
+    for (size_t row = 0; row < num_rows; row++) {
+        float acc = 0.0f;
+        const uint8_t* row_data = q4_data + row * bytes_per_row;
+        for (size_t b = 0; b < blocks_per_row; b++) {
+            const uint8_t* block = row_data + b * 18;
+            uint16_t scale_bits = (uint16_t)block[0] | ((uint16_t)block[1] << 8);
+            float combined_scale = decode_f16(scale_bits) * q8_scales[b];
+            const uint8_t* quants = block + 2;
+            const int8_t* q8_ptr = q8_x + b * 32;
+            for (size_t j = 0; j < 16; j++) {
+                uint8_t byte = quants[j];
+                int lo_v = (byte & 0x0F) - 8;
+                int hi_v = ((byte >> 4) & 0x0F) - 8;
+                acc += (float)lo_v * (float)q8_ptr[j * 2]     * combined_scale;
+                acc += (float)hi_v * (float)q8_ptr[j * 2 + 1] * combined_scale;
+            }
+        }
+        scores[row] = acc;
+    }
+}
+
+void q4_0_vecmat_c(
+    const float* activation,
+    const uint8_t* q4_data,
+    float* out,
+    size_t intermediate,
+    size_t hidden
+) {
+    size_t blocks_per_row = hidden / 32;
+    size_t bytes_per_row = blocks_per_row * 18;
+
+    for (size_t j = 0; j < hidden; j++) out[j] = 0.0f;
+
+    for (size_t row = 0; row < intermediate; row++) {
+        float act = activation[row];
+        if (act > -1e-10f && act < 1e-10f) continue;
+        const uint8_t* row_data = q4_data + row * bytes_per_row;
+        for (size_t b = 0; b < blocks_per_row; b++) {
+            const uint8_t* block = row_data + b * 18;
+            uint16_t scale_bits = (uint16_t)block[0] | ((uint16_t)block[1] << 8);
+            float scale = decode_f16(scale_bits) * act;
+            const uint8_t* quants = block + 2;
+            float* o = out + b * 32;
+            for (size_t j = 0; j < 16; j++) {
+                uint8_t byte = quants[j];
+                int lo_v = (byte & 0x0F) - 8;
+                int hi_v = ((byte >> 4) & 0x0F) - 8;
+                o[j * 2]     += (float)lo_v * scale;
+                o[j * 2 + 1] += (float)hi_v * scale;
+            }
+        }
+    }
 }
 #endif

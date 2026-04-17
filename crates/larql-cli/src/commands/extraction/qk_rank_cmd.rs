@@ -252,7 +252,7 @@ fn compute_singular_values(ata: &ndarray::Array2<f32>, dim: usize) -> Vec<f32> {
         matrix = matrix - outer;
     }
 
-    eigenvalues.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    eigenvalues.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
     eigenvalues
 }
 
