@@ -18,13 +18,17 @@
 //! Wire-in point: `walk --predict --index <q4 vindex>` in
 //! `larql-cli/src/commands/extraction/walk_cmd.rs`.
 
+use std::collections::HashMap;
+
 use ndarray::Array2;
 use tokenizers::Tokenizer;
 
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 
+use crate::attention::SharedKV;
 use crate::forward::embed_tokens_pub;
+use crate::forward::ple::precompute_per_layer_inputs;
 use crate::forward::PredictResult;
 use crate::forward::run_layer_with_ffn;
 
@@ -47,11 +51,11 @@ pub fn predict_q4k(
 
     let mut h = embed_tokens_pub(weights, token_ids);
 
-    // Note: KV-sharing across layers (Gemma 4 E2B) is not wired through
-    // here — the reused K/V cache lives in `SharedKV` and needs to be
-    // passed across iterations. 31B has num_kv_shared_layers=0 so this
-    // doesn't bite today. When E2B support is needed, track kv_cache in
-    // a HashMap<layer, SharedKV> just like `predict_with_temperature`.
+    // Per-Layer Embeddings + cross-layer KV-sharing — both used by
+    // Gemma 4 E2B (PLE + last-20 layers reuse K/V from the preceding
+    // unshared sliding/global layer). Mirrors `predict_with_temperature`.
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
 
     for layer in 0..num_layers {
         // ── Dequantise this layer's Q/K/V/O and gate/up/down ──
@@ -95,16 +99,26 @@ pub fn predict_q4k(
         weights.tensors.insert(down_key.clone(), w_down.into_shared());
 
         // ── Run the layer — reuses the standard block so layer_scalar,
-        //    per-layer embedding, and KV-sharing are all applied the same
-        //    way as the float `predict_with_temperature` path. Passing
-        //    `ple_input=None` and `shared_kv=None` is correct for 31B
-        //    (no PLE, num_kv_shared_layers=0); needs proper threading if
-        //    this ever supports E2B.
+        //    per-layer embedding, and KV-sharing all apply identically to
+        //    the float `predict_with_temperature` path.
+        let shared_kv = weights
+            .arch
+            .kv_shared_source_layer(layer)
+            .and_then(|src| kv_cache.get(&src));
         let ffn_backend = crate::ffn::WeightFfn { weights };
-        if let Some((h_new, _, _)) = run_layer_with_ffn(
-            weights, &h, layer, &ffn_backend, false, None, None,
+        if let Some((h_new, _, kv_out)) = run_layer_with_ffn(
+            weights,
+            &h,
+            layer,
+            &ffn_backend,
+            false,
+            ple_inputs.get(layer),
+            shared_kv,
         ) {
             h = h_new;
+            if let Some(kv) = kv_out {
+                kv_cache.insert(layer, kv);
+            }
         }
 
         // ── Drop this layer's f32 tensors before the next layer ──

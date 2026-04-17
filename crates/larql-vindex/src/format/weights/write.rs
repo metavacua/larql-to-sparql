@@ -623,6 +623,12 @@ pub fn write_model_weights_q4k(
             // vector. The forward path multiplies h by this value after
             // FFN; omitting it silently produced garbage on 31B.
             arch.layer_scalar_key(layer),
+            // Gemma 4 E2B per-layer embedding post-norm.
+            if arch.has_per_layer_embeddings() {
+                arch.post_per_layer_input_norm_key(layer)
+            } else {
+                None
+            },
         ].into_iter().flatten().collect();
 
         for key in keys {
@@ -654,9 +660,108 @@ pub fn write_model_weights_q4k(
             length: bytes.len() as u64,
             file: "norms.bin".into(),
         });
+        norms_offset += bytes.len() as u64;
+    }
+
+    // Gemma 4 E2B PLE global projection norm (small vector).
+    if arch.has_per_layer_embeddings() {
+        if let Some(data) = source.get_vector("per_layer_projection_norm.weight") {
+            let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+            norms_file.write_all(&bytes)?;
+            norm_entries.push(WeightEntry {
+                key: "per_layer_projection_norm.weight".into(),
+                kind: "vector".into(),
+                shape: vec![data.len()],
+                offset: norms_offset,
+                length: bytes.len() as u64,
+                file: "norms.bin".into(),
+            });
+        }
     }
     norms_file.flush()?;
     drop(norms_file);
+
+    // ── ple_weights.bin — Per-Layer Embedding tensors (Gemma 4 E2B only) ──
+    //
+    // E2B needs the two globals (`per_layer_model_projection`, the full
+    // `embed_tokens_per_layer` lookup) plus per-layer input_gate/projection
+    // matrices. `embed_tokens_per_layer` is the elephant — [vocab,
+    // num_layers·ple_dim] = ~9.4 GB f32 on E2B — but storing it as Q4_K
+    // (~1.2 GB) was the lesson from `embeddings.bin`: the token-lookup path
+    // reads at most a handful of rows per forward, so dequant-on-load to f32
+    // is acceptable here too.
+    if arch.has_per_layer_embeddings() {
+        let ple_path = dir.join("ple_weights.bin");
+        let mut ple_file = BufWriter::new(std::fs::File::create(&ple_path)?);
+        let mut ple_offset: u64 = 0;
+
+        let mut write_tensor = |file: &mut BufWriter<std::fs::File>,
+                                manifest: &mut Vec<WeightEntry>,
+                                offset: &mut u64,
+                                key: String,
+                                data: Option<(Vec<f32>, usize, usize)>|
+         -> Result<(), VindexError> {
+            if let Some((floats, rows, cols)) = data {
+                let padded = pad_to_256(&floats);
+                let q = quantize_q4_k(&padded);
+                file.write_all(&q)?;
+                manifest.push(WeightEntry {
+                    key,
+                    kind: "tensor_q4k".into(),
+                    shape: vec![rows, cols],
+                    offset: *offset,
+                    length: q.len() as u64,
+                    file: "ple_weights.bin".into(),
+                });
+                *offset += q.len() as u64;
+            }
+            Ok(())
+        };
+
+        // Global: model projection [ple_dim·num_layers, hidden]
+        write_tensor(
+            &mut ple_file,
+            &mut norm_entries,
+            &mut ple_offset,
+            "per_layer_model_projection.weight".into(),
+            source.get_tensor("per_layer_model_projection.weight"),
+        )?;
+
+        // Global: big embedding table [vocab, ple_dim·num_layers]
+        if let Some(key) = arch.per_layer_embed_key() {
+            write_tensor(
+                &mut ple_file,
+                &mut norm_entries,
+                &mut ple_offset,
+                key.clone(),
+                source.get_tensor(&key),
+            )?;
+        }
+
+        // Per-layer: input_gate + projection
+        for layer in 0..num_layers {
+            if let Some(k) = arch.per_layer_input_gate_key(layer) {
+                write_tensor(
+                    &mut ple_file,
+                    &mut norm_entries,
+                    &mut ple_offset,
+                    k.clone(),
+                    source.get_tensor(&k),
+                )?;
+            }
+            if let Some(k) = arch.per_layer_projection_key(layer) {
+                write_tensor(
+                    &mut ple_file,
+                    &mut norm_entries,
+                    &mut ple_offset,
+                    k.clone(),
+                    source.get_tensor(&k),
+                )?;
+            }
+        }
+
+        ple_file.flush()?;
+    }
 
     // ── lm_head_q4.bin ──
     if let Some((data, rows, cols)) = source.lm_head() {

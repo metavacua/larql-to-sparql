@@ -10,6 +10,22 @@ use super::embed::embed_tokens;
 use super::ple::precompute_per_layer_inputs;
 use super::layer::{run_layer_with_ffn, run_layer_with_capture, run_attention};
 
+/// Descending order on the probability field of `(index, prob)` pairs,
+/// with NaN probabilities treated as the smallest value so they never
+/// displace a real top-k hit. Used by every top-k selector in this file
+/// — a forward pass that produces the occasional NaN (bad quant, runaway
+/// softmax) still surfaces the real maximum instead of whatever NaN
+/// happened to land in the pivot.
+fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.1.is_nan(), b.1.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Greater, // NaN sorts after real in descending order
+        (false, true) => Ordering::Less,
+        _ => b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal),
+    }
+}
+
 /// Project the final hidden state to logits and return top-k predictions.
 pub fn logits_to_predictions_pub(
     weights: &ModelWeights,
@@ -63,13 +79,9 @@ pub(super) fn logits_to_predictions(
 
     let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
     let k = top_k.min(indexed.len());
-    indexed.select_nth_unstable_by(k, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    indexed.select_nth_unstable_by(k, cmp_desc_nan_last);
     indexed.truncate(k);
-    indexed.sort_unstable_by(|a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    indexed.sort_unstable_by(cmp_desc_nan_last);
 
     let predictions = indexed
         .into_iter()
@@ -428,4 +440,56 @@ pub fn predict_from_hidden_with_ffn(
     }
 
     logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmp_desc_nan_last;
+
+    #[test]
+    fn topk_sort_nan_last_preserves_real_max() {
+        // Logits with interleaved NaN must not displace the real maximum
+        // from top-k. Earlier `partial_cmp().unwrap()` panicked on NaN;
+        // the previous `unwrap_or(Equal)` patch stopped the panic but
+        // let NaN sort anywhere — sometimes knocking the real max out.
+        // `cmp_desc_nan_last` pushes NaN to the end so the top-k is
+        // always correct among the real values.
+        let probs: Vec<f32> = vec![0.1, 0.3, f32::NAN, 0.05, f32::NAN, 0.5, 0.2];
+        let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
+        let k = 3;
+        indexed.select_nth_unstable_by(k, cmp_desc_nan_last);
+        indexed.truncate(k);
+        indexed.sort_unstable_by(cmp_desc_nan_last);
+
+        assert_eq!(indexed.len(), 3);
+        let vals: Vec<f32> = indexed.iter().map(|(_, p)| *p).collect();
+        assert!(vals.iter().all(|v| !v.is_nan()), "NaN leaked into top-3: {vals:?}");
+        // Real top-3 (descending) from the non-NaN set {0.1, 0.3, 0.05, 0.5, 0.2}
+        // is [0.5, 0.3, 0.2].
+        assert_eq!(vals, vec![0.5, 0.3, 0.2]);
+    }
+
+    #[test]
+    fn topk_sort_all_nan_doesnt_panic() {
+        // Degenerate case: every logit is NaN (catastrophic quant / NaN
+        // cascade). The call must return *something* of the right length
+        // rather than panicking — callers can decide how to treat a
+        // NaN-only top-k.
+        let probs: Vec<f32> = vec![f32::NAN; 10];
+        let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
+        let k = 3;
+        indexed.select_nth_unstable_by(k, cmp_desc_nan_last);
+        indexed.truncate(k);
+        indexed.sort_unstable_by(cmp_desc_nan_last);
+        assert_eq!(indexed.len(), 3);
+    }
+
+    #[test]
+    fn topk_sort_no_nan_is_plain_descending() {
+        let probs: Vec<f32> = vec![0.1, 0.5, 0.3, 0.05, 0.7, 0.2];
+        let mut indexed: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
+        indexed.sort_unstable_by(cmp_desc_nan_last);
+        let vals: Vec<f32> = indexed.iter().map(|(_, p)| *p).collect();
+        assert_eq!(vals, vec![0.7, 0.5, 0.3, 0.2, 0.1, 0.05]);
+    }
 }

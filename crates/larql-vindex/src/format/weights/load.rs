@@ -315,6 +315,7 @@ pub fn load_model_weights_q4k(
     // norms.bin (f32) — loaded via weight_manifest.json, filtered to vector entries.
     let manifest_path = dir.join("weight_manifest.json");
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut tensors: HashMap<String, larql_models::WeightArray> = HashMap::new();
     let mut lm_head_loaded: Option<larql_models::WeightArray> = None;
 
     if manifest_path.exists() {
@@ -324,8 +325,8 @@ pub fn load_model_weights_q4k(
 
         let mut mmap_cache: HashMap<String, memmap2::Mmap> = HashMap::new();
         for entry in &entries {
-            if entry.kind != "vector" { continue; }
             if entry.file.is_empty() { continue; }
+            if entry.kind != "vector" && entry.kind != "tensor_q4k" { continue; }
 
             if !mmap_cache.contains_key(&entry.file) {
                 let fpath = dir.join(&entry.file);
@@ -343,16 +344,38 @@ pub fn load_model_weights_q4k(
             let byte_count = entry.length as usize;
             if byte_offset + byte_count > data.len() { continue; }
             let raw_bytes = &data[byte_offset..byte_offset + byte_count];
-            let expected_floats: usize = entry.shape.iter().product();
-            let actual_dtype = if byte_count == expected_floats * 4 {
-                crate::config::dtype::StorageDtype::F32
-            } else if byte_count == expected_floats * 2 {
-                crate::config::dtype::StorageDtype::F16
+
+            if entry.kind == "vector" {
+                let expected_floats: usize = entry.shape.iter().product();
+                let actual_dtype = if byte_count == expected_floats * 4 {
+                    crate::config::dtype::StorageDtype::F32
+                } else if byte_count == expected_floats * 2 {
+                    crate::config::dtype::StorageDtype::F16
+                } else {
+                    config.dtype
+                };
+                let floats = crate::config::dtype::decode_floats(raw_bytes, actual_dtype);
+                vectors.insert(entry.key.clone(), floats);
             } else {
-                config.dtype
-            };
-            let floats = crate::config::dtype::decode_floats(raw_bytes, actual_dtype);
-            vectors.insert(entry.key.clone(), floats);
+                // tensor_q4k: Q4_K-encoded 2D tensor (PLE weights for Gemma 4
+                // E2B). Dequantise to f32, insert into weights.tensors so
+                // `ple.rs` can look it up like any other dense matrix.
+                if entry.shape.len() != 2 { continue; }
+                let rows = entry.shape[0];
+                let cols = entry.shape[1];
+                let n = rows * cols;
+                let padded = n.div_ceil(256) * 256;
+                if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(raw_bytes, padded) {
+                    if floats.len() >= n {
+                        if let Ok(arr) = Array2::from_shape_vec(
+                            (rows, cols),
+                            floats[..n].to_vec(),
+                        ) {
+                            tensors.insert(entry.key.clone(), arr.into_shared());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -380,7 +403,7 @@ pub fn load_model_weights_q4k(
     let lm_head = lm_head_loaded.unwrap_or_else(|| embed.clone());
 
     Ok(ModelWeights {
-        tensors: HashMap::new(),
+        tensors,
         vectors,
         embed,
         lm_head,

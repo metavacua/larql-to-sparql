@@ -403,6 +403,43 @@ mod tests {
             arch.attn_k_norm_key(3),
             Some("layers.3.self_attn.k_norm.weight".to_string())
         );
+
+        // Gemma 4's shipped tokenizer.json drops BOS from its post-processor
+        // `single` template (Gemma 2/3 kept it), so the arch must advertise
+        // the BOS id so the inference tokenizer helper can prepend it.
+        assert_eq!(arch.bos_token_id(), Some(2));
+    }
+
+    #[test]
+    fn test_bos_token_id_gemma4_only() {
+        // Only Gemma 4 advertises an explicit BOS id — every other
+        // architecture's tokenizer.json already includes BOS in its
+        // post-processor so callers don't need to prepend it.
+        let non_gemma4 = [
+            serde_json::json!({"model_type": "llama", "hidden_size": 4096,
+                "num_hidden_layers": 32, "intermediate_size": 14336,
+                "num_attention_heads": 32, "num_key_value_heads": 8}),
+            serde_json::json!({"model_type": "gemma3", "hidden_size": 2560,
+                "num_hidden_layers": 34}),
+            serde_json::json!({"model_type": "gemma2", "hidden_size": 2304,
+                "num_hidden_layers": 26}),
+            serde_json::json!({"model_type": "mistral", "hidden_size": 4096,
+                "num_hidden_layers": 32}),
+            serde_json::json!({"model_type": "qwen2", "hidden_size": 2048,
+                "num_hidden_layers": 24, "intermediate_size": 5504,
+                "num_attention_heads": 16, "num_key_value_heads": 2}),
+            serde_json::json!({"model_type": "tinymodel", "hidden_size": 512,
+                "num_hidden_layers": 20, "intermediate_size": 2048,
+                "num_attention_heads": 8, "num_key_value_heads": 4}),
+        ];
+        for cfg in &non_gemma4 {
+            let arch = detect_from_json(cfg);
+            assert!(
+                arch.bos_token_id().is_none(),
+                "{} should not advertise a BOS id",
+                arch.family()
+            );
+        }
     }
 
     #[test]
