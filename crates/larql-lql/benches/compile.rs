@@ -84,6 +84,7 @@ fn make_compile_bench_vindex(tag: &str, with_down_weights: bool) -> PathBuf {
             ExtractLevel::Browse
         },
         dtype: StorageDtype::F32,
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: None,
         layers: Vec::new(),
         down_top_k: 1,

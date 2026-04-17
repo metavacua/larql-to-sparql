@@ -419,6 +419,7 @@ larql extract-index [MODEL] --output <OUTPUT> [OPTIONS]
 | `-o, --output <OUTPUT>` | Output path for the `.vindex` directory |
 | `--level <LEVEL>` | Extract level: `browse` (default), `inference`, `all` |
 | `--f16` | Store weights in f16 (half precision, halves file sizes) |
+| `--quant <FORMAT>` | Inline-quantise weights: `none` (default) or `q4k`. `q4k` emits Q4_K/Q6_K Ollama-compatible blocks and implies `--level all` |
 | `--from-vectors <PATH>` | Build from already-extracted NDJSON vector files instead of model weights |
 | `--down-top-k <N>` | Top-K tokens per feature in down metadata [default: 10] |
 | `--include-weights` | Alias for `--level all` (deprecated) |
@@ -436,12 +437,29 @@ larql extract-index google/gemma-3-4b-it -o model.vindex --level inference --f16
 # All weights (~10 GB at f16, enables COMPILE)
 larql extract-index google/gemma-3-4b-it -o model.vindex --level all --f16
 
+# Q4_K/Q6_K quantised inline (no f32 intermediate on disk, Ollama-compat)
+larql extract-index google/gemma-3-4b-it -o model.vindex --quant q4k
+
 # Build from pre-extracted vectors
 larql extract-index -o model.vindex --from-vectors vectors/
 
 # Resume an interrupted build
 larql extract-index google/gemma-3-4b-it -o model.vindex --f16 --resume
 ```
+
+**`--quant q4k` details:**
+
+- Q/K/O + gate/up: Q4_K (148 bytes per 256 values)
+- V + down: Q6_K (210 bytes per 256 values)
+- `--level browse` is implicitly promoted to `--level all` — the Q4_K
+  writer materialises all of attention, FFN, norms, and `lm_head` in
+  one pass, so a browse-only Q4_K vindex would be incoherent.
+- V-shares-K fallback: on Gemma 4 31B global layers where `v_proj` is
+  absent, K's bytes are stored in V's slot (still tagged `Q6_K`, still
+  keyed by the V tensor name) so downstream 4-per-layer indexing
+  stays valid.
+- `VindexConfig.quant = Q4k` is written to `index.json`; loaders
+  should dispatch on this field rather than sniffing filenames.
 
 ### `larql build`
 

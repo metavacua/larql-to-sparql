@@ -422,3 +422,300 @@ pub fn write_model_weights(
 }
 
 use crate::config::dtype::write_floats;
+
+// ── Q4_K / Q6_K streaming writer ──────────────────────────────────────────
+
+/// Per-block quantisation format for a single tensor in the Q4_K pipeline.
+/// Serde writes / reads the literal strings `"Q4_K"` and `"Q6_K"` to match
+/// llama.cpp / Ollama on-disk conventions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuantBlockFormat {
+    #[serde(rename = "Q4_K")]
+    Q4K,
+    #[serde(rename = "Q6_K")]
+    Q6K,
+}
+
+/// Manifest entry for `attn_weights_q4k.bin` — one per tensor (Q, K, V, O),
+/// 4 per layer in layer-major order.
+#[derive(Debug, Serialize, Deserialize)]
+struct Q4kAttnEntry {
+    key: String,
+    shape: Vec<usize>,
+    format: QuantBlockFormat,
+    offset: u64,
+    length: u64,
+}
+
+/// Pad a row-major f32 buffer to the next multiple of 256 with zeros
+/// (Q4_K/Q6_K super-blocks require length % 256 == 0).
+fn pad_to_256(data: &[f32]) -> Vec<f32> {
+    let padded_len = data.len().div_ceil(256) * 256;
+    if padded_len == data.len() {
+        data.to_vec()
+    } else {
+        let mut v = Vec::with_capacity(padded_len);
+        v.extend_from_slice(data);
+        v.resize(padded_len, 0.0);
+        v
+    }
+}
+
+/// Write model weights in Q4_K/Q6_K format, zero f32 intermediate on disk.
+///
+/// Emits:
+///   attn_weights_q4k.bin + attn_weights_q4k_manifest.json
+///     — Q/K/O → Q4_K, V → Q6_K
+///     — On layers where V reuses K (Gemma 4 31B global layers), the K
+///       bytes are written into the V slot so 4-per-layer indexing stays
+///       valid and downstream kernels reading V get K.
+///   interleaved_q4k.bin
+///     — [gate Q4_K | up Q4_K | down Q6_K] per layer, regular stride.
+///   lm_head_q4.bin
+///     — Q4_K of the output projection (falls back to embed_tokens when tied).
+///   norms.bin (f32, unchanged from non-Q4 path).
+///
+/// The source's per-tensor f32 materialisation is transient — one tensor's
+/// worth of heap (~350 MB peak on 31B global layer Q) quantised then dropped.
+pub fn write_model_weights_q4k(
+    source: &dyn WeightSource,
+    dir: &Path,
+    callbacks: &mut dyn IndexBuildCallbacks,
+) -> Result<(), VindexError> {
+    use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
+
+    callbacks.on_stage("model_weights_q4k");
+    let start = std::time::Instant::now();
+
+    let arch = source.arch();
+    let num_layers = source.num_layers();
+
+    // ── attn_weights_q4k.bin ──
+    let attn_path = dir.join("attn_weights_q4k.bin");
+    let mut attn_file = BufWriter::new(std::fs::File::create(&attn_path)?);
+    let mut attn_offset: u64 = 0;
+    let mut attn_manifest: Vec<Q4kAttnEntry> = Vec::with_capacity(num_layers * 4);
+
+    for layer in 0..num_layers {
+        callbacks.on_layer_start("attn_q4k", layer, num_layers);
+
+        // Resolve each tensor. For V, fall back to K when v_shares_k=true or
+        // v_proj simply isn't present (global layers on 31B).
+        let q_key = arch.attn_q_key(layer);
+        let k_key = arch.attn_k_key(layer);
+        let v_key = arch.attn_v_key(layer);
+        let o_key = arch.attn_o_key(layer);
+
+        let q = source.get_tensor(&q_key);
+        let k = source.get_tensor(&k_key);
+        let v = source.get_tensor(&v_key).or_else(|| {
+            if arch.v_shares_k(layer) { source.get_tensor(&k_key) } else { None }
+        });
+        let o = source.get_tensor(&o_key);
+
+        // Q, K, V, O in that order — use the same key string for V even when
+        // the data is K's, so loaders that look up by position still work.
+        let slots: [(&str, Option<(Vec<f32>, usize, usize)>); 4] = [
+            (q_key.as_str(), q),
+            (k_key.as_str(), k),
+            (v_key.as_str(), v),
+            (o_key.as_str(), o),
+        ];
+
+        for (i, (key, tensor)) in slots.iter().enumerate() {
+            let (data, rows, cols) = match tensor {
+                Some(t) => t.clone(),
+                None => continue, // tensor genuinely absent — skip
+            };
+
+            // V (index 2) gets Q6_K, others get Q4_K.
+            let is_v = i == 2;
+            let padded = pad_to_256(&data);
+            let q_bytes = if is_v { quantize_q6_k(&padded) } else { quantize_q4_k(&padded) };
+            let format = if is_v { QuantBlockFormat::Q6K } else { QuantBlockFormat::Q4K };
+
+            attn_file.write_all(&q_bytes)?;
+            let length = q_bytes.len() as u64;
+            attn_manifest.push(Q4kAttnEntry {
+                key: key.to_string(),
+                shape: vec![rows, cols],
+                format,
+                offset: attn_offset,
+                length,
+            });
+            attn_offset += length;
+        }
+
+        callbacks.on_layer_done("attn_q4k", layer, 0.0);
+    }
+    attn_file.flush()?;
+    drop(attn_file);
+
+    let manifest_json = serde_json::to_string_pretty(&attn_manifest)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(dir.join("attn_weights_q4k_manifest.json"), manifest_json)?;
+
+    // ── interleaved_q4k.bin (FFN gate/up/down) + manifest ──
+    //
+    // Layer-major: for each layer, `gate Q4_K + up Q4_K + down Q6_K`
+    // concatenated. Stride is regular across layers but block sizes
+    // depend on the architecture's hidden / intermediate, so we emit a
+    // sidecar manifest symmetric with `attn_weights_q4k_manifest.json`.
+    // Downstream readers resolve by key + layer instead of recomputing
+    // byte offsets; a shape/stride mismatch now fails at load rather
+    // than silently corrupting.
+    let ff_path = dir.join("interleaved_q4k.bin");
+    let mut ff_file = BufWriter::new(std::fs::File::create(&ff_path)?);
+    let mut ff_offset: u64 = 0;
+    let mut ff_manifest: Vec<Q4kAttnEntry> = Vec::with_capacity(num_layers * 3);
+
+    for layer in 0..num_layers {
+        callbacks.on_layer_start("ffn_q4k", layer, num_layers);
+        for (i, key) in [
+            arch.ffn_gate_key(layer),
+            arch.ffn_up_key(layer),
+            arch.ffn_down_key(layer),
+        ].iter().enumerate() {
+            if let Some((data, rows, cols)) = source.get_tensor(key) {
+                let padded = pad_to_256(&data);
+                let q_bytes = if i == 2 { quantize_q6_k(&padded) } else { quantize_q4_k(&padded) };
+                let format = if i == 2 { QuantBlockFormat::Q6K } else { QuantBlockFormat::Q4K };
+                ff_file.write_all(&q_bytes)?;
+                let length = q_bytes.len() as u64;
+                ff_manifest.push(Q4kAttnEntry {
+                    key: key.clone(),
+                    shape: vec![rows, cols],
+                    format,
+                    offset: ff_offset,
+                    length,
+                });
+                ff_offset += length;
+            }
+        }
+        callbacks.on_layer_done("ffn_q4k", layer, 0.0);
+    }
+    ff_file.flush()?;
+    drop(ff_file);
+
+    let ff_manifest_json = serde_json::to_string_pretty(&ff_manifest)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(dir.join("interleaved_q4k_manifest.json"), ff_manifest_json)?;
+
+    // ── norms.bin (f32, small) ──
+    let norms_path = dir.join("norms.bin");
+    let mut norms_file = BufWriter::new(std::fs::File::create(&norms_path)?);
+    let norms_dtype = crate::config::dtype::StorageDtype::F32;
+    let mut norms_offset: u64 = 0;
+    let mut norm_entries: Vec<WeightEntry> = Vec::new();
+
+    for layer in 0..num_layers {
+        let keys: Vec<String> = [
+            Some(arch.input_layernorm_key(layer)),
+            Some(arch.post_attention_layernorm_key(layer)),
+            arch.pre_feedforward_layernorm_key(layer),
+            arch.post_feedforward_layernorm_key(layer),
+            arch.attn_q_norm_key(layer),
+            arch.attn_k_norm_key(layer),
+        ].into_iter().flatten().collect();
+
+        for key in keys {
+            if let Some(data) = source.get_vector(&key) {
+                let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+                norms_file.write_all(&bytes)?;
+                norm_entries.push(WeightEntry {
+                    key: key.clone(),
+                    kind: "vector".into(),
+                    shape: vec![data.len()],
+                    offset: norms_offset,
+                    length: bytes.len() as u64,
+                    file: "norms.bin".into(),
+                });
+                norms_offset += bytes.len() as u64;
+            }
+        }
+    }
+
+    // Final model norm (after last layer)
+    if let Some(data) = source.get_vector("norm.weight") {
+        let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+        norms_file.write_all(&bytes)?;
+        norm_entries.push(WeightEntry {
+            key: "norm.weight".into(),
+            kind: "vector".into(),
+            shape: vec![data.len()],
+            offset: norms_offset,
+            length: bytes.len() as u64,
+            file: "norms.bin".into(),
+        });
+    }
+    norms_file.flush()?;
+    drop(norms_file);
+
+    // ── lm_head_q4.bin ──
+    if let Some((data, rows, cols)) = source.lm_head() {
+        let padded = pad_to_256(&data);
+        let q_bytes = quantize_q4_k(&padded);
+        std::fs::write(dir.join("lm_head_q4.bin"), &q_bytes)?;
+        // Record in norms manifest so a single weight_manifest.json references
+        // everything non-quantised-via-layout.
+        norm_entries.push(WeightEntry {
+            key: "lm_head.weight".into(),
+            kind: "tensor_q4k".into(),
+            shape: vec![rows, cols],
+            offset: 0,
+            length: q_bytes.len() as u64,
+            file: "lm_head_q4.bin".into(),
+        });
+    }
+
+    // norms + lm_head manifest (keeps weight_manifest.json meaningful even in Q4 mode)
+    let manifest_json = serde_json::to_string_pretty(&norm_entries)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(dir.join("weight_manifest.json"), manifest_json)?;
+
+    // ── Update index.json: has_model_weights=true, quant=q4k ──
+    let config_path = dir.join("index.json");
+    let config_text = std::fs::read_to_string(&config_path)?;
+    let mut config: VindexConfig = serde_json::from_str(&config_text)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+    config.has_model_weights = true;
+    config.quant = crate::QuantFormat::Q4k;
+
+    let cfg = arch.config();
+    config.model_config = Some(VindexModelConfig {
+        model_type: cfg.model_type.clone(),
+        head_dim: cfg.head_dim,
+        num_q_heads: cfg.num_q_heads,
+        num_kv_heads: cfg.num_kv_heads,
+        rope_base: cfg.rope_base,
+        sliding_window: cfg.sliding_window,
+        moe: if arch.is_moe() {
+            Some(crate::MoeConfig {
+                num_experts: arch.num_experts(),
+                top_k: arch.num_experts_per_token(),
+                shared_expert: arch.num_shared_experts() > 0,
+                router_type: "top_k_softmax".into(),
+            })
+        } else {
+            None
+        },
+        global_head_dim: cfg.global_head_dim,
+        num_global_kv_heads: cfg.num_global_kv_heads,
+        partial_rotary_factor: cfg.partial_rotary_factor,
+        sliding_window_pattern: cfg.sliding_window_pattern,
+        layer_types: cfg.layer_types.clone(),
+        attention_k_eq_v: cfg.attention_k_eq_v,
+        num_kv_shared_layers: cfg.num_kv_shared_layers,
+        per_layer_embed_dim: cfg.per_layer_embed_dim,
+        rope_local_base: cfg.rope_local_base,
+        query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+    });
+
+    let config_json = serde_json::to_string_pretty(&config)
+        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    std::fs::write(&config_path, config_json)?;
+
+    callbacks.on_stage_done("model_weights_q4k", start.elapsed().as_secs_f64() * 1000.0);
+    Ok(())
+}

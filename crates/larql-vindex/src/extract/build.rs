@@ -430,6 +430,7 @@ impl<'a> BuildContext<'a> {
             checksums: None,
             extract_level,
             dtype: self.dtype,
+            quant: crate::QuantFormat::None,
             layer_bands: crate::LayerBands::for_family(&family, self.num_layers),
             model_config: {
                 let cfg = self.weights.arch.config();
@@ -683,6 +684,7 @@ pub fn build_vindex_resume(
         checksums: None,
         extract_level: crate::ExtractLevel::Browse,
         dtype: StorageDtype::F32,
+        quant: crate::QuantFormat::None,
         layer_bands: crate::LayerBands::for_family(&family, num_layers),
         model_config: {
             let cfg = weights.arch.config();

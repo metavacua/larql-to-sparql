@@ -84,6 +84,7 @@ fn test_config() -> VindexConfig {
         embed_scale: 1.0,
         extract_level: ExtractLevel::Browse,
         dtype: larql_vindex::StorageDtype::default(),
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: Some(LayerBands {
             syntax: (0, 0),
             knowledge: (0, 1),

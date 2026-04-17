@@ -287,8 +287,11 @@ use crate::config::{
             down_top_k: down_top_k_size,
             has_model_weights: false,
             source: None,
-            checksums: None,            extract_level: crate::ExtractLevel::Browse,
-            dtype: crate::StorageDtype::F32,            layer_bands: None,
+            checksums: None,
+            extract_level: crate::ExtractLevel::Browse,
+            dtype: crate::StorageDtype::F32,
+            quant: crate::QuantFormat::None,
+            layer_bands: None,
             model_config: None,
         };
 

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use ndarray::Array2;
 
 use crate::config::dtype::StorageDtype;
+use crate::config::types::QuantFormat;
 use crate::config::{VindexConfig, VindexLayerInfo, VindexModelConfig};
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
@@ -35,6 +36,7 @@ pub fn build_vindex_streaming(
     down_top_k: usize,
     extract_level: crate::ExtractLevel,
     dtype: StorageDtype,
+    quant: QuantFormat,
     callbacks: &mut dyn IndexBuildCallbacks,
 ) -> Result<(), VindexError> {
     std::fs::create_dir_all(output_dir)?;
@@ -406,6 +408,7 @@ pub fn build_vindex_streaming(
         checksums: None,
         extract_level,
         dtype,
+        quant,
         layer_bands: crate::LayerBands::for_family(&family, num_layers),
         model_config: Some(VindexModelConfig {
             model_type: cfg.model_type.clone(),
@@ -442,7 +445,13 @@ pub fn build_vindex_streaming(
     std::fs::write(output_dir.join("index.json"), config_json)?;
 
     // ── 6. Model weights (if extract level requires them) ──
-    if extract_level != crate::ExtractLevel::Browse {
+    // With quant=q4k we always materialise weights regardless of the
+    // declared level — the Q4_K writer emits all of attn, FFN, norms, lm_head
+    // in one pass and makes `--level browse --quant q4k` incoherent, so
+    // q4k implicitly promotes to "all".
+    let needs_weights = extract_level != crate::ExtractLevel::Browse
+        || quant != QuantFormat::None;
+    if needs_weights {
         let shard_refs: Vec<&[u8]> = shard_mmaps.iter().map(|s| s.mmap.as_ref()).collect();
         let streaming_source = crate::format::weights::StreamingWeights {
             shard_mmaps: &shard_refs,
@@ -450,8 +459,18 @@ pub fn build_vindex_streaming(
             arch: &*arch,
             num_layers,
         };
-        crate::format::weights::write_model_weights(&streaming_source, output_dir, callbacks)?;
-        // write_model_weights updates index.json with has_model_weights=true
+        match quant {
+            QuantFormat::None => {
+                crate::format::weights::write_model_weights(
+                    &streaming_source, output_dir, callbacks,
+                )?;
+            }
+            QuantFormat::Q4k => {
+                crate::format::weights::write_model_weights_q4k(
+                    &streaming_source, output_dir, callbacks,
+                )?;
+            }
+        }
     }
 
     // Final checksums

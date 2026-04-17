@@ -118,12 +118,35 @@ pub fn resolve_attn_weights<'a>(
 }
 
 /// Helper: resolve FFN weights from vindex interleaved mmap.
+///
+/// Prefers the per-matrix manifest when available (emitted by the streaming
+/// `--quant q4k` writer: gate/up Q4_K, down Q6_K — non-uniform stride). Falls
+/// back to the legacy uniform-stride layout produced by `build_q4k_weights.rs`
+/// when the manifest is absent so older vindexes still work.
 pub fn resolve_ffn_weights<'a>(
-    q4_ffn_mmap: &'a [u8],
+    index: &'a larql_vindex::VectorIndex,
     layer: usize,
+    q4_ffn_mmap: &'a [u8],
     q4_ffn_per_matrix: usize,
     ffn_format: QuantFormat,
 ) -> (QuantWeight<'a>, QuantWeight<'a>, QuantWeight<'a>) {
+    fn str_to_format(s: &str, fallback: QuantFormat) -> QuantFormat {
+        match s {
+            "Q6_K" => QuantFormat::Q6_K,
+            "Q4_K" => QuantFormat::Q4_K,
+            "Q4_0" => QuantFormat::Q4_0,
+            _ => fallback,
+        }
+    }
+
+    if let Some([gate, up, down]) = index.interleaved_q4k_layer_data(layer) {
+        return (
+            QuantWeight { data: gate.0, scales: None, format: str_to_format(gate.1, ffn_format) },
+            QuantWeight { data: up.0,   scales: None, format: str_to_format(up.1,   ffn_format) },
+            QuantWeight { data: down.0, scales: None, format: str_to_format(down.1, ffn_format) },
+        );
+    }
+
     let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
     let fs = layer * q4_ffn_per_layer;
     (
@@ -147,7 +170,7 @@ pub fn build_pipeline_layers<'a>(
     layer_range.map(|layer| {
         let (wq, wk, wv, wo) = resolve_attn_weights(index, layer)
             .expect("No attention weights available for layer");
-        let (gate, up, down) = resolve_ffn_weights(q4_ffn_mmap, layer, q4_ffn_per_matrix, ffn_format);
+        let (gate, up, down) = resolve_ffn_weights(index, layer, q4_ffn_mmap, q4_ffn_per_matrix, ffn_format);
         build_arch_params(weights, layer, wq, wk, wv, wo, gate, up, down)
     }).collect()
 }

@@ -43,7 +43,7 @@ pub use tokenizers;
 // Config
 pub use config::dtype::StorageDtype;
 pub use config::types::{
-    DownMetaRecord, DownMetaTopK, ExtractLevel, LayerBands, MoeConfig,
+    DownMetaRecord, DownMetaTopK, ExtractLevel, LayerBands, MoeConfig, QuantFormat,
     VindexConfig, VindexLayerInfo, VindexModelConfig, VindexSource,
 };
 

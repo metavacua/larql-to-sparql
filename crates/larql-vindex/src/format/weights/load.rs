@@ -145,20 +145,55 @@ pub fn load_model_weights(
         }
     }
 
-    // Gate vectors from gate_vectors.bin
-    let gate_file = std::fs::File::open(dir.join("gate_vectors.bin"))?;
-    let gate_mmap = unsafe { memmap2::Mmap::map(&gate_file)? };
-    let gate_floats = crate::config::dtype::decode_floats(&gate_mmap, config.dtype);
-    let bpf = crate::config::dtype::bytes_per_float(config.dtype);
-    for info in &config.layers {
-        let float_offset = info.offset as usize / bpf;
-        let float_count = info.num_features * config.hidden_size;
-        if float_offset + float_count <= gate_floats.len() {
-            let gate_data = &gate_floats[float_offset..float_offset + float_count];
-            let gate_matrix = Array2::from_shape_vec(
-                (info.num_features, config.hidden_size), gate_data.to_vec(),
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
-            tensors.insert(arch.ffn_gate_key(info.layer), gate_matrix.into_shared());
+    // Gate vectors from gate_vectors.bin — only when running in non-Q4 mode.
+    //
+    // In Q4 vindexes (quant=q4k) the forward pass reads FFN weights straight
+    // from the Q4-packed `interleaved_q4k.bin` mmap via
+    // `VectorIndex::interleaved_q4k_layer_data`, so expanding `gate_vectors.bin`
+    // into an f32 HashMap just to have an unused copy wastes ~27 GB of heap at
+    // 31B scale and prevents the model from loading on a 96 GB machine.
+    if config.quant == crate::config::types::QuantFormat::None {
+        let gate_file = std::fs::File::open(dir.join("gate_vectors.bin"))?;
+        let gate_mmap = unsafe { memmap2::Mmap::map(&gate_file)? };
+        let gate_floats = crate::config::dtype::decode_floats(&gate_mmap, config.dtype);
+        let bpf = crate::config::dtype::bytes_per_float(config.dtype);
+        for info in &config.layers {
+            let float_offset = info.offset as usize / bpf;
+            let float_count = info.num_features * config.hidden_size;
+            if float_offset + float_count <= gate_floats.len() {
+                let gate_data = &gate_floats[float_offset..float_offset + float_count];
+                let gate_matrix = Array2::from_shape_vec(
+                    (info.num_features, config.hidden_size), gate_data.to_vec(),
+                ).map_err(|e| VindexError::Parse(e.to_string()))?;
+                tensors.insert(arch.ffn_gate_key(info.layer), gate_matrix.into_shared());
+            }
+        }
+    }
+
+    // lm_head from lm_head_q4.bin (dequantise to f32) when the quantised
+    // variant is present — the forward path expects an f32 lm_head for the
+    // final logits projection. Falls through to embed-tied derivation below
+    // if the file is absent (or dequantisation fails).
+    if lm_head_loaded.is_none() {
+        let lm_q4_path = dir.join("lm_head_q4.bin");
+        if lm_q4_path.exists() {
+            if let Some(model_cfg) = config.model_config.as_ref() {
+                // lm_head shape is (vocab_size, hidden_size) — same as embed.
+                let _ = model_cfg; // shape comes from config.vocab_size / hidden_size.
+            }
+            let bytes = std::fs::read(&lm_q4_path)?;
+            let num_floats = config.vocab_size * config.hidden_size;
+            let padded_floats = num_floats.div_ceil(256) * 256;
+            if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(&bytes, padded_floats) {
+                if floats.len() >= num_floats {
+                    if let Ok(arr) = Array2::from_shape_vec(
+                        (config.vocab_size, config.hidden_size),
+                        floats[..num_floats].to_vec(),
+                    ) {
+                        lm_head_loaded = Some(arr.into_shared());
+                    }
+                }
+            }
         }
     }
 

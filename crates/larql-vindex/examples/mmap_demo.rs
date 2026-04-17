@@ -57,6 +57,7 @@ fn main() {
         embed_scale: 1.0,
         extract_level: larql_vindex::ExtractLevel::Browse,
         dtype: larql_vindex::StorageDtype::F32,
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: None,
         layers: layer_infos,
         down_top_k: 3,

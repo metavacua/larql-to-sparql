@@ -124,6 +124,7 @@ pub fn copy_model_config(base: &Path, output: &Path) {
         "tokenizer_config.json",
         "special_tokens_map.json",
         "generation_config.json",
+        "tokenizer.model",  // SentencePiece model — required by llama.cpp's GGUF converter
     ] {
         let src = base.join(name);
         if src.exists() {

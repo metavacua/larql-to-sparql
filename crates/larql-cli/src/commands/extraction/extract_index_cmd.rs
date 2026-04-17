@@ -39,9 +39,22 @@ pub struct ExtractIndexArgs {
     #[arg(long)]
     f16: bool,
 
+    /// Quantise model weights inline while extracting — skips any f32 intermediate.
+    /// q4k: Q4_K for Q/K/O/gate/up, Q6_K for V/down (Ollama-compatible). Implies level=all.
+    #[arg(long, default_value = "none", value_parser = parse_quant)]
+    quant: larql_vindex::QuantFormat,
+
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
     resume: bool,
+}
+
+fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
+    match s.to_lowercase().as_str() {
+        "none" | "" => Ok(larql_vindex::QuantFormat::None),
+        "q4k" | "q4_k" => Ok(larql_vindex::QuantFormat::Q4k),
+        _ => Err(format!("unknown quant format: {s} (expected: none, q4k)")),
+    }
 }
 
 fn parse_extract_level(s: &str) -> Result<larql_vindex::ExtractLevel, String> {
@@ -169,8 +182,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             larql_vindex::StorageDtype::F32 => "f32",
             larql_vindex::StorageDtype::F16 => "f16",
         };
-        eprintln!("Extracting: {} → {} (level={}, dtype={})",
-            model_path.display(), args.output.display(), level_str, dtype_str);
+        eprintln!("Extracting: {} → {} (level={}, dtype={}, quant={})",
+            model_path.display(), args.output.display(), level_str, dtype_str, args.quant);
 
         let output = &args.output;
 
@@ -191,6 +204,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.down_top_k,
             level,
             dtype,
+            args.quant,
             &mut callbacks,
         )?;
     }

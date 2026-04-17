@@ -306,7 +306,7 @@ fn run_with_vindex_weights(
     } else {
         Box::new(SilentLoadCallbacks)
     };
-    let weights = larql_vindex::load_model_weights(vindex_path, &mut *cb)?;
+    let mut weights = larql_vindex::load_model_weights(vindex_path, &mut *cb)?;
     let tokenizer = load_vindex_tokenizer(vindex_path)?;
 
     vlog!(
@@ -317,7 +317,61 @@ fn run_with_vindex_weights(
         load_start.elapsed().as_secs_f64()
     );
 
+    // Route Q4 vindexes through the dequantise-per-layer forward path.
+    // The standard run_predict_inner wants f32 attn/FFN weights in
+    // `weights.tensors`, which don't exist in a Q4 vindex (they'd cost
+    // ~127 GB at 31B).
+    let cfg = larql_vindex::load_vindex_config(vindex_path)?;
+    if cfg.quant == larql_vindex::QuantFormat::Q4k {
+        return run_predict_q4k(&mut weights, &tokenizer, args, index);
+    }
+
     run_predict_inner(&weights, &tokenizer, args, index)
+}
+
+/// Predict against a Q4_K / Q6_K vindex: dequantise each layer's attn + FFN
+/// weights just-in-time, run the standard f32 forward block, drop, repeat.
+/// Same observable output as [`run_predict_inner`] — just a different memory
+/// profile (one layer's worth of f32 heap instead of the whole model).
+fn run_predict_q4k(
+    weights: &mut ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    args: &WalkArgs,
+    _index: &VectorIndex,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let encoding = tokenizer
+        .encode(args.prompt.as_str(), true)
+        .map_err(|e| format!("tokenize error: {e}"))?;
+    let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+    eprintln!("Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+
+    // The Q4 vindex we loaded already lives inside the VectorIndex used by
+    // the walk caller, but we need our OWN VectorIndex with the Q4 mmaps
+    // loaded (load_attn_q4k, load_interleaved_q4k) since the caller's index
+    // might have been constructed without those accessors wired up.
+    let vindex_path = args.index.as_deref()
+        .ok_or("--index required for Q4 predict path")?;
+    let mut cb = larql_vindex::SilentLoadCallbacks;
+    let mut q4_index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
+    q4_index.load_attn_q4k(vindex_path)?;
+    q4_index.load_interleaved_q4k(vindex_path)?;
+
+    let start = Instant::now();
+    let result = larql_inference::vindex::predict_q4k(
+        weights,
+        tokenizer,
+        &token_ids,
+        args.predict_top_k,
+        &q4_index,
+    );
+    eprintln!("Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
+
+    println!("\nTop {} predictions:", args.predict_top_k);
+    for (i, (token, prob)) in result.predictions.iter().enumerate() {
+        println!("  {i:2}. {:?} ({:.1}%)", token, prob * 100.0);
+    }
+
+    Ok(())
 }
 
 /// Core predict logic shared by model and vindex paths.

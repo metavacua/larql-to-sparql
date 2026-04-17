@@ -67,6 +67,9 @@ pub trait GateIndex {
     fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> { None }
     fn has_interleaved_q4k(&self) -> bool { false }
     fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> { None }
+    /// Per-layer FFN Q4_K/Q6_K slices — [gate, up, down] with format tags.
+    /// `None` when the FFN manifest wasn't emitted (older vindexes).
+    fn interleaved_q4k_layer_data(&self, _layer: usize) -> Option<[(&[u8], &str); 3]> { None }
 
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.

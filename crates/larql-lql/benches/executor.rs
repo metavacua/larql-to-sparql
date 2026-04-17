@@ -82,6 +82,7 @@ fn make_bench_vindex_dir(tag: &str) -> PathBuf {
         embed_scale: 1.0,
         extract_level: ExtractLevel::Browse,
         dtype: StorageDtype::F32,
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: None,
         layers: Vec::new(),
         down_top_k: 1,

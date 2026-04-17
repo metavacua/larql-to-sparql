@@ -5,5 +5,7 @@
 //! (the FFN backend that uses vindex KNN for feature selection).
 
 mod walk_ffn;
+mod q4k_forward;
 
 pub use walk_ffn::WalkFfn;
+pub use q4k_forward::predict_q4k;

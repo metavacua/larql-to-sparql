@@ -124,4 +124,8 @@ impl GateIndex for VectorIndex {
     fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> {
         self.interleaved_q4k_mmap.as_ref().map(|m| m.as_ref() as &[u8])
     }
+
+    fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
+        VectorIndex::interleaved_q4k_layer_data(self, layer)
+    }
 }

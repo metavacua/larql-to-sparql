@@ -15,5 +15,5 @@
 pub mod write;
 pub mod load;
 
-pub use write::{write_model_weights, StreamingWeights, WeightSource};
+pub use write::{write_model_weights, write_model_weights_q4k, StreamingWeights, WeightSource};
 pub use load::{load_model_weights, find_tokenizer_path};

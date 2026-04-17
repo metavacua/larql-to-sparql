@@ -34,6 +34,13 @@ pub struct VindexConfig {
     /// Storage precision (f32 or f16).
     #[serde(default)]
     pub dtype: crate::config::dtype::StorageDtype,
+    /// Quantisation format of the model weights written alongside this
+    /// vindex. `None` means float storage controlled by `dtype`;
+    /// `Q4k` means Q4_K/Q6_K blocks in `attn_weights_q4k.bin` +
+    /// `interleaved_q4k.bin`. Loaders dispatch on this field so they
+    /// don't have to sniff filenames.
+    #[serde(default)]
+    pub quant: QuantFormat,
     /// Model-specific layer band boundaries for DESCRIBE and label matching.
     #[serde(default)]
     pub layer_bands: Option<LayerBands>,
@@ -85,6 +92,29 @@ impl std::fmt::Display for ExtractLevel {
             Self::Browse => write!(f, "browse"),
             Self::Inference => write!(f, "inference"),
             Self::All => write!(f, "all"),
+        }
+    }
+}
+
+/// Quantization format for the model weights written to a vindex.
+///
+/// `None` = float weights (dtype controlled separately by `StorageDtype`).
+/// `Q4K`  = Q4_K for Q/K/O/gate/up + Q6_K for V/down, Ollama-compatible.
+///          Skips the f32 intermediate entirely — quantisation happens in
+///          the streaming extract loop straight from bf16 safetensors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum QuantFormat {
+    #[default]
+    None,
+    Q4k,
+}
+
+impl std::fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Q4k => write!(f, "q4k"),
         }
     }
 }

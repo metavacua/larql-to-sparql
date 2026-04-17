@@ -118,24 +118,41 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
             sub_maxs[j] = sub.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         }
 
-        // Global delta and min
+        // Global delta and min.
+        //
+        // Decode is `x = (d * q_scale) * nibble - (dmin * q_min)` with
+        // nibble ∈ [0, 15], q_scale ∈ [0, 63] (6-bit), q_min ∈ [0, 15]
+        // (4-bit). To span a sub-block's range with the 15 nibble levels we
+        // need `15 * d * q_scale ≈ sub_range`, so when `q_scale = 63`
+        // (maximum) and `sub_range = global_max_range`:
+        //     d = global_max_range / (15 * 63)
+        // Without the factor of 15 in the denominator the effective
+        // per-nibble step is too coarse, most values collapse onto nibble=0
+        // or 1, and reconstruction loses almost all weight-space detail.
         let global_max_range = sub_maxs.iter().zip(&sub_mins).map(|(a, b)| a - b)
             .fold(0.0f32, f32::max);
         let global_min = sub_mins.iter().copied().fold(f32::INFINITY, f32::min);
 
-        let d = if global_max_range > 0.0 { global_max_range / 63.0 } else { 0.0 };
+        let d = if global_max_range > 0.0 { global_max_range / (15.0 * 63.0) } else { 0.0 };
         let dmin = if global_min < 0.0 { -global_min / 15.0 } else { 0.0 };
 
         out.extend_from_slice(&f32_to_f16(d).to_le_bytes());
         out.extend_from_slice(&f32_to_f16(dmin).to_le_bytes());
 
-        // Compute 8 sub-block scales and mins (quantized to 6-bit and 4-bit)
+        // Compute 8 sub-block scales and mins.
+        // `q_scales[j] = sub_range / (15 * d)` so that `d * q_scales[j] * 15
+        // ≈ sub_range` (full dynamic range of 15 nibble levels).
+        // `q_mins[j] = |sub_min| / dmin` with q_mins ∈ [0, 15].
         let mut q_scales = [0u8; 8];
         let mut q_mins = [0u8; 8];
         for j in 0..8 {
             let range = sub_maxs[j] - sub_mins[j];
-            q_scales[j] = if d > 0.0 { (range / d).round().clamp(0.0, 63.0) as u8 } else { 0 };
-            q_mins[j] = if dmin > 0.0 { (-sub_mins[j] / dmin).round().clamp(0.0, 15.0) as u8 } else { 0 };
+            q_scales[j] = if d > 0.0 {
+                (range / (15.0 * d)).round().clamp(0.0, 63.0) as u8
+            } else { 0 };
+            q_mins[j] = if dmin > 0.0 {
+                (-sub_mins[j] / dmin).round().clamp(0.0, 15.0) as u8
+            } else { 0 };
         }
 
         // Pack 6-bit scales into 12 bytes (simplified: only using lower 6 bits of 8 bytes)
@@ -184,17 +201,25 @@ pub fn quantize_q6_k(data: &[f32]) -> Vec<u8> {
     for sb in 0..n_superblocks {
         let block = &data[sb * 256..(sb + 1) * 256];
 
-        // Find global abs max for super-block scale
+        // Q6_K decode is `x = d * sub_scale * q` with q ∈ [-32, 31] (6-bit
+        // signed). To span the sub-block's amax with 31 levels on the
+        // positive side: `d * sub_scale * 31 ≈ sub_max`. Picking d so the
+        // largest sub-block's sub_scale hits the i8 cap:
+        //   d = amax / (31 * 127)         # generous headroom
+        // and `sub_scale = round(sub_max / (31 * d))`.
+        // The previous `d = amax/32` / `sub_scale = sub_max/d` collapsed
+        // most values onto q ∈ {-1, 0, 1} because the scale per level was
+        // 32× too coarse.
         let amax = block.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-        let d = amax / 32.0; // 6-bit range: -32..+31
+        let d = amax / (31.0 * 127.0);
         let _inv_d = if d > 0.0 { 1.0 / d } else { 0.0 };
 
-        // Compute per-sub-block (16 values) int8 scales
+        // Compute per-sub-block (16 values) int8 scales.
         let mut sub_scales = [0i8; 16];
         for (j, sub_scale) in sub_scales.iter_mut().enumerate() {
             let sub = &block[j * 16..(j + 1) * 16];
             let sub_max = sub.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-            let sc = if d > 0.0 { sub_max / d } else { 0.0 };
+            let sc = if d > 0.0 { sub_max / (31.0 * d) } else { 0.0 };
             *sub_scale = sc.round().clamp(-128.0, 127.0) as i8;
         }
 

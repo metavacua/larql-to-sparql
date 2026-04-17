@@ -222,6 +222,13 @@ impl VectorIndex {
     }
 
     /// Load Q4_K/Q6_K interleaved FFN data (Ollama-compatible, matches attn format).
+    ///
+    /// Also reads the optional `interleaved_q4k_manifest.json` sidecar emitted
+    /// by the streaming Q4 writer. When the manifest is present callers get
+    /// per-matrix layout (offsets, lengths, formats) via
+    /// [`VectorIndex::interleaved_q4k_layer_data`]. When it's absent — older
+    /// vindexes from `build_q4k_weights.rs` — callers fall back to the legacy
+    /// uniform-stride path.
     pub fn load_interleaved_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join("interleaved_q4k.bin");
         if !path.exists() {
@@ -230,11 +237,52 @@ impl VectorIndex {
         let file = std::fs::File::open(&path)?;
         let mmap = unsafe { mmap_optimized(&file)? };
         self.interleaved_q4k_mmap = Some(Arc::new(mmap));
+
+        let manifest_path = dir.join("interleaved_q4k_manifest.json");
+        if manifest_path.exists() {
+            let json: Vec<serde_json::Value> = serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?,
+            )
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+            let entries: Vec<(usize, usize, String)> = json
+                .iter()
+                .map(|e| {
+                    let offset = e["offset"].as_u64().unwrap_or(0) as usize;
+                    let length = e["length"].as_u64().unwrap_or(0) as usize;
+                    let format = e["format"].as_str().unwrap_or("Q4_K").to_string();
+                    (offset, length, format)
+                })
+                .collect();
+            self.interleaved_q4k_manifest = Some(entries);
+        }
         Ok(())
     }
 
     pub fn has_interleaved_q4k(&self) -> bool {
         self.interleaved_q4k_mmap.is_some()
+    }
+
+    /// Per-layer Q4_K/Q6_K FFN slices — [gate, up, down] with formats.
+    ///
+    /// Returns `None` when the FFN manifest wasn't present at load time
+    /// (caller should fall back to uniform-stride). Returns `Some` iff the
+    /// manifest has 3 entries for `layer`; downstream kernels dispatch on
+    /// the format string (`"Q4_K"` or `"Q6_K"`).
+    pub fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
+        let mmap = self.interleaved_q4k_mmap.as_ref()?;
+        let manifest = self.interleaved_q4k_manifest.as_ref()?;
+        let base = layer * 3;
+        if base + 2 >= manifest.len() {
+            return None;
+        }
+        let mut out: [(&[u8], &str); 3] = [(&[], ""); 3];
+        for i in 0..3 {
+            let (offset, length, ref format) = manifest[base + i];
+            out[i] = (&mmap[offset..offset + length], format.as_str());
+        }
+        Some(out)
     }
 
     /// Dequantize one matrix from Q4 interleaved file → f32 Array2.

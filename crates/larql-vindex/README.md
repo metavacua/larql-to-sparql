@@ -280,7 +280,11 @@ model.vindex/
 ├── lm_head.bin             Output projection
 ├── interleaved.bin         gate|up|down packed per layer (optional)
 ├── interleaved_q4.bin      Q4_0 quantized version (optional, 7x smaller)
-├── index.json              Config, layer bands, provenance, checksums
+├── interleaved_q4k.bin     Q4_K gate/up + Q6_K down (when quant=q4k)
+├── interleaved_q4k_manifest.json  Per-tensor offsets for interleaved_q4k.bin
+├── attn_weights_q4k.bin    Q4_K Q/K/O + Q6_K V (when quant=q4k)
+├── attn_weights_q4k_manifest.json Per-tensor offsets for attn_weights_q4k.bin
+├── index.json              Config, layer bands, provenance, checksums, quant format
 ├── tokenizer.json          Tokenizer
 ├── relation_clusters.json  Discovered relation types
 ├── feature_labels.json     Probe-confirmed labels
@@ -294,6 +298,25 @@ model.vindex/
 | Browse | ~3 GB | DESCRIBE, WALK, SELECT |
 | Inference | ~6 GB | + INFER |
 | All | ~8.5 GB | + COMPILE |
+
+## Streaming Quantisation (`--quant q4k`)
+
+`build_vindex_streaming` can quantise model weights inline as it reads
+the safetensors shards, skipping the f32 intermediate entirely. Pass
+`QuantFormat::Q4k` (or `--quant q4k` on the CLI) to emit Ollama-
+compatible blocks:
+
+- Q/K/O/gate/up → Q4_K (148 bytes per 256 values)
+- V/down → Q6_K (210 bytes per 256 values)
+
+Output files: `attn_weights_q4k.bin` + `interleaved_q4k.bin` with
+per-tensor manifests. `VindexConfig.quant = Q4k` in `index.json` so
+loaders can dispatch on config.
+
+When `quant != None`, `--level browse` is implicitly promoted to
+`--level all` — the Q4_K writer emits all of attention, FFN, norms,
+and `lm_head` in one pass, and a browse-only Q4k vindex would be
+incoherent.
 
 ## Testing
 

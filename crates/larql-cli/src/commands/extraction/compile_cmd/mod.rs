@@ -63,9 +63,16 @@ pub struct CompileArgs {
     #[arg(long, default_value = "0.85")]
     pub ceiling: f64,
 
-    /// Maximum balancer iterations. Each iteration runs one forward
-    /// pass through the model, so this is the main cost of compile.
-    #[arg(long, default_value = "8")]
+    /// Maximum balancer iterations. Default 0 — the balancer is opt-in
+    /// because `larql_inference::forward::predict` is systematically
+    /// "peakier" than HF transformers' forward pass on the same weights,
+    /// so scaling the down vector to reach [floor, ceiling] in Rust's
+    /// simulation over-dampens the edge relative to deployed inference.
+    /// Leaving this at 0 installs at --alpha / --gate-scale and trusts
+    /// the caller's pre-tuned defaults (the paraphrase-sweep sweet spot:
+    /// g=1.0, α=0.3). Set --max-iters >0 only if you have reason to
+    /// believe Rust's predict tracks HF for your model.
+    #[arg(long, default_value = "0")]
     pub max_iters: u32,
 
     /// Skip applying the base model's `tokenizer_config.json::chat_template`

@@ -493,6 +493,7 @@ mod tests {
             embed_scale: 1.0,
             extract_level: larql_vindex::ExtractLevel::All,
             dtype: larql_vindex::config::dtype::StorageDtype::F32,
+            quant: larql_vindex::QuantFormat::None,
             layer_bands: None,
             layers: Vec::new(),
             down_top_k: 10,

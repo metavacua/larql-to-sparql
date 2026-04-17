@@ -77,6 +77,11 @@ pub struct VectorIndex {
     pub(crate) interleaved_q4_mmap: Option<Arc<memmap2::Mmap>>,
     /// Q4_K/Q6_K quantized interleaved FFN data (Ollama-compatible, matches attn format).
     pub(crate) interleaved_q4k_mmap: Option<Arc<memmap2::Mmap>>,
+    /// Per-matrix (offset, length, format) entries for `interleaved_q4k.bin`,
+    /// 3 per layer in [gate, up, down] order. Required because the Ollama
+    /// strategy mixes Q4_K (gate/up) with Q6_K (down), so layer stride is
+    /// not uniform and callers cannot compute offsets from shape alone.
+    pub(crate) interleaved_q4k_manifest: Option<Vec<(usize, usize, String)>>,
 
     /// Q4_0 gate vectors mmap — for fast Q4 KNN via larql-compute.
     pub(crate) gate_q4_mmap: Option<Arc<memmap2::Mmap>>,
@@ -127,6 +132,7 @@ impl Clone for VectorIndex {
             interleaved_mmap: self.interleaved_mmap.clone(),
             interleaved_q4_mmap: self.interleaved_q4_mmap.clone(),
             interleaved_q4k_mmap: self.interleaved_q4k_mmap.clone(),
+            interleaved_q4k_manifest: self.interleaved_q4k_manifest.clone(),
             gate_q4_mmap: self.gate_q4_mmap.clone(),
             gate_q4_slices: self.gate_q4_slices.clone(),
             lm_head_q4_mmap: self.lm_head_q4_mmap.clone(),
@@ -171,6 +177,7 @@ impl VectorIndex {
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
             interleaved_q4k_mmap: None,
+            interleaved_q4k_manifest: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -216,6 +223,7 @@ impl VectorIndex {
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
             interleaved_q4k_mmap: None,
+            interleaved_q4k_manifest: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
