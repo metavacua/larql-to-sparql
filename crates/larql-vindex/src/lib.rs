@@ -80,8 +80,8 @@ pub use format::huggingface::{
 };
 pub use format::weights::{
     write_model_weights, write_model_weights_with_opts, write_model_weights_q4k,
-    load_model_weights, load_model_weights_q4k,
-    WeightSource, StreamingWeights, WriteWeightsOptions,
+    load_model_weights, load_model_weights_with_opts, load_model_weights_q4k,
+    WeightSource, StreamingWeights, WriteWeightsOptions, LoadWeightsOptions,
 };
 
 // Patch

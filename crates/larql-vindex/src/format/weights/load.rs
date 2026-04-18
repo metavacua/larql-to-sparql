@@ -18,10 +18,77 @@ use crate::index::core::IndexLoadCallbacks;
 
 use super::write::WeightEntry;
 
-/// Load a full `ModelWeights` from a vindex directory.
+/// Options for [`load_model_weights_with_opts`]. Filter which
+/// component tensors are actually mmap'd + decoded at load time —
+/// unlike the post-load `drop_*` helpers on `ModelWeights`, these
+/// options mean we never allocate the f32 heap in the first place, so
+/// the process RSS genuinely drops.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct LoadWeightsOptions {
+    /// Skip attention weight tensors (Q / K / V / O projections +
+    /// q_norm / k_norm). Used by `larql serve --ffn-only` — the
+    /// client holds attention locally, the server doesn't need it.
+    pub skip_attn: bool,
+    /// Skip FFN weight tensors (gate / up / down projections).
+    /// Used by clients running `--ffn URL` — the remote server holds
+    /// those, the local heap shouldn't carry them.
+    pub skip_ffn: bool,
+    /// Skip `lm_head` (and any `lm_head_q4.bin` rebuild). Used by
+    /// servers that don't compute logits.
+    pub skip_lm_head: bool,
+    /// Skip the input embedding matrix. Used by servers that only
+    /// receive residual vectors, not token IDs.
+    pub skip_embed: bool,
+}
+
+impl LoadWeightsOptions {
+    /// Pattern match for FFN weight keys (matches
+    /// [`ModelWeights::drop_ffn_weights`] so the two strategies stay
+    /// in sync).
+    fn is_ffn_key(key: &str) -> bool {
+        const FFN_PATTERNS: &[&str] = &[
+            "gate_proj", "up_proj", "down_proj",
+            "ffn_gate", "ffn_up", "ffn_down",
+            "mlp.experts", "block_sparse_moe.experts",
+            "packed_gate_up_blocks", "packed_down_blocks",
+        ];
+        FFN_PATTERNS.iter().any(|p| key.contains(p))
+    }
+
+    /// Pattern match for attention weight keys (matches
+    /// [`ModelWeights::drop_attn_weights`]).
+    fn is_attn_key(key: &str) -> bool {
+        const ATTN_PATTERNS: &[&str] = &[
+            "self_attn.q_proj", "self_attn.k_proj",
+            "self_attn.v_proj", "self_attn.o_proj",
+            "attn_q", "attn_k", "attn_v", "attn_o",
+            "q_norm", "k_norm",
+        ];
+        ATTN_PATTERNS.iter().any(|p| key.contains(p))
+    }
+
+    fn should_skip(&self, key: &str) -> bool {
+        if self.skip_ffn && Self::is_ffn_key(key) { return true; }
+        if self.skip_attn && Self::is_attn_key(key) { return true; }
+        if self.skip_lm_head && key == "lm_head.weight" { return true; }
+        false
+    }
+}
+
+/// Load a full `ModelWeights` from a vindex directory (no filtering).
 pub fn load_model_weights(
     dir: &Path,
     callbacks: &mut dyn IndexLoadCallbacks,
+) -> Result<ModelWeights, VindexError> {
+    load_model_weights_with_opts(dir, callbacks, LoadWeightsOptions::default())
+}
+
+/// Load `ModelWeights` from a vindex directory, skipping component
+/// tensors per [`LoadWeightsOptions`].
+pub fn load_model_weights_with_opts(
+    dir: &Path,
+    callbacks: &mut dyn IndexLoadCallbacks,
+    opts: LoadWeightsOptions,
 ) -> Result<ModelWeights, VindexError> {
     let config = load_vindex_config(dir)?;
 
@@ -79,19 +146,25 @@ pub fn load_model_weights(
     if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
     let arch = larql_models::detect_from_json(&arch_obj);
 
-    callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
-    let embed_file = std::fs::File::open(dir.join("embeddings.bin"))?;
-    let embed_mmap = unsafe { memmap2::Mmap::map(&embed_file)? };
-    // Detect actual dtype from file size (may differ from index.json global dtype)
-    let expected_embed_f32 = config.vocab_size * config.hidden_size * 4;
-    let embed_dtype = if embed_mmap.len() == expected_embed_f32 {
-        crate::config::dtype::StorageDtype::F32
+    // Embeddings — skippable for FFN-service servers that only handle
+    // residual-vector requests and never see token IDs.
+    let embed = if opts.skip_embed {
+        callbacks.on_file_start("embeddings (skipped)", "opts.skip_embed=true");
+        Array2::<f32>::zeros((0, 0))
     } else {
-        crate::config::dtype::StorageDtype::F16
+        callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
+        let embed_file = std::fs::File::open(dir.join("embeddings.bin"))?;
+        let embed_mmap = unsafe { memmap2::Mmap::map(&embed_file)? };
+        let expected_embed_f32 = config.vocab_size * config.hidden_size * 4;
+        let embed_dtype = if embed_mmap.len() == expected_embed_f32 {
+            crate::config::dtype::StorageDtype::F32
+        } else {
+            crate::config::dtype::StorageDtype::F16
+        };
+        let embed_floats = crate::config::dtype::decode_floats(&embed_mmap, embed_dtype);
+        Array2::from_shape_vec((config.vocab_size, config.hidden_size), embed_floats)
+            .map_err(|e| VindexError::Parse(e.to_string()))?
     };
-    let embed_floats = crate::config::dtype::decode_floats(&embed_mmap, embed_dtype);
-    let embed = Array2::from_shape_vec((config.vocab_size, config.hidden_size), embed_floats)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
     callbacks.on_file_done("embeddings", config.vocab_size, 0.0);
 
     let manifest_path = dir.join("weight_manifest.json");
@@ -110,6 +183,12 @@ pub fn load_model_weights(
     let mut lm_head_loaded: Option<larql_models::WeightArray> = None;
 
     for entry in &entries {
+        // Pre-load filter: skip entries we don't need — never mmap or
+        // decode, so peak RSS reflects only what the caller wanted.
+        if opts.should_skip(&entry.key) {
+            continue;
+        }
+
         let filename = if entry.file.is_empty() { "model_weights.bin".to_string() } else { entry.file.clone() };
 
         if !mmap_cache.contains_key(&filename) {
@@ -169,7 +248,9 @@ pub fn load_model_weights(
     // `VectorIndex::interleaved_q4k_layer_data`, so expanding `gate_vectors.bin`
     // into an f32 HashMap just to have an unused copy wastes ~27 GB of heap at
     // 31B scale and prevents the model from loading on a 96 GB machine.
-    if config.quant == crate::config::types::QuantFormat::None {
+    // gate_vectors → FFN gate tensors. Skip when the caller doesn't
+    // want FFN weights (saves ~3-14 GB heap for a 4B/31B client).
+    if config.quant == crate::config::types::QuantFormat::None && !opts.skip_ffn {
         let gate_file = std::fs::File::open(dir.join("gate_vectors.bin"))?;
         let gate_mmap = unsafe { memmap2::Mmap::map(&gate_file)? };
         let gate_floats = crate::config::dtype::decode_floats(&gate_mmap, config.dtype);
@@ -191,7 +272,7 @@ pub fn load_model_weights(
     // variant is present — the forward path expects an f32 lm_head for the
     // final logits projection. Falls through to embed-tied derivation below
     // if the file is absent (or dequantisation fails).
-    if lm_head_loaded.is_none() {
+    if lm_head_loaded.is_none() && !opts.skip_lm_head {
         let lm_q4_path = dir.join("lm_head_q4.bin");
         if lm_q4_path.exists() {
             if let Some(model_cfg) = config.model_config.as_ref() {
@@ -218,7 +299,16 @@ pub fn load_model_weights(
 
     let cfg = arch.config();
     let embed = embed.into_shared();
-    let lm_head = lm_head_loaded.unwrap_or_else(|| embed.clone());
+    // Embed-tied fallback: models like Gemma share embed ↔ lm_head
+    // weights. When the caller asked to skip lm_head we don't want to
+    // clone embed into it — use an empty placeholder instead.
+    let lm_head = if opts.skip_lm_head {
+        lm_head_loaded.unwrap_or_else(|| {
+            Array2::<f32>::zeros((0, 0)).into_shared()
+        })
+    } else {
+        lm_head_loaded.unwrap_or_else(|| embed.clone())
+    };
 
     Ok(ModelWeights {
         tensors, vectors, embed, lm_head,

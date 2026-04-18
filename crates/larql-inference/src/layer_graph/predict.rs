@@ -73,7 +73,7 @@ pub fn predict_with_graph_vindex_logits(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Run a full forward pass using a LayerGraph for per-layer routing.
@@ -265,7 +265,7 @@ pub fn predict_split_pass(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Split pass using cached attention residuals — exact output at GPU speed.
@@ -318,7 +318,7 @@ pub fn predict_split_cached(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Honest production pipeline: real computation, no over-caching.

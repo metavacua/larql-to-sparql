@@ -82,6 +82,41 @@ in `larql-inference` yet.
 
 ---
 
+## P1 — Autoregressive generation quality
+
+### CPU KV cache for autoregressive generation
+
+Today's `larql run` autoregressive loop (for non-Metal or f16/remote
+paths) re-runs the full forward pass each step — O(N²) with no cache.
+Gemma 3 4B Q4K CPU pays ~3-4 s per generated token; 8 tokens is ~30 s,
+64 tokens is ~4 minutes. Functional but not ollama-shaped.
+
+The Metal shader `generate()` at
+`crates/larql-inference/src/layer_graph/generate.rs` does this right
+(KV-cached decode, ~20× faster) but is Q4K + Metal only.
+
+Proper fix: add a CPU-path `generate_cached()` that threads a
+`HashMap<layer, SharedKV>` across autoregressive steps and swaps the
+inner forward to a single-new-token-against-cached-KV pass. This is
+a real refactor of `predict_with_ffn` — needs a single-token variant
+that takes + returns KV state. Once the variant exists, `RemoteWalkBackend`
++ CPU attention with KV cache gets us fast decode on the demo path.
+
+### Shader attention + remote FFN
+
+Q4K + Metal + remote FFN — the ultimate Act 2 configuration. The
+shader pipeline (`full_pipeline_q4` / `decode_token`) currently
+dispatches attention AND FFN as fused GPU kernels reading from the
+Q4K mmap. For remote FFN we'd need to decompose per-layer into:
+attention-only GPU kernel → copy residual to host → HTTP round trip
+→ copy FFN output back to GPU → next layer's attention. Per-layer
+host+network hop kills throughput unless we batch across layers or
+use async pipelining.
+
+Worth doing for the Act 2 demo but non-trivial. See
+`larql-inference/src/layer_graph/{generate,pipeline_layer,prefill}.rs`
+— the fused paths need splitting at the attention/FFN seam.
+
 ## P1 — Loose ends in shipped features
 
 ### `--compact` loader reconstruction — WalkFfn-only today
@@ -214,6 +249,33 @@ the attention weights taking a third of RAM.
   loader reconstructs from `interleaved_q4k.bin` at load time. 2.3 s
   on 4B / ~12 s on 31B cost, saves 1.7 GB / 13.9 GB respectively.
   Measured via `crates/larql-vindex/examples/bench_gate_dequant.rs`.
+
+### Decoupled-inference memory asymmetry (real, pre-load filtered)
+- `LoadWeightsOptions { skip_attn, skip_ffn, skip_lm_head, skip_embed }`
+  filters weight manifest entries before mmap+decode — peak RSS
+  reflects only what the caller wanted (no allocator-pooling lie).
+- Server `--ffn-only`: skips attn + ffn + lm_head + embed at load.
+  Walk-ffn endpoint uses `walk_ffn_full_mmap` which reads
+  feature-major mmap, not heap tensors.
+- Client `--ffn URL`: skips FFN tensors at load. Attention + embed +
+  norms + lm_head only on heap.
+- Measured on Gemma 3 4B f32 (`gemma3-4b-v2.vindex`):
+  - Server RSS: 12.8 GB idle → **12.8 GB through inference** (never grew)
+  - Client load: 22.5 s → **7.9 s** (2.8× faster)
+  - Forward pass: 3.83 s → **0.83 s** (4.6× faster — no FFN tensor
+    touches on the client)
+  - Paris @ 80.66% — bit-identical to local unlimited-K walk
+- Drop-post-load helpers (`ModelWeights::drop_{attn,ffn,lm_head,embed}_weights`)
+  still exist but Rust's system allocator pools freed memory —
+  post-load drops reduce heap accounting but not process RSS.
+  Superseded by the pre-load filter for the demo path.
+- `larql serve` now resolves cache shorthands (`larql serve gemma4-31b-q4k`
+  works, not just full paths) via the same `cache::resolve_model`
+  logic `larql run` uses.
+- `larql run` / `larql dev walk` default `--top-k` to `usize::MAX`
+  (unlimited). The old `top-k=10` default silently produced garbage
+  on stale/low-K vindexes; removing the cap matches the server's
+  `WalkFfn::new_unlimited` behavior.
 
 ### Extract tiers + default flip
 - New `ExtractLevel::Attention` tier sits between `Browse` and

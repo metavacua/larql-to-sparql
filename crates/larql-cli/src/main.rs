@@ -229,9 +229,11 @@ struct ChatArgs {
     /// Vindex directory, `hf://owner/name`, or cache shorthand.
     model: String,
 
-    /// Number of predictions to show.
-    #[arg(short = 'n', long = "top", default_value = "10")]
-    top: usize,
+    /// Max tokens to generate per response. Defaults low because the
+    /// CPU path has no KV cache yet — use `--metal` with a Q4K vindex
+    /// for KV-cached fast generation.
+    #[arg(short = 'n', long = "max-tokens", default_value = "8")]
+    max_tokens: usize,
 
     /// Route FFN to a remote larql-server.
     #[arg(long, value_name = "URL")]
@@ -251,7 +253,8 @@ impl From<ChatArgs> for run_cmd::RunArgs {
         run_cmd::RunArgs {
             model: c.model,
             prompt: None,
-            top: c.top,
+            max_tokens: c.max_tokens,
+            top: 1,
             ffn: c.ffn,
             ffn_timeout_secs: c.ffn_timeout_secs,
             verbose: c.verbose,
@@ -566,7 +569,13 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
 fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd_args = Vec::new();
     if let Some(ref path) = args.vindex_path {
-        cmd_args.push(path.clone());
+        // Resolve cache shorthands / owner-name / hf:// → actual path
+        // so `larql serve gemma3-4b-v2` works the same as `larql run`.
+        // Explicit directories and already-resolved paths pass through.
+        let resolved = commands::primary::cache::resolve_model(path)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| path.clone());
+        cmd_args.push(resolved);
     }
     if let Some(ref dir) = args.dir {
         cmd_args.push("--dir".into());

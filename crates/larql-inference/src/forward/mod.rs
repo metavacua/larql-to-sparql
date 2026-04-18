@@ -45,6 +45,11 @@ pub struct TraceResult {
 /// Prediction result from a full forward pass.
 pub struct PredictResult {
     pub predictions: Vec<(String, f64)>,
+    /// Top-k token IDs parallel to `predictions`. `token_ids[i]`
+    /// produced `predictions[i].0` when decoded. Used by autoregressive
+    /// generators to append the argmax token without re-tokenizing the
+    /// decoded string (which would drift on subword boundaries).
+    pub token_ids: Vec<u32>,
 }
 
 /// Prediction result with per-layer residual capture.

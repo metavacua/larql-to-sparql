@@ -31,8 +31,20 @@ pub struct RunArgs {
     /// Prompt text. Omit to enter chat mode (line-by-line stdin).
     pub prompt: Option<String>,
 
-    /// Number of predictions to show.
-    #[arg(short = 'n', long = "top", default_value = "10")]
+    /// Maximum number of tokens to generate autoregressively. Set to
+    /// 1 for single-token "what comes next" behavior.
+    ///
+    /// Default is low (8) because the CPU generation path re-runs the
+    /// full forward pass per step (no KV cache) — ~3-4 s/token on
+    /// Q4K 4B CPU. For long outputs use `--metal` (Q4K shader path
+    /// with KV-cached decode, ~20× faster) or wait for CPU KV cache
+    /// to land (roadmap P1).
+    #[arg(short = 'n', long = "max-tokens", default_value = "8")]
+    pub max_tokens: usize,
+
+    /// Show the top-K prediction table for each step instead of just
+    /// the argmax. Implied by `--verbose`.
+    #[arg(long, default_value = "1")]
     pub top: usize,
 
     /// Route FFN to a remote larql-server (e.g. `http://127.0.0.1:8080`).
@@ -129,7 +141,8 @@ fn build_walk_args(
         model: None,
         gate_vectors: None,
         down_vectors: None,
-        top_k: 10,
+        top_k: usize::MAX,
+        max_tokens: args.max_tokens,
         layers: None,
         predict_top_k: args.top,
         predict: true,

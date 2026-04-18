@@ -43,7 +43,7 @@ pub fn finalize_logits(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Softmax probability of a single score within a set of hits.

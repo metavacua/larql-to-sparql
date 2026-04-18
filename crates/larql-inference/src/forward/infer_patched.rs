@@ -74,7 +74,7 @@ pub fn infer_patched(
     let walk_ffn = WalkFfn::new_unlimited_with_trace(weights, gate_index);
 
     let start = std::time::Instant::now();
-    let PredictResult { predictions: raw } =
+    let PredictResult { predictions: raw, .. } =
         predict_with_ffn(weights, tokenizer, token_ids, top_k, &walk_ffn);
     let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
 

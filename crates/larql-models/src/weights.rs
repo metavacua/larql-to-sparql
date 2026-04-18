@@ -62,4 +62,74 @@ impl ModelWeights {
         }
         freed
     }
+
+    /// Drop attention weight tensors (Q, K, V, O projections) and their
+    /// associated norms from memory. After this, the FFN + embedding +
+    /// lm_head paths still work; the `WeightFfn` dense FFN backend still
+    /// works. Attention-dependent paths (`run_attention_block`,
+    /// `predict_with_ffn`) will panic on missing tensors.
+    ///
+    /// Use on the **server side** of a decoupled-inference deployment
+    /// (`larql serve --ffn-only`) where the client holds attention
+    /// locally and only calls the FFN. Symmetric with
+    /// [`drop_ffn_weights`] which is used by the client.
+    ///
+    /// Typical savings: ~1 GB for 4B, ~8 GB for 31B.
+    pub fn drop_attn_weights(&mut self) -> usize {
+        let mut freed = 0usize;
+        let attn_patterns = [
+            "self_attn.q_proj", "self_attn.k_proj",
+            "self_attn.v_proj", "self_attn.o_proj",
+            "attn_q", "attn_k", "attn_v", "attn_o",
+            // QK norms (live alongside attention)
+            "q_norm", "k_norm",
+        ];
+        let keys_to_remove: Vec<String> = self.tensors.keys()
+            .filter(|k| attn_patterns.iter().any(|p| k.contains(p)))
+            .cloned()
+            .collect();
+        for key in &keys_to_remove {
+            if let Some(arr) = self.tensors.remove(key) {
+                freed += arr.len() * std::mem::size_of::<f32>();
+            }
+        }
+        let vec_keys: Vec<String> = self.vectors.keys()
+            .filter(|k| attn_patterns.iter().any(|p| k.contains(p)))
+            .cloned()
+            .collect();
+        for key in &vec_keys {
+            if let Some(v) = self.vectors.remove(key) {
+                freed += v.len() * std::mem::size_of::<f32>();
+            }
+        }
+        freed
+    }
+
+    /// Drop the lm_head output-projection matrix. After this, the
+    /// model can run forward passes but cannot compute logits.
+    /// Safe on the server side of a decoupled-inference deployment —
+    /// the client does the final logit projection, not the server.
+    ///
+    /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B (vocab × hidden f32).
+    /// Replaces `lm_head` with an empty array so the ModelWeights struct
+    /// remains valid.
+    pub fn drop_lm_head(&mut self) -> usize {
+        let freed = self.lm_head.len() * std::mem::size_of::<f32>();
+        self.lm_head = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
+            .expect("empty 0x0 array is always valid");
+        freed
+    }
+
+    /// Drop the input embedding matrix. After this, the model cannot
+    /// look up token → residual. Safe on the server side of a
+    /// decoupled-inference deployment where the client does token
+    /// embedding and only sends residual vectors.
+    ///
+    /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B.
+    pub fn drop_embed(&mut self) -> usize {
+        let freed = self.embed.len() * std::mem::size_of::<f32>();
+        self.embed = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
+            .expect("empty 0x0 array is always valid");
+        freed
+    }
 }

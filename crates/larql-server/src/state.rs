@@ -43,12 +43,35 @@ pub struct LoadedModel {
 
 impl LoadedModel {
     /// Get or lazy-load model weights for inference.
+    ///
+    /// For `--ffn-only` servers the loader filters attention + lm_head
+    /// + embed entries from the weight manifest before mmap/decode,
+    /// so peak RSS during load reflects only what the walk-ffn
+    /// endpoint actually needs.
     pub fn get_or_load_weights(&self) -> Result<&ModelWeights, String> {
         if let Some(w) = self.weights.get() {
             return Ok(w);
         }
         let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(&self.path, &mut cb)
+        // --ffn-only server: also skip the f32 hidden-major FFN tensors
+        // (up_weights.bin / down_weights.bin). The walk-ffn endpoint uses
+        // `WalkFfn::walk_ffn_full_mmap` which reads from the feature-major
+        // mmap (up_features.bin / down_features.bin via VectorIndex), not
+        // from `weights.tensors`. Decoding up_weights.bin into f32 heap
+        // costs ~3.4 GB on 4B / ~14 GB on 31B for zero benefit.
+        let opts = larql_vindex::LoadWeightsOptions {
+            skip_attn: self.ffn_only,
+            skip_lm_head: self.ffn_only,
+            skip_embed: self.ffn_only,
+            skip_ffn: self.ffn_only,
+        };
+        if self.ffn_only {
+            tracing::info!(
+                "ffn-only: skipping attn + ffn + lm_head + embed at load \
+                 (pre-mmap filter — walk uses feature-major mmap instead)"
+            );
+        }
+        let weights = larql_vindex::load_model_weights_with_opts(&self.path, &mut cb, opts)
             .map_err(|e| format!("failed to load model weights: {e}"))?;
         let _ = self.weights.set(weights);
         Ok(self.weights.get().unwrap())

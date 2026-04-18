@@ -83,17 +83,20 @@ pub(super) fn logits_to_predictions(
     indexed.truncate(k);
     indexed.sort_unstable_by(cmp_desc_nan_last);
 
-    let predictions = indexed
-        .into_iter()
-        .filter_map(|(idx, prob)| {
-            tokenizer
-                .decode(&[idx as u32], true)
-                .ok()
-                .map(|s| (s.trim().to_string(), prob as f64))
-        })
-        .collect();
+    let mut predictions = Vec::with_capacity(indexed.len());
+    let mut token_ids = Vec::with_capacity(indexed.len());
+    for (idx, prob) in indexed {
+        let id = idx as u32;
+        if let Ok(s) = tokenizer.decode(&[id], true) {
+            // Preserve leading whitespace — necessary for autoregressive
+            // detokenization where stripping would collapse "Paris" and
+            // " Paris" to the same token on re-encode.
+            predictions.push((s, prob as f64));
+            token_ids.push(id);
+        }
+    }
 
-    PredictResult { predictions }
+    PredictResult { predictions, token_ids }
 }
 
 /// Run a full forward pass and return the top-k next token predictions.

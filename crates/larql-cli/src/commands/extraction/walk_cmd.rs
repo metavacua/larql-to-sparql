@@ -35,8 +35,11 @@ pub struct WalkArgs {
     #[arg(long)]
     pub down_vectors: Option<PathBuf>,
 
-    /// Top-K features per layer for the gate KNN.
-    #[arg(short = 'k', long, default_value = "10")]
+    /// Top-K features per layer for the gate KNN. Default: unlimited
+    /// (`usize::MAX`) — matches the server's `WalkFfn::new_unlimited`
+    /// behavior and sidesteps quality drift on stale/low-K vindexes.
+    /// Pass an explicit `N` to cap for speed/memory trade-offs.
+    #[arg(short = 'k', long, default_value_t = usize::MAX)]
     pub top_k: usize,
 
     /// Layers to walk. Comma-separated or range (e.g., "26,27,28" or "24-33").
@@ -47,6 +50,11 @@ pub struct WalkArgs {
     /// Number of top predictions to show.
     #[arg(long, default_value = "10")]
     pub predict_top_k: usize,
+
+    /// Max tokens to generate autoregressively when `--predict` is set.
+    /// `1` reproduces the old "next-token-only" behavior.
+    #[arg(long, default_value = "1")]
+    pub max_tokens: usize,
 
     /// Run full forward pass with walk FFN and show predictions (requires --model).
     #[arg(long)]
@@ -345,7 +353,18 @@ fn run_with_vindex_weights(
         return run_predict_q4k(&mut weights, &tokenizer, args, index);
     }
 
-    let weights = larql_vindex::load_model_weights(vindex_path, &mut *cb)?;
+    // Remote FFN: load weights with a pre-mmap filter that skips the
+    // FFN tensors — they live on the remote server, the client heap
+    // shouldn't carry them. Peak RSS drops to attention + embed +
+    // norms + lm_head only.
+    let load_opts = larql_vindex::LoadWeightsOptions {
+        skip_ffn: args.ffn_remote.is_some(),
+        ..Default::default()
+    };
+    if load_opts.skip_ffn {
+        vlog!(verbose, "  remote FFN configured — skipping FFN tensors at load");
+    }
+    let weights = larql_vindex::load_model_weights_with_opts(vindex_path, &mut *cb, load_opts)?;
     let tokenizer = load_vindex_tokenizer(vindex_path)?;
 
     vlog!(
@@ -369,13 +388,14 @@ fn run_predict_q4k(
     args: &WalkArgs,
     _index: &VectorIndex,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let verbose = args.verbose;
     let token_ids = larql_inference::encode_prompt(
         tokenizer,
         &*weights.arch,
         args.prompt.as_str(),
     )
     .map_err(|e| format!("tokenize error: {e}"))?;
-    eprintln!("Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+    vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
 
     // The Q4 vindex we loaded already lives inside the VectorIndex used by
     // the walk caller, but we need our OWN VectorIndex with the Q4 mmaps
@@ -394,14 +414,53 @@ fn run_predict_q4k(
     // (unnormalised Q·K blows up before softmax). Opt in with `--metal` once
     // the QK-norm dispatch lands in `larql-compute/src/metal/decode.rs`.
     let start = Instant::now();
+
+    // Autoregressive multi-token generation. For Q4K on CPU, we build
+    // a per-layer CPU FfnBackend-compatible view and loop via the
+    // generic `generate_stream`. Metal shader autoregressive generation
+    // is a separate path (see `larql-inference/src/layer_graph/generate.rs`)
+    // and is wired to `--metal`; that path is KV-cached and much faster.
+    if args.max_tokens > 1 && !args.metal {
+        // CPU Q4K autoregressive: per-step, dequantise layer weights
+        // just-in-time (`predict_q4k` does this internally) and loop.
+        // Not token-cached, so O(N²) but correct. For speed use --metal.
+        return run_q4k_generate_cpu(weights, tokenizer, &token_ids, args, &q4_index);
+    }
+
     let result = if args.metal {
         let backend = larql_compute::default_backend();
         if !backend.has_q4() {
             return Err("Metal backend unavailable — rebuild with `--features metal` \
                 and run on an M-series Mac.".into());
         }
-        eprintln!("Backend: {} (EXPERIMENTAL — Q4 Metal decode is plumbed but produces NaN on \
+        vlog!(verbose, "Backend: {} (EXPERIMENTAL — Q4 Metal decode is plumbed but produces NaN on \
             post-norm models; tracking as ADR-009, see predict.rs:386)", backend.name());
+        // --metal + --max-tokens > 1: route to the existing shader
+        // autoregressive generate() in `larql-inference/src/layer_graph`
+        // (GPU prefill + KV-cached decode). That function returns its
+        // own tokens list; we stream them and exit.
+        if args.max_tokens > 1 {
+            use std::io::Write;
+            let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
+            let result = larql_inference::layer_graph::generate(
+                weights, tokenizer, &token_ids,
+                args.max_tokens, &q4_index, &*backend,
+                &cached_layers, 0..weights.num_layers,
+            );
+            let mut stdout = std::io::stdout();
+            for (tok, _) in &result.tokens {
+                print!("{tok}");
+                let _ = stdout.flush();
+            }
+            println!();
+            if verbose {
+                eprintln!(
+                    "  prefill: {:.1}ms  decode avg: {:.1}ms/tok  ({:.1} tok/s)",
+                    result.prefill_ms, result.avg_decode_ms(), result.decode_tok_s(),
+                );
+            }
+            return Ok(());
+        }
         larql_inference::vindex::predict_q4k_metal(
             weights,
             tokenizer,
@@ -411,7 +470,7 @@ fn run_predict_q4k(
             &*backend,
         )
     } else {
-        eprintln!("Backend: CPU (Accelerate + dequantise-per-layer)");
+        vlog!(verbose, "Backend: CPU (Accelerate + dequantise-per-layer)");
         larql_inference::vindex::predict_q4k(
             weights,
             tokenizer,
@@ -420,13 +479,51 @@ fn run_predict_q4k(
             &q4_index,
         )
     };
-    eprintln!("Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
+    vlog!(verbose, "Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
 
-    println!("\nTop {} predictions:", args.predict_top_k);
-    for (i, (token, prob)) in result.predictions.iter().enumerate() {
-        println!("  {i:2}. {:?} ({:.1}%)", token, prob * 100.0);
+    print_predictions("walk (q4k)", &result.predictions, verbose);
+
+    Ok(())
+}
+
+/// CPU Q4K autoregressive generation. Per-step: dequantise the layer's
+/// Q/K/V/O + gate/up/down weights (via `predict_q4k` internals), run
+/// the forward pass, take argmax, append, repeat. Streams tokens.
+fn run_q4k_generate_cpu(
+    weights: &mut ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    initial_ids: &[u32],
+    args: &WalkArgs,
+    q4_index: &VectorIndex,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let verbose = args.verbose;
+    let mut ids = initial_ids.to_vec();
+    let mut stdout = std::io::stdout();
+    let start = Instant::now();
+
+    for _step in 0..args.max_tokens {
+        let result = larql_inference::vindex::predict_q4k(
+            weights, tokenizer, &ids, 1, q4_index,
+        );
+        let next_id = match result.token_ids.first() {
+            Some(&id) => id,
+            None => break,
+        };
+        let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
+        print!("{tok_str}");
+        let _ = stdout.flush();
+        ids.push(next_id);
+        if is_stop_token(tok_str) { break; }
     }
-
+    println!();
+    if verbose {
+        eprintln!(
+            "  Q4K CPU generate: {:.2}s  ({} tokens)",
+            start.elapsed().as_secs_f64(),
+            ids.len() - initial_ids.len(),
+        );
+    }
     Ok(())
 }
 
@@ -460,6 +557,17 @@ fn run_predict_inner(
     // Walk FFN forward pass (with trace for analysis output)
     let walk_ffn = WalkFfn::new_with_trace(weights, index, args.top_k);
     let start = Instant::now();
+
+    // Autoregressive streaming path — default for `larql run`.
+    // max_tokens == 1 preserves the legacy "show top-K predictions
+    // for the next token" behavior of `dev walk --predict`.
+    if args.max_tokens > 1 {
+        generate_stream(weights, tokenizer, &walk_ffn, &token_ids, args.max_tokens, verbose);
+        let walk_elapsed = start.elapsed();
+        vlog!(verbose, "  Walk forward: {:.1}s", walk_elapsed.as_secs_f64());
+        return Ok(());
+    }
+
     let result = predict_with_ffn(
         weights,
         tokenizer,
@@ -477,7 +585,7 @@ fn run_predict_inner(
         println!();
     }
 
-    print_predictions("walk", &result.predictions);
+    print_predictions("walk", &result.predictions, verbose);
     vlog!(verbose, "  Walk forward: {:.1}s", walk_elapsed.as_secs_f64());
 
     if args.compare {
@@ -486,7 +594,7 @@ fn run_predict_inner(
             larql_inference::predict(weights, tokenizer, &token_ids, args.predict_top_k);
         let dense_elapsed = start.elapsed();
 
-        print_predictions("dense", &dense_result.predictions);
+        print_predictions("dense", &dense_result.predictions, verbose);
         vlog!(verbose, "  Dense forward: {:.1}s", dense_elapsed.as_secs_f64());
 
         let sparse_ffn = SparseFfn {
@@ -503,7 +611,7 @@ fn run_predict_inner(
         );
         let sparse_elapsed = start.elapsed();
 
-        print_predictions(&format!("sparse:{}", args.top_k), &sparse_result.predictions);
+        print_predictions(&format!("sparse:{}", args.top_k), &sparse_result.predictions, verbose);
         vlog!(verbose, "  Sparse forward: {:.1}s", sparse_elapsed.as_secs_f64());
 
         let weight_ffn = WeightFfn { weights };
@@ -528,6 +636,7 @@ fn run_predict_inner(
         print_predictions(
             &format!("hybrid (dense:0-{}, walk:{}-{})", switch - 1, switch, num_layers - 1),
             &hybrid_result.predictions,
+            verbose,
         );
         vlog!(verbose, "  Hybrid forward: {:.1}s", hybrid_elapsed.as_secs_f64());
 
@@ -554,6 +663,7 @@ fn run_predict_inner(
 /// `larql-server`. See `crates/larql-inference/src/ffn/remote.rs` for the
 /// backend and `crates/larql-server/src/routes/walk_ffn.rs` for the
 /// server endpoint.
+///
 fn run_predict_remote(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -579,6 +689,16 @@ fn run_predict_remote(
     vlog!(verbose, "  connected: hidden={} url={}", remote.hidden_size(), remote.base_url());
 
     let start = Instant::now();
+
+    if args.max_tokens > 1 {
+        generate_stream(weights, tokenizer, &remote, token_ids, args.max_tokens, verbose);
+        if verbose {
+            eprintln!("  Forward pass: {:.2}s  (FFN → {})",
+                      start.elapsed().as_secs_f64(), url);
+        }
+        return Ok(());
+    }
+
     let result = predict_with_ffn(
         weights,
         tokenizer,
@@ -588,21 +708,106 @@ fn run_predict_remote(
     );
     let elapsed = start.elapsed();
 
-    print_predictions("walk (ffn remote)", &result.predictions);
-    eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
+    print_predictions("walk (ffn remote)", &result.predictions, verbose);
+    if verbose {
+        eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
+    }
 
     Ok(())
 }
 
-fn print_predictions(label: &str, predictions: &[(String, f64)]) {
-    println!("\nTop predictions ({label}):");
-    for (i, (token, prob)) in predictions.iter().enumerate() {
-        println!(
-            "  {:2}. {:20} ({:.2}%)",
-            i + 1,
-            token,
-            prob * 100.0
-        );
+/// Stream autoregressive generation to stdout, token by token.
+///
+/// Each step: run a forward pass over the current sequence, take the
+/// argmax token, decode, `print!` without newline, flush. Appends the
+/// token ID to the sequence and continues until `max_tokens` or an EOS
+/// token is produced.
+///
+/// Backend-agnostic — works with `WalkFfn` (local), `RemoteWalkBackend`
+/// (FFN over HTTP), or any other `FfnBackend` impl.
+///
+/// On each step the full current sequence is re-run through
+/// `predict_with_ffn` (no KV cache). For Q4K + Metal deployments the
+/// shader `generate()` in `larql-inference/src/layer_graph/generate.rs`
+/// is far faster (KV-cached decode); route there when possible.
+fn generate_stream(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    ffn: &dyn larql_inference::FfnBackend,
+    initial_ids: &[u32],
+    max_tokens: usize,
+    verbose: bool,
+) -> Vec<u32> {
+    use std::io::Write;
+    let mut ids = initial_ids.to_vec();
+    let mut stdout = std::io::stdout();
+
+    if max_tokens == 0 {
+        return Vec::new();
+    }
+    let mut generated = Vec::with_capacity(max_tokens);
+
+    for step in 0..max_tokens {
+        // Next-token distribution over the current sequence. top=1 is
+        // enough here — we only need the argmax for greedy decoding.
+        let result = predict_with_ffn(weights, tokenizer, &ids, 1, ffn);
+        let next_id = match result.token_ids.first() {
+            Some(&id) => id,
+            None => break,
+        };
+        let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
+
+        // Stream the token to stdout — `print!` + explicit flush so
+        // each token lands instantly (the default line-buffered stdout
+        // would hold everything until a newline).
+        print!("{tok_str}");
+        let _ = stdout.flush();
+
+        generated.push(next_id);
+        ids.push(next_id);
+
+        // EOS / special-token stop. The tokenizer's decode of these
+        // often returns an empty string; check the id against the
+        // architecture's configured stop tokens too if available.
+        if is_stop_token(tok_str) {
+            break;
+        }
+        // Fast-path: on very short generations, skip the explicit
+        // EOS-id lookup cost.
+        let _ = step;
+    }
+    println!();
+    if verbose {
+        eprintln!("  Generated {} tokens", generated.len());
+    }
+    generated
+}
+
+fn is_stop_token(s: &str) -> bool {
+    matches!(
+        s,
+        "<eos>" | "</s>" | "<|endoftext|>" | "<|im_end|>"
+            | "<|end_of_turn|>" | "<end_of_turn>"
+    )
+}
+
+fn print_predictions(label: &str, predictions: &[(String, f64)], verbose: bool) {
+    if verbose {
+        println!("\nTop predictions ({label}):");
+        for (i, (token, prob)) in predictions.iter().enumerate() {
+            println!(
+                "  {:2}. {:20} ({:.2}%)",
+                i + 1,
+                token,
+                prob * 100.0
+            );
+        }
+    } else {
+        // Ollama-style clean output — just the top-1 token on stdout,
+        // no framing, no probabilities. `-v` for the full table.
+        if let Some((token, _)) = predictions.first() {
+            println!("{}", token.trim());
+        }
     }
 }
 
