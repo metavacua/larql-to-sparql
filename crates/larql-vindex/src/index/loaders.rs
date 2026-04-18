@@ -155,6 +155,7 @@ impl VectorIndex {
             hnsw_enabled: std::sync::atomic::AtomicBool::new(false),
             hnsw_ef_search: std::sync::atomic::AtomicUsize::new(200),
             lm_head_mmap: None,
+            lm_head_f16_mmap: None,
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,

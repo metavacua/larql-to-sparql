@@ -69,6 +69,10 @@ pub struct MetalBackend {
     pub rope_at_pos_pipeline: ComputePipelineState,
     pub rope_at_pos_batched_pipeline: ComputePipelineState,
     pub q4k_qkv_proj_pipeline: ComputePipelineState,
+    /// Fused mixed-quant QKV: Q4_K Q/K rows + Q6_K V rows in one dispatch.
+    /// Gemma 3 4B / Gemma 4 ship `V` as Q6_K; without this shader decode
+    /// falls through to three per-projection dispatches per layer.
+    pub q4k_q6k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
     pub q4kf_qkv_proj_pipeline: ComputePipelineState,
     pub q4kf_proj_pipeline: ComputePipelineState,
@@ -199,6 +203,8 @@ impl MetalBackend {
         // Fused Q4_K QKV projection (one dispatch for Q+K+V)
         let q4k_qkv_fn = library.get_function("q4k_qkv_proj", None).ok()?;
         let q4k_qkv_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4k_qkv_fn).ok()?;
+        let q4k_q6k_qkv_fn = library.get_function("q4k_q6k_qkv_proj", None).ok()?;
+        let q4k_q6k_qkv_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4k_q6k_qkv_fn).ok()?;
         let q4k_proj_fn = library.get_function("q4k_proj", None).ok()?;
         let q4k_proj_pipeline = device.new_compute_pipeline_state_with_function(&q4k_proj_fn).ok()?;
 
@@ -256,7 +262,7 @@ impl MetalBackend {
             q4k_geglu_silu_down_pipeline, q4k_geglu_gelu_tanh_down_pipeline,
             q6k_matvec_pipeline,
             rope_pipeline, rope_at_pos_pipeline, rope_at_pos_batched_pipeline,
-            q4k_qkv_proj_pipeline, q4k_proj_pipeline,
+            q4k_qkv_proj_pipeline, q4k_q6k_qkv_proj_pipeline, q4k_proj_pipeline,
             q4kf_qkv_proj_pipeline, q4kf_proj_pipeline,
             silu_pipeline, gelu_tanh_pipeline,
             layer_norm_pipeline, layer_norm_no_bias_pipeline,

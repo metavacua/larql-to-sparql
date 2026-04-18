@@ -1,6 +1,6 @@
 //! Fused QKV — llama.cpp's exact kernel_mul_mv_q4_K_f32, adapted for fused QKV.
 //!
-//! Uses GGUF block_q4_K_gguf (144 bytes) with packed 12-byte scales+mins.
+//! Uses GGUF `block_q4_K` (144 bytes) with packed 12-byte scales+mins.
 //! Inner loop matches llama.cpp byte-for-byte: no float() casts on nibbles,
 //! uint16_t mask extraction, FOR_UNROLL, register-based input.
 //!

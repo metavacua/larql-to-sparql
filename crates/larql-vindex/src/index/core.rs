@@ -70,6 +70,11 @@ pub struct VectorIndex {
     pub(crate) hnsw_ef_search: std::sync::atomic::AtomicUsize,
     /// Mmap'd lm_head (output projection): [vocab_size, hidden_size], f32.
     pub(crate) lm_head_mmap: Option<Arc<memmap2::Mmap>>,
+    /// Mmap'd lm_head as f16 — typically the tied-embedding case where the
+    /// vindex's `embeddings.bin` is the output projection. Carried by
+    /// `VectorIndex` so `lm_head_knn_backend` can dispatch to Metal's
+    /// `f16_gemv` without materialising a 5.6 GB f32 clone on 31B.
+    pub(crate) lm_head_f16_mmap: Option<Arc<memmap2::Mmap>>,
     pub vocab_size: usize,
     /// Interleaved FFN data: [gate|up|down] per layer in one contiguous file.
     pub(crate) interleaved_mmap: Option<Arc<memmap2::Mmap>>,
@@ -134,6 +139,7 @@ impl Clone for VectorIndex {
                 self.hnsw_ef_search.load(Ordering::Relaxed)
             ),
             lm_head_mmap: self.lm_head_mmap.clone(),
+            lm_head_f16_mmap: self.lm_head_f16_mmap.clone(),
             vocab_size: self.vocab_size,
             interleaved_mmap: self.interleaved_mmap.clone(),
             interleaved_q4_mmap: self.interleaved_q4_mmap.clone(),
@@ -182,6 +188,7 @@ impl VectorIndex {
             hnsw_enabled: std::sync::atomic::AtomicBool::new(false),
             hnsw_ef_search: std::sync::atomic::AtomicUsize::new(200),
             lm_head_mmap: None,
+            lm_head_f16_mmap: None,
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,
@@ -229,6 +236,7 @@ impl VectorIndex {
             hnsw_enabled: std::sync::atomic::AtomicBool::new(false),
             hnsw_ef_search: std::sync::atomic::AtomicUsize::new(200),
             lm_head_mmap: None,
+            lm_head_f16_mmap: None,
             vocab_size: 0,
             interleaved_mmap: None,
             interleaved_q4_mmap: None,

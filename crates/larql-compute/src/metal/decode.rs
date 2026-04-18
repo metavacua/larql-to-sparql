@@ -179,12 +179,22 @@ impl MetalBackend {
                         hidden, eps, norm_offset);
                 }
 
-                // Dispatch 2+: QKV projections — stage helper routes the mixed
-                // / fused / format-specific logic. For same-format (non-Q6_K)
-                // we hit the fused single-dispatch path; for mixed (Q4_K + Q6_K)
-                // we fall through to per-projection dispatches.
-                let all_same_format = layer.wq.format == layer.wk.format && layer.wk.format == layer.wv.format;
-                if all_same_format && layer.wq.format != crate::QuantFormat::Q6_K {
+                // Dispatch 2+: QKV projections. Three paths in priority order:
+                //
+                //  (i)  Uniform Q4_K / Q4_KF Q/K/V — single fused shader.
+                //  (ii) Q4_K Q/K + Q6_K V (Gemma 3 / 4 Ollama convention) —
+                //       dedicated mixed-quant fused shader. Replaces the
+                //       per-projection fallback that costs 2 extra dispatches
+                //       per layer × 34 layers ≈ 4 ms / token.
+                //  (iii) Anything else — per-projection fallback.
+                let uniform_q4k = layer.wq.format == layer.wk.format
+                    && layer.wk.format == layer.wv.format
+                    && layer.wq.format != crate::QuantFormat::Q6_K;
+                let mixed_q4k_q6k_v = layer.wq.format == crate::QuantFormat::Q4_K
+                    && layer.wk.format == crate::QuantFormat::Q4_K
+                    && layer.wv.format == crate::QuantFormat::Q6_K;
+
+                if uniform_q4k {
                     let fused_pipe = if layer.wq.format == crate::QuantFormat::Q4_KF {
                         &self.q4kf_qkv_proj_pipeline
                     } else {
@@ -197,9 +207,34 @@ impl MetalBackend {
                         &q_out, 0, &k_out, 0, &v_out, 0,
                         q_dim, kv_dim, hidden,
                     );
+                } else if mixed_q4k_q6k_v {
+                    // Fused Q4K Q/K + Q6K V — one dispatch for all three.
+                    use crate::metal::shaders::q4k_q6k_qkv_proj as sh;
+                    let total_rows = (q_dim + kv_dim + kv_dim) as u64;
+                    let num_tgs = total_rows.div_ceil(sh::ROWS_PER_TG);
+                    let q_rows_u = q_dim as u32;
+                    let k_rows_u = kv_dim as u32;
+                    let v_rows_u = kv_dim as u32;
+                    let k_u = hidden as u32;
+                    enc.set_compute_pipeline_state(&self.q4k_q6k_qkv_proj_pipeline);
+                    enc.set_buffer(0, Some(&wq_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&wk_bufs[l]), 0);
+                    enc.set_buffer(2, Some(&wv_bufs[l]), 0);
+                    enc.set_buffer(3, Some(&norm_f32_buf), 0);
+                    enc.set_buffer(4, Some(&q_out), 0);
+                    enc.set_buffer(5, Some(&k_out), 0);
+                    enc.set_buffer(6, Some(&v_out), 0);
+                    enc.set_bytes(7, 4, &q_rows_u as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(8, 4, &k_rows_u as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(9, 4, &v_rows_u as *const u32 as *const std::ffi::c_void);
+                    enc.set_bytes(10, 4, &k_u as *const u32 as *const std::ffi::c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(num_tgs, 1, 1),
+                        MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+                    );
                 } else {
-                    // Mixed formats (Q4_K Q/K + Q6_K V): per-projection
-                    // dispatch through the format-aware helper.
+                    // Mixed-but-unsupported (e.g. Q4_KF + Q6_K, or Q4_0 legacy):
+                    // per-projection dispatch through the format-aware helper.
                     use crate::metal::stages::qkv_proj::{self, Proj};
                     use crate::metal::stages::quant_matvec::Pipelines;
                     let pipes = Pipelines {

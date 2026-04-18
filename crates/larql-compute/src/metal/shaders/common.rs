@@ -20,19 +20,19 @@ static inline float decode_f16_metal(ushort bits) {
     return float(as_type<half>(bits));
 }
 
-// Q4_K super-block: 256 values in 148 bytes (larql format).
+// Q4_K super-block: 256 values in 144 bytes — **GGUF / llama.cpp layout**.
+//
+// Scales AND mins packed together into 12 bytes (6 bits each) and decoded
+// at dispatch time via the `get_scale_min_k4` convention. There is no
+// separate `mins[4]` field — it only existed in an older, now-defunct
+// larql layout whose 148-byte stride silently mis-read production GGUF
+// vindexes (see git history for the bug fix).
+//
+// Shaders that want safe pointer arithmetic through `[]` can use this
+// struct; callers reading weights byte-wise (the faster path used by
+// `q4k_matvec`, `q4k_qkv_proj`, `q4k_geglu_*_down`, `q4k_q6k_qkv_proj`)
+// just see 144-byte blocks as a flat `uchar*` and don't need the type.
 struct block_q4_K {
-    ushort d;           // f16 delta (2 bytes)
-    ushort dmin;        // f16 minimum (2 bytes)
-    uchar  scales[12];  // 8 × 6-bit sub-block scales packed (12 bytes)
-    uchar  mins[4];     // 8 × 4-bit sub-block mins packed (4 bytes)
-    uchar  qs[128];     // 256 × 4-bit values (128 bytes)
-};                      // Total: 148 bytes
-
-// GGUF Q4_K super-block: 256 values in 144 bytes.
-// Scales AND mins packed into 12 bytes (6 bits each).
-// This matches llama.cpp/Ollama's exact format.
-struct block_q4_K_gguf {
     half   d;           // super-block scale (2 bytes)
     half   dmin;        // super-block min scale (2 bytes)
     uchar  scales[12];  // 8 scales + 8 mins packed in 6 bits each

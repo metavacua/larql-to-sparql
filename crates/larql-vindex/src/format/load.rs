@@ -120,6 +120,30 @@ impl VectorIndex {
         let _ = index.load_interleaved(dir);
         let _ = index.load_up_features(dir);
         let _ = index.load_down_features(dir);
+        // Opportunistically adopt the f16 `embeddings.bin` as an f16 view
+        // of the LM head — but ONLY when the vindex has no separate lm_head
+        // file. `embeddings.bin` IS the lm_head for tied-embedding models
+        // (Gemma 2/3/4, Llama with `tie_word_embeddings=true`). For untied
+        // models the two matrices differ, so adopting embed here would
+        // make `lm_head_knn_backend` return wrong logits.
+        //
+        // Gate: file is f16-sized AND neither `lm_head.bin` nor
+        // `lm_head_q4.bin` is present in the vindex directory. The
+        // untied models that ship those files are always extracted with
+        // one of them, so presence is a reliable untied-signal.
+        let has_separate_lm_head = dir.join("lm_head.bin").exists()
+            || dir.join("lm_head_q4.bin").exists();
+        if !has_separate_lm_head {
+            if let Ok(f) = std::fs::File::open(dir.join("embeddings.bin")) {
+                if let Ok(mmap) = unsafe { memmap2::Mmap::map(&f) } {
+                    let expected_f16 = config.vocab_size * config.hidden_size * 2;
+                    if mmap.len() >= expected_f16 && mmap.len() < expected_f16 * 2 {
+                        if index.vocab_size == 0 { index.vocab_size = config.vocab_size; }
+                        index.set_lm_head_f16_mmap(std::sync::Arc::new(mmap));
+                    }
+                }
+            }
+        }
 
         Ok(index)
     }

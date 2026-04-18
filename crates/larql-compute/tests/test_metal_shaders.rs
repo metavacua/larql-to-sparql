@@ -2978,6 +2978,178 @@ fn f16_gemv_matches_f32_gemv_argmax() {
     );
 }
 
+/// Uniform `q4k_qkv_proj` fused shader matches three `q4k_matvec` dispatches.
+///
+/// Regression gate for the 148-vs-144 Q4_K super-block stride bug: the
+/// first draft of this shader typed weights as `block_q4_K*` (148-byte
+/// MSL struct with an obsolete `mins[4]` field), which silently mis-read
+/// production GGUF data. Row stride was off by 40 bytes per row,
+/// accumulating into buffer-overruns past the first superblock. The
+/// output was "approximately correct" enough for argmax to stabilise on
+/// trivial prompts, hiding the bug. Now the shader uses manual byte
+/// offsets with the correct 144-byte stride.
+#[test]
+fn q4k_qkv_proj_matches_per_proj_dispatch() {
+    let metal = get_metal();
+    let q_rows = 2048usize;
+    let kv_rows = 1024usize;
+    let hidden = 2560usize;
+
+    let wq_f32 = synth(q_rows, hidden, 0xbeef_0001).as_standard_layout().to_owned();
+    let wk_f32 = synth(kv_rows, hidden, 0xbeef_0002).as_standard_layout().to_owned();
+    let wv_f32 = synth(kv_rows, hidden, 0xbeef_0003).as_standard_layout().to_owned();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.017).cos()).collect();
+
+    let wq_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(wq_f32.as_slice().unwrap());
+    let wk_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(wk_f32.as_slice().unwrap());
+    let wv_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(wv_f32.as_slice().unwrap());
+
+    let ref_q = metal.q4k_matvec(&wq_q4k, &x, q_rows, hidden).expect("q4k_matvec Q");
+    let ref_k = metal.q4k_matvec(&wk_q4k, &x, kv_rows, hidden).expect("q4k_matvec K");
+    let ref_v = metal.q4k_matvec(&wv_q4k, &x, kv_rows, hidden).expect("q4k_matvec V");
+
+    // Fused dispatch through `q4k_qkv_proj`.
+    let wq_buf = metal.bufs().get_bytes(&wq_q4k);
+    let wk_buf = metal.bufs().get_bytes(&wk_q4k);
+    let wv_buf = metal.bufs().get_bytes(&wv_q4k);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let q_out = metal.bufs().output((q_rows * 4) as u64);
+    let k_out = metal.bufs().output((kv_rows * 4) as u64);
+    let v_out = metal.bufs().output((kv_rows * 4) as u64);
+
+    use larql_compute::metal::shaders::q4k_qkv_proj as sh;
+    let total_rows = (q_rows + kv_rows + kv_rows) as u64;
+    let num_tgs = total_rows.div_ceil(sh::ROWS_PER_TG);
+    let q_u = q_rows as u32;
+    let k_u = kv_rows as u32;
+    let v_u = kv_rows as u32;
+    let hidden_u = hidden as u32;
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4k_qkv_proj_pipeline);
+    enc.set_buffer(0, Some(&wq_buf), 0);
+    enc.set_buffer(1, Some(&wk_buf), 0);
+    enc.set_buffer(2, Some(&wv_buf), 0);
+    enc.set_buffer(3, Some(&x_buf), 0);
+    enc.set_buffer(4, Some(&q_out), 0);
+    enc.set_buffer(5, Some(&k_out), 0);
+    enc.set_buffer(6, Some(&v_out), 0);
+    enc.set_bytes(7, 4, &q_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(8, 4, &k_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(9, 4, &v_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(10, 4, &hidden_u as *const u32 as *const std::ffi::c_void);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let got_q = larql_compute::metal::buffers::read_buffer_f32(&q_out, q_rows);
+    let got_k = larql_compute::metal::buffers::read_buffer_f32(&k_out, kv_rows);
+    let got_v = larql_compute::metal::buffers::read_buffer_f32(&v_out, kv_rows);
+
+    let check = |name: &str, r: &[f32], g: &[f32]| {
+        let max_abs = r.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1e-6);
+        let d = max_diff(r, g);
+        assert!(d < max_abs * 1e-3,
+            "{name}: max_diff {d:.3e} exceeds 0.1% of max_abs {max_abs:.3e}");
+    };
+    check("Q", &ref_q, &got_q);
+    check("K", &ref_k, &got_k);
+    check("V", &ref_v, &got_v);
+}
+
+/// `q4k_q6k_qkv_proj` fused shader matches three separate-format dispatches.
+///
+/// Pins the mixed-quant fused kernel that replaces the 3-dispatch per-proj
+/// fallback when a layer ships Q4_K Q/K + Q6_K V (Gemma 3 4B / Gemma 4
+/// Ollama convention). If the shader silently regresses to under-read or
+/// over-read the Q4_K GGUF 144-byte blocks (as happened once when the
+/// first draft used the 148-byte `block_q4_K` MSL struct), this will
+/// catch it before real-vindex decode produces garbled tokens.
+#[test]
+fn q4k_q6k_qkv_proj_matches_per_proj_dispatch() {
+    let metal = get_metal();
+
+    // Shapes modelled on Gemma 3 4B: q_dim = 8 * 256, kv_dim = 4 * 256,
+    // hidden = 2560 (K must be a multiple of 256 for Q4_K / Q6_K).
+    let q_rows = 2048usize;
+    let kv_rows = 1024usize;
+    let hidden = 2560usize;
+
+    // Synthesise weight matrices and quantise.
+    let wq_f32 = synth(q_rows, hidden, 0xdead_beef_1).as_standard_layout().to_owned();
+    let wk_f32 = synth(kv_rows, hidden, 0xdead_beef_2).as_standard_layout().to_owned();
+    let wv_f32 = synth(kv_rows, hidden, 0xdead_beef_3).as_standard_layout().to_owned();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.011).sin()).collect();
+
+    let wq_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(wq_f32.as_slice().unwrap());
+    let wk_q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(wk_f32.as_slice().unwrap());
+    let wv_q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(wv_f32.as_slice().unwrap());
+
+    // Reference: dispatch each projection through its native shader.
+    let ref_q = metal.q4k_matvec(&wq_q4k, &x, q_rows, hidden).expect("q4k_matvec Q");
+    let ref_k = metal.q4k_matvec(&wk_q4k, &x, kv_rows, hidden).expect("q4k_matvec K");
+    let ref_v = metal.q6k_matvec(&wv_q6k, &x, kv_rows, hidden).expect("q6k_matvec V");
+
+    // Fused dispatch.
+    let wq_buf = metal.bufs().get_bytes(&wq_q4k);
+    let wk_buf = metal.bufs().get_bytes(&wk_q4k);
+    let wv_buf = metal.bufs().get_bytes(&wv_q6k);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let q_out = metal.bufs().output((q_rows * 4) as u64);
+    let k_out = metal.bufs().output((kv_rows * 4) as u64);
+    let v_out = metal.bufs().output((kv_rows * 4) as u64);
+
+    use larql_compute::metal::shaders::q4k_q6k_qkv_proj as sh;
+    let total_rows = (q_rows + kv_rows + kv_rows) as u64;
+    let num_tgs = total_rows.div_ceil(sh::ROWS_PER_TG);
+    let q_u = q_rows as u32;
+    let k_u = kv_rows as u32;
+    let v_u = kv_rows as u32;
+    let hidden_u = hidden as u32;
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4k_q6k_qkv_proj_pipeline);
+    enc.set_buffer(0, Some(&wq_buf), 0);
+    enc.set_buffer(1, Some(&wk_buf), 0);
+    enc.set_buffer(2, Some(&wv_buf), 0);
+    enc.set_buffer(3, Some(&x_buf), 0);
+    enc.set_buffer(4, Some(&q_out), 0);
+    enc.set_buffer(5, Some(&k_out), 0);
+    enc.set_buffer(6, Some(&v_out), 0);
+    enc.set_bytes(7, 4, &q_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(8, 4, &k_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(9, 4, &v_u as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(10, 4, &hidden_u as *const u32 as *const std::ffi::c_void);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let got_q = larql_compute::metal::buffers::read_buffer_f32(&q_out, q_rows);
+    let got_k = larql_compute::metal::buffers::read_buffer_f32(&k_out, kv_rows);
+    let got_v = larql_compute::metal::buffers::read_buffer_f32(&v_out, kv_rows);
+
+    // Q4_K quantisation can introduce tiny per-row scale differences
+    // depending on which shader dispatch path is taken; absolute tolerance
+    // scaled by row magnitude.
+    let check = |name: &str, r: &[f32], g: &[f32]| {
+        let max_abs = r.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1e-6);
+        let d = max_diff(r, g);
+        assert!(d < max_abs * 1e-3,
+            "{name}: max_diff {d:.3e} exceeds 0.1% of max_abs {max_abs:.3e}");
+    };
+    check("Q", &ref_q, &got_q);
+    check("K", &ref_k, &got_k);
+    check("V", &ref_v, &got_v);
+}
+
 /// Stage: `residual::encode_post_attn` with FFN that needs Q8 input.
 ///
 /// Verifies the additional q8_quant dispatch runs and produces a Q8

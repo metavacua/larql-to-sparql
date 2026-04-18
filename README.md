@@ -75,6 +75,12 @@ larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
 larql extract google/gemma-3-4b-it -o gemma3-4b.vindex \
   --quant q4k --drop-gate-vectors
 
+# Uniform Q4_K on FFN — gate + up + down all Q4_K (default stores
+# down as Q6_K). ~30 MB/layer smaller, ~1.5–1.7× faster decode down
+# matmul. Adds ~1.5 % softmax drift; top-1 / top-5 preserved.
+larql extract google/gemma-4-31b-it -o gemma4-31b.vindex \
+  --quant q4k --down-q4k
+
 # Opt out of f16 (rarely wanted — doubles file sizes)
 larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --f32
 

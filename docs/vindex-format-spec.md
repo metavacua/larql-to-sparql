@@ -106,7 +106,7 @@ model.vindex/
 │
 ├── attn_weights_q4k.bin      # Q/K/O = Q4_K, V = Q6_K per layer
 ├── attn_weights_q4k_manifest.json
-├── interleaved_q4k.bin       # FFN gate/up = Q4_K, down = Q6_K per layer
+├── interleaved_q4k.bin       # FFN gate/up = Q4_K, down = Q6_K (or Q4_K with --down-q4k) per layer
 ├── interleaved_q4k_manifest.json
 │
 │  # ═══ Gemma 4 E2B Per-Layer Embeddings ═══
