@@ -422,27 +422,29 @@ pub fn dispatch_full_pipeline(
     let _n_blocks = (hidden / 32) as u32;
 
     // Pre-cache Q8 attention weight buffers (higher precision for Q/K dot products)
+    // Stable across calls → cache by slice identity (skips per-token Metal-buffer
+    // allocation for ~68+ norm/scale handles on 34-layer Gemma 3 4B).
     let wq_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wq.data)).collect();
-    let wq_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wq.scales.unwrap_or(&[]))).collect();
+    let wq_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wq.scales.unwrap_or(&[]))).collect();
     let wk_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wk.data)).collect();
-    let wk_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wk.scales.unwrap_or(&[]))).collect();
+    let wk_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wk.scales.unwrap_or(&[]))).collect();
     let wv_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wv.data)).collect();
-    let wv_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wv.scales.unwrap_or(&[]))).collect();
+    let wv_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wv.scales.unwrap_or(&[]))).collect();
     let wo_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wo.data)).collect();
-    let wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.wo.scales.unwrap_or(&[]))).collect();
+    let wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wo.scales.unwrap_or(&[]))).collect();
     // Q4 FFN weight buffers
     let gate_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.gate.data)).collect();
     let up_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.up.data)).collect();
     let down_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.down.data)).collect();
 
-    // Norm weight buffers
-    let input_norm_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.input_norm)).collect();
-    let post_attn_norm_bufs: Vec<_> = layers.iter().map(|l| bufs.transient_from_f32(l.post_attn_norm)).collect();
+    // Norm weight buffers — also stable; cache.
+    let input_norm_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.input_norm)).collect();
+    let post_attn_norm_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.post_attn_norm)).collect();
     let pre_ffn_norm_bufs: Vec<Option<_>> = layers.iter().map(|l| {
-        l.pre_ffn_norm.map(|n| bufs.transient_from_f32(n))
+        l.pre_ffn_norm.map(|n| bufs.get_f32(n))
     }).collect();
     let post_ffn_norm_bufs: Vec<Option<_>> = layers.iter().map(|l| {
-        l.post_ffn_norm.map(|n| bufs.transient_from_f32(n))
+        l.post_ffn_norm.map(|n| bufs.get_f32(n))
     }).collect();
 
     // Initial hidden state as f32 buffer
@@ -676,8 +678,8 @@ pub fn dispatch_full_pipeline(
             if let (Some(qk_norm_pipe), Some(q_w_slice), Some(k_w_slice)) =
                 (qk_norm_pipeline, layers[l].q_norm_weight, layers[l].k_norm_weight)
             {
-                let q_w_buf = bufs.transient_from_f32(q_w_slice);
-                let k_w_buf = bufs.transient_from_f32(k_w_slice);
+                let q_w_buf = bufs.get_f32(q_w_slice);
+                let k_w_buf = bufs.get_f32(k_w_slice);
                 let enc = cmd.new_compute_command_encoder();
                 crate::metal::stages::qk_norm::encode_qk_norm(
                     enc, qk_norm_pipe,

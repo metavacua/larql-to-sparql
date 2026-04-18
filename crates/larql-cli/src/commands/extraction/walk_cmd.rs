@@ -417,6 +417,7 @@ fn run_predict_q4k(
     let mut q4_index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
     q4_index.load_attn_q4k(vindex_path)?;
     q4_index.load_interleaved_q4k(vindex_path)?;
+    let _ = q4_index.load_lm_head_q4(vindex_path);
 
     // Metal Q4K path (`--metal`) routes autoregressive generation through the
     // fused `full_pipeline_q4` prefill + `decode_token` KV-cached decode in

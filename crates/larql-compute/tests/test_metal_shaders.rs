@@ -2915,6 +2915,69 @@ fn f32_gemv_matches_ndarray_dot() {
     assert_eq!(exp_argmax, got_argmax, "argmax mismatch between CPU and Metal gemv");
 }
 
+/// `f16_gemv` shader: f16 weights × f32 query, matches `f32_gemv` within
+/// half-precision noise.
+///
+/// Motivating case: Gemma 4 31B tied-embedding LM head. The current path
+/// decodes the 2.8 GB f16 safetensors into a 5.6 GB f32 clone at load;
+/// this shader lets the Metal backend consume the f16 bytes directly.
+/// Test pins argmax equality with the f32 reference — that's the actual
+/// property that matters for top-K.
+#[test]
+fn f16_gemv_matches_f32_gemv_argmax() {
+    use larql_models::quant::half::encode_f16;
+
+    let metal = get_metal();
+    metal.set_flop_threshold(1);
+
+    let n = 2048usize;
+    let k = 2560usize;
+    let w = synth(n, k, 0xf16ce);
+    let x: Vec<f32> = (0..k).map(|i| ((i as f32) * 0.013).sin()).collect();
+
+    // f32 reference.
+    let x_arr = ndarray::Array1::from(x.clone());
+    let expected = w.dot(&x_arr);
+
+    // Encode weights as f16 bytes (IEEE half, little-endian).
+    let w_flat: Vec<f32> = w.iter().copied().collect();
+    let w_f16 = encode_f16(&w_flat);
+    assert_eq!(w_f16.len(), n * k * 2);
+
+    let got = metal
+        .f16_gemv(&w_f16, &x, n, k)
+        .expect("f16_gemv should dispatch above threshold");
+    assert_eq!(got.len(), n);
+
+    // f16 weights introduce relative error ~1e-3 on the output; don't pin
+    // values, pin argmax — that's the property the LM head top-K depends on.
+    let exp_argmax = expected
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
+    let got_argmax = got
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
+    assert_eq!(
+        exp_argmax, got_argmax,
+        "f16_gemv argmax mismatch vs f32 reference"
+    );
+
+    // Sanity: the scores around the argmax should be within f16 relative
+    // noise of the f32 reference.
+    let tol = expected.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1.0) * 5e-3;
+    let diff = (expected[exp_argmax] - got[exp_argmax]).abs();
+    assert!(
+        diff < tol,
+        "argmax-value drift {diff:.4} exceeds f16 tolerance {tol:.4}"
+    );
+}
+
 /// Stage: `residual::encode_post_attn` with FFN that needs Q8 input.
 ///
 /// Verifies the additional q8_quant dispatch runs and produces a Q8

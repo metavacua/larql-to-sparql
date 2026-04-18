@@ -19,19 +19,18 @@ impl ComputeBackend for MetalBackend {
         if 2 * n * k < self.flop_threshold.load(Ordering::Relaxed) {
             return None;
         }
-        let w_owned;
-        let w_data: &[f32] = match w.as_slice() {
-            Some(s) => s,
-            None => { w_owned = w.as_standard_layout().into_owned(); w_owned.as_slice().unwrap().to_vec().leak() }
-        };
-
         // Zero-copy cached weight buffer — `get_bytes` aliases mmap-backed
         // pages on Apple Silicon; the 2.68 GB `lm_head` only "uploads" once
-        // and every subsequent call reuses the same Metal buffer.
-        let w_bytes = unsafe {
-            std::slice::from_raw_parts(w_data.as_ptr() as *const u8, w_data.len() * 4)
+        // and every subsequent call reuses the same Metal buffer. If the
+        // caller passes a non-contiguous view, fall back to allocating an
+        // owned copy for *this* call (not cached — a new ptr each time).
+        let w_buf = match w.as_slice() {
+            Some(s) => self.bufs.get_f32(s),
+            None => {
+                let owned = w.as_standard_layout().into_owned();
+                self.bufs.transient_from_f32(owned.as_slice().unwrap())
+            }
         };
-        let w_buf = self.bufs.get_bytes(w_bytes);
         let x_buf = self.bufs.transient_from_f32(x);
         let out_buf = self.bufs.output((n * 4) as u64);
 
@@ -43,6 +42,40 @@ impl ComputeBackend for MetalBackend {
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
         enc.set_compute_pipeline_state(&self.f32_gemv_pipeline);
+        enc.set_buffer(0, Some(&w_buf), 0);
+        enc.set_buffer(1, Some(&x_buf), 0);
+        enc.set_buffer(2, Some(&out_buf), 0);
+        enc.set_bytes(3, 4, &n_u32 as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &k_u32 as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(num_tgs, 1, 1),
+            metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+        );
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+
+        Some(super::buffers::read_buffer_f32(&out_buf, n))
+    }
+
+    fn f16_gemv(&self, w_f16: &[u8], x: &[f32], n: usize, k: usize) -> Option<Vec<f32>> {
+        if w_f16.len() < n * k * 2 || x.len() != k { return None; }
+        // Same below-threshold gate as `f32_gemv` — small gemvs are dispatch-bound.
+        if 2 * n * k < self.flop_threshold.load(Ordering::Relaxed) { return None; }
+
+        // Zero-copy cached weight buffer (mmap-aliased on Apple Silicon).
+        let w_buf = self.bufs.get_bytes(w_f16);
+        let x_buf = self.bufs.transient_from_f32(x);
+        let out_buf = self.bufs.output((n * 4) as u64);
+
+        use crate::metal::shaders::f16_gemv as sh;
+        let n_u32 = n as u32;
+        let k_u32 = k as u32;
+        let num_tgs = (n as u64).div_ceil(sh::ROWS_PER_TG);
+
+        let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&self.f16_gemv_pipeline);
         enc.set_buffer(0, Some(&w_buf), 0);
         enc.set_buffer(1, Some(&x_buf), 0);
         enc.set_buffer(2, Some(&out_buf), 0);

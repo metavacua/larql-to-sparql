@@ -40,7 +40,7 @@ enum DownMatrix<'a> {
 #[inline]
 fn hits_len_ge_intermediate(config: &WalkFfnConfig, layer: usize, intermediate: usize) -> bool {
     match config.k_for(layer) {
-        Some(k) => k >= intermediate,
+        Some(k) => k >= (intermediate * 8) / 10,
         None => true,
     }
 }

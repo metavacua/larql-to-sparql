@@ -74,15 +74,18 @@ impl MetalBackend {
         let wk_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wk.data)).collect();
         let wv_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wv.data)).collect();
         let wo_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wo.data)).collect();
-        let wq_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.wq.scales.unwrap_or(&[]))).collect();
-        let wk_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.wk.scales.unwrap_or(&[]))).collect();
-        let wv_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.wv.scales.unwrap_or(&[]))).collect();
-        let wo_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.wo.scales.unwrap_or(&[]))).collect();
+        // Stable across decode calls → cache by slice identity. Skips ~136
+        // per-token Metal-buffer allocations for scales/norms on 34-layer
+        // Gemma 3. `get_f32` hits the cache from the second decode onward.
+        let wq_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wq.scales.unwrap_or(&[]))).collect();
+        let wk_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wk.scales.unwrap_or(&[]))).collect();
+        let wv_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wv.scales.unwrap_or(&[]))).collect();
+        let wo_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wo.scales.unwrap_or(&[]))).collect();
         let gate_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.gate.data)).collect();
         let up_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.up.data)).collect();
         let down_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.down.data)).collect();
-        let input_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.input_norm)).collect();
-        let post_attn_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.transient_from_f32(l.post_attn_norm)).collect();
+        let input_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.input_norm)).collect();
+        let post_attn_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.post_attn_norm)).collect();
 
         // Two h buffers for ping-pong: even layers write to h_a, odd to h_b.
         let h_init = self.bufs.transient_from_f32(x);
@@ -148,7 +151,7 @@ impl MetalBackend {
                 if layer.norm_type == crate::NormType::LayerNorm {
                     let len_val = hidden as u32;
                     if let Some(bias) = layer.input_norm_bias {
-                        let bias_buf = self.bufs.transient_from_f32(bias);
+                        let bias_buf = self.bufs.get_f32(bias);
                         enc.set_compute_pipeline_state(&self.layer_norm_pipeline);
                         enc.set_buffer(0, Some(&h_buf), 0);
                         enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
@@ -285,7 +288,7 @@ impl MetalBackend {
                 while tg_w < layer_head_dim && tg_w < 512 { tg_w <<= 1; }
 
                 // Q heads
-                let q_w_buf = self.bufs.transient_from_f32(q_w);
+                let q_w_buf = self.bufs.get_f32(q_w);
                 let nq_val = layer_num_q_heads as u32;
                 enc.set_compute_pipeline_state(&self.qk_norm_pipeline);
                 enc.set_buffer(0, Some(&q_out), 0);
@@ -301,7 +304,7 @@ impl MetalBackend {
                 );
 
                 // K heads
-                let k_w_buf = self.bufs.transient_from_f32(k_w);
+                let k_w_buf = self.bufs.get_f32(k_w);
                 let nkv_val = layer_num_kv_heads as u32;
                 enc.set_buffer(0, Some(&k_out), 0);
                 enc.set_buffer(1, Some(&k_out), 0);
@@ -442,7 +445,7 @@ impl MetalBackend {
                         &o_out_buf, &post_attn_norm_bufs[l], &normed_o, hidden, eps, norm_offset);
                 }
                 let pre_ffn_buf = if let Some(pfn) = layer.pre_ffn_norm {
-                    self.bufs.transient_from_f32(pfn)
+                    self.bufs.get_f32(pfn)
                 } else {
                     post_attn_norm_bufs[l].clone()
                 };
@@ -726,7 +729,7 @@ impl MetalBackend {
             // ── Step 7: Post-FFN residual ──
             if has_post_norms {
                 if let Some(post_ffn) = layer.post_ffn_norm {
-                    let post_ffn_buf = self.bufs.transient_from_f32(post_ffn);
+                    let post_ffn_buf = self.bufs.get_f32(post_ffn);
                     let normed_ffn = &normed_scratch;
                     use crate::metal::ops::full_pipeline::encode_rms_norm;
                     encode_rms_norm(enc, &self.rms_norm_pipeline,

@@ -38,6 +38,13 @@ pub trait ComputeBackend: Send + Sync {
     /// the 32×32 tiled sgemm wastes 31/32 threads at `M = 1`.
     fn f32_gemv(&self, _w: ArrayView2<f32>, _x: &[f32]) -> Option<Vec<f32>> { None }
 
+    /// Same shape as [`Self::f32_gemv`] but the weight matrix is f16 packed
+    /// as little-endian IEEE-half bytes, `n * k * 2` long. Lets the LM head
+    /// run directly on the mmap'd f16 embeddings without a 2× f32 clone.
+    /// Backends without a specialised kernel return `None`; callers either
+    /// dequantize and fall back to `f32_gemv`, or avoid the call entirely.
+    fn f16_gemv(&self, _w_f16: &[u8], _x: &[f32], _n: usize, _k: usize) -> Option<Vec<f32>> { None }
+
     /// Multiple matmuls in one submission. Default: serial dispatch.
     /// GPU backends can override with parallel command buffer encoding.
     fn matmul_batch(&self, ops: &[MatMulOp]) -> Vec<Array2<f32>> {

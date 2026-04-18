@@ -93,6 +93,10 @@ pub struct MetalBackend {
     /// autoregressive decode where `matmul_transb(query, lm_head)` shows
     /// up as the dominant per-token cost.
     pub f32_gemv_pipeline: ComputePipelineState,
+    /// Same layout as [`Self::f32_gemv_pipeline`], but with a `half`
+    /// weight matrix. Halves bandwidth for tied-embedding models whose
+    /// lm_head would otherwise live as a 5.6 GB f32 clone on 31B.
+    pub f16_gemv_pipeline: ComputePipelineState,
     flop_threshold: AtomicUsize,
 }
 
@@ -178,6 +182,9 @@ impl MetalBackend {
         // Dedicated f32 gemv for the LM head.
         let f32_gemv_fn = library.get_function("f32_gemv", None).ok()?;
         let f32_gemv_pipeline = device.new_compute_pipeline_state_with_function(&f32_gemv_fn).ok()?;
+        // f16 counterpart — half the memory, same shader topology.
+        let f16_gemv_fn = library.get_function("f16_gemv", None).ok()?;
+        let f16_gemv_pipeline = device.new_compute_pipeline_state_with_function(&f16_gemv_fn).ok()?;
 
         // RoPE (standalone, for prefill KV cache population)
         let rope_fn = library.get_function("rope_apply", None).ok()?;
@@ -259,6 +266,7 @@ impl MetalBackend {
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,
             f32_gemv_pipeline,
+            f16_gemv_pipeline,
             flop_threshold: AtomicUsize::new(calibrate::DEFAULT_FLOP_THRESHOLD),
         })
     }

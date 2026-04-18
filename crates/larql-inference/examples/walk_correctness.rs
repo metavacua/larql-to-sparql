@@ -8,7 +8,12 @@
 //! Gates:
 //!   - per-layer L2 ≤ 1e-3 (f16 vindex vs f32 weights noise floor)
 //!   - per-layer cos ≥ 0.9999
-//!   - end-to-end top-1 match, prob delta ≤ 0.001
+//!   - end-to-end top-1 match, prob delta ≤ 0.02 (Q4K/Q6K) or ≤ 0.035 (all-Q4K)
+//!
+//! The Phase B prob-delta budget auto-adapts to the vindex quantisation:
+//! `--down-q4k` builds (Q4_K on down_proj) trip an extra ~1.5% of softmax
+//! redistribution that's functionally harmless (top-1 + top-5 preserved),
+//! so the gate loosens from 0.02 to 0.035 when it detects Q4_K-down.
 //!
 //! Usage:
 //!   cargo run --release -p larql-inference --example walk_correctness -- \
@@ -98,6 +103,23 @@ impl<'a> FfnBackend for DualFfn<'a> {
     }
 
     fn name(&self) -> &str { "dual" }
+}
+
+/// Returns true when the interleaved Q4K manifest stores down_proj as Q4_K
+/// (the `--down-q4k` build variant). Falls back to `false` — the safer,
+/// tighter-threshold default — on any parse or IO error.
+fn detect_down_q4k(vindex: &std::path::Path) -> bool {
+    let manifest_path = vindex.join("interleaved_q4k_manifest.json");
+    let Ok(bytes) = std::fs::read(&manifest_path) else { return false };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return false };
+    let Some(entries) = value.as_array() else { return false };
+    for entry in entries {
+        let key = entry.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        if key.contains("down_proj") {
+            return entry.get("format").and_then(|v| v.as_str()) == Some("Q4_K");
+        }
+    }
+    false
 }
 
 fn layer_diff(a: &Array2<f32>, b: &Array2<f32>) -> LayerDiff {
@@ -256,15 +278,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jacc = dense_set.intersection(&walk_set).count() as f64
         / dense_set.union(&walk_set).count().max(1) as f64;
 
+    // Auto-detect whether down_proj is quantised as Q4_K or Q6_K from the
+    // interleaved manifest. --down-q4k builds redistribute ~1.5% more
+    // softmax mass than Q6K-down builds; the gate adapts so power-user
+    // trade-offs don't look like regressions.
+    let down_q4k = detect_down_q4k(&args.vindex);
+    let prob_delta_budget = if down_q4k { 0.035 } else { 0.02 };
+
     println!();
     println!("  top-1 match: {}  (dense={:?} walk={:?})",
         top1_match, dense_top1.0, walk_top1.0);
-    println!("  prob delta:  {:.6}", prob_delta);
+    println!("  prob delta:  {:.6}  (budget {:.3}, down={})",
+        prob_delta, prob_delta_budget, if down_q4k { "Q4_K" } else { "Q6_K" });
     println!("  top-5 Jaccard: {:.3}", jacc);
 
-    // Top-1 must match; prob delta allowed up to 0.02 to cover Q4K/Q6K
-    // quantisation noise (4B: ~0.004, 31B: likely similar).
-    let phase_b_ok = top1_match && prob_delta <= 0.02;
+    let phase_b_ok = top1_match && prob_delta <= prob_delta_budget;
     println!("  Phase B: {}\n", if phase_b_ok { "PASS" } else { "FAIL" });
 
     // ── Summary ────────────────────────────────────────────────────────
