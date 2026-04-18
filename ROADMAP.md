@@ -84,25 +84,61 @@ in `larql-inference` yet.
 
 ## P1 — Autoregressive generation quality
 
-### CPU KV cache for autoregressive generation
+### CPU KV cache for autoregressive generation — **SHIPPED**
 
-Today's `larql run` autoregressive loop (for non-Metal or f16/remote
-paths) re-runs the full forward pass each step — O(N²) with no cache.
-Gemma 3 4B Q4K CPU pays ~3-4 s per generated token; 8 tokens is ~30 s,
-64 tokens is ~4 minutes. Functional but not ollama-shaped.
+Two-phase autoregressive decoder in `larql-inference/src/forward/kv_generate.rs`:
 
-The Metal shader `generate()` at
-`crates/larql-inference/src/layer_graph/generate.rs` does this right
-(KV-cached decode, ~20× faster) but is Q4K + Metal only.
+- **Prefill** uses `run_attention_with_kv` to capture post-RoPE K and
+  post-V-norm V per layer into a `KvCache`.
+- **Decode** step in `crates/larql-inference/src/attention/decode.rs`:
+  `run_attention_block_decode_step` takes the new token's hidden +
+  the layer's existing cache, computes Q/K/V for just that row with
+  `apply_rope_partial_at(position=cached_len)`, concatenates the new
+  K/V onto the cache, runs `gqa_attention_decode_step` (O(cached_len)
+  per head), returns updated cache.
 
-Proper fix: add a CPU-path `generate_cached()` that threads a
-`HashMap<layer, SharedKV>` across autoregressive steps and swaps the
-inner forward to a single-new-token-against-cached-KV pass. This is
-a real refactor of `predict_with_ffn` — needs a single-token variant
-that takes + returns KV state. Once the variant exists, `RemoteWalkBackend`
-+ CPU attention with KV cache gets us fast decode on the demo path.
+Backend-agnostic via `FfnBackend` — works with `WalkFfn` (local) and
+`RemoteWalkBackend` (FFN over HTTP). Measured on Gemma 3 4B f32:
+
+- **Local, no cache (before):** ~1.2 s per decode step, O(N²) growing
+- **Local, KV-cached (now):** ~0.6 s/token steady
+- **Remote FFN, KV-cached (now):** ~0.5-0.6 s/token steady — same
+  protocol as the no-cache version, just many fewer tokens re-shipped
+
+Limitations:
+- Skips Gemma 4 E2B per-layer embeddings (PLE) and layer-scalar
+  application in the decode loop. Fine for Gemma 3. For full
+  Gemma 4 correctness wire `apply_per_layer_embedding` + `apply_layer_scalar`
+  into `generate_cached`'s decode layer.
+- Q4K CPU path still uses its own no-cache loop (`run_q4k_generate_cpu`).
+  Q4K + Metal shader `generate()` remains the fast Q4K path.
+
+### KV cache strategy selector — **SHIPPED (partial)**
+
+`larql run --kv-cache <strategy>` selects how past-token state is kept:
+
+- `standard` *(default)* — full FP32 K/V, unbounded. Shipped.
+- `markov-bounded` — sliding window (StreamingLLM-style). Shipped.
+  Pass `--context-window N` for the window size. Older tokens drop
+  off; memory stays O(window) regardless of generation length.
+- `none` — re-run full forward per decode step. O(N²). Shipped as
+  correctness fallback.
+
+Not yet wired into the live decode path (all in `crates/kv-cache-benchmark/`):
+
+- `markov-full` — active residual window + cold-tier reconstruction
+  via checkpoint layers. Compressed storage via residuals not K/V.
+  See `crates/kv-cache-benchmark/src/markov_residual/`. Needs a
+  reconstruction primitive that rehydrates K/V for cold-tier
+  positions from `token_ids + checkpoint_residual`.
+- `turboquant` — per-tensor Q4/Q8 compression of cached K/V. See
+  `crates/kv-cache-benchmark/src/turboquant/`. Needs per-step
+  quantize/dequantize around the cache append.
+- `graph-walk` — experimental, unclear production viability.
 
 ### Shader attention + remote FFN
+
+### Shader attention + remote FFN (Act 2 endgame)
 
 Q4K + Metal + remote FFN — the ultimate Act 2 configuration. The
 shader pipeline (`full_pipeline_q4` / `decode_token`) currently

@@ -15,6 +15,7 @@ pub mod embed;
 pub mod ple;
 pub mod layer;
 pub mod predict;
+pub mod kv_generate;
 pub mod trace;
 pub mod memit;
 pub mod target_delta;
@@ -114,6 +115,7 @@ pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
 
 pub use embed::embed_tokens_pub;
 pub use layer::{run_ffn, run_attention_public, run_layer_with_ffn};
+pub use kv_generate::{generate_cached, generate_cached_with_window};
 pub use predict::{
     predict, predict_with_temperature, predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace,
     predict_with_router, predict_with_strategy, predict_from_hidden, predict_from_hidden_with_ffn,

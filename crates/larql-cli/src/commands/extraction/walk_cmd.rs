@@ -56,6 +56,16 @@ pub struct WalkArgs {
     #[arg(long, default_value = "1")]
     pub max_tokens: usize,
 
+    /// KV cache strategy for autoregressive decode.
+    /// See `larql run --help` for the full menu.
+    #[arg(long, default_value = "standard",
+          value_parser = crate::commands::primary::run_cmd::parse_kv_cache)]
+    pub kv_cache: crate::commands::primary::run_cmd::KvCacheKind,
+
+    /// Sliding-window size when `--kv-cache markov-bounded`.
+    #[arg(long, default_value = "0")]
+    pub context_window: usize,
+
     /// Run full forward pass with walk FFN and show predictions (requires --model).
     #[arg(long)]
     pub predict: bool,
@@ -562,7 +572,7 @@ fn run_predict_inner(
     // max_tokens == 1 preserves the legacy "show top-K predictions
     // for the next token" behavior of `dev walk --predict`.
     if args.max_tokens > 1 {
-        generate_stream(weights, tokenizer, &walk_ffn, &token_ids, args.max_tokens, verbose);
+        generate_stream(weights, tokenizer, &walk_ffn, &token_ids, args, verbose);
         let walk_elapsed = start.elapsed();
         vlog!(verbose, "  Walk forward: {:.1}s", walk_elapsed.as_secs_f64());
         return Ok(());
@@ -691,7 +701,7 @@ fn run_predict_remote(
     let start = Instant::now();
 
     if args.max_tokens > 1 {
-        generate_stream(weights, tokenizer, &remote, token_ids, args.max_tokens, verbose);
+        generate_stream(weights, tokenizer, &remote, token_ids, args, verbose);
         if verbose {
             eprintln!("  Forward pass: {:.2}s  (FFN → {})",
                       start.elapsed().as_secs_f64(), url);
@@ -716,69 +726,74 @@ fn run_predict_remote(
     Ok(())
 }
 
-/// Stream autoregressive generation to stdout, token by token.
+/// Stream autoregressive generation to stdout, token by token, using
+/// a CPU KV cache.
 ///
-/// Each step: run a forward pass over the current sequence, take the
-/// argmax token, decode, `print!` without newline, flush. Appends the
-/// token ID to the sequence and continues until `max_tokens` or an EOS
-/// token is produced.
+/// **Phase 1 (prefill)**: full forward pass over the prompt, capturing
+/// post-RoPE K and post-V-norm V per layer → initial KV cache.
+/// **Phase 2 (decode)**: per-step — embed new token (one row), run a
+/// decode-step attention that attends new Q against cached K/V +
+/// appends new K/V to the cache, FFN, next layer. Per-step cost is
+/// O(cached_len × hidden) instead of O(cached_len² × hidden) without
+/// the cache.
 ///
 /// Backend-agnostic — works with `WalkFfn` (local), `RemoteWalkBackend`
 /// (FFN over HTTP), or any other `FfnBackend` impl.
-///
-/// On each step the full current sequence is re-run through
-/// `predict_with_ffn` (no KV cache). For Q4K + Metal deployments the
-/// shader `generate()` in `larql-inference/src/layer_graph/generate.rs`
-/// is far faster (KV-cached decode); route there when possible.
 fn generate_stream(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
     ffn: &dyn larql_inference::FfnBackend,
     initial_ids: &[u32],
-    max_tokens: usize,
+    args: &WalkArgs,
     verbose: bool,
 ) -> Vec<u32> {
     use std::io::Write;
-    let mut ids = initial_ids.to_vec();
+    use crate::commands::primary::run_cmd::KvCacheKind;
     let mut stdout = std::io::stdout();
+    let max_tokens = args.max_tokens;
 
-    if max_tokens == 0 {
-        return Vec::new();
-    }
-    let mut generated = Vec::with_capacity(max_tokens);
-
-    for step in 0..max_tokens {
-        // Next-token distribution over the current sequence. top=1 is
-        // enough here — we only need the argmax for greedy decoding.
-        let result = predict_with_ffn(weights, tokenizer, &ids, 1, ffn);
-        let next_id = match result.token_ids.first() {
-            Some(&id) => id,
-            None => break,
-        };
-        let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
-
-        // Stream the token to stdout — `print!` + explicit flush so
-        // each token lands instantly (the default line-buffered stdout
-        // would hold everything until a newline).
-        print!("{tok_str}");
-        let _ = stdout.flush();
-
-        generated.push(next_id);
-        ids.push(next_id);
-
-        // EOS / special-token stop. The tokenizer's decode of these
-        // often returns an empty string; check the id against the
-        // architecture's configured stop tokens too if available.
-        if is_stop_token(tok_str) {
-            break;
+    let (generated, label) = match args.kv_cache {
+        KvCacheKind::Standard => {
+            let g = larql_inference::forward::generate_cached(
+                weights, tokenizer, ffn, initial_ids, max_tokens,
+                |_id, tok| { print!("{tok}"); let _ = stdout.flush(); },
+            );
+            (g, "standard KV cache")
         }
-        // Fast-path: on very short generations, skip the explicit
-        // EOS-id lookup cost.
-        let _ = step;
-    }
+        KvCacheKind::MarkovBounded => {
+            let window = if args.context_window > 0 {
+                Some(args.context_window)
+            } else {
+                None
+            };
+            let g = larql_inference::forward::generate_cached_with_window(
+                weights, tokenizer, ffn, initial_ids, max_tokens, window,
+                |_id, tok| { print!("{tok}"); let _ = stdout.flush(); },
+            );
+            (g, "Markov-bounded KV cache")
+        }
+        KvCacheKind::None => {
+            // No-cache: run full forward per step. O(N²).
+            let mut ids = initial_ids.to_vec();
+            let mut generated = Vec::with_capacity(max_tokens);
+            for _ in 0..max_tokens {
+                let result = predict_with_ffn(weights, tokenizer, &ids, 1, ffn);
+                let next_id = match result.token_ids.first() {
+                    Some(&id) => id, None => break,
+                };
+                let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
+                print!("{tok_str}");
+                let _ = stdout.flush();
+                ids.push(next_id);
+                generated.push(next_id);
+                if is_stop_token(tok_str) { break; }
+            }
+            (generated, "no cache (O(N²))")
+        }
+    };
     println!();
     if verbose {
-        eprintln!("  Generated {} tokens", generated.len());
+        eprintln!("  Generated {} tokens ({label})", generated.len());
     }
     generated
 }

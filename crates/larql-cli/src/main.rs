@@ -229,10 +229,8 @@ struct ChatArgs {
     /// Vindex directory, `hf://owner/name`, or cache shorthand.
     model: String,
 
-    /// Max tokens to generate per response. Defaults low because the
-    /// CPU path has no KV cache yet — use `--metal` with a Q4K vindex
-    /// for KV-cached fast generation.
-    #[arg(short = 'n', long = "max-tokens", default_value = "8")]
+    /// Max tokens to generate per chat response.
+    #[arg(short = 'n', long = "max-tokens", default_value = "64")]
     max_tokens: usize,
 
     /// Route FFN to a remote larql-server.
@@ -255,6 +253,8 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             prompt: None,
             max_tokens: c.max_tokens,
             top: 1,
+            kv_cache: run_cmd::KvCacheKind::Standard,
+            context_window: 0,
             ffn: c.ffn,
             ffn_timeout_secs: c.ffn_timeout_secs,
             verbose: c.verbose,
