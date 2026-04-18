@@ -85,6 +85,7 @@ pub fn predict_q4k(
     // unshared sliding/global layer). Mirrors `predict_with_temperature`.
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+    let dump_dir = std::env::var("LARQL_CPU_DUMP_LAYERS").ok();
 
     for layer in 0..num_layers {
         // ── Dequantise this layer's Q/K/V/O and gate/up/down ──
@@ -161,6 +162,18 @@ pub fn predict_q4k(
         weights.tensors.remove(&gate_key);
         weights.tensors.remove(&up_key);
         weights.tensors.remove(&down_key);
+
+        // Optional per-layer residual dump matching the Metal shader's
+        // LARQL_METAL_DUMP_LAYERS convention. Together these let us diff
+        // CPU vs Metal layer-by-layer and bisect the first divergence.
+        if let Some(ref dir) = dump_dir {
+            let slice = h.as_slice().unwrap_or(&[]);
+            let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let path = format!("{dir}/cpu_layer_{layer:02}.f32");
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                eprintln!("[dump] failed to write {path}: {e}");
+            }
+        }
     }
 
     crate::forward::predict::logits_to_predictions_pub(

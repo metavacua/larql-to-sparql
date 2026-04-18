@@ -167,12 +167,40 @@ pub fn generate(
         h.as_slice().unwrap_or(&[]).to_vec()
     });
 
-    let h = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec).unwrap_or(h_embed);
+    let h_metal = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec.clone())
+        .unwrap_or_else(|_| h_embed.clone());
 
+    let compare = std::env::var("LARQL_METAL_COMPARE_CPU").is_ok();
+
+    let h = h_metal;
     let h_1d = {
         let h_final = crate::forward::apply_norm(weights, &h, weights.arch.final_norm_key(), norm_offset);
         h_final.row(seq_len - 1).to_owned()
     };
+
+    // CPU-vs-Metal comparison mode (LARQL_METAL_COMPARE_CPU=1). Runs the
+    // known-correct `predict_q4k` CPU path on the same prompt and diffs
+    // the top-5 predicted tokens against the Metal path. Purpose: isolate
+    // whether wrong-token output is from the compute path or from the
+    // lm_head / logits-sampling layer.
+    if compare {
+        let metal_hits_vindex = index.lm_head_knn_backend(&h_1d, 5, backend);
+        let metal_hits_cpu_lm = cpu_lm_head_topk(weights, &h_1d, 5);
+        let as_toks = |hits: &[(u32, f32)]| -> Vec<String> {
+            hits.iter()
+                .map(|(t, _)| tokenizer.decode(&[*t], true).unwrap_or_default().trim().to_string())
+                .collect()
+        };
+        eprintln!("[compare] metal final h_1d:  len={}  nan={}  inf={}  max_abs={:.3e}",
+            h_1d.len(),
+            h_1d.iter().filter(|v| v.is_nan()).count(),
+            h_1d.iter().filter(|v| v.is_infinite()).count(),
+            h_1d.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max));
+        eprintln!("[compare] metal top-5 via vindex-KNN:    {:?}", as_toks(&metal_hits_vindex));
+        eprintln!("[compare] metal top-5 via CPU lm_head:   {:?}", as_toks(&metal_hits_cpu_lm));
+
+        eprintln!("[compare] (run `larql walk --predict` (no --metal) for CPU reference tokens)");
+    }
     let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
 
     // Sample first token

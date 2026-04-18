@@ -8,7 +8,6 @@ pub mod forward;
 pub mod graph_ffn;
 pub mod layer_graph;
 pub mod model;
-pub mod route_ffn;
 pub mod residual;
 pub mod tokenizer;
 pub mod trace;
@@ -34,7 +33,7 @@ pub use capture::{
 };
 pub use error::InferenceError;
 pub use ffn::{
-    FfnBackend, HighwayFfn, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
+    FfnBackend, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
     SparseFfn, WeightFfn,
 };
 pub use attention::AttentionWeights;
@@ -52,19 +51,6 @@ pub use forward::{
     KnnOverride, KNN_COSINE_THRESHOLD,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
-#[allow(deprecated)]
-pub use ffn::experimental::cached::CachedFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::clustered::{ClusteredFfn, ClusteredGateIndex};
-#[allow(deprecated)]
-pub use ffn::experimental::down_clustered::{DownClusteredFfn, DownClusteredIndex};
-#[allow(deprecated)]
-pub use ffn::experimental::entity_routed::EntityRoutedFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::feature_list::FeatureListFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::graph::GraphFfn;
-pub use route_ffn::{RouteFfn, RouteGuidedFfn, RouteTable};
 pub use trace::{
     trace_residuals, trace as trace_decomposed, AnswerWaypoint, LayerSummary,
     ResidualTrace, TraceNode, TracePositions, TraceStore, TraceWriter,

@@ -159,9 +159,6 @@ enum DevCommand {
     /// Build gate index for graph-based FFN (offline, run once per model).
     IndexGates(index_gates_cmd::IndexGatesArgs),
 
-    /// Extract attention routing patterns from forward passes.
-    ExtractRoutes(extract_routes_cmd::ExtractRoutesArgs),
-
     /// Walk the model as a local vector index — gate KNN + down token lookup.
     Walk(walk_cmd::WalkArgs),
 
@@ -186,9 +183,6 @@ enum DevCommand {
     /// Bottleneck analysis of attention components.
     AttnBottleneck(attn_bottleneck_cmd::AttnBottleneckArgs),
 
-    /// Benchmark FFN performance: dense vs sparse at various K values.
-    FfnBench(ffn_bench_cmd::FfnBenchArgs),
-
     /// Bottleneck analysis of FFN components.
     FfnBottleneck(ffn_bottleneck_cmd::FfnBottleneckArgs),
 
@@ -197,9 +191,6 @@ enum DevCommand {
 
     /// Knowledge graph retrieval benchmark.
     KgBench(kg_bench_cmd::KgBenchArgs),
-
-    /// Measure FFN throughput at various access patterns.
-    FfnThroughput(ffn_throughput_cmd::FfnThroughputArgs),
 
     /// Trace residual stream trajectories on the sphere across layers.
     TrajectoryTrace(trajectory_trace_cmd::TrajectoryTraceArgs),
@@ -543,7 +534,6 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
         DevCommand::Residuals(a) => residuals_cmd::run(a),
         DevCommand::Predict(a) => predict_cmd::run(a),
         DevCommand::IndexGates(a) => index_gates_cmd::run(a),
-        DevCommand::ExtractRoutes(a) => extract_routes_cmd::run(a),
         DevCommand::Walk(a) => walk_cmd::run(a),
         DevCommand::AttentionCapture(a) => attention_capture_cmd::run(a),
         DevCommand::QkTemplates(a) => qk_templates_cmd::run(a),
@@ -552,11 +542,9 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
         DevCommand::OvGate(a) => ov_gate_cmd::run(a),
         DevCommand::CircuitDiscover(a) => circuit_discover_cmd::run(a),
         DevCommand::AttnBottleneck(a) => attn_bottleneck_cmd::run(a),
-        DevCommand::FfnBench(a) => ffn_bench_cmd::run(a),
         DevCommand::FfnBottleneck(a) => ffn_bottleneck_cmd::run(a),
         DevCommand::FfnOverlap(a) => ffn_overlap_cmd::run(a),
         DevCommand::KgBench(a) => kg_bench_cmd::run(a),
-        DevCommand::FfnThroughput(a) => ffn_throughput_cmd::run(a),
         DevCommand::TrajectoryTrace(a) => trajectory_trace_cmd::run(a),
         DevCommand::ProjectionTest(a) => projection_test_cmd::run(a),
         DevCommand::FingerprintExtract(a) => fingerprint_extract_cmd::run(a),

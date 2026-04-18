@@ -463,48 +463,6 @@ impl<'a> WalkFfn<'a> {
         Some((out, activation))
     }
 
-    /// KNN-direct walk: gate scores as activations + down from mmap.
-    /// NOTE: Produces wrong answer without up projection (tested: Jack instead of Paris).
-    /// Kept for future research when combined gate+up vectors are available.
-    #[allow(dead_code)]
-    ///
-    /// Gate KNN scores = x @ gate_vectors^T = the gate projection.
-    /// Apply SiLU activation. Multiply by down matrix. Done.
-    /// No gate matmul from model weights. No up matmul. No GEGLU.
-    /// Two BLAS gemms: gate_knn + down. Reads 205MB instead of 315MB.
-    fn walk_ffn_knn_direct(
-        &self,
-        layer: usize,
-        x: &Array2<f32>,
-    ) -> Option<(Array2<f32>, Array2<f32>)> {
-        let down_view = self.index.down_layer_matrix(layer)?;
-        let gate_scores = self.index.gate_scores_batch(layer, x)?;
-
-        let arch = &*self.weights.arch;
-        let use_gelu = matches!(
-            arch.activation(),
-            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
-        );
-
-        // Gate scores → SiLU/GELU activation (no up projection)
-        let activation = if use_gelu {
-            gate_scores.mapv(crate::ffn::gelu_tanh)
-        } else {
-            gate_scores.mapv(|v| v * crate::ffn::sigmoid(v))
-        };
-
-        // activation[seq, intermediate] @ down[intermediate, hidden] → [seq, hidden]
-        let mut out = larql_compute::matmul_gpu(&activation, &down_view, self.backend);
-
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
-            .and_then(|k| self.weights.vectors.get(&k))
-        {
-            crate::forward::add_bias(&mut out, bias);
-        }
-
-        Some((out, activation))
-    }
-
     /// Walk FFN: gate/up from model weights + down from mmap.
     ///
     /// Uses dense gate/up matmul (exact, sequential reads) and reads the down

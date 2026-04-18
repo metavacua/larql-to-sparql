@@ -1,21 +1,16 @@
 //! Feed-forward network computation — trait-based with pluggable backends.
 //!
-//! ## Production backends
-//! - [`WeightFfn`] — dense, architecture-correct (the ground truth)
-//! - [`SparseFfn`] — gate matmul + top-K sparse up/down
-//! - [`LayerFfnRouter`] — per-layer backend selection
-//! - [`HighwayFfn`] — returns zeros (skip FFN)
+//! Production: [`WalkFfn`](crate::vindex::WalkFfn) — the unified walk kernel.
+//! Full-K and sparse-K are the same code path parameterised by [`WalkFfnConfig`](crate::vindex::WalkFfnConfig).
 //!
-//! See also `WalkFfn` in `vector_index.rs` (delegates to WeightFfn + vindex trace).
-//!
-//! ## Experimental backends
-//! See `experimental/` for research backends developed during FFN optimization.
+//! Reference: [`WeightFfn`] + [`SparseFfn`] live here for correctness/bench
+//! comparison (see `examples/walk_correctness.rs`); they are not used in
+//! production dispatch.
 
 pub mod weight;
 pub mod sparse;
 pub mod sparse_compute;
 pub mod remote;
-pub mod experimental;
 #[cfg(test)]
 mod tests;
 
@@ -67,21 +62,6 @@ impl<'a> LayerFfnRouter<'a> {
         if layer < self.num_layers { self.backends[layer] }
         else { self.backends[self.num_layers - 1] }
     }
-}
-
-// ── Highway backend ──
-
-/// Returns zeros. Skips FFN computation; attention still runs.
-pub struct HighwayFfn;
-
-impl FfnBackend for HighwayFfn {
-    fn forward(&self, _layer: usize, x: &Array2<f32>) -> Array2<f32> {
-        Array2::<f32>::zeros((x.shape()[0], x.shape()[1]))
-    }
-    fn forward_with_activation(&self, _layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-        (Array2::<f32>::zeros((x.shape()[0], x.shape()[1])), Array2::<f32>::zeros((x.shape()[0], 1)))
-    }
-    fn name(&self) -> &str { "highway" }
 }
 
 // ── Activation functions ──

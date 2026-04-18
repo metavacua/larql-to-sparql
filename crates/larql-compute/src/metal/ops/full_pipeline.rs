@@ -562,7 +562,8 @@ pub fn dispatch_full_pipeline(
         ffn_q8s_bufs.push(bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64));
     }
 
-    let cmd = queue.new_command_buffer();
+    let mut cmd = queue.new_command_buffer();
+    let dump_path = std::env::var("LARQL_METAL_DUMP_LAYERS").ok();
 
     for l in 0..num_layers {
         let eps = layers[l].eps;
@@ -1360,6 +1361,25 @@ pub fn dispatch_full_pipeline(
             enc.end_encoding();
         }
 
+        // Optional per-layer residual dump (LARQL_METAL_DUMP_LAYERS=<dir>).
+        // Commits the buffer up to this layer, reads h_bufs[l+1], writes to
+        // `{dir}/metal_layer_{l}.f32` as raw little-endian floats. Enables
+        // diffing against the CPU reference layer-by-layer to bisect the
+        // first layer where the Metal compute path diverges from CPU.
+        if let Some(ref dir) = dump_path {
+            cmd.commit();
+            cmd.wait_until_completed();
+            let ptr = h_bufs[l + 1].contents() as *const f32;
+            if !ptr.is_null() {
+                let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+                let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let path = format!("{dir}/metal_layer_{l:02}.f32");
+                if let Err(e) = std::fs::write(&path, &bytes) {
+                    eprintln!("[dump] failed to write {path}: {e}");
+                }
+            }
+            cmd = queue.new_command_buffer();
+        }
     }
 
     cmd.commit();

@@ -11,7 +11,7 @@ use crate::residual::rms_norm;
 use super::apply_norm;
 use super::ple::{apply_per_layer_embedding};
 
-/// Public wrapper for run_attention (used by CachedFfn calibration).
+/// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(weights: &ModelWeights, h: &Array2<f32>, layer: usize) -> Option<Array2<f32>> {
     run_attention(weights, h, layer)
 }
