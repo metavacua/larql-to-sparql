@@ -23,6 +23,7 @@ pub mod shaders;   // modular: shaders/mod.rs → one file per shader
 pub mod buffers;
 pub mod f32_ops;
 pub mod ops;        // modular: ops/mod.rs → one file per operation
+pub mod stages;     // modular: stages/mod.rs → one file per pipeline stage
 pub mod calibrate;
 mod direct_ops;
 mod decode;

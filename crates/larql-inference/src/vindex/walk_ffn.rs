@@ -269,11 +269,10 @@ impl<'a> WalkFfn<'a> {
             if let (Some(gate_scores), Some(x_flat)) =
                 (self.index.gate_scores_batch(layer, x), x_slice_for_matmul)
             {
-                // Up leg.
+                // Up leg — native f32 mmap if present, else direct Q4K matmul.
                 let up_scores: Option<ndarray::Array2<f32>> = if let Some(v) = up_native {
                     Some(larql_compute::dot_proj_gpu(x, &v, self.backend))
                 } else if let Some(y) = self.index.q4k_matmul_transb(layer, 1, x_flat, seq_len, self.backend) {
-                    // y is [seq, intermediate] row-major.
                     ndarray::Array2::from_shape_vec((seq_len, intermediate), y).ok()
                 } else { None };
 
@@ -288,8 +287,6 @@ impl<'a> WalkFfn<'a> {
                     let out_matmul: Option<ndarray::Array2<f32>> = if let Some(v) = down_native {
                         Some(larql_compute::matmul_gpu(&activation, &v, self.backend))
                     } else if let Some(act_flat) = act_slice {
-                        // W_down is stored [hidden, intermediate]; q4k_matmul_transb
-                        // with component=2 emits [seq, hidden] directly.
                         self.index
                             .q4k_matmul_transb(layer, 2, act_flat, seq_len, self.backend)
                             .and_then(|y| ndarray::Array2::from_shape_vec((seq_len, hidden), y).ok())
