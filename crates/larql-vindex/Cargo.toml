@@ -18,6 +18,9 @@ thiserror = { workspace = true }
 # Matrix types (all compute via larql-compute)
 ndarray = "0.16"
 
+# Parallelism for the direct-Q4K matmul kernel (feature walk).
+rayon = "1.10"
+
 # Tokenizer (for embeddings loading + token resolution)
 tokenizers = "0.21"
 

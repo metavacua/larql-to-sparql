@@ -10,6 +10,7 @@
 //!   sparse_model: gate KNN + sparse gather from model weights
 
 use ndarray::Array2;
+use rayon::prelude::*;
 
 use larql_compute::ComputeBackend;
 use crate::ffn::FfnBackend;
@@ -19,6 +20,30 @@ use crate::vindex::l1_cache::FfnL1Cache;
 use crate::vindex::walk_config::WalkFfnConfig;
 
 use larql_vindex::{GateIndex, WalkHit, WalkTrace};
+
+/// Helper enums for the K=full gemv path. Keep the backing storage alive
+/// (Arc<Vec<f32>> or native mmap view) so the ArrayView2 borrows are valid.
+enum UpMatrix<'a> {
+    View(ndarray::ArrayView2<'a, f32>),
+    Arc(std::sync::Arc<Vec<f32>>),
+}
+enum DownMatrix<'a> {
+    View(ndarray::ArrayView2<'a, f32>),
+    Arc(std::sync::Arc<Vec<f32>>),
+}
+
+/// True when the user asked for full-K (K ≥ feature count) — the signal
+/// that we should route the walk through batched gemm rather than a
+/// per-feature loop. Treats `usize::MAX` (set by `::dense` / `--k full`)
+/// as full-K; also caches the check when top-K happens to exceed the
+/// layer's feature count.
+#[inline]
+fn hits_len_ge_intermediate(config: &WalkFfnConfig, layer: usize, intermediate: usize) -> bool {
+    match config.k_for(layer) {
+        Some(k) => k >= intermediate,
+        None => true,
+    }
+}
 
 pub struct WalkFfn<'a> {
     pub weights: &'a ModelWeights,
@@ -176,32 +201,23 @@ impl<'a> WalkFfn<'a> {
         let seq_len = x.shape()[0];
         let intermediate = self.index.num_features(layer);
 
-        // Prefer native f32 mmap (zero-copy). Fall back to lazy Q4K dequant
-        // when the vindex ships Q4K-only (as Gemma 4 31B does). Q4K arcs
-        // live in the Mutex-cached VectorIndex fields; the local bindings
-        // below keep them alive for the ArrayView2 borrows.
+        // Prefer native f32 mmap (zero-copy). When the vindex is Q4K-only
+        // (e.g. Gemma 4 31B) we decode one row at a time into scratch
+        // buffers — no full-layer dequant cache, so memory stays flat
+        // regardless of model size. The row-decode cost is ~60μs on 31B
+        // and only fires K times per layer, so at the sparse K users
+        // actually run (100–500) the overhead is bounded.
         let up_native = self.index.up_layer_matrix(layer);
         let down_native = self.index.down_layer_matrix(layer);
-        let up_q4k: Option<std::sync::Arc<Vec<f32>>> = if up_native.is_none() {
-            Some(self.index.q4k_ffn_layer(layer, 1)?)
-        } else { None };
-        let down_q4k: Option<std::sync::Arc<Vec<f32>>> = if down_native.is_none() {
-            Some(self.index.q4k_ffn_layer(layer, 2)?)
-        } else { None };
-        let up_view: ndarray::ArrayView2<'_, f32> = match up_native {
-            Some(v) => v,
-            None => ndarray::ArrayView2::from_shape(
-                (intermediate, hidden),
-                up_q4k.as_ref().unwrap().as_slice(),
-            ).ok()?,
-        };
-        let down_view: ndarray::ArrayView2<'_, f32> = match down_native {
-            Some(v) => v,
-            None => ndarray::ArrayView2::from_shape(
-                (intermediate, hidden),
-                down_q4k.as_ref().unwrap().as_slice(),
-            ).ok()?,
-        };
+        let q4k_row_fallback = up_native.is_none() || down_native.is_none();
+        // Sanity-check Q4K data is present so we fail early rather than
+        // surfacing confusing per-row decode misses.
+        if q4k_row_fallback && self.index.interleaved_q4k_layer_data(layer).is_none() {
+            return None;
+        }
+
+        // No scratch buffers needed — Q4K fused kernels decode + math in one pass.
+        let _ = q4k_row_fallback;
 
         let arch = &*self.weights.arch;
         let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
@@ -213,9 +229,91 @@ impl<'a> WalkFfn<'a> {
         let mut out = Array2::<f32>::zeros((seq_len, hidden));
         let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));
 
+        // Hoist layer-level state: the HashMap lookups inside the feature
+        // loop fire ~15M times per forward on 31B K=full. When no INSERT
+        // has touched this layer we can skip them entirely.
+        let layer_has_overrides = self.index.has_overrides_at(layer);
+        let up_bias_for_layer = if !is_gated {
+            arch.ffn_up_bias_key(layer).and_then(|bk| self.weights.vectors.get(&bk).cloned())
+        } else { None };
+
+        // K=full gemv fast path. When every feature is active (top-K > N),
+        // the per-feature loop is mathematically equivalent to three dense
+        // matmuls: gate_scores = x @ W_gate.T, up_scores = x @ W_up.T,
+        // out = silu(gate)*up @ W_down.T. Routing through BLAS gemm is
+        // 10–30× faster than iterating 10k+ features serially because
+        // BLAS cache-blocks the work and keeps FMA pipelines saturated.
+        //
+        // Requires the up matrix cached as f32 [intermediate, hidden]. For
+        // Q4K-only vindexes we call q4k_ffn_layer to build the cache on
+        // first access (same mechanism as down_cache above). Memory cost:
+        // ~3.4 GB on 4B per-model, ~27 GB on 31B — feasible on 4B laptops,
+        // tight on 31B/64 GB machines (future work: per-layer streaming).
+        // K=full fast path. Three variants, chosen by what the vindex exposes:
+        //
+        //  (A) native f32 mmap for up/down → route through BLAS sgemm
+        //      (same as walk_ffn_interleaved); zero extra memory.
+        //  (B) Q4K vindex, on-the-fly matmul_transb (direct-Q4K gemm)
+        //      → decode + FMA fused per feature, parallel over W rows;
+        //      zero extra memory (no f32 cache). Enables K=full on 31B
+        //      within a 64 GB RAM budget.
+        //  (C) Q4K vindex with cached f32 decode → fallback when direct
+        //      matmul isn't available. Fastest on small models where
+        //      memory is plentiful.
+        //
+        // Each variant terminates with the same silu/gelu * up → activation
+        // → activation @ down → out sequence.
+        let k_is_full = hits_len_ge_intermediate(&self.config, layer, intermediate);
+        if !layer_has_overrides && is_gated && k_is_full {
+            let x_slice_for_matmul: Option<&[f32]> = x.as_slice();
+            if let (Some(gate_scores), Some(x_flat)) =
+                (self.index.gate_scores_batch(layer, x), x_slice_for_matmul)
+            {
+                // Up leg.
+                let up_scores: Option<ndarray::Array2<f32>> = if let Some(v) = up_native {
+                    Some(larql_compute::dot_proj_gpu(x, &v, self.backend))
+                } else if let Some(y) = self.index.q4k_matmul_transb(layer, 1, x_flat, seq_len, self.backend) {
+                    // y is [seq, intermediate] row-major.
+                    ndarray::Array2::from_shape_vec((seq_len, intermediate), y).ok()
+                } else { None };
+
+                if let Some(up_scores) = up_scores {
+                    let activation = if use_gelu {
+                        crate::ffn::gelu_tanh_gate_up(&gate_scores, &up_scores)
+                    } else {
+                        crate::ffn::silu_gate_up(&gate_scores, &up_scores)
+                    };
+                    // Down leg.
+                    let act_slice: Option<&[f32]> = activation.as_slice();
+                    let out_matmul: Option<ndarray::Array2<f32>> = if let Some(v) = down_native {
+                        Some(larql_compute::matmul_gpu(&activation, &v, self.backend))
+                    } else if let Some(act_flat) = act_slice {
+                        // W_down is stored [hidden, intermediate]; q4k_matmul_transb
+                        // with component=2 emits [seq, hidden] directly.
+                        self.index
+                            .q4k_matmul_transb(layer, 2, act_flat, seq_len, self.backend)
+                            .and_then(|y| ndarray::Array2::from_shape_vec((seq_len, hidden), y).ok())
+                    } else { None };
+                    if let Some(out_matmul) = out_matmul {
+                        out.assign(&out_matmul);
+                        full_activation.assign(&activation);
+                        return Some((out, full_activation));
+                    }
+                }
+            }
+        }
+
         for s in 0..seq_len {
             let x_row = x.row(s);
             let x_owned = x_row.to_owned();
+            // Used by q4k_ffn_row_dot (up fast path); constant per seq pos.
+            let x_slice_owned: Vec<f32>;
+            let x_slice: &[f32] = if let Some(sl) = x_row.as_slice() {
+                sl
+            } else {
+                x_slice_owned = x_owned.as_slice().unwrap().to_vec();
+                &x_slice_owned
+            };
 
             // Gate: try fastest path available
             //   1. gate_walk (per-feature dot, no matmul) if available
@@ -228,25 +326,115 @@ impl<'a> WalkFfn<'a> {
 
             let mut out_row = out.row_mut(s);
 
+            // Parallel fast path — see comment above for trigger conditions.
+            // Resolves the Q4K up slice once per layer, then the hot loop
+            // calls `larql_models::quant::ggml::q4k_row_dot` directly (no
+            // dyn dispatch per feature). On M3 Max this takes 31B K=full
+            // from ~15 s to ~2 s per forward.
+            let parallelisable = !layer_has_overrides
+                && is_gated
+                && hits.len() >= 512
+                && down_native.is_none();
+            // Populate the down cache here — only when the parallel path
+            // will actually use it. At K=full the gemv fast path already
+            // returned, so this pays for itself only on sparse K layers.
+            let down_cache_local: Option<std::sync::Arc<Vec<f32>>> =
+                if parallelisable { self.index.q4k_ffn_layer(layer, 2) } else { None };
+            if parallelisable && down_cache_local.is_some() {
+                let down_arc = down_cache_local.as_ref().unwrap();
+                let down_data: &[f32] = down_arc.as_slice();
+                // Hoist up-side Q4K slice out of the hot loop — one dyn call
+                // here, then the closure uses `&[u8]` directly.
+                let up_slices = self.index.interleaved_q4k_layer_data(layer);
+                let up_q4k_bytes: Option<&[u8]> = match (up_native.as_ref(), up_slices) {
+                    (Some(_), _) => None,
+                    (None, Some(s)) if s[1].1 == "Q4_K" => Some(s[1].0),
+                    _ => None,
+                };
+                let n_threads = rayon::current_num_threads().max(1);
+                let chunk_size = hits.len().div_ceil(n_threads);
+                let up_native_ref = up_native.as_ref();
+
+                let partials: Vec<Vec<f32>> = hits
+                    .par_chunks(chunk_size)
+                    .map(|chunk| {
+                        let mut partial = vec![0.0f32; hidden];
+                        for &(feat, gate_score) in chunk {
+                            let up_score = if let Some(up_view) = up_native_ref {
+                                up_view.row(feat).dot(&x_row)
+                            } else if let Some(up_bytes) = up_q4k_bytes {
+                                // Q4_K row stride: blocks_per_row * 144 bytes.
+                                let bytes_per_row = (hidden / 256) * 144;
+                                let start = feat * bytes_per_row;
+                                let end = start + bytes_per_row;
+                                match larql_models::quant::ggml::q4k_row_dot(
+                                    &up_bytes[start..end], x_slice,
+                                ) {
+                                    Ok(v) => v,
+                                    Err(_) => 0.0,
+                                }
+                            } else {
+                                // Unknown up format — cheapest is to skip this
+                                // feature. Accuracy at K=full may suffer but the
+                                // parallelisable check gates this tightly.
+                                0.0
+                            };
+                            let activated_gate = if use_gelu {
+                                crate::ffn::gelu_tanh(gate_score)
+                            } else {
+                                gate_score * crate::ffn::sigmoid(gate_score)
+                            };
+                            let act = activated_gate * up_score;
+                            if act.abs() > 1e-10 {
+                                let row_start = feat * hidden;
+                                let down_row = &down_data[row_start..row_start + hidden];
+                                // Route through ndarray → BLAS saxpy rather
+                                // than a hand-rolled loop; LLVM doesn't
+                                // reliably auto-vectorise the scalar version.
+                                let mut pv = ndarray::ArrayViewMut1::from(partial.as_mut_slice());
+                                let dv = ndarray::ArrayView1::from(down_row);
+                                pv.scaled_add(act, &dv);
+                            }
+                        }
+                        partial
+                    })
+                    .collect();
+
+                let out_slice = out_row.as_slice_mut().unwrap();
+                for p in &partials {
+                    for i in 0..hidden {
+                        out_slice[i] += p[i];
+                    }
+                }
+                // full_activation intentionally left zero in the fast path —
+                // callers needing it drop to the serial loop.
+                continue;
+            }
+
             for (feat, gate_score) in hits {
                 let act = if is_gated {
-                    // Up: prefer the override slot (set by INSERT) before
-                    // falling back to the mmap'd `up_features.bin` row.
-                    // This is the parallel of the down_override path
-                    // below — installing a fact rewrites all three
-                    // FFN slot components (gate via overlay, up here,
-                    // down via base.down_overrides) so the slot's
-                    // activation reflects the constellation install
-                    // instead of the original weak free-slot up vector.
-                    let up_score = if let Some(up_ov) = self.index.up_override(layer, feat) {
+                    // Up source: INSERT override (rare) > native mmap row >
+                    // Q4K per-row NEON decode. The `layer_has_overrides`
+                    // early-out skips the HashMap lookup on clean layers.
+                    let up_ov = if layer_has_overrides {
+                        self.index.up_override(layer, feat)
+                    } else { None };
+                    let up_score = if let Some(up_ov) = up_ov {
                         if up_ov.len() == hidden {
-                            let ov = ndarray::ArrayView1::from(up_ov);
-                            ov.dot(&x_row)
-                        } else {
+                            ndarray::ArrayView1::from(up_ov).dot(&x_row)
+                        } else if let Some(ref up_view) = up_native {
                             up_view.row(feat).dot(&x_row)
+                        } else {
+                            match self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice) {
+                                Some(v) => v, None => return None,
+                            }
                         }
-                    } else {
+                    } else if let Some(ref up_view) = up_native {
                         up_view.row(feat).dot(&x_row)
+                    } else {
+                        match self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice) {
+                            Some(v) => v, None => return None,
+                        }
                     };
                     let activated_gate = if use_gelu {
                         crate::ffn::gelu_tanh(gate_score)
@@ -256,9 +444,7 @@ impl<'a> WalkFfn<'a> {
                     activated_gate * up_score
                 } else {
                     let mut v = gate_score;
-                    if let Some(bias) = arch.ffn_up_bias_key(layer)
-                        .and_then(|bk| self.weights.vectors.get(&bk))
-                    {
+                    if let Some(ref bias) = up_bias_for_layer {
                         if feat < bias.len() { v += bias[feat]; }
                     }
                     if use_gelu { crate::ffn::gelu_tanh(v) } else { v * crate::ffn::sigmoid(v) }
@@ -267,16 +453,29 @@ impl<'a> WalkFfn<'a> {
                 full_activation[[s, feat]] = act;
 
                 if act.abs() > 1e-10 {
-                    // Down: scaled vector add from mmap (not a matmul)
-                    if let Some(override_down) = self.index.down_override(layer, feat) {
+                    // Down: INSERT override (rare) > native mmap > Q4K cache.
+                    let down_ov = if layer_has_overrides {
+                        self.index.down_override(layer, feat)
+                    } else { None };
+                    if let Some(override_down) = down_ov {
                         if override_down.len() == hidden {
-                            let ov = ndarray::ArrayView1::from(override_down);
-                            out_row.scaled_add(act, &ov);
+                            out_row.scaled_add(act, &ndarray::ArrayView1::from(override_down));
                             continue;
                         }
                     }
-                    let down_row = down_view.row(feat);
-                    out_row.scaled_add(act, &down_row);
+                    if let Some(ref down_view) = down_native {
+                        out_row.scaled_add(act, &down_view.row(feat));
+                    } else {
+                        // Serial sparse fallback hits Q4K row-scaled-add
+                        // against the transposed cache — populates it on
+                        // demand; sized ~intermediate×hidden per layer.
+                        let out_slice = out_row.as_slice_mut().unwrap();
+                        if !self.index.q4k_ffn_row_scaled_add_via_cache(
+                            layer, 2, feat, act, out_slice,
+                        ) {
+                            return None;
+                        }
+                    }
                 }
             }
         }

@@ -134,4 +134,34 @@ impl GateIndex for VectorIndex {
     {
         VectorIndex::q4k_ffn_layer(self, layer, component)
     }
+
+    fn q4k_ffn_row_into(&self, layer: usize, component: usize, feat: usize, out: &mut [f32]) -> bool {
+        VectorIndex::q4k_ffn_row_into(self, layer, component, feat, out)
+    }
+
+    fn q4k_ffn_row_dot(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+        VectorIndex::q4k_ffn_row_dot(self, layer, component, feat, x)
+    }
+
+    fn q4k_ffn_row_dot_via_cache(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+        VectorIndex::q4k_ffn_row_dot_via_cache(self, layer, component, feat, x)
+    }
+    fn q4k_ffn_row_scaled_add_via_cache(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+        VectorIndex::q4k_ffn_row_scaled_add_via_cache(self, layer, component, feat, alpha, out)
+    }
+
+    fn q4k_ffn_row_scaled_add(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+        VectorIndex::q4k_ffn_row_scaled_add(self, layer, component, feat, alpha, out)
+    }
+
+    fn q4k_matmul_transb(
+        &self,
+        layer: usize,
+        component: usize,
+        x: &[f32],
+        x_rows: usize,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        VectorIndex::q4k_matmul_transb(self, layer, component, x, x_rows, backend)
+    }
 }

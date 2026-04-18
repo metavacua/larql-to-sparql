@@ -10,6 +10,7 @@
 /// into f16 subnormal range by the corrected Q4_K/Q6_K scale formulas.
 /// The right formula is `114 - e`: for `e = shifts + 1`, we need f32
 /// biased exponent `127 + (-14 - shifts)` = `114 - e`.
+#[inline]
 pub fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits >> 15) as u32) << 31;
     let exp = ((bits >> 10) & 0x1F) as u32;

@@ -491,11 +491,12 @@ mod tests {
 
     /// Inline llama.cpp Q4_K dequantise — kept in the test module so we
     /// don't take a dev-dep on `larql-models` just to verify the format.
+    /// Mirrors `dequantize_row_q4_K` in llama.cpp/ggml-quants.c.
     fn dequantize_q4_k_llama(data: &[u8], n_elements: usize) -> Vec<f32> {
         let block_size = 144;
         let super_block = 256;
         let n_blocks = n_elements / super_block;
-        let mut out = Vec::with_capacity(n_elements);
+        let mut out = vec![0.0f32; n_elements];
         for sb in 0..n_blocks {
             let block = &data[sb * block_size..(sb + 1) * block_size];
             let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
@@ -509,20 +510,25 @@ mod tests {
                 scales[j + 4] = (p[j + 8] & 0x0F) | ((p[j]     >> 6) << 4);
                 mins[j + 4]   = (p[j + 8] >>  4)  | ((p[j + 4] >> 6) << 4);
             }
+            // Four groups × 32 bytes. Each group holds two adjacent
+            // sub-blocks: low nibbles → sub 2g (scales[2g]), high
+            // nibbles → sub 2g+1 (scales[2g+1]).
             let quants = &block[16..144];
-            for j in 0..8 {
-                let sc = d * scales[j] as f32;
-                let mn = dmin * mins[j] as f32;
-                let chunk = &quants[j * 16..(j + 1) * 16];
-                // 16 lo nibbles first (sub[0..16]), then 16 hi nibbles
-                // (sub[16..32]) — llama.cpp layout.
-                let base = out.len();
-                out.resize(base + 32, 0.0);
-                for (i, &byte) in chunk.iter().enumerate() {
-                    let lo = (byte & 0x0F) as f32;
-                    let hi = ((byte >> 4) & 0x0F) as f32;
-                    out[base + i]      = sc * lo - mn;
-                    out[base + i + 16] = sc * hi - mn;
+            let sb_base = sb * super_block;
+            for g in 0..4 {
+                let sb_lo = 2 * g;
+                let sb_hi = 2 * g + 1;
+                let sc_lo = d * scales[sb_lo] as f32;
+                let sc_hi = d * scales[sb_hi] as f32;
+                let mn_lo = dmin * mins[sb_lo] as f32;
+                let mn_hi = dmin * mins[sb_hi] as f32;
+                let chunk = &quants[g * 32..(g + 1) * 32];
+                let base_lo = sb_base + sb_lo * 32;
+                let base_hi = sb_base + sb_hi * 32;
+                for l in 0..32 {
+                    let byte = chunk[l];
+                    out[base_lo + l] = sc_lo * (byte & 0x0F) as f32 - mn_lo;
+                    out[base_hi + l] = sc_hi * ((byte >> 4) & 0x0F) as f32 - mn_hi;
                 }
             }
         }

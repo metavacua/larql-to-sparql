@@ -307,10 +307,14 @@ impl VectorIndex {
 
     /// Dequantise one Q4K/Q6K FFN matrix on demand, caching the result.
     /// `component`: 0=gate, 1=up, 2=down. Returns `None` when no Q4K
-    /// interleaved mmap is loaded. Used by `walk_ffn_sparse` as a fallback
-    /// when the vindex exposes only Q4K (no native f32 up/down mmap).
-    /// First access per (layer, component) pays a ~200ms dequant cost; later
-    /// accesses are a single `Arc` clone.
+    /// interleaved mmap is loaded. First access per (layer, component)
+    /// pays a ~200ms–1s dequant cost (varies with intermediate size);
+    /// later accesses are a single `Arc` clone.
+    ///
+    /// **Memory cost.** Caching a 31B layer's up+down is ~1.85GB of f32
+    /// heap. For fine-grained inference prefer [`Self::q4k_ffn_row_into`],
+    /// which decodes a single feature into a caller-provided buffer
+    /// without populating the cache.
     pub fn q4k_ffn_layer(&self, layer: usize, component: usize)
         -> Option<std::sync::Arc<Vec<f32>>>
     {
@@ -327,14 +331,34 @@ impl VectorIndex {
         let (bytes, format) = slices[component];
         let intermediate = self.num_features(layer);
         if intermediate == 0 { return None; }
-        let n = intermediate * self.hidden_size;
+        let hidden = self.hidden_size;
+        let n = intermediate * hidden;
         let padded = n.div_ceil(256) * 256;
         let decoded = match format {
             "Q4_K" => larql_models::quant::ggml::dequantize_q4_k(bytes, padded).ok()?,
             "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded).ok()?,
             _ => return None,
         };
-        let arc = std::sync::Arc::new(decoded.into_iter().take(n).collect::<Vec<f32>>());
+        // Gate (0) and up (1) are stored row-major [intermediate, hidden] — row
+        // `feat` already contains that feature's weight vector.
+        //
+        // Down (2) is stored row-major [hidden, intermediate] (the native PyTorch
+        // nn.Linear(intermediate, hidden) orientation). To give callers a
+        // feature-major view matching gate/up, we transpose here: after the flip
+        // arc[feat*hidden..(feat+1)*hidden] is feature `feat`'s down vector.
+        let final_data: Vec<f32> = if component == 2 {
+            let mut t = vec![0.0f32; n];
+            for h in 0..hidden {
+                let src_row = &decoded[h * intermediate..(h + 1) * intermediate];
+                for (i, &v) in src_row.iter().enumerate() {
+                    t[i * hidden + h] = v;
+                }
+            }
+            t
+        } else {
+            decoded.into_iter().take(n).collect()
+        };
+        let arc = std::sync::Arc::new(final_data);
         {
             let mut cache = self.q4k_ffn_cache.lock().unwrap();
             if let Some(slot) = cache.get_mut(layer) {
@@ -342,6 +366,263 @@ impl VectorIndex {
             }
         }
         Some(arc)
+    }
+
+    /// Cache-based scaled-add — decodes the whole layer (`q4k_ffn_layer`)
+    /// on first access, then serves `out += alpha * row` from the cached
+    /// feature-major matrix. Required for down: it is stored transposed
+    /// on disk (`[hidden, intermediate]`), so a per-row decode reads
+    /// hidden-dim rows rather than feature vectors.
+    #[inline]
+    pub fn q4k_ffn_row_scaled_add_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
+        let Some(arc) = self.q4k_ffn_layer(layer, component) else { return false; };
+        let hidden = self.hidden_size;
+        let row_start = feat * hidden;
+        let row_end = row_start + hidden;
+        if row_end > arc.len() || out.len() != hidden { return false; }
+        for i in 0..hidden {
+            out[i] += alpha * arc[row_start + i];
+        }
+        true
+    }
+
+    /// Cache-based dot — same role as `q4k_ffn_row_scaled_add_via_cache`
+    /// but for the up leg. Currently unused (up is row-major on disk so
+    /// per-row decode is enough); kept for diagnostics and test parity.
+    /// If this works and the per-row version doesn't, the bug is in the
+    /// row-offset calculation or per-row byte slicing.
+    #[inline]
+    pub fn q4k_ffn_row_dot_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
+        let arc = self.q4k_ffn_layer(layer, component)?;
+        let hidden = self.hidden_size;
+        let row_start = feat * hidden;
+        let row_end = row_start + hidden;
+        if row_end > arc.len() { return None; }
+        let mut acc = 0.0f32;
+        for (i, &xv) in x.iter().enumerate() {
+            acc += arc[row_start + i] * xv;
+        }
+        Some(acc)
+    }
+
+    /// Direct Q4K/Q6K matmul — Y = X @ W.T, where W is the FFN matrix
+    /// stored as Q4K/Q6K bytes in the vindex. Decodes and FMAs fused,
+    /// parallelised across W rows. Zero extra RAM (no f32 cache).
+    ///
+    /// `x` is `[x_rows, w_cols]` row-major. `component` selects the layer's
+    /// gate (0) / up (1) / down (2) Q4K slice. On return the output is
+    /// `[x_rows, w_rows]` row-major where `w_rows` equals the slice's
+    /// shape-0 (intermediate for gate/up, hidden for down).
+    ///
+    /// Dispatches to the backend's `q4k_matvec` / `q6k_matvec` when a
+    /// compute backend is provided (Metal on Apple Silicon, CPU-SIMD
+    /// otherwise) — one submission per X row. Falls back to the rayon
+    /// + CPU-NEON scalar path when no backend is attached.
+    pub fn q4k_matmul_transb(
+        &self,
+        layer: usize,
+        component: usize,
+        x: &[f32],
+        x_rows: usize,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        use rayon::prelude::*;
+        if component > 2 { return None; }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+
+        let intermediate = self.num_features(layer);
+        let hidden = self.hidden_size;
+        let (w_rows, w_cols) = match component {
+            0 | 1 => (intermediate, hidden),
+            2     => (hidden, intermediate),
+            _     => return None,
+        };
+        if x.len() != x_rows * w_cols { return None; }
+        if w_cols % 256 != 0 { return None; }
+
+        // Backend per-row dispatch is *slower* than CPU-NEON here because
+        // each q4k_matvec call pays a Metal submission (~15 ms). With x_rows
+        // × layers × 3 components we'd spend all our time in dispatch.
+        // A batched Metal shader (one submission per layer) would fix this,
+        // but we don't have it wired yet — keep the hook for future use.
+        let _ = backend;
+
+        let (block_bytes, block_size) = match format {
+            "Q4_K" => (144usize, 256usize),
+            "Q6_K" => (210usize, 256usize),
+            _ => return None,
+        };
+        let blocks_per_row = w_cols / block_size;
+        let bytes_per_w_row = blocks_per_row * block_bytes;
+
+        // CPU fallback: rayon over W rows, NEON per-row dot.
+        let mut y_t = vec![0.0f32; w_rows * x_rows];
+        y_t.par_chunks_mut(x_rows).enumerate().for_each(|(j, slot)| {
+            let w_row_start = j * bytes_per_w_row;
+            let w_row = &bytes[w_row_start..w_row_start + bytes_per_w_row];
+            for i in 0..x_rows {
+                let x_row = &x[i * w_cols..(i + 1) * w_cols];
+                slot[i] = match format {
+                    "Q4_K" => larql_models::quant::ggml::q4k_row_dot(w_row, x_row).unwrap_or(0.0),
+                    "Q6_K" => larql_models::quant::ggml::q6k_row_dot(w_row, x_row).unwrap_or(0.0),
+                    _ => 0.0,
+                };
+            }
+        });
+        let mut y = vec![0.0f32; x_rows * w_rows];
+        for j in 0..w_rows {
+            let src_base = j * x_rows;
+            for i in 0..x_rows {
+                y[i * w_rows + j] = y_t[src_base + i];
+            }
+        }
+        Some(y)
+    }
+
+    /// Fused Q4K/Q6K decode + dot with `x` for one feature. Returns `None`
+    /// if the row isn't available. This is ~2× faster than the
+    /// `q4k_ffn_row_into` → BLAS sdot sequence because it skips the Vec
+    /// allocation, the intermediate copy, and keeps the decoded data in
+    /// registers.
+    #[inline]
+    pub fn q4k_ffn_row_dot(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
+        if component > 2 || x.len() != self.hidden_size { return None; }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return None; }
+        match format {
+            "Q4_K" => {
+                if hidden % 256 != 0 { return None; }
+                let bytes_per_row = (hidden / 256) * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return None; }
+                larql_models::quant::ggml::q4k_row_dot(&bytes[start..end], x).ok()
+            }
+            "Q6_K" => {
+                if hidden % 256 != 0 { return None; }
+                let bytes_per_row = (hidden / 256) * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return None; }
+                larql_models::quant::ggml::q6k_row_dot(&bytes[start..end], x).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Fused Q4K/Q6K decode + scaled-add into `out` for one feature.
+    /// Counterpart to `q4k_ffn_row_dot` for the down leg.
+    #[inline]
+    pub fn q4k_ffn_row_scaled_add(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
+        if component > 2 || out.len() != self.hidden_size { return false; }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return false; }
+        match format {
+            "Q4_K" => {
+                if hidden % 256 != 0 { return false; }
+                let bytes_per_row = (hidden / 256) * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                larql_models::quant::ggml::q4k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+            }
+            "Q6_K" => {
+                if hidden % 256 != 0 { return false; }
+                let bytes_per_row = (hidden / 256) * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                larql_models::quant::ggml::q6k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+            }
+            _ => false,
+        }
+    }
+
+    /// Decode one row of a Q4K/Q6K FFN matrix directly into `out` without
+    /// caching. `component`: 0=gate, 1=up, 2=down; `feat` is the feature
+    /// (row) index; `out` must have length `hidden_size`. Returns `false`
+    /// when the vindex has no Q4K data or shape is invalid.
+    ///
+    /// Row-level decode is the small-memory path for very large models
+    /// (~30B+) where caching entire dequantised layers blows the RAM
+    /// budget. Cost is ~50–70μs per row for hidden≈5376; at K=100 on a
+    /// 60-layer model that's ~60 × 100 × 2 decodes × 60μs ≈ 720ms per
+    /// forward pass.
+    pub fn q4k_ffn_row_into(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        out: &mut [f32],
+    ) -> bool {
+        if component > 2 || out.len() != self.hidden_size { return false; }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return false; }
+
+        match format {
+            "Q4_K" => {
+                // Q4_K block: 144 bytes for 256 elements.
+                if hidden % 256 != 0 { return false; }
+                let blocks_per_row = hidden / 256;
+                let bytes_per_row = blocks_per_row * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                let row_bytes = &bytes[start..end];
+                match larql_models::quant::ggml::dequantize_q4_k(row_bytes, hidden) {
+                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Err(_) => false,
+                }
+            }
+            "Q6_K" => {
+                // Q6_K block: 210 bytes for 256 elements.
+                if hidden % 256 != 0 { return false; }
+                let blocks_per_row = hidden / 256;
+                let bytes_per_row = blocks_per_row * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                let row_bytes = &bytes[start..end];
+                match larql_models::quant::ggml::dequantize_q6_k(row_bytes, hidden) {
+                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Err(_) => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     /// Get gate matrix from Q4 interleaved file, dequantized to f32.

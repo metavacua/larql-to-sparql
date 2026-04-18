@@ -113,6 +113,36 @@ impl GateIndex for PatchedVindex {
         self.base.q4k_ffn_layer(layer, component)
     }
 
+    fn q4k_ffn_row_into(&self, layer: usize, component: usize, feat: usize, out: &mut [f32]) -> bool {
+        self.base.q4k_ffn_row_into(layer, component, feat, out)
+    }
+
+    fn q4k_ffn_row_dot(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+        self.base.q4k_ffn_row_dot(layer, component, feat, x)
+    }
+
+    fn q4k_ffn_row_dot_via_cache(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+        self.base.q4k_ffn_row_dot_via_cache(layer, component, feat, x)
+    }
+    fn q4k_ffn_row_scaled_add_via_cache(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+        self.base.q4k_ffn_row_scaled_add_via_cache(layer, component, feat, alpha, out)
+    }
+
+    fn q4k_ffn_row_scaled_add(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+        self.base.q4k_ffn_row_scaled_add(layer, component, feat, alpha, out)
+    }
+
+    fn q4k_matmul_transb(
+        &self,
+        layer: usize,
+        component: usize,
+        x: &[f32],
+        x_rows: usize,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        self.base.q4k_matmul_transb(layer, component, x, x_rows, backend)
+    }
+
     fn gate_knn_batch(&self, layer: usize, x: &ndarray::Array2<f32>, top_k: usize) -> Vec<usize> {
         // The base impl runs a BLAS gemm against the disk-side gate
         // matrix and ignores the patch overlay — so any feature with

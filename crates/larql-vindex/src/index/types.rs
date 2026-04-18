@@ -30,7 +30,7 @@ pub struct WalkTrace {
 /// Both `VectorIndex` (base, readonly) and `PatchedVindex` (with overlay)
 /// implement this trait, allowing `WalkFfn` and other consumers to work
 /// transparently with patched or unpatched indexes.
-pub trait GateIndex {
+pub trait GateIndex: Send + Sync {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)>;
     fn feature_meta(&self, layer: usize, feature: usize) -> Option<FeatureMeta>;
     fn num_features(&self, layer: usize) -> usize;
@@ -76,6 +76,46 @@ pub trait GateIndex {
     /// Returns `None` when the vindex has no Q4K interleaved data.
     fn q4k_ffn_layer(&self, _layer: usize, _component: usize)
         -> Option<std::sync::Arc<Vec<f32>>> { None }
+
+    /// Decode one row of a Q4K FFN matrix without caching. Small-memory
+    /// alternative to `q4k_ffn_layer`. See `VectorIndex::q4k_ffn_row_into`.
+    fn q4k_ffn_row_into(&self, _layer: usize, _component: usize, _feat: usize, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Fused Q4K/Q6K decode + dot — returns `dot(dequant(row), x)` without
+    /// materialising the decoded row. See `VectorIndex::q4k_ffn_row_dot`.
+    fn q4k_ffn_row_dot(&self, _layer: usize, _component: usize, _feat: usize, _x: &[f32]) -> Option<f32> {
+        None
+    }
+
+    /// TEMP diagnostic — route row-dot through full-layer cache.
+    fn q4k_ffn_row_dot_via_cache(&self, _layer: usize, _component: usize, _feat: usize, _x: &[f32]) -> Option<f32> {
+        None
+    }
+    fn q4k_ffn_row_scaled_add_via_cache(&self, _layer: usize, _component: usize, _feat: usize, _alpha: f32, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Fused Q4K/Q6K decode + scaled-add — `out += alpha * dequant(row)`
+    /// without materialising the decoded row.
+    fn q4k_ffn_row_scaled_add(&self, _layer: usize, _component: usize, _feat: usize, _alpha: f32, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Direct Q4K/Q6K matmul — `Y = X @ W.T` against the layer's Q4K bytes.
+    /// See `VectorIndex::q4k_matmul_transb`. `x` is `[x_rows, w_cols]`.
+    /// `backend` (when provided) routes through Metal/CPU-SIMD kernels.
+    fn q4k_matmul_transb(
+        &self,
+        _layer: usize,
+        _component: usize,
+        _x: &[f32],
+        _x_rows: usize,
+        _backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        None
+    }
 
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.

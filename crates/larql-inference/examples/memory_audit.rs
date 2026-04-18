@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use larql_inference::{
-    predict_with_ffn, InferenceModel,
+    default_backend, predict_with_ffn, InferenceModel,
     vindex::{WalkFfn, WalkFfnConfig},
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
@@ -30,6 +30,8 @@ struct Args {
     prompt: String,
     iterations: usize,
     walk_only: bool,
+    k: String,
+    hnsw_ef: Option<usize>,
 }
 
 fn parse_args() -> Args {
@@ -39,6 +41,8 @@ fn parse_args() -> Args {
     let mut prompt = "The capital of France is".to_string();
     let mut iterations: usize = 20;
     let mut walk_only = false;
+    let mut k = "full".to_string();
+    let mut hnsw_ef: Option<usize> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -48,16 +52,18 @@ fn parse_args() -> Args {
             "--prompt" => { i += 1; prompt = args[i].clone(); }
             "--iterations" => { i += 1; iterations = args[i].parse().unwrap_or(20); }
             "--walk-only" => { walk_only = true; }
+            "--k" => { i += 1; k = args[i].clone(); }
+            "--hnsw" => { i += 1; hnsw_ef = args[i].parse().ok(); }
             _ => {}
         }
         i += 1;
     }
 
     if model.is_empty() || !vindex.is_dir() {
-        eprintln!("Usage: memory_audit --model MODEL --vindex PATH [--walk-only] [--prompt TEXT] [--iterations N]");
+        eprintln!("Usage: memory_audit --model MODEL --vindex PATH [--walk-only] [--k full|N] [--hnsw EF] [--prompt TEXT] [--iterations N]");
         std::process::exit(1);
     }
-    Args { model, vindex, prompt, iterations, walk_only }
+    Args { model, vindex, prompt, iterations, walk_only, k, hnsw_ef }
 }
 
 // ── RSS sampling ────────────────────────────────────────────────────────
@@ -141,14 +147,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         index.total_gate_vectors(), q4, q4k, iv);
     checkpoint("after interleaved mmap loads", started, baseline);
 
+    if let Some(ef) = args.hnsw_ef {
+        index.enable_hnsw(ef);
+        println!("  HNSW enabled with ef_search={ef} (indexes build lazily per layer)\n");
+    }
+
     // ── Encode prompt ──────────────────────────────────────────────────
     let encoding = tokenizer.encode(args.prompt.as_str(), true)
         .map_err(|e| format!("tokenize: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
     // ── Warmup forward pass ────────────────────────────────────────────
+    let k_val: usize = if args.k == "full" || args.k == "unlimited" {
+        usize::MAX
+    } else {
+        args.k.parse().unwrap_or(usize::MAX)
+    };
+    println!("  K = {} ({})\n", args.k, if k_val == usize::MAX { "dense walk".into() } else { format!("sparse K={k_val}") });
+    // Detect best compute backend: Metal when available (Apple Silicon with
+    // the `metal` feature), CPU-BLAS otherwise. Walk matmul paths route
+    // through this backend automatically.
+    let backend = default_backend();
+    println!("  Compute backend: {}\n", if backend.has_q4() { "Metal (or CPU w/ Q4)" } else { "CPU (BLAS)" });
     let walk = WalkFfn::from_config(weights, &index,
-        WalkFfnConfig::sparse(num_layers, usize::MAX));
+        WalkFfnConfig::sparse(num_layers, k_val))
+        .with_backend(&*backend);
 
     let t = Instant::now();
     let _ = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk);
