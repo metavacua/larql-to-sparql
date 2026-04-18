@@ -10,10 +10,11 @@
 //!   Q8_0 / Q4_0 attention which consume Q8 input.
 //!
 //! Both variants are per-position (single hidden vector per call); the
-//! caller loops over positions.
+//! caller loops over positions. The caller owns the encoder lifecycle —
+//! these helpers only issue dispatches.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// f32-output input RMS norm.
 ///
@@ -21,7 +22,7 @@ use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
 /// cooperative single-threadgroup `rms_norm` shader.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_f32(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     h_buf: &Buffer,
     h_off: u64,
@@ -33,7 +34,6 @@ pub fn encode_f32(
     norm_offset: f32,
 ) {
     let hidden_val = hidden as u32;
-    let enc = cmd.new_compute_command_encoder();
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(h_buf), h_off);
     enc.set_buffer(1, Some(norm_weight), 0);
@@ -45,13 +45,12 @@ pub fn encode_f32(
         MTLSize::new(1, 1, 1),
         MTLSize::new(256.min(hidden as u64), 1, 1),
     );
-    enc.end_encoding();
 }
 
 /// Fused RMS norm + Q8 quantise — writes Q8 int8 values and f32 scales.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_q8(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     h_buf: &Buffer,
     h_off: u64,
@@ -65,7 +64,6 @@ pub fn encode_q8(
     norm_offset: f32,
 ) {
     let hidden_val = hidden as u32;
-    let enc = cmd.new_compute_command_encoder();
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(h_buf), h_off);
     enc.set_buffer(1, Some(norm_weight), 0);
@@ -78,5 +76,4 @@ pub fn encode_q8(
         MTLSize::new(1, 1, 1),
         MTLSize::new(256.min(hidden as u64), 1, 1),
     );
-    enc.end_encoding();
 }

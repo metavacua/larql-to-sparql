@@ -14,7 +14,7 @@
 //! prefill is achieved by looping over positions with buffer offsets.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 use super::quant_matvec;
 
@@ -34,7 +34,7 @@ pub struct Proj<'a> {
 /// at their respective byte offsets.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_fused_f32(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     wq_buf: &Buffer,
     wk_buf: &Buffer,
@@ -53,7 +53,6 @@ pub fn encode_fused_f32(
     let v_rows_val = kv_rows as u32;
     let k_val = hidden as u32;
     let num_tgs = (total_rows as u64).div_ceil(q4kf_qkv::ROWS_PER_TG);
-    let enc = cmd.new_compute_command_encoder();
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(wq_buf), 0);
     enc.set_buffer(1, Some(wk_buf), 0);
@@ -70,7 +69,6 @@ pub fn encode_fused_f32(
         MTLSize::new(num_tgs, 1, 1),
         MTLSize::new(q4kf_qkv::THREADS_PER_TG, 1, 1),
     );
-    enc.end_encoding();
 }
 
 /// Per-projection f32-input QKV — mixed formats (Gemma 4 Q4_K + Q6_K).
@@ -81,7 +79,7 @@ pub fn encode_fused_f32(
 /// callers with pure f32-input formats can pass any valid buffer + 0 offset.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_per_proj(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipes: &quant_matvec::Pipelines<'_>,
     f32_in: &Buffer,
     f32_in_off: u64,
@@ -93,7 +91,6 @@ pub fn encode_per_proj(
     hidden: usize,
 ) {
     for p in projections {
-        let enc = cmd.new_compute_command_encoder();
         quant_matvec::encode(
             enc, p.format, p.w_buf,
             f32_in, f32_in_off,
@@ -102,7 +99,6 @@ pub fn encode_per_proj(
             pipes,
             p.rows, hidden,
         );
-        enc.end_encoding();
     }
 }
 
@@ -112,7 +108,7 @@ pub fn encode_per_proj(
 /// f32 scale buffers. `q8_qkv_proj` writes all three outputs in one dispatch.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_fused_q8(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     wq_buf: &Buffer, wq_scale: &Buffer,
     wk_buf: &Buffer, wk_scale: &Buffer,
@@ -129,7 +125,6 @@ pub fn encode_fused_q8(
     let v_rows_val = kv_rows as u32;
     let k_val = hidden as u32;
     let total_rows = (q_rows + kv_rows + kv_rows) as u64;
-    let enc = cmd.new_compute_command_encoder();
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(wq_buf), 0);
     enc.set_buffer(1, Some(wk_buf), 0);
@@ -150,5 +145,4 @@ pub fn encode_fused_q8(
         MTLSize::new(total_rows, 1, 1),
         MTLSize::new(256, 1, 1),
     );
-    enc.end_encoding();
 }

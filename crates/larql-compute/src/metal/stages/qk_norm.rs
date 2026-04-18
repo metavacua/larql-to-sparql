@@ -9,7 +9,7 @@
 //!     offset 0.0, weight = 1.0)
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// Compute the threadgroup width for a `head_dim`-long cooperative reduction.
 /// Rounds up to a power of two, capped at 512 (shader limit).
@@ -28,7 +28,7 @@ fn tg_width(head_dim: usize) -> u64 {
 /// should then fall back to the shader's internal normalisation.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_qk_norm(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     q_buf: &Buffer, q_w_buf: &Buffer,
     k_buf: &Buffer, k_w_buf: &Buffer,
@@ -41,7 +41,6 @@ pub fn encode_qk_norm(
     let nkv_val = num_kv_heads as u32;
     let tg_w = tg_width(head_dim);
 
-    let enc = cmd.new_compute_command_encoder();
     for pos in 0..seq_len {
         let q_buf_off = (pos * num_q_heads * head_dim * 4) as u64;
         enc.set_compute_pipeline_state(pipeline);
@@ -67,7 +66,6 @@ pub fn encode_qk_norm(
             MTLSize::new(tg_w, 1, 1),
         );
     }
-    enc.end_encoding();
 }
 
 /// Parameter-free per-head RMS norm on V (Gemma 4).
@@ -75,7 +73,7 @@ pub fn encode_qk_norm(
 /// Weight is implicitly 1.0 (shader still takes a weight buffer — the
 /// caller stages an all-ones vector of length `head_dim`). Offset is 0.
 pub fn encode_v_norm(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     v_buf: &Buffer, ones_buf: &Buffer,
     seq_len: usize,
@@ -87,7 +85,6 @@ pub fn encode_v_norm(
     let zero_off: f32 = 0.0;
     let tg_w = tg_width(head_dim);
 
-    let enc = cmd.new_compute_command_encoder();
     for pos in 0..seq_len {
         let v_buf_off = (pos * num_kv_heads * head_dim * 4) as u64;
         enc.set_compute_pipeline_state(pipeline);
@@ -103,5 +100,4 @@ pub fn encode_v_norm(
             MTLSize::new(tg_w, 1, 1),
         );
     }
-    enc.end_encoding();
 }

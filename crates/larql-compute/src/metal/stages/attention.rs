@@ -10,7 +10,7 @@
 //! pass `skip_rope = true`.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// Flags for the fused attention dispatch. Keeps the parameter list
 /// readable; every boolean has an obvious default.
@@ -22,9 +22,11 @@ pub struct Flags {
     pub rotary_dim: u32,
 }
 
+/// Dispatch `fused_attention` into the given encoder. Caller owns the
+/// encoder lifecycle.
 #[allow(clippy::too_many_arguments)]
 pub fn encode(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     q_buf: &Buffer, k_buf: &Buffer, v_buf: &Buffer,
     attn_out: &Buffer,
@@ -40,7 +42,6 @@ pub fn encode(
     let qknorm_val: u32 = if flags.use_qk_norm { 1 } else { 0 };
     let skip_rope_val: u32 = if flags.skip_rope { 1 } else { 0 };
 
-    let enc = cmd.new_compute_command_encoder();
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(q_buf), 0);
     enc.set_buffer(1, Some(k_buf), 0);
@@ -60,5 +61,4 @@ pub fn encode(
         MTLSize::new(num_q_heads as u64, seq_len as u64, 1),
         MTLSize::new(256, 1, 1),
     );
-    enc.end_encoding();
 }

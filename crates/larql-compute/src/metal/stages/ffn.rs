@@ -14,7 +14,7 @@
 //! threads.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 use super::quant_matvec;
 
@@ -28,7 +28,7 @@ pub enum Activation {
 /// Gated FFN (Llama / Gemma / Qwen): `down(act(gate) * up)`.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_gated(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipes: &quant_matvec::Pipelines<'_>,
     geglu_silu_pipeline: &ComputePipelineState,
     geglu_gelu_tanh_pipeline: &ComputePipelineState,
@@ -57,30 +57,22 @@ pub fn encode_gated(
         let inter_off = pos as u64 * inter_stride_bytes;
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
-        {
-            let enc = cmd.new_compute_command_encoder();
-            quant_matvec::encode(
-                enc, gate_format, gate_buf,
-                ffn_norm_out, h_off,
-                ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-                gate_scratch, inter_off,
-                pipes,
-                inter, hidden,
-            );
-            enc.end_encoding();
-        }
-        {
-            let enc = cmd.new_compute_command_encoder();
-            quant_matvec::encode(
-                enc, up_format, up_buf,
-                ffn_norm_out, h_off,
-                ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-                up_scratch, inter_off,
-                pipes,
-                inter, hidden,
-            );
-            enc.end_encoding();
-        }
+        quant_matvec::encode(
+            enc, gate_format, gate_buf,
+            ffn_norm_out, h_off,
+            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
+            gate_scratch, inter_off,
+            pipes,
+            inter, hidden,
+        );
+        quant_matvec::encode(
+            enc, up_format, up_buf,
+            ffn_norm_out, h_off,
+            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
+            up_scratch, inter_off,
+            pipes,
+            inter, hidden,
+        );
     }
 
     // Multi-position elementwise GEGLU.
@@ -91,14 +83,12 @@ pub fn encode_gated(
             Activation::GeluTanh => geglu_gelu_tanh_pipeline,
             Activation::SiLU => geglu_silu_pipeline,
         };
-        let enc = cmd.new_compute_command_encoder();
         enc.set_compute_pipeline_state(geglu_pipe);
         enc.set_buffer(0, Some(gate_scratch), 0);
         enc.set_buffer(1, Some(up_scratch), 0);
         enc.set_buffer(2, Some(act_scratch), 0);
         enc.set_bytes(3, 4, &total_inter_val as *const u32 as *const c_void);
         enc.dispatch_threads(MTLSize::new(total_inter, 1, 1), MTLSize::new(256, 1, 1));
-        enc.end_encoding();
     }
 
     // Down projection per position. Q4_K / Q4_KF / Q6_K take f32 input
@@ -109,7 +99,6 @@ pub fn encode_gated(
         let inter_off = pos as u64 * inter_stride_bytes;
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
-        let enc = cmd.new_compute_command_encoder();
         quant_matvec::encode(
             enc, down_format, down_buf,
             act_scratch, inter_off,
@@ -118,14 +107,13 @@ pub fn encode_gated(
             pipes,
             hidden, inter,
         );
-        enc.end_encoding();
     }
 }
 
 /// Standard FFN (StarCoder2): `down(act(up))`. No gate.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_standard(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipes: &quant_matvec::Pipelines<'_>,
     silu_pipeline: &ComputePipelineState,
     gelu_tanh_pipeline: &ComputePipelineState,
@@ -151,7 +139,6 @@ pub fn encode_standard(
         let inter_off = pos as u64 * inter_stride_bytes;
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
-        let enc = cmd.new_compute_command_encoder();
         quant_matvec::encode(
             enc, up_format, up_buf,
             ffn_norm_out, h_off,
@@ -160,7 +147,6 @@ pub fn encode_standard(
             pipes,
             inter, hidden,
         );
-        enc.end_encoding();
     }
 
     {
@@ -170,13 +156,11 @@ pub fn encode_standard(
             Activation::GeluTanh => gelu_tanh_pipeline,
             Activation::SiLU => silu_pipeline,
         };
-        let enc = cmd.new_compute_command_encoder();
         enc.set_compute_pipeline_state(act_pipe);
         enc.set_buffer(0, Some(up_scratch), 0);
         enc.set_buffer(1, Some(act_scratch), 0);
         enc.set_bytes(2, 4, &total_inter_val as *const u32 as *const c_void);
         enc.dispatch_threads(MTLSize::new(total_inter, 1, 1), MTLSize::new(256, 1, 1));
-        enc.end_encoding();
     }
 
     for pos in 0..seq_len {
@@ -184,7 +168,6 @@ pub fn encode_standard(
         let inter_off = pos as u64 * inter_stride_bytes;
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
-        let enc = cmd.new_compute_command_encoder();
         quant_matvec::encode(
             enc, down_format, down_buf,
             act_scratch, inter_off,
@@ -193,6 +176,5 @@ pub fn encode_standard(
             pipes,
             hidden, inter,
         );
-        enc.end_encoding();
     }
 }

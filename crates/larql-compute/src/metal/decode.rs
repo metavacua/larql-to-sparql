@@ -170,117 +170,48 @@ impl MetalBackend {
                         hidden, eps, norm_offset);
                 }
 
-                // Dispatch 2+: Per-projection matvec (handles mixed Q4_K/Q6_K formats)
-                // Each projection dispatched with its format-specific shader.
+                // Dispatch 2+: QKV projections — stage helper routes the mixed
+                // / fused / format-specific logic. For same-format (non-Q6_K)
+                // we hit the fused single-dispatch path; for mixed (Q4_K + Q6_K)
+                // we fall through to per-projection dispatches.
                 let all_same_format = layer.wq.format == layer.wk.format && layer.wk.format == layer.wv.format;
                 if all_same_format && layer.wq.format != crate::QuantFormat::Q6_K {
-                    // Fused QKV: all same Q4_K/Q4_KF format
-                    let total_rows = (q_dim + kv_dim + kv_dim) as u32;
-                    let q_rows_val = q_dim as u32;
-                    let k_rows_val = kv_dim as u32;
-                    let v_rows_val = kv_dim as u32;
-                    let k_val = hidden as u32;
-                    // Use correct ROWS_PER_TG for the selected pipeline
-                    let (qkv_pipeline, rows_per_tg) = if layer.wq.format == crate::QuantFormat::Q4_KF {
-                        (&self.q4kf_qkv_proj_pipeline, crate::metal::shaders::q4kf_qkv_proj::ROWS_PER_TG)
+                    let fused_pipe = if layer.wq.format == crate::QuantFormat::Q4_KF {
+                        &self.q4kf_qkv_proj_pipeline
                     } else {
-                        (&self.q4k_qkv_proj_pipeline, crate::metal::shaders::q4k_qkv_proj::ROWS_PER_TG)
+                        &self.q4k_qkv_proj_pipeline
                     };
-                    let num_tgs = (total_rows as u64).div_ceil(rows_per_tg);
-                    enc.set_compute_pipeline_state(qkv_pipeline);
-                    enc.set_buffer(0, Some(&wq_bufs[l]), 0);
-                    enc.set_buffer(1, Some(&wk_bufs[l]), 0);
-                    enc.set_buffer(2, Some(&wv_bufs[l]), 0);
-                    enc.set_buffer(3, Some(&norm_f32_buf), 0);
-                    enc.set_buffer(4, Some(&q_out), 0);
-                    enc.set_buffer(5, Some(&k_out), 0);
-                    enc.set_buffer(6, Some(&v_out), 0);
-                    enc.set_bytes(7, 4, &q_rows_val as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(8, 4, &k_rows_val as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(9, 4, &v_rows_val as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(10, 4, &k_val as *const u32 as *const std::ffi::c_void);
-                    let threads_per_tg = if layer.wq.format == crate::QuantFormat::Q4_KF {
-                        crate::metal::shaders::q4kf_qkv_proj::THREADS_PER_TG
-                    } else {
-                        crate::metal::shaders::q4k_qkv_proj::THREADS_PER_TG
-                    };
-                    enc.dispatch_thread_groups(
-                        MTLSize::new(num_tgs, 1, 1),
-                        MTLSize::new(threads_per_tg, 1, 1),
+                    crate::metal::stages::qkv_proj::encode_fused_f32(
+                        enc, fused_pipe,
+                        &wq_bufs[l], &wk_bufs[l], &wv_bufs[l],
+                        &norm_f32_buf, 0,
+                        &q_out, 0, &k_out, 0, &v_out, 0,
+                        q_dim, kv_dim, hidden,
                     );
                 } else {
-                    // Mixed formats: dispatch each projection separately.
-                    // This handles Q4_K Q/K + Q6_K V (Ollama strategy).
-                    let k_val = hidden as u32;
-
-                    // Helper: dispatch one projection with format-appropriate shader
-                    fn encode_single_proj(
-                        enc: &metal::ComputeCommandEncoderRef,
-                        w_buf: &metal::Buffer, x_buf: &metal::Buffer, out_buf: &metal::Buffer,
-                        rows: usize, k: u32, format: crate::QuantFormat,
-                        q4k_pipeline: &metal::ComputePipelineState,
-                        q4kf_pipeline: &metal::ComputePipelineState,
-                        q6k_pipeline: &metal::ComputePipelineState,
-                    ) {
-                        match format {
-                            crate::QuantFormat::Q6_K => {
-                                use crate::metal::shaders::q6k_matvec as q6k;
-                                let n = rows as u32;
-                                let num_tgs = (rows as u64).div_ceil(q6k::ROWS_PER_TG);
-                                enc.set_compute_pipeline_state(q6k_pipeline);
-                                enc.set_buffer(0, Some(w_buf), 0);
-                                enc.set_buffer(1, Some(x_buf), 0);
-                                enc.set_buffer(2, Some(out_buf), 0);
-                                enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
-                                enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-                                enc.dispatch_thread_groups(
-                                    MTLSize::new(num_tgs, 1, 1),
-                                    MTLSize::new(q6k::THREADS_PER_TG, 1, 1),
-                                );
-                            }
-                            crate::QuantFormat::Q4_KF => {
-                                use crate::metal::shaders::q4kf_qkv_proj as proj_sh;
-                                let n = rows as u32;
-                                let num_tgs = (rows as u64).div_ceil(proj_sh::ROWS_PER_TG);
-                                enc.set_compute_pipeline_state(q4kf_pipeline);
-                                enc.set_buffer(0, Some(w_buf), 0);
-                                enc.set_buffer(1, Some(x_buf), 0);
-                                enc.set_buffer(2, Some(out_buf), 0);
-                                enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
-                                enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-                                enc.dispatch_thread_groups(
-                                    MTLSize::new(num_tgs, 1, 1),
-                                    MTLSize::new(proj_sh::THREADS_PER_TG, 1, 1),
-                                );
-                            }
-                            _ => {
-                                // Q4_K standard
-                                use crate::metal::shaders::q4k_matvec as q4k;
-                                let n = rows as u32;
-                                let num_tgs = (rows as u64).div_ceil(q4k::ROWS_PER_TG);
-                                enc.set_compute_pipeline_state(q4k_pipeline);
-                                enc.set_buffer(0, Some(w_buf), 0);
-                                enc.set_buffer(1, Some(x_buf), 0);
-                                enc.set_buffer(2, Some(out_buf), 0);
-                                enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
-                                enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-                                enc.dispatch_thread_groups(
-                                    MTLSize::new(num_tgs, 1, 1),
-                                    MTLSize::new(q4k::THREADS_PER_TG, 1, 1),
-                                );
-                            }
-                        }
-                    }
-
-                    encode_single_proj(enc, &wq_bufs[l], &norm_f32_buf, &q_out,
-                        q_dim, k_val, layer.wq.format,
-                        &self.q4k_matvec_pipeline, &self.q4kf_proj_pipeline, &self.q6k_matvec_pipeline);
-                    encode_single_proj(enc, &wk_bufs[l], &norm_f32_buf, &k_out,
-                        kv_dim, k_val, layer.wk.format,
-                        &self.q4k_matvec_pipeline, &self.q4kf_proj_pipeline, &self.q6k_matvec_pipeline);
-                    encode_single_proj(enc, &wv_bufs[l], &norm_f32_buf, &v_out,
-                        kv_dim, k_val, layer.wv.format,
-                        &self.q4k_matvec_pipeline, &self.q4kf_proj_pipeline, &self.q6k_matvec_pipeline);
+                    // Mixed formats (Q4_K Q/K + Q6_K V): per-projection
+                    // dispatch through the format-aware helper.
+                    use crate::metal::stages::qkv_proj::{self, Proj};
+                    use crate::metal::stages::quant_matvec::Pipelines;
+                    let pipes = Pipelines {
+                        q4kf_proj: Some(&self.q4kf_proj_pipeline),
+                        q4k_matvec_fallback: &self.q4k_matvec_pipeline,
+                        q6k_matvec: &self.q6k_matvec_pipeline,
+                        q4_matvec: &self.q4.matvec,
+                    };
+                    qkv_proj::encode_per_proj(
+                        enc, &pipes,
+                        &norm_f32_buf, 0,
+                        // Q8 bufs unused for f32-input formats — pass the
+                        // norm buffer as a harmless placeholder.
+                        &norm_f32_buf, 0, &norm_f32_buf, 0,
+                        [
+                            Proj { format: layer.wq.format, w_buf: &wq_bufs[l], out_buf: &q_out, out_off: 0, rows: q_dim },
+                            Proj { format: layer.wk.format, w_buf: &wk_bufs[l], out_buf: &k_out, out_off: 0, rows: kv_dim },
+                            Proj { format: layer.wv.format, w_buf: &wv_bufs[l], out_buf: &v_out, out_off: 0, rows: kv_dim },
+                        ],
+                        hidden,
+                    );
                 }
             } else {
                 // Q8 path: norm+Q8 → Q8 QKV (reuse ffn_q8/q8s scratch)
@@ -441,54 +372,53 @@ impl MetalBackend {
 
             // Scratch buffers pre-allocated above — reused each layer.
             let new_h = if l % 2 == 0 { &h_a } else { &h_b };
-            {
-                if uses_q4k {
-                    use crate::metal::shaders::q4kf_qkv_proj as proj_sh;
-                    let o_rows = hidden as u32;
-                    let o_k = layer_q_dim as u32;
-                    let num_tgs = (hidden as u64).div_ceil(proj_sh::ROWS_PER_TG);
-                    let o_pipeline = if layer.wo.format == crate::QuantFormat::Q4_KF {
-                        &self.q4kf_proj_pipeline
-                    } else {
-                        &self.q4k_proj_pipeline
-                    };
-                    enc.set_compute_pipeline_state(o_pipeline);
-                    enc.set_buffer(0, Some(&wo_bufs[l]), 0);
-                    enc.set_buffer(1, Some(&attn_out), 0);
-                    enc.set_buffer(2, Some(&o_out_buf), 0);
-                    enc.set_bytes(3, 4, &o_rows as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(4, 4, &o_k as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_thread_groups(
-                        MTLSize::new(num_tgs, 1, 1),
-                        MTLSize::new(proj_sh::THREADS_PER_TG, 1, 1),
-                    );
-                } else {
-                    let o_q8 = &o_q8_scratch;
-                    let o_q8s = &o_q8s_scratch;
-                    let dim_val = layer_q_dim as u32;
-                    let blocks = (layer_q_dim / 32) as u32;
-                    enc.set_compute_pipeline_state(&self.q8_quant_pipeline);
-                    enc.set_buffer(0, Some(&attn_out), 0);
-                    enc.set_buffer(1, Some(&o_q8), 0);
-                    enc.set_buffer(2, Some(&o_q8s), 0);
-                    enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
+            if uses_q4k {
+                // Q4_K / Q4_KF / Q6_K O-projection via the stage helper.
+                use crate::metal::stages::quant_matvec::Pipelines;
+                let pipes = Pipelines {
+                    q4kf_proj: Some(&self.q4kf_proj_pipeline),
+                    q4k_matvec_fallback: &self.q4k_proj_pipeline,
+                    q6k_matvec: &self.q6k_matvec_pipeline,
+                    q4_matvec: &self.q4.matvec,
+                };
+                crate::metal::stages::o_proj::encode(
+                    enc, &pipes, &self.q8_quant_pipeline,
+                    layer.wo.format,
+                    &wo_bufs[l],
+                    &attn_out, 0,
+                    &o_q8_scratch, 0, &o_q8s_scratch, 0,
+                    &o_out_buf, 0,
+                    layer_q_dim, hidden,
+                );
+            } else {
+                // Q8 legacy path: decode-specific `q8_matvec` shader (not in
+                // stages::quant_matvec which uses `q4_matvec` for Q4_0/Q8_0
+                // with a different buffer layout). Inline.
+                let o_q8 = &o_q8_scratch;
+                let o_q8s = &o_q8s_scratch;
+                let dim_val = layer_q_dim as u32;
+                let blocks = (layer_q_dim / 32) as u32;
+                enc.set_compute_pipeline_state(&self.q8_quant_pipeline);
+                enc.set_buffer(0, Some(&attn_out), 0);
+                enc.set_buffer(1, Some(&o_q8), 0);
+                enc.set_buffer(2, Some(&o_q8s), 0);
+                enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
 
-                    let o_rows = hidden as u32;
-                    let o_k = layer_q_dim as u32;
-                    enc.set_compute_pipeline_state(&self.q8_matvec_pipeline);
-                    enc.set_buffer(0, Some(&wo_bufs[l]), 0);
-                    enc.set_buffer(1, Some(&o_q8), 0);
-                    enc.set_buffer(2, Some(&wo_scale_bufs[l]), 0);
-                    enc.set_buffer(3, Some(&o_q8s), 0);
-                    enc.set_buffer(4, Some(&o_out_buf), 0);
-                    enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
-                    enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_thread_groups(
-                        MTLSize::new((hidden as u64).div_ceil(8), 1, 1),
-                        MTLSize::new(256, 1, 1),
-                    );
-                }
+                let o_rows = hidden as u32;
+                let o_k = layer_q_dim as u32;
+                enc.set_compute_pipeline_state(&self.q8_matvec_pipeline);
+                enc.set_buffer(0, Some(&wo_bufs[l]), 0);
+                enc.set_buffer(1, Some(&o_q8), 0);
+                enc.set_buffer(2, Some(&wo_scale_bufs[l]), 0);
+                enc.set_buffer(3, Some(&o_q8s), 0);
+                enc.set_buffer(4, Some(&o_out_buf), 0);
+                enc.set_bytes(5, 4, &o_rows as *const u32 as *const std::ffi::c_void);
+                enc.set_bytes(6, 4, &o_k as *const u32 as *const std::ffi::c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new((hidden as u64).div_ceil(8), 1, 1),
+                    MTLSize::new(256, 1, 1),
+                );
             }
 
             // ── Step 5: Residual + norm (format-aware: Q4_K skips Q8 quantize) ──
@@ -791,19 +721,20 @@ impl MetalBackend {
             }
 
             // ── Step 8: Optional layer scalar ──
+            //
+            // Note: stages::layer_scalar scales in-place (src == dst). Decode's
+            // original code wrote to a separate `scaled_scratch` buffer then
+            // pointed `h_buf` at it. In-place on `new_h` produces the same
+            // downstream residual read since nothing else aliases `new_h`
+            // between this write and the next layer's input norm read.
             if layer.layer_scalar != 0.0 {
-                let scaled = &scaled_scratch;
-                let scalar_val = layer.layer_scalar;
-                enc.set_compute_pipeline_state(&self.scale_vector_pipeline);
-                enc.set_buffer(0, Some(&new_h), 0);
-                enc.set_buffer(1, Some(&scaled), 0);
-                enc.set_bytes(2, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(3, 4, &scalar_val as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
-                h_buf = scaled;
-            } else {
-                h_buf = new_h;
+                crate::metal::stages::layer_scalar::encode(
+                    enc, &self.scale_vector_pipeline,
+                    new_h, 1, hidden, layer.layer_scalar,
+                );
             }
+            h_buf = new_h;
+            let _ = &scaled_scratch; // keep binding alive; no longer needed
 
         }
 

@@ -8,15 +8,16 @@
 //! a thread per pair. One encoder batches all dispatches for efficiency.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// Apply RoPE to Q and K per head per position.
 ///
 /// `rotary_dim == 0` is treated by the shader as "rotate full head_dim".
 /// Partial rotation (Gemma 4 global layers) uses `rotary_dim < head_dim`.
+/// Caller owns the encoder lifecycle.
 #[allow(clippy::too_many_arguments)]
 pub fn encode(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     q_buf: &Buffer, k_buf: &Buffer,
     seq_len: usize,
@@ -30,7 +31,6 @@ pub fn encode(
     let rdim_effective = if rotary_dim == 0 { head_dim } else { rotary_dim };
     let hdim = (rdim_effective / 2) as u64;
 
-    let enc = cmd.new_compute_command_encoder();
     for pos in 0..seq_len {
         let pos_val = pos as u32;
         for qh in 0..num_q_heads {
@@ -60,5 +60,4 @@ pub fn encode(
             );
         }
     }
-    enc.end_encoding();
 }

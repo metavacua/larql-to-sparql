@@ -115,26 +115,38 @@ fn run_attention_block_core(
         (cached_k.clone(), cached_v.clone())
     } else {
         let w_k = weights.tensors.get(&arch.attn_k_key(layer)).unwrap();
-        let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
-        let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer)).unwrap() };
+        // v_from_k: architecturally asserted OR tensor genuinely absent.
+        // On Gemma 4 31B global layers, attention_k_eq_v=true AND v_proj is
+        // omitted from safetensors — both signals align. Prefer the arch
+        // assertion so we honour intent even if a redundant v_proj slipped
+        // into a vindex rebuild.
+        let v_from_k = arch.v_shares_k(layer)
+            || !weights.tensors.contains_key(&arch.attn_v_key(layer));
 
         let mut k_full = dot_proj(&h_norm, w_k);
-        let mut v_full = dot_proj(&h_norm, w_v);
-
         if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
             add_bias(&mut k_full, bias);
-        }
-        if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
-            add_bias(&mut v_full, bias);
-        }
-
-        if arch.has_v_norm() {
-            v_full = rms_norm_heads_no_weight(&v_full, num_kv, head_dim);
         }
 
         let k_normed = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
             Some(norm_w) => rms_norm_heads(&k_full, norm_w, num_kv, head_dim, qk_norm_off),
-            None => k_full,
+            None => k_full.clone(),
+        };
+
+        // When v shares k, v = k post-k-norm (no separate v_norm, no RoPE).
+        // Otherwise compute v via its own projection + optional v_norm.
+        let v_full = if v_from_k {
+            k_normed.clone()
+        } else {
+            let w_v = weights.tensors.get(&arch.attn_v_key(layer)).unwrap();
+            let mut v = dot_proj(&h_norm, w_v);
+            if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+                add_bias(&mut v, bias);
+            }
+            if arch.has_v_norm() {
+                v = rms_norm_heads_no_weight(&v, num_kv, head_dim);
+            }
+            v
         };
 
         let k_r = apply_rope_partial(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac);

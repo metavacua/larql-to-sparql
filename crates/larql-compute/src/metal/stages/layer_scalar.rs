@@ -8,20 +8,19 @@
 //!
 //! Scoped to positions 0..seq_len for multi-position prefill; decode
 //! calls with seq_len = 1.
+//!
+//! Caller owns the encoder lifecycle.
 
 use std::ffi::c_void;
-use metal::{Buffer, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// If `scalar` is non-zero, scale the f32 residual at each position by `scalar`.
 ///
 /// * `h_buf` is the residual buffer holding `seq_len × hidden` f32s starting
 ///   at byte 0, one `hidden`-sized slice per position.
 /// * `pipeline` must be the pipeline for the `scale_vector` shader.
-///
-/// The encoder is begun and ended inside this function so the caller can
-/// drop straight back into the main command-buffer sequence.
 pub fn encode(
-    cmd: &metal::CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
     h_buf: &Buffer,
     seq_len: usize,
@@ -30,7 +29,6 @@ pub fn encode(
 ) {
     if scalar == 0.0 { return; }
     let hidden_val = hidden as u32;
-    let enc = cmd.new_compute_command_encoder();
     for pos in 0..seq_len {
         let h_off = (pos * hidden * 4) as u64;
         enc.set_compute_pipeline_state(pipeline);
@@ -45,5 +43,4 @@ pub fn encode(
             MTLSize::new(256.min(hidden as u64), 1, 1),
         );
     }
-    enc.end_encoding();
 }

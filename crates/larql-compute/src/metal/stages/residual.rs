@@ -14,7 +14,7 @@
 //! pass `has_post_norms` and the appropriate weight buffers.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 /// Post-attention residual + pre-FFN norm (+ optional Q8 quant).
 ///
@@ -31,7 +31,7 @@ use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
 /// directly.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_post_attn(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     rms_norm_pipeline: &ComputePipelineState,
     residual_add_pipeline: &ComputePipelineState,
     q8_quant_pipeline: &ComputePipelineState,
@@ -65,56 +65,44 @@ pub fn encode_post_attn(
         if has_post_norms {
             // Post-norm: norm(O) first, then residual add.
             let normed = scratch_alloc((hidden * 4) as u64);
-            {
-                let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(rms_norm_pipeline);
-                enc.set_buffer(0, Some(o_out), h_off);
-                enc.set_buffer(1, Some(post_attn_norm_buf), 0);
-                enc.set_buffer(2, Some(&normed), 0);
-                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
-                enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
-                enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
-                enc.end_encoding();
-            }
-            let enc = cmd.new_compute_command_encoder();
+            enc.set_compute_pipeline_state(rms_norm_pipeline);
+            enc.set_buffer(0, Some(o_out), h_off);
+            enc.set_buffer(1, Some(post_attn_norm_buf), 0);
+            enc.set_buffer(2, Some(&normed), 0);
+            enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+            enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
+            enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
+            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
+
             enc.set_compute_pipeline_state(residual_add_pipeline);
             enc.set_buffer(0, Some(h_buf), h_off);
             enc.set_buffer(1, Some(&normed), 0);
             enc.set_buffer(2, Some(h_post_attn), h_off);
             enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
             enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(tg_threads, 1, 1));
-            enc.end_encoding();
         } else {
             // Pre-norm: residual add first (h + O), then norm below.
-            let enc = cmd.new_compute_command_encoder();
             enc.set_compute_pipeline_state(residual_add_pipeline);
             enc.set_buffer(0, Some(h_buf), h_off);
             enc.set_buffer(1, Some(o_out), h_off);
             enc.set_buffer(2, Some(h_post_attn), h_off);
             enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
             enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(tg_threads, 1, 1));
-            enc.end_encoding();
         }
 
         // Pre-FFN rms_norm on h_post_attn → ffn_norm_out (f32).
-        {
-            let enc = cmd.new_compute_command_encoder();
-            enc.set_compute_pipeline_state(rms_norm_pipeline);
-            enc.set_buffer(0, Some(h_post_attn), h_off);
-            enc.set_buffer(1, Some(pre_ffn_weight_buf), 0);
-            enc.set_buffer(2, Some(ffn_norm_out), h_off);
-            enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
-            enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
-            enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
-            enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
-            enc.end_encoding();
-        }
+        enc.set_compute_pipeline_state(rms_norm_pipeline);
+        enc.set_buffer(0, Some(h_post_attn), h_off);
+        enc.set_buffer(1, Some(pre_ffn_weight_buf), 0);
+        enc.set_buffer(2, Some(ffn_norm_out), h_off);
+        enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+        enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
+        enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
+        enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
 
         // Q8-quantise ffn_norm_out when the FFN needs Q8 input (Q4_0 / Q8_0).
         if ffn_needs_q8 {
             let blocks = (hidden as u64).div_ceil(32);
-            let enc = cmd.new_compute_command_encoder();
             enc.set_compute_pipeline_state(q8_quant_pipeline);
             enc.set_buffer(0, Some(ffn_norm_out), h_off);
             enc.set_buffer(1, Some(ffn_q8_buf), q8_off);
@@ -124,7 +112,6 @@ pub fn encode_post_attn(
                 MTLSize::new(blocks, 1, 1),
                 MTLSize::new(256.min(blocks), 1, 1),
             );
-            enc.end_encoding();
         }
     }
 }
@@ -138,7 +125,7 @@ pub fn encode_post_attn(
 ///     `h_next = h_post_attn + down_out`.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_post_ffn(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     rms_norm_pipeline: &ComputePipelineState,
     residual_add_pipeline: &ComputePipelineState,
     scratch_alloc: &mut dyn FnMut(u64) -> Buffer,
@@ -162,40 +149,31 @@ pub fn encode_post_ffn(
         if has_post_norms {
             if let Some(post_ffn_buf) = post_ffn_norm_buf {
                 let normed = scratch_alloc((hidden * 4) as u64);
-                {
-                    let enc = cmd.new_compute_command_encoder();
-                    enc.set_compute_pipeline_state(rms_norm_pipeline);
-                    enc.set_buffer(0, Some(down_out), h_off);
-                    enc.set_buffer(1, Some(post_ffn_buf), 0);
-                    enc.set_buffer(2, Some(&normed), 0);
-                    enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
-                    enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
-                    enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
-                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
-                    enc.end_encoding();
-                }
-                {
-                    let enc = cmd.new_compute_command_encoder();
-                    enc.set_compute_pipeline_state(residual_add_pipeline);
-                    enc.set_buffer(0, Some(h_post_attn), h_off);
-                    enc.set_buffer(1, Some(&normed), 0);
-                    enc.set_buffer(2, Some(h_next), h_off);
-                    enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
-                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(tg_threads, 1, 1));
-                    enc.end_encoding();
-                }
+                enc.set_compute_pipeline_state(rms_norm_pipeline);
+                enc.set_buffer(0, Some(down_out), h_off);
+                enc.set_buffer(1, Some(post_ffn_buf), 0);
+                enc.set_buffer(2, Some(&normed), 0);
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
+                enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
+                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(tg_threads, 1, 1));
+
+                enc.set_compute_pipeline_state(residual_add_pipeline);
+                enc.set_buffer(0, Some(h_post_attn), h_off);
+                enc.set_buffer(1, Some(&normed), 0);
+                enc.set_buffer(2, Some(h_next), h_off);
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(tg_threads, 1, 1));
                 continue;
             }
         }
 
         // Pre-norm or post-norm-without-post_ffn_norm: plain residual.
-        let enc = cmd.new_compute_command_encoder();
         enc.set_compute_pipeline_state(residual_add_pipeline);
         enc.set_buffer(0, Some(h_post_attn), h_off);
         enc.set_buffer(1, Some(down_out), h_off);
         enc.set_buffer(2, Some(h_next), h_off);
         enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
         enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(tg_threads, 1, 1));
-        enc.end_encoding();
     }
 }

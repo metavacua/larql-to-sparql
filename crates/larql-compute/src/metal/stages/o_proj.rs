@@ -10,17 +10,17 @@
 //! Single-vector per position. Multi-position prefill loops.
 
 use std::ffi::c_void;
-use metal::{Buffer, CommandBufferRef, ComputePipelineState, MTLSize};
+use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 
 use super::quant_matvec;
 
-/// Per-position O projection.
+/// Per-position O projection. Caller owns the encoder lifecycle.
 ///
 /// For Q4_K / Q4_KF / Q6_K this is one dispatch. For Q4_0 / Q8_0 we first
 /// quantise `attn_in` to the caller's Q8 staging buffer.
 #[allow(clippy::too_many_arguments)]
 pub fn encode(
-    cmd: &CommandBufferRef,
+    enc: &ComputeCommandEncoderRef,
     pipes: &quant_matvec::Pipelines<'_>,
     q8_quant_pipeline: &ComputePipelineState,
     format: crate::QuantFormat,
@@ -40,7 +40,6 @@ pub fn encode(
         // Q4_0 / Q8_0: quantise attn_in[q_dim] → Q8 int8 + per-32 f16 scale.
         let dim_val = q_dim as u32;
         let blocks = (q_dim as u64).div_ceil(32);
-        let enc = cmd.new_compute_command_encoder();
         enc.set_compute_pipeline_state(q8_quant_pipeline);
         enc.set_buffer(0, Some(attn_in), attn_in_off);
         enc.set_buffer(1, Some(q8_stage), q8_stage_off);
@@ -50,10 +49,8 @@ pub fn encode(
             MTLSize::new(blocks, 1, 1),
             MTLSize::new(256.min(blocks), 1, 1),
         );
-        enc.end_encoding();
     }
 
-    let enc = cmd.new_compute_command_encoder();
     quant_matvec::encode(
         enc, format, wo_buf,
         attn_in, attn_in_off,
@@ -62,5 +59,4 @@ pub fn encode(
         pipes,
         hidden, q_dim,
     );
-    enc.end_encoding();
 }

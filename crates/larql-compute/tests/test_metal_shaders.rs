@@ -2569,9 +2569,10 @@ fn stage_post_attn_pre_norm_matches_cpu() {
     let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
     let mut scratch = |n: u64| bufs.output(n);
     larql_compute::metal::stages::residual::encode_post_attn(
-        cmd, &rms_norm, &residual_add, &q8_quant,
+        enc, &rms_norm, &residual_add, &q8_quant,
         &mut scratch,
         &h_buf, &o_buf, &h_pa, &ffn_out,
         &w_buf, &w_buf, // post_attn_norm_buf, pre_ffn_weight_buf (same in pre-norm)
@@ -2583,6 +2584,7 @@ fn stage_post_attn_pre_norm_matches_cpu() {
         hidden as u64,
         (((hidden + 31) / 32) * 4) as u64,
     );
+    enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();
 
@@ -2641,9 +2643,10 @@ fn stage_post_attn_post_norm_matches_cpu() {
     let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
     let mut scratch = |n: u64| bufs.output(n);
     larql_compute::metal::stages::residual::encode_post_attn(
-        cmd, &rms_norm, &residual_add, &q8_quant,
+        enc, &rms_norm, &residual_add, &q8_quant,
         &mut scratch,
         &h_buf, &o_buf, &h_pa, &ffn_out,
         &w_pa_buf, &w_pf_buf,
@@ -2655,6 +2658,7 @@ fn stage_post_attn_post_norm_matches_cpu() {
         hidden as u64,
         (((hidden + 31) / 32) * 4) as u64,
     );
+    enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();
 
@@ -2686,9 +2690,10 @@ fn stage_post_ffn_pre_norm_matches_cpu() {
     let out = bufs.output((seq_len * hidden * 4) as u64);
 
     let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
     let mut scratch = |n: u64| bufs.output(n);
     larql_compute::metal::stages::residual::encode_post_ffn(
-        cmd, &rms_norm, &residual_add,
+        enc, &rms_norm, &residual_add,
         &mut scratch,
         &dn_buf, &hpa_buf, &out,
         None,
@@ -2696,6 +2701,7 @@ fn stage_post_ffn_pre_norm_matches_cpu() {
         /*has_post_norms*/ false,
         (hidden * 4) as u64,
     );
+    enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();
 
@@ -2736,9 +2742,10 @@ fn stage_post_ffn_post_norm_matches_cpu() {
     let out = bufs.output((seq_len * hidden * 4) as u64);
 
     let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
     let mut scratch = |n: u64| bufs.output(n);
     larql_compute::metal::stages::residual::encode_post_ffn(
-        cmd, &rms_norm, &residual_add,
+        enc, &rms_norm, &residual_add,
         &mut scratch,
         &dn_buf, &hpa_buf, &out,
         Some(&w_buf),
@@ -2746,6 +2753,7 @@ fn stage_post_ffn_post_norm_matches_cpu() {
         /*has_post_norms*/ true,
         (hidden * 4) as u64,
     );
+    enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();
 
@@ -2882,9 +2890,10 @@ fn stage_post_attn_q8_ffn_emits_roundtrippable_q8() {
     let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
     let mut scratch = |n: u64| bufs.output(n);
     larql_compute::metal::stages::residual::encode_post_attn(
-        cmd, &rms_norm, &residual_add, &q8_quant,
+        enc, &rms_norm, &residual_add, &q8_quant,
         &mut scratch,
         &h_buf, &o_buf, &h_pa, &ffn_out,
         &w_buf, &w_buf,
@@ -2896,6 +2905,7 @@ fn stage_post_attn_q8_ffn_emits_roundtrippable_q8() {
         hidden as u64,
         (((hidden + 31) / 32) * 4) as u64,
     );
+    enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();
 
