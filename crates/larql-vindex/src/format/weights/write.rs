@@ -171,9 +171,19 @@ impl<'a> WeightSource for StreamingWeights<'a> {
 
 /// Options for [`write_model_weights_with_opts`]. Use
 /// `WriteWeightsOptions::default()` to get the legacy behavior (writes
-/// every component file).
-#[derive(Default, Clone, Copy, Debug)]
+/// every component file — equivalent to `ExtractLevel::All`).
+#[derive(Clone, Copy, Debug)]
 pub struct WriteWeightsOptions {
+    /// Extract tier — controls which component files are written.
+    /// Attention tier writes attn + norms only; Inference adds FFN;
+    /// All adds lm_head. See [`crate::ExtractLevel`] for full semantics.
+    ///
+    /// **Default is `All`, not `Browse`.** Callers of `write_model_weights`
+    /// have already decided weights should be written; the CLI-facing
+    /// `ExtractLevel::default() == Browse` is the "I want a KNN-only
+    /// vindex" intent and is gated out earlier in the extract pipeline.
+    pub level: crate::ExtractLevel,
+
     /// Skip writing `up_weights.bin` + `down_weights.bin`. The up/down
     /// weights are expected to be available via feature-major
     /// `up_features.bin` + `down_features.bin` — the loader
@@ -190,6 +200,15 @@ pub struct WriteWeightsOptions {
     /// afterwards; otherwise downstream dense paths
     /// (`WeightFfn::forward`, MEMIT) will panic on missing tensors.
     pub ffn_compact: bool,
+}
+
+impl Default for WriteWeightsOptions {
+    fn default() -> Self {
+        Self {
+            level: crate::ExtractLevel::All,
+            ffn_compact: false,
+        }
+    }
 }
 
 /// Write model weights to split component files.
@@ -222,7 +241,12 @@ pub fn write_model_weights_with_opts(
     let num_layers = source.num_layers();
     let mut entries: Vec<WeightEntry> = Vec::new();
 
-    // ── Attention weights ──
+    // ── Attention weights ── (skipped when level < Attention)
+    let write_attn = opts.level.writes_attn();
+    let write_ffn = opts.level.writes_ffn() && !opts.ffn_compact;
+    let write_lm_head = opts.level.writes_lm_head();
+
+    if write_attn {
     let attn_path = dir.join("attn_weights.bin");
     let mut attn_file = BufWriter::new(std::fs::File::create(&attn_path)?);
     let mut attn_offset: u64 = 0;
@@ -265,30 +289,26 @@ pub fn write_model_weights_with_opts(
         callbacks.on_layer_done("attn_weights", layer, 0.0);
     }
     attn_file.flush()?;
+    } // end if write_attn
 
     // ── FFN up + down weights (gate is in gate_vectors.bin) ──
     //
-    // When `opts.ffn_compact` is set AND the architecture is dense (not
-    // MoE), skip writing `up_weights.bin` / `down_weights.bin` entirely.
-    // The loader reconstructs up/down tensors from feature-major
-    // `up_features.bin` / `down_features.bin` — those must be built
-    // separately via `cargo run --release -p larql-vindex --example
-    // build_{down,up}_features -- <vindex>` before the compact vindex
-    // can drive a dense forward pass.
+    // Skipped entirely when `opts.level < Inference` OR
+    // `opts.ffn_compact && !is_moe` (see `ffn_compact` doc for the
+    // compact-mode caveats).
     //
     // MoE compact mode is not yet supported: the MoE branch below packs
     // the per-expert up/down weights *and* the router matrix into
     // `up_weights.bin`, and the loader would need expert-aware feature
     // files that don't exist yet. Refuse instead of silently corrupting.
-    if opts.ffn_compact && arch.is_moe() {
+    if opts.ffn_compact && arch.is_moe() && opts.level.writes_ffn() {
         return Err(VindexError::Parse(
             "ffn_compact not yet supported for MoE architectures — \
              per-expert feature-major files don't exist yet".into(),
         ));
     }
-    let skip_ffn_weights = opts.ffn_compact;
 
-    if !skip_ffn_weights {
+    if write_ffn {
     let up_path = dir.join("up_weights.bin");
     let mut up_file = BufWriter::new(std::fs::File::create(&up_path)?);
     let mut up_offset: u64 = 0;
@@ -369,60 +389,64 @@ pub fn write_model_weights_with_opts(
     }
     up_file.flush()?;
     down_file.flush()?;
-    } // end if !skip_ffn_weights
+    } // end if write_ffn
 
-    // ── Norms ──
-    let norms_path = dir.join("norms.bin");
-    let mut norms_file = BufWriter::new(std::fs::File::create(&norms_path)?);
-    let mut norms_offset: u64 = 0;
+    // ── Norms ── (paired with attention; skipped when level < Attention)
+    if write_attn {
+        let norms_path = dir.join("norms.bin");
+        let mut norms_file = BufWriter::new(std::fs::File::create(&norms_path)?);
+        let mut norms_offset: u64 = 0;
 
-    // Per-layer norms
-    for layer in 0..num_layers {
-        let norm_keys: Vec<String> = [
-            Some(arch.input_layernorm_key(layer)),
-            Some(arch.post_attention_layernorm_key(layer)),
-            arch.pre_feedforward_layernorm_key(layer),
-            arch.post_feedforward_layernorm_key(layer),
-        ].into_iter().flatten().collect();
+        // Per-layer norms
+        for layer in 0..num_layers {
+            let norm_keys: Vec<String> = [
+                Some(arch.input_layernorm_key(layer)),
+                Some(arch.post_attention_layernorm_key(layer)),
+                arch.pre_feedforward_layernorm_key(layer),
+                arch.post_feedforward_layernorm_key(layer),
+            ].into_iter().flatten().collect();
 
-        for key in norm_keys {
-            if let Some(data) = source.get_vector(&key) {
-                let bytes = crate::config::dtype::encode_floats(&data, dtype);
-                norms_file.write_all(&bytes)?;
-                entries.push(WeightEntry {
-                    key, kind: "vector".into(),
-                    shape: vec![data.len()],
-                    offset: norms_offset, length: bytes.len() as u64,
-                    file: "norms.bin".into(),
-                });
-                norms_offset += bytes.len() as u64;
+            for key in norm_keys {
+                if let Some(data) = source.get_vector(&key) {
+                    let bytes = crate::config::dtype::encode_floats(&data, dtype);
+                    norms_file.write_all(&bytes)?;
+                    entries.push(WeightEntry {
+                        key, kind: "vector".into(),
+                        shape: vec![data.len()],
+                        offset: norms_offset, length: bytes.len() as u64,
+                        file: "norms.bin".into(),
+                    });
+                    norms_offset += bytes.len() as u64;
+                }
             }
         }
+
+        // Final norm (model.norm.weight)
+        if let Some(data) = source.get_vector("norm.weight") {
+            let bytes = crate::config::dtype::encode_floats(&data, dtype);
+            norms_file.write_all(&bytes)?;
+            entries.push(WeightEntry {
+                key: "norm.weight".into(), kind: "vector".into(),
+                shape: vec![data.len()],
+                offset: norms_offset, length: bytes.len() as u64,
+                file: "norms.bin".into(),
+            });
+        }
+        norms_file.flush()?;
     }
 
-    // Final norm (model.norm.weight)
-    if let Some(data) = source.get_vector("norm.weight") {
-        let bytes = crate::config::dtype::encode_floats(&data, dtype);
-        norms_file.write_all(&bytes)?;
-        entries.push(WeightEntry {
-            key: "norm.weight".into(), kind: "vector".into(),
-            shape: vec![data.len()],
-            offset: norms_offset, length: bytes.len() as u64,
-            file: "norms.bin".into(),
-        });
-    }
-    norms_file.flush()?;
-
-    // ── LM Head ──
-    if let Some((data, rows, cols)) = source.lm_head() {
-        let lm_bytes = crate::config::dtype::encode_floats(&data, dtype);
-        std::fs::write(dir.join("lm_head.bin"), &lm_bytes)?;
-        entries.push(WeightEntry {
-            key: "lm_head.weight".into(), kind: "tensor".into(),
-            shape: vec![rows, cols],
-            offset: 0, length: lm_bytes.len() as u64,
-            file: "lm_head.bin".into(),
-        });
+    // ── LM Head ── (skipped when level < Inference)
+    if write_lm_head {
+        if let Some((data, rows, cols)) = source.lm_head() {
+            let lm_bytes = crate::config::dtype::encode_floats(&data, dtype);
+            std::fs::write(dir.join("lm_head.bin"), &lm_bytes)?;
+            entries.push(WeightEntry {
+                key: "lm_head.weight".into(), kind: "tensor".into(),
+                shape: vec![rows, cols],
+                offset: 0, length: lm_bytes.len() as u64,
+                file: "lm_head.bin".into(),
+            });
+        }
     }
 
     // ── Manifest ──

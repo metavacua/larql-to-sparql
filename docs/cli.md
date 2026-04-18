@@ -730,38 +730,62 @@ a backwards-compatible alias.
 larql extract-index [MODEL] --output <OUTPUT> [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
-| `<MODEL>` | Model path or HuggingFace model ID (not needed with `--from-vectors`) |
-| `-o, --output <OUTPUT>` | Output path for the `.vindex` directory |
-| `--level <LEVEL>` | Extract level: `browse` (default), `inference`, `all` |
-| `--f16` | Store weights in f16 (half precision, halves file sizes) |
-| `--quant <FORMAT>` | Inline-quantise weights: `none` (default) or `q4k`. `q4k` emits Q4_K/Q6_K Ollama-compatible blocks and implies `--level all` + `--f16` on the unquantised side-channels |
-| `--from-vectors <PATH>` | Build from already-extracted NDJSON vector files instead of model weights |
-| `--down-top-k <N>` | Top-K tokens per feature in down metadata [default: 10] |
-| `--include-weights` | Alias for `--level all` (deprecated) |
-| `--resume` | Skip stages that already have output files |
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Model path or HuggingFace model ID (not needed with `--from-vectors`) | — |
+| `-o, --output <OUTPUT>` | Output path for the `.vindex` directory | — |
+| `--level <LEVEL>` | `browse` / `attention` / `inference` / `all` — strict increasing tiers. See below. | `inference` |
+| `--f32` | Opt out of f16 on side-channel tensors. Rarely wanted — doubles file sizes. | off (f16) |
+| `--quant <FORMAT>` | Inline-quantise forward-pass weights: `none` or `q4k`. `q4k` emits Q4_K/Q6_K Ollama-compatible blocks; implies `--level all` + f16 side-channels. | `none` |
+| `--compact` | Skip `up_weights.bin` + `down_weights.bin`; FFN weights live only in feature-major files. `WalkFfn`-only. | off |
+| `--drop-gate-vectors` | Skip `gate_vectors.bin` entirely; loader rebuilds gate from `interleaved_q4k.bin` at load. Only with `--quant q4k`. | off |
+| `--from-vectors <PATH>` | Build from already-extracted NDJSON vector files instead of model weights | — |
+| `--down-top-k <N>` | Top-K tokens per feature in down metadata | 10 |
+| `--include-weights` | Alias for `--level all` (deprecated — use `--level` directly) | — |
+| `--resume` | Skip stages that already have output files | off |
+
+**Extract tiers (`--level`).** Each tier is a strict superset of the
+previous:
+
+| Tier | Adds | Enables |
+|---|---|---|
+| `browse` | gate + embed + down_meta + tokenizer | WALK / DESCRIBE / SELECT (no forward pass) |
+| `attention` | + attention + norms | client-side of `run --ffn URL` (Act 2 demo) |
+| **`inference` (default)** | + FFN up/down | full local forward pass (INFER) |
+| `all` | + lm_head + COMPILE extras | COMPILE |
 
 **Examples:**
 
 ```bash
-# Browse-only (~3 GB at f16, enables DESCRIBE/WALK/SELECT)
-larql extract-index google/gemma-3-4b-it -o model.vindex --f16
+# Default — inference-ready, f16 (~6 GB for 4B)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex
 
-# With inference weights (~6 GB at f16, enables INFER)
-larql extract-index google/gemma-3-4b-it -o model.vindex --level inference --f16
+# Browse-only (no forward pass, ~3 GB)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level browse
 
-# All weights (~10 GB at f16, enables COMPILE)
-larql extract-index google/gemma-3-4b-it -o model.vindex --level all --f16
+# Attention-only slice for Act 2 of the demo — carve out the
+# client-side half of an FFN-over-HTTP pair
+larql extract google/gemma-4-31b-it -o gemma4-31b.client.vindex --level attention
 
-# Q4_K/Q6_K quantised inline (no f32 intermediate on disk, Ollama-compat)
-larql extract-index google/gemma-3-4b-it -o model.vindex --quant q4k
+# All (+ lm_head for COMPILE)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level all
+
+# Q4_K/Q6_K quantised inline — smallest disk footprint, Ollama-compat
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
+
+# Maximum size reduction on Q4K — drop the redundant f16 gate, rebuild
+# from the Q4K at load time
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex \
+  --quant q4k --drop-gate-vectors
+
+# Legacy name still works
+larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex
 
 # Build from pre-extracted vectors
-larql extract-index -o model.vindex --from-vectors vectors/
+larql extract -o gemma3-4b.vindex --from-vectors vectors/
 
 # Resume an interrupted build
-larql extract-index google/gemma-3-4b-it -o model.vindex --f16 --resume
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --resume
 ```
 
 **`--quant q4k` details:**

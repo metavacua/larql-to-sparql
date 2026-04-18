@@ -71,25 +71,62 @@ pub struct VindexSource {
     pub larql_version: String,
 }
 
-/// What components are included in the vindex.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// What components are included in the vindex. Strictly increasing —
+/// each tier is a superset of the previous.
+///
+/// | Tier        | Adds                                   | Enables                                |
+/// |-------------|----------------------------------------|----------------------------------------|
+/// | `browse`    | gate, embed, down_meta, tokenizer      | WALK / DESCRIBE / SELECT               |
+/// | `attention` | + attention + norms                    | client-side of `run --ffn URL` (Act 2) |
+/// | `inference` | + FFN up/down                          | full local forward pass (INFER)        |
+/// | `all`       | + lm_head + any COMPILE extras         | COMPILE                                |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum ExtractLevel {
-    /// Gate + embed + down_meta only. Enables WALK, DESCRIBE, SELECT.
+    /// Gate + embed + down_meta + tokenizer. Enables WALK, DESCRIBE,
+    /// SELECT. No forward pass possible.
     #[default]
     Browse,
-    /// + attention weights. Enables INFER, EXPLAIN INFER.
+    /// + attention + norms. Enables the client-side half of
+    /// `larql run --ffn URL` (Act 2 of the Gemma 4 MoE demo). Cannot
+    /// run a forward pass alone — FFN must live somewhere else.
+    Attention,
+    /// + FFN up/down weights. Enables full local INFER.
     Inference,
-    /// + up, down (full), norms, lm_head. Enables COMPILE.
+    /// + lm_head (when not tied to embed) + anything else future
+    /// COMPILE passes need. Enables COMPILE.
     All,
 }
 
+impl ExtractLevel {
+    /// Whether this tier includes attention weights + norms.
+    /// True for Attention, Inference, All.
+    pub fn writes_attn(self) -> bool {
+        self >= Self::Attention
+    }
+
+    /// Whether this tier includes FFN up/down weight files (the full
+    /// compute weights, not just the gate used by KNN).
+    /// True for Inference, All.
+    pub fn writes_ffn(self) -> bool {
+        self >= Self::Inference
+    }
+
+    /// Whether this tier writes lm_head. When the model ties
+    /// embeddings (embed_tokens shares weights with lm_head), the
+    /// writer may still skip it — this is the intent flag.
+    /// True for Inference, All.
+    pub fn writes_lm_head(self) -> bool {
+        self >= Self::Inference
+    }
+}
 
 impl std::fmt::Display for ExtractLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Browse => write!(f, "browse"),
+            Self::Attention => write!(f, "attention"),
             Self::Inference => write!(f, "inference"),
             Self::All => write!(f, "all"),
         }

@@ -494,8 +494,7 @@ pub fn build_vindex_streaming(
     // declared level — the Q4_K writer emits all of attn, FFN, norms, lm_head
     // in one pass and makes `--level browse --quant q4k` incoherent, so
     // q4k implicitly promotes to "all".
-    let needs_weights = extract_level != crate::ExtractLevel::Browse
-        || quant != QuantFormat::None;
+    let needs_weights = extract_level.writes_attn() || quant != QuantFormat::None;
     if needs_weights {
         let shard_refs: Vec<&[u8]> = shard_mmaps.iter().map(|s| s.mmap.as_ref()).collect();
         let streaming_source = crate::format::weights::StreamingWeights {
@@ -504,16 +503,22 @@ pub fn build_vindex_streaming(
             arch: &*arch,
             num_layers,
         };
+        // Thread the extract level into the write options so the
+        // writer can skip attn/FFN/lm_head sections per tier.
+        let mut level_opts = weight_opts;
+        level_opts.level = extract_level;
         match quant {
             QuantFormat::None => {
                 crate::format::weights::write_model_weights_with_opts(
-                    &streaming_source, output_dir, callbacks, weight_opts,
+                    &streaming_source, output_dir, callbacks, level_opts,
                 )?;
             }
             QuantFormat::Q4k => {
                 // Q4K doesn't write `up_weights.bin` / `down_weights.bin`
                 // at all — the FFN weights live in `interleaved_q4k.bin`.
-                // `ffn_compact` is a no-op here by construction.
+                // `ffn_compact` is a no-op here by construction. Level
+                // gating for Q4K is a future refinement (today Q4K
+                // always writes the full set).
                 crate::format::weights::write_model_weights_q4k(
                     &streaming_source, output_dir, callbacks,
                 )?;

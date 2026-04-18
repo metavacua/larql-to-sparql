@@ -215,6 +215,21 @@ the attention weights taking a third of RAM.
   on 4B / ~12 s on 31B cost, saves 1.7 GB / 13.9 GB respectively.
   Measured via `crates/larql-vindex/examples/bench_gate_dequant.rs`.
 
+### Extract tiers + default flip
+- New `ExtractLevel::Attention` tier sits between `Browse` and
+  `Inference`: includes attention + norms but not FFN. This is the
+  first-class way to carve a client-side vindex for the Act 2 demo
+  (`larql extract <model> --level attention`). No more ad-hoc slicing.
+- Strict `Browse < Attention < Inference < All` ordering + helper
+  methods (`writes_attn()` / `writes_ffn()` / `writes_lm_head()`)
+  drive what each tier writes. Writers now actually honor the
+  boundaries — previously only Browse was meaningfully different from
+  non-Browse.
+- **Default flip.** `larql extract` now defaults to `--level inference`
+  + f16. The common case (`larql extract <model> -o x.vindex`) produces
+  an inference-ready vindex out of the box, no flags needed. `--f32`
+  opts out of f16 for the rare case someone wants it.
+
 ### Gemma 4 config plumbing
 - Fixed three missing `final_logit_softcapping` initializers
   (pre-existing compile break on the `architecture-b` branch).

@@ -42,23 +42,44 @@ larql list
 larql run gemma-3-4b-it-vindex "The capital of France is"
 larql run gemma-3-4b-it-vindex          # drops into chat mode
 
-# Or work from a local vindex you extracted yourself
-larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level inference --f16
+# Or extract locally — inference-ready at f16 by default
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex
 larql run gemma3-4b.vindex "Einstein is known for"
 ```
 
+`larql extract` defaults to `--level inference` (full local forward
+pass) stored at f16. No flags needed for the common case.
+
 <details>
-<summary>Other ways to get a vindex</summary>
+<summary>Extract tiers and options</summary>
 
 ```bash
-# Browse-only extract (~3 GB at f16)
-larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --f16
+# Browse-only — gate KNN + embeddings, no forward pass (~3 GB for 4B)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level browse
 
-# Q4_K/Q6_K inline (Ollama-compatible, skips the f32 intermediate)
+# Attention-only — client-side slice for `run --ffn URL` (Act 2 demo)
+larql extract google/gemma-3-4b-it -o gemma3-4b.attn.vindex --level attention
+
+# Inference (default) — full local forward pass
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level inference
+
+# All — +lm_head +COMPILE extras (largest)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level all
+
+# Q4_K/Q6_K inline (Ollama-compatible, smallest disk footprint)
 larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
 
-# Convert from GGUF
-larql convert gguf-to-vindex model.gguf -o model.vindex --f16
+# Maximum size reduction on Q4K — drop gate_vectors.bin, rebuild from
+# interleaved_q4k.bin at load (~1.6 s cost on 4B, ~12 s on 31B)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex \
+  --quant q4k --drop-gate-vectors
+
+# Opt out of f16 (rarely wanted — doubles file sizes)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --f32
+
+# Convert from GGUF instead of extracting from safetensors
+larql convert gguf-to-vindex model.gguf -o model.vindex
 ```
 
 `extract-index` is kept as a backwards-compatible alias of `extract`.
@@ -74,11 +95,17 @@ larql serve gemma3-4b.vindex --port 8080
 ### Run attention locally, FFN on another machine
 
 ```bash
-# Server (any box, any GPU — holds the FFN):
+# One-time — carve the client-side vindex (attention + embed + norms,
+# no FFN compute weights). `--level attention` is the new first-class
+# way to produce this slice.
+larql extract google/gemma-4-31b-it -o gemma4-31b.client.vindex \
+  --level attention
+
+# Server (any box, any GPU — holds the full model + FFN):
 larql serve gemma4-31b.vindex --port 8080 --ffn-only
 
-# Client (laptop — runs attention, FFN over HTTP):
-larql run gemma4-31b.vindex --ffn http://server.local:8080 \
+# Client (laptop — runs attention locally, FFN over HTTP):
+larql run gemma4-31b.client.vindex --ffn http://server.local:8080 \
   "The capital of France is"
 ```
 
