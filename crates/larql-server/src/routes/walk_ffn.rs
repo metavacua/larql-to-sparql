@@ -1,5 +1,9 @@
 //! POST /v1/walk-ffn — decoupled inference protocol.
 //!
+//! L2 FFN cache: single-position (`seq_len == 1`) requests with `full_output`
+//! check the per-model L2 cache before running WalkFfn. Cache key is derived
+//! from the gate-KNN feature IDs for that layer (same scheme as L1).
+//!
 //! Client sends a residual vector, server runs either (a) gate KNN only, or
 //! (b) the full FFN compute, and returns the result. This enables distributed
 //! inference where the client runs attention locally and the server provides
@@ -42,6 +46,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
+use larql_vindex::GateIndex as _;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -188,6 +193,9 @@ fn run_full_output(
     let x = Array2::from_shape_vec((seq_len, hidden), req.residual.clone())
         .map_err(|e| ServerError::Internal(format!("reshape residual: {e}")))?;
 
+    // L2 cache is only consulted for single-position requests (autoregressive step).
+    let use_l2_cache = seq_len == 1;
+
     let mut results = Vec::with_capacity(scan_layers.len());
     for &layer in scan_layers {
         if layer >= model.config.num_layers {
@@ -196,10 +204,40 @@ fn run_full_output(
                 model.config.num_layers
             )));
         }
+
+        // L2 cache check: compute gate-KNN key, look up before running FFN.
+        // Skip when the layer has active overrides (INSERT patches may change
+        // down/up vectors without changing the gate, so the feature-ID key
+        // would match but the output would be stale).
+        let l2_key = if use_l2_cache && !(*patched).has_overrides_at(layer) {
+            let x_1d = x.row(0).to_owned();
+            let hits = patched.gate_knn(layer, &x_1d, req.top_k);
+            let feat_ids: Vec<usize> = hits.iter().map(|(f, _)| *f).collect();
+            let key = crate::ffn_l2_cache::FfnL2Cache::key(&feat_ids);
+            if let Some(cached) = model.ffn_l2_cache.get(layer, key) {
+                let output: Vec<f32> = (*cached).clone();
+                results.push(serde_json::json!({
+                    "layer": layer,
+                    "output": output,
+                    "seq_len": seq_len,
+                }));
+                continue;
+            }
+            Some(key)
+        } else {
+            None
+        };
+
         let out = walk_ffn.forward(layer, &x);
         // out shape is [seq_len, hidden] — flatten row-major.
         let output: Vec<f32> = out.into_iter().collect();
         debug_assert_eq!(output.len(), seq_len * hidden);
+
+        // L2 cache insert (non-blocking, best-effort).
+        if let Some(key) = l2_key {
+            model.ffn_l2_cache.insert(layer, key, output.clone());
+        }
+
         results.push(serde_json::json!({
             "layer": layer,
             "output": output,

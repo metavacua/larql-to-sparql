@@ -4,6 +4,7 @@ mod auth;
 mod cache;
 mod error;
 mod etag;
+mod ffn_l2_cache;
 mod grpc;
 mod ratelimit;
 mod routes;
@@ -169,6 +170,7 @@ fn load_single_vindex(
         info!("  Infer: not available (no model weights in vindex)");
     }
 
+    let num_layers = config.num_layers;
     Ok(LoadedModel {
         id,
         path,
@@ -181,6 +183,7 @@ fn load_single_vindex(
         ffn_only,
         weights: std::sync::OnceLock::new(),
         probe_labels,
+        ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(num_layers),
     })
 }
 

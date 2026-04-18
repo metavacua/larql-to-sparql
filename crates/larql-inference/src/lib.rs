@@ -83,7 +83,7 @@ pub use layer_graph::{
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,
     detect_template,
 };
-pub use vindex::WalkFfn;
+pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache};
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
 

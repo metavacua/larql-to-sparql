@@ -5,13 +5,19 @@ pub const HEADER: &str = r#"
 #include <metal_stdlib>
 using namespace metal;
 
+// Decode an f16 bit-pattern to f32, preserving subnormals.
+//
+// The previous hand-rolled unpack flushed subnormals to ±0 (the `exp == 0`
+// branch returned `sign` for any mantissa). Q4_K and Q6_K super-block scales
+// use `d = amax / (31 * 127)` which lands in f16 subnormal range whenever
+// the row's amax < ~0.24 — every such row previously decoded as zero on GPU
+// while CPU read the correct value, causing silent all-zero rows in V/FFN
+// projections.
+//
+// Using Metal's native `half` cast delegates subnormal handling to the
+// hardware's IEEE-754 f16 implementation, which Apple Silicon supports.
 static inline float decode_f16_metal(ushort bits) {
-    uint sign = uint(bits & 0x8000) << 16;
-    uint exp = (bits >> 10) & 0x1F;
-    uint mant = bits & 0x3FF;
-    if (exp == 0) return as_type<float>(sign);
-    exp = exp + 127 - 15;
-    return as_type<float>(sign | (exp << 23) | (mant << 13));
+    return float(as_type<half>(bits));
 }
 
 // Q4_K super-block: 256 values in 148 bytes (larql format).

@@ -120,8 +120,10 @@ pub fn generate(
         };
     }
 
+    // Q4_K GGUF layout: 144 bytes per 256-value superblock.
+    // Q4_0: 18 bytes per 32-value block (2-byte f16 scale + 16 bytes of nibbles).
     let q4_ffn_per_matrix = if ffn_is_q4k {
-        (intermediate * hidden).div_ceil(256) * 148
+        (intermediate * hidden).div_ceil(256) * 144
     } else {
         intermediate * hidden / 32 * 18
     };

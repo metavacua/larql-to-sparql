@@ -27,8 +27,13 @@ kernel void gelu_tanh(
 {
     if (tid >= N) return;
     float x = input[tid];
+    // Clamp the tanh argument to avoid `exp(2y)` overflow inside Apple
+    // Silicon's tanh (see note in `geglu_gelu_tanh`). Mathematically
+    // equivalent at f32 precision since tanh saturates by |y|=10.
     float c = 0.7978845608f; // sqrt(2/pi)
-    float t = tanh(c * (x + 0.044715f * x * x * x));
+    float y = c * (x + 0.044715f * x * x * x);
+    y = clamp(y, -15.0f, 15.0f);
+    float t = tanh(y);
     out[tid] = 0.5f * x * (1.0f + t);
 }
 "#;

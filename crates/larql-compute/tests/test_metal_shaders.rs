@@ -1852,3 +1852,475 @@ fn rms_norm_with_different_eps() {
     let diff = max_diff(&r1, &r2);
     assert!(diff > 0.1, "Different eps values should produce different outputs (diff={diff})");
 }
+
+// ── Q6_K diagnostic: single-row, single-superblock with dequantize reference. ──
+// Pin the round-trip accuracy:
+//   1. Quantize a known row via `quantize_q6_k` → 210 bytes.
+//   2. CPU dequant via `dequantize_q6_k` and dot with x → reference answer.
+//   3. Metal `q6k_matvec` → GPU answer.
+//   4. Both must agree within 0.01 on a single superblock.
+#[test]
+fn q6k_single_superblock_matches_dequantize_reference() {
+    let metal = get_metal();
+    let hidden = 256usize;
+
+    // Row with a clean monotone gradient — easy to eyeball per-element error.
+    let row: Vec<f32> = (0..hidden).map(|i| (i as f32 / 255.0) - 0.5).collect();
+    // One-hot probe: each x[k]=1 selects column k, making the dot product equal
+    // to row[k] after dequant round-trip.
+    for probe_k in [0usize, 1, 2, 15, 16, 31, 32, 127, 128, 200, 255] {
+        let mut x = vec![0.0f32; hidden];
+        x[probe_k] = 1.0;
+
+        let q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&row);
+        assert_eq!(q6k.len(), 210, "single superblock should be 210 bytes");
+
+        let dequant = larql_models::quant::ggml::dequantize_q6_k(&q6k, hidden).unwrap();
+        let cpu_ref: f32 = dequant[probe_k] * x[probe_k];
+
+        let metal_out = metal.q6k_matvec(&q6k, &x, 1, hidden).unwrap();
+
+        let diff = (cpu_ref - metal_out[0]).abs();
+        if diff > 0.01 {
+            eprintln!(
+                "probe_k={probe_k} row[k]={:.4} dequant[k]={:.4} cpu={:.4} metal={:.4} diff={:.4}",
+                row[probe_k], dequant[probe_k], cpu_ref, metal_out[0], diff,
+            );
+        }
+        assert!(
+            diff < 0.01,
+            "Q6_K probe at k={probe_k} diverged: cpu={cpu_ref} metal={} diff={diff}",
+            metal_out[0],
+        );
+    }
+}
+
+// ── Q6_K multi-row: find the row where divergence starts. ──
+//
+// `hidden = 256` so each row is a single superblock. `rows = 32` (matches
+// the existing `q6k_matvec_matches_cpu` failure). Prints per-row diff to
+// isolate whether the bug is:
+//   (a) first few rows only (threadgroup indexing broken past tg_id=0), or
+//   (b) every row (format/decode bug), or
+//   (c) every Nth row (simdgroup assignment broken).
+#[test]
+fn q6k_multi_row_diagnostic() {
+    let metal = get_metal();
+    let hidden = 256usize;
+    let rows = 32usize;
+
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    let q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&matrix);
+
+    // Reference via dequantize_q6_k + CPU gemv.
+    let dequant = larql_models::quant::ggml::dequantize_q6_k(&q6k, rows * hidden).unwrap();
+    let mut cpu_ref = vec![0.0f32; rows];
+    for row in 0..rows {
+        cpu_ref[row] = (0..hidden).map(|k| dequant[row * hidden + k] * x[k]).sum();
+    }
+
+    let metal_out = metal.q6k_matvec(&q6k, &x, rows, hidden).unwrap();
+
+    let mut worst_row = 0usize;
+    let mut worst_diff = 0.0f32;
+    for row in 0..rows {
+        let diff = (cpu_ref[row] - metal_out[row]).abs();
+        // Row-input stats — help spot when a bad row aligns with a pathological
+        // quantization bucket (very small amax, degenerate scales).
+        let row_slice = &matrix[row * hidden..(row + 1) * hidden];
+        let amax = row_slice.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        let mean = row_slice.iter().sum::<f32>() / hidden as f32;
+        eprintln!(
+            "row {row:2}: cpu={:+.4} metal={:+.4} diff={:+.4}  amax={:.4} mean={:+.4}",
+            cpu_ref[row], metal_out[row], diff, amax, mean,
+        );
+        if diff > worst_diff {
+            worst_diff = diff;
+            worst_row = row;
+        }
+    }
+    assert!(
+        worst_diff < 0.01,
+        "Worst divergence at row {worst_row}: diff={worst_diff}",
+    );
+}
+
+// ── Q6_K multi-superblock: the real-world failure mode. ──
+// hidden=1536 gives `superblocks = 6`. The shader's outer loop
+// `for sb = lane; sb < 6; sb += 32` means lanes 6..31 are idle and lanes
+// 0..5 each handle one superblock. Tests that `simd_sum` correctly
+// aggregates contributions across idle and active lanes.
+#[test]
+fn q6k_multi_superblock_matches_dequantize_reference() {
+    let metal = get_metal();
+    let hidden = 1536usize; // 6 superblocks
+    let rows = 1usize;
+
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| ((i as f32) * 0.003).sin() * 0.5).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.007).cos() * 0.5).collect();
+
+    let q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&matrix);
+
+    let dequant = larql_models::quant::ggml::dequantize_q6_k(&q6k, rows * hidden).unwrap();
+    let cpu_ref: f32 = (0..hidden).map(|k| dequant[k] * x[k]).sum();
+
+    let metal_out = metal.q6k_matvec(&q6k, &x, rows, hidden).unwrap();
+
+    let diff = (cpu_ref - metal_out[0]).abs();
+    eprintln!(
+        "q6k_multi_superblock cpu={cpu_ref:.4} metal={:.4} diff={diff:.4}",
+        metal_out[0]
+    );
+    assert!(
+        diff < 0.05,
+        "Q6_K multi-superblock diverged: cpu={cpu_ref} metal={} diff={diff}",
+        metal_out[0]
+    );
+}
+
+// ── f16 subnormal regression: rows with small amax (d in subnormal range)
+//
+// Prior to the `as_type<half>` fix in `common.rs::decode_f16_metal`, any
+// row whose `d = amax/(31*127)` fell below the f16 min normal (~6.1e-5)
+// was decoded as 0 on GPU, yielding silent all-zero rows in V projections.
+// This test pins one such row: amax ≈ 0.15, d ≈ 3.8e-5 (subnormal).
+#[test]
+fn q6k_subnormal_d_matches_cpu() {
+    let metal = get_metal();
+    let hidden = 256usize;
+
+    // Row with small amplitude so `d` lands in f16 subnormal range.
+    let row: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.007).sin() * 0.15).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.003).cos()).collect();
+    let q6k = larql_compute::cpu::ops::q4_common::quantize_q6_k(&row);
+
+    let dequant = larql_models::quant::ggml::dequantize_q6_k(&q6k, hidden).unwrap();
+    let cpu_ref: f32 = (0..hidden).map(|k| dequant[k] * x[k]).sum();
+    let metal_out = metal.q6k_matvec(&q6k, &x, 1, hidden).unwrap();
+
+    // CPU and Metal must agree within 1% of cpu_ref (or 0.01 absolute).
+    let tol = (cpu_ref.abs() * 0.01).max(0.01);
+    assert!(
+        (cpu_ref - metal_out[0]).abs() < tol,
+        "Q6_K subnormal-d regression: cpu={cpu_ref} metal={} diff={}",
+        metal_out[0],
+        (cpu_ref - metal_out[0]).abs()
+    );
+    // Belt-and-suspenders: must not be exactly zero if input is non-trivial.
+    assert!(metal_out[0].abs() > 1e-6, "Metal output zeroed out (flushed subnormal d?)");
+}
+
+// ── Q4_K: single superblock matches CPU dequantize + gemv ──
+#[test]
+fn q4k_single_superblock_matches_dequantize_reference() {
+    let metal = get_metal();
+    let hidden = 256usize;
+
+    let row: Vec<f32> = (0..hidden).map(|i| ((i as f32) / 127.0) - 1.0).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.01).sin()).collect();
+
+    let q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&row);
+    assert_eq!(q4k.len(), 144, "single superblock should pack into 144 bytes GGUF");
+
+    let dequant = larql_models::quant::ggml::dequantize_q4_k(&q4k, hidden).unwrap();
+    let cpu_ref: f32 = (0..hidden).map(|k| dequant[k] * x[k]).sum();
+    let metal_out = metal.q4k_matvec(&q4k, &x, 1, hidden).unwrap();
+
+    let diff = (cpu_ref - metal_out[0]).abs();
+    assert!(
+        diff < 0.05,
+        "Q4_K single-superblock: cpu={cpu_ref} metal={} diff={diff}",
+        metal_out[0]
+    );
+}
+
+// ── Q4_K: multi-superblock rows, multi-row batch ──
+#[test]
+fn q4k_multi_row_matches_dequantize_reference() {
+    let metal = get_metal();
+    let hidden = 1536usize; // 6 superblocks (Gemma 4 E2B sliding layer)
+    let rows = 32usize;
+
+    let matrix: Vec<f32> = (0..rows * hidden).map(|i| ((i as f32) * 0.001).cos() * 0.5).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.007).sin()).collect();
+
+    let q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&matrix);
+    let dequant = larql_models::quant::ggml::dequantize_q4_k(&q4k, rows * hidden).unwrap();
+    let metal_out = metal.q4k_matvec(&q4k, &x, rows, hidden).unwrap();
+
+    let mut worst = 0.0f32;
+    for row in 0..rows {
+        let expected: f32 = (0..hidden).map(|k| dequant[row * hidden + k] * x[k]).sum();
+        let diff = (expected - metal_out[row]).abs();
+        if diff > worst { worst = diff; }
+    }
+    assert!(
+        worst < 0.5,
+        "Q4_K multi-row worst diff={worst} exceeds 0.5 (expected < 0.1 for well-conditioned input)"
+    );
+}
+
+// ── GEGLU GELU-tanh: no NaN on gate values near the tanh-overflow threshold ──
+//
+// Before clamping, gate values around ±10 produce tanh arguments near ±50
+// and Apple Silicon's `tanh(x) ≈ (exp(2x)-1)/(exp(2x)+1)` overflows to NaN.
+#[test]
+fn geglu_gelu_tanh_no_nan_on_large_gate() {
+    let metal = get_metal();
+    let n = 256usize;
+    // Range gate through [-15, +15] to stress the tanh-overflow region.
+    let gate: Vec<f32> = (0..n)
+        .map(|i| ((i as f32 / n as f32) * 30.0) - 15.0)
+        .collect();
+    let up: Vec<f32> = vec![1.0; n];
+
+    let g_buf = metal.bufs().transient_from_f32(&gate);
+    let u_buf = metal.bufs().transient_from_f32(&up);
+    let out_buf = metal.bufs().output((n * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.geglu_gelu_tanh_pipeline);
+    enc.set_buffer(0, Some(&g_buf), 0);
+    enc.set_buffer(1, Some(&u_buf), 0);
+    enc.set_buffer(2, Some(&out_buf), 0);
+    let n_val = n as u32;
+    enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
+    enc.dispatch_threads(
+        metal::MTLSize::new(n as u64, 1, 1),
+        metal::MTLSize::new(256, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, n);
+    let nan_count = out.iter().filter(|v| v.is_nan()).count();
+    let inf_count = out.iter().filter(|v| v.is_infinite()).count();
+    assert_eq!(nan_count, 0, "geglu_gelu_tanh emitted {nan_count} NaN values");
+    assert_eq!(inf_count, 0, "geglu_gelu_tanh emitted {inf_count} Inf values");
+}
+
+// ── q4kf_proj: production single-projection Q4_K (GGUF 144-byte) ──
+//
+// This is the shader that `dispatch_full_pipeline` actually dispatches for
+// Q4_K gate/up/down/o projections. If this diverges from CPU dequantise
+// everything downstream is wrong.
+#[test]
+fn q4kf_proj_matches_cpu_reference() {
+    let metal = get_metal();
+    // Use a shape representative of a real Q4_K projection: hidden=1536,
+    // rows=512 (matches Gemma 4 sliding-layer KV dim).
+    let hidden = 1536usize;
+    let rows = 512usize;
+
+    let matrix: Vec<f32> = (0..rows * hidden)
+        .map(|i| ((i as f32) * 0.001).cos() * 0.6)
+        .collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.003).sin()).collect();
+
+    let q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&matrix);
+    assert_eq!(q4k.len(), rows * 144 * (hidden / 256));
+
+    // CPU reference: dequantise + straightforward gemv.
+    let dequant = larql_models::quant::ggml::dequantize_q4_k(&q4k, rows * hidden).unwrap();
+    let mut cpu_out = vec![0.0f32; rows];
+    for row in 0..rows {
+        cpu_out[row] = (0..hidden)
+            .map(|k| dequant[row * hidden + k] * x[k])
+            .sum();
+    }
+
+    // Metal: dispatch q4kf_proj directly (not via Backend trait, which
+    // routes to the legacy q4k_matvec pipeline).
+    use larql_compute::metal::shaders::q4kf_qkv_proj as q4kf;
+    let w_buf = metal.bufs().get_bytes(&q4k);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let out_buf = metal.bufs().output((rows * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4kf_proj_pipeline);
+    enc.set_buffer(0, Some(&w_buf), 0);
+    enc.set_buffer(1, Some(&x_buf), 0);
+    enc.set_buffer(2, Some(&out_buf), 0);
+    let n = rows as u32;
+    let k = hidden as u32;
+    enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+    let num_tgs = (rows as u64).div_ceil(q4kf::ROWS_PER_TG);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, rows);
+    let max_diff = metal_out.iter().zip(cpu_out.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(
+        max_diff < 0.3,
+        "q4kf_proj diverged from CPU: max_diff={max_diff} (rows={rows})"
+    );
+    assert!(metal_out.iter().all(|v| v.is_finite()), "q4kf_proj emitted NaN/Inf");
+}
+
+// ── q4kf_qkv_proj: production fused Q+K+V Q4_K (GGUF 144-byte) ──
+//
+// The fused attention QKV dispatch for Gemma 3 pure-Q4_K vindexes. Verifies
+// all three output streams agree with CPU dequant when weights are the same.
+#[test]
+fn q4kf_qkv_proj_matches_individual_projections() {
+    let metal = get_metal();
+    let hidden = 1536usize;
+    let q_rows = 512usize;
+    let k_rows = 256usize;
+    let v_rows = 256usize;
+
+    let wq: Vec<f32> = (0..q_rows * hidden).map(|i| ((i as f32) * 0.0011).cos() * 0.5).collect();
+    let wk: Vec<f32> = (0..k_rows * hidden).map(|i| ((i as f32) * 0.0013).sin() * 0.5).collect();
+    let wv: Vec<f32> = (0..v_rows * hidden).map(|i| ((i as f32) * 0.0017).cos() * 0.5).collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.003).sin()).collect();
+
+    let q_quant = larql_compute::cpu::ops::q4_common::quantize_q4_k(&wq);
+    let k_quant = larql_compute::cpu::ops::q4_common::quantize_q4_k(&wk);
+    let v_quant = larql_compute::cpu::ops::q4_common::quantize_q4_k(&wv);
+
+    // CPU reference: dequant each and gemv against x.
+    let q_deq = larql_models::quant::ggml::dequantize_q4_k(&q_quant, q_rows * hidden).unwrap();
+    let k_deq = larql_models::quant::ggml::dequantize_q4_k(&k_quant, k_rows * hidden).unwrap();
+    let v_deq = larql_models::quant::ggml::dequantize_q4_k(&v_quant, v_rows * hidden).unwrap();
+    let mut q_cpu = vec![0.0f32; q_rows];
+    let mut k_cpu = vec![0.0f32; k_rows];
+    let mut v_cpu = vec![0.0f32; v_rows];
+    for r in 0..q_rows { q_cpu[r] = (0..hidden).map(|c| q_deq[r*hidden+c]*x[c]).sum(); }
+    for r in 0..k_rows { k_cpu[r] = (0..hidden).map(|c| k_deq[r*hidden+c]*x[c]).sum(); }
+    for r in 0..v_rows { v_cpu[r] = (0..hidden).map(|c| v_deq[r*hidden+c]*x[c]).sum(); }
+
+    // Metal fused dispatch.
+    use larql_compute::metal::shaders::q4kf_qkv_proj as q4kf;
+    let wq_buf = metal.bufs().get_bytes(&q_quant);
+    let wk_buf = metal.bufs().get_bytes(&k_quant);
+    let wv_buf = metal.bufs().get_bytes(&v_quant);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let q_out = metal.bufs().output((q_rows * 4) as u64);
+    let k_out = metal.bufs().output((k_rows * 4) as u64);
+    let v_out = metal.bufs().output((v_rows * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4kf_qkv_proj_pipeline);
+    enc.set_buffer(0, Some(&wq_buf), 0);
+    enc.set_buffer(1, Some(&wk_buf), 0);
+    enc.set_buffer(2, Some(&wv_buf), 0);
+    enc.set_buffer(3, Some(&x_buf), 0);
+    enc.set_buffer(4, Some(&q_out), 0);
+    enc.set_buffer(5, Some(&k_out), 0);
+    enc.set_buffer(6, Some(&v_out), 0);
+    let q_rows_val = q_rows as u32;
+    let k_rows_val = k_rows as u32;
+    let v_rows_val = v_rows as u32;
+    let k_val = hidden as u32;
+    enc.set_bytes(7, 4, &q_rows_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(8, 4, &k_rows_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(9, 4, &v_rows_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(10, 4, &k_val as *const u32 as *const std::ffi::c_void);
+    let total_rows = (q_rows + k_rows + v_rows) as u64;
+    let num_tgs = total_rows.div_ceil(q4kf::ROWS_PER_TG);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let q_metal = larql_compute::metal::buffers::read_buffer_f32(&q_out, q_rows);
+    let k_metal = larql_compute::metal::buffers::read_buffer_f32(&k_out, k_rows);
+    let v_metal = larql_compute::metal::buffers::read_buffer_f32(&v_out, v_rows);
+
+    let q_diff = max_diff(&q_cpu, &q_metal);
+    let k_diff = max_diff(&k_cpu, &k_metal);
+    let v_diff = max_diff(&v_cpu, &v_metal);
+    // Tolerance 0.5 — the fused shader accumulates 1536 products in a single
+    // f32 simdgroup reduction; the CPU reference uses scalar left-to-right
+    // order. Drift from associativity of float addition lives at this level
+    // with 512-row matrices. Well below any real accuracy concern.
+    assert!(q_diff < 0.5, "q4kf_qkv_proj Q stream diverged: {q_diff}");
+    assert!(k_diff < 0.5, "q4kf_qkv_proj K stream diverged: {k_diff}");
+    assert!(v_diff < 0.5, "q4kf_qkv_proj V stream diverged: {v_diff}");
+    assert!(q_metal.iter().all(|v| v.is_finite()), "Q stream had NaN/Inf");
+    assert!(k_metal.iter().all(|v| v.is_finite()), "K stream had NaN/Inf");
+    assert!(v_metal.iter().all(|v| v.is_finite()), "V stream had NaN/Inf");
+}
+
+// ── qk_norm: per-head RMS norm with learned weight (Gemma 3/4 pre-RoPE). ──
+//
+// Hand-validated: per-head RMS(x) then multiply by (weight[d] + offset).
+// The `v_norm_matches_cpu` test already exercises the parameter-free form;
+// this test pins the weighted form + non-zero offset (Gemma 2/3 stores
+// `real_weight - 1` with `offset = 1.0`).
+#[test]
+fn qk_norm_matches_cpu_reference() {
+    let metal = get_metal();
+    let num_heads = 4usize;
+    let head_dim = 256usize;
+    let eps = 1e-6f32;
+    let offset = 1.0f32;
+
+    // Deterministic input + weight.
+    let input: Vec<f32> = (0..num_heads * head_dim)
+        .map(|i| ((i as f32) * 0.01).sin() * 2.0 + 0.5)
+        .collect();
+    let weight: Vec<f32> = (0..head_dim)
+        .map(|d| ((d as f32) / head_dim as f32) * 0.3)
+        .collect();
+
+    // CPU reference: per-head RMS norm.
+    let mut cpu_out = vec![0.0f32; num_heads * head_dim];
+    for h in 0..num_heads {
+        let base = h * head_dim;
+        let sum_sq: f32 = input[base..base + head_dim].iter().map(|v| v * v).sum();
+        let rms = (sum_sq / head_dim as f32 + eps).sqrt();
+        for d in 0..head_dim {
+            cpu_out[base + d] = input[base + d] / rms * (offset + weight[d]);
+        }
+    }
+
+    // Metal dispatch.
+    let in_buf = metal.bufs().transient_from_f32(&input);
+    let w_buf = metal.bufs().transient_from_f32(&weight);
+    let out_buf = metal.bufs().output((num_heads * head_dim * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.qk_norm_pipeline);
+    enc.set_buffer(0, Some(&in_buf), 0);
+    enc.set_buffer(1, Some(&out_buf), 0);
+    enc.set_buffer(2, Some(&w_buf), 0);
+    let hd_val = head_dim as u32;
+    let nh_val = num_heads as u32;
+    enc.set_bytes(3, 4, &hd_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(4, 4, &nh_val as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
+    enc.set_bytes(6, 4, &offset as *const f32 as *const std::ffi::c_void);
+    // Threadgroup width = power-of-two ≥ head_dim, capped at 512.
+    let mut tg_w: u64 = 1;
+    while (tg_w as usize) < head_dim && tg_w < 512 { tg_w <<= 1; }
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_heads as u64, 1, 1),
+        metal::MTLSize::new(tg_w, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, num_heads * head_dim);
+    let diff = max_diff(&cpu_out, &metal_out);
+    assert!(diff < 1e-3, "qk_norm diverged from CPU: max_diff={diff}");
+}

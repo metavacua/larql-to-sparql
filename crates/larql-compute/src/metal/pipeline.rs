@@ -67,6 +67,7 @@ impl MetalBackend {
             None, None, // no q4kf_qkv_proj / q4kf_proj (legacy benchmark path)
             None,       // no rope_at_pos
             None,       // no qk_norm
+            None,       // no scale_vector (no layer_scalar)
             None,       // no KV cache
             &full_layers, x, hidden, inter, q_dim, kv_dim,
             1, 0, 0, 0, 0.0, false, 0.0,

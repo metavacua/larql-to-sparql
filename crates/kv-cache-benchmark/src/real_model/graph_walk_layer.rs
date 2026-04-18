@@ -117,7 +117,7 @@ pub fn run_graph_walk_vindex_logits(
     let t0 = std::time::Instant::now();
 
     // Build a WalkLayerGraph: dense attention + walk FFN
-    let walk_ffn = larql_inference::WalkFfn::new(weights, index, 8192);
+    let walk_ffn = larql_inference::WalkFfn::new_unlimited(weights, index);
     let walk_graph = larql_inference::WalkLayerGraph {
         ffn: &walk_ffn,
         backend: None,

@@ -1,21 +1,28 @@
-//! Q4_K matrix-vector multiply — multi-row optimization.
+//! Q4_K matrix-vector multiply — GGUF 144-byte block layout.
 //!
-//! Each simdgroup processes 2 output rows (nr0=2), reading the input vector
-//! once and reusing it across both rows. Input stays in L1 cache since all
-//! lanes within the simdgroup read the same X addresses.
+//! Block layout (matches llama.cpp `block_q4_K` and larql's
+//! `quantize_q4_k` / `dequantize_q4_k`):
 //!
-//! 4 simdgroups × 2 rows = 8 rows per threadgroup, 128 threads total.
+//!   [0..2]    f16 super-block scale `d`
+//!   [2..4]    f16 super-block min-scale `dmin`
+//!   [4..16]   12 bytes of packed 6-bit scales + 6-bit mins (8 of each)
+//!   [16..144] 128 bytes of 4-bit nibbles (256 values, 2 per byte)
 //!
-//! FIXME(chris): this shader still targets the legacy 148-byte "Chris
-//! variant" Q4_K layout. `quantize_q4_k` now emits the 144-byte llama.cpp
-//! GGUF layout, so this kernel reads garbage off any freshly-extracted
-//! vindex. Update `Q4K_BLOCK_SIZE`, the scale/min unpack, and the nibble
-//! offset (20 → 16) to match `dequantize_q4_k` in larql-models before
-//! re-enabling the Metal Q4 decode path.
+//! The 12-byte scale packing (from llama.cpp `get_scale_min_k4`):
+//!   j in 0..4 : scale = sb[j]   & 0x3F,  min = sb[j+4] & 0x3F
+//!   j in 4..8 : scale = (sb[j+4] & 0x0F) | ((sb[j-4] >> 6) << 4)
+//!                min  = (sb[j+4] >> 4)   | ((sb[j]   >> 6) << 4)
+//!
+//! Dequantize per sub-block j (32 values):
+//!   value[i] = d * scale[j] * nibble[i] - dmin * min[j]
+//!
+//! Dispatch: one simdgroup per row, four simdgroups per threadgroup
+//! (`ROWS_PER_TG = 4`, `THREADS_PER_TG = 128`). Each row's 32 lanes
+//! cooperate on the dot product across super-blocks.
 
 pub const SHADER: &str = r#"
-constant uint Q4K_NR0 = 2;
-constant uint Q4K_BLOCK_SIZE = 148;
+constant uint Q4K_ROWS_PER_TG = 4;      // one simdgroup per row
+constant uint Q4K_BLOCK_SIZE = 144;     // GGUF Q4_K super-block bytes
 
 kernel void q4k_matvec(
     device const uchar*  W4K   [[buffer(0)]],
@@ -24,67 +31,71 @@ kernel void q4k_matvec(
     constant uint&       N     [[buffer(3)]],
     constant uint&       K     [[buffer(4)]],
     uint tg_id     [[threadgroup_position_in_grid]],
-    uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
+    uint row_idx = tg_id * Q4K_ROWS_PER_TG + sg_id;
+    if (row_idx >= N) return;
+
     uint superblocks = K / 256;
     uint bytes_per_row = superblocks * Q4K_BLOCK_SIZE;
-    uint total_subs = superblocks * 8;
+    device const uchar* row = W4K + row_idx * bytes_per_row;
 
-    // 4 simdgroups, each handles 2 rows
-    uint first_row = (tg_id * 4 + sg_id) * Q4K_NR0;
+    // Each lane handles one (or more) super-blocks via stride-32 loop.
+    // For the 2560/1536 hidden sizes common in production, superblocks
+    // is 6 or 10 — well below 32 — so only lanes [0, superblocks) do work.
+    float acc = 0.0f;
 
-    float acc[Q4K_NR0] = {0.f};
+    for (uint sb = lane; sb < superblocks; sb += 32) {
+        device const uchar* block = row + sb * Q4K_BLOCK_SIZE;
 
-    for (uint sub = lane; sub < total_subs; sub += 32) {
-        uint sb = sub / 8;
-        uint j = sub % 8;
-        uint xi = sb * 256 + j * 32;
+        // Super-block scales (f16).
+        ushort d_bits    = ushort(block[0]) | (ushort(block[1]) << 8);
+        ushort dmin_bits = ushort(block[2]) | (ushort(block[3]) << 8);
+        float d    = decode_f16_metal(d_bits);
+        float dmin = decode_f16_metal(dmin_bits);
 
-        // Process both rows with the same input values (L1-cached)
-        for (uint r = 0; r < Q4K_NR0; r++) {
-            uint row_idx = first_row + r;
-            if (row_idx >= N) break;
-
-            device const uchar* block = W4K + row_idx * bytes_per_row + sb * Q4K_BLOCK_SIZE;
-
-            device const half* dh = (device const half*)block;
-            float d    = float(dh[0]);
-            float dmin = float(dh[1]);
-
-            device const uchar* sc_bytes = block + 4;
-            float sc = d * float(sc_bytes[j] & 0x3F);
-            float mn;
-            device const uchar* min_bytes = block + 16;
-            if (j < 4) mn = dmin * float(min_bytes[j] & 0x0F);
-            else mn = dmin * float((min_bytes[j - 4] >> 4) & 0x0F);
-
-            device const uint4* qp = (device const uint4*)(block + 20 + j * 16);
-            uint4 w = qp[0];
-
-            float dot = 0.0f, xs = 0.0f;
-            #define P(W, S, I) { \
-                float a = X[xi+I], b = X[xi+I+1]; \
-                dot += float((W>>S)&0xFu)*a + float((W>>(S+4))&0xFu)*b; \
-                xs += a + b; }
-            P(w.x, 0, 0); P(w.x, 8, 2); P(w.x,16, 4); P(w.x,24, 6);
-            P(w.y, 0, 8); P(w.y, 8,10); P(w.y,16,12); P(w.y,24,14);
-            P(w.z, 0,16); P(w.z, 8,18); P(w.z,16,20); P(w.z,24,22);
-            P(w.w, 0,24); P(w.w, 8,26); P(w.w,16,28); P(w.w,24,30);
-            #undef P
-            acc[r] += sc * dot - mn * xs;
+        // 12 bytes of packed scales + mins.
+        device const uchar* sb_bytes = block + 4;
+        uint scales[8];
+        uint mins[8];
+        for (uint j = 0; j < 4; j++) {
+            scales[j] = uint(sb_bytes[j])   & 0x3Fu;
+            mins[j]   = uint(sb_bytes[j+4]) & 0x3Fu;
         }
+        for (uint j = 4; j < 8; j++) {
+            scales[j] = (uint(sb_bytes[j+4]) & 0x0Fu) | ((uint(sb_bytes[j-4]) >> 6) << 4);
+            mins[j]   = (uint(sb_bytes[j+4]) >> 4)    | ((uint(sb_bytes[j])   >> 6) << 4);
+        }
+
+        // 128 bytes of nibbles = 8 sub-blocks × 16 bytes × 2 nibbles = 256 values.
+        // Layout: byte[j*16 + i] holds `out[j*32 + i]` (low nibble) and
+        // `out[j*32 + 16 + i]` (high nibble).
+        device const uchar* qs = block + 16;
+        uint x_base = sb * 256;
+        float sb_acc = 0.0f;
+
+        for (uint j = 0; j < 8; j++) {
+            float sc = d * float(scales[j]);
+            float mn = dmin * float(mins[j]);
+            uint qs_off = j * 16;
+            uint sub_base = j * 32;
+            for (uint i = 0; i < 16; i++) {
+                uchar byte = qs[qs_off + i];
+                float lo = float(byte & 0x0Fu);
+                float hi = float((byte >> 4) & 0x0Fu);
+                sb_acc += (sc * lo - mn) * X[x_base + sub_base + i];
+                sb_acc += (sc * hi - mn) * X[x_base + sub_base + 16 + i];
+            }
+        }
+
+        acc += sb_acc;
     }
 
-    for (uint r = 0; r < Q4K_NR0; r++) {
-        uint row_idx = first_row + r;
-        if (row_idx >= N) break;
-        float sum = simd_sum(acc[r]);
-        if (lane == 0) out[row_idx] = sum;
-    }
+    acc = simd_sum(acc);
+    if (lane == 0) out[row_idx] = acc;
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 8;
-pub const THREADS_PER_TG: u64 = 128;  // 4 simdgroups × 32 lanes, each sg does 2 rows
+pub const ROWS_PER_TG: u64 = 4;
+pub const THREADS_PER_TG: u64 = 128;

@@ -9,6 +9,7 @@ use larql_vindex::{PatchedVindex, VindexConfig, ndarray::Array2, tokenizers};
 use tokio::sync::RwLock;
 
 use crate::cache::DescribeCache;
+use crate::ffn_l2_cache::FfnL2Cache;
 use crate::session::SessionManager;
 
 /// A single loaded model.
@@ -39,6 +40,8 @@ pub struct LoadedModel {
     /// Probe-confirmed feature labels: (layer, feature) → relation name.
     /// Loaded from feature_labels.json if present.
     pub probe_labels: HashMap<(usize, usize), String>,
+    /// L2 FFN output cache — shared across all clients, persists for server lifetime.
+    pub ffn_l2_cache: FfnL2Cache,
 }
 
 impl LoadedModel {

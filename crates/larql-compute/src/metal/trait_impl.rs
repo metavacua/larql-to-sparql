@@ -73,6 +73,7 @@ impl ComputeBackend for MetalBackend {
             Some(&self.q4kf_proj_pipeline),
             None,                           // no rope_at_pos for standard full_pipeline_q4
             Some(&self.qk_norm_pipeline),
+            Some(&self.scale_vector_pipeline),
             None,                           // no KV cache for standard full_pipeline_q4
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
@@ -193,6 +194,7 @@ impl ComputeBackend for MetalBackend {
             Some(&self.q4kf_proj_pipeline),
             Some(&self.rope_at_pos_pipeline),
             Some(&self.qk_norm_pipeline),
+            Some(&self.scale_vector_pipeline),
             Some(kv),
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,

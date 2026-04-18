@@ -76,7 +76,7 @@ fn run_infer(
 
     // Helper: run walk inference against a PatchedVindex
     let run_walk = |patched: &larql_vindex::PatchedVindex| {
-        let walk_ffn = larql_inference::WalkFfn::new(weights, patched, 8092);
+        let walk_ffn = larql_inference::WalkFfn::new_unlimited(weights, patched);
         let walk_start = std::time::Instant::now();
         let pred = larql_inference::predict_with_ffn(
             weights,

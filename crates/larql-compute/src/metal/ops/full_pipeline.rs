@@ -250,6 +250,97 @@ fn encode_quant_matvec_offset(
     }
 }
 
+/// Format-aware FFN matvec (gate / up): N rows × K cols. Reads either f32
+/// input (Q4_K / Q4_KF / Q6_K) or Q8 input (Q4_0 / Q8_0) and writes f32 output.
+/// The `f32_in` buffer holds one hidden-sized f32 vector per position starting
+/// at `f32_in_off` bytes; `q8_in` / `q8s_in` hold the Q8 version at their own
+/// offsets. All matvecs are single-vector dispatches.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_ffn_matvec(
+    enc: &ComputeCommandEncoderRef,
+    format: crate::QuantFormat,
+    w_buf: &Buffer,
+    f32_in: &Buffer,
+    f32_in_off: u64,
+    q8_in: &Buffer,
+    q8_in_off: u64,
+    q8s_in: &Buffer,
+    q8s_in_off: u64,
+    out_buf: &Buffer,
+    out_off: u64,
+    q4k_pipeline: &ComputePipelineState,
+    q6k_pipeline: &ComputePipelineState,
+    q4kf_proj_pipeline: Option<&ComputePipelineState>,
+    q4_matvec_pipeline: &ComputePipelineState,
+    num_rows: usize,
+    hidden: usize,
+) {
+    let n = num_rows as u32;
+    let k = hidden as u32;
+    match format {
+        crate::QuantFormat::Q4_K | crate::QuantFormat::Q4_KF => {
+            // Prefer `q4kf_proj` (144-byte GGUF, llama.cpp-exact inner loop).
+            if let Some(q4kf_proj_pipe) = q4kf_proj_pipeline {
+                use crate::metal::shaders::q4kf_qkv_proj as q4kf;
+                let num_tgs = (num_rows as u64).div_ceil(q4kf::ROWS_PER_TG);
+                enc.set_compute_pipeline_state(q4kf_proj_pipe);
+                enc.set_buffer(0, Some(w_buf), 0);
+                enc.set_buffer(1, Some(f32_in), f32_in_off);
+                enc.set_buffer(2, Some(out_buf), out_off);
+                enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+                enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(num_tgs, 1, 1),
+                    MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+                );
+            } else {
+                use crate::metal::shaders::q4k_matvec as q4k;
+                let num_tgs = (num_rows as u64).div_ceil(q4k::ROWS_PER_TG);
+                enc.set_compute_pipeline_state(q4k_pipeline);
+                enc.set_buffer(0, Some(w_buf), 0);
+                enc.set_buffer(1, Some(f32_in), f32_in_off);
+                enc.set_buffer(2, Some(out_buf), out_off);
+                enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+                enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+                enc.dispatch_thread_groups(
+                    MTLSize::new(num_tgs, 1, 1),
+                    MTLSize::new(q4k::THREADS_PER_TG, 1, 1),
+                );
+            }
+        }
+        crate::QuantFormat::Q6_K => {
+            use crate::metal::shaders::q6k_matvec as q6k;
+            let num_tgs = (num_rows as u64).div_ceil(q6k::ROWS_PER_TG);
+            enc.set_compute_pipeline_state(q6k_pipeline);
+            enc.set_buffer(0, Some(w_buf), 0);
+            enc.set_buffer(1, Some(f32_in), f32_in_off);
+            enc.set_buffer(2, Some(out_buf), out_off);
+            enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+            enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+            enc.dispatch_thread_groups(
+                MTLSize::new(num_tgs, 1, 1),
+                MTLSize::new(q6k::THREADS_PER_TG, 1, 1),
+            );
+        }
+        crate::QuantFormat::Q4_0 | crate::QuantFormat::Q8_0 => {
+            // Q4_0 matvec expects Q8 input + Q8 scales (per-32 f16-scaled blocks).
+            use crate::metal::shaders::q4_matvec as q4mv;
+            let num_tgs = (num_rows as u64).div_ceil(q4mv::ROWS_PER_TG);
+            enc.set_compute_pipeline_state(q4_matvec_pipeline);
+            enc.set_buffer(0, Some(w_buf), 0);
+            enc.set_buffer(1, Some(q8_in), q8_in_off);
+            enc.set_buffer(2, Some(q8s_in), q8s_in_off);
+            enc.set_buffer(3, Some(out_buf), out_off);
+            enc.set_bytes(4, 4, &n as *const u32 as *const c_void);
+            enc.set_bytes(5, 4, &k as *const u32 as *const c_void);
+            enc.dispatch_thread_groups(
+                MTLSize::new(num_tgs, 1, 1),
+                MTLSize::new(q4mv::THREADS_PER_TG, 1, 1),
+            );
+        }
+    }
+}
+
 /// Dispatch a matvec based on the weight's quantization format.
 /// Q4_K/Q6_K take f32 input. Q8_0/Q4_0 take Q8 input.
 #[allow(dead_code, clippy::too_many_arguments)]
@@ -359,6 +450,7 @@ pub fn dispatch_full_pipeline(
     q4kf_proj_pipeline: Option<&ComputePipelineState>,
     rope_at_pos_pipeline: Option<&ComputePipelineState>,
     qk_norm_pipeline: Option<&ComputePipelineState>,
+    scale_vector_pipeline: Option<&ComputePipelineState>,
     mut kv_cache: Option<&mut super::kv_cache::KVCache>,
     layers: &[crate::FullPipelineLayer],
     x: &[f32],
@@ -798,14 +890,16 @@ pub fn dispatch_full_pipeline(
         if use_separate_rope {
             let rope_pipeline = rope_at_pos_pipeline.unwrap();
             let hd = layer_head_dim as u32;
-            let hdim = (layer_head_dim / 2) as u64;
+            // Gemma 4 global layers use partial rotation: `rotary_dim < head_dim`.
+            // Pass `layer.rotary_dim` (0 means "full head_dim" per the shader).
+            let rdim_val = layers[l].rotary_dim as u32;
+            let rdim_effective = if layers[l].rotary_dim == 0 {
+                layer_head_dim
+            } else {
+                layers[l].rotary_dim
+            };
+            let hdim = (rdim_effective / 2) as u64;
 
-            // Apply RoPE per head using rope_apply (handles all positions in one dispatch).
-            // Q layout: [seq, num_q * layer_head_dim]. For each head, offset by head * layer_head_dim
-            // within each position's stride of num_q * layer_head_dim.
-            // rope_apply expects [seq_len, dim] contiguous — but our data has stride
-            // = num_heads * layer_head_dim, not layer_head_dim. So we must use rope_at_pos per position per head.
-            // Optimization: batch all positions into one encoder, all heads sequential.
             let enc = cmd.new_compute_command_encoder();
             for pos in 0..seq_len {
                 let pos_val = pos as u32;
@@ -816,6 +910,7 @@ pub fn dispatch_full_pipeline(
                     enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
                     enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const c_void);
                     enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &rdim_val as *const u32 as *const c_void);
                     enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
                 }
                 for kvh in 0..layer_num_kv_heads {
@@ -825,6 +920,7 @@ pub fn dispatch_full_pipeline(
                     enc.set_bytes(1, 4, &hd as *const u32 as *const c_void);
                     enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const c_void);
                     enc.set_bytes(3, 4, &pos_val as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &rdim_val as *const u32 as *const c_void);
                     enc.dispatch_threads(MTLSize::new(hdim, 1, 1), MTLSize::new(hdim.min(256), 1, 1));
                 }
             }
@@ -860,7 +956,10 @@ pub fn dispatch_full_pipeline(
             enc.set_bytes(11, 4, &softcap as *const f32 as *const c_void);
             let skip_rope_val = if use_separate_rope { 1u32 } else { 0u32 };
             enc.set_bytes(12, 4, &skip_rope_val as *const u32 as *const c_void);
-            let rotary_dim_val = 0u32;
+            // Pass per-layer rotary_dim (0 = full head_dim). Gemma 4 global
+            // layers use partial rotation (rotary_dim = head_dim / 4) — this
+            // must match what the caller pre-applied in separate RoPE.
+            let rotary_dim_val = layers[l].rotary_dim as u32;
             enc.set_bytes(13, 4, &rotary_dim_val as *const u32 as *const c_void);
             enc.dispatch_thread_groups(
                 MTLSize::new(layer_num_q_heads as u64, seq_len as u64, 1),
@@ -956,17 +1055,27 @@ pub fn dispatch_full_pipeline(
             }
         }
 
-        // ── 6. Post-attention residual + pre-FFN norm + Q8 quantize. Per position. ──
+        // ── 6. Post-attention residual + pre-FFN norm. ──
         //
-        // Post-norm (Gemma): norm(O) + residual → norm → Q8
-        // Pre-norm (Llama):  residual + O → norm → Q8
+        // Two output representations are needed here:
+        //   (a) ffn_norm_outs[l]  — f32 per position; consumed by Q4_K / Q4_KF /
+        //                            Q6_K FFN which expect f32 input.
+        //   (b) ffn_q8_bufs[l] + ffn_q8s_bufs[l] — Q8 + scales per position;
+        //       consumed only by Q4_0 / Q8_0 FFN.
+        // We always produce (a) via residual_add + rms_norm. We only produce
+        // (b) when the FFN actually needs it, to avoid the extra dispatch.
         //
-        // `residual_norm_q8` fuses residual_add + rms_norm + Q8 into one
-        // cooperative dispatch (single threadgroup), so we loop per position.
+        // `h_post_attns[l]` holds the post-residual f32 hidden state for the
+        // final residual add at the end of this layer (step 10).
+        let ffn_format = layers[l].gate.format;
+        let ffn_needs_q8 = matches!(ffn_format,
+            crate::QuantFormat::Q4_0 | crate::QuantFormat::Q8_0);
+
+
         for pos in 0..seq_len {
+            // First build h_post_attns[l][pos] = h + O (or h + norm(O) for post-norm).
             if has_post_norms {
-                // Post-norm path: norm the attention output per position first,
-                // then fuse (h + normed_O) with the pre-FFN norm.
+                // Post-norm: norm(O) first, then residual add.
                 let normed = bufs.output((hidden * 4) as u64);
                 {
                     let enc = cmd.new_compute_command_encoder();
@@ -980,69 +1089,108 @@ pub fn dispatch_full_pipeline(
                     enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                     enc.end_encoding();
                 }
-                let pre_ffn_buf = pre_ffn_norm_bufs[l].as_ref().unwrap_or(&post_attn_norm_bufs[l]);
-                {
-                    let enc = cmd.new_compute_command_encoder();
-                    enc.set_compute_pipeline_state(residual_norm_q8_pipeline);
-                    enc.set_buffer(0, Some(&h_bufs[l]), h_off(pos));
-                    enc.set_buffer(1, Some(&normed), 0);
-                    enc.set_buffer(2, Some(pre_ffn_buf), 0);
-                    enc.set_buffer(3, Some(&ffn_q8_bufs[l]), ffn_q8_off(pos));
-                    enc.set_buffer(4, Some(&ffn_q8s_bufs[l]), ffn_q8s_off(pos));
-                    enc.set_buffer(5, Some(&h_post_attns[l]), h_off(pos));
-                    enc.set_bytes(6, 4, &hidden_val as *const u32 as *const c_void);
-                    enc.set_bytes(7, 4, &eps as *const f32 as *const c_void);
-                    enc.set_bytes(8, 4, &norm_offset as *const f32 as *const c_void);
-                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
-                    enc.end_encoding();
-                }
-            } else {
-                // Pre-norm: fused (h + O) → post_attn_norm → Q8 in one dispatch.
                 let enc = cmd.new_compute_command_encoder();
-                enc.set_compute_pipeline_state(residual_norm_q8_pipeline);
+                enc.set_compute_pipeline_state(residual_add_pipeline);
+                enc.set_buffer(0, Some(&h_bufs[l]), h_off(pos));
+                enc.set_buffer(1, Some(&normed), 0);
+                enc.set_buffer(2, Some(&h_post_attns[l]), h_off(pos));
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.end_encoding();
+            } else {
+                // Pre-norm: residual add first (h + O), then norm happens below.
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(residual_add_pipeline);
                 enc.set_buffer(0, Some(&h_bufs[l]), h_off(pos));
                 enc.set_buffer(1, Some(&o_outs[l]), h_off(pos));
-                enc.set_buffer(2, Some(&post_attn_norm_bufs[l]), 0);
-                enc.set_buffer(3, Some(&ffn_q8_bufs[l]), ffn_q8_off(pos));
-                enc.set_buffer(4, Some(&ffn_q8s_bufs[l]), ffn_q8s_off(pos));
-                enc.set_buffer(5, Some(&h_post_attns[l]), h_off(pos));
-                enc.set_bytes(6, 4, &hidden_val as *const u32 as *const c_void);
-                enc.set_bytes(7, 4, &eps as *const f32 as *const c_void);
-                enc.set_bytes(8, 4, &norm_offset as *const f32 as *const c_void);
+                enc.set_buffer(2, Some(&h_post_attns[l]), h_off(pos));
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.end_encoding();
+            }
+
+            // Pre-FFN rms_norm on h_post_attns → ffn_norm_outs (f32).
+            let pre_ffn_weight = if has_post_norms {
+                pre_ffn_norm_bufs[l].as_ref().unwrap_or(&post_attn_norm_bufs[l])
+            } else {
+                &post_attn_norm_bufs[l]
+            };
+            {
+                let enc = cmd.new_compute_command_encoder();
+                enc.set_compute_pipeline_state(rms_norm_pipeline);
+                enc.set_buffer(0, Some(&h_post_attns[l]), h_off(pos));
+                enc.set_buffer(1, Some(pre_ffn_weight), 0);
+                enc.set_buffer(2, Some(&ffn_norm_outs[l]), h_off(pos));
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.set_bytes(4, 4, &eps as *const f32 as *const c_void);
+                enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
                 enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 enc.end_encoding();
             }
-        }
 
-        // ── 7-9. FFN: gate+up → GEGLU → down (Gated) or up → activation → down (Standard). ──
-        // Pointwise ops (GEGLU / SiLU / GELU-tanh) can be a single multi-position
-        // dispatch because they're elementwise on `seq_len * inter` floats.
-        // The quantised matvecs are single-vector, so we loop per position.
-        for pos in 0..seq_len {
-            if layers[l].ffn_type == crate::FfnType::Standard {
-                // Standard FFN: up → activation → down (no gate)
+            // If FFN is Q8-input, additionally Q8-quantise ffn_norm_outs.
+            if ffn_needs_q8 {
+                let blocks = (hidden as u64).div_ceil(32);
                 let enc = cmd.new_compute_command_encoder();
-                encode_q4_matvec_offset(enc, &q4.matvec,
-                    &up_bufs[l], &ffn_q8_bufs[l], ffn_q8_off(pos),
-                    &ffn_q8s_bufs[l], ffn_q8s_off(pos),
-                    &up_outs[l], inter_off(pos), inter, hidden);
-                enc.end_encoding();
-            } else {
-                // Gated FFN: gate+up → GEGLU → down
-                let enc = cmd.new_compute_command_encoder();
-                encode_q4_matvec_offset(enc, &q4.matvec,
-                    &gate_bufs[l], &ffn_q8_bufs[l], ffn_q8_off(pos),
-                    &ffn_q8s_bufs[l], ffn_q8s_off(pos),
-                    &gate_outs[l], inter_off(pos), inter, hidden);
-                encode_q4_matvec_offset(enc, &q4.matvec,
-                    &up_bufs[l], &ffn_q8_bufs[l], ffn_q8_off(pos),
-                    &ffn_q8s_bufs[l], ffn_q8s_off(pos),
-                    &up_outs[l], inter_off(pos), inter, hidden);
+                enc.set_compute_pipeline_state(q8_quant_pipeline);
+                enc.set_buffer(0, Some(&ffn_norm_outs[l]), h_off(pos));
+                enc.set_buffer(1, Some(&ffn_q8_bufs[l]), ffn_q8_off(pos));
+                enc.set_buffer(2, Some(&ffn_q8s_bufs[l]), ffn_q8s_off(pos));
+                enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                enc.dispatch_threads(
+                    MTLSize::new(blocks, 1, 1),
+                    MTLSize::new(256.min(blocks), 1, 1),
+                );
                 enc.end_encoding();
             }
         }
 
-        // Activation — single multi-position dispatch.
+        // ── 7-9. FFN: gate+up → GEGLU → down. Format-aware per position. ──
+        //
+        // Gate/up format drives the input representation:
+        //   Q4_K / Q4_KF / Q6_K → f32 input (ffn_norm_outs), direct matvec
+        //   Q4_0 / Q8_0         → Q8 input (ffn_q8_bufs + ffn_q8s_bufs)
+        //
+        // The down projection matches Gemma 4's Ollama strategy (Q4_K gate/up
+        // with Q6_K down): each format dispatched to its dedicated shader.
+        let gate_format = layers[l].gate.format;
+        let up_format = layers[l].up.format;
+        let down_format = layers[l].down.format;
+
+        for pos in 0..seq_len {
+            // Gate projection (only if gated)
+            if layers[l].ffn_type != crate::FfnType::Standard {
+                let enc = cmd.new_compute_command_encoder();
+                dispatch_ffn_matvec(
+                    enc, gate_format,
+                    &gate_bufs[l], &ffn_norm_outs[l], h_off(pos),
+                    &ffn_q8_bufs[l], ffn_q8_off(pos),
+                    &ffn_q8s_bufs[l], ffn_q8s_off(pos),
+                    &gate_outs[l], inter_off(pos),
+                    q4k_matvec_pipeline, q6k_matvec_pipeline,
+                    q4kf_proj_pipeline, &q4.matvec,
+                    inter, hidden,
+                );
+                enc.end_encoding();
+            }
+            // Up projection
+            {
+                let enc = cmd.new_compute_command_encoder();
+                dispatch_ffn_matvec(
+                    enc, up_format,
+                    &up_bufs[l], &ffn_norm_outs[l], h_off(pos),
+                    &ffn_q8_bufs[l], ffn_q8_off(pos),
+                    &ffn_q8s_bufs[l], ffn_q8s_off(pos),
+                    &up_outs[l], inter_off(pos),
+                    q4k_matvec_pipeline, q6k_matvec_pipeline,
+                    q4kf_proj_pipeline, &q4.matvec,
+                    inter, hidden,
+                );
+                enc.end_encoding();
+            }
+        }
+
+        // Activation — multi-position pointwise dispatch over `seq_len * inter`.
         {
             let total_inter = (seq_len * inter) as u64;
             let total_inter_val = (seq_len * inter) as u32;
@@ -1074,17 +1222,74 @@ pub fn dispatch_full_pipeline(
             }
         }
 
-        // Down projection — per position. `q4.f32_matvec` takes f32 input
-        // (`act_bufs_vec`) and writes f32 output (`down_outs`).
+        // Down projection — per position, format-aware. Reads act_bufs_vec
+        // (f32) of size `inter`, writes down_outs (f32) of size `hidden`.
+        // For Q4_0 / Q8_0 down we'd need to Q8-quantise act_bufs_vec first;
+        // current production vindexes use Q4_K / Q6_K so that branch is a
+        // fallback that goes through Q4_0 f32-matvec (non-fast but correct).
         for pos in 0..seq_len {
             let enc = cmd.new_compute_command_encoder();
-            enc.set_compute_pipeline_state(&q4.f32_matvec);
-            enc.set_buffer(0, Some(&down_bufs[l]), 0);
-            enc.set_buffer(1, Some(&act_bufs_vec[l]), inter_off(pos));
-            enc.set_buffer(2, Some(&down_outs[l]), h_off(pos));
-            enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
-            enc.set_bytes(4, 4, &inter_val as *const u32 as *const c_void);
-            enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256, 1, 1));
+            match down_format {
+                crate::QuantFormat::Q6_K => {
+                    use crate::metal::shaders::q6k_matvec as q6k;
+                    let n = hidden as u32;
+                    let k = inter as u32;
+                    let num_tgs = (hidden as u64).div_ceil(q6k::ROWS_PER_TG);
+                    enc.set_compute_pipeline_state(q6k_matvec_pipeline);
+                    enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&act_bufs_vec[l]), inter_off(pos));
+                    enc.set_buffer(2, Some(&down_outs[l]), h_off(pos));
+                    enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(num_tgs, 1, 1),
+                        MTLSize::new(q6k::THREADS_PER_TG, 1, 1),
+                    );
+                }
+                crate::QuantFormat::Q4_K | crate::QuantFormat::Q4_KF => {
+                    if let Some(q4kf_proj_pipe) = q4kf_proj_pipeline {
+                        use crate::metal::shaders::q4kf_qkv_proj as q4kf;
+                        let n = hidden as u32;
+                        let k = inter as u32;
+                        let num_tgs = (hidden as u64).div_ceil(q4kf::ROWS_PER_TG);
+                        enc.set_compute_pipeline_state(q4kf_proj_pipe);
+                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                        enc.set_buffer(1, Some(&act_bufs_vec[l]), inter_off(pos));
+                        enc.set_buffer(2, Some(&down_outs[l]), h_off(pos));
+                        enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+                        enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(num_tgs, 1, 1),
+                            MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+                        );
+                    } else {
+                        use crate::metal::shaders::q4k_matvec as q4k;
+                        let n = hidden as u32;
+                        let k = inter as u32;
+                        let num_tgs = (hidden as u64).div_ceil(q4k::ROWS_PER_TG);
+                        enc.set_compute_pipeline_state(q4k_matvec_pipeline);
+                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                        enc.set_buffer(1, Some(&act_bufs_vec[l]), inter_off(pos));
+                        enc.set_buffer(2, Some(&down_outs[l]), h_off(pos));
+                        enc.set_bytes(3, 4, &n as *const u32 as *const c_void);
+                        enc.set_bytes(4, 4, &k as *const u32 as *const c_void);
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(num_tgs, 1, 1),
+                            MTLSize::new(q4k::THREADS_PER_TG, 1, 1),
+                        );
+                    }
+                }
+                _ => {
+                    // Q4_0 / Q8_0 fallback via f32 input matvec.
+                    enc.set_compute_pipeline_state(&q4.f32_matvec);
+                    enc.set_buffer(0, Some(&down_bufs[l]), 0);
+                    enc.set_buffer(1, Some(&act_bufs_vec[l]), inter_off(pos));
+                    enc.set_buffer(2, Some(&down_outs[l]), h_off(pos));
+                    enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &inter_val as *const u32 as *const c_void);
+                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256, 1, 1));
+                }
+            }
             enc.end_encoding();
         }
 
@@ -1126,6 +1331,32 @@ pub fn dispatch_full_pipeline(
             enc.set_buffer(2, Some(&h_bufs[l + 1]), h_off(pos));
             enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
             enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+            enc.end_encoding();
+        }
+
+        // ── 11. Per-layer residual scalar (Gemma 4). ──
+        //
+        // Gemma 4 multiplies the layer's residual output by a learned scalar
+        // (`layer_scalar`, typically ~0.05) to stabilise the residual stream.
+        // Without this the residual magnitude explodes across layers since
+        // Gemma 4's post_attn_norm weights can reach ~100. Matches
+        // `decode_token`'s Step 8 and `apply_layer_scalar` on CPU.
+        if let Some(scale_pipe) = scale_vector_pipeline.filter(|_| layers[l].layer_scalar != 0.0) {
+            let scalar = layers[l].layer_scalar;
+            let enc = cmd.new_compute_command_encoder();
+            for pos in 0..seq_len {
+                enc.set_compute_pipeline_state(scale_pipe);
+                enc.set_buffer(0, Some(&h_bufs[l + 1]), h_off(pos));
+                enc.set_buffer(1, Some(&h_bufs[l + 1]), h_off(pos));
+                enc.set_bytes(2, 4, &hidden_val as *const u32 as *const c_void);
+                enc.set_bytes(3, 4, &scalar as *const f32 as *const c_void);
+                // `scale_vector` uses `thread_position_in_grid` — need one
+                // thread per element, not a single 256-thread threadgroup.
+                enc.dispatch_threads(
+                    MTLSize::new(hidden as u64, 1, 1),
+                    MTLSize::new(256.min(hidden as u64), 1, 1),
+                );
+            }
             enc.end_encoding();
         }
 
