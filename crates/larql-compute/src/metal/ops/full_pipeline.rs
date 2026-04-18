@@ -31,7 +31,7 @@ pub struct LayerWeights<'a> {
     pub down_t_q4: &'a [u8],
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn encode_q4_matvec(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -167,7 +167,7 @@ fn encode_q4_matvec_offset(
 /// Mirrors `encode_quant_matvec` but takes `in_off` / `out_off` byte offsets
 /// so a single backing buffer can hold `seq_len` rows addressed by position.
 /// Q4_K / Q6_K / Q4_KF read f32 input at `in_off`; Q4_0 / Q8_0 read Q8 input.
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn encode_quant_matvec_offset(
     enc: &ComputeCommandEncoderRef,
     format: crate::QuantFormat,
@@ -252,7 +252,7 @@ fn encode_quant_matvec_offset(
 
 /// Dispatch a matvec based on the weight's quantization format.
 /// Q4_K/Q6_K take f32 input. Q8_0/Q4_0 take Q8 input.
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn encode_quant_matvec(
     enc: &ComputeCommandEncoderRef,
     format: crate::QuantFormat,
@@ -470,18 +470,7 @@ pub fn dispatch_full_pipeline(
         ffn_q8s_bufs.push(bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64));
     }
 
-    let mut cmd = queue.new_command_buffer();
-    let diag_per_layer = std::env::var("LARQL_METAL_DEBUG").is_ok();
-    if diag_per_layer {
-        let ptr = h_bufs[0].contents() as *const f32;
-        if !ptr.is_null() {
-            let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
-            let mut nz = 0usize; let mut nan = 0usize; let mut max_abs = 0.0f32;
-            for v in s { if *v != 0.0 { nz += 1; } if v.is_nan() { nan += 1; } let a = v.abs(); if a > max_abs && a.is_finite() { max_abs = a; } }
-            eprintln!("[DBG INPUT] h_bufs[0] nonzero={}/{} nan={} max_abs={:.3e} x_len={}",
-                nz, seq_len * hidden, nan, max_abs, x.len());
-        }
-    }
+    let cmd = queue.new_command_buffer();
 
     for l in 0..num_layers {
         let eps = layers[l].eps;
@@ -554,10 +543,9 @@ pub fn dispatch_full_pipeline(
                 let fuseable = all_same_format
                     && matches!(layers[l].wq.format,
                         crate::QuantFormat::Q4_K | crate::QuantFormat::Q4_KF);
-                let force_fallback = std::env::var("LARQL_METAL_NO_FUSED_QKV").is_ok();
-                // Prefer q4kf (144-byte) over q4k (148-byte legacy).
+                // Prefer q4kf (144-byte GGUF) over q4k (148-byte legacy).
                 let fused_pipe = q4kf_qkv_proj_pipeline.or(q4k_qkv_proj_pipeline);
-                if let Some(fused_pipeline) = fused_pipe.filter(|_| fuseable && !force_fallback) {
+                if let Some(fused_pipeline) = fused_pipe.filter(|_| fuseable) {
                     use crate::metal::shaders::q4kf_qkv_proj as q4kf_qkv;
                     let total_rows = (layer_q_dim + layer_kv_dim + layer_kv_dim) as u32;
                     let q_rows_val = layer_q_dim as u32;
@@ -700,6 +688,43 @@ pub fn dispatch_full_pipeline(
                     MTLSize::new(total_rows as u64, 1, 1),
                     MTLSize::new(256, 1, 1),
                 );
+                enc.end_encoding();
+            }
+        }
+
+        // ── 3 (pre). Optional parameter-free V-norm (Gemma 4). ──
+        // Normalises V per-head before it feeds into attention. Matches
+        // `decode_token`'s Step 3. Only applied when the architecture
+        // requests it (`layer.has_v_norm`).
+        if layers[l].has_v_norm {
+            if let Some(qk_norm_pipe) = qk_norm_pipeline {
+                // Re-use qk_norm shader: it already RMS-norms per head with
+                // a weight vector. V-norm is parameter-free (weight = 1,
+                // offset = 0), so we stage an all-ones weight buffer once.
+                let ones: Vec<f32> = vec![1.0; layer_head_dim];
+                let ones_buf = bufs.transient_from_f32(&ones);
+                let hd_val = layer_head_dim as u32;
+                let nkv_val = layer_num_kv_heads as u32;
+                let zero_off: f32 = 0.0;
+                let mut tg_w: u64 = 1;
+                while (tg_w as usize) < layer_head_dim && tg_w < 512 { tg_w <<= 1; }
+
+                let enc = cmd.new_compute_command_encoder();
+                for pos in 0..seq_len {
+                    let v_buf_off = (pos * layer_num_kv_heads * layer_head_dim * 4) as u64;
+                    enc.set_compute_pipeline_state(qk_norm_pipe);
+                    enc.set_buffer(0, Some(&v_outs[l]), v_buf_off);
+                    enc.set_buffer(1, Some(&v_outs[l]), v_buf_off);
+                    enc.set_buffer(2, Some(&ones_buf), 0);
+                    enc.set_bytes(3, 4, &hd_val as *const u32 as *const c_void);
+                    enc.set_bytes(4, 4, &nkv_val as *const u32 as *const c_void);
+                    enc.set_bytes(5, 4, &eps as *const f32 as *const c_void);
+                    enc.set_bytes(6, 4, &zero_off as *const f32 as *const c_void);
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(layer_num_kv_heads as u64, 1, 1),
+                        MTLSize::new(tg_w, 1, 1),
+                    );
+                }
                 enc.end_encoding();
             }
         }
@@ -1104,63 +1129,10 @@ pub fn dispatch_full_pipeline(
             enc.end_encoding();
         }
 
-        if diag_per_layer {
-            cmd.commit();
-            cmd.wait_until_completed();
-            // Inspect every intermediate buffer for layer 0 only (to limit noise).
-            let inspect = |name: &str, buf: &metal::Buffer, len: usize| {
-                let ptr = buf.contents() as *const f32;
-                if ptr.is_null() { return; }
-                let s = unsafe { std::slice::from_raw_parts(ptr, len) };
-                let mut nz = 0usize; let mut nan = 0usize; let mut inf = 0usize; let mut max_abs = 0.0f32;
-                for v in s {
-                    if *v != 0.0 { nz += 1; }
-                    if v.is_nan() { nan += 1; }
-                    if v.is_infinite() { inf += 1; }
-                    let a = v.abs();
-                    if a > max_abs && a.is_finite() { max_abs = a; }
-                }
-                eprintln!("[DBG L{} {}] nz={}/{} nan={} inf={} max_abs={:.3e}",
-                    l, name, nz, len, nan, inf, max_abs);
-            };
-            if l == 0 {
-                inspect("norm_out", &norm_outs[l], seq_len * hidden);
-                inspect("q_out",    &q_outs[l],    seq_len * layer_q_dim);
-                inspect("k_out",    &k_outs[l],    seq_len * layer_kv_dim);
-                inspect("v_out",    &v_outs[l],    seq_len * layer_kv_dim);
-                let v_ptr = v_outs[l].contents() as *const f32;
-                for p in 0..seq_len {
-                    let s = unsafe { std::slice::from_raw_parts(v_ptr.add(p * layer_kv_dim), layer_kv_dim) };
-                    let mut nan = 0usize; let mut max_abs = 0.0f32; let mut nz = 0usize;
-                    for v in s { if *v != 0.0 { nz += 1; } if v.is_nan() { nan += 1; } let a = v.abs(); if a > max_abs && a.is_finite() { max_abs = a; } }
-                    eprintln!("[DBG L0 v_out pos={}] nz={}/{} nan={} max_abs={:.3e}", p, nz, layer_kv_dim, nan, max_abs);
-                }
-                inspect("attn_out", &attn_outs[l], seq_len * layer_q_dim);
-                inspect("o_out",    &o_outs[l],    seq_len * hidden);
-                inspect("h_post_attn", &h_post_attns[l], seq_len * hidden);
-                inspect("down_out", &down_outs[l], seq_len * hidden);
-            }
-            inspect(&format!("h_bufs[{}]", l + 1), &h_bufs[l + 1], seq_len * hidden);
-            cmd = queue.new_command_buffer();
-        }
     }
 
     cmd.commit();
     cmd.wait_until_completed();
-    // DIAG: command buffer status and sanity-check final hidden state.
-    {
-        let status = cmd.status();
-        let h_len = seq_len * hidden;
-        let ptr = h_bufs[num_layers].contents() as *const f32;
-        let (nz, nan, max_abs) = if !ptr.is_null() {
-            let s = unsafe { std::slice::from_raw_parts(ptr, h_len) };
-            let mut nz = 0usize; let mut nan = 0usize; let mut max_abs = 0.0f32;
-            for v in s { if *v != 0.0 { nz += 1; } if v.is_nan() { nan += 1; } let a = v.abs(); if a > max_abs { max_abs = a; } }
-            (nz, nan, max_abs)
-        } else { (0, 0, 0.0) };
-        eprintln!("[DBG dispatch] status={:?} seq_len={} hidden={} h_nonzero={}/{} nan={} max_abs={:.3e}",
-            status, seq_len, hidden, nz, h_len, nan, max_abs);
-    }
 
     // Populate KV cache from GPU-computed RoPE'd K and V (post-commit, buffers readable)
     if let Some(ref mut kv) = kv_cache {

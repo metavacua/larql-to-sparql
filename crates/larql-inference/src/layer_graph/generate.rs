@@ -27,16 +27,10 @@ fn lm_head_topk(
     backend: &dyn ComputeBackend,
 ) -> Vec<(u32, f32)> {
     let hits = index.lm_head_knn_backend(query, top_k, backend);
-    eprintln!("[DBG lm_head_topk] vindex hits={} query len={} lm_head shape={:?} query_max_abs={:.3e}",
-        hits.len(), query.len(), weights.lm_head.shape(),
-        query.iter().map(|v| v.abs()).fold(0.0f32, f32::max));
     if !hits.is_empty() {
         return hits;
     }
-    let fb = cpu_lm_head_topk(weights, query, top_k);
-    eprintln!("[DBG lm_head_topk] cpu fallback hits={} top5={:?}",
-        fb.len(), fb.iter().take(5).map(|(t,s)| (*t, *s)).collect::<Vec<_>>());
-    fb
+    cpu_lm_head_topk(weights, query, top_k)
 }
 
 fn cpu_lm_head_topk(

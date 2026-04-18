@@ -443,6 +443,23 @@ fn run_predict_q4k(
             return Err("Metal backend unavailable — rebuild with `--features metal` \
                 and run on an M-series Mac.".into());
         }
+        // Detect Q6_K mixed-format vindexes (Ollama strategy: Q4_K Q/K +
+        // Q6_K V). The current Metal Q6_K matvec shader has a known
+        // correctness issue on these vindexes that causes NaN residuals —
+        // fall back to the CPU Q4K path so users get real output rather
+        // than garbage tokens. Tracked separately.
+        let has_q6k_attn = (0..weights.num_layers).any(|li| {
+            q4_index.attn_q4k_layer_data(li)
+                .map(|entries| entries.iter().any(|(_, fmt)| *fmt == "Q6_K"))
+                .unwrap_or(false)
+        });
+        if has_q6k_attn && args.max_tokens > 1 {
+            vlog!(verbose,
+                "Metal backend present but vindex uses Q6_K attention weights \
+                 (Ollama mixed-quant strategy). Metal Q6_K matvec has a known \
+                 correctness bug — falling back to CPU Q4K generate.");
+            return run_q4k_generate_cpu(weights, tokenizer, &token_ids, args, &q4_index);
+        }
         vlog!(verbose, "Backend: {} (Metal Q4K prefill + KV-cached decode)", backend.name());
         // --metal + --max-tokens > 1: route to the existing shader
         // autoregressive generate() in `larql-inference/src/layer_graph`
