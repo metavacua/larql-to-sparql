@@ -69,7 +69,7 @@ pub struct MetalBackend {
     pub rope_at_pos_batched_pipeline: ComputePipelineState,
     pub q4k_qkv_proj_pipeline: ComputePipelineState,
     q4k_proj_pipeline: ComputePipelineState,
-    q4kf_qkv_proj_pipeline: ComputePipelineState,
+    pub q4kf_qkv_proj_pipeline: ComputePipelineState,
     pub q4kf_proj_pipeline: ComputePipelineState,
     // Standalone activations (non-gated FFN)
     pub silu_pipeline: ComputePipelineState,

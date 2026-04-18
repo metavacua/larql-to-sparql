@@ -82,11 +82,11 @@ pub struct WalkArgs {
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Opt in to the Metal Q4 decode path. Off by default because the
-    /// per-token `kv_attention` shader doesn't apply QK-norm yet, so
-    /// Gemma 3 / Gemma 4 post-norm models produce NaN. Pre-norm models
-    /// (Llama, Mistral) should work. Flip this on once the QK-norm
-    /// dispatch lands in `decode.rs`.
+    /// Run autoregressive generation through the Metal Q4K pipeline:
+    /// fused `full_pipeline_q4` prefill + `decode_token` KV-cached decode.
+    /// Works for pre-norm (Llama, Mistral) and post-norm + QK-norm
+    /// (Gemma 3, Gemma 4) architectures. Requires a Q4K vindex and a
+    /// build with `--features metal` on an M-series Mac.
     #[arg(long)]
     pub metal: bool,
 
@@ -418,11 +418,11 @@ fn run_predict_q4k(
     q4_index.load_attn_q4k(vindex_path)?;
     q4_index.load_interleaved_q4k(vindex_path)?;
 
-    // CPU path is the default today. Metal Q4 decode is wired (see
-    // `predict_q4k_metal`) but the per-token `kv_attention` shader doesn't
-    // apply QK-norm, so Gemma 3 / Gemma 4 post-norm models produce NaN
-    // (unnormalised Q·K blows up before softmax). Opt in with `--metal` once
-    // the QK-norm dispatch lands in `larql-compute/src/metal/decode.rs`.
+    // Metal Q4K path (`--metal`) routes autoregressive generation through the
+    // fused `full_pipeline_q4` prefill + `decode_token` KV-cached decode in
+    // `layer_graph::generate`. Works for pre-norm (Llama/Mistral) and
+    // post-norm + QK-norm (Gemma 3/4) architectures. CPU path below is the
+    // fallback for when the backend is absent or for diffing.
     let start = Instant::now();
 
     // Autoregressive multi-token generation. For Q4K on CPU, we build
@@ -443,8 +443,7 @@ fn run_predict_q4k(
             return Err("Metal backend unavailable — rebuild with `--features metal` \
                 and run on an M-series Mac.".into());
         }
-        vlog!(verbose, "Backend: {} (EXPERIMENTAL — Q4 Metal decode is plumbed but produces NaN on \
-            post-norm models; tracking as ADR-009, see predict.rs:386)", backend.name());
+        vlog!(verbose, "Backend: {} (Metal Q4K prefill + KV-cached decode)", backend.name());
         // --metal + --max-tokens > 1: route to the existing shader
         // autoregressive generate() in `larql-inference/src/layer_graph`
         // (GPU prefill + KV-cached decode). That function returns its
@@ -752,25 +751,35 @@ fn generate_stream(
     let mut stdout = std::io::stdout();
     let max_tokens = args.max_tokens;
 
+    // Auto-detected compute backend. On macOS with the `metal` feature
+    // this is Metal; otherwise CPU BLAS. Note the Metal backend has a
+    // FLOP threshold (~500M) below which it stays on CPU — single-token
+    // decode-step matmuls (m=1 × k×n) are ~5-7M FLOP and fall under
+    // that limit, so projections run on CPU BLAS even when Metal is
+    // available. Real GPU wins require either the Q4K `full_pipeline`
+    // (already wired via `--metal` on Q4K vindexes) or batched decode.
+    let backend = larql_compute::default_backend();
+
     let (generated, label) = match args.kv_cache {
-        KvCacheKind::Standard => {
-            let g = larql_inference::forward::generate_cached(
-                weights, tokenizer, ffn, initial_ids, max_tokens,
-                |_id, tok| { print!("{tok}"); let _ = stdout.flush(); },
-            );
-            (g, "standard KV cache")
-        }
-        KvCacheKind::MarkovBounded => {
-            let window = if args.context_window > 0 {
+        KvCacheKind::Standard | KvCacheKind::MarkovBounded => {
+            let window = if args.kv_cache == KvCacheKind::MarkovBounded
+                && args.context_window > 0
+            {
                 Some(args.context_window)
             } else {
                 None
             };
-            let g = larql_inference::forward::generate_cached_with_window(
-                weights, tokenizer, ffn, initial_ids, max_tokens, window,
+            let g = larql_inference::forward::generate_cached_backend(
+                weights, tokenizer, ffn, initial_ids, max_tokens,
+                Some(&*backend), window,
                 |_id, tok| { print!("{tok}"); let _ = stdout.flush(); },
             );
-            (g, "Markov-bounded KV cache")
+            let label = if window.is_some() {
+                "Markov-bounded KV cache"
+            } else {
+                "standard KV cache"
+            };
+            (g, label)
         }
         KvCacheKind::None => {
             // No-cache: run full forward per step. O(N²).
@@ -793,7 +802,16 @@ fn generate_stream(
     };
     println!();
     if verbose {
-        eprintln!("  Generated {} tokens ({label})", generated.len());
+        // Honest reporting: the backend is `backend.name()` but the
+        // Metal path only actually dispatches when matmul size exceeds
+        // the calibrated FLOP threshold. Decode-step matmuls on 4B are
+        // typically below that, so labelling "via metal" would be a
+        // lie. Report both the detected backend AND note that single-
+        // token decode stays on CPU regardless.
+        eprintln!(
+            "  Generated {} tokens ({}) — backend={} (decode matmuls usually below GPU threshold)",
+            generated.len(), label, backend.name(),
+        );
     }
     generated
 }

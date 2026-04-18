@@ -24,7 +24,7 @@
 use ndarray::Array2;
 
 use crate::attention::{
-    run_attention_block_decode_step, run_attention_with_kv, KvCache,
+    run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
 };
 use crate::ffn::FfnBackend;
 use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
@@ -50,7 +50,27 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, None, &mut on_token,
+        weights, tokenizer, ffn, prompt_ids, max_new_tokens, None, None, &mut on_token,
+    )
+}
+
+/// Variant of [`generate_cached`] that runs Q/K/V/O projections on a
+/// GPU `ComputeBackend` when provided. GQA softmax stays on CPU.
+pub fn generate_cached_backend<F>(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    max_new_tokens: usize,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+    window: Option<usize>,
+    mut on_token: F,
+) -> Vec<u32>
+where
+    F: FnMut(u32, &str),
+{
+    generate_cached_bounded(
+        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, backend, &mut on_token,
     )
 }
 
@@ -73,10 +93,11 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, &mut on_token,
+        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, None, &mut on_token,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_cached_bounded(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -84,6 +105,7 @@ fn generate_cached_bounded(
     prompt_ids: &[u32],
     max_new_tokens: usize,
     window: Option<usize>,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
     on_token: &mut dyn FnMut(u32, &str),
 ) -> Vec<u32> {
     if max_new_tokens == 0 || prompt_ids.is_empty() {
@@ -99,10 +121,11 @@ fn generate_cached_bounded(
 
     let mut h = embed_tokens_pub(weights, prompt_ids);
     for layer in 0..num_layers {
-        let (h_post_attn, k_rope, v) = match run_attention_with_kv(weights, &h, layer) {
-            Some(t) => t,
-            None => return Vec::new(),
-        };
+        let (h_post_attn, k_rope, v) =
+            match run_attention_with_kv_backend(weights, &h, layer, backend) {
+                Some(t) => t,
+                None => return Vec::new(),
+            };
         cache.layers[layer] = Some((k_rope, v));
         // Apply the window bound immediately — if prompt is longer
         // than the window, attention during later decode steps only
@@ -143,8 +166,8 @@ fn generate_cached_bounded(
         let mut h_step = h_new;
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
-            let (h_post_attn, new_kv) = match run_attention_block_decode_step(
-                weights, &h_step, layer, kv_entry, abs_position,
+            let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
+                weights, &h_step, layer, kv_entry, abs_position, backend,
             ) {
                 Some(t) => t,
                 None => return generated,

@@ -4,6 +4,75 @@ use larql_compute::ComputeBackend;
 use crate::model::ModelWeights;
 use super::CachedLayerGraph;
 
+/// Top-K logits lookup that transparently handles models with tied
+/// input/output embeddings (Gemma 2/3/4) whose vindex has no dedicated
+/// `lm_head.bin` / `lm_head_q4.bin`.
+///
+/// Resolution order:
+/// 1. Vindex-native KNN (`lm_head_knn_backend`) — fastest, used when the
+///    vindex was built with a separate lm_head.
+/// 2. CPU gemv against `weights.lm_head` — the loader fills this from
+///    `embed.clone()` for tied-embedding models, so it's always populated
+///    even when no lm_head file is present.
+///
+/// The second path is O(vocab * hidden) floats through the CPU, but that's
+/// a one-shot matvec per generated token — negligible compared to the
+/// per-layer attention + FFN. It lets every model generate tokens through
+/// the Metal pipeline regardless of how its vindex was packaged.
+fn lm_head_topk(
+    index: &larql_vindex::VectorIndex,
+    weights: &ModelWeights,
+    query: &ndarray::Array1<f32>,
+    top_k: usize,
+    backend: &dyn ComputeBackend,
+) -> Vec<(u32, f32)> {
+    let hits = index.lm_head_knn_backend(query, top_k, backend);
+    eprintln!("[DBG lm_head_topk] vindex hits={} query len={} lm_head shape={:?} query_max_abs={:.3e}",
+        hits.len(), query.len(), weights.lm_head.shape(),
+        query.iter().map(|v| v.abs()).fold(0.0f32, f32::max));
+    if !hits.is_empty() {
+        return hits;
+    }
+    let fb = cpu_lm_head_topk(weights, query, top_k);
+    eprintln!("[DBG lm_head_topk] cpu fallback hits={} top5={:?}",
+        fb.len(), fb.iter().take(5).map(|(t,s)| (*t, *s)).collect::<Vec<_>>());
+    fb
+}
+
+fn cpu_lm_head_topk(
+    weights: &ModelWeights,
+    query: &ndarray::Array1<f32>,
+    top_k: usize,
+) -> Vec<(u32, f32)> {
+    let lm = &weights.lm_head;
+    if lm.is_empty() || query.is_empty() {
+        return Vec::new();
+    }
+    let vocab = lm.shape()[0];
+    let hidden = lm.shape()[1];
+    if hidden != query.len() {
+        return Vec::new();
+    }
+    // Single matvec: lm @ query → [vocab]. Use ndarray's BLAS-backed dot.
+    let scores = lm.dot(query);
+    let mut indexed: Vec<(u32, f32)> = scores
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(i, s)| (i as u32, s))
+        .collect();
+    let k = top_k.min(indexed.len());
+    if k > 0 && k < indexed.len() {
+        indexed.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.truncate(k);
+    }
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Drop any NaN scores from the tail — they'd otherwise sort unpredictably.
+    indexed.retain(|(_, s)| s.is_finite());
+    let _ = vocab;
+    indexed
+}
+
 /// Multi-token generation: GPU prefill → decode loop with KV cache.
 ///
 /// 1. GPU prefill: full_pipeline_q4 populates KV cache for all layers
@@ -114,7 +183,7 @@ pub fn generate(
     let mut tokens = Vec::with_capacity(max_tokens);
     let mut decode_ms = Vec::with_capacity(max_tokens);
 
-    let first_hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+    let first_hits = lm_head_topk(index, weights, &h_1d, 5, backend);
     if let Some(&(tid, score)) = first_hits.first() {
         let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
         let prob = super::logits::softmax_prob(score, &first_hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
@@ -140,7 +209,7 @@ pub fn generate(
             let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
             let h_1d = h_final.row(0).to_owned();
 
-            let hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+            let hits = lm_head_topk(index, weights, &h_1d, 5, backend);
             let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
             decode_ms.push(step_ms);
 
@@ -163,7 +232,7 @@ pub fn generate(
             }
             let h_final = crate::forward::apply_norm(weights, &h_dec, weights.arch.final_norm_key(), norm_offset);
             let h_1d = h_final.row(0).to_owned();
-            let hits = index.lm_head_knn_backend(&h_1d, 5, backend);
+            let hits = lm_head_topk(index, weights, &h_1d, 5, backend);
             let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
             decode_ms.push(step_ms);
             if let Some(&(tid, score)) = hits.first() {

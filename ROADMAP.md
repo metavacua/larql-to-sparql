@@ -138,6 +138,36 @@ Not yet wired into the live decode path (all in `crates/kv-cache-benchmark/`):
 
 ### Shader attention + remote FFN
 
+### Metal speedup for non-Q4K decode
+
+**Status:** backend is auto-detected and threaded through
+`generate_cached_backend`, but in practice **single-token decode
+matmuls stay on CPU** because they fall below the Metal backend's
+calibrated FLOP threshold (~500M). Per-layer projections on 4B are
+only 5-7M FLOP each — far under the break-even point where GPU
+dispatch overhead is worth paying.
+
+**What this means today:**
+- `larql run` on f16/f32 vindexes uses CPU BLAS projections regardless
+  of `--metal` availability. The KV cache is still the decisive win
+  (~6× speedup vs no-cache).
+- `larql run --metal` on a **Q4K vindex** routes to
+  `larql_inference::layer_graph::generate` (the shader
+  `full_pipeline_q4` — all layers fused in one command buffer, KV-
+  cached decode on GPU). This is the real GPU path.
+
+**What would actually win on f16/f32:**
+1. **Fused f16 full_pipeline shader** — same structure as Q4K's
+   `full_pipeline` but with f16 weights. Multi-day shader work.
+2. **Batched / speculative decode** — emit N tokens per forward pass
+   (draft model, Medusa heads, or speculative sampling). N×M FLOP
+   per matmul would clear the threshold. Compatible with remote FFN
+   if the batching happens client-side.
+
+See `crates/larql-compute/benches/{linalg,matmul}.rs` and the
+many `crates/larql-compute/examples/profile_*.rs` for the measured
+GPU-vs-CPU break-even curves — the threshold isn't arbitrary.
+
 ### Shader attention + remote FFN (Act 2 endgame)
 
 Q4K + Metal + remote FFN — the ultimate Act 2 configuration. The

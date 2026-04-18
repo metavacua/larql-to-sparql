@@ -159,6 +159,9 @@ pub fn gqa_attention_decode_step(
 /// position — the caller must pass its true position in the original
 /// sequence, NOT the clipped cache length (those differ under a
 /// sliding window). Returns the updated `(h_post_attn, new_kv)`.
+///
+/// CPU-only variant. For GPU projections use
+/// [`run_attention_block_decode_step_backend`].
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn run_attention_block_decode_step(
@@ -168,8 +171,27 @@ pub fn run_attention_block_decode_step(
     kv_entry: Option<&SharedKV>,
     abs_position: usize,
 ) -> Option<(Array2<f32>, SharedKV)> {
-    use crate::forward::{add_bias, dot_proj};
+    run_attention_block_decode_step_backend(weights, h_new, layer, kv_entry, abs_position, None)
+}
+
+/// Decode-step attention with optional GPU-accelerated projections
+/// (Q/K/V/O matmuls route through `ComputeBackend::matmul_transb` when
+/// `backend` is `Some`). GQA softmax + weighted-V stays on CPU —
+/// that's O(cached_len × head_dim × num_q) per step and rarely the
+/// bottleneck vs the hidden×hidden projection gemms.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn run_attention_block_decode_step_backend(
+    weights: &crate::model::ModelWeights,
+    h_new: &Array2<f32>,
+    layer: usize,
+    kv_entry: Option<&SharedKV>,
+    abs_position: usize,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+) -> Option<(Array2<f32>, SharedKV)> {
+    use crate::forward::add_bias;
     use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+    use larql_compute::dot_proj_gpu;
 
     let arch = &*weights.arch;
     let head_dim = arch.head_dim_for_layer(layer);
@@ -190,7 +212,7 @@ pub fn run_attention_block_decode_step(
 
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
     let w_o = weights.tensors.get(&arch.attn_o_key(layer))?;
-    let mut q_full = dot_proj(&h_norm, w_q);
+    let mut q_full = dot_proj_gpu(&h_norm, w_q, backend);
     if let Some(bias) = arch.attn_q_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut q_full, bias);
     }
@@ -210,8 +232,8 @@ pub fn run_attention_block_decode_step(
     let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
     let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer))? };
 
-    let mut k_full_new = dot_proj(&h_norm, w_k);
-    let mut v_full_new = dot_proj(&h_norm, w_v);
+    let mut k_full_new = dot_proj_gpu(&h_norm, w_k, backend);
+    let mut v_full_new = dot_proj_gpu(&h_norm, w_v, backend);
     if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut k_full_new, bias);
     }
@@ -249,7 +271,7 @@ pub fn run_attention_block_decode_step(
         num_q, head_dim, reps, scale, softcap,
     );
 
-    let mut attn_projected = dot_proj(&attn_out, w_o);
+    let mut attn_projected = dot_proj_gpu(&attn_out, w_o, backend);
     if let Some(bias) = arch.attn_o_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut attn_projected, bias);
     }
