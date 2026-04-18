@@ -11,6 +11,54 @@ impl ComputeBackend for MetalBackend {
         self.f32_ops.matmul_transb(&self.queue, &self.bufs, a, b, self.flop_threshold.load(Ordering::Relaxed))
     }
 
+    fn f32_gemv(&self, w: ArrayView2<f32>, x: &[f32]) -> Option<Vec<f32>> {
+        let (n, k) = (w.shape()[0], w.shape()[1]);
+        if x.len() != k { return None; }
+        // Fall back below the GPU threshold — small gemvs are dominated by
+        // dispatch overhead.
+        if 2 * n * k < self.flop_threshold.load(Ordering::Relaxed) {
+            return None;
+        }
+        let w_owned;
+        let w_data: &[f32] = match w.as_slice() {
+            Some(s) => s,
+            None => { w_owned = w.as_standard_layout().into_owned(); w_owned.as_slice().unwrap().to_vec().leak() }
+        };
+
+        // Zero-copy cached weight buffer — `get_bytes` aliases mmap-backed
+        // pages on Apple Silicon; the 2.68 GB `lm_head` only "uploads" once
+        // and every subsequent call reuses the same Metal buffer.
+        let w_bytes = unsafe {
+            std::slice::from_raw_parts(w_data.as_ptr() as *const u8, w_data.len() * 4)
+        };
+        let w_buf = self.bufs.get_bytes(w_bytes);
+        let x_buf = self.bufs.transient_from_f32(x);
+        let out_buf = self.bufs.output((n * 4) as u64);
+
+        use crate::metal::shaders::f32_gemv as sh;
+        let n_u32 = n as u32;
+        let k_u32 = k as u32;
+        let num_tgs = (n as u64).div_ceil(sh::ROWS_PER_TG);
+
+        let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&self.f32_gemv_pipeline);
+        enc.set_buffer(0, Some(&w_buf), 0);
+        enc.set_buffer(1, Some(&x_buf), 0);
+        enc.set_buffer(2, Some(&out_buf), 0);
+        enc.set_bytes(3, 4, &n_u32 as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &k_u32 as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(num_tgs, 1, 1),
+            metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+        );
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+
+        Some(super::buffers::read_buffer_f32(&out_buf, n))
+    }
+
     fn matmul_batch(&self, ops: &[MatMulOp]) -> Vec<Array2<f32>> {
         ops.iter().map(|op| {
             if op.transpose_b { self.matmul_transb(op.a.view(), op.b.view()) }

@@ -2356,6 +2356,7 @@ fn streaming_extract_from_safetensors() {
         larql_vindex::StorageDtype::F32,
         larql_vindex::QuantFormat::None,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     ).unwrap();
@@ -2506,6 +2507,7 @@ fn streaming_extract_q4k_from_safetensors() {
         larql_vindex::StorageDtype::F32,
         QuantFormat::Q4k,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     )
@@ -3324,6 +3326,7 @@ fn streaming_extract_q4k_carries_ple_tensors() {
         larql_vindex::StorageDtype::F32,
         QuantFormat::Q4k,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     )
@@ -3556,6 +3559,7 @@ fn streaming_extract_preserves_per_layer_intermediate_for_variable_ffn() {
         larql_vindex::StorageDtype::F32,
         QuantFormat::Q4k,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     )

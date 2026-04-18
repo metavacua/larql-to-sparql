@@ -30,26 +30,48 @@ fn lm_head_topk(
     if !hits.is_empty() {
         return hits;
     }
-    cpu_lm_head_topk(weights, query, top_k)
+    backend_lm_head_topk(weights, query, top_k, backend)
 }
 
-fn cpu_lm_head_topk(
+/// LM-head top-K via the active ComputeBackend.
+///
+/// Performs a single gemv `scores[vocab] = lm_head[vocab, hidden] · query[hidden]`
+/// by dispatching `matmul_transb(query[1, hidden], lm_head[vocab, hidden])`.
+/// On Metal this is a GPU f32 gemv (under Apple Silicon unified memory the
+/// 2.68 GB `weights.lm_head` is shared, not copied). On CPU it's the
+/// BLAS fallback via the same trait method. Either way this replaces the
+/// previous unconditional CPU `ndarray::dot`, which was ~26 ms/tok on
+/// Gemma 3 4B — the dominant cost of real-vindex decode.
+fn backend_lm_head_topk(
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,
     top_k: usize,
+    backend: &dyn ComputeBackend,
 ) -> Vec<(u32, f32)> {
     let lm = &weights.lm_head;
-    if lm.is_empty() || query.is_empty() {
-        return Vec::new();
-    }
+    if lm.is_empty() || query.is_empty() { return Vec::new(); }
     let vocab = lm.shape()[0];
     let hidden = lm.shape()[1];
-    if hidden != query.len() {
-        return Vec::new();
-    }
-    // Single matvec: lm @ query → [vocab]. Use ndarray's BLAS-backed dot.
-    let scores = lm.dot(query);
-    let mut indexed: Vec<(u32, f32)> = scores
+    if hidden != query.len() { return Vec::new(); }
+
+    // Try the dedicated GPU gemv first (~3-5 ms on Metal for the Gemma
+    // 262K × 2560 tied LM head). Fall back to `matmul_transb` (which
+    // itself falls back to BLAS below the flop threshold) if the backend
+    // doesn't specialise gemv.
+    let query_slice = match query.as_slice() {
+        Some(s) => s,
+        None => &query.to_vec(),
+    };
+    let scores_vec: Vec<f32> = if let Some(s) = backend.f32_gemv(lm.view(), query_slice) {
+        s
+    } else {
+        let q_row = match query.view().into_shape_with_order((1, hidden)) {
+            Ok(r) => r, Err(_) => return Vec::new(),
+        };
+        backend.matmul_transb(q_row, lm.view()).row(0).to_vec()
+    };
+
+    let mut indexed: Vec<(u32, f32)> = scores_vec
         .iter()
         .copied()
         .enumerate()
@@ -61,10 +83,20 @@ fn cpu_lm_head_topk(
         indexed.truncate(k);
     }
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    // Drop any NaN scores from the tail — they'd otherwise sort unpredictably.
     indexed.retain(|(_, s)| s.is_finite());
     let _ = vocab;
     indexed
+}
+
+/// Kept for the `LARQL_METAL_COMPARE_CPU=1` diagnostic mode which wants a
+/// known-good CPU reference. Not used in the hot path.
+#[allow(dead_code)]
+fn cpu_lm_head_topk(
+    weights: &ModelWeights,
+    query: &ndarray::Array1<f32>,
+    top_k: usize,
+) -> Vec<(u32, f32)> {
+    backend_lm_head_topk(weights, query, top_k, &larql_compute::CpuBackend)
 }
 
 /// Multi-token generation: GPU prefill → decode loop with KV cache.

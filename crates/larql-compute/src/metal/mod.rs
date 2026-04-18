@@ -89,6 +89,10 @@ pub struct MetalBackend {
     pub rms_norm_q8_pipeline: ComputePipelineState,
     pub residual_norm_pipeline: ComputePipelineState,
     pub residual_norm_q8_pipeline: ComputePipelineState,
+    /// Dedicated row-per-simdgroup f32 gemv for the LM head. Used in
+    /// autoregressive decode where `matmul_transb(query, lm_head)` shows
+    /// up as the dominant per-token cost.
+    pub f32_gemv_pipeline: ComputePipelineState,
     flop_threshold: AtomicUsize,
 }
 
@@ -171,6 +175,10 @@ impl MetalBackend {
         let residual_norm_pipeline = device.new_compute_pipeline_state_with_function(&residual_norm_fn).ok()?;
         let residual_norm_q8_pipeline = device.new_compute_pipeline_state_with_function(&residual_norm_q8_fn).ok()?;
 
+        // Dedicated f32 gemv for the LM head.
+        let f32_gemv_fn = library.get_function("f32_gemv", None).ok()?;
+        let f32_gemv_pipeline = device.new_compute_pipeline_state_with_function(&f32_gemv_fn).ok()?;
+
         // RoPE (standalone, for prefill KV cache population)
         let rope_fn = library.get_function("rope_apply", None).ok()?;
         let rope_pipeline = device.new_compute_pipeline_state_with_function(&rope_fn).ok()?;
@@ -250,6 +258,7 @@ impl MetalBackend {
             scale_vector_pipeline,
             kv_cache: std::sync::Mutex::new(None),
             rms_norm_q8_pipeline, residual_norm_pipeline, residual_norm_q8_pipeline,
+            f32_gemv_pipeline,
             flop_threshold: AtomicUsize::new(calibrate::DEFAULT_FLOP_THRESHOLD),
         })
     }

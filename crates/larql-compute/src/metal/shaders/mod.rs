@@ -38,6 +38,7 @@ pub mod qk_norm;
 pub mod turboquant_encode;
 pub mod turboquant_decode;
 pub mod graph_walk_knn;
+pub mod f32_gemv;
 
 /// Concatenate all shaders into one MSL source string for compilation.
 pub fn all_shaders() -> String {
@@ -46,6 +47,7 @@ pub fn all_shaders() -> String {
     // f32 matmul
     src.push_str(sgemm::SHADER);
     src.push_str(sgemm_transb::SHADER);
+    src.push_str(f32_gemv::SHADER);
     // Q4 dense matvec variants
     src.push_str(q4_matvec::SHADER);
     src.push_str(q4_matvec_v2::SHADER);

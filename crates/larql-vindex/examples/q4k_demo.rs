@@ -67,6 +67,7 @@ fn main() {
         StorageDtype::F32,
         QuantFormat::None,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     )
@@ -89,6 +90,7 @@ fn main() {
         StorageDtype::F32,
         QuantFormat::Q4k,
         larql_vindex::WriteWeightsOptions::default(),
+        larql_vindex::Q4kWriteOptions::default(),
         false,
         &mut cb,
     )

@@ -77,6 +77,16 @@ pub struct ExtractIndexArgs {
     #[arg(long)]
     drop_gate_vectors: bool,
 
+    /// Quantise FFN down-proj as Q4_K instead of Q6_K. Only valid with
+    /// `--quant q4k`. Default keeps the Ollama-compatible mix (Q4_K for
+    /// gate/up, Q6_K for down). Enabling this saves ~30 MB/layer on 31B
+    /// (~1.8 GB total) and drops down matmul cost ~1.5-1.7× at decode.
+    /// Quantisation error on down is a scatter-sum over the intermediate
+    /// dimension — noise averages — but quality must be validated
+    /// against `walk_correctness` before adopting in production.
+    #[arg(long)]
+    down_q4k: bool,
+
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
     resume: bool,
@@ -260,6 +270,12 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
                     .into(),
             );
         }
+        if args.down_q4k && args.quant != larql_vindex::QuantFormat::Q4k {
+            return Err(
+                "--down-q4k requires --quant q4k (only the Q4K writer honours this flag)".into(),
+            );
+        }
+        let q4k_opts = larql_vindex::Q4kWriteOptions { down_q4k: args.down_q4k };
         larql_vindex::build_vindex_streaming(
             &model_path,
             &tokenizer,
@@ -270,6 +286,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             dtype,
             args.quant,
             weight_opts,
+            q4k_opts,
             args.drop_gate_vectors,
             &mut callbacks,
         )?;

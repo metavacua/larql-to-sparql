@@ -79,7 +79,8 @@ pub use format::huggingface::{
     is_hf_path, PublishCallbacks, SilentPublishCallbacks,
 };
 pub use format::weights::{
-    write_model_weights, write_model_weights_with_opts, write_model_weights_q4k,
+    write_model_weights, write_model_weights_with_opts,
+    write_model_weights_q4k, write_model_weights_q4k_with_opts, Q4kWriteOptions,
     load_model_weights, load_model_weights_with_opts, load_model_weights_q4k,
     WeightSource, StreamingWeights, WriteWeightsOptions, LoadWeightsOptions,
 };

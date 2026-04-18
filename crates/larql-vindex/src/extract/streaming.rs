@@ -38,6 +38,7 @@ pub fn build_vindex_streaming(
     dtype: StorageDtype,
     quant: QuantFormat,
     weight_opts: crate::format::weights::WriteWeightsOptions,
+    q4k_opts: crate::format::weights::Q4kWriteOptions,
     // Skip writing `gate_vectors.bin` entirely. Only valid when
     // `quant == Q4k` — the loader synthesizes gate from Q4K at load
     // time. Refused otherwise because without a Q4K interleaved file
@@ -519,8 +520,8 @@ pub fn build_vindex_streaming(
                 // `ffn_compact` is a no-op here by construction. Level
                 // gating for Q4K is a future refinement (today Q4K
                 // always writes the full set).
-                crate::format::weights::write_model_weights_q4k(
-                    &streaming_source, output_dir, callbacks,
+                crate::format::weights::write_model_weights_q4k_with_opts(
+                    &streaming_source, output_dir, callbacks, q4k_opts,
                 )?;
             }
         }

@@ -542,6 +542,18 @@ fn pad_to_256(data: &[f32]) -> Vec<f32> {
     }
 }
 
+/// Options for [`write_model_weights_q4k_with_opts`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Q4kWriteOptions {
+    /// Quantise FFN down-proj as Q4_K instead of Q6_K. Default `false`
+    /// preserves the Ollama-compatible "Q4_K_M" mix (Q4_K for gate/up,
+    /// Q6_K for down). Setting `true` uses Q4_K uniformly — saves ~30MB
+    /// per layer on 31B (1.8GB total) and drops down matmul cost ~1.5-1.7×
+    /// to match up-proj timings. Quantisation noise on the scatter-sum
+    /// averages across the intermediate dimension; empirically close.
+    pub down_q4k: bool,
+}
+
 /// Write model weights in Q4_K/Q6_K format, zero f32 intermediate on disk.
 ///
 /// Emits:
@@ -552,6 +564,7 @@ fn pad_to_256(data: &[f32]) -> Vec<f32> {
 ///       valid and downstream kernels reading V get K.
 ///   interleaved_q4k.bin
 ///     — [gate Q4_K | up Q4_K | down Q6_K] per layer, regular stride.
+///     — With `down_q4k=true`: [gate | up | down] all Q4_K.
 ///   lm_head_q4.bin
 ///     — Q4_K of the output projection (falls back to embed_tokens when tied).
 ///   norms.bin (f32, unchanged from non-Q4 path).
@@ -562,6 +575,17 @@ pub fn write_model_weights_q4k(
     source: &dyn WeightSource,
     dir: &Path,
     callbacks: &mut dyn IndexBuildCallbacks,
+) -> Result<(), VindexError> {
+    write_model_weights_q4k_with_opts(source, dir, callbacks, Q4kWriteOptions::default())
+}
+
+/// Like [`write_model_weights_q4k`] but accepts a [`Q4kWriteOptions`] knob
+/// to toggle the FFN down-proj quantisation format.
+pub fn write_model_weights_q4k_with_opts(
+    source: &dyn WeightSource,
+    dir: &Path,
+    callbacks: &mut dyn IndexBuildCallbacks,
+    opts: Q4kWriteOptions,
 ) -> Result<(), VindexError> {
     use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 
@@ -661,8 +685,12 @@ pub fn write_model_weights_q4k(
         ].iter().enumerate() {
             if let Some((data, rows, cols)) = source.get_tensor(key) {
                 let padded = pad_to_256(&data);
-                let q_bytes = if i == 2 { quantize_q6_k(&padded) } else { quantize_q4_k(&padded) };
-                let format = if i == 2 { QuantBlockFormat::Q6K } else { QuantBlockFormat::Q4K };
+                // Gate (i=0) and up (i=1) always Q4_K. Down (i=2) defaults
+                // to Q6_K for llama.cpp compatibility, Q4_K when opts.down_q4k.
+                let is_down = i == 2;
+                let use_q6 = is_down && !opts.down_q4k;
+                let q_bytes = if use_q6 { quantize_q6_k(&padded) } else { quantize_q4_k(&padded) };
+                let format = if use_q6 { QuantBlockFormat::Q6K } else { QuantBlockFormat::Q4K };
                 ff_file.write_all(&q_bytes)?;
                 let length = q_bytes.len() as u64;
                 ff_manifest.push(Q4kAttnEntry {

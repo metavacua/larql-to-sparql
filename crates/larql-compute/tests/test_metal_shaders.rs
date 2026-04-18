@@ -2861,6 +2861,60 @@ fn stage_quant_matvec_routes_format_to_correct_shader() {
     assert!(rel < 0.1, "Q4_0 route rel err {rel:.4}");
 }
 
+/// `f32_gemv` shader: `out[N] = W[N,K] · x[K]` matches `ndarray::dot`.
+///
+/// Motivating case: LM-head logits at autoregressive decode. The shader's
+/// value-add over re-using `sgemm_transb` at M=1 is both speed (row-per-
+/// simdgroup vs 31/32-wasted-thread tiled gemm) and argmax stability
+/// (deterministic per-row reduction order, no shifting of top-K under
+/// noisy logits). Test pins both.
+#[test]
+fn f32_gemv_matches_ndarray_dot() {
+    let metal = get_metal();
+    // Small shapes fall below the default 500 MFLOP threshold and return
+    // None (caller falls back to CPU). We want to exercise the Metal
+    // path, so drop the floor.
+    metal.set_flop_threshold(1);
+
+    // Dimensions chosen to match the Gemma 3/4 LM-head aspect ratio in
+    // miniature: wide N, K a non-power-of-two-multiple-of-32, K % 128 != 0.
+    let n = 2048usize;
+    let k = 2560usize;
+    let w = synth(n, k, 0xa11ce);
+    let x: Vec<f32> = (0..k).map(|i| ((i as f32) * 0.013).sin()).collect();
+
+    // CPU reference: ndarray's BLAS gemv.
+    let x_arr = ndarray::Array1::from(x.clone());
+    let expected = w.dot(&x_arr);
+
+    // Metal path.
+    let got = metal.f32_gemv(w.view(), &x).expect("gemv should dispatch above threshold");
+    assert_eq!(got.len(), n);
+
+    let diff = max_diff(expected.as_slice().unwrap(), &got);
+    let max_abs = expected.iter().map(|v| v.abs()).fold(0.0f32, f32::max).max(1e-6);
+    let rel = diff / max_abs;
+    assert!(
+        rel < 1e-4,
+        "f32_gemv rel err {rel:.2e} (abs {diff:.2e}, max_abs {max_abs:.2e})"
+    );
+
+    // Argmax stability — the actual property that matters for LM-head top-K.
+    let exp_argmax = expected
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
+    let got_argmax = got
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .unwrap()
+        .0;
+    assert_eq!(exp_argmax, got_argmax, "argmax mismatch between CPU and Metal gemv");
+}
+
 /// Stage: `residual::encode_post_attn` with FFN that needs Q8 input.
 ///
 /// Verifies the additional q8_quant dispatch runs and produces a Q8

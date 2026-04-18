@@ -30,6 +30,14 @@ pub trait ComputeBackend: Send + Sync {
     /// C = A × B^T where A is [m, k] and B is [n, k].
     fn matmul_transb(&self, a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32>;
 
+    /// Dedicated row-per-simdgroup gemv for single-row × large-N × large-K.
+    /// Computes `out[N] = W[N, K] · x[K]`. Backends that lack a specialised
+    /// kernel should return `None`; callers fall back to `matmul_transb`.
+    ///
+    /// Motivating use-case: LM-head logits in autoregressive decode where
+    /// the 32×32 tiled sgemm wastes 31/32 threads at `M = 1`.
+    fn f32_gemv(&self, _w: ArrayView2<f32>, _x: &[f32]) -> Option<Vec<f32>> { None }
+
     /// Multiple matmuls in one submission. Default: serial dispatch.
     /// GPU backends can override with parallel command buffer encoding.
     fn matmul_batch(&self, ops: &[MatMulOp]) -> Vec<Array2<f32>> {
