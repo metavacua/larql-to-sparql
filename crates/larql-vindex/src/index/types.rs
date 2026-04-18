@@ -71,6 +71,12 @@ pub trait GateIndex {
     /// `None` when the FFN manifest wasn't emitted (older vindexes).
     fn interleaved_q4k_layer_data(&self, _layer: usize) -> Option<[(&[u8], &str); 3]> { None }
 
+    /// Dequantised Q4K/Q6K FFN matrix for `(layer, component)` where
+    /// `component` is 0=gate, 1=up, 2=down. Lazily decoded and cached.
+    /// Returns `None` when the vindex has no Q4K interleaved data.
+    fn q4k_ffn_layer(&self, _layer: usize, _component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>> { None }
+
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.
     fn gate_knn_q4(

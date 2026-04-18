@@ -128,4 +128,10 @@ impl GateIndex for VectorIndex {
     fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
         VectorIndex::interleaved_q4k_layer_data(self, layer)
     }
+
+    fn q4k_ffn_layer(&self, layer: usize, component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>>
+    {
+        VectorIndex::q4k_ffn_layer(self, layer, component)
+    }
 }

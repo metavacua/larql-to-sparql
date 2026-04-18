@@ -564,6 +564,17 @@ pub fn dispatch_full_pipeline(
 
     let mut cmd = queue.new_command_buffer();
     let dump_path = std::env::var("LARQL_METAL_DUMP_LAYERS").ok();
+    // Dump h_embed (input to layer 0) before any compute — lets us
+    // verify CPU and Metal start from the same point.
+    if let Some(ref dir) = dump_path {
+        let ptr = h_bufs[0].contents() as *const f32;
+        if !ptr.is_null() {
+            let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+            let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let path = format!("{dir}/metal_h_embed.f32");
+            let _ = std::fs::write(&path, &bytes);
+        }
+    }
 
     for l in 0..num_layers {
         let eps = layers[l].eps;
@@ -822,6 +833,23 @@ pub fn dispatch_full_pipeline(
             }
         }
 
+        // Stage dump: Q just after QKV projection, before QK-norm.
+        if dump_path.is_some() && l == 0 {
+            cmd.commit();
+            cmd.wait_until_completed();
+            let ptr = q_outs[l].contents() as *const f32;
+            if !ptr.is_null() {
+                let n = seq_len * layer_q_dim;
+                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let _ = std::fs::write(
+                    format!("{}/metal_L0_q_out_raw.f32", dump_path.as_ref().unwrap()),
+                    &bytes,
+                );
+            }
+            cmd = queue.new_command_buffer();
+        }
+
         // ── 3a. QK-norm on Q and K (pre-RoPE). Gemma 3 / Gemma 4. ──
         //
         // Applied BEFORE RoPE to match the reference implementation and
@@ -881,6 +909,23 @@ pub fn dispatch_full_pipeline(
         } else {
             false
         };
+
+        // Stage dump: Q after QK-norm, before RoPE.
+        if dump_path.is_some() && l == 0 {
+            cmd.commit();
+            cmd.wait_until_completed();
+            let ptr = q_outs[l].contents() as *const f32;
+            if !ptr.is_null() {
+                let n = seq_len * layer_q_dim;
+                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let _ = std::fs::write(
+                    format!("{}/metal_L0_q_out_after_qk_norm.f32", dump_path.as_ref().unwrap()),
+                    &bytes,
+                );
+            }
+            cmd = queue.new_command_buffer();
+        }
 
         // ── 3b. Apply RoPE separately when populating KV cache ──
         // When kv_cache is provided, apply RoPE to Q and K via rope_at_pos per head
@@ -1369,14 +1414,33 @@ pub fn dispatch_full_pipeline(
         if let Some(ref dir) = dump_path {
             cmd.commit();
             cmd.wait_until_completed();
-            let ptr = h_bufs[l + 1].contents() as *const f32;
-            if !ptr.is_null() {
-                let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+            let write_f32 = |name: &str, buf: &metal::Buffer, n: usize| {
+                let ptr = buf.contents() as *const f32;
+                if ptr.is_null() { return; }
+                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
                 let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
-                let path = format!("{dir}/metal_layer_{l:02}.f32");
+                let path = format!("{dir}/metal_layer_{l:02}_{name}.f32");
                 if let Err(e) = std::fs::write(&path, &bytes) {
                     eprintln!("[dump] failed to write {path}: {e}");
                 }
+            };
+            // End-of-layer residual (matches CPU dump exactly).
+            write_f32("h_out", &h_bufs[l + 1], seq_len * hidden);
+            // Per-stage snapshots for layer 0 only (noise budget): these
+            // let us bisect which shader stage first diverges from CPU.
+            if l == 0 {
+                write_f32("norm_out",     &norm_outs[l],     seq_len * hidden);
+                write_f32("q_out",        &q_outs[l],        seq_len * layer_q_dim);
+                write_f32("k_out",        &k_outs[l],        seq_len * layer_kv_dim);
+                write_f32("v_out",        &v_outs[l],        seq_len * layer_kv_dim);
+                write_f32("attn_out",     &attn_outs[l],     seq_len * layer_q_dim);
+                write_f32("o_out",        &o_outs[l],        seq_len * hidden);
+                write_f32("h_post_attn",  &h_post_attns[l],  seq_len * hidden);
+                write_f32("ffn_norm_out", &ffn_norm_outs[l], seq_len * hidden);
+                write_f32("gate_out",     &gate_outs[l],     seq_len * inter);
+                write_f32("up_out",       &up_outs[l],       seq_len * inter);
+                write_f32("act_buf",      &act_bufs_vec[l],  seq_len * inter);
+                write_f32("down_out",     &down_outs[l],     seq_len * hidden);
             }
             cmd = queue.new_command_buffer();
         }

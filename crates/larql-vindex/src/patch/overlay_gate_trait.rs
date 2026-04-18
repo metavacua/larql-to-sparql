@@ -71,6 +71,48 @@ impl GateIndex for PatchedVindex {
         self.base.has_full_mmap_ffn()
     }
 
+    fn has_interleaved(&self) -> bool {
+        self.base.has_interleaved()
+    }
+
+    fn interleaved_gate(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
+        self.base.interleaved_gate(layer)
+    }
+
+    fn interleaved_up(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
+        self.base.interleaved_up(layer)
+    }
+
+    fn interleaved_down(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
+        self.base.interleaved_down(layer)
+    }
+
+    fn has_interleaved_q4(&self) -> bool {
+        self.base.has_interleaved_q4()
+    }
+
+    fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> {
+        self.base.interleaved_q4_mmap_ref()
+    }
+
+    fn has_interleaved_q4k(&self) -> bool {
+        self.base.has_interleaved_q4k()
+    }
+
+    fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> {
+        self.base.interleaved_q4k_mmap_ref()
+    }
+
+    fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
+        self.base.interleaved_q4k_layer_data(layer)
+    }
+
+    fn q4k_ffn_layer(&self, layer: usize, component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>>
+    {
+        self.base.q4k_ffn_layer(layer, component)
+    }
+
     fn gate_knn_batch(&self, layer: usize, x: &ndarray::Array2<f32>, top_k: usize) -> Vec<usize> {
         // The base impl runs a BLAS gemm against the disk-side gate
         // matrix and ignores the patch overlay — so any feature with

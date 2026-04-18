@@ -68,24 +68,31 @@ kernel void q4k_matvec(
             mins[j]   = (uint(sb_bytes[j+4]) >> 4)    | ((uint(sb_bytes[j])   >> 6) << 4);
         }
 
-        // 128 bytes of nibbles = 8 sub-blocks × 16 bytes × 2 nibbles = 256 values.
-        // Layout: byte[j*16 + i] holds `out[j*32 + i]` (low nibble) and
-        // `out[j*32 + 16 + i]` (high nibble).
+        // 128 bytes of nibbles arranged as 4 groups × 32 bytes. Each group
+        // pairs two adjacent sub-blocks: low nibbles → sub-block 2g (scale
+        // scales[2g]), high nibbles → sub-block 2g+1 (scale scales[2g+1]).
+        // Matches llama.cpp `dequantize_row_q4_K` and the `q4kf_proj`
+        // shader family.
         device const uchar* qs = block + 16;
         uint x_base = sb * 256;
         float sb_acc = 0.0f;
 
-        for (uint j = 0; j < 8; j++) {
-            float sc = d * float(scales[j]);
-            float mn = dmin * float(mins[j]);
-            uint qs_off = j * 16;
-            uint sub_base = j * 32;
-            for (uint i = 0; i < 16; i++) {
-                uchar byte = qs[qs_off + i];
+        for (uint g = 0; g < 4; g++) {
+            uint sb_lo = 2 * g;
+            uint sb_hi = 2 * g + 1;
+            float sc_lo = d * float(scales[sb_lo]);
+            float sc_hi = d * float(scales[sb_hi]);
+            float mn_lo = dmin * float(mins[sb_lo]);
+            float mn_hi = dmin * float(mins[sb_hi]);
+            uint qs_off = g * 32;
+            uint base_lo = sb_lo * 32;
+            uint base_hi = sb_hi * 32;
+            for (uint l = 0; l < 32; l++) {
+                uchar byte = qs[qs_off + l];
                 float lo = float(byte & 0x0Fu);
                 float hi = float((byte >> 4) & 0x0Fu);
-                sb_acc += (sc * lo - mn) * X[x_base + sub_base + i];
-                sb_acc += (sc * hi - mn) * X[x_base + sub_base + 16 + i];
+                sb_acc += (sc_lo * lo - mn_lo) * X[x_base + base_lo + l];
+                sb_acc += (sc_hi * hi - mn_hi) * X[x_base + base_hi + l];
             }
         }
 

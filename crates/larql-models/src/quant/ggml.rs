@@ -225,17 +225,18 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 ///
 /// Each (scale, min) pair governs 32 elements within the 256-element super-block.
 pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
-    let block_size = 144;   // 2 + 2 + 12 + 128 = actual Q4_K block size in llama.cpp
+    let block_size = 144;   // 2 + 2 + 12 + 128, llama.cpp GGUF layout.
     let super_block = 256;
     let n_blocks = n_elements / super_block;
-    let mut out = Vec::with_capacity(n_elements);
+    let mut out = vec![0.0f32; n_elements];
 
     for sb in 0..n_blocks {
         let block = &data[sb * block_size..(sb + 1) * block_size];
         let d = f16_to_f32(u16::from_le_bytes([block[0], block[1]]));
         let dmin = f16_to_f32(u16::from_le_bytes([block[2], block[3]]));
 
-        // 12 bytes of packed scales + mins at bytes 4..16
+        // 12 bytes of packed scales + mins at bytes 4..16, per
+        // llama.cpp's `get_scale_min_k4`.
         let scales_bytes = &block[4..16];
         let mut scales = [0u8; 8];
         let mut mins = [0u8; 8];
@@ -249,22 +250,28 @@ pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
             }
         }
 
-        // 128 bytes of quants at bytes 16..144 (2 nibbles per byte)
+        // Nibble layout (matches llama.cpp `dequantize_row_q4_K`): four
+        // groups of 32 bytes, each group spans two adjacent sub-blocks.
+        //   byte[g*32 + l].low_nibble  → y[sb*256 + 2g*32     + l]  (sub-block 2g)
+        //   byte[g*32 + l].high_nibble → y[sb*256 + (2g+1)*32 + l]  (sub-block 2g+1)
+        //   scales[2g]   / mins[2g]   scale the low nibbles
+        //   scales[2g+1] / mins[2g+1] scale the high nibbles
         let quants = &block[16..144];
-        for j in 0..8 {
-            let sc_val = d * scales[j] as f32;
-            let mn_val = dmin * mins[j] as f32;
-            // Each scale governs 32 values = 16 bytes
-            let chunk = &quants[j * 16..(j + 1) * 16];
-            // First pass: lower 4-bits of each byte
-            for &byte in chunk {
-                let lo = (byte & 0x0F) as f32;
-                out.push(sc_val * lo - mn_val);
-            }
-            // Second pass: upper 4-bits of each byte
-            for &byte in chunk {
-                let hi = ((byte >> 4) & 0x0F) as f32;
-                out.push(sc_val * hi - mn_val);
+        let sb_base = sb * super_block;
+        for g in 0..4 {
+            let sb_lo = 2 * g;
+            let sb_hi = 2 * g + 1;
+            let sc_lo = d * scales[sb_lo] as f32;
+            let sc_hi = d * scales[sb_hi] as f32;
+            let mn_lo = dmin * mins[sb_lo] as f32;
+            let mn_hi = dmin * mins[sb_hi] as f32;
+            let chunk = &quants[g * 32..(g + 1) * 32];
+            let base_lo = sb_base + sb_lo * 32;
+            let base_hi = sb_base + sb_hi * 32;
+            for l in 0..32 {
+                let byte = chunk[l];
+                out[base_lo + l] = sc_lo * (byte & 0x0F) as f32 - mn_lo;
+                out[base_hi + l] = sc_hi * ((byte >> 4) & 0x0F) as f32 - mn_hi;
             }
         }
     }

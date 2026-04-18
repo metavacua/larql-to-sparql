@@ -72,8 +72,20 @@ fn run_attention_block_core(
     let seq_len = h.shape()[0];
     let norm_offset = arch.norm_weight_offset();
 
+    // Layer-0 stage dumps, paired with the Metal side via
+    // LARQL_CPU_STAGE_DUMP=<dir>. Scoped to layer 0 for noise budget.
+    let stage_dump = if layer == 0 { std::env::var("LARQL_CPU_STAGE_DUMP").ok() } else { None };
+    let dump_f32 = |name: &str, arr: &Array2<f32>| {
+        if let Some(ref dir) = stage_dump {
+            let slice = arr.as_slice().unwrap_or(&[]);
+            let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let _ = std::fs::write(format!("{dir}/cpu_L0_{name}.f32"), &bytes);
+        }
+    };
+
     // Input norm
     let h_norm = crate::forward::apply_norm(weights, h, &arch.input_layernorm_key(layer), norm_offset);
+    dump_f32("norm_out", &h_norm);
 
     // Q projection (always from current hidden state)
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
@@ -82,6 +94,7 @@ fn run_attention_block_core(
     if let Some(bias) = arch.attn_q_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut q_full, bias);
     }
+    dump_f32("q_out_raw", &q_full);
 
     // QK norm on Q
     let qk_offset = weights.arch.qk_norm_weight_offset();
@@ -90,6 +103,7 @@ fn run_attention_block_core(
         Some(norm_w) => rms_norm_heads(&q_full, norm_w, num_q, head_dim, qk_norm_off),
         None => q_full,
     };
+    dump_f32("q_out_after_qk_norm", &q_normed);
 
     // RoPE on Q
     let layer_rope_base = arch.rope_base_for_layer(layer);
@@ -127,18 +141,22 @@ fn run_attention_block_core(
         (k_r, v_full)
     };
 
+    dump_f32("q_out_after_rope", &q_rope);
+
     // GQA attention
     let softcap = arch.attn_logit_softcapping();
     let (attn_out, attn_weights) = gqa_attention_with_weights(
         &q_rope, &k_rope, &v_final, num_q, head_dim, reps, scale, seq_len,
         capture_attention, softcap,
     );
+    dump_f32("attn_out", &attn_out);
 
     // O projection
     let mut attn_projected = dot_proj(&attn_out, w_o);
     if let Some(bias) = arch.attn_o_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
         add_bias(&mut attn_projected, bias);
     }
+    dump_f32("o_out", &attn_projected);
 
     // Residual connection
     let res_mult = arch.residual_multiplier();

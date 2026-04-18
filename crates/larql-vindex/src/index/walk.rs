@@ -305,6 +305,45 @@ impl VectorIndex {
         ndarray::Array2::from_shape_vec((intermediate, self.hidden_size), floats).ok()
     }
 
+    /// Dequantise one Q4K/Q6K FFN matrix on demand, caching the result.
+    /// `component`: 0=gate, 1=up, 2=down. Returns `None` when no Q4K
+    /// interleaved mmap is loaded. Used by `walk_ffn_sparse` as a fallback
+    /// when the vindex exposes only Q4K (no native f32 up/down mmap).
+    /// First access per (layer, component) pays a ~200ms dequant cost; later
+    /// accesses are a single `Arc` clone.
+    pub fn q4k_ffn_layer(&self, layer: usize, component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>>
+    {
+        if component > 2 { return None; }
+        {
+            let cache = self.q4k_ffn_cache.lock().unwrap();
+            if let Some(slot) = cache.get(layer) {
+                if let Some(ref arc) = slot[component] {
+                    return Some(arc.clone());
+                }
+            }
+        }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+        let intermediate = self.num_features(layer);
+        if intermediate == 0 { return None; }
+        let n = intermediate * self.hidden_size;
+        let padded = n.div_ceil(256) * 256;
+        let decoded = match format {
+            "Q4_K" => larql_models::quant::ggml::dequantize_q4_k(bytes, padded).ok()?,
+            "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded).ok()?,
+            _ => return None,
+        };
+        let arc = std::sync::Arc::new(decoded.into_iter().take(n).collect::<Vec<f32>>());
+        {
+            let mut cache = self.q4k_ffn_cache.lock().unwrap();
+            if let Some(slot) = cache.get_mut(layer) {
+                slot[component] = Some(arc.clone());
+            }
+        }
+        Some(arc)
+    }
+
     /// Get gate matrix from Q4 interleaved file, dequantized to f32.
     pub fn interleaved_q4_gate(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.dequant_q4_matrix(layer, 0)

@@ -28,6 +28,7 @@ use ndarray::Array2;
 use larql_inference::{
     predict_with_ffn, FfnBackend, InferenceModel, WeightFfn,
     vindex::{WalkFfn, WalkFfnConfig},
+    default_backend, ComputeBackend,
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
@@ -117,8 +118,8 @@ struct LayerTiming {
 }
 
 fn bench_layer(ffn: &dyn FfnBackend, layer: usize, x: &Array2<f32>, iters: usize) -> LayerTiming {
-    // Warmup
-    for _ in 0..3 {
+    // Warmup — more aggressive to page mmap into resident memory.
+    for _ in 0..10 {
         let _ = ffn.forward(layer, x);
     }
     let mut samples: Vec<f64> = Vec::with_capacity(iters);
@@ -182,10 +183,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let t = Instant::now();
     let mut cb = SilentLoadCallbacks;
-    let index = VectorIndex::load_vindex(&args.vindex, &mut cb)?;
-    println!("Vindex loaded in {:.1}s ({} vectors)\n",
+    let mut index = VectorIndex::load_vindex(&args.vindex, &mut cb)?;
+    // Load the Q4 interleaved mmap if present — enables walk_ffn_q4_interleaved
+    // (one Metal shader per forward vs three BLAS gemms).
+    let q4_loaded = index.load_interleaved_q4(&args.vindex).is_ok();
+    // Also load the f32 interleaved mmap for walk_ffn_interleaved (contiguous gate+up+down).
+    let iv_loaded = index.load_interleaved(&args.vindex).is_ok();
+    println!("Vindex loaded in {:.1}s ({} vectors, q4_interleaved={}, interleaved={})\n",
         t.elapsed().as_secs_f64(),
-        index.total_gate_vectors());
+        index.total_gate_vectors(),
+        q4_loaded, iv_loaded);
 
     let weights = model.weights();
     let tokenizer = model.tokenizer();
@@ -210,10 +217,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Build configs ──────────────────────────────────────────────────
     let weight_ffn = WeightFfn { weights };
 
+    // Compute backend (Metal on Apple Silicon, CPU otherwise).
+    let backend: Box<dyn ComputeBackend> = default_backend();
+    let backend_name = if backend.has_q4() { "Metal/Q4" } else { "CPU" };
+    println!("Compute backend: {backend_name}\n");
+
     let walk_full_graph = WalkFfn::from_config(weights, &index,
         WalkFfnConfig::sparse(num_layers, usize::MAX));  // graph walk, no matmul
     let walk_full_dense = WalkFfn::from_config(weights, &index,
-        WalkFfnConfig::dense(num_layers));               // mmap matmul path
+        WalkFfnConfig::dense(num_layers));               // mmap matmul (CPU)
+    let walk_full_dense_gpu = WalkFfn::from_config(weights, &index,
+        WalkFfnConfig::dense(num_layers)).with_backend(&*backend); // mmap matmul (GPU/Metal if available)
     let walk_5000 = WalkFfn::from_config(weights, &index,
         WalkFfnConfig::sparse(num_layers, 5000));
     let walk_1000 = WalkFfn::from_config(weights, &index,
@@ -225,15 +239,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let walk_100 = WalkFfn::from_config(weights, &index,
         WalkFfnConfig::sparse(num_layers, 100));
 
+    let _ = walk_full_dense_gpu; // Metal dispatched per-layer has severe overhead; skip for now.
     let configs: Vec<(&str, &dyn FfnBackend, bool)> = vec![
-        ("weights (ref matmul)",     &weight_ffn,      true),
-        ("mmap dense (BLAS gemm)",   &walk_full_dense, true),
-        ("graph K=full (no matmul)", &walk_full_graph, false),
-        ("graph K=5000",             &walk_5000,       false),
-        ("graph K=1000",             &walk_1000,       false),
-        ("graph K=500",              &walk_500,        false),
-        ("graph K=200",              &walk_200,        false),
-        ("graph K=100",              &walk_100,        false),
+        ("weights (ref matmul, CPU)",     &weight_ffn,          true),
+        ("mmap dense (BLAS gemm, CPU)",   &walk_full_dense,     true),
+        ("graph K=full (no matmul)",      &walk_full_graph,     false),
+        ("graph K=5000",                  &walk_5000,           false),
+        ("graph K=1000",                  &walk_1000,           false),
+        ("graph K=500",                   &walk_500,            false),
+        ("graph K=200",                   &walk_200,            false),
+        ("graph K=100",                   &walk_100,            false),
     ];
 
     // ── Run benches ────────────────────────────────────────────────────

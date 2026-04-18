@@ -68,17 +68,25 @@ pub fn dispatch(q4k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
             let qs = &block[16..144];
             let x_base = sb * 256;
 
-            for j in 0..8 {
-                let sc = d * scales[j] as f32;
-                let mn = dmin * mins[j] as f32;
-                let qs_off = j * 16;
-                let sub_base = j * 32;
-                for i in 0..16 {
-                    let byte = qs[qs_off + i];
+            // Four groups × 32 bytes; each group pairs two sub-blocks
+            // (low nibbles → sub 2g with scales[2g], high nibbles →
+            //  sub 2g+1 with scales[2g+1]). Matches llama.cpp's layout.
+            for g in 0..4 {
+                let sb_lo = 2 * g;
+                let sb_hi = 2 * g + 1;
+                let sc_lo = d * scales[sb_lo] as f32;
+                let sc_hi = d * scales[sb_hi] as f32;
+                let mn_lo = dmin * mins[sb_lo] as f32;
+                let mn_hi = dmin * mins[sb_hi] as f32;
+                let qs_off = g * 32;
+                let base_lo = sb_lo * 32;
+                let base_hi = sb_hi * 32;
+                for l in 0..32 {
+                    let byte = qs[qs_off + l];
                     let lo = (byte & 0x0F) as f32;
                     let hi = ((byte >> 4) & 0x0F) as f32;
-                    acc += (sc * lo - mn) * x[x_base + sub_base + i];
-                    acc += (sc * hi - mn) * x[x_base + sub_base + 16 + i];
+                    acc += (sc_lo * lo - mn_lo) * x[x_base + base_lo + l];
+                    acc += (sc_hi * hi - mn_hi) * x[x_base + base_hi + l];
                 }
             }
         }

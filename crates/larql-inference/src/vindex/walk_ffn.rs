@@ -172,12 +172,36 @@ impl<'a> WalkFfn<'a> {
         layer: usize,
         x: &Array2<f32>,
     ) -> Option<(Array2<f32>, Array2<f32>)> {
-        let up_view = self.index.up_layer_matrix(layer)?;
-        let down_view = self.index.down_layer_matrix(layer)?;
-
         let hidden = x.shape()[1];
         let seq_len = x.shape()[0];
         let intermediate = self.index.num_features(layer);
+
+        // Prefer native f32 mmap (zero-copy). Fall back to lazy Q4K dequant
+        // when the vindex ships Q4K-only (as Gemma 4 31B does). Q4K arcs
+        // live in the Mutex-cached VectorIndex fields; the local bindings
+        // below keep them alive for the ArrayView2 borrows.
+        let up_native = self.index.up_layer_matrix(layer);
+        let down_native = self.index.down_layer_matrix(layer);
+        let up_q4k: Option<std::sync::Arc<Vec<f32>>> = if up_native.is_none() {
+            Some(self.index.q4k_ffn_layer(layer, 1)?)
+        } else { None };
+        let down_q4k: Option<std::sync::Arc<Vec<f32>>> = if down_native.is_none() {
+            Some(self.index.q4k_ffn_layer(layer, 2)?)
+        } else { None };
+        let up_view: ndarray::ArrayView2<'_, f32> = match up_native {
+            Some(v) => v,
+            None => ndarray::ArrayView2::from_shape(
+                (intermediate, hidden),
+                up_q4k.as_ref().unwrap().as_slice(),
+            ).ok()?,
+        };
+        let down_view: ndarray::ArrayView2<'_, f32> = match down_native {
+            Some(v) => v,
+            None => ndarray::ArrayView2::from_shape(
+                (intermediate, hidden),
+                down_q4k.as_ref().unwrap().as_slice(),
+            ).ok()?,
+        };
 
         let arch = &*self.weights.arch;
         let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;

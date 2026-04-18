@@ -11,6 +11,28 @@ use ndarray::Array2;
 use crate::weights::ModelWeights;
 use crate::detect::ModelError;
 
+/// Returns true when `key` names a FFN weight tensor (gate/up/down projection
+/// or packed expert block). Used by `load_model_dir_walk_only` to skip
+/// decoding these entirely — critical for large models where decoding them
+/// into f32 heap would blow RAM before they can be dropped.
+pub fn is_ffn_tensor(key: &str) -> bool {
+    let ffn_patterns = ["gate_proj", "up_proj", "down_proj",
+                       "ffn_gate", "ffn_up", "ffn_down",
+                       "mlp.experts", "block_sparse_moe.experts",
+                       "packed_gate_up_blocks", "packed_down_blocks"];
+    ffn_patterns.iter().any(|p| key.contains(p))
+}
+
+/// Load model weights from a directory or file, never reading FFN tensors.
+///
+/// Equivalent to `load_model_dir` + `drop_ffn_weights` but without the heap
+/// spike: FFN tensors are skipped at deserialisation time, so peak RSS
+/// tracks only the retained (attention / embed / lm_head / norms) weights.
+/// Use this with vindex-backed FFN (walk-only inference).
+pub fn load_model_dir_walk_only(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
+    load_model_dir_filtered(path, |k| is_ffn_tensor(k))
+}
+
 /// Load model weights from a directory or file.
 ///
 /// Auto-detects the format:
@@ -20,6 +42,16 @@ use crate::detect::ModelError;
 ///
 /// Detects architecture from config.json (safetensors) or GGUF metadata.
 pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
+    load_model_dir_filtered(path, |_| false)
+}
+
+/// Same as `load_model_dir` but `skip_key` returning true causes a tensor to
+/// be dropped before decode — its bytes are never read from the mmap and no
+/// f32 heap allocation occurs for it.
+pub fn load_model_dir_filtered(
+    path: impl AsRef<Path>,
+    skip_key: impl Fn(&str) -> bool,
+) -> Result<ModelWeights, ModelError> {
     let path = path.as_ref();
 
     // Single GGUF file
@@ -98,6 +130,7 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
                 let key = normalize_key(&name, prefixes);
                 let shape = view.shape();
                 if name.ends_with("_blocks") || name.ends_with("_scales") { continue; }
+                if skip_key(&key) { continue; }
                 let data = match tensor_to_f32(&view) {
                     Ok(d) => d,
                     Err(_) => continue,
@@ -117,6 +150,7 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
             for (name, view) in st.tensors() {
                 let key = normalize_key(&name, prefixes);
                 let shape = view.shape();
+                if skip_key(&key) { continue; }
                 let data = match tensor_to_f32(&view) {
                     Ok(d) => d,
                     Err(_) => continue,

@@ -2160,6 +2160,11 @@ fn q4kf_proj_matches_cpu_reference() {
     cmd.wait_until_completed();
 
     let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, rows);
+    // Also report per-bucket scale so silent scale bugs are visible.
+    let met_max = metal_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let cpu_max = cpu_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let ratio = cpu_max / met_max.max(1e-9);
+    eprintln!("q4kf_proj[{rows}x{hidden}]  cpu_max={cpu_max:.3e}  metal_max={met_max:.3e}  ratio_cpu/metal={ratio:.3}");
     let max_diff = metal_out.iter().zip(cpu_out.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
@@ -2168,6 +2173,71 @@ fn q4kf_proj_matches_cpu_reference() {
         "q4kf_proj diverged from CPU: max_diff={max_diff} (rows={rows})"
     );
     assert!(metal_out.iter().all(|v| v.is_finite()), "q4kf_proj emitted NaN/Inf");
+}
+
+// ── q4kf_proj: Gemma-3-4B Q-projection shape (hidden=2560, rows=2048).
+//
+// The 1536/512 test above uses Gemma-4-E2B dims; this variant exercises the
+// `hidden % 1024 != 0` edge case (hidden=2560 → 10 superblocks) which the
+// q4kf_proj inner loop handles via `for ib = ix; ib < nb; ib += 4` where
+// lanes 0-1 process 3 superblocks each and lanes 2-3 process 2. Regression
+// guard for divergence seen in end-to-end Gemma 3 4B Metal inference.
+#[test]
+fn q4kf_proj_matches_cpu_reference_gemma3_shape() {
+    let metal = get_metal();
+    let hidden = 2560usize;  // Gemma 3 4B hidden_size
+    let rows = 2048usize;    // Gemma 3 4B q_dim (8 heads × 256 head_dim... wait 4*256=1024, see)
+
+    let matrix: Vec<f32> = (0..rows * hidden)
+        .map(|i| ((i as f32) * 0.0007).sin() * 0.5)
+        .collect();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.002).cos()).collect();
+
+    let q4k = larql_compute::cpu::ops::q4_common::quantize_q4_k(&matrix);
+
+    let dequant = larql_models::quant::ggml::dequantize_q4_k(&q4k, rows * hidden).unwrap();
+    let mut cpu_out = vec![0.0f32; rows];
+    for row in 0..rows {
+        cpu_out[row] = (0..hidden).map(|k| dequant[row * hidden + k] * x[k]).sum();
+    }
+
+    use larql_compute::metal::shaders::q4kf_qkv_proj as q4kf;
+    let w_buf = metal.bufs().get_bytes(&q4k);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let out_buf = metal.bufs().output((rows * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4kf_proj_pipeline);
+    enc.set_buffer(0, Some(&w_buf), 0);
+    enc.set_buffer(1, Some(&x_buf), 0);
+    enc.set_buffer(2, Some(&out_buf), 0);
+    let n = rows as u32;
+    let k = hidden as u32;
+    enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+    let num_tgs = (rows as u64).div_ceil(q4kf::ROWS_PER_TG);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, rows);
+    let met_max = metal_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let cpu_max = cpu_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let ratio = cpu_max / met_max.max(1e-9);
+    eprintln!("q4kf_proj[{rows}x{hidden}]  cpu_max={cpu_max:.3e}  metal_max={met_max:.3e}  ratio={ratio:.3}");
+    let max_diff = metal_out.iter().zip(cpu_out.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(
+        ratio > 0.95 && ratio < 1.05,
+        "q4kf_proj scale off for hidden=2560: cpu_max/metal_max={ratio:.3} (should be ~1.0)",
+    );
+    assert!(max_diff < 1.0, "q4kf_proj[{rows}x{hidden}] max_diff={max_diff}");
 }
 
 // ── q4kf_qkv_proj: production fused Q+K+V Q4_K (GGUF 144-byte) ──
@@ -2323,4 +2393,101 @@ fn qk_norm_matches_cpu_reference() {
     let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, num_heads * head_dim);
     let diff = max_diff(&cpu_out, &metal_out);
     assert!(diff < 1e-3, "qk_norm diverged from CPU: max_diff={diff}");
+}
+
+// ── q4kf_proj on REAL vindex Q4_K bytes (end-to-end regression) ──
+//
+// Background: `q4kf_proj_matches_cpu_reference*` pass (ratio 1.000) with
+// weights produced by our `quantize_q4_k`. But on REAL Ollama-GGUF Q4_K
+// bytes from a Gemma 3 4B vindex, Metal `q4kf_proj` and CPU
+// `dequantize_q4_k + gemv` diverge by ~22% in magnitude (ratio ~0.78).
+//
+// Root cause (verified 2026-04-18): our `quantize_q4_k` emits a slightly
+// different 12-byte scale+min packing than what llama.cpp writes. The
+// Metal shader's scale-unpack matches our quantizer; `dequantize_q4_k`
+// matches llama.cpp. Since production vindexes contain llama.cpp-layout
+// bytes (extracted from Ollama GGUFs), the Metal shader reads them with
+// the wrong scale nibbles and returns values ~22% off.
+//
+// Fix path: either update `quantize_q4_k` to emit llama.cpp-exact
+// packing (so shader + data agree again), or update the shader's scale
+// unpack to match `dequantize_q4_k`. The shader path (q4kf_qkv_proj.rs)
+// is the canonical llama.cpp pattern — easier to leave it alone and fix
+// the quantizer.
+//
+// Test is gated on the vindex file being present; skipped otherwise.
+// Failing here is the intended regression gate.
+#[test]
+fn q4kf_proj_matches_cpu_on_real_vindex_bytes() {
+    let vindex = std::path::Path::new("../../output/gemma3-4b-q4k-v2.vindex");
+    if !vindex.exists() {
+        eprintln!("skip: real vindex {} not present", vindex.display());
+        return;
+    }
+    let manifest_path = vindex.join("attn_weights_q4k_manifest.json");
+    let bin_path = vindex.join("attn_weights_q4k.bin");
+    let manifest_txt = match std::fs::read_to_string(&manifest_path) {
+        Ok(t) => t,
+        Err(_) => { eprintln!("skip: manifest unreadable"); return; }
+    };
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest_txt).unwrap();
+    let q_entry = entries.iter()
+        .find(|e| e["key"].as_str().unwrap_or("").contains("layers.0.self_attn.q_proj"))
+        .expect("layer 0 Q entry in manifest");
+    let offset = q_entry["offset"].as_u64().unwrap() as usize;
+    let length = q_entry["length"].as_u64().unwrap() as usize;
+    let shape: Vec<usize> = q_entry["shape"].as_array().unwrap()
+        .iter().map(|v| v.as_u64().unwrap() as usize).collect();
+    let (rows, hidden) = (shape[0], shape[1]);
+    let bin = std::fs::read(&bin_path).expect("attn_weights_q4k.bin");
+    let q_bytes = &bin[offset..offset + length];
+
+    // CPU reference: dequantize the real bytes, then gemv against a fixed x.
+    let dequant = larql_models::quant::ggml::dequantize_q4_k(q_bytes, rows * hidden).unwrap();
+    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32) * 0.01).sin()).collect();
+    let mut cpu_out = vec![0.0f32; rows];
+    for row in 0..rows {
+        cpu_out[row] = (0..hidden).map(|k| dequant[row * hidden + k] * x[k]).sum();
+    }
+
+    // Metal: dispatch q4kf_proj directly on the real bytes.
+    let metal = get_metal();
+    use larql_compute::metal::shaders::q4kf_qkv_proj as q4kf;
+    let w_buf = metal.bufs().get_bytes(q_bytes);
+    let x_buf = metal.bufs().transient_from_f32(&x);
+    let out_buf = metal.bufs().output((rows * 4) as u64);
+
+    let cmd = metal.queue().new_command_buffer();
+    let enc = cmd.new_compute_command_encoder();
+    enc.set_compute_pipeline_state(&metal.q4kf_proj_pipeline);
+    enc.set_buffer(0, Some(&w_buf), 0);
+    enc.set_buffer(1, Some(&x_buf), 0);
+    enc.set_buffer(2, Some(&out_buf), 0);
+    let n = rows as u32;
+    let k = hidden as u32;
+    enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
+    enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
+    let num_tgs = (rows as u64).div_ceil(q4kf::ROWS_PER_TG);
+    enc.dispatch_thread_groups(
+        metal::MTLSize::new(num_tgs, 1, 1),
+        metal::MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+    );
+    enc.end_encoding();
+    cmd.commit();
+    cmd.wait_until_completed();
+
+    let metal_out = larql_compute::metal::buffers::read_buffer_f32(&out_buf, rows);
+    let cpu_max = cpu_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let met_max = metal_out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let ratio = cpu_max / met_max.max(1e-9);
+    let max_diff = cpu_out.iter().zip(&metal_out).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    eprintln!(
+        "real-bytes q4kf_proj[{rows}x{hidden}]  cpu_max={cpu_max:.3e}  \
+         metal_max={met_max:.3e}  ratio_cpu/metal={ratio:.3}  max_abs_diff={max_diff:.3e}"
+    );
+    assert!(
+        (ratio - 1.0).abs() < 0.05,
+        "q4kf_proj on REAL vindex data scales differently from CPU dequant+gemv: \
+         ratio={ratio:.3} (expected ~1.0). This is the end-to-end regression."
+    );
 }

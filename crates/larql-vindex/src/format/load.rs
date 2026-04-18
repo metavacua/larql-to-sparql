@@ -109,7 +109,19 @@ impl VectorIndex {
             None
         };
 
-        Ok(VectorIndex::new_mmap(gate_mmap, gate_slices, gate_dtype, down_meta_mmap, num_layers, hidden_size))
+        let mut index = VectorIndex::new_mmap(gate_mmap, gate_slices, gate_dtype, down_meta_mmap, num_layers, hidden_size);
+
+        // Opportunistically wire up FFN payload mmaps so walk_ffn_sparse can
+        // find up/down data without callers needing to know which flavour
+        // is on disk. Each load_* returns Err(_) if its file isn't present;
+        // those errors are non-fatal here.
+        let _ = index.load_interleaved_q4k(dir);
+        let _ = index.load_interleaved_q4(dir);
+        let _ = index.load_interleaved(dir);
+        let _ = index.load_up_features(dir);
+        let _ = index.load_down_features(dir);
+
+        Ok(index)
     }
 }
 

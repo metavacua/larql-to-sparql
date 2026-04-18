@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::error::InferenceError;
 use crate::forward::trace_forward;
-use crate::model::{load_model_dir, resolve_model_path, ModelWeights};
+use crate::model::{load_model_dir, load_model_dir_walk_only, resolve_model_path, ModelWeights};
 use crate::tokenizer::load_tokenizer;
 
 /// Configuration for residual/activation capture.
@@ -78,14 +78,14 @@ impl InferenceModel {
         })
     }
 
-    /// Load in walk-only mode: drops FFN weights after loading.
-    /// Requires vindex with down_features.bin + up_features.bin for FFN.
-    /// Saves ~13GB RAM for a 4B model.
+    /// Load in walk-only mode — never reads FFN tensors from safetensors.
+    /// Requires a vindex to serve the FFN path. Peak RSS during load tracks
+    /// only the retained (attention / embed / lm_head / norms) weights,
+    /// which makes large-model loading (~30B+) feasible on machines that
+    /// couldn't hold the full f32-decoded model in memory.
     pub fn load_walk_only(model: &str) -> Result<Self, InferenceError> {
         let model_path = resolve_model_path(model)?;
-        let mut weights = load_model_dir(&model_path)?;
-        let freed = weights.drop_ffn_weights();
-        eprintln!("[walk-only] Dropped FFN weights: {:.1} GB freed", freed as f64 / 1e9);
+        let weights = load_model_dir_walk_only(&model_path)?;
         let tokenizer = load_tokenizer(&model_path)?;
         Ok(Self {
             weights,

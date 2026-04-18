@@ -113,15 +113,21 @@ fn f32_to_f16(val: f32) -> u16 {
 /// Quantize f32 data to Q4_K format — the canonical llama.cpp / GGUF
 /// layout (Ollama-compatible, 144 bytes per 256-element super-block).
 ///
-/// Block layout:
+/// Block layout (matches `kernel_mul_mv_q4_K_f32` in llama.cpp and the
+/// `q4kf_proj` / `q4kf_qkv_proj` Metal shaders):
 ///   [0..1]    f16 d (super-block scale)
 ///   [2..3]    f16 dmin (super-block min)
 ///   [4..15]   12 bytes packing 8 × 6-bit `q_scales` + 8 × 6-bit `q_mins`
-///             via the llama.cpp `get_scale_min_k4` scheme.
-///   [16..143] 128 bytes of 4-bit nibbles (256 values).
+///             via `get_scale_min_k4`.
+///   [16..143] 128 bytes of 4-bit nibbles arranged as FOUR 32-byte groups.
+///             Each group holds TWO adjacent sub-blocks — low nibbles go
+///             to sub-block `2g`, high nibbles go to sub-block `2g+1`.
+///             `scales[2g]` / `mins[2g]` scale the low nibbles,
+///             `scales[2g+1]` / `mins[2g+1]` scale the high nibbles.
 ///
-/// Dequantises exactly with [`crate::quant::ggml::dequantize_q4_k`] /
-/// `larql_models::quant::ggml::dequantize_q4_k`.
+/// Round-trips exactly through `dequantize_q4_k` in this crate and
+/// `larql_models::quant::ggml::dequantize_q4_k`, and decodes identically
+/// via the Metal shaders and llama.cpp's reference `dequantize_row_q4_K`.
 pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
     assert!(data.len().is_multiple_of(256), "data length must be a multiple of 256");
     let n_superblocks = data.len() / 256;
@@ -148,10 +154,6 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
 
         // Q4_K decode is `x = (d * q_scale) * nibble - (dmin * q_min)`
         // with nibble ∈ [0, 15], q_scale ∈ [0, 63], q_min ∈ [0, 63].
-        // 15 nibble levels span the sub-range when q_scale saturates at 63:
-        //     d = sub_range / (15 · 63)
-        // For dmin, q_min saturates at 63 when sub_min saturates at global_min:
-        //     dmin = |global_min| / 63
         let d = if global_max_range > 0.0 { global_max_range / (15.0 * 63.0) } else { 0.0 };
         let dmin = if global_min < 0.0 { -global_min / 63.0 } else { 0.0 };
 
@@ -170,18 +172,11 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
             } else { 0 };
         }
 
-        // Pack scales + mins into 12 bytes per llama.cpp's `get_scale_min_k4`.
-        // Decoder for j < 4:
-        //   scales[j] = packed[j]     & 0x3F      (low 6 of byte j)
-        //   mins[j]   = packed[j + 4] & 0x3F      (low 6 of byte j+4)
-        // Decoder for j ≥ 4:
-        //   scales[j] = (packed[j+4] & 0x0F)    | ((packed[j-4] >> 6) << 4)
-        //   mins[j]   = (packed[j+4] >>  4)      | ((packed[j]   >> 6) << 4)
-        //
-        // So packed[0..4] must carry: low 6 of scales[0..4] in bits 0-5,
-        // top 2 of scales[4..8] in bits 6-7. Likewise packed[4..8] carry
-        // mins[0..4] low + mins[4..8] top 2 bits. packed[8..12] carry the
-        // low 4 of scales[4..8] and mins[4..8] in alternating nibbles.
+        // 12-byte scales + mins packing, `get_scale_min_k4` reference:
+        //   j < 4: scales[j] = packed[j]     & 0x3F
+        //          mins[j]   = packed[j+4]   & 0x3F
+        //   j ≥ 4: scales[j] = (packed[j+4] & 0x0F) | ((packed[j-4] >> 6) << 4)
+        //          mins[j]   = (packed[j+4] >> 4)   | ((packed[j]   >> 6) << 4)
         let mut packed = [0u8; 12];
         for j in 0..4 {
             packed[j]     = (q_scales[j] & 0x3F) | (((q_scales[j + 4] >> 4) & 0x03) << 6);
@@ -190,20 +185,26 @@ pub fn quantize_q4_k(data: &[f32]) -> Vec<u8> {
         }
         out.extend_from_slice(&packed);
 
-        // 256 nibbles: 16 bytes per sub-block × 8 sub-blocks = 128 bytes.
-        // llama.cpp's dequantise pairs `sub[i]` with `sub[i + 16]` in each
-        // byte (low nibble first 16 values, high nibble last 16) — NOT
-        // `sub[2i]` / `sub[2i+1]`. Getting this wrong produces a shuffled
-        // sub-block that round-trips through our own decoder but mis-decodes
-        // through llama.cpp / `dequantize_q4_k`.
-        for j in 0..8 {
-            let sc = d * q_scales[j] as f32;
-            let mn = dmin * q_mins[j] as f32;
-            let inv_sc = if sc > 0.0 { 1.0 / sc } else { 0.0 };
-            let sub = &block[j * 32..(j + 1) * 32];
-            for i in 0..16 {
-                let lo = ((sub[i]      + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
-                let hi = ((sub[i + 16] + mn) * inv_sc).round().clamp(0.0, 15.0) as u8;
+        // Nibble packing: llama.cpp groups two adjacent sub-blocks into
+        // one 32-byte span. For group `g` ∈ [0,4):
+        //   byte[g*32 + l].low_nibble  = encoded sub-block `2g`   value `l`
+        //   byte[g*32 + l].high_nibble = encoded sub-block `2g+1` value `l`
+        // Encoding uses that sub-block's own scale/min:
+        //   enc = round((v + dmin*q_min) / (d*q_scale)) clamped to [0, 15]
+        for g in 0..4 {
+            let sb_lo = 2 * g;
+            let sb_hi = 2 * g + 1;
+            let sc_lo = d * q_scales[sb_lo] as f32;
+            let sc_hi = d * q_scales[sb_hi] as f32;
+            let mn_lo = dmin * q_mins[sb_lo] as f32;
+            let mn_hi = dmin * q_mins[sb_hi] as f32;
+            let inv_lo = if sc_lo > 0.0 { 1.0 / sc_lo } else { 0.0 };
+            let inv_hi = if sc_hi > 0.0 { 1.0 / sc_hi } else { 0.0 };
+            let lo_sub = &block[sb_lo * 32..(sb_lo + 1) * 32];
+            let hi_sub = &block[sb_hi * 32..(sb_hi + 1) * 32];
+            for l in 0..32 {
+                let lo = ((lo_sub[l] + mn_lo) * inv_lo).round().clamp(0.0, 15.0) as u8;
+                let hi = ((hi_sub[l] + mn_hi) * inv_hi).round().clamp(0.0, 15.0) as u8;
                 out.push(lo | (hi << 4));
             }
         }

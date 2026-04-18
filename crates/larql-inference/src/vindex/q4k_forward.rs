@@ -86,6 +86,11 @@ pub fn predict_q4k(
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
     let dump_dir = std::env::var("LARQL_CPU_DUMP_LAYERS").ok();
+    if let Some(ref dir) = dump_dir {
+        let slice = h.as_slice().unwrap_or(&[]);
+        let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let _ = std::fs::write(format!("{dir}/cpu_h_embed.f32"), &bytes);
+    }
 
     for layer in 0..num_layers {
         // ── Dequantise this layer's Q/K/V/O and gate/up/down ──

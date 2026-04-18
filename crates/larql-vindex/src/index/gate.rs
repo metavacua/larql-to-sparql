@@ -170,9 +170,9 @@ impl VectorIndex {
         None // Not on fast path — caller will use resolve_gate
     }
 
-    /// Per-feature gate walk: score each feature with an individual dot product.
-    /// No matrix multiplication. Iterates gate vectors from mmap and computes
-    /// dot products one feature at a time. Returns exact top-K.
+    /// Batched gate walk: scores all features via a single BLAS `gemv`, then
+    /// extracts the top-K. Despite the name, this is batched matrix-vector —
+    /// see [`Self::gate_walk_pure`] for a true per-feature implementation.
     pub fn gate_walk(
         &self,
         layer: usize,

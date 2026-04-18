@@ -82,6 +82,12 @@ pub struct VectorIndex {
     /// strategy mixes Q4_K (gate/up) with Q6_K (down), so layer stride is
     /// not uniform and callers cannot compute offsets from shape alone.
     pub(crate) interleaved_q4k_manifest: Option<Vec<(usize, usize, String)>>,
+    /// Per-layer lazy decode cache for Q4K/Q6K FFN tensors.
+    /// `q4k_ffn_cache[layer][c]` is the dequantised `[intermediate × hidden]`
+    /// matrix for component `c` (0=gate, 1=up, 2=down). Populated on first
+    /// access via `q4k_ffn_layer`. Backs `walk_ffn_sparse`'s f32 view when
+    /// no native f32 mmap exists (Q4K-only vindexes).
+    pub(crate) q4k_ffn_cache: Mutex<Vec<[Option<Arc<Vec<f32>>>; 3]>>,
 
     /// Q4_0 gate vectors mmap — for fast Q4 KNN via larql-compute.
     pub(crate) gate_q4_mmap: Option<Arc<memmap2::Mmap>>,
@@ -133,6 +139,9 @@ impl Clone for VectorIndex {
             interleaved_q4_mmap: self.interleaved_q4_mmap.clone(),
             interleaved_q4k_mmap: self.interleaved_q4k_mmap.clone(),
             interleaved_q4k_manifest: self.interleaved_q4k_manifest.clone(),
+            q4k_ffn_cache: Mutex::new(
+                (0..self.num_layers).map(|_| [None, None, None]).collect(),
+            ),
             gate_q4_mmap: self.gate_q4_mmap.clone(),
             gate_q4_slices: self.gate_q4_slices.clone(),
             lm_head_q4_mmap: self.lm_head_q4_mmap.clone(),
@@ -178,6 +187,7 @@ impl VectorIndex {
             interleaved_q4_mmap: None,
             interleaved_q4k_mmap: None,
             interleaved_q4k_manifest: None,
+            q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -224,6 +234,7 @@ impl VectorIndex {
             interleaved_q4_mmap: None,
             interleaved_q4k_mmap: None,
             interleaved_q4k_manifest: None,
+            q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
