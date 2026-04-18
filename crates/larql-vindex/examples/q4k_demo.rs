@@ -66,6 +66,8 @@ fn main() {
         ExtractLevel::All,
         StorageDtype::F32,
         QuantFormat::None,
+        larql_vindex::WriteWeightsOptions::default(),
+        false,
         &mut cb,
     )
     .expect("f32 extract");
@@ -86,6 +88,8 @@ fn main() {
         ExtractLevel::All,
         StorageDtype::F32,
         QuantFormat::Q4k,
+        larql_vindex::WriteWeightsOptions::default(),
+        false,
         &mut cb,
     )
     .expect("q4k extract");

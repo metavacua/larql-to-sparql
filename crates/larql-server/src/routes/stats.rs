@@ -29,9 +29,12 @@ fn build_stats(model: &LoadedModel) -> serde_json::Value {
         || config.extract_level == larql_vindex::ExtractLevel::All
         || config.has_model_weights;
 
+    let mode = if model.ffn_only { "ffn-service" } else { "full" };
+
     serde_json::json!({
         "model": config.model,
         "family": config.family,
+        "mode": mode,
         "layers": config.num_layers,
         "features": total_features,
         "features_per_layer": features_per_layer,
@@ -43,6 +46,7 @@ fn build_stats(model: &LoadedModel) -> serde_json::Value {
         "loaded": {
             "browse": true,
             "inference": has_inference && !model.infer_disabled,
+            "ffn_service": true,
         },
     })
 }

@@ -134,6 +134,8 @@ fn bench_extract_throughput(c: &mut Criterion) {
                     ExtractLevel::All,
                     StorageDtype::F32,
                     q,
+                    larql_vindex::WriteWeightsOptions::default(),
+                    false,
                     &mut cb,
                 )
                 .expect("extract");

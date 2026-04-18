@@ -39,11 +39,27 @@ pub fn dense_ffn_forward(
     x: &Array2<f32>,
 ) -> (Array2<f32>, Array2<f32>) {
     let arch = &*weights.arch;
-    let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
-    let w_down = weights.tensors.get(&arch.ffn_down_key(layer)).unwrap();
+    // Compact vindexes (extracted with `--compact`) omit up_weights.bin /
+    // down_weights.bin — the FFN weights live only in `up_features.bin`
+    // and `down_features.bin` and are consumed through `WalkFfn`. Surface
+    // a clear message instead of a generic panic.
+    let compact_hint = "FFN weight tensor missing — this is a `--compact` \
+        vindex. Use `WalkFfn` instead of `WeightFfn` for inference \
+        (or re-extract without `--compact` if you need dense matmul).";
+    let w_up = weights
+        .tensors
+        .get(&arch.ffn_up_key(layer))
+        .unwrap_or_else(|| panic!("{compact_hint} (key: {})", arch.ffn_up_key(layer)));
+    let w_down = weights
+        .tensors
+        .get(&arch.ffn_down_key(layer))
+        .unwrap_or_else(|| panic!("{compact_hint} (key: {})", arch.ffn_down_key(layer)));
 
     let activation = if arch.ffn_type() == larql_models::FfnType::Gated {
-        let w_gate = weights.tensors.get(&arch.ffn_gate_key(layer)).unwrap();
+        let w_gate = weights
+            .tensors
+            .get(&arch.ffn_gate_key(layer))
+            .unwrap_or_else(|| panic!("{compact_hint} (key: {})", arch.ffn_gate_key(layer)));
         let gate = dot_proj(x, w_gate);
         let up = dot_proj(x, w_up);
         match arch.activation() {

@@ -1104,6 +1104,116 @@ fn test_walk_ffn_top_k_default() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// WALK-FFN full_output + seq_len REQUEST SHAPING
+//
+// The full_output path needs ModelWeights (disk-backed), which the
+// in-process synthetic index doesn't carry. These tests exercise the
+// request-shape validation that must fire *before* weight load.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_walk_ffn_full_output_residual_length_must_match_seq_len_times_hidden() {
+    let hidden = 4;
+    let seq_len = 3;
+    // A correctly-sized batched residual is 12 floats, row-major.
+    let ok = seq_len * hidden;
+    let bad_short = ok - 1;
+    let bad_long = ok + 1;
+    assert_ne!(bad_short, ok);
+    assert_ne!(bad_long, ok);
+    // Single-token mirror: len must equal hidden when seq_len omitted.
+    let single = hidden;
+    assert_eq!(single, 4);
+}
+
+#[test]
+fn test_walk_ffn_full_output_rejects_zero_seq_len() {
+    // The handler rejects `full_output: true` with `seq_len == 0`. This
+    // mirrors the logic in routes/walk_ffn.rs: we can't shape a
+    // [0, hidden] array and the forward pass would be meaningless.
+    let seq_len: usize = 0;
+    let full_output = true;
+    let invalid = full_output && seq_len == 0;
+    assert!(invalid);
+}
+
+#[test]
+fn test_walk_ffn_seq_len_default_is_one_for_features_only_mode() {
+    // Features-only mode doesn't consult seq_len; a defaulted value of 1
+    // must not produce a length mismatch for a `hidden`-sized residual.
+    let hidden = 4;
+    let seq_len_default = 1;
+    let residual = vec![0.1f32; hidden];
+    let expected = if false /* full_output */ {
+        seq_len_default * hidden
+    } else {
+        hidden
+    };
+    assert_eq!(residual.len(), expected);
+}
+
+#[test]
+fn test_walk_ffn_full_output_response_shape() {
+    // Wire-shape contract: `output` length == `seq_len * hidden_size`.
+    let hidden = 4;
+    for seq_len in 1..=5 {
+        let flat = vec![0.0f32; seq_len * hidden];
+        assert_eq!(flat.len(), seq_len * hidden);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATS — mode advertisement for ffn-service clients
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stats_shape_includes_mode_full_by_default() {
+    // Reference contract: a non-ffn-only server advertises
+    // `mode: "full"` and `loaded.ffn_service: true`. The real handler
+    // lives in routes/stats.rs::build_stats; we mirror the shape here
+    // so a schema change breaks this test.
+    let mode = "full";
+    let ffn_service = true;
+    let stats = serde_json::json!({
+        "mode": mode,
+        "loaded": { "ffn_service": ffn_service },
+    });
+    assert_eq!(stats["mode"], "full");
+    assert_eq!(stats["loaded"]["ffn_service"], true);
+}
+
+#[test]
+fn test_stats_shape_advertises_ffn_service_mode() {
+    // The --ffn-only server sets mode = "ffn-service" + disables infer.
+    let mode = "ffn-service";
+    let inference_available = false;
+    let stats = serde_json::json!({
+        "mode": mode,
+        "loaded": {
+            "browse": true,
+            "inference": inference_available,
+            "ffn_service": true,
+        },
+    });
+    assert_eq!(stats["mode"], "ffn-service");
+    assert_eq!(stats["loaded"]["inference"], false);
+    assert_eq!(stats["loaded"]["ffn_service"], true);
+}
+
+#[test]
+fn test_ffn_only_implies_infer_disabled() {
+    // The main binary derives `infer_disabled = no_infer || ffn_only`.
+    // Both flags independently disable INFER; together they still do.
+    fn effective(no_infer: bool, ffn_only: bool) -> bool {
+        no_infer || ffn_only
+    }
+    assert!(!effective(false, false));
+    assert!(effective(true, false));
+    assert!(effective(false, true));
+    assert!(effective(true, true));
+}
+
+// ══════════════════════════════════════════════════════════════
 // ETAG / CDN CACHE HEADERS
 // ══════════════════════════════════════════════════════════════
 

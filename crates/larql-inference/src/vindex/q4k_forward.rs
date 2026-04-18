@@ -9,11 +9,37 @@
 //! stays around 1.8 GB per layer (the 31B down_proj) — the rest of the
 //! model lives on disk through `VectorIndex` mmaps.
 //!
-//! This is deliberately the simplest correct path — it reuses every
-//! attention / QK-norm / RoPE / GQA / GEGLU routine from the f32 code. A
-//! future optimisation would call `larql_compute::cpu::ops::q4k_matvec`
-//! directly to avoid the per-layer dequant, but that would mean
-//! re-implementing the whole attention block.
+//! The forward path reuses every attention / QK-norm / RoPE / GQA /
+//! GEGLU routine from the f32 code, so Gemma 2/3/4 model families all
+//! work. A future optimisation would call
+//! `larql_compute::cpu::ops::q4k_matvec` directly to avoid the per-layer
+//! dequant, but that would mean re-implementing the whole attention
+//! block.
+//!
+//! ## Gemma 4 E2B specifics
+//!
+//! Getting E2B green required four fixes on top of the baseline 31B
+//! path:
+//!
+//! - **Cross-layer KV sharing** — `num_kv_shared_layers=20` means layers
+//!   15-34 reuse K/V computed by the last unshared sliding / full layer.
+//!   We thread a `kv_cache: HashMap<usize, SharedKV>` through the loop
+//!   (mirrors `predict_with_temperature`).
+//! - **Per-Layer Embeddings (PLE)** — extraction writes the global PLE
+//!   tensors (`per_layer_model_projection`, `embed_tokens_per_layer`)
+//!   and the per-layer `per_layer_input_gate` / `per_layer_projection`
+//!   into `ple_weights.bin` at **f16** (NOT Q4_K — the super-block
+//!   calibration zeroes out embedding-style tensors). Load populates
+//!   `weights.tensors` so `precompute_per_layer_inputs` and
+//!   `apply_per_layer_embedding` can read them directly.
+//! - **Double-wide MLP** — `use_double_wide_mlp=True` gives some layers
+//!   `intermediate=12288` while the model-wide config reports 6144. Use
+//!   `index.num_features(layer)` per-layer to size the FFN dequant;
+//!   `weights.intermediate_size` is wrong for wide layers.
+//! - **Final-logit softcap** — `final_logit_softcapping=30.0` must
+//!   survive extract → vindex → load. Without it `logits_to_predictions`
+//!   peaks on the wrong token; the cos-sim 0.99 uncapped distribution
+//!   on E2B happened to argmax on "hyperparameters".
 //!
 //! Wire-in point: `walk --predict --index <q4 vindex>` in
 //! `larql-cli/src/commands/extraction/walk_cmd.rs`.
@@ -47,7 +73,10 @@ pub fn predict_q4k(
 ) -> PredictResult {
     let num_layers = weights.num_layers;
     let hidden = weights.hidden_size;
-    let intermediate = weights.intermediate_size;
+    // NOTE: don't use `weights.intermediate_size` — Gemma 4 E2B has
+    // `use_double_wide_mlp=True`, so half the layers (15-34) actually
+    // ship with intermediate=12288 while `weights.intermediate_size`
+    // reports the baseline 6144. Ask the index per layer instead.
 
     let mut h = embed_tokens_pub(weights, token_ids);
 
@@ -70,6 +99,9 @@ pub fn predict_q4k(
         let head_dim = arch.head_dim_for_layer(layer);
         let q_dim = num_q * head_dim;
         let kv_dim = num_kv * head_dim;
+        // Per-layer intermediate size — 6144 on standard E2B layers,
+        // 12288 on double-wide ones.
+        let intermediate = index.num_features(layer);
 
         let q_key = arch.attn_q_key(layer);
         let k_key = arch.attn_k_key(layer);

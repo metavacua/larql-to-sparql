@@ -134,14 +134,28 @@ message InferResponse {
 message WalkFfnRequest {
   uint32 layer = 1;
   repeated uint32 layers = 2;
+  // Flat residual, row-major [seq_len, hidden_size]. In features-only mode
+  // only the first hidden_size entries are consulted.
   repeated float residual = 3;
   uint32 top_k = 4;
+  // Number of residual rows in `residual`. Defaults to 1 if zero.
+  // Only consulted when full_output = true.
+  uint32 seq_len = 5;
+  // When true, the server computes the full FFN output (gate KNN →
+  // activation → up gather → down projection) and returns it per layer
+  // as a flat [seq_len, hidden_size] row-major vector in `output` below.
+  bool full_output = 6;
 }
 
 message WalkFfnLayerResult {
   uint32 layer = 1;
+  // Populated in features-only mode.
   repeated uint32 features = 2;
   repeated float scores = 3;
+  // Populated in full_output mode. Flat row-major [seq_len, hidden_size].
+  repeated float output = 4;
+  // Echo of the seq_len used to shape `output`. Zero in features-only mode.
+  uint32 seq_len = 5;
 }
 
 message WalkFfnResponse {

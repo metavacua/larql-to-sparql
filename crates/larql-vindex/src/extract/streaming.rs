@@ -37,8 +37,19 @@ pub fn build_vindex_streaming(
     extract_level: crate::ExtractLevel,
     dtype: StorageDtype,
     quant: QuantFormat,
+    weight_opts: crate::format::weights::WriteWeightsOptions,
+    // Skip writing `gate_vectors.bin` entirely. Only valid when
+    // `quant == Q4k` — the loader synthesizes gate from Q4K at load
+    // time. Refused otherwise because without a Q4K interleaved file
+    // the gate would be unrecoverable.
+    drop_gate_vectors: bool,
     callbacks: &mut dyn IndexBuildCallbacks,
 ) -> Result<(), VindexError> {
+    if drop_gate_vectors && quant != QuantFormat::Q4k {
+        return Err(VindexError::Parse(
+            "--drop-gate-vectors requires --quant q4k (the loader rebuilds gate from Q4K)".into(),
+        ));
+    }
     std::fs::create_dir_all(output_dir)?;
 
     // Detect architecture
@@ -105,9 +116,36 @@ pub fn build_vindex_streaming(
     callbacks.on_stage_done("loading", 0.0);
 
     // ── 1. Gate vectors (streaming, one layer at a time) ──
+    //
+    // If `drop_gate_vectors` is set we still walk every layer to build
+    // `layer_infos` (num_features per layer is part of `index.json`)
+    // but redirect writes to `/dev/null` (`io::sink`). The gate bytes
+    // are recoverable from `interleaved_q4k.bin` at load time.
     callbacks.on_stage("gate_vectors");
     let gate_path = output_dir.join("gate_vectors.bin");
-    let mut gate_file = BufWriter::new(std::fs::File::create(&gate_path)?);
+    enum GateSink {
+        File(BufWriter<std::fs::File>),
+        Discard(std::io::Sink),
+    }
+    impl std::io::Write for GateSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            match self {
+                GateSink::File(f) => f.write(buf),
+                GateSink::Discard(s) => s.write(buf),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            match self {
+                GateSink::File(f) => f.flush(),
+                GateSink::Discard(s) => s.flush(),
+            }
+        }
+    }
+    let mut gate_file: GateSink = if drop_gate_vectors {
+        GateSink::Discard(std::io::sink())
+    } else {
+        GateSink::File(BufWriter::new(std::fs::File::create(&gate_path)?))
+    };
     let mut layer_infos: Vec<VindexLayerInfo> = Vec::new();
     let mut offset: u64 = 0;
 
@@ -215,6 +253,12 @@ pub fn build_vindex_streaming(
         callbacks.on_layer_done("gate", layer, start.elapsed().as_secs_f64() * 1000.0);
     }
     gate_file.flush()?;
+    // If we were only sinking bytes, don't leave a zero-byte
+    // gate_vectors.bin behind for the loader to trip over.
+    drop(gate_file);
+    if drop_gate_vectors && gate_path.exists() {
+        let _ = std::fs::remove_file(&gate_path);
+    }
     callbacks.on_stage_done("gate_vectors", 0.0);
 
     // ── 1b. Router weights (MoE models only) ──
@@ -436,6 +480,7 @@ pub fn build_vindex_streaming(
             per_layer_embed_dim: cfg.per_layer_embed_dim,
             rope_local_base: cfg.rope_local_base,
             query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+            final_logit_softcapping: cfg.final_logit_softcapping,
         }),
     };
 
@@ -461,11 +506,14 @@ pub fn build_vindex_streaming(
         };
         match quant {
             QuantFormat::None => {
-                crate::format::weights::write_model_weights(
-                    &streaming_source, output_dir, callbacks,
+                crate::format::weights::write_model_weights_with_opts(
+                    &streaming_source, output_dir, callbacks, weight_opts,
                 )?;
             }
             QuantFormat::Q4k => {
+                // Q4K doesn't write `up_weights.bin` / `down_weights.bin`
+                // at all — the FFN weights live in `interleaved_q4k.bin`.
+                // `ffn_compact` is a no-op here by construction.
                 crate::format::weights::write_model_weights_q4k(
                     &streaming_source, output_dir, callbacks,
                 )?;

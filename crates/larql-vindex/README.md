@@ -284,6 +284,7 @@ model.vindex/
 ├── interleaved_q4k_manifest.json  Per-tensor offsets for interleaved_q4k.bin
 ├── attn_weights_q4k.bin    Q4_K Q/K/O + Q6_K V (when quant=q4k)
 ├── attn_weights_q4k_manifest.json Per-tensor offsets for attn_weights_q4k.bin
+├── ple_weights.bin         Per-Layer Embedding tensors at f16 (Gemma 4 E2B only)
 ├── index.json              Config, layer bands, provenance, checksums, quant format
 ├── tokenizer.json          Tokenizer
 ├── relation_clusters.json  Discovered relation types
@@ -317,6 +318,37 @@ When `quant != None`, `--level browse` is implicitly promoted to
 `--level all` — the Q4_K writer emits all of attention, FFN, norms,
 and `lm_head` in one pass, and a browse-only Q4k vindex would be
 incoherent.
+
+### Per-Layer Embeddings (Gemma 4 E2B)
+
+E2B's Per-Layer Embedding tensors don't go through Q4_K because the
+per-super-block (d, dmin) calibration destroys embedding-style tensors
+— one outlier row per super-block pulls the scale, zeroing the other
+255 cells. The noise then compounds across 35 layers' additive PLE
+contributions. Instead they land in `ple_weights.bin` at **f16**:
+
+- `per_layer_model_projection.weight`  (~27 MB at f16)
+- `embed_tokens_per_layer.weight`      (~4.7 GB at f16 on E2B)
+- `layers.N.per_layer_input_gate.weight` + `per_layer_projection.weight`
+
+Load dequantises to f32 at mmap time and inserts into `weights.tensors`.
+`larql_inference::forward::ple::precompute_per_layer_inputs` and
+`apply_per_layer_embedding` then work unchanged.
+
+### E2B caveats worth knowing
+
+- **Cross-layer KV sharing** (`num_kv_shared_layers=20`): layers 15-34
+  reuse K/V computed by the last unshared sliding / global layer. The
+  Q4 forward path threads a `kv_cache` through the loop to honour this.
+- **Double-wide MLP** (`use_double_wide_mlp=True`): half the layers
+  ship with `intermediate=12288` while the model-wide config reports
+  6144. `VectorIndex::num_features(layer)` is the authoritative
+  per-layer FFN width; don't read `weights.intermediate_size` in any
+  dequant / forward code.
+- **Final-logit softcap** (`final_logit_softcapping=30.0`): preserved
+  through `VindexModelConfig.final_logit_softcapping`. Missing it lets
+  `logits_to_predictions` peak on the wrong token — there is no "fail
+  loudly" mode for a dropped softcap, only a silent accuracy hit.
 
 ## Testing
 

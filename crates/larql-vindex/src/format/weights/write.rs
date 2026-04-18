@@ -169,6 +169,29 @@ impl<'a> WeightSource for StreamingWeights<'a> {
 
 // ── Write model weights (generic over source) ──
 
+/// Options for [`write_model_weights_with_opts`]. Use
+/// `WriteWeightsOptions::default()` to get the legacy behavior (writes
+/// every component file).
+#[derive(Default, Clone, Copy, Debug)]
+pub struct WriteWeightsOptions {
+    /// Skip writing `up_weights.bin` + `down_weights.bin`. The up/down
+    /// weights are expected to be available via feature-major
+    /// `up_features.bin` + `down_features.bin` — the loader
+    /// reconstructs the hidden-major tensors from those when the
+    /// manifest-referenced files are missing.
+    ///
+    /// On a 4B f16 vindex this saves ~3.4 GB (1.7 GB per tensor). On a
+    /// 31B vindex, proportionally ~14 GB. The cost is non-zero load
+    /// time (one mmap + transpose per layer for down, direct view for
+    /// up).
+    ///
+    /// Only take this option if `up_features.bin` and `down_features.bin`
+    /// are already in the output directory or will be produced
+    /// afterwards; otherwise downstream dense paths
+    /// (`WeightFfn::forward`, MEMIT) will panic on missing tensors.
+    pub ffn_compact: bool,
+}
+
 /// Write model weights to split component files.
 ///
 /// Works with any `WeightSource`: ModelWeights (build path) or
@@ -177,6 +200,16 @@ pub fn write_model_weights(
     source: &dyn WeightSource,
     dir: &Path,
     callbacks: &mut dyn IndexBuildCallbacks,
+) -> Result<(), VindexError> {
+    write_model_weights_with_opts(source, dir, callbacks, WriteWeightsOptions::default())
+}
+
+/// Explicit-options variant of [`write_model_weights`].
+pub fn write_model_weights_with_opts(
+    source: &dyn WeightSource,
+    dir: &Path,
+    callbacks: &mut dyn IndexBuildCallbacks,
+    opts: WriteWeightsOptions,
 ) -> Result<(), VindexError> {
     callbacks.on_stage("model_weights");
     let start = std::time::Instant::now();
@@ -234,6 +267,28 @@ pub fn write_model_weights(
     attn_file.flush()?;
 
     // ── FFN up + down weights (gate is in gate_vectors.bin) ──
+    //
+    // When `opts.ffn_compact` is set AND the architecture is dense (not
+    // MoE), skip writing `up_weights.bin` / `down_weights.bin` entirely.
+    // The loader reconstructs up/down tensors from feature-major
+    // `up_features.bin` / `down_features.bin` — those must be built
+    // separately via `cargo run --release -p larql-vindex --example
+    // build_{down,up}_features -- <vindex>` before the compact vindex
+    // can drive a dense forward pass.
+    //
+    // MoE compact mode is not yet supported: the MoE branch below packs
+    // the per-expert up/down weights *and* the router matrix into
+    // `up_weights.bin`, and the loader would need expert-aware feature
+    // files that don't exist yet. Refuse instead of silently corrupting.
+    if opts.ffn_compact && arch.is_moe() {
+        return Err(VindexError::Parse(
+            "ffn_compact not yet supported for MoE architectures — \
+             per-expert feature-major files don't exist yet".into(),
+        ));
+    }
+    let skip_ffn_weights = opts.ffn_compact;
+
+    if !skip_ffn_weights {
     let up_path = dir.join("up_weights.bin");
     let mut up_file = BufWriter::new(std::fs::File::create(&up_path)?);
     let mut up_offset: u64 = 0;
@@ -314,6 +369,7 @@ pub fn write_model_weights(
     }
     up_file.flush()?;
     down_file.flush()?;
+    } // end if !skip_ffn_weights
 
     // ── Norms ──
     let norms_path = dir.join("norms.bin");
@@ -411,6 +467,7 @@ pub fn write_model_weights(
         per_layer_embed_dim: cfg.per_layer_embed_dim,
         rope_local_base: cfg.rope_local_base,
         query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+        final_logit_softcapping: cfg.final_logit_softcapping,
     });
 
     let config_json = serde_json::to_string_pretty(&config)
@@ -683,37 +740,41 @@ pub fn write_model_weights_q4k(
 
     // ── ple_weights.bin — Per-Layer Embedding tensors (Gemma 4 E2B only) ──
     //
-    // E2B needs the two globals (`per_layer_model_projection`, the full
-    // `embed_tokens_per_layer` lookup) plus per-layer input_gate/projection
-    // matrices. `embed_tokens_per_layer` is the elephant — [vocab,
-    // num_layers·ple_dim] = ~9.4 GB f32 on E2B — but storing it as Q4_K
-    // (~1.2 GB) was the lesson from `embeddings.bin`: the token-lookup path
-    // reads at most a handful of rows per forward, so dequant-on-load to f32
-    // is acceptable here too.
+    // Stored as f16 — NOT Q4_K. The two globals (`per_layer_model_projection`,
+    // `embed_tokens_per_layer`) and the per-layer input_gate/projection
+    // matrices behave like embedding tables: each super-block of 256 values
+    // spans a wide dynamic range with a handful of outliers, and Q4_K's
+    // per-super-block (d, dmin) calibration zeros out the majority of cells
+    // to accommodate those outliers. PLE contributions are additive into
+    // every layer's residual, so the cell-level noise compounds across 35
+    // layers — the observable result was "arrays" / "amphibians" instead
+    // of "Paris" on Gemma 4 E2B. f16 halves the BF16 footprint (~4.7 GB for
+    // the big lookup on E2B) and preserves enough precision for accurate
+    // per-token PLE retrieval.
     if arch.has_per_layer_embeddings() {
         let ple_path = dir.join("ple_weights.bin");
         let mut ple_file = BufWriter::new(std::fs::File::create(&ple_path)?);
         let mut ple_offset: u64 = 0;
+        let ple_dtype = crate::config::dtype::StorageDtype::F16;
 
-        let mut write_tensor = |file: &mut BufWriter<std::fs::File>,
-                                manifest: &mut Vec<WeightEntry>,
-                                offset: &mut u64,
-                                key: String,
-                                data: Option<(Vec<f32>, usize, usize)>|
+        let write_tensor = |file: &mut BufWriter<std::fs::File>,
+                            manifest: &mut Vec<WeightEntry>,
+                            offset: &mut u64,
+                            key: String,
+                            data: Option<(Vec<f32>, usize, usize)>|
          -> Result<(), VindexError> {
             if let Some((floats, rows, cols)) = data {
-                let padded = pad_to_256(&floats);
-                let q = quantize_q4_k(&padded);
-                file.write_all(&q)?;
+                let bytes = crate::config::dtype::encode_floats(&floats, ple_dtype);
+                file.write_all(&bytes)?;
                 manifest.push(WeightEntry {
                     key,
-                    kind: "tensor_q4k".into(),
+                    kind: "tensor_f16".into(),
                     shape: vec![rows, cols],
                     offset: *offset,
-                    length: q.len() as u64,
+                    length: bytes.len() as u64,
                     file: "ple_weights.bin".into(),
                 });
-                *offset += q.len() as u64;
+                *offset += bytes.len() as u64;
             }
             Ok(())
         };
@@ -822,6 +883,7 @@ pub fn write_model_weights_q4k(
         per_layer_embed_dim: cfg.per_layer_embed_dim,
         rope_local_base: cfg.rope_local_base,
         query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+        final_logit_softcapping: cfg.final_logit_softcapping,
     });
 
     let config_json = serde_json::to_string_pretty(&config)

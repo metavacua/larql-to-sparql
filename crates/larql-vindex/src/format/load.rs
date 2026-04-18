@@ -28,35 +28,63 @@ impl VectorIndex {
         let num_layers = config.num_layers;
         let hidden_size = config.hidden_size;
 
-        // Load gate vectors from binary
-        callbacks.on_file_start("gate_vectors", &dir.join("gate_vectors.bin").display().to_string());
-        let start = std::time::Instant::now();
-
+        // Load gate vectors from binary. If `gate_vectors.bin` is
+        // missing but `interleaved_q4k.bin` is present, synthesize an
+        // anonymous mmap by dequantizing the Q4K gate slices at f16 —
+        // that's dedup #2 in action (a Q4K vindex extracted with
+        // `--drop-gate-vectors` carries gate weights only once, Q4K).
         let gate_path = dir.join("gate_vectors.bin");
-        let gate_file = std::fs::File::open(&gate_path)?;
-        let gate_mmap = unsafe { crate::mmap_util::mmap_optimized(&gate_file)? };
-        let bpf = crate::config::dtype::bytes_per_float(config.dtype);
+        let interleaved_q4k_path = dir.join("interleaved_q4k.bin");
 
-        // Build per-layer slice info — offsets in floats (not bytes)
-        let mut gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![
-            crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
-            num_layers
-        ];
-        let mut total_gate = 0;
+        let (gate_mmap, gate_slices, gate_dtype) = if gate_path.exists() {
+            callbacks.on_file_start(
+                "gate_vectors",
+                &gate_path.display().to_string(),
+            );
+            let start = std::time::Instant::now();
+            let gate_file = std::fs::File::open(&gate_path)?;
+            let gate_mmap = unsafe { crate::mmap_util::mmap_optimized(&gate_file)? };
+            let bpf = crate::config::dtype::bytes_per_float(config.dtype);
 
-        for info in &config.layers {
-            gate_slices[info.layer] = crate::index::core::GateLayerSlice {
-                float_offset: info.offset as usize / bpf,
-                num_features: info.num_features,
-            };
-            total_gate += info.num_features;
-        }
-
-        callbacks.on_file_done(
-            "gate_vectors",
-            total_gate,
-            start.elapsed().as_secs_f64() * 1000.0,
-        );
+            let mut gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![
+                crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
+                num_layers
+            ];
+            let mut total_gate = 0;
+            for info in &config.layers {
+                gate_slices[info.layer] = crate::index::core::GateLayerSlice {
+                    float_offset: info.offset as usize / bpf,
+                    num_features: info.num_features,
+                };
+                total_gate += info.num_features;
+            }
+            callbacks.on_file_done(
+                "gate_vectors",
+                total_gate,
+                start.elapsed().as_secs_f64() * 1000.0,
+            );
+            (gate_mmap, gate_slices, config.dtype)
+        } else if interleaved_q4k_path.exists() {
+            callbacks.on_file_start(
+                "gate_vectors (synth from Q4K)",
+                &interleaved_q4k_path.display().to_string(),
+            );
+            let start = std::time::Instant::now();
+            let (gate_mmap, gate_slices) =
+                synthesize_gate_from_q4k(dir, &config, hidden_size)?;
+            let total: usize = gate_slices.iter().map(|s| s.num_features).sum();
+            callbacks.on_file_done(
+                "gate_vectors (synth from Q4K)",
+                total,
+                start.elapsed().as_secs_f64() * 1000.0,
+            );
+            (gate_mmap, gate_slices, crate::config::dtype::StorageDtype::F16)
+        } else {
+            return Err(VindexError::Parse(format!(
+                "neither gate_vectors.bin nor interleaved_q4k.bin present in {}",
+                dir.display()
+            )));
+        };
 
         // Load down metadata — mmap binary (zero heap), fall back to JSONL (legacy)
         let start = std::time::Instant::now();
@@ -81,8 +109,100 @@ impl VectorIndex {
             None
         };
 
-        Ok(VectorIndex::new_mmap(gate_mmap, gate_slices, config.dtype, down_meta_mmap, num_layers, hidden_size))
+        Ok(VectorIndex::new_mmap(gate_mmap, gate_slices, gate_dtype, down_meta_mmap, num_layers, hidden_size))
     }
+}
+
+/// Dequantize gate slices from `interleaved_q4k.bin` into an anonymous
+/// f16 mmap shaped like a real `gate_vectors.bin` file. Used when a
+/// Q4K vindex was extracted with `--drop-gate-vectors`.
+///
+/// Layout matches `gate_vectors.bin` so the rest of the gate-mmap
+/// accessors (`gate_vectors_at`, `gate_knn`, …) work unchanged.
+fn synthesize_gate_from_q4k(
+    dir: &Path,
+    config: &VindexConfig,
+    hidden_size: usize,
+) -> Result<
+    (
+        memmap2::Mmap,
+        Vec<crate::index::core::GateLayerSlice>,
+    ),
+    VindexError,
+> {
+    let interleaved_path = dir.join("interleaved_q4k.bin");
+    let manifest_path = dir.join("interleaved_q4k_manifest.json");
+    if !manifest_path.exists() {
+        return Err(VindexError::Parse(format!(
+            "interleaved_q4k_manifest.json missing alongside {}",
+            interleaved_path.display()
+        )));
+    }
+    // Open the Q4K file and the manifest.
+    let iq4_file = std::fs::File::open(&interleaved_path)?;
+    let iq4_mmap = unsafe { crate::mmap_util::mmap_optimized(&iq4_file)? };
+    let manifest_json: Vec<serde_json::Value> = serde_json::from_str(
+        &std::fs::read_to_string(&manifest_path)?,
+    )
+    .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+    let num_layers = config.num_layers;
+    // Allocate one anon MmapMut big enough for all layers at f16
+    // (2 bytes per float). macOS lazily commits — physical RAM only
+    // grows as we write.
+    let mut byte_offset: u64 = 0;
+    let mut gate_slices = vec![
+        crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
+        num_layers
+    ];
+    for info in &config.layers {
+        gate_slices[info.layer] = crate::index::core::GateLayerSlice {
+            // Offset measured in floats (f16 → bpf=2).
+            float_offset: (byte_offset as usize) / 2,
+            num_features: info.num_features,
+        };
+        byte_offset += (info.num_features as u64) * (hidden_size as u64) * 2;
+    }
+    let total_bytes = byte_offset as usize;
+
+    let mut anon = memmap2::MmapMut::map_anon(total_bytes)
+        .map_err(|e| VindexError::Parse(format!("anon mmap: {e}")))?;
+
+    for info in &config.layers {
+        // Manifest entries per layer are [gate, up, down] in order.
+        let base = info.layer * 3;
+        let gate_entry = manifest_json.get(base).ok_or_else(|| {
+            VindexError::Parse(format!(
+                "q4k manifest missing gate entry for layer {}",
+                info.layer
+            ))
+        })?;
+        let offset = gate_entry["offset"].as_u64().unwrap_or(0) as usize;
+        let length = gate_entry["length"].as_u64().unwrap_or(0) as usize;
+        let format = gate_entry["format"].as_str().unwrap_or("");
+        if format != "Q4_K" {
+            return Err(VindexError::Parse(format!(
+                "expected Q4_K gate at layer {}, got `{format}`",
+                info.layer
+            )));
+        }
+        let q_bytes = &iq4_mmap[offset..offset + length];
+        let n = info.num_features * hidden_size;
+        let padded = n.div_ceil(256) * 256;
+        let gate_f32 = larql_models::quant::ggml::dequantize_q4_k(q_bytes, padded)
+            .map_err(|e| VindexError::Parse(format!("dequantize layer {}: {e}", info.layer)))?;
+        let gate_f16_bytes = larql_models::quant::half::encode_f16(&gate_f32[..n]);
+
+        // Copy into the anon mmap at the right byte offset.
+        let slot_byte_offset = gate_slices[info.layer].float_offset * 2;
+        let dst = &mut anon[slot_byte_offset..slot_byte_offset + gate_f16_bytes.len()];
+        dst.copy_from_slice(&gate_f16_bytes);
+    }
+
+    let mmap = anon
+        .make_read_only()
+        .map_err(|e| VindexError::Parse(format!("make_read_only: {e}")))?;
+    Ok((mmap, gate_slices))
 }
 
 /// Load embeddings from a .vindex directory.

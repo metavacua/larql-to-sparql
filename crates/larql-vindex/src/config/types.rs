@@ -259,6 +259,12 @@ pub struct VindexModelConfig {
     /// Query pre-attention scalar (overrides 1/sqrt(head_dim)).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_pre_attn_scalar: Option<f64>,
+    /// Final-logit tanh softcap (Gemma 2/3/4: 30.0). Applied to logits
+    /// immediately before softmax in `logits_to_predictions`. Omitting it
+    /// leaves logits uncapped — on E2B this peaked the softmax on the
+    /// wrong token (observed: "Paris" → "hyperparameters").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_logit_softcapping: Option<f64>,
 }
 
 /// MoE (Mixture of Experts) configuration.

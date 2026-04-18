@@ -56,6 +56,17 @@ struct Cli {
     #[arg(long)]
     no_infer: bool,
 
+    /// Run as an FFN-service endpoint for remote `RemoteWalkBackend`
+    /// clients. Disables `/v1/infer` (like `--no-infer`) and advertises
+    /// `mode: ffn-service` in `/v1/stats`. This is Act 2 of the demo —
+    /// the server holds the FFN weights, clients hold attention.
+    ///
+    /// Memory-footprint optimization (skip attention-weight load) is a
+    /// separate follow-up; today this flag is an operating-mode
+    /// declaration, not a memory saving.
+    #[arg(long)]
+    ffn_only: bool,
+
     /// Enable CORS for browser access.
     #[arg(long)]
     cors: bool,
@@ -93,7 +104,11 @@ struct Cli {
     tls_key: Option<PathBuf>,
 }
 
-fn load_single_vindex(path_str: &str, no_infer: bool) -> Result<LoadedModel, BoxError> {
+fn load_single_vindex(
+    path_str: &str,
+    no_infer: bool,
+    ffn_only: bool,
+) -> Result<LoadedModel, BoxError> {
     let path = if larql_vindex::is_hf_path(path_str) {
         info!("Resolving HuggingFace path: {}", path_str);
         larql_vindex::resolve_hf_vindex(path_str)?
@@ -140,7 +155,13 @@ fn load_single_vindex(path_str: &str, no_infer: bool) -> Result<LoadedModel, Box
         info!("  Labels: {} probe-confirmed", probe_labels.len());
     }
 
-    if no_infer {
+    // --ffn-only implies --no-infer. The /v1/infer path needs full model
+    // weights; this mode serves just the FFN compute via /v1/walk-ffn.
+    let infer_disabled = no_infer || ffn_only;
+    if ffn_only {
+        info!("  Mode: ffn-service (--ffn-only)");
+        info!("  Infer: disabled (FFN-service mode)");
+    } else if no_infer {
         info!("  Infer: disabled (--no-infer)");
     } else if has_weights {
         info!("  Infer: available (weights detected, will lazy-load on first request)");
@@ -156,7 +177,8 @@ fn load_single_vindex(path_str: &str, no_infer: bool) -> Result<LoadedModel, Box
         embeddings,
         embed_scale,
         tokenizer,
-        infer_disabled: no_infer,
+        infer_disabled,
+        ffn_only,
         weights: std::sync::OnceLock::new(),
         probe_labels,
     })
@@ -205,13 +227,13 @@ async fn main() -> Result<(), BoxError> {
         }
         info!("Found {} vindexes in {}", paths.len(), dir.display());
         for p in &paths {
-            match load_single_vindex(&p.to_string_lossy(), cli.no_infer) {
+            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only) {
                 Ok(m) => models.push(Arc::new(m)),
                 Err(e) => warn!("  Skipping {}: {}", p.display(), e),
             }
         }
     } else if let Some(ref vindex_path) = cli.vindex_path {
-        let m = load_single_vindex(vindex_path, cli.no_infer)?;
+        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only)?;
         models.push(Arc::new(m));
     } else {
         return Err("must provide a vindex path or --dir".into());

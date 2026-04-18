@@ -28,6 +28,12 @@ pub struct LoadedModel {
     pub tokenizer: tokenizers::Tokenizer,
     /// Whether inference is disabled (--no-infer).
     pub infer_disabled: bool,
+    /// Whether this server is running in FFN-service mode (--ffn-only).
+    /// Implies `infer_disabled = true`; advertised in /v1/stats so clients
+    /// using `RemoteWalkBackend` can tell they've landed on the right
+    /// endpoint. Memory-footprint optimization (skip attention weight
+    /// load) is a separate follow-up.
+    pub ffn_only: bool,
     /// Model weights, lazy-loaded on first INFER request.
     pub weights: std::sync::OnceLock<ModelWeights>,
     /// Probe-confirmed feature labels: (layer, feature) → relation name.

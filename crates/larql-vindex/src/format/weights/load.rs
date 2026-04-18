@@ -76,6 +76,7 @@ pub fn load_model_weights(
     if let Some(v) = model_cfg.per_layer_embed_dim { obj.insert("hidden_size_per_layer_input".into(), v.into()); }
     if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
     if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
+    if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
     let arch = larql_models::detect_from_json(&arch_obj);
 
     callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
@@ -295,6 +296,7 @@ pub fn load_model_weights_q4k(
     if let Some(v) = model_cfg.per_layer_embed_dim { obj.insert("hidden_size_per_layer_input".into(), v.into()); }
     if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
     if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
+    if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
     let arch = larql_models::detect_from_json(&arch_obj);
 
     // Embeddings — required for token lookup at layer 0.
@@ -326,7 +328,10 @@ pub fn load_model_weights_q4k(
         let mut mmap_cache: HashMap<String, memmap2::Mmap> = HashMap::new();
         for entry in &entries {
             if entry.file.is_empty() { continue; }
-            if entry.kind != "vector" && entry.kind != "tensor_q4k" { continue; }
+            if entry.kind != "vector"
+                && entry.kind != "tensor_q4k"
+                && entry.kind != "tensor_f16"
+            { continue; }
 
             if !mmap_cache.contains_key(&entry.file) {
                 let fpath = dir.join(&entry.file);
@@ -357,15 +362,24 @@ pub fn load_model_weights_q4k(
                 let floats = crate::config::dtype::decode_floats(raw_bytes, actual_dtype);
                 vectors.insert(entry.key.clone(), floats);
             } else {
-                // tensor_q4k: Q4_K-encoded 2D tensor (PLE weights for Gemma 4
-                // E2B). Dequantise to f32, insert into weights.tensors so
+                // tensor_q4k / tensor_f16: 2D tensor (PLE weights for Gemma 4
+                // E2B). Decode to f32 and insert into weights.tensors so
                 // `ple.rs` can look it up like any other dense matrix.
                 if entry.shape.len() != 2 { continue; }
                 let rows = entry.shape[0];
                 let cols = entry.shape[1];
                 let n = rows * cols;
-                let padded = n.div_ceil(256) * 256;
-                if let Ok(floats) = larql_models::quant::ggml::dequantize_q4_k(raw_bytes, padded) {
+                let floats: Option<Vec<f32>> = if entry.kind == "tensor_q4k" {
+                    let padded = n.div_ceil(256) * 256;
+                    larql_models::quant::ggml::dequantize_q4_k(raw_bytes, padded).ok()
+                } else {
+                    // tensor_f16 — raw bytes are IEEE half-precision.
+                    Some(crate::config::dtype::decode_floats(
+                        raw_bytes,
+                        crate::config::dtype::StorageDtype::F16,
+                    ))
+                };
+                if let Some(floats) = floats {
                     if floats.len() >= n {
                         if let Ok(arr) = Array2::from_shape_vec(
                             (rows, cols),

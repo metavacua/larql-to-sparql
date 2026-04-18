@@ -40,7 +40,7 @@ The vindex format is model-agnostic. It stores weights by function (gate, down, 
 
 | Family | Models | FFN Type | Notes |
 |--------|--------|----------|-------|
-| Gemma | Gemma 2/3 (2B-27B) | Gated (gate + up + down) | GeGLU activation, GQA attention |
+| Gemma | Gemma 2/3/4 (2B-31B) | Gated (gate + up + down) | GeGLU activation, GQA attention; Gemma 4 adds per-layer head_dim, QK-norm, partial RoPE, cross-layer KV sharing (E2B), Per-Layer Embeddings (E2B), double-wide MLP (E2B) |
 | Llama | Llama 2/3 (7B-405B) | Gated (gate + up + down) | SiLU activation, GQA attention |
 | Mistral | Mistral 7B | Gated (gate + up + down) | Sliding window attention |
 | Mixtral | Mixtral 8x7B, 8x22B | MoE (8 experts × gate + up + down) | Sparse MoE, top-2 routing |
@@ -72,6 +72,9 @@ Dense FFN models have no explicit gate matrix — the FFN is `W_out @ GELU(W_in 
 - **RoPE variants:** Base frequency and scaling stored in `model_config`. Used by INFER only.
 - **MoE shared expert (DeepSeek):** Stored as Expert 0 with a `shared: true` flag.
 - **Fine-grained MoE (DeepSeek V3):** 256 experts with top-8 routing. Same structure, more features per layer.
+- **Per-Layer Embeddings (Gemma 4 E2B):** Carried in `ple_weights.bin` at f16. `VectorIndex::num_features(layer)` is the authoritative per-layer FFN width for models with `use_double_wide_mlp=True`.
+- **Logit softcap (Gemma 2/3/4):** `final_logit_softcapping` is stored in `index.json::model_config` and reapplied before softmax at inference time. Dropping it silently mis-peaks the top-1 token.
+- **Cross-layer KV sharing (Gemma 4 E2B):** `num_kv_shared_layers` in `model_config` drives the forward-pass cache. Storage is unchanged — the source-layer Q4K weights still ship; the reader skips K/V compute at shared layers.
 
 ---
 
@@ -97,6 +100,23 @@ model.vindex/
 ├── up_weights.bin            # W_up per layer
 ├── down_weights.bin          # W_down per layer (full vectors)
 ├── lm_head.bin               # Output projection (omitted if tied to embeddings)
+│
+│  # ═══ Quantised Weights (when quant = Q4k) ═══
+│  # Written instead of attn_weights.bin / up_weights.bin / down_weights.bin.
+│
+├── attn_weights_q4k.bin      # Q/K/O = Q4_K, V = Q6_K per layer
+├── attn_weights_q4k_manifest.json
+├── interleaved_q4k.bin       # FFN gate/up = Q4_K, down = Q6_K per layer
+├── interleaved_q4k_manifest.json
+│
+│  # ═══ Gemma 4 E2B Per-Layer Embeddings ═══
+│  # Emitted only when has_per_layer_embeddings() == true.
+│  # f16 deliberately — Q4_K super-block calibration destroys
+│  # embedding-style tensors, and PLE contributions are additive
+│  # into every layer's residual so per-cell noise compounds.
+│
+├── ple_weights.bin           # per_layer_model_projection + embed_tokens_per_layer
+│                             # + per-layer input_gate & projection (all f16)
 │
 │  # ═══ Metadata & Labels ═══
 │
@@ -243,10 +263,14 @@ JSON array mapping tensor keys to byte offsets in the weight files.
 | Field | Type | Description |
 |-------|------|-------------|
 | `key` | string | Tensor key (architecture-specific naming) |
-| `kind` | string | `"tensor"` (2D) or `"vector"` (1D) |
+| `kind` | string | `"tensor"` (2D f32/f16), `"vector"` (1D f32/f16), `"tensor_q4k"` (2D Q4_K 144-byte blocks, used by `lm_head_q4.bin`), or `"tensor_f16"` (2D IEEE half, used by `ple_weights.bin`) |
 | `shape` | [usize] | Dimensions |
 | `offset` | u64 | Byte offset into the relevant weight file |
 | `length` | u64 | Byte length |
+
+`tensor_q4k` and `tensor_f16` entries are decoded to f32 at load time
+and surface in `ModelWeights.tensors`, so the downstream forward code
+can read them like any other dense matrix.
 
 ---
 

@@ -4,7 +4,6 @@ use std::time::Instant;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_vindex::IndexBuildCallbacks;
-use larql_vindex::write_model_weights;
 use larql_inference::{ InferenceModel};
 
 #[derive(Args)]
@@ -35,14 +34,41 @@ pub struct ExtractIndexArgs {
     #[arg(long)]
     include_weights: bool,
 
-    /// Store weights in f16 (half precision). Halves file sizes with negligible accuracy loss.
+    /// Store side-channel tensors (gate_vectors.bin, embeddings.bin,
+    /// attn/norms/lm_head when `--quant none`) at f16 instead of f32.
+    /// Halves those file sizes with negligible accuracy loss. `--quant q4k`
+    /// implies this automatically.
     #[arg(long)]
     f16: bool,
 
-    /// Quantise model weights inline while extracting — skips any f32 intermediate.
-    /// q4k: Q4_K for Q/K/O/gate/up, Q6_K for V/down (Ollama-compatible). Implies level=all.
+    /// Quantise model forward-pass weights inline while extracting —
+    /// skips any f32 intermediate. `q4k`: Q4_K for Q/K/O/gate/up, Q6_K for
+    /// V/down (Ollama-compatible). Implies `--level all` and `--f16` on
+    /// the unquantised side-channels (gate_vectors, embeddings).
     #[arg(long, default_value = "none", value_parser = parse_quant)]
     quant: larql_vindex::QuantFormat,
+
+    /// Skip writing `up_weights.bin` + `down_weights.bin`. The up/down
+    /// weights are reconstructable from `up_features.bin` /
+    /// `down_features.bin` which are produced separately via
+    /// `build_{up,down}_features`. This saves ~3.4 GB on a 4B f16 vindex
+    /// / ~14 GB on a 31B vindex.
+    ///
+    /// **Caveat:** a compact vindex can only be read by `WalkFfn` (the
+    /// default inference path). `WeightFfn` / `larql dev walk --compare`
+    /// will panic on missing FFN tensors.
+    #[arg(long)]
+    compact: bool,
+
+    /// Skip writing `gate_vectors.bin`. Only valid with `--quant q4k`
+    /// — the loader rebuilds the f16 gate by dequantizing
+    /// `interleaved_q4k.bin` at vindex-load time. Saves ~1.7 GB on a
+    /// 4B q4k vindex / ~14 GB on a 31B q4k vindex; costs ~1.6 s / ~12 s
+    /// of CPU at load. See
+    /// `cargo run --release -p larql-vindex --example bench_gate_dequant`
+    /// for the measured trade-off.
+    #[arg(long)]
+    drop_gate_vectors: bool,
 
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
@@ -143,7 +169,15 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.level
     };
 
-    let dtype = if args.f16 {
+    // Dtype resolution:
+    //   --f16                → F16
+    //   --quant q4k          → F16 (Q4K quantizes attn + FFN; pairing that
+    //                          with f32 gate_vectors/embeddings doubles
+    //                          the side-channel footprint for zero accuracy
+    //                          benefit. The f16 browse extract already
+    //                          proves f16 side-channels are correct.)
+    //   default              → F32
+    let dtype = if args.f16 || args.quant == larql_vindex::QuantFormat::Q4k {
         larql_vindex::StorageDtype::F16
     } else {
         larql_vindex::StorageDtype::F32
@@ -162,7 +196,12 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             )?;
             eprintln!("\nLoading model for weights: {}", model_name);
             let model = InferenceModel::load(model_name)?;
-            write_model_weights(model.weights(), &args.output, &mut callbacks)?;
+            let weight_opts = larql_vindex::WriteWeightsOptions {
+                ffn_compact: args.compact,
+            };
+            larql_vindex::write_model_weights_with_opts(
+                model.weights(), &args.output, &mut callbacks, weight_opts,
+            )?;
         }
     } else {
         // Build from model — streaming mode (mmap safetensors, no full model load)
@@ -196,6 +235,15 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("tokenizer.json not found at {}", model_path.display()).into());
         };
 
+        let weight_opts = larql_vindex::WriteWeightsOptions {
+            ffn_compact: args.compact,
+        };
+        if args.drop_gate_vectors && args.quant != larql_vindex::QuantFormat::Q4k {
+            return Err(
+                "--drop-gate-vectors requires --quant q4k (gate is rebuilt from Q4K at load)"
+                    .into(),
+            );
+        }
         larql_vindex::build_vindex_streaming(
             &model_path,
             &tokenizer,
@@ -205,6 +253,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             level,
             dtype,
             args.quant,
+            weight_opts,
+            args.drop_gate_vectors,
             &mut callbacks,
         )?;
     }

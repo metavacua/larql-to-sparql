@@ -32,28 +32,76 @@ larql> INFER "The capital of France is" TOP 3;
 # Build
 cargo build --release
 
-# Extract a model into a vindex (browse-only, ~3 GB at f16)
-larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --f16
+# Pull a pre-built vindex from HuggingFace
+larql pull hf://chrishayuk/gemma-3-4b-it-vindex
 
-# Extract with inference weights (~6 GB at f16)
-larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --level inference --f16
+# List what's cached
+larql list
 
-# Or extract as Q4_K/Q6_K inline (Ollama-compatible, skips the f32 intermediate)
-larql extract-index google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
+# Run it — one-shot or chat
+larql run gemma-3-4b-it-vindex "The capital of France is"
+larql run gemma-3-4b-it-vindex          # drops into chat mode
 
-# Or convert from GGUF
+# Or work from a local vindex you extracted yourself
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --level inference --f16
+larql run gemma3-4b.vindex "Einstein is known for"
+```
+
+<details>
+<summary>Other ways to get a vindex</summary>
+
+```bash
+# Browse-only extract (~3 GB at f16)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --f16
+
+# Q4_K/Q6_K inline (Ollama-compatible, skips the f32 intermediate)
+larql extract google/gemma-3-4b-it -o gemma3-4b.vindex --quant q4k
+
+# Convert from GGUF
 larql convert gguf-to-vindex model.gguf -o model.vindex --f16
+```
 
-# Or download from HuggingFace
-larql hf download chrishayuk/gemma-3-4b-it-vindex
+`extract-index` is kept as a backwards-compatible alias of `extract`.
 
-# Start the REPL
+</details>
+
+### Serve it over HTTP + gRPC
+
+```bash
+larql serve gemma3-4b.vindex --port 8080
+```
+
+### Run attention locally, FFN on another machine
+
+```bash
+# Server (any box, any GPU — holds the FFN):
+larql serve gemma4-31b.vindex --port 8080 --ffn-only
+
+# Client (laptop — runs attention, FFN over HTTP):
+larql run gemma4-31b.vindex --ffn http://server.local:8080 \
+  "The capital of France is"
+```
+
+### Query via LQL
+
+```bash
 larql repl
-
-# Use a local vindex or HuggingFace vindex directly
 larql lql 'USE "gemma3-4b.vindex"; DESCRIBE "France";'
 larql lql 'USE "hf://chrishayuk/gemma-3-4b-it-vindex"; DESCRIBE "France";'
 ```
+
+### Research / interpretability tools
+
+All under `larql dev <subcmd>` (weight extraction, QK rank analysis,
+OV→gate projection, circuit discovery, trajectory tracing, 20+ others):
+
+```bash
+larql dev --help
+larql dev walk --prompt "The capital of France is" --index gemma3-4b.vindex --predict
+```
+
+Legacy invocation `larql walk …` still works and transparently trampolines
+to `larql dev walk …`.
 
 ## What is a Vindex?
 

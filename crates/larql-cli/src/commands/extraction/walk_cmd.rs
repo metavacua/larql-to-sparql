@@ -8,7 +8,7 @@ use larql_vindex::{
 };
 use larql_inference::{
     predict_with_ffn, predict_with_router, InferenceModel, LayerFfnRouter, ModelWeights,
-    SparseFfn, WeightFfn,
+    RemoteFfnConfig, RemoteWalkBackend, SparseFfn, WeightFfn,
     vindex::WalkFfn,
 };
 
@@ -16,53 +16,53 @@ use larql_inference::{
 pub struct WalkArgs {
     /// Prompt text to walk through the model.
     #[arg(short, long)]
-    prompt: String,
+    pub prompt: String,
 
     /// Path to a .vindex directory (self-contained, no model needed).
     #[arg(long)]
-    index: Option<PathBuf>,
+    pub index: Option<PathBuf>,
 
     /// Model path or HuggingFace model ID (needed for --predict/--compare,
     /// or when not using --index).
     #[arg(short, long)]
-    model: Option<String>,
+    pub model: Option<String>,
 
     /// Path to extracted ffn_gate vectors (alternative to --index).
     #[arg(long)]
-    gate_vectors: Option<PathBuf>,
+    pub gate_vectors: Option<PathBuf>,
 
     /// Path to extracted ffn_down vectors (alternative to --index).
     #[arg(long)]
-    down_vectors: Option<PathBuf>,
+    pub down_vectors: Option<PathBuf>,
 
     /// Top-K features per layer for the gate KNN.
     #[arg(short = 'k', long, default_value = "10")]
-    top_k: usize,
+    pub top_k: usize,
 
     /// Layers to walk. Comma-separated or range (e.g., "26,27,28" or "24-33").
     /// Default: all layers.
     #[arg(short, long)]
-    layers: Option<String>,
+    pub layers: Option<String>,
 
     /// Number of top predictions to show.
     #[arg(long, default_value = "10")]
-    predict_top_k: usize,
+    pub predict_top_k: usize,
 
     /// Run full forward pass with walk FFN and show predictions (requires --model).
     #[arg(long)]
-    predict: bool,
+    pub predict: bool,
 
     /// Compare walk FFN predictions against dense ground truth (requires --model).
     #[arg(long)]
-    compare: bool,
+    pub compare: bool,
 
     /// Number of down tokens to show per feature.
     #[arg(long, default_value = "5")]
-    down_top_k: usize,
+    pub down_top_k: usize,
 
     /// Show verbose loading and timing info.
     #[arg(short, long)]
-    verbose: bool,
+    pub verbose: bool,
 
     /// Opt in to the Metal Q4 decode path. Off by default because the
     /// per-token `kv_attention` shader doesn't apply QK-norm yet, so
@@ -70,7 +70,20 @@ pub struct WalkArgs {
     /// (Llama, Mistral) should work. Flip this on once the QK-norm
     /// dispatch lands in `decode.rs`.
     #[arg(long)]
-    metal: bool,
+    pub metal: bool,
+
+    /// Route the FFN to a remote `larql-server` via `POST /v1/walk-ffn`
+    /// (with `full_output: true`). Attention still runs locally; the FFN
+    /// per-layer call lands on the server. Incompatible with `--compare`
+    /// — the comparison backends expect local FFN weights.
+    ///
+    /// Example: `--ffn-remote http://127.0.0.1:8080`
+    #[arg(long, value_name = "URL")]
+    pub ffn_remote: Option<String>,
+
+    /// Per-request HTTP timeout (seconds) for `--ffn-remote`.
+    #[arg(long, default_value = "60")]
+    pub ffn_remote_timeout_secs: u64,
 }
 
 struct VerboseLoadCallbacks;
@@ -432,6 +445,18 @@ fn run_predict_inner(
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
 
+    // Remote FFN short-circuit: attention runs locally, FFN hits the server
+    // per layer. Mutually exclusive with --compare (the comparison backends
+    // need local FFN weights to diff against).
+    if let Some(ref url) = args.ffn_remote {
+        if args.compare {
+            return Err("--compare is incompatible with --ffn-remote \
+                       (comparison backends require local FFN)"
+                .into());
+        }
+        return run_predict_remote(weights, tokenizer, &token_ids, args, url);
+    }
+
     // Walk FFN forward pass (with trace for analysis output)
     let walk_ffn = WalkFfn::new_with_trace(weights, index, args.top_k);
     let start = Instant::now();
@@ -521,6 +546,50 @@ fn run_predict_inner(
             hybrid_elapsed,
         );
     }
+
+    Ok(())
+}
+
+/// Remote FFN forward pass: attention local, FFN served over HTTP by
+/// `larql-server`. See `crates/larql-inference/src/ffn/remote.rs` for the
+/// backend and `crates/larql-server/src/routes/walk_ffn.rs` for the
+/// server endpoint.
+fn run_predict_remote(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    token_ids: &[u32],
+    args: &WalkArgs,
+    url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let verbose = args.verbose;
+    let timeout = std::time::Duration::from_secs(args.ffn_remote_timeout_secs);
+    let config = RemoteFfnConfig::new(url).with_timeout(timeout);
+
+    vlog!(verbose, "Connecting to remote FFN: {url}");
+    let remote = RemoteWalkBackend::connect(config)?;
+    if remote.hidden_size() != weights.hidden_size {
+        return Err(format!(
+            "remote hidden_size {} != local attention hidden_size {} \
+             — client and server must be the same model",
+            remote.hidden_size(),
+            weights.hidden_size,
+        )
+        .into());
+    }
+    vlog!(verbose, "  connected: hidden={} url={}", remote.hidden_size(), remote.base_url());
+
+    let start = Instant::now();
+    let result = predict_with_ffn(
+        weights,
+        tokenizer,
+        token_ids,
+        args.predict_top_k,
+        &remote,
+    );
+    let elapsed = start.elapsed();
+
+    print_predictions("walk (ffn remote)", &result.predictions);
+    eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
 
     Ok(())
 }

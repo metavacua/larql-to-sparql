@@ -463,6 +463,7 @@ impl<'a> BuildContext<'a> {
                     per_layer_embed_dim: cfg.per_layer_embed_dim,
                     rope_local_base: cfg.rope_local_base,
                     query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+                    final_logit_softcapping: cfg.final_logit_softcapping,
                 })
             },
         };
@@ -708,6 +709,7 @@ pub fn build_vindex_resume(
                 per_layer_embed_dim: cfg.per_layer_embed_dim,
                 rope_local_base: cfg.rope_local_base,
                 query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+                final_logit_softcapping: cfg.final_logit_softcapping,
             })
         },
     };
