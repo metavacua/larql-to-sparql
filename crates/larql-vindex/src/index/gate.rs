@@ -442,6 +442,26 @@ impl VectorIndex {
                 }
             }
         }
+        // f16 mmap — lazy decode into cache, then borrow (no per-call clone).
+        // Holding the Mutex for the matmul is fine: forward passes are serial
+        // per-layer, and this replaces a 462MB clone with a direct view.
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16 {
+            let slice = self.gate_mmap_slices.get(layer)?;
+            if slice.num_features == 0 { return None; }
+            let mmap = self.gate_mmap_bytes.as_ref()?;
+            let mut cache = self.f16_decode_cache.lock().unwrap();
+            if cache.len() <= layer { cache.resize(layer + 1, None); }
+            if cache[layer].is_none() {
+                let byte_offset = slice.float_offset * 2;
+                let byte_end = byte_offset + slice.num_features * self.hidden_size * 2;
+                if byte_end > mmap.len() { return None; }
+                let raw = &mmap[byte_offset..byte_end];
+                cache[layer] = Some(larql_models::quant::half::decode_f16(raw));
+            }
+            let data = cache[layer].as_ref().unwrap();
+            let view = ArrayView2::from_shape((slice.num_features, self.hidden_size), data.as_slice()).unwrap();
+            return Some(gate_matmul(&view, &x.view()));
+        }
         None
     }
 

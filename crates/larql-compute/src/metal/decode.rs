@@ -117,6 +117,12 @@ impl MetalBackend {
         let cmd = self.queue.new_command_buffer();
         let enc = cmd.new_compute_command_encoder();
 
+        // Diagnostic: run only up to (and including) the specified layer,
+        // then dump intermediates and exit. Pinpoints which sub-stage in
+        // which layer first produces NaN on real-vindex decode.
+        let diag_stop_layer: Option<usize> = std::env::var("LARQL_DECODE_DIAG_LAYER")
+            .ok().and_then(|v| v.parse::<usize>().ok());
+
         for l in 0..num_layers {
             let layer = &layers[l];
             let norm_offset = layer.norm_offset;
@@ -535,14 +541,25 @@ impl MetalBackend {
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
-                        // Down
-                        enc.set_compute_pipeline_state(&self.q4kf_proj_pipeline);
-                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
-                        enc.set_buffer(1, Some(&act_buf), 0);
-                        enc.set_buffer(2, Some(&down_out), 0);
-                        enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                        // Down — format-aware. Mixed Q4_KF gate/up + Q6_K
+                        // down ships on some vindexes; route through the
+                        // format-matching shader.
+                        use crate::metal::stages::quant_matvec::{self as qmv, Pipelines};
+                        let pipes = Pipelines {
+                            q4kf_proj: Some(&self.q4kf_proj_pipeline),
+                            q4k_matvec_fallback: &self.q4k_matvec_pipeline,
+                            q6k_matvec: &self.q6k_matvec_pipeline,
+                            q4_matvec: &self.q4.matvec,
+                        };
+                        qmv::encode(
+                            enc, layer.down.format, &down_bufs[l],
+                            &act_buf, 0,
+                            &act_buf, 0, &act_buf, 0,
+                            &down_out, 0,
+                            &pipes,
+                            hidden, inter,
+                        );
+                        let _ = n_tgs_down;
                     } else {
                         let n_tgs_up = (inter as u64).div_ceil(q4kf::ROWS_PER_TG);
                         enc.set_compute_pipeline_state(&self.q4kf_proj_pipeline);
@@ -602,14 +619,26 @@ impl MetalBackend {
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
-                        // Down projection (Q4_K, f32 input from GEGLU)
-                        enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
-                        enc.set_buffer(0, Some(&down_bufs[l]), 0);
-                        enc.set_buffer(1, Some(&act_buf), 0);
-                        enc.set_buffer(2, Some(&down_out), 0);
-                        enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
+                        // Down projection — format-aware. Gemma 3 4B ships
+                        // Q6_K down even when gate/up are Q4_K. Route through
+                        // the format-matching shader so we don't decode Q6_K
+                        // bytes as if they were Q4_K (→ NaN).
+                        use crate::metal::stages::quant_matvec::{self as qmv, Pipelines};
+                        let pipes = Pipelines {
+                            q4kf_proj: Some(&self.q4kf_proj_pipeline),
+                            q4k_matvec_fallback: &self.q4k_matvec_pipeline,
+                            q6k_matvec: &self.q6k_matvec_pipeline,
+                            q4_matvec: &self.q4.matvec,
+                        };
+                        qmv::encode(
+                            enc, layer.down.format, &down_bufs[l],
+                            &act_buf, 0,
+                            &act_buf, 0, &act_buf, 0, // Q8 unused for f32 input
+                            &down_out, 0,
+                            &pipes,
+                            hidden, inter,
+                        );
+                        let _ = n_tgs_down;
                     } else {
                         let n_tgs_up = (inter as u64).div_ceil(q4k::ROWS_PER_TG);
                         enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
@@ -736,6 +765,36 @@ impl MetalBackend {
             h_buf = new_h;
             let _ = &scaled_scratch; // keep binding alive; no longer needed
 
+            // Diagnostic early-exit after layer `l`. Commits what we have,
+            // reads the per-sub-stage buffers, and reports NaN counts.
+            if diag_stop_layer == Some(l) {
+                enc.end_encoding();
+                cmd.commit();
+                cmd.wait_until_completed();
+                let stat = |name: &str, buf: &metal::Buffer, n: usize| {
+                    let ptr = buf.contents() as *const f32;
+                    if ptr.is_null() { eprintln!("[diag L{l}] {name}: null contents"); return; }
+                    let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                    let nan = s.iter().filter(|v| v.is_nan()).count();
+                    let inf = s.iter().filter(|v| v.is_infinite()).count();
+                    let maxabs = s.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+                    eprintln!("[diag L{l}] {name}: len={n} nan={nan} inf={inf} max_abs={maxabs:.3e}");
+                };
+                stat("norm_f32_buf", &norm_f32_buf, hidden);
+                stat("q_out",        &q_out,        layer_q_dim);
+                stat("k_out",        &k_out,        layer_num_kv_heads * layer_head_dim);
+                stat("v_out",        &v_out,        layer_num_kv_heads * layer_head_dim);
+                stat("attn_out_buf", &attn_out_buf, layer_q_dim);
+                stat("o_out_buf",    &o_out_buf,    hidden);
+                stat("h_post_attn",  &h_post_attn,  hidden);
+                stat("ffn_norm_out", &ffn_norm_out, hidden);
+                stat("gate_out_scratch", &gate_out_scratch, inter);
+                stat("up_out",       &up_out,       inter);
+                stat("act_buf",      &act_buf,      inter);
+                stat("down_out",     &down_out,     hidden);
+                stat("new_h (h_out)", new_h,        hidden);
+                return super::buffers::read_buffer_f32(new_h, hidden);
+            }
         }
 
         enc.end_encoding();

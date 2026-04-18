@@ -218,35 +218,103 @@ pub fn generate(
     let mut current_token_id = first_hits.first().map(|&(tid, _)| tid).unwrap_or(0);
     let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
 
+    // Per-stage decode profiling. Set LARQL_PROFILE_DECODE=1 to log a
+    // one-line per-step breakdown of embed / GPU forward / final norm /
+    // lm_head / detokenize, plus a summary at the end.
+    let profile = std::env::var("LARQL_PROFILE_DECODE").is_ok();
+    let mut t_embed = 0.0f64;
+    let mut t_gpu = 0.0f64;
+    let mut t_norm = 0.0f64;
+    let mut t_lmhead = 0.0f64;
+    let mut t_detok = 0.0f64;
+
     for _step in 1..max_tokens {
         let decode_start = std::time::Instant::now();
 
+        let t0 = std::time::Instant::now();
         let h_tok = crate::forward::embed_tokens_pub(weights, &[current_token_id]);
         let x_dec: Vec<f32> = h_tok.row(0).to_vec();
+        let embed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        if profile && _step <= 2 {
+            let x_nan = x_dec.iter().filter(|v| v.is_nan()).count();
+            let x_max = x_dec.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+            eprintln!(
+                "[profile] step={} input tok={} x_dec: len={} nan={} max_abs={:.3e}",
+                _step, current_token_id, x_dec.len(), x_nan, x_max,
+            );
+        }
+
+        let t1 = std::time::Instant::now();
         let result = backend.decode_token(
             &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
             weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
         );
+        let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        if profile && _step <= 2 {
+            match &result {
+                Some(h) => {
+                    let h_nan = h.iter().filter(|v| v.is_nan()).count();
+                    let h_max = h.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+                    eprintln!(
+                        "[profile] step={} decode_token h_out: len={} nan={} max_abs={:.3e}",
+                        _step, h.len(), h_nan, h_max,
+                    );
+                }
+                None => eprintln!("[profile] step={} decode_token returned None", _step),
+            }
+        }
 
         if let Some(h_out) = result {
+            let t2 = std::time::Instant::now();
             let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
             let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
             let h_1d = h_final.row(0).to_owned();
+            let norm_ms = t2.elapsed().as_secs_f64() * 1000.0;
 
+            let t3 = std::time::Instant::now();
             let hits = lm_head_topk(index, weights, &h_1d, 5, backend);
+            let lmhead_ms = t3.elapsed().as_secs_f64() * 1000.0;
+            if profile && _step <= 2 {
+                let h_nan = h_1d.iter().filter(|v| v.is_nan()).count();
+                let h_inf = h_1d.iter().filter(|v| v.is_infinite()).count();
+                let h_max = h_1d.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+                eprintln!(
+                    "[profile] step={} h_1d: len={} nan={} inf={} max_abs={:.3e}  hits.len()={}",
+                    _step, h_1d.len(), h_nan, h_inf, h_max, hits.len(),
+                );
+            }
+
             let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
             decode_ms.push(step_ms);
 
             if let Some(&(tid, score)) = hits.first() {
+                let t4 = std::time::Instant::now();
                 let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
+                let detok_ms = t4.elapsed().as_secs_f64() * 1000.0;
                 let prob = super::logits::softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
                 let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
+                if profile {
+                    eprintln!(
+                        "[profile] step={} total={:.1}ms  embed={:.2}  gpu={:.1}  norm={:.2}  lm_head={:.1}  detok={:.2}",
+                        _step, step_ms, embed_ms, gpu_ms, norm_ms, lmhead_ms, detok_ms,
+                    );
+                }
+                t_embed += embed_ms; t_gpu += gpu_ms; t_norm += norm_ms;
+                t_lmhead += lmhead_ms; t_detok += detok_ms;
                 tokens.push((tok_str, prob));
                 current_token_id = tid;
                 if is_eos { break; }
-            } else { break; }
+            } else {
+                if profile { eprintln!("[profile] step={} — lm_head returned empty; break", _step); }
+                break;
+            }
         } else {
             // GPU failed — CPU fallback
+            if profile {
+                eprintln!("[profile] step={} — GPU returned None, CPU fallback", _step);
+            }
             let mut h_dec = h_tok;
             for layer in 0..num_layers {
                 let (h_post_attn, _, _) =
@@ -268,6 +336,16 @@ pub fn generate(
                 if is_eos { break; }
             } else { break; }
         }
+    }
+
+    if profile && !decode_ms.is_empty() {
+        let n = decode_ms.len() as f64;
+        eprintln!(
+            "[profile] SUMMARY over {} steps: embed={:.2}ms  gpu={:.1}ms  norm={:.2}ms  lm_head={:.1}ms  detok={:.2}ms  total={:.1}ms",
+            decode_ms.len(),
+            t_embed / n, t_gpu / n, t_norm / n, t_lmhead / n, t_detok / n,
+            decode_ms.iter().sum::<f64>() / n,
+        );
     }
 
     GenerateResult { tokens, prefill_ms, decode_ms }
