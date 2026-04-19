@@ -177,3 +177,120 @@ pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize
 pub fn model_id_from_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).to_string()
 }
+
+#[cfg(test)]
+mod loaded_model_tests {
+    //! Unit tests for `LoadedModel` field/flag plumbing.
+    //!
+    //! The q4k / f32 branch in `get_or_load_weights` keys off
+    //! `config.quant == QuantFormat::Q4k`, and `run_full_output` in
+    //! `routes/walk_ffn.rs` keys off the same check to decide between
+    //! `WalkFfn::new_unlimited` and `q4k_ffn_forward_layer`. Running
+    //! either branch end-to-end needs a real on-disk vindex (GBs of
+    //! weights), so we cover just the flag plumbing and the selector
+    //! expression here; the end-to-end walk is validated by the
+    //! `larql bench <model>` example script.
+    use super::*;
+    use larql_vindex::{
+        ExtractLevel, LayerBands, QuantFormat, VectorIndex, VindexConfig, VindexLayerInfo,
+    };
+    use larql_vindex::ndarray::Array2;
+
+    fn tiny_config(quant: QuantFormat) -> VindexConfig {
+        VindexConfig {
+            version: 2,
+            model: "test/model".to_string(),
+            family: "test".to_string(),
+            source: None,
+            checksums: None,
+            num_layers: 1,
+            hidden_size: 4,
+            intermediate_size: 4,
+            vocab_size: 4,
+            embed_scale: 1.0,
+            extract_level: ExtractLevel::Browse,
+            dtype: larql_vindex::StorageDtype::default(),
+            quant,
+            layer_bands: Some(LayerBands {
+                syntax: (0, 0),
+                knowledge: (0, 0),
+                output: (0, 0),
+            }),
+            layers: vec![VindexLayerInfo {
+                layer: 0, num_features: 2, offset: 0, length: 32,
+                num_experts: None, num_features_per_expert: None,
+            }],
+            down_top_k: 1,
+            has_model_weights: false,
+            model_config: None,
+        }
+    }
+
+    fn tiny_loaded_model(quant: QuantFormat, release_mmap: bool) -> LoadedModel {
+        let hidden = 4;
+        let gate = Array2::<f32>::zeros((2, hidden));
+        let index = VectorIndex::new(vec![Some(gate)], vec![None], 1, hidden);
+        let patched = larql_vindex::PatchedVindex::new(index);
+
+        let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+        let tokenizer = larql_vindex::tokenizers::Tokenizer::from_bytes(tok_json).unwrap();
+
+        LoadedModel {
+            id: "test".into(),
+            path: PathBuf::from("/nonexistent"),
+            config: tiny_config(quant),
+            patched: tokio::sync::RwLock::new(patched),
+            embeddings: Array2::<f32>::zeros((4, hidden)),
+            embed_scale: 1.0,
+            tokenizer,
+            infer_disabled: true,
+            ffn_only: false,
+            release_mmap_after_request: release_mmap,
+            weights: std::sync::OnceLock::new(),
+            probe_labels: HashMap::new(),
+            ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(1),
+        }
+    }
+
+    #[test]
+    fn release_mmap_flag_round_trips_true() {
+        let model = tiny_loaded_model(QuantFormat::None, true);
+        assert!(
+            model.release_mmap_after_request,
+            "true must survive unchanged — the walk-ffn handler reads this \
+             post-request to issue MADV_DONTNEED"
+        );
+    }
+
+    #[test]
+    fn release_mmap_flag_round_trips_false() {
+        let model = tiny_loaded_model(QuantFormat::None, false);
+        assert!(!model.release_mmap_after_request);
+    }
+
+    #[test]
+    fn quant_format_selects_q4k_branch() {
+        // Exact selector used in both `get_or_load_weights` and
+        // `run_full_output` to pick the q4k path.
+        let q4k_model = tiny_loaded_model(QuantFormat::Q4k, false);
+        let f32_model = tiny_loaded_model(QuantFormat::None, false);
+
+        assert!(
+            q4k_model.config.quant == QuantFormat::Q4k,
+            "Q4k config → q4k branch (load_model_weights_q4k + q4k_ffn_forward_layer)"
+        );
+        assert!(
+            f32_model.config.quant != QuantFormat::Q4k,
+            "None config → f32 branch (load_model_weights_with_opts + WalkFfn::new_unlimited)"
+        );
+    }
+
+    #[test]
+    fn weights_not_loaded_by_default() {
+        // Lazy-load contract: `weights` is `OnceLock::new()` until the
+        // first `get_or_load_weights` call. The `release_mmap_after_request`
+        // post-processing in walk_ffn.rs doesn't touch this.
+        let model = tiny_loaded_model(QuantFormat::None, true);
+        assert!(model.weights.get().is_none());
+    }
+}

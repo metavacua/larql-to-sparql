@@ -1,5 +1,6 @@
 //! larql-server — HTTP server for vindex knowledge queries.
 
+mod announce;
 mod auth;
 mod cache;
 mod error;
@@ -132,6 +133,18 @@ struct Cli {
     /// TLS private key path for HTTPS.
     #[arg(long)]
     tls_key: Option<PathBuf>,
+
+    /// Join the self-assembling grid at this router gRPC address.
+    /// Example: "http://router:50052"
+    /// Requires --public-url so the router knows where to send clients.
+    #[arg(long)]
+    join: Option<String>,
+
+    /// Public HTTP URL clients should use to reach this server.
+    /// Used when announcing to the grid with --join.
+    /// Example: "http://server-a:8080"
+    #[arg(long)]
+    public_url: Option<String>,
 }
 
 fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
@@ -408,6 +421,29 @@ async fn main() -> Result<(), BoxError> {
     }
 
     let addr = format!("{}:{}", cli.host, cli.port);
+
+    // Grid announce (if --join provided).
+    if let Some(join_url) = cli.join.clone() {
+        let listen_url = cli.public_url.clone().unwrap_or_else(|| {
+            let host = if cli.host == "0.0.0.0" { "127.0.0.1" } else { &cli.host };
+            format!("http://{}:{}", host, cli.port)
+        });
+        // Collect announce params from all loaded models.
+        for m in &models {
+            let (layer_start, layer_end) = match layer_range {
+                Some((s, e)) => (s as u32, (e - 1) as u32), // e is exclusive internally
+                None => (0, (m.config.num_layers.saturating_sub(1)) as u32),
+            };
+            announce::run_announce(announce::AnnounceConfig {
+                join_url: join_url.clone(),
+                model_id: m.id.clone(),
+                layer_start,
+                layer_end,
+                listen_url: listen_url.clone(),
+                ram_bytes: 0,
+            });
+        }
+    }
 
     // TLS or plain HTTP.
     if let (Some(cert_path), Some(key_path)) = (&cli.tls_cert, &cli.tls_key) {

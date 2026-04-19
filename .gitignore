@@ -32,3 +32,4 @@ output/
 data/
 experiments/
 vindexes/
+.pids/

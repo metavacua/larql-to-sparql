@@ -444,11 +444,18 @@ impl<'a> BuildContext<'a> {
                     rope_base: self.weights.rope_base,
                     sliding_window: cfg.sliding_window,
                     moe: if self.is_moe {
+                        let a = &*self.weights.arch;
                         Some(crate::MoeConfig {
                             num_experts: self.n_experts,
-                            top_k: self.weights.arch.num_experts_per_token(),
-                            shared_expert: self.weights.arch.num_shared_experts() > 0,
-                            router_type: "top_k_softmax".to_string(),
+                            top_k: a.num_experts_per_token(),
+                            shared_expert: a.num_shared_experts() > 0,
+                            router_type: a.moe_router_type().to_string(),
+                            moe_intermediate_size: if a.moe_intermediate_size() > 0 {
+                                Some(a.moe_intermediate_size())
+                            } else {
+                                None
+                            },
+                            hybrid: a.is_hybrid_moe(),
                         })
                     } else {
                         None
@@ -698,7 +705,22 @@ pub fn build_vindex_resume(
                 num_kv_heads: weights.num_kv_heads,
                 rope_base: weights.rope_base,
                 sliding_window: cfg.sliding_window,
-                moe: None,
+                moe: if weights.arch.is_moe() {
+                    Some(crate::MoeConfig {
+                        num_experts: weights.arch.num_experts(),
+                        top_k: weights.arch.num_experts_per_token(),
+                        shared_expert: weights.arch.num_shared_experts() > 0,
+                        router_type: weights.arch.moe_router_type().to_string(),
+                        moe_intermediate_size: if weights.arch.moe_intermediate_size() > 0 {
+                            Some(weights.arch.moe_intermediate_size())
+                        } else {
+                            None
+                        },
+                        hybrid: weights.arch.is_hybrid_moe(),
+                    })
+                } else {
+                    None
+                },
                 global_head_dim: cfg.global_head_dim,
                 num_global_kv_heads: cfg.num_global_kv_heads,
                 partial_rotary_factor: cfg.partial_rotary_factor,

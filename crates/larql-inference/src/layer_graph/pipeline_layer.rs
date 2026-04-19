@@ -90,6 +90,11 @@ pub fn build_arch_params<'a>(
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
         ffn_down_bias: arch.ffn_down_bias_key(layer)
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+
+        // Hybrid MoE (Gemma 4 A4B). Packed BF16 expert tensors are not stored in
+        // ModelWeights.vectors — they require a raw-bytes weight store that doesn't
+        // exist yet. Set None until raw-bytes loading lands.
+        moe: None,
     }
 }
 

@@ -1,0 +1,17 @@
+[package]
+name = "larql-router-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "gRPC protocol types for the larql-router self-assembling grid"
+
+[dependencies]
+tonic = "0.13"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+[build-dependencies]
+tonic-build = "0.13"
+protobuf-src = "2"

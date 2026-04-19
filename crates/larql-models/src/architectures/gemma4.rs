@@ -15,7 +15,7 @@
 //! 2. `sliding_window_pattern` field (every Nth layer is full)
 //! 3. Default pattern of 6 (every 6th layer is full)
 
-use crate::config::{Activation, ModelArchitecture, ModelConfig};
+use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
 
 pub struct Gemma4Arch {
     config: ModelConfig,
@@ -215,5 +215,126 @@ impl ModelArchitecture for Gemma4Arch {
         } else {
             self.config.rope_base
         }
+    }
+
+    // ── Hybrid MoE (26B A4B: dense MLP + expert block, outputs summed) ──
+
+    fn is_moe(&self) -> bool {
+        self.config.enable_moe_block
+    }
+
+    fn is_hybrid_moe(&self) -> bool {
+        self.config.enable_moe_block
+    }
+
+    fn expert_format(&self) -> ExpertFormat {
+        ExpertFormat::PackedBF16
+    }
+
+    fn num_experts(&self) -> usize {
+        self.config.num_experts.unwrap_or(0)
+    }
+
+    fn num_experts_per_token(&self) -> usize {
+        self.config.top_k_experts
+            .or(self.config.num_experts_per_token)
+            .unwrap_or(0)
+    }
+
+    fn moe_intermediate_size(&self) -> usize {
+        self.config.moe_intermediate_size.unwrap_or(0)
+    }
+
+    fn moe_router_type(&self) -> &str {
+        if self.config.enable_moe_block {
+            "gemma4_top_k_softmax"
+        } else {
+            "top_k_softmax"
+        }
+    }
+
+    /// Router linear projection: selects top-k experts.
+    fn moe_router_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!("{}router.proj.weight", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    fn moe_router_scale_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!("{}router.scale", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    fn moe_router_per_expert_scale_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!("{}router.per_expert_scale", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    /// All experts' gate+up weights packed: [num_experts, 2*moe_intermediate, hidden].
+    fn packed_experts_gate_up_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!("{}experts.gate_up_proj", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    /// All experts' down weights packed: [num_experts, hidden, moe_intermediate].
+    fn packed_experts_down_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!("{}experts.down_proj", self.layer_prefix(layer)))
+        } else {
+            None
+        }
+    }
+
+    // In MoE layers, post_feedforward_layernorm becomes _1 (dense branch).
+    fn post_feedforward_layernorm_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!(
+                "{}post_feedforward_layernorm_1.weight",
+                self.layer_prefix(layer)
+            ))
+        } else {
+            Some(format!(
+                "{}post_feedforward_layernorm.weight",
+                self.layer_prefix(layer)
+            ))
+        }
+    }
+
+    fn moe_pre_experts_norm_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!(
+                "{}pre_feedforward_layernorm_2.weight",
+                self.layer_prefix(layer)
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn moe_post_experts_norm_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!(
+                "{}post_feedforward_layernorm_2.weight",
+                self.layer_prefix(layer)
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn moe_post_ffn1_norm_key(&self, layer: usize) -> Option<String> {
+        // Alias for post_feedforward_layernorm_1 — same key, explicit name for clarity.
+        self.post_feedforward_layernorm_key(layer)
     }
 }

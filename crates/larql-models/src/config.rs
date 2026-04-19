@@ -45,6 +45,11 @@ pub enum ExpertFormat {
     /// All experts fused into one tensor with block quantization.
     /// Keys: `experts.gate_up_proj_blocks`, `experts.gate_up_proj_scales`, etc.
     PackedMxfp4,
+    /// Packed BF16/F16 stacked tensors (Gemma 4 26B A4B).
+    /// All experts fused into one tensor per projection, no quantization scales.
+    /// Keys: `experts.gate_up_proj` [num_experts, 2*moe_intermediate, hidden],
+    ///        `experts.down_proj`   [num_experts, hidden, moe_intermediate].
+    PackedBF16,
 }
 
 /// RoPE scaling configuration (YaRN, linear, dynamic).
@@ -73,6 +78,12 @@ pub struct ModelConfig {
     pub num_experts: Option<usize>,
     pub num_experts_per_token: Option<usize>,
     pub num_shared_experts: Option<usize>,
+    /// Gemma 4 A4B: enables hybrid dense-MLP + MoE-experts block per layer.
+    pub enable_moe_block: bool,
+    /// Gemma 4 A4B: experts activated per token (stored as `top_k_experts` in config.json).
+    pub top_k_experts: Option<usize>,
+    /// Gemma 4 A4B: intermediate (hidden) dimension of each expert's FFN.
+    pub moe_intermediate_size: Option<usize>,
     // MLA fields
     pub kv_lora_rank: Option<usize>,
     pub q_lora_rank: Option<usize>,
@@ -498,6 +509,12 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    /// Router algorithm identifier (written into MoeConfig.router_type in vindex).
+    /// Override in architectures with non-standard routing (e.g., Gemma 4's normalised softmax + per-expert scale).
+    fn moe_router_type(&self) -> &str {
+        "top_k_softmax"
+    }
+
     /// Expert FFN gate weight key.
     fn expert_ffn_gate_key(&self, _layer: usize, _expert_id: usize) -> Option<String> {
         None
@@ -536,6 +553,59 @@ pub trait ModelArchitecture: Send + Sync {
 
     /// Shared expert FFN down-projection weight key.
     fn shared_expert_down_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    // ── Hybrid MoE (Gemma 4 A4B: dense MLP + expert block summed per layer) ──
+
+    /// Whether this model has a hybrid dense-MLP + expert block per layer.
+    /// Unlike pure MoE (Mixtral/DeepSeek), both branches run and their outputs are summed.
+    fn is_hybrid_moe(&self) -> bool {
+        false
+    }
+
+    /// Per-expert intermediate (hidden) dimension. 0 for non-MoE models.
+    fn moe_intermediate_size(&self) -> usize {
+        0
+    }
+
+    /// Packed stacked gate+up projection key (Gemma 4 PackedBF16 format).
+    /// Tensor shape: [num_experts, 2 * moe_intermediate_size, hidden_size].
+    fn packed_experts_gate_up_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Packed stacked down projection key (Gemma 4 PackedBF16 format).
+    /// Tensor shape: [num_experts, hidden_size, moe_intermediate_size].
+    fn packed_experts_down_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Gemma 4 router learned input-scale key (`router.scale`).
+    fn moe_router_scale_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Gemma 4 router per-expert output-scale key (`router.per_expert_scale`).
+    fn moe_router_per_expert_scale_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Post-FFN norm for dense MLP output in hybrid MoE layers.
+    /// Gemma 4 A4B: `post_feedforward_layernorm_1.weight` (replaces the plain variant).
+    fn moe_post_ffn1_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Pre-norm applied to the residual before feeding into the expert block.
+    /// Gemma 4 A4B: `pre_feedforward_layernorm_2.weight`.
+    fn moe_pre_experts_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Post-norm applied to the expert block output.
+    /// Gemma 4 A4B: `post_feedforward_layernorm_2.weight`.
+    fn moe_post_experts_norm_key(&self, _layer: usize) -> Option<String> {
         None
     }
 

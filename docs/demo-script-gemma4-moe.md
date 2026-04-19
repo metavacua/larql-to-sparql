@@ -157,18 +157,28 @@ that proves the claim on the dense model we just ran.
 Same vindex, two machines:
 
 ```bash
-# On the server — the FFN service (disables /v1/infer, advertises
-# mode: ffn-service in /v1/stats, skips gate warmup).
-$ larql serve gemma4-31b.vindex --port 8080 --ffn-only
+# On the server — the FFN service. Three bounds layered:
+#   --ffn-only                       skip eager gate warmup (55 GB → 5.6 GB)
+#   --max-gate-cache-layers 4        LRU cap on decoded f16 heap
+#   --release-mmap-after-request     madvise(DONTNEED) post-request (Linux hard, Darwin soft)
+$ larql serve gemma4-31b.vindex --port 8080 --ffn-only \
+    --max-gate-cache-layers 4 \
+    --release-mmap-after-request
   Loaded: gemma-4-31b-it (60 layers dense, Q4_K)
   Mode:   ffn-service (--ffn-only)
   Warmup: skipped (lazy gate decode on first request)
+  Gate cache: LRU, max 4 layers
+  Mmap release: enabled (MADV_DONTNEED after each walk-ffn request)
   Endpoints:
     POST /v1/walk-ffn     ← the one we care about
     GET  /v1/stats
   Listening on 0.0.0.0:8080
   RSS at startup: ~5.6 GB
 ```
+
+For real deployments prefer `--layers START-END` (sharding) — pages outside
+the layer range never fault in. The flags above are the single-shard
+belt-and-suspenders (see ADR-0005 for the full trade-off).
 
 ```bash
 # On the laptop — attention local, FFN over HTTP.
@@ -442,6 +452,15 @@ medical papers. Swapping one for the other is a file copy on the server.
   `walk_cmd.rs` + `predict_q4k_with_ffn` in `q4k_forward.rs`. Client
   dequantises attention per layer, delegates FFN to `RemoteWalkBackend`.
   Path label `walk (q4k + ffn remote)` confirms it's not falling back.
+  (See ADR-0006.)
+- [x] **Gate-cache LRU bound (`--max-gate-cache-layers N`)**: caps the f16
+  gate decode cache at N layers via LRU eviction. `N=0` = unlimited
+  (historical); `N=4` on 31B holds ~1.7 GB of decoded f32 gates instead
+  of 26 GB at steady state.
+- [x] **Mmap release (`--release-mmap-after-request`)**: invokes
+  `madvise(MADV_DONTNEED)` on all owned mmaps post-request. Linux:
+  immediate RSS drop. Darwin: advisory — kernel may defer. Use
+  `--layers START-END` for hard bound on macOS. (See ADR-0005.)
 
 ### Phase 1 — MoE inference path (blocks Act 2)
 

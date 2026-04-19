@@ -467,7 +467,13 @@ pub fn build_vindex_streaming(
                     num_experts: n_experts,
                     top_k: arch.num_experts_per_token(),
                     shared_expert: arch.num_shared_experts() > 0,
-                    router_type: "top_k_softmax".to_string(),
+                    router_type: arch.moe_router_type().to_string(),
+                    moe_intermediate_size: if arch.moe_intermediate_size() > 0 {
+                        Some(arch.moe_intermediate_size())
+                    } else {
+                        None
+                    },
+                    hybrid: arch.is_hybrid_moe(),
                 })
             } else { None },
             // Per-layer geometry (Gemma 4)

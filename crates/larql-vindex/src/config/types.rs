@@ -183,6 +183,7 @@ impl LayerBands {
             ("gemma2", 46) => Some(Self { syntax: (0, 18), knowledge: (19, 37), output: (38, 45) }),
 
             // Gemma 4 family
+            ("gemma4", 30) => Some(Self { syntax: (0, 11), knowledge: (12, 23), output: (24, 29) }),
             ("gemma4", 36) => Some(Self { syntax: (0, 14), knowledge: (15, 28), output: (29, 35) }),
             ("gemma4", 35) => Some(Self { syntax: (0, 13), knowledge: (14, 27), output: (28, 34) }),
             ("gemma4", 60) => Some(Self { syntax: (0, 23), knowledge: (24, 47), output: (48, 59) }),
@@ -314,9 +315,17 @@ pub struct MoeConfig {
     /// Whether there's a shared expert always active (DeepSeek V2/V3).
     #[serde(default)]
     pub shared_expert: bool,
-    /// Router type (e.g., "top_k_softmax").
+    /// Router type (e.g., "top_k_softmax", "gemma4_top_k_softmax").
     #[serde(default = "default_router_type")]
     pub router_type: String,
+    /// Per-expert intermediate (hidden) dimension.
+    /// Differs from the dense FFN intermediate_size in hybrid models (Gemma 4 A4B).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moe_intermediate_size: Option<usize>,
+    /// Hybrid MoE: dense MLP and expert block coexist in each layer, outputs summed.
+    /// True for Gemma 4 A4B. False for pure MoE (Mixtral, DeepSeek).
+    #[serde(default)]
+    pub hybrid: bool,
 }
 
 fn default_router_type() -> String {

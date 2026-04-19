@@ -138,12 +138,19 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
     let num_experts = text_config["n_routed_experts"]
         .as_u64()
         .or_else(|| text_config["num_local_experts"].as_u64())
+        .or_else(|| text_config["num_experts"].as_u64())
         .map(|v| v as usize);
     let num_experts_per_token = text_config["num_experts_per_tok"]
         .as_u64()
         .or_else(|| text_config["num_experts_per_token"].as_u64())
         .map(|v| v as usize);
     let num_shared_experts = text_config["n_shared_experts"].as_u64().map(|v| v as usize);
+    // Gemma 4 A4B hybrid MoE fields
+    let enable_moe_block = text_config["enable_moe_block"].as_bool().unwrap_or(false);
+    let top_k_experts = text_config["top_k_experts"].as_u64().map(|v| v as usize);
+    let moe_intermediate_size = text_config["moe_intermediate_size"]
+        .as_u64()
+        .map(|v| v as usize);
 
     // MLA fields
     let kv_lora_rank = text_config["kv_lora_rank"].as_u64().map(|v| v as usize);
@@ -244,6 +251,9 @@ fn parse_model_config(config: &serde_json::Value) -> ModelConfig {
         attention_k_eq_v,
         per_layer_embed_dim,
         num_kv_shared_layers,
+        enable_moe_block,
+        top_k_experts,
+        moe_intermediate_size,
     }
 }
 
@@ -1227,6 +1237,108 @@ mod tests {
         // RoPE bases from rope_parameters
         assert_eq!(arch.rope_base_for_layer(0), 10_000.0);
         assert_eq!(arch.rope_base_for_layer(5), 1_000_000.0);
+    }
+
+    #[test]
+    fn test_detect_gemma4_26b_a4b() {
+        // Gemma 4 26B A4B — hybrid dense-MLP + MoE per layer.
+        // Architecture: 30 layers, hidden=2816, dense_intermediate=9216,
+        // 128 experts each with moe_intermediate=704, top_k=8.
+        let config = serde_json::json!({
+            "model_type": "gemma4",
+            "text_config": {
+                "model_type": "gemma4_text",
+                "hidden_size": 2816,
+                "intermediate_size": 9216,
+                "num_hidden_layers": 30,
+                "num_attention_heads": 16,
+                "num_key_value_heads": 8,
+                "head_dim": 256,
+                "global_head_dim": 512,
+                "num_global_key_value_heads": 4,
+                "vocab_size": 262144,
+                "enable_moe_block": true,
+                "num_experts": 128,
+                "top_k_experts": 8,
+                "moe_intermediate_size": 704,
+                "final_logit_softcapping": 30.0,
+                "rope_parameters": {
+                    "full_attention": {
+                        "partial_rotary_factor": 0.25,
+                        "rope_theta": 1000000.0
+                    },
+                    "sliding_attention": {
+                        "rope_theta": 10000.0
+                    }
+                }
+            }
+        });
+
+        let arch = detect_from_json(&config);
+        assert_eq!(arch.family(), "gemma4");
+        assert_eq!(arch.config().num_layers, 30);
+        assert_eq!(arch.config().hidden_size, 2816);
+        assert_eq!(arch.config().intermediate_size, 9216);
+
+        // MoE
+        assert!(arch.is_moe());
+        assert!(arch.is_hybrid_moe());
+        assert_eq!(arch.num_experts(), 128);
+        assert_eq!(arch.num_experts_per_token(), 8);
+        assert_eq!(arch.moe_intermediate_size(), 704);
+
+        // Router keys
+        assert_eq!(
+            arch.moe_router_key(0),
+            Some("layers.0.router.proj.weight".to_string())
+        );
+        assert_eq!(
+            arch.moe_router_scale_key(3),
+            Some("layers.3.router.scale".to_string())
+        );
+        assert_eq!(
+            arch.moe_router_per_expert_scale_key(3),
+            Some("layers.3.router.per_expert_scale".to_string())
+        );
+
+        // Packed expert keys
+        assert_eq!(
+            arch.packed_experts_gate_up_key(5),
+            Some("layers.5.experts.gate_up_proj".to_string())
+        );
+        assert_eq!(
+            arch.packed_experts_down_key(5),
+            Some("layers.5.experts.down_proj".to_string())
+        );
+
+        // Hybrid MoE norm keys — dense branch gets _1 suffix
+        assert_eq!(
+            arch.post_feedforward_layernorm_key(0),
+            Some("layers.0.post_feedforward_layernorm_1.weight".to_string())
+        );
+        assert_eq!(
+            arch.moe_pre_experts_norm_key(0),
+            Some("layers.0.pre_feedforward_layernorm_2.weight".to_string())
+        );
+        assert_eq!(
+            arch.moe_post_experts_norm_key(0),
+            Some("layers.0.post_feedforward_layernorm_2.weight".to_string())
+        );
+
+        // Dense FFN keys still present (both branches coexist)
+        assert_eq!(arch.ffn_gate_key(0), "layers.0.mlp.gate_proj.weight");
+        assert_eq!(arch.ffn_up_key(0), "layers.0.mlp.up_proj.weight");
+        assert_eq!(arch.ffn_down_key(0), "layers.0.mlp.down_proj.weight");
+
+        // ExpertFormat
+        use crate::config::ExpertFormat;
+        assert_eq!(arch.expert_format(), ExpertFormat::PackedBF16);
+
+        // Gemma 4 features still work
+        assert_eq!(arch.norm_weight_offset(), 0.0);
+        assert!(arch.has_v_norm());
+        assert!(arch.has_post_norms());
+        assert_eq!(arch.bos_token_id(), Some(2));
     }
 
     #[test]

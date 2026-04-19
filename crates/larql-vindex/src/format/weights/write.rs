@@ -475,7 +475,13 @@ pub fn write_model_weights_with_opts(
                 num_experts: arch.num_experts(),
                 top_k: arch.num_experts_per_token(),
                 shared_expert: arch.num_shared_experts() > 0,
-                router_type: "top_k_softmax".into(),
+                router_type: arch.moe_router_type().into(),
+                moe_intermediate_size: if arch.moe_intermediate_size() > 0 {
+                    Some(arch.moe_intermediate_size())
+                } else {
+                    None
+                },
+                hybrid: arch.is_hybrid_moe(),
             })
         } else {
             None
@@ -920,7 +926,13 @@ pub fn write_model_weights_q4k_with_opts(
                 num_experts: arch.num_experts(),
                 top_k: arch.num_experts_per_token(),
                 shared_expert: arch.num_shared_experts() > 0,
-                router_type: "top_k_softmax".into(),
+                router_type: arch.moe_router_type().into(),
+                moe_intermediate_size: if arch.moe_intermediate_size() > 0 {
+                    Some(arch.moe_intermediate_size())
+                } else {
+                    None
+                },
+                hybrid: arch.is_hybrid_moe(),
             })
         } else {
             None

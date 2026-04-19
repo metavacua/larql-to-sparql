@@ -782,3 +782,174 @@ impl VectorIndex {
     }
 
 }
+
+// ══════════════════════════════════════════════════════════════
+// Gate cache LRU tests
+//
+// Cover `set_gate_cache_max_layers` and `touch_gate_cache_lru` on an
+// f16 mmap-backed VectorIndex. Each `gate_knn` call at a new layer
+// lazily decodes the layer's gate matrix into `f16_decode_cache`;
+// callers should cap the number of resident decoded layers via
+// `set_gate_cache_max_layers` to bound RSS on long-running servers.
+// ══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod gate_cache_lru_tests {
+    use super::super::core::VectorIndex;
+    use crate::config::dtype::StorageDtype;
+    use ndarray::Array1;
+
+    /// Build a minimal f16 mmap-backed VectorIndex suitable for exercising
+    /// the f16 decode cache. `num_layers` layers, each with `num_features`
+    /// features over `hidden` dims. The gate matrix at each layer is a
+    /// scaled identity (row i, col (i % hidden) = 1.0) so a query that's
+    /// 1.0 in dim 0 always hits feature 0.
+    fn f16_mmap_index(num_layers: usize, num_features: usize, hidden: usize) -> VectorIndex {
+        let per_layer_floats = num_features * hidden;
+        let per_layer_bytes = per_layer_floats * 2; // f16
+        let total_bytes = per_layer_bytes * num_layers;
+
+        let mut anon = memmap2::MmapMut::map_anon(total_bytes).unwrap();
+
+        let mut slices = Vec::with_capacity(num_layers);
+        for l in 0..num_layers {
+            // Row i dim (i % hidden) = 1.0, zeros elsewhere.
+            let mut data = vec![0.0f32; per_layer_floats];
+            for i in 0..num_features {
+                data[i * hidden + (i % hidden)] = 1.0;
+            }
+            let bytes = larql_models::quant::half::encode_f16(&data);
+            let off = l * per_layer_bytes;
+            anon[off..off + per_layer_bytes].copy_from_slice(&bytes);
+            slices.push(super::super::types::GateLayerSlice {
+                float_offset: (l * per_layer_bytes) / 2,
+                num_features,
+            });
+        }
+
+        let mmap = anon.make_read_only().unwrap();
+        VectorIndex::new_mmap(mmap, slices, StorageDtype::F16, None, num_layers, hidden)
+    }
+
+    /// Touch layer `l` to force a gate cache decode (or a hit if already cached).
+    fn touch(idx: &VectorIndex, layer: usize) {
+        let q = Array1::from_vec(vec![1.0f32; idx.hidden_size]);
+        let _ = idx.gate_knn(layer, &q, 1);
+    }
+
+    /// Number of layers currently resident in `f16_decode_cache`.
+    fn resident_layers(idx: &VectorIndex) -> usize {
+        idx.f16_decode_cache
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|slot| slot.is_some())
+            .count()
+    }
+
+    /// Snapshot of the LRU queue, front (newest) first.
+    fn lru_snapshot(idx: &VectorIndex) -> Vec<usize> {
+        idx.gate_cache_lru
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn unlimited_cache_grows_without_eviction() {
+        let idx = f16_mmap_index(4, 2, 4);
+        // Default cap is 0 == unlimited (historical behaviour).
+        for l in 0..4 {
+            touch(&idx, l);
+        }
+        assert_eq!(resident_layers(&idx), 4, "all 4 layers must stay resident");
+        // The LRU queue is not populated when the cap is 0 — the fast path
+        // in `touch_gate_cache_lru` bails before touching it.
+        assert_eq!(
+            lru_snapshot(&idx).len(),
+            0,
+            "LRU queue should stay empty when the cap is unlimited"
+        );
+    }
+
+    #[test]
+    fn cap_two_evicts_lru_on_third_access() {
+        let idx = f16_mmap_index(4, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(resident_layers(&idx), 2);
+
+        // Third distinct layer must evict the oldest (layer 0).
+        touch(&idx, 2);
+        assert_eq!(resident_layers(&idx), 2, "cap of 2 holds");
+
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[0].is_none(), "layer 0 should have been evicted");
+        assert!(cache[1].is_some(), "layer 1 still cached");
+        assert!(cache[2].is_some(), "layer 2 newly cached");
+    }
+
+    #[test]
+    fn cache_hit_promotes_layer_to_newest() {
+        let idx = f16_mmap_index(4, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+
+        // Populate: [0, 1]. LRU front-to-back is [1, 0] (1 newest).
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(lru_snapshot(&idx), vec![1, 0]);
+
+        // Re-touch 0 → now 0 is newest. LRU front-to-back: [0, 1].
+        touch(&idx, 0);
+        assert_eq!(lru_snapshot(&idx), vec![0, 1]);
+
+        // Next insert should evict layer 1 (oldest), NOT layer 0.
+        touch(&idx, 2);
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[0].is_some(), "layer 0 was promoted on hit, must stay");
+        assert!(cache[1].is_none(), "layer 1 was oldest, must be evicted");
+        assert!(cache[2].is_some(), "layer 2 newly cached");
+    }
+
+    #[test]
+    fn shrinking_cap_evicts_down_to_new_bound() {
+        let idx = f16_mmap_index(4, 2, 4);
+        // Enable LRU first (so the cache records eviction candidates),
+        // then fill all 4 layers at the larger cap.
+        idx.set_gate_cache_max_layers(4);
+        for l in 0..4 {
+            touch(&idx, l);
+        }
+        assert_eq!(resident_layers(&idx), 4);
+        assert_eq!(lru_snapshot(&idx).len(), 4);
+
+        // Shrink to 1 — three oldest entries must be dropped immediately.
+        idx.set_gate_cache_max_layers(1);
+        assert_eq!(resident_layers(&idx), 1);
+        assert_eq!(lru_snapshot(&idx).len(), 1);
+
+        // The retained layer must be the most-recently-used one (layer 3).
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[3].is_some(), "newest layer should be the survivor");
+        for l in 0..3 {
+            assert!(cache[l].is_none(), "layer {l} should have been evicted");
+        }
+    }
+
+    #[test]
+    fn set_cap_zero_is_noop_on_existing_entries() {
+        let idx = f16_mmap_index(3, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(resident_layers(&idx), 2);
+
+        // Switching back to unlimited must not evict anything.
+        idx.set_gate_cache_max_layers(0);
+        assert_eq!(resident_layers(&idx), 2);
+    }
+}

@@ -115,6 +115,22 @@ larql run gemma4-31b.client.vindex --ffn http://server.local:8080 \
   "The capital of France is"
 ```
 
+**Bounding server RSS.** `--ffn-only` skips the eager gate warmup at
+startup (55 GB → 5.6 GB on 31B Q4_K). For steady-state bounds, layer
+each of these on as needed:
+
+```bash
+larql serve gemma4-31b.vindex --port 8080 --ffn-only \
+  --layers 0-19                    \  # hard bound: this shard serves only layers 0-19
+  --max-gate-cache-layers 4        \  # LRU cap on decoded f16 gate heap
+  --release-mmap-after-request        # madvise(DONTNEED) post-request (Linux strict)
+```
+
+`--layers` is the reliable hard bound on both Linux and macOS.
+`--release-mmap-after-request` is strict on Linux, advisory on Darwin.
+See `docs/adr/0005-ffn-service-memory-bounds.md` for the measured
+ceilings under each combination.
+
 ### Query via LQL
 
 ```bash

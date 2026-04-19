@@ -58,6 +58,10 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 | `--port <PORT>` | Listen port | 8080 |
 | `--host <HOST>` | Bind address | 0.0.0.0 |
 | `--no-infer` | Disable inference (browse-only, saves memory) | false |
+| `--ffn-only` | Run as an FFN-service endpoint for `RemoteWalkBackend` clients. Skips the f16→f32 gate warmup (10× smaller startup RSS on 31B Q4_K) | false |
+| `--layers <START-END>` | Serve only this layer range. Out-of-range requests return HTTP 400. Pages outside the range are never touched. | all |
+| `--max-gate-cache-layers <N>` | LRU cap on decoded f16 gate layers. `0` = unlimited. Each decoded layer is ~433 MB on 31B. | 0 |
+| `--release-mmap-after-request` | `madvise(MADV_DONTNEED)` on all mmaps after each walk-ffn request. Linux: immediate RSS drop. Darwin: advisory. | false |
 | `--cors` | Enable CORS headers | false |
 | `--api-key <KEY>` | Require Bearer token auth (health exempt) | — |
 | `--rate-limit <SPEC>` | Per-IP rate limit (e.g., "100/min", "10/sec") | — |
@@ -67,6 +71,23 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 | `--tls-cert <PATH>` | TLS certificate for HTTPS | — |
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
 | `--log-level <LEVEL>` | Logging level | info |
+
+### Memory bounds — cheat sheet
+
+Measured on Gemma 4 31B Q4_K (macOS, CPU). See ADR-0005 for details.
+
+| Flags | Startup RSS | After 3 requests |
+|---|---|---|
+| default | 55 GB | 55 GB |
+| `--ffn-only` | 5.6 GB | 23 GB |
+| `--ffn-only --max-gate-cache-layers 4` | 5.6 GB | 23 GB |
+| `... --release-mmap-after-request` | 5.6 GB | 23 GB stable (Linux: ~6 GB) |
+| `... --layers 0-19` (sharding) | 5.6 GB | ~8 GB |
+
+`--layers` is the strict bound. The other flags target individual growth
+modes and compose cleanly (`--ffn-only` skips startup warmup,
+`--max-gate-cache-layers` caps decoded heap, `--release-mmap-after-request`
+hints the kernel to drop mmap pages).
 
 ## API Endpoints
 
