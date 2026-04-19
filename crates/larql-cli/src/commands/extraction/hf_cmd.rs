@@ -111,6 +111,21 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
         eprintln!(" done");
     }
 
+    fn on_file_skipped(&mut self, filename: &str, size: u64, sha256: &str) {
+        let short_sha = sha256.get(..12).unwrap_or(sha256);
+        let size_str = if size > 1_073_741_824 {
+            format!("{:.2} GB", size as f64 / 1_073_741_824.0)
+        } else if size > 1_048_576 {
+            format!("{:.1} MB", size as f64 / 1_048_576.0)
+        } else {
+            format!("{:.1} KB", size as f64 / 1024.0)
+        };
+        eprintln!(
+            "  Skipping  {} ({}) — unchanged (sha256 {}…)",
+            filename, size_str, short_sha
+        );
+    }
+
     fn on_complete(&mut self, url: &str) {
         eprintln!("  URL: {}", url);
     }

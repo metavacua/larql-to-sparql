@@ -36,7 +36,7 @@ use crate::commands::primary::cache;
 // vindex; everything else is opt-in.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Part {
+pub enum Part {
     Embed,
     Norms,
     Attn,
@@ -105,7 +105,7 @@ impl Part {
 
 /// Preset part-sets. Expansion is deterministic; `--parts` overrides take
 /// precedence when both are passed.
-fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
+pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
     use Part::*;
     // Note: `embed` + `norms` appear in the server preset because
     // `load_model_weights_q4k` unconditionally opens `embeddings.bin` at

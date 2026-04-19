@@ -1035,3 +1035,94 @@ Used by `larql bfs --mock`. A JSON array:
   {"prompt": "The capital of France is", "answer": "Paris", "probability": 0.89}
 ]
 ```
+
+## Distribution: `slice`, `publish`, `pull`
+
+The three commands form the distribution pipeline: extract once, carve
+the deployment variants you need, push them to HuggingFace as sibling
+repos under a shared collection, pull them on the consumer side with
+progress + resume.
+
+Architectural rationale (why each slice exists, how collections get
+composed, SHA256 skip semantics, empty-gate loader for attention-only
+clients) is in
+[`docs/adr/0007-vindex-distribution.md`](adr/0007-vindex-distribution.md).
+Command reference below.
+
+### `slice`
+
+Carve a built vindex into deployment variants. Pure file I/O + `index.json`
+rewrite — no re-extract.
+
+| Flag | Description | Default |
+|---|---|---|
+| `<SRC>` | Source vindex: directory, `hf://owner/name`, cache shorthand | — |
+| `-o, --output <DST>` | Destination directory. Must not exist unless `--force`. | — |
+| `--preset <NAME>` | `client`, `server`, `browse`, `router`, `all` | — |
+| `--parts <list>` | Explicit parts (embed, norms, attn, gate, down_meta, ffn, lm_head, router, tokenizer, manifest, labels, readme). `index.json` is always copied. | — |
+| `--force` | Overwrite `<DST>` if it exists | false |
+| `--dry-run` | Preview what would be copied | false |
+
+Slice sizes on Gemma 4 31B Q4_K: `client` 7.4 GB, `server` 27 GB,
+`browse` 16 GB, full 32 GB.
+
+### `publish`
+
+Upload the full vindex plus sibling slices to HuggingFace and file them
+into three nested collections.
+
+| Flag | Description | Default |
+|---|---|---|
+| `<SRC>` | Source vindex | — |
+| `--repo <OWNER/NAME>` | HF repo ID for the full vindex. Siblings derive from `--slice-repo-template`. | required |
+| `--full` / `--no-full` | Upload the full vindex | `--full` |
+| `--slices <list>` | Presets to upload alongside. `none` to skip. | `client,server,browse` |
+| `--slice-repo-template <T>` | `{repo}` → `--repo`, `{preset}` → preset. | `{repo}-{preset}` |
+| `--collections <list>` | `model`, `family`, `library`. `none` to skip. | `model,family,library` |
+| `--model-title <T>` | Override per-model collection title | derived |
+| `--family <NAME>` | Override family collection group | derived |
+| `--library-title <T>` | Override library collection title | `LARQL Vindex Library` |
+| `--force-upload` | Re-upload every file; ignore SHA256 skip | false |
+| `--tmp-dir <DIR>` | Staging directory for slice carving | system temp |
+| `--dry-run` | Preview, no HF writes | false |
+
+**Skip-if-unchanged** (default on): before each upload the client fetches
+the repo's LFS file index and compares `lfs.oid` against the local
+SHA256. Matches skip. Small json files always re-upload. Re-publishing
+a 27 GB server slice where nothing changed transfers only a few KB.
+
+**Streaming + progress**: uploads stream the file via a counting
+`Read` adapter that ticks a per-file indicatif bar as bytes flow out.
+No whole-file-into-RAM pre-read. An interrupted `publish` restarts via
+the SHA256 skip on completed files; the interrupted file re-uploads.
+
+### `pull`
+
+Download a vindex (or a slice, or a whole collection) with per-file
+progress bars. hf-hub handles `.incomplete` partial-file resume
+internally.
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | `hf://owner/name[@rev]`, `owner/name`, or local path. Omit with `--collection`. | — |
+| `--preset <NAME>` | Pull `{repo}-{preset}` instead of the named repo. | — |
+| `--all-slices` | Full + every default sibling (`-client`, `-server`, `-browse`). Missing siblings warn, don't fail. | false |
+| `--collection <SLUG\|URL>` | Pull every dataset in an HF collection. | — |
+| `--sibling-template <T>` | Must match `publish --slice-repo-template`. | `{repo}-{preset}` |
+
+After a plain `pull <repo>`, `larql` HEAD-probes for standard siblings
+and prints an "also available" hint if any exist — so the sliced layout
+is self-announcing from a single repo URL.
+
+```bash
+larql pull chrishayuk/gemma-4-31b-it-vindex
+# → progress bars per file, then:
+#   Also available on HuggingFace:
+#     --preset client   → hf://chrishayuk/gemma-4-31b-it-vindex-client
+#     --preset server   → hf://chrishayuk/gemma-4-31b-it-vindex-server
+#     --preset browse   → hf://chrishayuk/gemma-4-31b-it-vindex-browse
+#   Use `larql pull <repo> --all-slices` to grab them all.
+```
+
+Requires `HF_TOKEN` or `~/.huggingface/token` only for private repos
+and collections; public pulls work unauthenticated.

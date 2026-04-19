@@ -56,6 +56,9 @@ enum Commands {
     /// Carve a subset of a vindex (client / server / browse / router slice).
     Slice(slice_cmd::SliceArgs),
 
+    /// Publish a vindex to HuggingFace — full vindex plus slice siblings.
+    Publish(publish_cmd::PublishArgs),
+
     /// Remove a cached vindex.
     Rm(rm_cmd::RmArgs),
 
@@ -500,6 +503,7 @@ fn main() {
         Commands::List(args) => list_cmd::run(args),
         Commands::Show(args) => show_cmd::run(args),
         Commands::Slice(args) => slice_cmd::run(args),
+        Commands::Publish(args) => publish_cmd::run(args),
         Commands::Rm(args) => rm_cmd::run(args),
 
         // ── Build / extract ──

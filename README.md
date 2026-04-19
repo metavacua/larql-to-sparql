@@ -123,6 +123,58 @@ Other presets: `browse` (DESCRIBE/WALK only, no forward pass), `router`
 (MoE router only, ADR-0003), `all` (full clone). See `larql slice --help`
 for the explicit part list.
 
+### Publish to HuggingFace — full + slices + collections
+
+`larql publish` combines `slice` + `hf publish` and adds HuggingFace
+**collections**: one run uploads four sibling repos and files them into
+three nested collections (model / family / library) for discovery.
+
+```bash
+# One command. Four repos. Three collections.
+larql publish gemma4-31b.vindex --repo chrishayuk/gemma-4-31b-it-vindex
+
+# Preview without touching HF
+larql publish gemma4-31b.vindex --repo chrishayuk/gemma-4-31b-it-vindex --dry-run
+```
+
+**Skip-if-unchanged.** Each upload compares the local SHA256 against the
+remote `lfs.oid`. Files that already match skip the transfer. Re-publishing
+a ~27 GB server slice where nothing changed re-uploads only the manifest —
+not 27 GB of weights. Override with `--force-upload`.
+
+**Streaming + progress.** Uploads stream the file (no 27 GB-into-RAM pre-read)
+and report live progress via a per-file bar. An interrupted run picks up
+on the next invocation: completed files skip via SHA, the interrupted
+file re-uploads.
+
+Flags: `--no-full`, `--slices client,server`, `--collections model,family`,
+`--model-title`, `--family`, `--library-title`, `--slice-repo-template`,
+`--force-upload`, `--dry-run`. Requires `HF_TOKEN` or
+`~/.huggingface/token`.
+
+### Pull with slice awareness
+
+`larql pull` mirrors `publish` on the download side: pick a specific
+sibling, pull them all, or pull a whole collection. Each file gets an
+indicatif progress bar; hf-hub resumes interrupted downloads from the
+`.incomplete` partial on the next run.
+
+```bash
+# Plain pull — the full vindex. Shows a hint at the end listing
+# any `-client` / `-server` / `-browse` siblings that exist on HF.
+larql pull chrishayuk/gemma-4-31b-it-vindex
+
+# Pull just the client slice (laptop side of `run --ffn URL`)
+larql pull chrishayuk/gemma-4-31b-it-vindex --preset client
+
+# Pull full + every default sibling in one command
+larql pull chrishayuk/gemma-4-31b-it-vindex --all-slices
+
+# Pull every dataset in an HF collection — works on the collection URL
+# from larql publish or the slug alone.
+larql pull --collection chrishayuk/gemma-4-31b-it-larql-vindex-abc123
+```
+
 **Bounding server RSS.** `--ffn-only` skips the eager gate warmup at
 startup (55 GB → 5.6 GB on 31B Q4_K). For steady-state bounds, layer
 each of these on as needed:

@@ -276,6 +276,73 @@ failure.
 
 ---
 
+## `larql pull` — consumer side
+
+The download half of the story mirrors `publish`. Four resolution paths,
+symmetric with the four publish options:
+
+| Pull flag | Publish counterpart | Resolves to |
+|---|---|---|
+| plain `pull <repo>` | plain `publish --repo <repo>` | one repo |
+| `pull <repo> --preset client` | `publish --slices client` | `{repo}-client` via same template |
+| `pull <repo> --all-slices` | `publish` with default slice set | full + every default sibling |
+| `pull --collection <slug>` | `publish --collections …` | every dataset in the collection |
+
+### Sibling hints
+
+After a plain single-repo `pull`, `pull_one` calls
+`dataset_repo_exists(...)` (HEAD `/api/datasets/{repo}`) for each
+standard suffix on the same base. Matches are printed as an "Also
+available" hint so the slice convention is self-announcing:
+
+```
+$ larql pull chrishayuk/gemma-4-31b-it-vindex
+Pulling hf://chrishayuk/gemma-4-31b-it-vindex...
+[per-file progress bars]
+Cached at: /.../datasets--chrishayuk--gemma-4-31b-it-vindex/...
+
+  Also available on HuggingFace:
+    --preset client   → hf://chrishayuk/gemma-4-31b-it-vindex-client
+    --preset server   → hf://chrishayuk/gemma-4-31b-it-vindex-server
+    --preset browse   → hf://chrishayuk/gemma-4-31b-it-vindex-browse
+  Use `larql pull <repo> --all-slices` to grab them all.
+```
+
+If the pulled repo itself ends in a known suffix (`-client` etc.),
+`split_sibling_suffix` maps back to the base and probes the full repo
+plus the other siblings, so someone who pulls a client slice still
+discovers the full and the server companion.
+
+### Progress + resume
+
+`larql_vindex::resolve_hf_vindex_with_progress(hf_path, factory)` wraps
+hf-hub 0.5's `Repo::download_with_progress`. The factory is called per
+file with the filename and returns a fresh `DownloadProgress` — in the
+CLI that's a `BarProgress(indicatif::ProgressBar)` backed by a shared
+`MultiProgress`.
+
+hf-hub handles `.incomplete` partial-file resume internally: an
+interrupted pull restarts where it left off on the next run. No
+additional code needed on our side.
+
+### indicatif version split
+
+hf-hub 0.5 pins indicatif 0.18 and provides `impl Progress for
+indicatif::ProgressBar` out of the box — but the CLI is on indicatif
+0.17 (different types). Hence `BarProgress` in `pull_cmd.rs` with a
+hand-rolled `Progress` impl over indicatif 0.17. Cheap and keeps the
+workspace consistent on one indicatif version.
+
+### Collection pull — degradation
+
+`fetch_collection_items` calls `/api/collections/{slug}` and filters
+to `type == "dataset"` entries. Per-repo failures log a warning but
+don't abort the batch — one unavailable sibling shouldn't fail the
+whole collection pull. Summary at the end counts successes vs
+failures.
+
+---
+
 ## Flag surface summary
 
 | Flag | Default | Effect |
@@ -299,8 +366,9 @@ failure.
 |---|---|
 | `crates/larql-cli/src/commands/primary/slice_cmd.rs` | `slice_vindex`, `Part`, `preset_parts`, CLI wrapper |
 | `crates/larql-cli/src/commands/primary/publish_cmd.rs` | `larql publish`: slice orchestration, collection composition, skip plumbing |
+| `crates/larql-cli/src/commands/primary/pull_cmd.rs` | `larql pull`: `--preset`, `--all-slices`, `--collection`, sibling hints, indicatif progress bars (`BarProgress`) |
 | `crates/larql-cli/src/commands/extraction/hf_cmd.rs` | `larql hf publish` (simpler one-repo publish); shares `PublishCallbacks` |
-| `crates/larql-vindex/src/format/huggingface.rs` | `publish_vindex`, `publish_vindex_with_opts`, `PublishOptions`, `fetch_remote_lfs_oids`, `ensure_collection`, `CollectionItem`, `PublishCallbacks::on_file_skipped` |
+| `crates/larql-vindex/src/format/huggingface.rs` | `publish_vindex`, `publish_vindex_with_opts`, `PublishOptions`, `fetch_remote_lfs_oids`, `ensure_collection`, `CollectionItem`, `dataset_repo_exists`, `fetch_collection_items`, `resolve_hf_vindex_with_progress`, `DownloadProgress`, streaming `CountingReader` + poll-thread upload, `PublishCallbacks::on_file_skipped` + `on_file_progress` |
 | `crates/larql-vindex/src/format/load.rs` | Empty-gate synthesis when both gate source files are absent |
 | `crates/larql-vindex/src/format/checksums.rs` | `sha256_file` (reused from pre-existing checksum infra) |
 

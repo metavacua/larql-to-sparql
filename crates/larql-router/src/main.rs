@@ -8,6 +8,14 @@
 //!             and announce their capabilities. No static configuration.
 //!
 //! Both modes can coexist. Grid takes priority; static shards are fallback.
+//!
+//! # Wire format
+//!
+//! The router is wire-transparent for both JSON (`application/json`) and binary
+//! (`application/x-larql-ffn`) requests. For single-shard routes the body is
+//! forwarded byte-for-byte with no intermediate parsing. Multi-shard fan-out
+//! is supported for JSON only; binary multi-shard requests are rejected with
+//! HTTP 400 (use the batched JSON format or route per-shard manually).
 
 mod grid;
 
@@ -16,9 +24,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use axum::response::Response;
 use axum::routing::post;
 use axum::{Json, Router};
+use bytes::Bytes;
 use clap::Parser;
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -27,6 +37,11 @@ use tracing::{info, warn};
 
 use grid::{GridServiceImpl, GridState};
 use larql_router_protocol::GridServiceServer;
+
+// ── Binary wire format constants ───────────────────────────────────────────────
+
+const BINARY_CT: &str = "application/x-larql-ffn";
+const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
@@ -118,6 +133,36 @@ fn parse_shards(spec: &str) -> Result<Vec<Shard>, String> {
     Ok(shards)
 }
 
+// ── Binary routing ─────────────────────────────────────────────────────────────
+
+/// Extract layer indices from a binary request body without parsing the residual.
+///
+/// Returns `None` if the header is malformed or truncated.
+pub(crate) fn peek_binary(body: &[u8]) -> Option<Vec<usize>> {
+    if body.len() < 4 {
+        return None;
+    }
+    let first = u32::from_le_bytes(body[0..4].try_into().ok()?);
+    if first == BATCH_MARKER {
+        if body.len() < 8 {
+            return None;
+        }
+        let n = u32::from_le_bytes(body[4..8].try_into().ok()?) as usize;
+        let needed = 8 + n * 4;
+        if body.len() < needed {
+            return None;
+        }
+        let layers = (0..n)
+            .map(|i| {
+                u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize
+            })
+            .collect();
+        Some(layers)
+    } else {
+        Some(vec![first as usize])
+    }
+}
+
 // ── App state ──────────────────────────────────────────────────────────────────
 
 struct AppState {
@@ -138,29 +183,33 @@ impl AppState {
     ) -> Result<HashMap<usize, String>, usize> {
         if let Some(grid) = &self.grid {
             let guard = grid.read().await;
-            // Try grid first; fall through to static shards for any misses.
             let mut out = HashMap::with_capacity(layers.len());
             let mut static_needed: Vec<usize> = Vec::new();
             for &layer in layers {
                 match guard.route(model_id, layer as u32) {
-                    Some(url) => { out.insert(layer, url); }
+                    Some(url) => {
+                        out.insert(layer, url);
+                    }
                     None => static_needed.push(layer),
                 }
             }
-            drop(guard); // release grid lock before static scan
+            drop(guard);
             for layer in static_needed {
                 match self.static_shards.iter().find(|s| s.owns(layer)) {
-                    Some(s) => { out.insert(layer, s.url.clone()); }
+                    Some(s) => {
+                        out.insert(layer, s.url.clone());
+                    }
                     None => return Err(layer),
                 }
             }
             return Ok(out);
         }
-        // Grid not enabled — static shards only.
         let mut out = HashMap::with_capacity(layers.len());
         for &layer in layers {
             match self.static_shards.iter().find(|s| s.owns(layer)) {
-                Some(s) => { out.insert(layer, s.url.clone()); }
+                Some(s) => {
+                    out.insert(layer, s.url.clone());
+                }
                 None => return Err(layer),
             }
         }
@@ -172,47 +221,103 @@ impl AppState {
 
 async fn handle_walk_ffn(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, String)> {
-    // Collect the requested layers.
-    let layers: Vec<usize> = if let Some(arr) = body.get("layers").and_then(|v| v.as_array()) {
-        arr.iter()
-            .filter_map(|v| v.as_u64().map(|n| n as usize))
-            .collect()
-    } else if let Some(n) = body.get("layer").and_then(|v| v.as_u64()) {
-        vec![n as usize]
+    request: axum::extract::Request,
+) -> Response {
+    match handle_walk_ffn_inner(state, request).await {
+        Ok(r) => r,
+        Err((status, msg)) => {
+            // Always return errors as JSON regardless of input content-type.
+            let body = format!(r#"{{"error":{}}}"#, serde_json::Value::String(msg));
+            Response::builder()
+                .status(status)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap()
+        }
+    }
+}
+
+async fn handle_walk_ffn_inner(
+    state: Arc<AppState>,
+    request: axum::extract::Request,
+) -> Result<Response, (StatusCode, String)> {
+    let is_binary = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.starts_with(BINARY_CT))
+        .unwrap_or(false);
+
+    let body_bytes: Bytes = axum::body::to_bytes(request.into_body(), 64 * 1024 * 1024)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("read body: {e}")))?;
+
+    let (layers, model_id_owned): (Vec<usize>, Option<String>) = if is_binary {
+        let layers = peek_binary(&body_bytes).ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "binary: truncated or malformed header".to_string(),
+            )
+        })?;
+        (layers, None)
     } else {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            r#"{"error":"must provide 'layer' or 'layers'"}"#.into(),
-        ));
+        let peek: Value = serde_json::from_slice(&body_bytes)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")))?;
+        let layers: Vec<usize> =
+            if let Some(arr) = peek.get("layers").and_then(|v| v.as_array()) {
+                arr.iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as usize))
+                    .collect()
+            } else if let Some(n) = peek.get("layer").and_then(|v| v.as_u64()) {
+                vec![n as usize]
+            } else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "must provide 'layer' or 'layers'".to_string(),
+                ));
+            };
+        let model_id = peek
+            .get("model_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        (layers, model_id)
     };
 
     if layers.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            r#"{"error":"empty layer list"}"#.into(),
-        ));
+        return Err((StatusCode::BAD_REQUEST, "empty layer list".to_string()));
     }
 
-    // Optional model_id in the request body (multi-model grids).
-    let model_id = body.get("model_id").and_then(|v| v.as_str()).map(str::to_owned);
-    let mid = model_id.as_deref();
-
-    // Resolve all layers in one lock acquisition (validates + maps in a single read).
+    let mid = model_id_owned.as_deref();
     let layer_urls = state.resolve_all(mid, &layers).await.map_err(|missing| {
         (
             StatusCode::BAD_REQUEST,
-            format!(r#"{{"error":"layer {missing} has no owning shard in this router"}}"#),
+            format!("layer {missing} has no owning shard in this router"),
         )
     })?;
 
-    // Single layer: proxy the body unchanged.
-    if layers.len() == 1 {
-        return proxy_to(&state.client, &layer_urls[&layers[0]], body).await;
+    // Determine unique shards.
+    let unique_urls: std::collections::HashSet<&String> = layer_urls.values().collect();
+
+    if unique_urls.len() == 1 || layers.len() == 1 {
+        // All layers on the same shard — proxy raw bytes unchanged.
+        let url = layer_urls.values().next().unwrap();
+        let ct = if is_binary { BINARY_CT } else { "application/json" };
+        return proxy_raw(&state.client, url, body_bytes, ct).await;
     }
 
-    // Batched: group layers by URL, fan out in parallel, merge.
+    // Multi-shard dispatch.
+    if is_binary {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "binary fan-out across multiple shards is not supported; use JSON or split by shard"
+                .to_string(),
+        ));
+    }
+
+    // JSON fan-out: group layers by URL, dispatch in parallel, merge.
+    let body_value: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")))?;
+
     let mut by_url: HashMap<String, Vec<usize>> = HashMap::new();
     for (&layer, url) in &layer_urls {
         by_url.entry(url.clone()).or_default().push(layer);
@@ -220,7 +325,7 @@ async fn handle_walk_ffn(
 
     let mut handles = Vec::new();
     for (url, shard_layers) in &by_url {
-        let mut sub_body = body.clone();
+        let mut sub_body = body_value.clone();
         if shard_layers.len() == 1 {
             sub_body["layer"] = Value::from(shard_layers[0]);
             sub_body.as_object_mut().unwrap().remove("layers");
@@ -267,43 +372,53 @@ async fn handle_walk_ffn(
     }
     all_results.sort_by_key(|r| r.get("layer").and_then(|v| v.as_u64()).unwrap_or(0));
 
-    Ok(Json(serde_json::json!({
+    let merged = serde_json::json!({
         "results": all_results,
         "latency_ms": (max_latency * 10.0).round() / 10.0,
-    })))
+    });
+    let json_bytes = serde_json::to_vec(&merged)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(json_bytes))
+        .unwrap())
 }
 
-async fn proxy_to(
+/// Forward raw bytes to a shard, passing the Content-Type header through.
+/// The shard's response status and Content-Type are preserved unchanged.
+async fn proxy_raw(
     client: &reqwest::Client,
     base_url: &str,
-    body: Value,
-) -> Result<Json<Value>, (StatusCode, String)> {
+    body: Bytes,
+    ct: &str,
+) -> Result<Response, (StatusCode, String)> {
     let url = format!("{base_url}/v1/walk-ffn");
     let resp = client
         .post(&url)
-        .json(&body)
+        .header(reqwest::header::CONTENT_TYPE, ct)
+        .body(body.to_vec())
         .send()
         .await
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("shard {base_url}: {e}")))?;
 
     let status = resp.status();
-    let json: Value = resp
-        .json()
+    let resp_ct = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+    let resp_bytes = resp
+        .bytes()
         .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("decode response: {e}")))?;
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("read shard response: {e}")))?;
 
-    if !status.is_success() {
-        let msg = json
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown shard error")
-            .to_string();
-        return Err((
-            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
-            msg,
-        ));
-    }
-    Ok(Json(json))
+    Ok(Response::builder()
+        .status(status.as_u16())
+        .header(header::CONTENT_TYPE, resp_ct)
+        .body(axum::body::Body::from(resp_bytes))
+        .unwrap())
 }
 
 async fn handle_health() -> Json<Value> {
@@ -334,7 +449,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!("larql-router v{}", env!("CARGO_PKG_VERSION"));
 
-    // Must have at least one of --shards or --grid-port.
     if cli.shards.is_none() && cli.grid_port.is_none() {
         eprintln!("error: must provide --shards or --grid-port (or both)");
         std::process::exit(1);
@@ -347,7 +461,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .pool_max_idle_per_host(16)
         .build()?;
 
-    // Static shards.
     let static_shards = if let Some(spec) = &cli.shards {
         let shards = parse_shards(spec).map_err(|e| format!("--shards: {e}"))?;
         info!("Static shard map:");
@@ -376,16 +489,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Vec::new()
     };
 
-    // Grid state (shared with gRPC service and HTTP handler).
     let grid_state: Option<Arc<RwLock<GridState>>> = if cli.grid_port.is_some() {
         Some(Arc::new(RwLock::new(GridState::default())))
     } else {
         None
     };
 
-    // Start gRPC grid server if --grid-port is set.
     if let (Some(grid_port), Some(state)) = (cli.grid_port, &grid_state) {
-        let svc = GridServiceServer::new(GridServiceImpl::new_with_key(state.clone(), cli.grid_key.clone()));
+        let svc = GridServiceServer::new(GridServiceImpl::new_with_key(
+            state.clone(),
+            cli.grid_key.clone(),
+        ));
         let grpc_addr: SocketAddr = format!("{}:{}", cli.host, grid_port).parse()?;
         info!("Grid gRPC server listening: {grpc_addr}");
         tokio::spawn(async move {
@@ -412,4 +526,136 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Tests
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── peek_binary ───────────────────────────────────────────────────────────
+
+    fn make_binary_single(layer: u32, residual_floats: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&layer.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
+        buf.extend_from_slice(&1u32.to_le_bytes()); // flags (full_output)
+        buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
+        buf.extend(std::iter::repeat(0u8).take(residual_floats * 4));
+        buf
+    }
+
+    fn make_binary_batch(layers: &[u32], residual_floats: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
+        buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+        for &l in layers {
+            buf.extend_from_slice(&l.to_le_bytes());
+        }
+        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
+        buf.extend_from_slice(&1u32.to_le_bytes()); // flags
+        buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
+        buf.extend(std::iter::repeat(0u8).take(residual_floats * 4));
+        buf
+    }
+
+    #[test]
+    fn peek_binary_single_layer() {
+        let body = make_binary_single(5, 4);
+        let layers = peek_binary(&body).unwrap();
+        assert_eq!(layers, vec![5]);
+    }
+
+    #[test]
+    fn peek_binary_batch_layers() {
+        let body = make_binary_batch(&[5, 20, 30], 4);
+        let layers = peek_binary(&body).unwrap();
+        assert_eq!(layers, vec![5, 20, 30]);
+    }
+
+    #[test]
+    fn peek_binary_empty_body_returns_none() {
+        assert!(peek_binary(&[]).is_none());
+    }
+
+    #[test]
+    fn peek_binary_truncated_single_returns_value() {
+        // Only 4 bytes — enough for a single-layer marker.
+        let buf = 7u32.to_le_bytes();
+        let layers = peek_binary(&buf).unwrap();
+        assert_eq!(layers, vec![7]);
+    }
+
+    #[test]
+    fn peek_binary_batch_truncated_layer_list_returns_none() {
+        // Claims 10 layers but only provides 2 u32s after num_layers.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
+        buf.extend_from_slice(&10u32.to_le_bytes()); // num_layers = 10
+        buf.extend_from_slice(&0u32.to_le_bytes()); // layer 0
+        buf.extend_from_slice(&1u32.to_le_bytes()); // layer 1 — only 2 of 10
+        assert!(peek_binary(&buf).is_none());
+    }
+
+    #[test]
+    fn peek_binary_zero_batch_layers() {
+        let body = make_binary_batch(&[], 4);
+        let layers = peek_binary(&body).unwrap();
+        assert!(layers.is_empty());
+    }
+
+    // ── parse_shards ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_shards_single_entry() {
+        let shards = parse_shards("0-16=http://host-a:8080").unwrap();
+        assert_eq!(shards.len(), 1);
+        assert_eq!(shards[0].layer_start, 0);
+        assert_eq!(shards[0].layer_end, 17); // exclusive
+        assert_eq!(shards[0].url, "http://host-a:8080");
+    }
+
+    #[test]
+    fn parse_shards_two_entries() {
+        let shards =
+            parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
+        assert_eq!(shards.len(), 2);
+        assert!(shards[0].owns(0));
+        assert!(shards[0].owns(16));
+        assert!(!shards[0].owns(17));
+        assert!(shards[1].owns(17));
+        assert!(shards[1].owns(33));
+    }
+
+    #[test]
+    fn parse_shards_empty_string_errors() {
+        assert!(parse_shards("").is_err());
+    }
+
+    #[test]
+    fn parse_shards_missing_url_errors() {
+        assert!(parse_shards("0-16").is_err());
+    }
+
+    #[test]
+    fn parse_shards_end_less_than_start_errors() {
+        assert!(parse_shards("16-0=http://host:8080").is_err());
+    }
+
+    #[test]
+    fn parse_shards_ignores_trailing_comma() {
+        let shards = parse_shards("0-16=http://host:8080,").unwrap();
+        assert_eq!(shards.len(), 1);
+    }
+
+    #[test]
+    fn shard_owns_inclusive_bounds() {
+        let shards = parse_shards("0-16=http://host:8080").unwrap();
+        assert!(shards[0].owns(0));
+        assert!(shards[0].owns(16));
+        assert!(!shards[0].owns(17));
+    }
 }
