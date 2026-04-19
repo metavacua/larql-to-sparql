@@ -45,6 +45,7 @@ pub use forward::{
     predict_with_strategy, trace_forward, trace_forward_full, trace_forward_with_ffn,
     LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention,
     PredictResultWithResiduals, TraceResult,
+    capture_spec_residuals, SpecCapture,
     run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
     TargetDelta, TargetDeltaOpts,
     apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,

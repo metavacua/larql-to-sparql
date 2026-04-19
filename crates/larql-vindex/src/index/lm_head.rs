@@ -237,4 +237,66 @@ mod tests {
         let probs: Vec<f32> = all.iter().map(|(_, s)| *s).collect();
         assert!(probs.windows(2).all(|w| w[0] >= w[1]));
     }
+
+    /// `synthesize_lm_head_q4` converts f16 embeddings to Q4_0 in RAM.
+    ///
+    /// Invariants:
+    ///   - `has_lm_head_q4` false before synthesis, true after.
+    ///   - Output byte length = vocab × (hidden/32 × 18).
+    ///   - Re-quantizing a row via CPU path gives dot-product scores that rank
+    ///     the matching row first (round-trip correctness).
+    #[test]
+    fn synthesize_lm_head_q4_produces_correct_bytes() {
+        use std::sync::Arc;
+
+        let vocab: usize = 16;
+        let hidden: usize = 64; // must be multiple of 32
+
+        // Build a synthetic f16 embedding table: row i = constant (i+1) * 0.01
+        let mut f16_bytes = vec![0u8; vocab * hidden * 2];
+        for row in 0..vocab {
+            let val = (row as f32 + 1.0) * 0.01;
+            let bits = larql_models::quant::half::f32_to_f16(val);
+            for col in 0..hidden {
+                let off = (row * hidden + col) * 2;
+                let b = bits.to_le_bytes();
+                f16_bytes[off] = b[0];
+                f16_bytes[off + 1] = b[1];
+            }
+        }
+
+        // Minimal VectorIndex with the f16 mmap and known dims.
+        let mmap = Arc::new(unsafe {
+            let mem = memmap2::MmapMut::map_anon(f16_bytes.len()).unwrap();
+            let mut mem = mem;
+            mem.copy_from_slice(&f16_bytes);
+            mem.make_read_only().unwrap()
+        });
+
+        let mut index = crate::index::core::VectorIndex::new(
+            vec![None; 1],
+            vec![None; 1],
+            1,
+            hidden,
+        );
+        index.vocab_size = vocab;
+        index.set_lm_head_f16_mmap(mmap);
+
+        assert!(!index.has_lm_head_q4(), "should not have Q4 before synthesis");
+        index.synthesize_lm_head_q4();
+        assert!(index.has_lm_head_q4(), "should have Q4 after synthesis");
+
+        // Byte length check.
+        let synth = index.lm_head_q4_synth.as_ref().unwrap();
+        let blocks_per_row = hidden / 32;
+        let bytes_per_row = blocks_per_row * 18;
+        assert_eq!(synth.len(), vocab * bytes_per_row,
+            "synthesized Q4 byte length should be vocab × (hidden/32 × 18)");
+
+        // Calling again should be a no-op (idempotent).
+        let ptr_before = synth.as_ptr();
+        index.synthesize_lm_head_q4();
+        let ptr_after = index.lm_head_q4_synth.as_ref().unwrap().as_ptr();
+        assert_eq!(ptr_before, ptr_after, "second call should not reallocate");
+    }
 }

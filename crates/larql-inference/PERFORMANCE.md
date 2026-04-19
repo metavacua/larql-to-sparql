@@ -25,23 +25,35 @@ predict_honest("The capital of France is"):
   Total:                                     ~203ms = 4.9 tok/s
 ```
 
-## GPU Decode Path (synthetic, seq=1)
+## GPU Decode Path
 
-From `compare_ollama` benchmark (larql-compute, 2026-04-09):
+### Synthetic (compare_ollama, random weights, 2026-04-09)
 
 | Engine | ms/tok | tok/s | Notes |
 |--------|--------|-------|-------|
-| **LARQL Q4_KF decode (34L, KV)** | **8.5ms** | **117** | **Exceeds Ollama** |
+| **LARQL Q4_KF decode (34L, KV)** | **8.5ms** | **117** | **Synthetic ceiling** |
 | LARQL Q4_K decode (21L, KV) | 11.6ms | 86 | |
 | LARQL Q8 decode (21L, KV) | 19.3ms | 52 | |
 | Ollama (34L) | 10.3ms | 98 | |
-| **vs Ollama** | **0.83x** | — | **17% faster** |
-| **Projected cached (8L)** | **~2ms** | **~500** | Cache L0-12, compute 8 layers |
+| **vs Ollama (synthetic)** | **0.83x** | — | **17% faster** |
+
+### Real vindex (larql bench, gemma3-4b-q4k-v2.vindex, 2026-04-19)
+
+Prompt: "The capital of France is" (5 tokens), 50 tok, 3 warmup.
+
+| Engine | prefill | ms/tok | tok/s | Notes |
+|--------|---------|--------|-------|-------|
+| **LARQL Metal** | **67.7ms** | **15.6ms** | **64.1** | |
+| Ollama gemma3:4b | ~15ms | ~10ms | ~100 | |
+| **vs Ollama (real)** | — | 1.56x slower | — | GPU forward 86% of decode |
+
+Per-stage: embed 0.002ms · GPU fwd 14.1ms · final_norm 0.007ms · lm_head 2.0ms · detok 0.008ms
 
 Progress:
-- 2026-04-07: 28.0ms / 36 tok/s (34L) = 2.84x Ollama
-- 2026-04-08: 18.3ms / 55 tok/s (34L) = 1.79x Ollama
-- 2026-04-09: 8.5ms / 117 tok/s (34L) = 0.83x Ollama (17% faster)
+- 2026-04-07: 28.0ms / 36 tok/s (34L synthetic) = 2.84x Ollama
+- 2026-04-08: 18.3ms / 55 tok/s (34L synthetic) = 1.79x Ollama
+- 2026-04-09: 8.5ms / 117 tok/s (34L synthetic) = 0.83x Ollama (synthetic ceiling)
+- 2026-04-19: 15.6ms / 64 tok/s (34L real vindex) — lm_head Q4 synthesis, KV cache fix
 
 ## Layer Graph Strategies
 

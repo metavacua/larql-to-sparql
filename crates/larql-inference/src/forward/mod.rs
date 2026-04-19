@@ -129,6 +129,7 @@ pub use trace::{
     capture_ffn_activation_matrix, estimate_ffn_covariance,
     trace_forward, trace_forward_with_ffn, trace_forward_full,
     calibrate_scalar_gains,
+    capture_spec_residuals, SpecCapture,
 };
 pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult};
 pub use target_delta::{TargetDelta, TargetDeltaOpts};

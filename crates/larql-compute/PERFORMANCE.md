@@ -2,19 +2,35 @@
 
 Machine: M3 Max, macOS, Gemma 3 4B (34 layers, hidden=2560, inter=10240, vocab=262K)
 
-## Current State (2026-04-09)
+## Current State (2026-04-19)
 
+### Synthetic (compare_ollama, random weights, M3 Max)
 ```
-LARQL Q4_KF decode (34 layers, KV cache):   8.5ms = 117 tok/s  ← EXCEEDS Ollama
-LARQL Q4_K  decode (21 layers, KV cache):  11.6ms =  86 tok/s
-LARQL Q8    decode (21 layers, KV cache):  19.3ms =  52 tok/s
-
+LARQL Q4_KF decode (34 layers, KV cache):   8.5ms = 117 tok/s  ← synthetic ceiling
 Ollama gemma3:4b (34 layers):              10.3ms =  98 tok/s
-vs Ollama:                                 0.83x (17% FASTER)
-Per-layer:                                 0.250ms vs 0.303ms
+vs Ollama (synthetic):                     0.83x (17% FASTER)
 ```
 
-### Optimizations applied (2026-04-08 — 2026-04-09)
+### Real vindex (larql bench, gemma3-4b-q4k-v2.vindex, M3 Max, 2026-04-19)
+```
+Prompt: "The capital of France is" (5 tokens)
+
+  prefill (warm, after KV cache pre-alloc): 67.7ms
+  decode (50 tok, 3 warmup discarded):      15.6ms = 64.1 tok/s
+  lm_head (Q4_0 synthesized):               2.0ms  (was 4.3ms f16 gemv)
+  GPU forward (34 layers):                 14.1ms  (86% of decode)
+
+vs Ollama gemma3:4b:                       ~100 tok/s  (1.56× gap)
+
+Per-stage:
+  embed       0.002ms  (0.0%)
+  GPU fwd    14.1ms   (86.3%)
+  final_norm  0.007ms  (0.0%)
+  lm_head     2.0ms   (13.6%)
+  detok       0.008ms  (0.1%)
+```
+
+### Optimizations applied (2026-04-08 — 2026-04-19)
 
 1. Single command buffer + single global encoder for all 34 layers
 2. Batched RoPE + V-norm shaders (16 dispatches → 3 per layer)
@@ -27,6 +43,14 @@ Per-layer:                                 0.250ms vs 0.303ms
 9. **Cooperative SIMD norm reduction** — O(N) reads instead of O(N²). Saved ~10ms.
    All norm kernels (rms_norm, residual_norm, residual_norm_q8) previously had each
    thread redundantly reading ALL elements. Now: stripe + simd_sum + threadgroup reduce.
+10. **Q4_0 lm_head synthesis** — synthesized from f16 embeddings at load time. Avoids
+    5.6 GB heap clone; lm_head path 4.3ms → 2.0ms (2.2× faster).
+11. **KV cache kept on reset** — `reset_kv_cache` now resets `current_len` only; stops
+    reallocating ~1.1 GB of GPU buffers on every new prompt.
+12. **q4_matvec ROWS_PER_TG=32** — TG memory 9 KB → 2.88 KB (K=2560 exact fit), concurrent
+    TGs per core 3 → 11, wave count 273 → ~18.
+13. **q6k_matvec ROWS_PER_TG=4** — doubles TG count (320 → 640) for better DRAM utilisation
+    on the 2560-row down projection.
 
 ## Component Profiling (34 layers, isolated, one command buffer each)
 
@@ -324,8 +348,14 @@ Date        Milestone                                    Time      tok/s
 2026-04-08  + SIMD KV attention reductions               20.5ms    49  (34L)
 2026-04-09  + pre-allocated scratch buffers               18.3ms    55  (34L)
 2026-04-09  + fused Q4_KF gate+up (q4kf_ffn_gate_up)     18.3ms    55  (34L)
-2026-04-09  + cooperative SIMD norm (O(N²)→O(N))           8.5ms   117  (34L) ← EXCEEDS OLLAMA
-2026-04-09  vs Ollama: 2.84x → 0.83x (17% faster)         —        —
+2026-04-09  + cooperative SIMD norm (O(N²)→O(N))           8.5ms   117  (34L, synthetic) ← exceeds Ollama synthetic
+2026-04-09  vs Ollama (synthetic): 2.84x → 0.83x (17% faster)
+2026-04-18  Real vindex wired (bench_cmd), base ~55 tok/s  15.8ms    63  (34L, real)
+2026-04-19  + Q4_0 lm_head synthesis (4.3ms → 2.0ms)      15.6ms    64  (34L, real)
+2026-04-19  + KV cache kept on reset (prefill 323ms→68ms)  67.7ms    64  (prefill warm)
+2026-04-19  + q4_matvec ROWS_PER_TG=32, TG mem 9KB→2.9KB    —        —
+2026-04-19  + q6k_matvec ROWS_PER_TG=4 (320→640 TGs)         —        —
+2026-04-19  vs Ollama (real): 1.56x gap (64 vs ~100 tok/s)
 ```
 
 ## Path to Ollama Parity — EXCEEDED (2026-04-09)

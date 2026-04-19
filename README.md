@@ -426,25 +426,33 @@ Dense and full-precision MoE models support all operations (DESCRIBE, WALK, INFE
 | Load vindex | 8ms |
 | Mutate (meta + gate) | 617ns |
 
-### Inference Engine (Gemma 3 4B, Apple Silicon)
+### Inference Engine (Gemma 3 4B, Apple Silicon M3 Max)
 
-| Operation | Latency |
-|---|---|
-| Walk prediction (no attention) | 33ms |
-| INFER walk (with attention, mmap FFN) | 517ms |
-| INFER dense (with attention, all matmul) | 535ms |
-| DESCRIBE (knowledge browse) | 33ms |
+| Operation | Latency | tok/s |
+|---|---|---|
+| **GPU Q4K decode (Metal, 34L, KV cache)** | **15.6ms** | **64** |
+| Walk prediction (CPU, no attention) | 33ms | 30 |
+| INFER walk (CPU, with attention, mmap FFN) | 517ms | 1.9 |
+| INFER dense (CPU, all matmul) | 535ms | 1.9 |
+| DESCRIBE (knowledge browse) | 33ms | — |
+
+GPU decode per-stage breakdown:
+
+| Component | Time | % of total |
+|---|---|---|
+| GPU forward (34 layers, Q4K/Q6K) | 14.1ms | 86% |
+| LM head (Q4_0 synthesized from f16 embeddings) | 2.0ms | 12% |
+| Embed + norm + detokenize | <0.1ms | <1% |
+
+CPU walk breakdown:
 
 | Component | Time | % of total |
 |---|---|---|
 | Logits (262K vocab gemv) | 221ms | 41% |
 | FFN × 34 layers (walk) | 194ms | 36% |
 | Attention × 34 layers | 84ms | 16% |
-| Walk FFN per layer (mmap down) | 5.7ms | — |
-| Dense FFN per layer | 6.7ms | — |
-| BLAS-fused attention per head | 42us | — |
 
-Walk is **faster than dense** (517ms vs 535ms). FFN down projection reads from mmap'd vindex (zero-copy BLAS). Walk only needs ~3.5GB of model weights (attention + embeddings), not 16.6GB. No quantization. See [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md) for architecture and [docs/inference-engine.md](docs/inference-engine.md) for engine details.
+Walk is **faster than dense** (517ms vs 535ms). GPU Q4K decode is **16× faster** than CPU walk. FFN down projection in walk reads from mmap'd vindex (zero-copy BLAS). Walk only needs ~3.5GB of model weights (attention + embeddings), not 16.6GB. No quantization. See [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md) for architecture and [docs/inference-engine.md](docs/inference-engine.md) for engine details.
 
 ## Residual Stream Trace
 
