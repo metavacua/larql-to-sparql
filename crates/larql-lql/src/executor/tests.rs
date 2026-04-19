@@ -417,6 +417,7 @@ fn make_test_weights() -> larql_inference::ModelWeights {
     larql_inference::ModelWeights {
         tensors,
         vectors,
+        raw_bytes: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers,

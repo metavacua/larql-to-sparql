@@ -4,6 +4,8 @@
 //! that connects to the router, sends an AnnounceMsg, and then sends
 //! Heartbeats every 10 seconds. On disconnect it reconnects with backoff.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use larql_router_protocol::{
@@ -11,6 +13,7 @@ use larql_router_protocol::{
     ServerPayload,
 };
 use tokio_stream::StreamExt;
+use tonic::metadata::AsciiMetadataValue;
 use tracing::{error, info, warn};
 
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -28,6 +31,10 @@ pub struct AnnounceConfig {
     pub listen_url: String,
     /// Approximate resident RAM for this shard in bytes.
     pub ram_bytes: u64,
+    /// Shared secret that the router expects. None = open grid (dev only).
+    pub grid_key: Option<String>,
+    /// Stable identity hash of the vindex (model_id + num_layers).
+    pub vindex_hash: String,
 }
 
 // ── Public entry point ─────────────────────────────────────────────────────────
@@ -59,10 +66,33 @@ pub fn run_announce(config: AnnounceConfig) {
     });
 }
 
+/// Stable hash of the vindex identity (not a security primitive — for version checks).
+pub fn vindex_identity_hash(model_id: &str, num_layers: usize) -> String {
+    let mut h = DefaultHasher::new();
+    model_id.hash(&mut h);
+    num_layers.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
 // ── Single connection lifecycle ────────────────────────────────────────────────
 
 async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut client = GridServiceClient::connect(cfg.join_url.clone()).await?;
+    let channel = tonic::transport::Channel::from_shared(cfg.join_url.clone())?
+        .connect()
+        .await?;
+
+    // Inject the grid key into every outgoing RPC as "Authorization: Bearer <key>".
+    let bearer: Option<AsciiMetadataValue> = cfg
+        .grid_key
+        .as_ref()
+        .map(|k| format!("Bearer {k}").parse())
+        .transpose()?;
+    let mut client = GridServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+        if let Some(val) = &bearer {
+            req.metadata_mut().insert("authorization", val.clone());
+        }
+        Ok(req)
+    });
 
     // Channel for messages we send to the router.
     let (tx, rx) = tokio::sync::mpsc::channel::<ServerMessage>(32);
@@ -79,7 +109,7 @@ async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn std::error::Error 
             layer_end: cfg.layer_end,
             ram_bytes: cfg.ram_bytes,
             listen_url: cfg.listen_url.clone(),
-            vindex_hash: String::new(),
+            vindex_hash: cfg.vindex_hash.clone(),
         })),
     })
     .await?;

@@ -111,6 +111,19 @@ pub fn load_model_dir_filtered(
 
     let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
+
+    let expert_format = arch.expert_format();
+    let is_packed_mxfp4 = expert_format == crate::ExpertFormat::PackedMxfp4;
+    let is_packed_bf16 = expert_format == crate::ExpertFormat::PackedBF16;
+
+    // Keys that must be preserved as raw bytes rather than converted to f32.
+    // For PackedBF16 (Gemma 4 26B A4B): experts.gate_up_proj and experts.down_proj
+    // are 3D tensors [num_experts, out_dim, in_dim] in BF16. Converting them to f32
+    // would double their memory footprint; the compute path dequantizes per-expert on demand.
+    let should_keep_raw = |key: &str| -> bool {
+        is_packed_bf16 && (key.contains("experts.gate_up_proj") || key.contains("experts.down_proj"))
+    };
 
     for st_path in &st_files {
         let file = std::fs::File::open(st_path)?;
@@ -120,7 +133,6 @@ pub fn load_model_dir_filtered(
 
         // Check for MXFP4 packed expert tensors (GPT-OSS format)
         let tensor_names: Vec<String> = st.names().iter().map(|n| n.to_string()).collect();
-        let is_packed_mxfp4 = arch.expert_format() == crate::ExpertFormat::PackedMxfp4;
 
         if is_packed_mxfp4 {
             // MXFP4 path: dequantize packed expert blocks+scales into per-expert tensors
@@ -146,11 +158,17 @@ pub fn load_model_dir_filtered(
                 }
             }
         } else {
-            // Standard float path
             for (name, view) in st.tensors() {
                 let key = normalize_key(&name, prefixes);
                 let shape = view.shape();
                 if skip_key(&key) { continue; }
+
+                // PackedBF16 expert tensors: preserve raw bytes, skip f32 conversion
+                if should_keep_raw(&key) {
+                    raw_bytes.insert(key, view.data().to_vec());
+                    continue;
+                }
+
                 let data = match tensor_to_f32(&view) {
                     Ok(d) => d,
                     Err(_) => continue,
@@ -187,6 +205,7 @@ pub fn load_model_dir_filtered(
     Ok(ModelWeights {
         tensors,
         vectors,
+        raw_bytes,
         embed,
         lm_head,
         num_layers: cfg.num_layers,

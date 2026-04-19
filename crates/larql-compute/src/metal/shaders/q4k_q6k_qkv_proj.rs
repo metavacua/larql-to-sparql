@@ -9,17 +9,18 @@
 //!
 //! This shader merges them into one dispatch. Layout choices:
 //!
-//! - `ROWS_PER_TG = 8`, `THREADS_PER_TG = 256` — matches `q4k_matvec` and
-//!   `q6k_matvec` (8 simdgroups × 32 lanes). One simdgroup per output row.
-//! - Q/K branch: superblock stride (each lane handles one superblock). For
-//!   K=2560 (10 superblocks), 31% lane utilisation — acceptable given that
-//!   these are small KV matrices (1024 rows) and fusing saves 68 dispatches/token.
-//! - V branch: all-lanes-per-superblock pattern from `q6k_matvec` (8 passes,
-//!   lane handles element `pass*32+lane` per superblock). 100% utilisation.
+//! - `ROWS_PER_TG = 4`, `THREADS_PER_TG = 128` (4 simdgroups × 32 lanes).
+//!   Measured optimal for the fused two-path shader: the Q4K and Q6K code
+//!   paths have higher combined register pressure than the standalone shaders,
+//!   so 4 rows/TG fits better than 8 (which regressed ~30% on M3 Max).
+//! - Q/K branch: superblock stride. For K=2560 (10 superblocks), lanes 0-9
+//!   each process one superblock independently, lanes 10-31 idle.
+//! - V branch: all-lanes-per-superblock (8 passes, element `pass*32+lane`
+//!   per superblock). All 32 lanes cooperate on each superblock.
 //! - Row → (Q|K|V) branch by `global_row < q_rows`, etc.
 
 pub const SHADER: &str = r#"
-constant uint Q4K_Q6K_ROWS_PER_TG = 8;
+constant uint Q4K_Q6K_ROWS_PER_TG = 4;
 constant uint Q4K_BLOCK_SIZE_MIXED = 144;
 constant uint Q6K_BLOCK_SIZE_MIXED = 210;
 
@@ -144,5 +145,5 @@ kernel void q4k_q6k_qkv_proj(
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 8;
-pub const THREADS_PER_TG: u64 = 256; // 8 simdgroups × 32 lanes
+pub const ROWS_PER_TG: u64 = 4;
+pub const THREADS_PER_TG: u64 = 128; // 4 simdgroups × 32 lanes

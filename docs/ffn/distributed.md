@@ -1,7 +1,8 @@
 # Distributed FFN — Layer Sharding and Router
 
-**Status:** Implemented (layer sharding + HTTP router)  
-**ADR:** docs/adr/0003-ffn-router.md
+**Status:** Implemented (layer sharding + static router + self-assembling grid)  
+**ADR:** docs/adr/0003-ffn-router.md, docs/adr/0004-ffn-grid.md  
+**Full spec:** docs/specs/larql-router-spec.md
 
 ---
 
@@ -73,11 +74,29 @@ are rejected immediately with HTTP 400:
 
 ## Router
 
+Two dispatch modes:
+
+**Static mode** — configured at startup with `--shards`:
+
 ```bash
 larql-router \
   --shards "0-16=http://host-a:8080,17-33=http://host-b:8081" \
   --port 9090
 ```
+
+**Grid mode** — servers self-register via gRPC; no static config needed:
+
+```bash
+# Router listens for server registrations on gRPC port 50052
+larql-router --grid-port 50052 --grid-key "$KEY" --port 9090
+
+# Servers announce themselves on startup
+larql-server model.vindex --ffn-only --layers 0-16 \
+  --join "http://router:50052" --grid-key "$KEY" \
+  --public-url "http://server-a:8080"
+```
+
+Both modes can coexist. Grid takes priority; static shards are the fallback.
 
 The router exposes `POST /v1/walk-ffn` — the same endpoint as `larql-server`.
 The client's `RemoteWalkBackend` connects to the router with `--ffn-remote http://router:9090`
@@ -115,10 +134,13 @@ to an unreachable shard will return HTTP 502 with the upstream error.
 
 | Location | What it does |
 |---|---|
-| `crates/larql-router/src/main.rs` | Full router binary |
+| `crates/larql-router/src/main.rs` | CLI, HTTP handler, static shard dispatch, `resolve_all` |
+| `crates/larql-router/src/grid.rs` | `GridState` (O(1) route cache), `GridServiceImpl` (gRPC) |
+| `crates/larql-router-protocol/` | Shared proto types (`grid.proto`) and tonic stubs |
+| `crates/larql-server/src/announce.rs` | Background announce task; reconnect with backoff |
 | `parse_shards("0-16=http://...")` | Parses `--shards` spec; inclusive→exclusive end |
-| `handle_walk_ffn` | Dispatch handler: single-layer proxy or parallel fan-out |
-| `proxy_to_shard` | Single shard proxy; propagates HTTP error status |
+| `handle_walk_ffn` | Dispatch: `resolve_all` (single lock) → proxy or parallel fan-out |
+| `proxy_to` | Single-shard proxy; propagates HTTP error status |
 
 ---
 
@@ -162,19 +184,24 @@ larql-router \
 
 ## Router Options
 
+See full option reference in `docs/specs/larql-router-spec.md §3`.
+
+Key flags:
+
 | Flag | Default | Description |
 |---|---|---|
-| `--shards` | required | Comma-separated `START-END=URL` entries (inclusive bounds) |
-| `--port` | 9090 | Listen port |
-| `--host` | 0.0.0.0 | Bind address |
+| `--shards` | — | Static `START-END=URL` shard map |
+| `--grid-port` | — | Enable self-assembling grid gRPC server |
+| `--grid-key` | — | Shared auth secret (`LARQL_GRID_KEY` env var) |
+| `--port` | 9090 | HTTP listen port |
 | `--timeout-secs` | 120 | Per-request timeout to backend shards |
-| `--log-level` | info | Tracing log level |
 
 ---
 
 ## What Is Not Yet Implemented
 
-- **Live resharding** — `larql-router reshard` admin RPC (ADR-0003 Phase 5)
-- **gRPC transport** — router currently uses HTTP/JSON fan-out; Phase 2 of ADR-0003 replaces this with raw f32 bytes over gRPC, eliminating JSON serialisation overhead on the residual (~10 KB per hop)
-- **MoE expert dispatch** — Phase 3; requires expert-major weight layout in vindex extraction
-- **Router L2 cache** — Phase 4; router is the natural cache position but currently passes every request through to shards
+- **Mode B (available)** — server starts empty, router assigns a shard (ADR-0004 Phase 2)
+- **Admin CLI** — `larql-router status / drain / assign / gaps` (ADR-0004 Phase 5)
+- **gRPC transport to backends** — currently HTTP/JSON; a future version uses raw f32 bytes over gRPC (ADR-0003 Phase 2)
+- **MoE expert dispatch** — routing by expert ID (ADR-0003 Phase 3)
+- **Router L2 cache** — router is the natural cache position but currently passes every request through (ADR-0003 Phase 4)

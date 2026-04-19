@@ -101,19 +101,27 @@ larql serve gemma3-4b.vindex --port 8080
 ### Run attention locally, FFN on another machine
 
 ```bash
-# One-time — carve the client-side vindex (attention + embed + norms,
-# no FFN compute weights). `--level attention` is the new first-class
-# way to produce this slice.
-larql extract google/gemma-4-31b-it -o gemma4-31b.client.vindex \
-  --level attention
+# Extract once, then carve deployment slices with `larql slice`.
+# Either --preset or --parts a,b,c works; `--dry-run` previews.
+larql extract google/gemma-4-31b-it -o gemma4-31b.vindex --quant q4k
 
-# Server (any box, any GPU — holds the full model + FFN):
-larql serve gemma4-31b.vindex --port 8080 --ffn-only
+# Client slice (7.4 GB for 31B Q4_K — attn + embed + norms + tokenizer)
+larql slice gemma4-31b.vindex --preset client -o gemma4-31b.client.vindex
+
+# Server slice (27 GB — gate + interleaved FFN + down_meta, no attention)
+larql slice gemma4-31b.vindex --preset server -o gemma4-31b.server.vindex
+
+# Server (holds the FFN half):
+larql serve gemma4-31b.server.vindex --port 8080 --ffn-only
 
 # Client (laptop — runs attention locally, FFN over HTTP):
 larql run gemma4-31b.client.vindex --ffn http://server.local:8080 \
   "The capital of France is"
 ```
+
+Other presets: `browse` (DESCRIBE/WALK only, no forward pass), `router`
+(MoE router only, ADR-0003), `all` (full clone). See `larql slice --help`
+for the explicit part list.
 
 **Bounding server RSS.** `--ffn-only` skips the eager gate warmup at
 startup (55 GB → 5.6 GB on 31B Q4_K). For steady-state bounds, layer
@@ -237,7 +245,7 @@ LQL parser and executor. 20+ statement types across 5 categories:
 
 ## LQL Reference
 
-See [docs/lql-spec.md](docs/lql-spec.md) for the full language specification and [docs/lql-guide.md](docs/lql-guide.md) for a quick start guide.
+See [docs/specs/lql-spec.md](docs/specs/lql-spec.md) for the full language specification and [docs/lql-guide.md](docs/lql-guide.md) for a quick start guide.
 
 ### Key Statements
 
@@ -351,7 +359,7 @@ Input formats: **safetensors** (HuggingFace), **GGUF** (llama.cpp, dequantized t
 | GPT-OSS | GPT-OSS-120B | MoE (128 experts, MXFP4) |
 | GPT-2 | GPT-2 (117M-1.5B) | Dense (GELU) |
 
-Dense and full-precision MoE models support all operations (DESCRIBE, WALK, INFER). MXFP4-quantized MoE models (GPT-OSS) can be extracted and served but DESCRIBE/WALK produce noisy results due to 4-bit weight precision — use INFER for accurate knowledge queries. See [operations spec](docs/vindex-operations-spec.md) for details.
+Dense and full-precision MoE models support all operations (DESCRIBE, WALK, INFER). MXFP4-quantized MoE models (GPT-OSS) can be extracted and served but DESCRIBE/WALK produce noisy results due to 4-bit weight precision — use INFER for accurate knowledge queries. See [operations spec](docs/specs/vindex-operations-spec.md) for details.
 
 ## Benchmarks
 
@@ -445,17 +453,17 @@ See [docs/residual-trace.md](docs/residual-trace.md) for the full writeup.
 
 | Doc | Description |
 |---|---|
-| [docs/lql-spec.md](docs/lql-spec.md) | LQL language specification (v0.3) |
-| [docs/vindex-format-spec.md](docs/vindex-format-spec.md) | Vindex file format specification (v0.3, ~98% implemented) |
-| [docs/vindex-operations-spec.md](docs/vindex-operations-spec.md) | Vindex operations, API, patches (~98% implemented) |
-| [docs/vindex-ecosystem-spec.md](docs/vindex-ecosystem-spec.md) | Distributed hosting, HuggingFace, Vindexfile (~85% implemented) |
+| [docs/specs/lql-spec.md](docs/specs/lql-spec.md) | LQL language specification (v0.3) |
+| [docs/specs/vindex-format-spec.md](docs/specs/vindex-format-spec.md) | Vindex file format specification (v0.3, ~98% implemented) |
+| [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md) | Vindex operations, API, patches (~98% implemented) |
+| [docs/specs/vindex-ecosystem-spec.md](docs/specs/vindex-ecosystem-spec.md) | Distributed hosting, HuggingFace, Vindexfile (~85% implemented) |
 | [docs/lql-guide.md](docs/lql-guide.md) | LQL quick start guide |
 | [docs/cli.md](docs/cli.md) | CLI reference |
 | [docs/inference-engine.md](docs/inference-engine.md) | Inference engine — BLAS-fused attention, Metal GPU, auto-calibration |
 | [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md) | FFN graph layer — mmap walk faster than dense (517ms vs 535ms), all 34 layers |
 | [docs/walk-boundary-sweep.md](docs/walk-boundary-sweep.md) | Walk boundary sweep — correctness proof across all layer boundaries |
 | [docs/residual-trace.md](docs/residual-trace.md) | Residual stream trace — decomposition, storage, tiered context |
-| [docs/trace-format-spec.md](docs/trace-format-spec.md) | Trace file format specification (.bin, .bndx, .ctxt) |
+| [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md) | Trace file format specification (.bin, .bndx, .ctxt) |
 
 ## Building & Testing
 

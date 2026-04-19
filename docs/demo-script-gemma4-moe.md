@@ -461,6 +461,15 @@ medical papers. Swapping one for the other is a file copy on the server.
   `madvise(MADV_DONTNEED)` on all owned mmaps post-request. Linux:
   immediate RSS drop. Darwin: advisory — kernel may defer. Use
   `--layers START-END` for hard bound on macOS. (See ADR-0005.)
+- [x] **`larql slice`**: carve a vindex into deployment slices without
+  re-extracting. Presets `client` (7.4 GB on 31B Q4_K: attn + embed +
+  norms + tokenizer), `server` (27 GB: gate + interleaved_q4k +
+  down_meta + embed + norms; no attention), `browse`, `router`, `all`.
+  `VectorIndex::load_vindex` now synthesises a zero-byte gate mmap
+  when both `gate_vectors.bin` and `interleaved_q4k.bin` are absent —
+  needed for the attention-only client slice. End-to-end verified:
+  7.4 GB client slice + 27 GB server slice gives `Paris 99.36%` via
+  remote FFN, same as the full-vindex baseline.
 
 ### Phase 1 — MoE inference path (blocks Act 2)
 

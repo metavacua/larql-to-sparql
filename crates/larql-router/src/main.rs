@@ -59,6 +59,12 @@ struct Cli {
     /// Log level.
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    /// Shared secret for the self-assembling grid.
+    /// Servers must pass the same key via --grid-key to be accepted.
+    /// If not set, the grid port is open to any server (development only).
+    #[arg(long, env = "LARQL_GRID_KEY")]
+    grid_key: Option<String>,
 }
 
 // ── Static shard map ───────────────────────────────────────────────────────────
@@ -123,19 +129,42 @@ struct AppState {
 }
 
 impl AppState {
-    /// Find the HTTP URL to send layer N to.
-    /// Grid takes priority over static shards.
-    /// model_id is used for multi-model grids; None matches any model.
-    async fn find_url(&self, model_id: Option<&str>, layer: usize) -> Option<String> {
+    /// Resolve all layers in one lock acquisition.
+    /// Returns Ok(layer → url) or Err(first missing layer).
+    async fn resolve_all(
+        &self,
+        model_id: Option<&str>,
+        layers: &[usize],
+    ) -> Result<HashMap<usize, String>, usize> {
         if let Some(grid) = &self.grid {
-            if let Some(url) = grid.read().await.route(model_id, layer as u32) {
-                return Some(url);
+            let guard = grid.read().await;
+            // Try grid first; fall through to static shards for any misses.
+            let mut out = HashMap::with_capacity(layers.len());
+            let mut static_needed: Vec<usize> = Vec::new();
+            for &layer in layers {
+                match guard.route(model_id, layer as u32) {
+                    Some(url) => { out.insert(layer, url); }
+                    None => static_needed.push(layer),
+                }
+            }
+            drop(guard); // release grid lock before static scan
+            for layer in static_needed {
+                match self.static_shards.iter().find(|s| s.owns(layer)) {
+                    Some(s) => { out.insert(layer, s.url.clone()); }
+                    None => return Err(layer),
+                }
+            }
+            return Ok(out);
+        }
+        // Grid not enabled — static shards only.
+        let mut out = HashMap::with_capacity(layers.len());
+        for &layer in layers {
+            match self.static_shards.iter().find(|s| s.owns(layer)) {
+                Some(s) => { out.insert(layer, s.url.clone()); }
+                None => return Err(layer),
             }
         }
-        self.static_shards
-            .iter()
-            .find(|s| s.owns(layer))
-            .map(|s| s.url.clone())
+        Ok(out)
     }
 }
 
@@ -170,27 +199,23 @@ async fn handle_walk_ffn(
     let model_id = body.get("model_id").and_then(|v| v.as_str()).map(str::to_owned);
     let mid = model_id.as_deref();
 
-    // Validate all layers have a route before dispatching anything.
-    for &layer in &layers {
-        if state.find_url(mid, layer).await.is_none() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!(r#"{{"error":"layer {layer} has no owning shard in this router"}}"#),
-            ));
-        }
-    }
+    // Resolve all layers in one lock acquisition (validates + maps in a single read).
+    let layer_urls = state.resolve_all(mid, &layers).await.map_err(|missing| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!(r#"{{"error":"layer {missing} has no owning shard in this router"}}"#),
+        )
+    })?;
 
     // Single layer: proxy the body unchanged.
     if layers.len() == 1 {
-        let url = state.find_url(mid, layers[0]).await.unwrap();
-        return proxy_to(&state.client, &url, body).await;
+        return proxy_to(&state.client, &layer_urls[&layers[0]], body).await;
     }
 
     // Batched: group layers by URL, fan out in parallel, merge.
     let mut by_url: HashMap<String, Vec<usize>> = HashMap::new();
-    for &layer in &layers {
-        let url = state.find_url(mid, layer).await.unwrap();
-        by_url.entry(url).or_default().push(layer);
+    for (&layer, url) in &layer_urls {
+        by_url.entry(url.clone()).or_default().push(layer);
     }
 
     let mut handles = Vec::new();
@@ -317,6 +342,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(cli.timeout_secs))
+        .tcp_keepalive(std::time::Duration::from_secs(30))
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .pool_max_idle_per_host(16)
         .build()?;
 
     // Static shards.
@@ -357,7 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Start gRPC grid server if --grid-port is set.
     if let (Some(grid_port), Some(state)) = (cli.grid_port, &grid_state) {
-        let svc = GridServiceServer::new(GridServiceImpl::new(state.clone()));
+        let svc = GridServiceServer::new(GridServiceImpl::new_with_key(state.clone(), cli.grid_key.clone()));
         let grpc_addr: SocketAddr = format!("{}:{}", cli.host, grid_port).parse()?;
         info!("Grid gRPC server listening: {grpc_addr}");
         tokio::spawn(async move {

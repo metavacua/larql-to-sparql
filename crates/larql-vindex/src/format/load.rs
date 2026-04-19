@@ -103,10 +103,29 @@ impl VectorIndex {
             );
             (gate_mmap, gate_slices, crate::config::dtype::StorageDtype::F16)
         } else {
-            return Err(VindexError::Parse(format!(
-                "neither gate_vectors.bin nor interleaved_q4k.bin present in {}",
-                dir.display()
-            )));
+            // Neither gate_vectors.bin nor interleaved_q4k.bin present.
+            // This is the attention-only client-side slice (produced by
+            // `larql slice --preset client`): the client runs attention
+            // locally and delegates gate-KNN + FFN to the remote server
+            // via `--ffn URL`, so it genuinely does not need gate data.
+            // Hand back an empty gate mmap + all-zero slices. `gate_knn`
+            // returns an empty result on this index, which is the correct
+            // behaviour for an attention-only client — nothing calls it.
+            callbacks.on_file_start(
+                "gate_vectors (absent — client-only slice)",
+                &dir.display().to_string(),
+            );
+            let empty = memmap2::MmapMut::map_anon(0)?.make_read_only()?;
+            let gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![
+                crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
+                num_layers
+            ];
+            callbacks.on_file_done(
+                "gate_vectors (absent — client-only slice)",
+                0,
+                0.0,
+            );
+            (empty, gate_slices, crate::config::dtype::StorageDtype::F16)
         };
 
         // Load down metadata — mmap binary (zero heap), fall back to JSONL (legacy)

@@ -311,7 +311,7 @@ pub fn load_model_weights_with_opts(
     };
 
     Ok(ModelWeights {
-        tensors, vectors, embed, lm_head,
+        tensors, vectors, raw_bytes: std::collections::HashMap::new(), embed, lm_head,
         num_layers: cfg.num_layers,
         hidden_size: cfg.hidden_size,
         intermediate_size: cfg.intermediate_size,
@@ -509,6 +509,7 @@ pub fn load_model_weights_q4k(
     Ok(ModelWeights {
         tensors,
         vectors,
+        raw_bytes: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers: cfg.num_layers,

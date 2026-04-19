@@ -216,6 +216,7 @@ fn drop_ffn_weights_removes_ffn_tensors() {
     let mut weights = ModelWeights {
         tensors,
         vectors: HashMap::new(),
+        raw_bytes: HashMap::new(),
         embed: small.clone(),
         lm_head: small.clone(),
         arch,
@@ -274,6 +275,7 @@ fn drop_ffn_weights_removes_moe_experts() {
     let mut weights = ModelWeights {
         tensors,
         vectors: HashMap::new(),
+        raw_bytes: HashMap::new(),
         embed: small.clone(),
         lm_head: small.clone(),
         arch,

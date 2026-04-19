@@ -12,3 +12,4 @@ pub mod pull_cmd;
 pub mod rm_cmd;
 pub mod run_cmd;
 pub mod show_cmd;
+pub mod slice_cmd;

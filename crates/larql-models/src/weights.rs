@@ -12,6 +12,9 @@ pub type WeightArray = ArcArray2<f32>;
 pub struct ModelWeights {
     pub tensors: HashMap<String, WeightArray>,
     pub vectors: HashMap<String, Vec<f32>>,
+    /// Raw bytes for tensors that must stay in their native dtype (e.g. packed BF16 expert
+    /// weights for Gemma 4 26B A4B). Keyed by the same normalized tensor names as `tensors`.
+    pub raw_bytes: HashMap<String, Vec<u8>>,
     pub embed: WeightArray,
     /// Output projection matrix. Same as embed if tie_word_embeddings=true,
     /// separate lm_head.weight otherwise.
@@ -58,6 +61,17 @@ impl ModelWeights {
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
                 freed += v.len() * std::mem::size_of::<f32>();
+            }
+        }
+        // Drop packed expert byte tensors (Gemma 4 A4B experts.gate_up_proj / experts.down_proj)
+        let raw_keys: Vec<String> = self.raw_bytes.keys()
+            .filter(|k| ffn_patterns.iter().any(|p| k.contains(p))
+                || k.contains("experts.gate_up_proj") || k.contains("experts.down_proj"))
+            .cloned()
+            .collect();
+        for key in &raw_keys {
+            if let Some(v) = self.raw_bytes.remove(key) {
+                freed += v.len();
             }
         }
         freed

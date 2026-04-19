@@ -53,6 +53,9 @@ enum Commands {
     /// Show metadata for a vindex.
     Show(show_cmd::ShowArgs),
 
+    /// Carve a subset of a vindex (client / server / browse / router slice).
+    Slice(slice_cmd::SliceArgs),
+
     /// Remove a cached vindex.
     Rm(rm_cmd::RmArgs),
 
@@ -496,6 +499,7 @@ fn main() {
         Commands::Link(args) => link_cmd::run(args),
         Commands::List(args) => list_cmd::run(args),
         Commands::Show(args) => show_cmd::run(args),
+        Commands::Slice(args) => slice_cmd::run(args),
         Commands::Rm(args) => rm_cmd::run(args),
 
         // ── Build / extract ──

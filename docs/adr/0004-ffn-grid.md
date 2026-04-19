@@ -1,6 +1,6 @@
 # ADR-0004 — Self-Assembling Distributed FFN Grid
 
-**Status:** Draft  
+**Status:** Accepted — Phase 1 (Mode A: announce, auth, multi-router) implemented  
 **Supersedes:** ADR-0003 §3 (static --shards configuration)  
 **Depends on:** ADR-0003 (larql-router base)
 
@@ -525,39 +525,107 @@ $ larql-server \
 
 ---
 
-## Implementation Plan
+## Implementation Status
 
-### Phase 1 — Registration stream (3 days)
+### Phase 1 — Registration stream ✅ DONE
 
-- `crates/larql-router/src/grid.rs` — `CoverageMatrix`, `ServerRegistry`
-- `proto/grid.proto` — `GridService`, all message types above
-- `Join` RPC server-side — accept connections, process `AnnounceMsg`
-- Router logs coverage % and gaps on each registration change
-- Client dispatch uses coverage matrix instead of static `--shards` map
+**Crates:**
+- `crates/larql-router-protocol` — shared proto + tonic codegen (`grid.proto`,
+  `GridService`, all message types). Separate crate so neither server nor router
+  depends on the other.
+- `crates/larql-router/src/grid.rs` — `GridState`, `GridServiceImpl`
+- `crates/larql-server/src/announce.rs` — background announce task
 
-### Phase 2 — Available mode (2 days)
+**What is implemented:**
+
+- **Mode A announce**: servers connect to the router with `--join`, send
+  `AnnounceMsg`, receive `AckMsg`. Router stores entry in `GridState`.
+- **Persistent bidirectional stream**: server keeps the gRPC stream open for its
+  lifetime. Sends `HeartbeatMsg` every 10 seconds. On stream close (crash or
+  shutdown) the router immediately deregisters the server.
+- **Reconnect with backoff**: announce task retries with exponential backoff
+  (1s → 2s → 4s … cap 60s) on any connection error.
+- **O(1) route cache**: `GridState` maintains two pre-built tables rebuilt on
+  every topology change (join/leave only — heartbeats skip the rebuild):
+  - `route_table: HashMap<(model_id, layer), Vec<server_id>>` — for named-model queries
+  - `any_model_table: HashMap<layer, Vec<server_id>>` — for single-model grids
+  - `route()` is O(1) table lookup + O(replicas) least-loaded scan
+  - `route_all()` resolves an entire layer batch in one lock acquisition
+- **Least-loaded replica selection**: among servers owning the same layer range,
+  the one with the smallest `requests_in_flight` counter is chosen. Counter is
+  updated by each heartbeat.
+- **Multi-model routing**: `(model_id, layer)` key. `model_id` is optional in
+  requests — `None` matches any model for single-model grids. Servers announce
+  each loaded model separately.
+- **Multiple routers (stateless fan-out)**: `--join` accepts a comma-separated
+  list of router gRPC URLs. One announce stream is spawned per router per model.
+  Each router holds an independent copy of grid state rebuilt from live streams.
+  No coordination needed — state converges within one heartbeat interval (10s).
+- **Grid authentication**: `--grid-key SECRET` (or `LARQL_GRID_KEY` env var) on
+  both router and server. Router rejects `Join` streams with
+  `Status::UNAUTHENTICATED` if the bearer token is wrong or absent. Server
+  injects `Authorization: Bearer <key>` via a tonic interceptor on every outgoing
+  RPC including reconnects.
+- **Vindex identity hash**: `vindex_identity_hash(model_id, num_layers)` computed
+  on the server (stable hash of model identity, not a cryptographic primitive).
+  Sent in `AnnounceMsg.vindex_hash`. Router logs it on registration — mismatched
+  model versions are immediately visible.
+- **Static shard fallback**: grid takes priority; if no grid route is found for a
+  layer, the handler falls through to the static `--shards` map. Both modes
+  coexist.
+- **Connection pool tuning**: reqwest client configured with `tcp_keepalive(30s)`,
+  `pool_idle_timeout(90s)`, `pool_max_idle_per_host(16)` — avoids per-hop TCP
+  handshake overhead.
+
+**Measured latency (Gemma 3 4B, localhost):**
+- Per-hop overhead: ~2.4 ms (routing + HTTP round-trip)
+- Full 34-layer pass (serial): ~371 ms (34 × 10.9 ms)
+- Shard size does not affect latency — `RemoteWalkBackend` calls one layer at a
+  time regardless of shard size. Shard size only affects RSS.
+
+**Typical launch:**
+
+```bash
+# Router — with auth, grid on port 50052
+larql-router \
+  --grid-port 50052 \
+  --grid-key "$(cat /run/secrets/grid_key)" \
+  --port 9090
+
+# Server — announces to two routers (fan-out HA)
+larql-server output/gemma3-4b-q4k.vindex \
+  --ffn-only --layers 0-16 \
+  --join "http://router-a:50052,http://router-b:50052" \
+  --grid-key "$(cat /run/secrets/grid_key)" \
+  --public-url "http://server-a:8080"
+```
+
+---
+
+### Phase 2 — Available mode (pending)
 
 - `AvailableMsg` handling — add server to available pool
 - Gap monitor background task — scan matrix every 5s, assign from pool
 - `AssignMsg` sent to available server; `RefuseMsg` handling tries next
 - `ReadyMsg` handling — server moves from loading to serving
 
-### Phase 3 — Heartbeat and health (2 days)
+### Phase 3 — Heartbeat and health (partial — heartbeat implemented)
 
-- `HeartbeatMsg` processing — update server metrics in `ServerRegistry`
-- Dead server detection — stream disconnect triggers immediate coverage update
-- `requests_in_flight` used for load-aware replica selection
+- ✅ `HeartbeatMsg` processing — updates `cpu_pct`, `ram_used`, `requests_in_flight`
+- ✅ Dead server detection — stream disconnect triggers immediate deregister + table rebuild
+- ✅ `requests_in_flight` used for load-aware replica selection
+- ⬜ Stale heartbeat eviction — evict servers that haven't sent a heartbeat in >N seconds
 
-### Phase 4 — Rebalancing (3 days)
+### Phase 4 — Rebalancing (pending)
 
 - Replica count tracking per shard
 - Under-replication detection — assign additional servers
 - Over-replication detection — send `UnassignMsg` to least loaded replica
 - Load-based replication — hot shard threshold config
 
-### Phase 5 — Admin CLI (1 day)
+### Phase 5 — Admin CLI (pending)
 
-- `larql-router status` — grid status table
+- `larql-router status` — grid status table (gRPC `Status` RPC is implemented; CLI is not)
 - `larql-router drain --server` — graceful server removal
 - `larql-router assign` — force assignment of a layer range
 - `larql-router gaps` — gap report per model

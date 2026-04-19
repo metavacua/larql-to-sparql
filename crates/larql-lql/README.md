@@ -38,7 +38,7 @@ larql-server).
 | **Introspection** | `SHOW {RELATIONS, LAYERS, FEATURES, MODELS, PATCHES}`, `STATS` | metadata |
 | **Pipe** | `<stmt> \|> <stmt>` | composition |
 
-The full grammar is in `docs/lql-spec.md`. The user-facing tutorial is in
+The full grammar is in `docs/specs/lql-spec.md`. The user-facing tutorial is in
 `docs/lql-guide.md`.
 
 ## INSERT: two modes
@@ -128,7 +128,7 @@ COMPILE CURRENT INTO VINDEX "out.vindex"
 > The online refine pass (Gram-Schmidt against cached decoy residuals) runs at INSERT time, so
 > no compile-time refine step is needed — INSERT already handles bleed defense.
 
-The full mechanism is documented in `docs/vindex-operations-spec.md` §1.6.
+The full mechanism is documented in `docs/specs/vindex-operations-spec.md` §1.6.
 
 ## COMPILE INTO MODEL (MEMIT)
 

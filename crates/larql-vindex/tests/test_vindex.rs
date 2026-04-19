@@ -1751,6 +1751,7 @@ fn make_synthetic_model() -> larql_models::ModelWeights {
     larql_models::ModelWeights {
         tensors,
         vectors,
+        raw_bytes: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers,

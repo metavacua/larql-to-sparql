@@ -134,9 +134,10 @@ struct Cli {
     #[arg(long)]
     tls_key: Option<PathBuf>,
 
-    /// Join the self-assembling grid at this router gRPC address.
-    /// Example: "http://router:50052"
-    /// Requires --public-url so the router knows where to send clients.
+    /// Join one or more router grids (comma-separated gRPC addresses).
+    /// Example: "http://router-a:50052,http://router-b:50052"
+    /// Each router gets an independent announce stream — stateless fan-out.
+    /// Requires --public-url so routers know where to send clients.
     #[arg(long)]
     join: Option<String>,
 
@@ -145,6 +146,11 @@ struct Cli {
     /// Example: "http://server-a:8080"
     #[arg(long)]
     public_url: Option<String>,
+
+    /// Shared secret matching the router's --grid-key.
+    /// Required when the router enforces grid authentication.
+    #[arg(long, env = "LARQL_GRID_KEY")]
+    grid_key: Option<String>,
 }
 
 fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
@@ -423,25 +429,37 @@ async fn main() -> Result<(), BoxError> {
     let addr = format!("{}:{}", cli.host, cli.port);
 
     // Grid announce (if --join provided).
-    if let Some(join_url) = cli.join.clone() {
+    if let Some(join_spec) = cli.join.clone() {
         let listen_url = cli.public_url.clone().unwrap_or_else(|| {
             let host = if cli.host == "0.0.0.0" { "127.0.0.1" } else { &cli.host };
             format!("http://{}:{}", host, cli.port)
         });
-        // Collect announce params from all loaded models.
+        let join_urls: Vec<String> = join_spec
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if join_urls.len() > 1 {
+            info!("Joining {} routers (stateless fan-out)", join_urls.len());
+        }
         for m in &models {
             let (layer_start, layer_end) = match layer_range {
-                Some((s, e)) => (s as u32, (e - 1) as u32), // e is exclusive internally
+                Some((s, e)) => (s as u32, (e - 1) as u32),
                 None => (0, (m.config.num_layers.saturating_sub(1)) as u32),
             };
-            announce::run_announce(announce::AnnounceConfig {
-                join_url: join_url.clone(),
-                model_id: m.id.clone(),
-                layer_start,
-                layer_end,
-                listen_url: listen_url.clone(),
-                ram_bytes: 0,
-            });
+            let vhash = announce::vindex_identity_hash(&m.id, m.config.num_layers);
+            for join_url in &join_urls {
+                announce::run_announce(announce::AnnounceConfig {
+                    join_url: join_url.clone(),
+                    model_id: m.id.clone(),
+                    layer_start,
+                    layer_end,
+                    listen_url: listen_url.clone(),
+                    ram_bytes: 0,
+                    grid_key: cli.grid_key.clone(),
+                    vindex_hash: vhash.clone(),
+                });
+            }
         }
     }
 

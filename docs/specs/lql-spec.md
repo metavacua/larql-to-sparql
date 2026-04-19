@@ -1624,4 +1624,4 @@ The residual stream trace enables infinite context without KV cache. Boundary re
 
 370K tokens (Apollo 11 transcript): 55-110 MB vs 56 GB KV cache.
 
-**Status:** Implemented in `trace/` module. File formats: `.bin` (full chains), `.bndx` (boundaries), `.ctxt` (tiered context). Mmap'd, append-only, zero-copy. See `docs/residual-trace.md` and `docs/trace-format-spec.md`.
+**Status:** Implemented in `trace/` module. File formats: `.bin` (full chains), `.bndx` (boundaries), `.ctxt` (tiered context). Mmap'd, append-only, zero-copy. See `docs/residual-trace.md` and `docs/specs/trace-format-spec.md`.

@@ -43,7 +43,7 @@ pub mod metal;
 pub use pipeline::{
     QuantFormat, QuantWeight,
     NormType, FfnType, Activation,
-    FullPipelineLayer,
+    FullPipelineLayer, MoeLayerWeights,
 };
 
 // ── Re-exports: backend ──

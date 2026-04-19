@@ -82,15 +82,15 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
 - **Storage is mmap-first.** Gate vectors, embeddings, down weights are zero-copy `mmap`'d. f16 is the default dtype (`--f16` halves size with negligible accuracy loss). Don't load entire tensors into RAM unless an operation requires it.
 - **Three extraction levels, not features.** `browse` (~3 GB), `inference` (~6 GB), `all` (~10 GB) — gated by `ExtractLevel` enum in [crates/larql-vindex/src/config/types.rs](crates/larql-vindex/src/config/types.rs). Check level before attempting an operation; fail loudly if weights aren't present.
 - **Walk FFN is sparse-by-design and can beat dense** (517ms vs 535ms on Gemma 4B) because gate KNN (K≈10) skips most of the 10,240 features per layer. If you touch FFN code, preserve this invariant — see [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md).
-- **MXFP4 quantized MoE (GPT-OSS) has degraded DESCRIBE/WALK** due to 4-bit precision; `INFER` is the supported path. Don't assume all model families are equivalent — see [docs/vindex-operations-spec.md](docs/vindex-operations-spec.md).
+- **MXFP4 quantized MoE (GPT-OSS) has degraded DESCRIBE/WALK** due to 4-bit precision; `INFER` is the supported path. Don't assume all model families are equivalent — see [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md).
 
 ## Where to find things
 
-- LQL language spec: [docs/lql-spec.md](docs/lql-spec.md) (v0.3)
-- Vindex file format: [docs/vindex-format-spec.md](docs/vindex-format-spec.md)
-- Operations + patches: [docs/vindex-operations-spec.md](docs/vindex-operations-spec.md)
-- Ecosystem (HF publish, Vindexfile): [docs/vindex-ecosystem-spec.md](docs/vindex-ecosystem-spec.md)
+- LQL language spec: [docs/specs/lql-spec.md](docs/specs/lql-spec.md) (v0.3)
+- Vindex file format: [docs/specs/vindex-format-spec.md](docs/specs/vindex-format-spec.md)
+- Operations + patches: [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md)
+- Ecosystem (HF publish, Vindexfile): [docs/specs/vindex-ecosystem-spec.md](docs/specs/vindex-ecosystem-spec.md)
 - Inference engine internals: [docs/inference-engine.md](docs/inference-engine.md), [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md)
-- Trace format (.bin/.bndx/.ctxt): [docs/trace-format-spec.md](docs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
+- Trace format (.bin/.bndx/.ctxt): [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md), [docs/residual-trace.md](docs/residual-trace.md)
 - Experimental work: [experiments/](experiments/) — numbered 01-07, each self-contained
 - Python bindings docs: [crates/larql-python/README.md](crates/larql-python/README.md), [docs/larql-python.md](docs/larql-python.md)

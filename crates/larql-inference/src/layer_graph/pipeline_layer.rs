@@ -4,7 +4,7 @@
 //! from larql-models and wiring them into larql-compute's FullPipelineLayer.
 //! Both GPU and CPU paths use this — no duplicated param extraction.
 
-use larql_compute::{QuantWeight, QuantFormat, FullPipelineLayer};
+use larql_compute::{QuantWeight, QuantFormat, FullPipelineLayer, MoeLayerWeights};
 use crate::model::ModelWeights;
 
 /// Extract per-layer architecture parameters into a FullPipelineLayer.
@@ -91,11 +91,59 @@ pub fn build_arch_params<'a>(
         ffn_down_bias: arch.ffn_down_bias_key(layer)
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
 
-        // Hybrid MoE (Gemma 4 A4B). Packed BF16 expert tensors are not stored in
-        // ModelWeights.vectors — they require a raw-bytes weight store that doesn't
-        // exist yet. Set None until raw-bytes loading lands.
-        moe: None,
+        moe: build_moe_weights(weights, arch, layer),
     }
+}
+
+fn build_moe_weights<'a>(
+    weights: &'a ModelWeights,
+    arch: &dyn larql_models::ModelArchitecture,
+    layer: usize,
+) -> Option<MoeLayerWeights<'a>> {
+    if !arch.is_hybrid_moe() { return None; }
+
+    let gate_up_key = arch.packed_experts_gate_up_key(layer)?;
+    let down_key = arch.packed_experts_down_key(layer)?;
+    let router_key = arch.moe_router_key(layer)?;
+
+    let experts_gate_up = weights.raw_bytes.get(&gate_up_key)?.as_slice();
+    let experts_down = weights.raw_bytes.get(&down_key)?.as_slice();
+    let router_proj = weights.vectors.get(&router_key)?.as_slice();
+
+    let router_scale = arch.moe_router_scale_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let router_per_expert_scale = arch.moe_router_per_expert_scale_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let pre_experts_norm = arch.moe_pre_experts_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let post_ffn1_norm = arch.moe_post_ffn1_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let post_experts_norm = arch.moe_post_experts_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+
+    Some(MoeLayerWeights {
+        experts_gate_up,
+        experts_down,
+        router_proj,
+        router_scale,
+        router_per_expert_scale,
+        pre_experts_norm,
+        post_ffn1_norm,
+        post_experts_norm,
+        num_experts: arch.num_experts(),
+        top_k: arch.num_experts_per_token(),
+        intermediate_size: arch.moe_intermediate_size(),
+    })
 }
 
 /// Helper: resolve attention weights from vindex (Q4_K preferred, Q8 fallback).

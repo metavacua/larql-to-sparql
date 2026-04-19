@@ -32,17 +32,15 @@ pub struct ServerEntry {
     pub last_seen: Instant,
 }
 
-impl ServerEntry {
-    fn owns(&self, layer: u32) -> bool {
-        layer >= self.layer_start && layer <= self.layer_end
-    }
-}
-
 // ── Grid state ────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct GridState {
     servers: HashMap<String, ServerEntry>,
+    // Pre-built: (model_id, layer) → server_ids; rebuilt only on topology change.
+    route_table: HashMap<(String, u32), Vec<String>>,
+    // Pre-built: layer → server_ids for model_id=None (single-model) queries.
+    any_model_table: HashMap<u32, Vec<String>>,
 }
 
 impl GridState {
@@ -55,6 +53,7 @@ impl GridState {
             "Grid: server joined"
         );
         self.servers.insert(entry.server_id.clone(), entry);
+        self.rebuild_route_table();
         self.log_coverage();
     }
 
@@ -66,6 +65,7 @@ impl GridState {
                 layers = %format!("{}-{}", entry.layer_start, entry.layer_end),
                 "Grid: server left"
             );
+            self.rebuild_route_table();
             self.log_coverage();
         }
     }
@@ -83,23 +83,55 @@ impl GridState {
             entry.requests_in_flight = requests_in_flight;
             entry.last_seen = Instant::now();
         }
+        // Heartbeats don't change topology — no table rebuild needed.
     }
 
-    /// Route a layer request to a listen_url. Picks least-loaded replica.
-    /// model_id is optional — if None, matches any model (single-model grids).
+    /// Route one layer. O(1) table lookup + O(replicas) least-loaded scan.
     pub fn route(&self, model_id: Option<&str>, layer: u32) -> Option<String> {
-        let candidates: Vec<&ServerEntry> = self
-            .servers
-            .values()
-            .filter(|s| {
-                s.owns(layer)
-                    && model_id.map_or(true, |m| s.model_id == m)
-            })
-            .collect();
-        candidates
-            .iter()
-            .min_by_key(|s| s.requests_in_flight)
-            .map(|s| s.listen_url.clone())
+        let ids = match model_id {
+            Some(m) => self.route_table.get(&(m.to_owned(), layer)),
+            None => self.any_model_table.get(&layer),
+        };
+        ids.and_then(|server_ids| {
+            server_ids
+                .iter()
+                .filter_map(|id| self.servers.get(id))
+                .min_by_key(|s| s.requests_in_flight)
+                .map(|s| s.listen_url.clone())
+        })
+    }
+
+    /// Resolve all layers in one call — one lock acquisition covers the whole batch.
+    /// Returns Ok(layer → url) or Err(first layer with no owning shard).
+    pub fn route_all(
+        &self,
+        model_id: Option<&str>,
+        layers: &[usize],
+    ) -> Result<HashMap<usize, String>, usize> {
+        let mut out = HashMap::with_capacity(layers.len());
+        for &layer in layers {
+            match self.route(model_id, layer as u32) {
+                Some(url) => { out.insert(layer, url); }
+                None => return Err(layer),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Rebuild layer→servers index. Called only on join/leave (cold path).
+    fn rebuild_route_table(&mut self) {
+        let mut rt: HashMap<(String, u32), Vec<String>> = HashMap::new();
+        let mut any: HashMap<u32, Vec<String>> = HashMap::new();
+        for entry in self.servers.values() {
+            for layer in entry.layer_start..=entry.layer_end {
+                rt.entry((entry.model_id.clone(), layer))
+                    .or_default()
+                    .push(entry.server_id.clone());
+                any.entry(layer).or_default().push(entry.server_id.clone());
+            }
+        }
+        self.route_table = rt;
+        self.any_model_table = any;
     }
 
     fn log_coverage(&self) {
@@ -190,14 +222,17 @@ impl GridState {
 pub struct GridServiceImpl {
     pub state: Arc<RwLock<GridState>>,
     next_id: AtomicU64,
+    /// If set, every incoming Join stream must present "Authorization: Bearer <key>".
+    grid_key: Option<String>,
 }
 
 impl GridServiceImpl {
     pub fn new(state: Arc<RwLock<GridState>>) -> Self {
-        Self {
-            state,
-            next_id: AtomicU64::new(1),
-        }
+        Self { state, next_id: AtomicU64::new(1), grid_key: None }
+    }
+
+    pub fn new_with_key(state: Arc<RwLock<GridState>>, key: Option<String>) -> Self {
+        Self { state, next_id: AtomicU64::new(1), grid_key: key }
     }
 
     fn alloc_server_id(&self) -> String {
@@ -220,6 +255,18 @@ impl GridService for GridServiceImpl {
         &self,
         request: Request<Streaming<ServerMessage>>,
     ) -> Result<Response<Self::JoinStream>, Status> {
+        // Auth check — reject streams that don't carry the correct grid key.
+        if let Some(expected) = &self.grid_key {
+            let token = request
+                .metadata()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "));
+            if token.map(|t| t != expected).unwrap_or(true) {
+                return Err(Status::unauthenticated("invalid grid key"));
+            }
+        }
+
         let state = self.state.clone();
         let server_id = self.alloc_server_id();
         let (tx, rx) = mpsc::channel::<Result<RouterMessage, Status>>(32);

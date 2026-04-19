@@ -1,6 +1,6 @@
 # ADR-0003 — FFN Router: Transparent Dispatch Tier
 
-**Status:** Draft  
+**Status:** Accepted — Phase 1 (dense HTTP router) implemented  
 **Depends on:** ADR-0002 (Three-Tier Cache)
 
 ---
