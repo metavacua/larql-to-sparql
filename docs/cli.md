@@ -489,7 +489,7 @@ larql dev walk --prompt <PROMPT> [OPTIONS]
 | `--compare` | Compare walk FFN predictions against dense ground truth (requires `--model`). Incompatible with `--ffn-remote`. |
 | `--down-top-k <N>` | Number of down tokens to show per feature [default: 5] |
 | `-v, --verbose` | Show verbose loading and timing info |
-| `--ffn-remote <URL>` | Route FFN to a remote `larql-server` via `POST /v1/walk-ffn` (`full_output: true`). Attention still runs locally; each layer's FFN is a round trip. Same wire protocol that [`larql run --ffn`](#larql-run) uses. |
+| `--ffn-remote <URL>` | Route FFN to a remote `larql-server` via `POST /v1/walk-ffn` (`full_output: true`). Attention still runs locally; all layers are sent in a single binary batch round trip (`application/x-larql-ffn`, little-endian f32). Falls back to JSON if the server does not support binary. Same wire protocol that [`larql run --ffn`](#larql-run) uses. |
 | `--ffn-remote-timeout-secs <N>` | Per-request HTTP timeout for `--ffn-remote` [default: 60] |
 
 **Examples:**

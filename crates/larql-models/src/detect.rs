@@ -486,6 +486,46 @@ mod tests {
 
         let arch = detect_from_json(&config);
         assert_eq!(arch.family(), "qwen3");
+        assert!(!arch.is_moe());
+    }
+
+    #[test]
+    fn test_detect_qwen3_moe_30b() {
+        // Matches Qwen/Qwen3-30B-A3B config.json
+        let config = serde_json::json!({
+            "model_type": "qwen3_moe",
+            "hidden_size": 2048,
+            "intermediate_size": 6144,
+            "moe_intermediate_size": 768,
+            "num_hidden_layers": 48,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 8,
+            "num_experts": 128,
+            "num_experts_per_tok": 8
+        });
+
+        let arch = detect_from_json(&config);
+        assert!(arch.is_moe());
+        assert!(!arch.is_hybrid_moe());
+        assert_eq!(arch.num_experts(), 128);
+        assert_eq!(arch.num_experts_per_token(), 8);
+        assert_eq!(arch.moe_intermediate_size(), 768);
+        assert_eq!(
+            arch.moe_router_key(0).unwrap(),
+            "layers.0.mlp.gate.weight"
+        );
+        assert_eq!(
+            arch.expert_ffn_gate_key(0, 5).unwrap(),
+            "layers.0.mlp.experts.5.gate_proj.weight"
+        );
+        assert_eq!(
+            arch.expert_ffn_up_key(0, 5).unwrap(),
+            "layers.0.mlp.experts.5.up_proj.weight"
+        );
+        assert_eq!(
+            arch.expert_ffn_down_key(0, 5).unwrap(),
+            "layers.0.mlp.experts.5.down_proj.weight"
+        );
     }
 
     #[test]

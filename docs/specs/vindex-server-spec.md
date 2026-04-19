@@ -799,9 +799,11 @@ Clients can send `If-None-Match` to receive `304 Not Modified` when the response
 
 ### 12.4 Decoupled Inference Protocol (implemented)
 
-`POST /v1/walk-ffn` — client sends a residual vector, server runs gate KNN and returns selected features + scores.
+`POST /v1/walk-ffn` has two modes.
 
-**Single layer:**
+#### Features-only mode (default)
+
+Client POSTs a `[hidden_size]` residual; server runs gate KNN and returns feature indices + scores. The client still needs `up_features.bin` + `down_features.bin` locally to compute the FFN output.
 
 ```json
 POST /v1/walk-ffn
@@ -809,15 +811,42 @@ POST /v1/walk-ffn
 → {"layer": 26, "features": [9515, 4532, ...], "scores": [1436.9, 26.1, ...], "latency_ms": 0.01}
 ```
 
-**Batched (all layers in one round-trip):**
-
+**Batched:**
 ```json
-POST /v1/walk-ffn
-{"layers": [0, 1, ..., 33], "residual": [0.12, -0.34, ...]}
+{"layers": [0, 1, ..., 33], "residual": [...]}
 → {"results": [{"layer": 0, "features": [...], "scores": [...]}, ...], "latency_ms": 0.3}
 ```
 
-Single-layer mode: 34 round-trips per token. Batched mode: 1 round-trip (~200ms per token anywhere). Validates that residual length matches hidden_size.
+#### Full-output mode (`"full_output": true`)
+
+Client POSTs a `[seq_len × hidden_size]` row-major residual; server runs the architecture-correct WalkFfn path (gate KNN → activation → up gather → down projection) and returns the FFN output for each layer. This is what `--ffn-remote` uses — the server holds all FFN weights, the client holds only attention.
+
+```json
+POST /v1/walk-ffn
+{"layer": 5, "residual": [...], "seq_len": 1, "full_output": true}
+→ {"layer": 5, "output": [...], "seq_len": 1, "latency_ms": 8.1}
+```
+
+**Batched** (all layers in one round-trip):
+```json
+{"layers": [0, 1, ..., 33], "residual": [...], "seq_len": 1, "full_output": true}
+→ {"results": [{"layer": 0, "output": [...], "seq_len": 1}, ...], "latency_ms": 8.3}
+```
+
+Validates that `residual.len() == seq_len * hidden_size`.
+
+#### Binary wire format (`Content-Type: application/x-larql-ffn`)
+
+Full-output mode also accepts a compact binary encoding that eliminates JSON float serialization overhead (~0.5 ms/hop on Gemma 3 4B). The `RemoteWalkBackend` client uses binary by default.
+
+```
+Request single layer:  [layer u32 LE][seq_len u32][flags u32 bit0=1][top_k u32][residual f32[]]
+Request batch:         [0xFFFFFFFF][num_layers u32][layer u32[]...][seq_len u32][flags u32][top_k u32][residual f32[]]
+Response single layer: [layer u32 LE][seq_len u32][latency_ms f32][output f32[]]
+Response batch:        [0xFFFFFFFF][num_results u32][latency_ms f32] + per result: [layer u32][seq_len u32][num_floats u32][output f32[]]
+```
+
+Binary requires `full_output = true`. Features-only binary is rejected with HTTP 400. Full format spec: `docs/ffn/distributed.md` and `docs/specs/larql-router-spec.md §8`.
 
 ---
 
