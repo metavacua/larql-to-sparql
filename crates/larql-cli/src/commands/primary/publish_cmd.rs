@@ -22,6 +22,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::commands::primary::cache;
 use crate::commands::primary::slice_cmd::{preset_parts, slice_vindex, Part};
@@ -520,7 +521,7 @@ fn execute_step(
 }
 
 fn upload_dir(dir: &Path, repo: &str, force_upload: bool) -> Result<String, Box<dyn std::error::Error>> {
-    let mut callbacks = CliPublishCallbacks;
+    let mut callbacks = CliPublishCallbacks::new();
     let opts = larql_vindex::PublishOptions {
         skip_unchanged: !force_upload,
     };
@@ -529,10 +530,43 @@ fn upload_dir(dir: &Path, repo: &str, force_upload: bool) -> Result<String, Box<
 }
 
 // ─── Progress reporter ───────────────────────────────────────────────────
-// Mirrors hf_cmd::CliPublishCallbacks but indented so output is readable
-// when multiple uploads stream in one `larql publish` run.
+//
+// One `MultiProgress` per upload-step (i.e. per sibling repo). Each file
+// gets its own bar via `on_file_start`; `on_file_progress` ticks it as
+// bytes flow through the counting-reader upload body (see
+// `larql_vindex::upload_file_to_hf`). Skipped files get a finished bar
+// so the line stays visible in the scrollback.
 
-struct CliPublishCallbacks;
+struct CliPublishCallbacks {
+    mp: MultiProgress,
+    current: Option<ProgressBar>,
+}
+
+impl CliPublishCallbacks {
+    fn new() -> Self {
+        Self {
+            mp: MultiProgress::new(),
+            current: None,
+        }
+    }
+}
+
+fn make_upload_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "    {msg:28} [{elapsed_precise}] [{wide_bar:.green/blue}] \
+         {bytes:>10}/{total_bytes:<10} {bytes_per_sec:>10} ({eta})",
+    )
+    .unwrap()
+    .progress_chars("#>-")
+}
+
+fn truncate_msg(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("…{}", &s[s.len() - (max - 1)..])
+    } else {
+        s.to_string()
+    }
+}
 
 impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     fn on_start(&mut self, repo: &str) {
@@ -540,23 +574,44 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     }
 
     fn on_file_start(&mut self, filename: &str, size: u64) {
-        eprint!("    Uploading {} ({})…", filename, human_size(size));
+        let bar = self.mp.add(ProgressBar::new(size));
+        bar.set_style(make_upload_style());
+        bar.set_message(truncate_msg(filename, 28));
+        self.current = Some(bar);
+    }
+
+    fn on_file_progress(&mut self, _filename: &str, bytes_sent: u64, _total_bytes: u64) {
+        if let Some(ref bar) = self.current {
+            bar.set_position(bytes_sent);
+        }
     }
 
     fn on_file_done(&mut self, _filename: &str) {
-        eprintln!(" done");
+        if let Some(bar) = self.current.take() {
+            bar.finish();
+        }
     }
 
     fn on_file_skipped(&mut self, filename: &str, size: u64, sha256: &str) {
-        // Truncated hash: short enough to fit on one line, still unique
-        // enough to spot-check against `sha256sum` or the HF file card.
-        let short_sha = sha256.get(..12).unwrap_or(sha256);
-        eprintln!(
-            "    Skipping  {} ({}) — unchanged (sha256 {}…)",
-            filename,
-            human_size(size),
-            short_sha
+        // A finished bar that reads "skipped — sha256 abc123def456…" so the
+        // line stays visible in scrollback alongside the uploaded files.
+        let bar = self.mp.add(ProgressBar::new(size));
+        bar.set_style(
+            ProgressStyle::with_template(
+                "    {msg:28} [skipped — unchanged, sha256 {prefix:.dim}…]",
+            )
+            .unwrap(),
         );
+        bar.set_message(truncate_msg(filename, 28));
+        let short_sha = sha256.get(..12).unwrap_or(sha256);
+        // indicatif doesn't expose custom template keys per-bar, so embed
+        // the hash via `with_finish_message` / a set-message variant.
+        // Simpler: just finish the bar with a preformatted message.
+        bar.finish_with_message(format!(
+            "{:<28} [skipped — unchanged, sha256 {}…]",
+            truncate_msg(filename, 28),
+            short_sha
+        ));
     }
 
     fn on_complete(&mut self, url: &str) {

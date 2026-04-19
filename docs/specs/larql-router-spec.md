@@ -306,7 +306,57 @@ WantedBy=multi-user.target
 
 ---
 
-## 8. Connection Pool
+## 8. Binary Wire Format
+
+The router transparently forwards the binary wire format (`Content-Type:
+application/x-larql-ffn`) without parsing. Clients and servers that support
+binary format can use it end-to-end with no router changes.
+
+### Format summary
+
+```
+Single-layer request:
+  [4: layer u32 LE][4: seq_len u32][4: flags u32 (bit0=full_output)][4: top_k u32]
+  [residual f32[] LE]
+
+Batch request:
+  [4: BATCH_MARKER=0xFFFFFFFF][4: num_layers u32][K×4: layer u32[]LE]
+  [4: seq_len u32][4: flags u32][4: top_k u32][residual f32[] LE]
+
+Single-layer response:
+  [4: layer u32 LE][4: seq_len u32][4: latency f32][output f32[] LE]
+
+Batch response:
+  [4: BATCH_MARKER][4: num_results u32][4: latency f32]
+  Per result: [4: layer u32][4: seq_len u32][4: num_floats u32][output f32[] LE]
+```
+
+### Constraints
+
+- Binary format requires `full_output = true`. Features-only binary requests
+  are rejected by the server with HTTP 400.
+- **Multi-shard binary fan-out is not supported.** The router cannot split a
+  binary batch across shards. Use JSON for cross-shard batches or route
+  shard-local batches directly. The single-shard case (all layers on one
+  shard) is forwarded raw regardless of format.
+- `model_id` is not encoded in the binary format; multi-model binary routing
+  uses the grid's default routing for that layer.
+
+### Performance
+
+Measured on Gemma 3 4B (hidden_size=3072, seq_len=1):
+
+| Format  | Request size | Shard latency (median) |
+|---------|-------------|------------------------|
+| JSON    | ~15.4 KB    | ~8.1 ms                |
+| Binary  | ~10.3 KB    | ~7.6 ms                |
+
+~33% smaller requests, ~0.5 ms/hop savings from eliminating JSON float
+serialization.
+
+---
+
+## 9. Connection Pool
 
 The reqwest client to backend shards is configured for low-latency reuse:
 
@@ -322,7 +372,7 @@ hop.
 
 ---
 
-## 9. What Is Not Yet Implemented
+## 10. What Is Not Yet Implemented
 
 Tracked in ADR-0003 / ADR-0004:
 
@@ -336,7 +386,7 @@ Tracked in ADR-0003 / ADR-0004:
 
 ---
 
-## 10. Crate Structure
+## 11. Crate Structure
 
 ```
 crates/larql-router-protocol/       shared proto types (router + server)

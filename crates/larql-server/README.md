@@ -272,6 +272,37 @@ POST /v1/walk-ffn
 → {"results": [{"layer": 0, "features": [...], "scores": [...]}, ...], "latency_ms": 0.3}
 ```
 
+**Full-output mode** — returns the computed FFN output vector (gate KNN → up
+gather → down projection). Requires model weights (`--ffn-only` is sufficient).
+
+```json
+POST /v1/walk-ffn
+Content-Type: application/json
+{"layer": 26, "residual": [...], "seq_len": 1, "full_output": true}
+→ {"layer": 26, "output": [...], "seq_len": 1, "latency_ms": 8.1}
+```
+
+**Binary wire format** (`Content-Type: application/x-larql-ffn`) — eliminates
+JSON float serialization overhead. Only supported with `full_output: true`.
+
+```
+Single-layer request:
+  [4: layer u32 LE][4: seq_len u32][4: flags u32 (bit0=1)][4: top_k u32][residual f32[] LE]
+
+Single-layer response:
+  [4: layer u32 LE][4: seq_len u32][4: latency f32][output f32[] LE]
+
+Batch request:  [4: BATCH_MARKER=0xFFFFFFFF][4: num_layers u32][layers u32[] LE]...
+Batch response: [4: BATCH_MARKER][4: num_results u32][4: latency f32]
+                per result: [4: layer][4: seq_len][4: num_floats][output f32[] LE]
+```
+
+Performance vs JSON (Gemma 3 4B, hidden_size=3072, seq_len=1): ~33% smaller
+requests, ~0.5 ms/hop faster.
+
+`RemoteWalkBackend` in `larql-inference` uses binary format automatically and
+exposes `forward_all_layers()` for a batched single-round-trip forward pass.
+
 ### gRPC
 
 All endpoints are available over gRPC using Protocol Buffers. Enable with `--grpc-port`:

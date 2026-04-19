@@ -24,11 +24,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::body::Bytes;
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::post;
 use axum::{Json, Router};
-use bytes::Bytes;
 use clap::Parser;
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -248,7 +248,7 @@ async fn handle_walk_ffn_inner(
         .map(|ct| ct.starts_with(BINARY_CT))
         .unwrap_or(false);
 
-    let body_bytes: Bytes = axum::body::to_bytes(request.into_body(), 64 * 1024 * 1024)
+    let body_bytes = axum::body::to_bytes(request.into_body(), 64 * 1024 * 1024)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("read body: {e}")))?;
 

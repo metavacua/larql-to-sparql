@@ -198,6 +198,45 @@ Key flags:
 
 ---
 
+## Binary Wire Format
+
+`RemoteWalkBackend` uses the binary wire format (`Content-Type:
+application/x-larql-ffn`) by default, eliminating JSON float
+serialization overhead on both the client and server.
+
+### Performance (Gemma 3 4B, hidden_size=3072, seq_len=1)
+
+| Format  | Request size | p50 latency |
+|---------|-------------|-------------|
+| JSON    | ~15.4 KB    | ~8.1 ms     |
+| Binary  | ~10.3 KB    | ~7.6 ms     |
+
+~33% smaller requests, ~0.5 ms/hop faster.
+
+### Batched forward pass
+
+`RemoteWalkBackend.forward_all_layers(layers, x)` sends all layers in a
+single HTTP round trip (binary batch request). The router fans the batch
+out to the owning shards in parallel. Wall-clock time = `max(shard
+latencies)`.
+
+```rust
+let backend = RemoteWalkBackend::connect(RemoteFfnConfig::new("http://router:9090"))?;
+let layer_outputs: HashMap<usize, Array2<f32>> =
+    backend.forward_all_layers(&(0..34).collect::<Vec<_>>(), &residual)?;
+```
+
+### Constraints
+
+- Binary format requires `full_output = true`.
+- Multi-shard binary fan-out is not supported at the router. Use JSON
+  for cross-shard batches, or route shard-local batches directly to the
+  shard.
+- `model_id` is not in the binary format; multi-model grids use the
+  default routing for that layer.
+
+---
+
 ## What Is Not Yet Implemented
 
 - **Mode B (available)** — server starts empty, router assigns a shard (ADR-0004 Phase 2)

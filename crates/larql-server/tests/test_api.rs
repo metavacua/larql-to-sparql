@@ -1485,3 +1485,217 @@ fn test_grpc_port_flag() {
     let grpc_port: Option<u16> = None;
     assert!(grpc_port.is_none()); // gRPC disabled
 }
+
+// ══════════════════════════════════════════════════════════════
+// BINARY WIRE FORMAT
+// ══════════════════════════════════════════════════════════════
+//
+// Tests for the `application/x-larql-ffn` binary protocol used by
+// POST /v1/walk-ffn.  These tests exercise the format constants and
+// codec round-trips independently of the HTTP stack.
+
+const BINARY_CT: &str = "application/x-larql-ffn";
+const BATCH_MARKER_U32: u32 = 0xFFFF_FFFF;
+
+fn bin_make_single_request(
+    layer: u32,
+    seq_len: u32,
+    full_output: bool,
+    top_k: u32,
+    residual: &[f32],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&layer.to_le_bytes());
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&(full_output as u32).to_le_bytes());
+    buf.extend_from_slice(&top_k.to_le_bytes());
+    for &v in residual {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_batch_request(
+    layers: &[u32],
+    seq_len: u32,
+    full_output: bool,
+    top_k: u32,
+    residual: &[f32],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&BATCH_MARKER_U32.to_le_bytes());
+    buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+    for &l in layers {
+        buf.extend_from_slice(&l.to_le_bytes());
+    }
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&(full_output as u32).to_le_bytes());
+    buf.extend_from_slice(&top_k.to_le_bytes());
+    for &v in residual {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_single_response(layer: u32, seq_len: u32, latency: f32, output: &[f32]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&layer.to_le_bytes());
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&latency.to_le_bytes());
+    for &v in output {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_batch_response(latency: f32, entries: &[(u32, &[f32])]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&BATCH_MARKER_U32.to_le_bytes());
+    buf.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&latency.to_le_bytes());
+    for &(layer, floats) in entries {
+        buf.extend_from_slice(&layer.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
+        buf.extend_from_slice(&(floats.len() as u32).to_le_bytes());
+        for &v in floats {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    buf
+}
+
+#[test]
+fn test_binary_content_type_constant() {
+    assert_eq!(BINARY_CT, "application/x-larql-ffn");
+}
+
+#[test]
+fn test_binary_batch_marker_constant() {
+    assert_eq!(BATCH_MARKER_U32, 0xFFFF_FFFFu32);
+}
+
+#[test]
+fn test_binary_single_request_first_u32_is_layer() {
+    let residual = vec![1.0f32, 0.0, 0.0, 0.0];
+    let body = bin_make_single_request(26, 1, true, 8092, &residual);
+    let layer = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    assert_eq!(layer, 26);
+    // Single-layer: first u32 must NOT be BATCH_MARKER
+    assert_ne!(layer, BATCH_MARKER_U32);
+}
+
+#[test]
+fn test_binary_batch_request_first_u32_is_marker() {
+    let residual = vec![1.0f32, 0.0, 0.0, 0.0];
+    let body = bin_make_batch_request(&[5, 20], 1, true, 8092, &residual);
+    let marker = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    assert_eq!(marker, BATCH_MARKER_U32);
+}
+
+#[test]
+fn test_binary_single_request_structure() {
+    // Verify all fixed header fields at expected offsets.
+    let residual = vec![0.5f32, -0.5];
+    let body = bin_make_single_request(7, 2, true, 512, &residual);
+    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let flags    = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    let top_k    = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    assert_eq!(layer, 7);
+    assert_eq!(seq_len, 2);
+    assert_eq!(flags & 1, 1); // full_output bit
+    assert_eq!(top_k, 512);
+    assert_eq!(body.len(), 16 + 2 * 4); // header + 2 floats
+}
+
+#[test]
+fn test_binary_batch_request_structure() {
+    let residual = vec![1.0f32; 4];
+    let body = bin_make_batch_request(&[5, 20, 30], 1, true, 128, &residual);
+    let num_layers = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    assert_eq!(num_layers, 3);
+    let l0 = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    let l1 = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let l2 = u32::from_le_bytes(body[16..20].try_into().unwrap());
+    assert_eq!((l0, l1, l2), (5, 20, 30));
+    // After 3 layer u32s: seq_len, flags, top_k
+    let seq_len = u32::from_le_bytes(body[20..24].try_into().unwrap());
+    let flags   = u32::from_le_bytes(body[24..28].try_into().unwrap());
+    let top_k   = u32::from_le_bytes(body[28..32].try_into().unwrap());
+    assert_eq!(seq_len, 1);
+    assert_eq!(flags & 1, 1);
+    assert_eq!(top_k, 128);
+}
+
+#[test]
+fn test_binary_single_response_structure() {
+    let output = vec![0.1f32, 0.2, 0.3];
+    let body = bin_make_single_response(26, 1, 9.5, &output);
+    // [layer u32][seq_len u32][latency f32][output f32*]
+    assert_eq!(body.len(), 12 + 3 * 4);
+    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let latency  = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(layer, 26);
+    assert_eq!(seq_len, 1);
+    assert!((latency - 9.5).abs() < 0.01);
+    let v0 = f32::from_le_bytes(body[12..16].try_into().unwrap());
+    assert!((v0 - 0.1).abs() < 1e-6);
+}
+
+#[test]
+fn test_binary_batch_response_structure() {
+    let body = bin_make_batch_response(
+        12.3,
+        &[(5, &[1.0, 2.0]), (20, &[3.0, 4.0])],
+    );
+    let marker      = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let num_results = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let latency     = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(marker, BATCH_MARKER_U32);
+    assert_eq!(num_results, 2);
+    assert!((latency - 12.3).abs() < 0.01);
+    // First result entry at offset 12
+    let layer0     = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let num_floats0 = u32::from_le_bytes(body[20..24].try_into().unwrap());
+    assert_eq!(layer0, 5);
+    assert_eq!(num_floats0, 2);
+}
+
+#[test]
+fn test_binary_float_roundtrip_exact() {
+    let values = vec![f32::MIN_POSITIVE, -0.0f32, 1.0, f32::MAX / 2.0, 1e-7];
+    let body = bin_make_single_response(0, 1, 0.0, &values);
+    let decoded: Vec<f32> = body[12..]
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    for (a, b) in decoded.iter().zip(values.iter()) {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "float bits differ: {:#010x} vs {:#010x}", a.to_bits(), b.to_bits()
+        );
+    }
+}
+
+#[test]
+fn test_binary_features_only_flag_zero() {
+    // Binary with full_output=false should have flags bit0 = 0.
+    let body = bin_make_single_request(5, 1, false, 8092, &[1.0, 0.0, 0.0, 0.0]);
+    let flags = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(flags & 1, 0, "full_output bit should be 0 for features-only");
+}
+
+#[test]
+fn test_binary_request_residual_size() {
+    // Residual for a hidden_size=4 model, seq_len=2 = 8 floats.
+    let residual: Vec<f32> = (0..8).map(|i| i as f32).collect();
+    let body = bin_make_single_request(0, 2, true, 8092, &residual);
+    let residual_bytes = &body[16..]; // after 4 header u32s
+    assert_eq!(residual_bytes.len(), 8 * 4);
+    for (i, chunk) in residual_bytes.chunks_exact(4).enumerate() {
+        let v = f32::from_le_bytes(chunk.try_into().unwrap());
+        assert!((v - i as f32).abs() < 1e-6);
+    }
+}
