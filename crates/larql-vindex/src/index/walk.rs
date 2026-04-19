@@ -9,7 +9,7 @@ use crate::error::VindexError;
 
 use super::core::VectorIndex;
 
-use crate::mmap_util::mmap_optimized;
+use crate::mmap_util::{mmap_demand_paged, mmap_optimized};
 
 /// Feature store methods for VectorIndex.
 impl VectorIndex {
@@ -22,7 +22,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: only the activated feature vectors are read per token.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.down_features_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -82,7 +83,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: only activated feature vectors are read per token.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.up_features_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -121,7 +123,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: per-layer prefetch issued at query time via prefetch_interleaved_layer.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -212,7 +215,7 @@ impl VectorIndex {
             return Err(VindexError::Parse("interleaved_q4.bin not found".into()));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_q4_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -235,7 +238,9 @@ impl VectorIndex {
             return Err(VindexError::Parse("interleaved_q4k.bin not found".into()));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: the q4k forward walk reads only the activated features'
+        // byte ranges per layer, not the entire 13 GB file.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_q4k_mmap = Some(Arc::new(mmap));
 
         let manifest_path = dir.join("interleaved_q4k_manifest.json");

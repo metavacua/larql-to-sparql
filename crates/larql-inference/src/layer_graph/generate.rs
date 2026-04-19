@@ -138,6 +138,7 @@ pub fn generate(
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
             decode_ms: vec![],
+            stage_timings: StageTimings::default(),
         };
     }
 
@@ -149,6 +150,7 @@ pub fn generate(
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
             decode_ms: vec![],
+            stage_timings: StageTimings::default(),
         };
     }
 
@@ -363,6 +365,10 @@ pub fn generate(
                 let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
                 let prob = super::logits::softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
                 let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
+                // CPU-fallback path: the full decode is attributed to `gpu_ms_total`
+                // for lack of a better bucket — consumers interpret it as "forward
+                // work" regardless of which backend ran it.
+                t_gpu += step_ms;
                 tokens.push((tok_str, prob));
                 current_token_id = tid;
                 if is_eos { break; }
@@ -380,7 +386,36 @@ pub fn generate(
         );
     }
 
-    GenerateResult { tokens, prefill_ms, decode_ms }
+    // Per-stage totals across all successful steps (not vec-per-step to
+    // keep the struct tiny — the `larql bench` harness averages these
+    // against `decode_ms.len()`).
+    GenerateResult {
+        tokens,
+        prefill_ms,
+        decode_ms,
+        stage_timings: StageTimings {
+            embed_ms_total: t_embed,
+            gpu_ms_total: t_gpu,
+            norm_ms_total: t_norm,
+            lm_head_ms_total: t_lmhead,
+            detok_ms_total: t_detok,
+        },
+    }
+}
+
+/// Sum of per-stage decode times across every successful step.
+///
+/// Dividing each field by `GenerateResult::decode_ms.len()` gives the
+/// per-token average. Populated unconditionally — the six
+/// `Instant::now()` calls per step are negligible next to the GPU
+/// forward pass and the LM-head gemv.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StageTimings {
+    pub embed_ms_total: f64,
+    pub gpu_ms_total: f64,
+    pub norm_ms_total: f64,
+    pub lm_head_ms_total: f64,
+    pub detok_ms_total: f64,
 }
 
 /// Result of multi-token generation.
@@ -388,6 +423,23 @@ pub struct GenerateResult {
     pub tokens: Vec<(String, f64)>,
     pub prefill_ms: f64,
     pub decode_ms: Vec<f64>,
+    pub stage_timings: StageTimings,
+}
+
+impl StageTimings {
+    /// Per-token average across `n` decode steps. Returns all-zero if
+    /// `n == 0` (short-circuit no-decode paths safely).
+    pub fn avg_per_step(&self, n: usize) -> StageTimings {
+        if n == 0 { return Self::default(); }
+        let nf = n as f64;
+        StageTimings {
+            embed_ms_total: self.embed_ms_total / nf,
+            gpu_ms_total: self.gpu_ms_total / nf,
+            norm_ms_total: self.norm_ms_total / nf,
+            lm_head_ms_total: self.lm_head_ms_total / nf,
+            detok_ms_total: self.detok_ms_total / nf,
+        }
+    }
 }
 
 impl GenerateResult {

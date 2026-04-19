@@ -1,6 +1,26 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[cfg(unix)]
+extern crate libc;
+
+/// Current process RSS in megabytes (best-effort).
+fn rss_mb() -> f64 {
+    #[cfg(unix)]
+    unsafe {
+        let mut usage: libc::rusage = std::mem::zeroed();
+        libc::getrusage(libc::RUSAGE_SELF, &mut usage);
+        // macOS: ru_maxrss is bytes. Linux: kilobytes.
+        #[cfg(target_os = "macos")]
+        let bytes = usage.ru_maxrss as u64;
+        #[cfg(not(target_os = "macos"))]
+        let bytes = (usage.ru_maxrss as u64) * 1024;
+        bytes as f64 / (1024.0 * 1024.0)
+    }
+    #[cfg(not(unix))]
+    { 0.0 }
+}
+
 use clap::Args;
 use larql_vindex::{
     load_vindex_embeddings, load_vindex_tokenizer,
@@ -172,6 +192,9 @@ pub fn run(args: WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
         index.total_down_meta(),
         load_start.elapsed().as_secs_f64()
     );
+    // RSS at this point = attn + embed + norms (gate vectors demand-paged,
+    // not yet faulted in). Useful for the "7 GB" claim in demos.
+    vlog!(verbose, "  RSS at load: {:.1} GB (gate vectors not yet resident)", rss_mb() / 1024.0);
 
     // Parse layer selection
     let all_layers = index.loaded_layers();
@@ -360,6 +383,9 @@ fn run_with_vindex_weights(
             weights.hidden_size,
             load_start.elapsed().as_secs_f64()
         );
+        // RSS now = attn weights + embeddings + norms. FFN payload (gate_vectors,
+        // interleaved_q4k) is demand-paged; pages fault in during inference.
+        vlog!(verbose, "  RSS after weights: {:.1} GB", rss_mb() / 1024.0);
         return run_predict_q4k(&mut weights, &tokenizer, args, index);
     }
 

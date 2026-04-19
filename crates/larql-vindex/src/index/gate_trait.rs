@@ -65,6 +65,15 @@ impl GateIndex for VectorIndex {
         self.gate_scores_batch(layer, x)
     }
 
+    fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Array2<f32>> {
+        self.gate_scores_batch_backend(layer, x, backend)
+    }
+
     fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.up_layer_matrix(layer)
     }

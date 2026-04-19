@@ -63,6 +63,15 @@ impl GateIndex for PatchedVindex {
         self.base.gate_scores_batch(layer, x)
     }
 
+    fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &ndarray::Array2<f32>,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<ndarray::Array2<f32>> {
+        self.base.gate_scores_batch_backend(layer, x, backend)
+    }
+
     fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.up_layer_matrix(layer)
     }

@@ -92,16 +92,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Warmup — make sure mmap pages and Q4K metadata are hot.
     for _ in 0..2 {
-        let _ = index.gate_scores_batch(args.layer, &x);
+        let _ = index.gate_scores_batch_backend(args.layer, &x, backend_ref);
         let _ = index.q4k_matmul_transb(args.layer, 1, x_flat, args.seq_len, backend_ref);
     }
 
-    // --- Gate scores ---
-    let mut gate_ms = Vec::with_capacity(args.iters);
+    // --- Gate scores (CPU BLAS path) ---
+    let mut gate_cpu_ms = Vec::with_capacity(args.iters);
     for _ in 0..args.iters {
         let t = Instant::now();
         let _ = index.gate_scores_batch(args.layer, &x);
-        gate_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        gate_cpu_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    // --- Gate scores (backend-aware path — Metal f32_gemv when seq_len==1) ---
+    let mut gate_gpu_ms = Vec::with_capacity(args.iters);
+    for _ in 0..args.iters {
+        let t = Instant::now();
+        let _ = index.gate_scores_batch_backend(args.layer, &x, backend_ref);
+        gate_gpu_ms.push(t.elapsed().as_secs_f64() * 1000.0);
     }
 
     // --- Up Q4K matmul ---
@@ -121,23 +129,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         down_ms.push(t.elapsed().as_secs_f64() * 1000.0);
     }
 
-    let g_med = median(&mut gate_ms.clone());
+    let gc_med = median(&mut gate_cpu_ms.clone());
+    let gg_med = median(&mut gate_gpu_ms.clone());
     let u_med = median(&mut up_ms.clone());
     let d_med = median(&mut down_ms.clone());
-    let g_p99 = percentile(&mut gate_ms, 0.99);
+    let gc_p99 = percentile(&mut gate_cpu_ms, 0.99);
+    let gg_p99 = percentile(&mut gate_gpu_ms, 0.99);
     let u_p99 = percentile(&mut up_ms, 0.99);
     let d_p99 = percentile(&mut down_ms, 0.99);
 
     println!("\n--- Per-phase medians @ layer {} (seq_len={}) ---", args.layer, args.seq_len);
     println!("  {:<28}  median   p99", "phase");
     println!("  {}", "-".repeat(58));
-    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "gate_scores_batch (f16)", g_med, g_p99);
+    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "gate_scores CPU BLAS", gc_med, gc_p99);
+    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "gate_scores backend (gpu)", gg_med, gg_p99);
     println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "q4k_matmul_transb (up)", u_med, u_p99);
     println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "q4k_matmul_transb (down)", d_med, d_p99);
     println!("  {}", "-".repeat(58));
-    let layer_total = g_med + u_med + d_med;
-    println!("  {:<28}  {:>6.1}ms", "per-layer FFN total", layer_total);
-    println!("  {:<28}  {:>6.1}ms", format!("× {num_layers} layers est. FFN"), layer_total * num_layers as f64);
+    let layer_total_cpu = gc_med + u_med + d_med;
+    let layer_total_gpu = gg_med + u_med + d_med;
+    println!("  {:<28}  {:>6.1}ms", "per-layer FFN total (CPU gate)", layer_total_cpu);
+    println!("  {:<28}  {:>6.1}ms", "per-layer FFN total (GPU gate)", layer_total_gpu);
+    println!("  {:<28}  {:>6.1}ms", format!("× {num_layers} layers (CPU gate)"), layer_total_cpu * num_layers as f64);
+    println!("  {:<28}  {:>6.1}ms", format!("× {num_layers} layers (GPU gate)"), layer_total_gpu * num_layers as f64);
+    if gg_med > 0.0 {
+        println!("  → gate gpu speedup: {:.2}× ({:.1} ms saved / layer, {:.1} ms / token total)",
+            gc_med / gg_med, gc_med - gg_med, (gc_med - gg_med) * num_layers as f64);
+    }
 
     Ok(())
 }

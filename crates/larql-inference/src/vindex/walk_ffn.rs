@@ -267,7 +267,7 @@ impl<'a> WalkFfn<'a> {
         if !layer_has_overrides && is_gated && k_is_full {
             let x_slice_for_matmul: Option<&[f32]> = x.as_slice();
             if let (Some(gate_scores), Some(x_flat)) =
-                (self.index.gate_scores_batch(layer, x), x_slice_for_matmul)
+                (self.index.gate_scores_batch_backend(layer, x, self.backend), x_slice_for_matmul)
             {
                 // Up leg — native f32 mmap if present, else direct Q4K matmul.
                 let up_scores: Option<ndarray::Array2<f32>> = if let Some(v) = up_native {

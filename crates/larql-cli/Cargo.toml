@@ -28,6 +28,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 minijinja = "2"
+libc = "0.2"
 
 [features]
 default = ["metal"]

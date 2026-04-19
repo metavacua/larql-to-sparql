@@ -43,7 +43,12 @@ impl VectorIndex {
             );
             let start = std::time::Instant::now();
             let gate_file = std::fs::File::open(&gate_path)?;
-            let gate_mmap = unsafe { crate::mmap_util::mmap_optimized(&gate_file)? };
+            // Demand-paged: gate_vectors are large and only a fraction of
+            // pages are touched per token (HNSW path) or scanned sequentially
+            // once per query (linear path). MADV_WILLNEED would prefault the
+            // entire file into RAM at load time, inflating RSS by ~13 GB on
+            // 31B before any inference runs.
+            let gate_mmap = unsafe { crate::mmap_util::mmap_demand_paged(&gate_file)? };
             let bpf = crate::config::dtype::bytes_per_float(config.dtype);
 
             let mut gate_slices: Vec<crate::index::core::GateLayerSlice> = vec![

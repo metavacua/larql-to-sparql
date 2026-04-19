@@ -52,6 +52,20 @@ pub trait GateIndex: Send + Sync {
     fn has_down_features(&self) -> bool { false }
     fn down_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> { None }
     fn gate_scores_batch(&self, _layer: usize, _x: &Array2<f32>) -> Option<Array2<f32>> { None }
+    /// Backend-aware variant of `gate_scores_batch`. When `backend` is a
+    /// Metal `ComputeBackend` and `x` is a single row, implementations
+    /// can dispatch `f32_gemv` instead of CPU BLAS — the gate matmul is
+    /// the dominant per-layer cost on 31B decode (60 % of token time).
+    /// Default implementation ignores the backend and calls the legacy
+    /// method.
+    fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        _backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Array2<f32>> {
+        self.gate_scores_batch(layer, x)
+    }
     fn up_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> { None }
     fn has_full_mmap_ffn(&self) -> bool { false }
     fn has_interleaved(&self) -> bool { false }

@@ -38,12 +38,33 @@ pub trait ComputeBackend: Send + Sync {
     /// the 32×32 tiled sgemm wastes 31/32 threads at `M = 1`.
     fn f32_gemv(&self, _w: ArrayView2<f32>, _x: &[f32]) -> Option<Vec<f32>> { None }
 
+    /// Like [`Self::f32_gemv`] but skips the internal CPU-vs-GPU flop
+    /// threshold. Use when the caller has already decided the work is
+    /// worth a GPU dispatch — e.g. the per-layer gate matmul that fires
+    /// once per feature-set per token and accumulates across 34–60 layers.
+    /// A 52 M-flop gemv on a single row wouldn't clear the default 500 M
+    /// threshold, but saves real time in aggregate.
+    fn f32_gemv_force(&self, w: ArrayView2<f32>, x: &[f32]) -> Option<Vec<f32>> {
+        self.f32_gemv(w, x)
+    }
+
     /// Same shape as [`Self::f32_gemv`] but the weight matrix is f16 packed
     /// as little-endian IEEE-half bytes, `n * k * 2` long. Lets the LM head
     /// run directly on the mmap'd f16 embeddings without a 2× f32 clone.
     /// Backends without a specialised kernel return `None`; callers either
     /// dequantize and fall back to `f32_gemv`, or avoid the call entirely.
     fn f16_gemv(&self, _w_f16: &[u8], _x: &[f32], _n: usize, _k: usize) -> Option<Vec<f32>> { None }
+
+    /// Like [`Self::f16_gemv`] but skips the internal flop threshold.
+    /// Same motivation as [`Self::f32_gemv_force`] — per-layer gate gemvs
+    /// are sub-500M-FLOP individually but aggregate across 60 layers ×
+    /// every decode token. The f16 variant halves memory bandwidth on
+    /// the gate matrix (stored as f16 on disk) and skips the lazy f16→
+    /// f32 decode step the BLAS path has to pay on every vindex cold
+    /// layer.
+    fn f16_gemv_force(&self, w_f16: &[u8], x: &[f32], n: usize, k: usize) -> Option<Vec<f32>> {
+        self.f16_gemv(w_f16, x, n, k)
+    }
 
     /// Multiple matmuls in one submission. Default: serial dispatch.
     /// GPU backends can override with parallel command buffer encoding.

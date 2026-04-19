@@ -28,6 +28,33 @@ fn gate_matmul(gate: &ArrayView2<f32>, x: &ArrayView2<f32>) -> Array2<f32> {
     cpu.matmul_transb(*gate, *x)
 }
 
+/// GPU-accelerated gate matmul for the single-position decode case.
+///
+/// When `x` is a single row (seq_len == 1) and the caller passes a Metal
+/// backend, route the gate gemv through `f32_gemv` — the dedicated
+/// row-per-simdgroup kernel that closed lm_head on the 4B. Returns
+/// `None` if the gemv threshold isn't met or seq_len > 1; caller falls
+/// back to `gate_matmul` (CPU BLAS).
+///
+/// Shape note: returns the [N, 1] column vector laid out as [N]; caller
+/// wraps it into Array2 shape (N, 1) at the seam.
+fn gate_gemv_gpu(
+    gate: &ArrayView2<f32>,
+    x: &ArrayView2<f32>,
+    backend: &dyn larql_compute::ComputeBackend,
+) -> Option<Array2<f32>> {
+    if x.shape()[0] != 1 { return None; }
+    let x_row = x.row(0);
+    let x_slice = x_row.as_slice()?;
+    // Force GPU dispatch regardless of the backend's flop_threshold —
+    // per-layer gate gemvs are ~50–200 M FLOPs, below the default 500 M
+    // threshold that protects tiny one-off gemvs. At 34/60 layers × every
+    // decode token the aggregated saving is real even if each call alone
+    // would be dispatch-bound.
+    let scores = backend.f32_gemv_force(*gate, x_slice)?;
+    Array2::from_shape_vec((gate.shape()[0], 1), scores).ok()
+}
+
 /// Resolved gate matrix data — owned f32 with feature count.
 struct GateData {
     data: Vec<f32>,
@@ -401,8 +428,34 @@ impl VectorIndex {
         layer: usize,
         x: &Array2<f32>,
     ) -> Option<Array2<f32>> {
+        self.gate_scores_batch_backend(layer, x, None)
+    }
+
+    /// Backend-aware gate scores. When `backend` is present and `x` is
+    /// a single row (seq_len == 1), route through `f32_gemv` — the
+    /// same row-per-simdgroup path that closed lm_head. On Gemma 4 31B
+    /// decode (hidden = 5376, ~18 K features, 60 layers) the CPU-BLAS
+    /// path clocks ~4.3 ms/layer × 60 = 258 ms/token = 60 % of decode.
+    /// Metal f32_gemv was measured at ~1 ms/layer on the lm_head of
+    /// similar shape, so the upside is ~200 ms/token.
+    pub fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Array2<f32>> {
         if x.shape()[0] == 0 { return None; }
-        // Fast path first, then fallback
+
+        // Metal gemv fast path (decode / single-row prefill).
+        if let Some(be) = backend {
+            if x.shape()[0] == 1 {
+                if let Some(scores_2d) = self.gate_scores_2d_gpu(layer, x, be) {
+                    return Some(scores_2d.t().to_owned());
+                }
+            }
+        }
+
+        // BLAS paths — warmed f32 / mmap f32 / lazy-decoded f16.
         let scores_2d = if let Some(s) = self.gate_scores_2d_fast(layer, x) {
             s
         } else {
@@ -410,6 +463,74 @@ impl VectorIndex {
             gate_matmul(&gate.view(self.hidden_size), &x.view())
         };
         Some(scores_2d.t().to_owned())
+    }
+
+    /// Zero-copy GPU gate scores for f32 mmap/warmed, single-row `x`.
+    /// Matches `gate_scores_2d_fast` shape contract: returns [N, 1].
+    fn gate_scores_2d_gpu(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        backend: &dyn larql_compute::ComputeBackend,
+    ) -> Option<Array2<f32>> {
+        // Warmed cache (f32 heap).
+        {
+            let warmed = self.warmed_gates.read().unwrap();
+            if let Some(Some(ref data)) = warmed.get(layer) {
+                let nf = self.gate_mmap_slices.get(layer).map(|s| s.num_features).unwrap_or(0);
+                if nf > 0 {
+                    let view = ArrayView2::from_shape((nf, self.hidden_size), data.as_slice()).unwrap();
+                    if let Some(scores) = gate_gemv_gpu(&view, &x.view(), backend) {
+                        return Some(scores);
+                    }
+                }
+            }
+        }
+        // f32 mmap (zero-copy, the production path for f32 gate vectors).
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F32 {
+            if let Some(ref mmap) = self.gate_mmap_bytes {
+                if let Some(slice) = self.gate_mmap_slices.get(layer) {
+                    if slice.num_features == 0 { return None; }
+                    let byte_offset = slice.float_offset * 4;
+                    let byte_end = byte_offset + slice.num_features * self.hidden_size * 4;
+                    if byte_end > mmap.len() { return None; }
+                    let data = unsafe {
+                        let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
+                        std::slice::from_raw_parts(ptr, slice.num_features * self.hidden_size)
+                    };
+                    let view = ArrayView2::from_shape((slice.num_features, self.hidden_size), data).unwrap();
+                    if let Some(scores) = gate_gemv_gpu(&view, &x.view(), backend) {
+                        return Some(scores);
+                    }
+                }
+            }
+        }
+        // f16 mmap: zero-copy pass of raw f16 bytes to Metal's f16_gemv
+        // shader, skipping the f16→f32 decode cache entirely. On 31B with
+        // an ~18 K × 5376 gate matrix (387 MB f32, 194 MB f16) halving
+        // the memory bandwidth is the difference between hitting the
+        // CPU-BLAS ceiling and going faster on Metal.
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16 {
+            if x.shape()[0] == 1 {
+                let slice = self.gate_mmap_slices.get(layer)?;
+                if slice.num_features == 0 { return None; }
+                let mmap = self.gate_mmap_bytes.as_ref()?;
+                let byte_offset = slice.float_offset * 2;
+                let byte_end = byte_offset + slice.num_features * self.hidden_size * 2;
+                if byte_end <= mmap.len() {
+                    let raw = &mmap[byte_offset..byte_end];
+                    let x_row = x.row(0);
+                    if let Some(x_slice) = x_row.as_slice() {
+                        if let Some(scores) = backend.f16_gemv_force(
+                            raw, x_slice, slice.num_features, self.hidden_size,
+                        ) {
+                            return Array2::from_shape_vec((slice.num_features, 1), scores).ok();
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Zero-copy batch gate scores for f32 mmap/warmed — returns [features, seq].

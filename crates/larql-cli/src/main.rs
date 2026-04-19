@@ -56,6 +56,9 @@ enum Commands {
     /// Remove a cached vindex.
     Rm(rm_cmd::RmArgs),
 
+    /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
+    Bench(bench_cmd::BenchArgs),
+
     // ── Server ──────────────────────────────────────────────────────
     #[command(next_help_heading = "Server")]
     /// Serve a vindex over HTTP + gRPC.
@@ -475,6 +478,7 @@ fn main() {
         // ── Primary ──
         Commands::Run(args) => run_cmd::run(args),
         Commands::Chat(args) => run_cmd::run(args.into()),
+        Commands::Bench(args) => bench_cmd::run(args),
         Commands::Pull(args) => pull_cmd::run(args),
         Commands::Link(args) => link_cmd::run(args),
         Commands::List(args) => list_cmd::run(args),
