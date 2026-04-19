@@ -1,17 +1,24 @@
 //! Q6_K matrix-vector multiply — used by Ollama for V projection and FFN down.
 //!
 //! Q6_K super-block layout (256 values = 210 bytes):
-//!   [0..127]    128 bytes: lower 4 bits of each value (packed nibbles, 2 per byte)
-//!   [128..191]   64 bytes: upper 2 bits (packed, 4 per byte)
-//!   [192..207]   16 bytes: 16 × int8 scales (one per 16-value sub-block)
-//!   [208..209]    2 bytes: f16 super-block scale (d)
+//!   [0..127]    128 bytes: lo4 — lower 4 bits of each value (2 per byte)
+//!   [128..191]   64 bytes: hi2 — upper 2 bits (4 per byte)
+//!   [192..207]   16 bytes: int8 scales (one per 16-value sub-block)
+//!   [208..209]    2 bytes: f16 super-block scale d
 //!
-//! Dequantize: val = d * scale_j * ((lo4 | (hi2 << 4)) - 32)
-//!   where j = sub-block index, each sub-block has 16 values
+//! Dequantize element i: d * scales[i/16] * ((lo4[i] | (hi2[i] << 4)) - 32)
+//!
+//! **Parallelism strategy (all-lanes-per-superblock):**
+//!
+//! All 32 lanes cooperate on EVERY superblock. Each lane handles 8 elements
+//! per superblock (256/32 = 8), iterating over 8 passes with stride 32.
+//! No shared memory: K=10240 (40 KB f32) exceeds the 16 KB threadgroup limit.
+//! X fits in GPU L2 cache after first TG reads it.
+//! ROWS_PER_TG = 8 (one row per simdgroup).
 
 pub const SHADER: &str = r#"
-constant uint Q6K_ROWS_PER_TG = 4;
-constant uint Q6K_BLOCK_SIZE = 210;
+constant uint Q6K_ROWS_PER_TG = 8;
+constant uint Q6K_BLOCK_SIZE  = 210;
 
 kernel void q6k_matvec(
     device const uchar*  W6K   [[buffer(0)]],
@@ -20,70 +27,48 @@ kernel void q6k_matvec(
     constant uint&       N     [[buffer(3)]],
     constant uint&       K     [[buffer(4)]],
     uint tg_id     [[threadgroup_position_in_grid]],
-    uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
-    uint superblocks = K / 256;
-    uint bytes_per_row = superblocks * Q6K_BLOCK_SIZE;
-
     uint row_idx = tg_id * Q6K_ROWS_PER_TG + sg_id;
     if (row_idx >= N) return;
 
+    uint superblocks   = K / 256u;
+    uint bytes_per_row = superblocks * Q6K_BLOCK_SIZE;
     device const uchar* row = W6K + row_idx * bytes_per_row;
 
     float acc = 0.0f;
 
-    for (uint sb = lane; sb < superblocks; sb += 32) {
+    for (uint sb = 0u; sb < superblocks; sb++) {
         device const uchar* block = row + sb * Q6K_BLOCK_SIZE;
-
-        // Lower 4 bits: 128 bytes (256 nibbles packed)
-        device const uchar* ql = block;
-        // Upper 2 bits: 64 bytes (256 × 2 bits, 4 per byte)
-        device const uchar* qh = block + 128;
-        // 16 scales: one per 16-value sub-block
-        device const char* scales = (device const char*)(block + 192);
-        // Super-block scale
+        device const uchar* ql    = block;
+        device const uchar* qh    = block + 128u;
+        device const char*  sc    = (device const char*)(block + 192u);
         ushort d_bits = ushort(block[208]) | (ushort(block[209]) << 8);
         float d = decode_f16_metal(d_bits);
 
-        uint x_base = sb * 256;
-        float block_acc = 0.0f;
+        uint x_base = sb * 256u;
 
-        for (uint j = 0; j < 16; j++) {
-            float sc = d * float(scales[j]);
-            uint sub_base = j * 16;
+        for (uint pass = 0u; pass < 8u; pass++) {
+            uint i = pass * 32u + lane;
 
-            for (uint i = 0; i < 8; i++) {
-                uint qi = sub_base + i * 2;
-                uint byte_idx = qi / 2;
-                uchar lo_byte = ql[byte_idx];
-                uint hi_byte_idx = qi / 4;
-                uchar hi_byte = qh[hi_byte_idx];
+            uchar lo_byte = ql[i >> 1u];
+            uint lo4 = (i & 1u) ? ((lo_byte >> 4u) & 0x0Fu) : (lo_byte & 0x0Fu);
 
-                // Lower 4 bits
-                float lo4_0 = float(lo_byte & 0x0F);
-                float lo4_1 = float((lo_byte >> 4) & 0x0F);
-                // Upper 2 bits
-                uint bit_offset_0 = (qi % 4) * 2;
-                uint bit_offset_1 = ((qi + 1) % 4) * 2;
-                float hi2_0 = float((hi_byte >> bit_offset_0) & 0x03);
-                float hi2_1 = float((qh[(qi+1)/4] >> bit_offset_1) & 0x03);
+            uchar hi_byte = qh[i >> 2u];
+            uint hi2 = (hi_byte >> ((i & 3u) << 1u)) & 0x03u;
 
-                float val0 = sc * ((lo4_0 + hi2_0 * 16.0f) - 32.0f);
-                float val1 = sc * ((lo4_1 + hi2_1 * 16.0f) - 32.0f);
+            int raw = int(lo4 | (hi2 << 4u)) - 32;
 
-                block_acc += val0 * X[x_base + qi];
-                block_acc += val1 * X[x_base + qi + 1];
-            }
+            float val = d * float(sc[i >> 4u]) * float(raw);
+            acc = fma(val, X[x_base + i], acc);
         }
-        acc += block_acc;
     }
 
     acc = simd_sum(acc);
-    if (lane == 0) out[row_idx] = acc;
+    if (lane == 0u) out[row_idx] = acc;
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 4;
-pub const THREADS_PER_TG: u64 = 128;
+pub const ROWS_PER_TG: u64 = 8;
+pub const THREADS_PER_TG: u64 = 256;

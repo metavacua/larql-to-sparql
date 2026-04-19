@@ -11,5 +11,5 @@ pub mod l1_cache;
 
 pub use walk_config::WalkFfnConfig;
 pub use walk_ffn::WalkFfn;
-pub use q4k_forward::{predict_q4k, predict_q4k_metal};
+pub use q4k_forward::{predict_q4k, predict_q4k_metal, predict_q4k_with_ffn, q4k_ffn_forward_layer};
 pub use l1_cache::FfnL1Cache;

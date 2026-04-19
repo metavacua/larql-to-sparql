@@ -168,6 +168,23 @@ pub trait ComputeBackend: Send + Sync {
         _rope_base: f32,
     ) -> Option<Vec<f32>> { None }
 
+    /// Like `decode_token` but splits each layer into attn / gate+up / down
+    /// command buffers and times each. Returns `(result, attn_ms, gate_up_ms,
+    /// down_ms)` summed across all layers. Default delegates to `decode_token`
+    /// with zero timings. Only called when `LARQL_PROFILE_SPLIT=1`.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_token_split_profile(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32,
+    ) -> (Option<Vec<f32>>, f64, f64, f64) {
+        (self.decode_token(layers, x, hidden, inter, q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, rope_base), 0.0, 0.0, 0.0)
+    }
+
     /// Q4_K matvec: scores[N] = Q4_K[N,K] @ f32_x[K]. Returns None if not supported.
     fn q4k_matvec(
         &self,

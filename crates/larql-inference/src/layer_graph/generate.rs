@@ -256,6 +256,7 @@ pub fn generate(
     // one-line per-step breakdown of embed / GPU forward / final norm /
     // lm_head / detokenize, plus a summary at the end.
     let profile = std::env::var("LARQL_PROFILE_DECODE").is_ok();
+    let profile_split = std::env::var("LARQL_PROFILE_SPLIT").is_ok();
     let mut t_embed = 0.0f64;
     let mut t_gpu = 0.0f64;
     let mut t_norm = 0.0f64;
@@ -280,10 +281,19 @@ pub fn generate(
         }
 
         let t1 = std::time::Instant::now();
-        let result = backend.decode_token(
-            &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
-            weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
-        );
+        let result = if profile_split && _step == 2 {
+            // Step 2 is post-JIT warm — run split profiling once and print.
+            let (r, _ta, _tgu, _td) = backend.decode_token_split_profile(
+                &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
+                weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+            );
+            r
+        } else {
+            backend.decode_token(
+                &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
+                weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+            )
+        };
         let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
         if profile && _step <= 2 {

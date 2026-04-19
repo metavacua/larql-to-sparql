@@ -279,7 +279,6 @@ impl ComputeBackend for MetalBackend {
         rope_base: f32,
     ) -> Option<Vec<f32>> {
         let num_layers = layers.len();
-        // Lazily initialize KV cache
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if cache_guard.is_none() {
             *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
@@ -287,6 +286,28 @@ impl ComputeBackend for MetalBackend {
         let kv = cache_guard.as_mut().unwrap();
         Some(MetalBackend::decode_token(self, kv, layers, x, hidden, inter, q_dim, kv_dim,
             num_q_heads, num_kv_heads, head_dim, rope_base))
+    }
+
+    fn decode_token_split_profile(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32,
+    ) -> (Option<Vec<f32>>, f64, f64, f64) {
+        let num_layers = layers.len();
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        if cache_guard.is_none() {
+            *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+        }
+        let kv = cache_guard.as_mut().unwrap();
+        let (res, ta, tgu, td) = MetalBackend::decode_token_split_profile(
+            self, kv, layers, x, hidden, inter, q_dim, kv_dim,
+            num_q_heads, num_kv_heads, head_dim, rope_base,
+        );
+        (Some(res), ta, tgu, td)
     }
 
     fn has_q4(&self) -> bool { true }

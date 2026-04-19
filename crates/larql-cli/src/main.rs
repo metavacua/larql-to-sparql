@@ -290,6 +290,19 @@ struct ServeArgs {
     #[arg(long)]
     ffn_only: bool,
 
+    /// Cap decoded f16 gate layers via LRU (bounds server RSS). 0 = unlimited.
+    /// On 31B each layer decodes to ~433 MB, so 60 layers = ~26 GB.
+    /// Set to N to cap at N layers; evicted layers are re-decoded on access.
+    #[arg(long, default_value = "0")]
+    max_gate_cache_layers: usize,
+
+    /// madvise(MADV_DONTNEED) on all mmaps after each walk-ffn request.
+    /// Enforces a hard RSS bound alongside --max-gate-cache-layers at the
+    /// cost of re-fault per request. Prefer --layers sharding for real
+    /// deployments (sharding never touches out-of-range pages).
+    #[arg(long)]
+    release_mmap_after_request: bool,
+
     /// Enable CORS for browser access.
     #[arg(long)]
     cors: bool,
@@ -586,6 +599,13 @@ fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.ffn_only {
         cmd_args.push("--ffn-only".into());
+    }
+    if args.max_gate_cache_layers > 0 {
+        cmd_args.push("--max-gate-cache-layers".into());
+        cmd_args.push(args.max_gate_cache_layers.to_string());
+    }
+    if args.release_mmap_after_request {
+        cmd_args.push("--release-mmap-after-request".into());
     }
     if args.cors {
         cmd_args.push("--cors".into());

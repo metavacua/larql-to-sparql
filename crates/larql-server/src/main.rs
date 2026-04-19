@@ -62,11 +62,40 @@ struct Cli {
     /// `mode: ffn-service` in `/v1/stats`. This is Act 2 of the demo —
     /// the server holds the FFN weights, clients hold attention.
     ///
-    /// Memory-footprint optimization (skip attention-weight load) is a
-    /// separate follow-up; today this flag is an operating-mode
-    /// declaration, not a memory saving.
+    /// Also skips the f16→f32 gate-vector warmup, which is the largest
+    /// eager cost on startup (~2x the gate_vectors.bin size). Gate
+    /// decode happens lazily per layer on first request instead.
     #[arg(long)]
     ffn_only: bool,
+
+    /// Only load and serve layers in this range (inclusive, e.g. "0-19").
+    /// Layers outside the range are not dequantized and their mmap pages are
+    /// never touched, keeping RSS proportional to the shard size.
+    /// Requests for out-of-range layers are rejected with HTTP 400.
+    #[arg(long)]
+    layers: Option<String>,
+
+    /// Cap the number of decoded f16 gate layers held in the lazy cache.
+    /// 0 = unlimited (default; matches historical behaviour). Each decoded
+    /// layer is roughly `intermediate × hidden × 4 bytes` — on 31B that's
+    /// ~433 MB per layer, so a 60-layer model fully decoded is ~26 GB.
+    /// Set to N to cap at N layers via LRU eviction.
+    ///
+    /// Use when RSS headroom matters (e.g. co-hosting multiple models) at
+    /// the cost of re-decode when evicted layers are re-accessed.
+    #[arg(long, default_value = "0")]
+    max_gate_cache_layers: usize,
+
+    /// Ask the kernel to drop resident mmap pages after each walk-ffn
+    /// request (calls `madvise(MADV_DONTNEED)` on every mapping). On
+    /// Linux RSS drops immediately; on Darwin the kernel may defer.
+    /// Pairs with `--max-gate-cache-layers` to enforce a hard bound.
+    ///
+    /// Prefer `--layers START-END` for real deployments — sharding
+    /// prevents out-of-range pages from ever being touched. This flag
+    /// is for the single-shard-holds-everything demo topology.
+    #[arg(long)]
+    release_mmap_after_request: bool,
 
     /// Enable CORS for browser access.
     #[arg(long)]
@@ -105,10 +134,29 @@ struct Cli {
     tls_key: Option<PathBuf>,
 }
 
+fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
+    let parts: Vec<&str> = s.splitn(2, '-').collect();
+    if parts.len() != 2 {
+        return Err(format!("--layers: expected 'START-END' (e.g. '0-19'), got '{s}'").into());
+    }
+    let start: usize = parts[0].trim().parse()
+        .map_err(|_| format!("--layers: invalid start '{}'", parts[0]))?;
+    let end: usize = parts[1].trim().parse()
+        .map_err(|_| format!("--layers: invalid end '{}'", parts[1]))?;
+    if end < start {
+        return Err(format!("--layers: end ({end}) must be >= start ({start})").into());
+    }
+    // CLI uses inclusive end; internally we use exclusive end.
+    Ok((start, end + 1))
+}
+
 fn load_single_vindex(
     path_str: &str,
     no_infer: bool,
     ffn_only: bool,
+    layer_range: Option<(usize, usize)>,
+    max_gate_cache_layers: usize,
+    release_mmap_after_request: bool,
 ) -> Result<LoadedModel, BoxError> {
     let path = if larql_vindex::is_hf_path(path_str) {
         info!("Resolving HuggingFace path: {}", path_str);
@@ -124,13 +172,20 @@ fn load_single_vindex(
     let id = model_id_from_name(&model_name);
 
     let mut cb = SilentLoadCallbacks;
-    let mut index = VectorIndex::load_vindex(&path, &mut cb)?;
+    let mut index = VectorIndex::load_vindex_with_range(&path, &mut cb, layer_range)?;
+    if max_gate_cache_layers > 0 {
+        index.set_gate_cache_max_layers(max_gate_cache_layers);
+        info!("  Gate cache: LRU, max {} layers", max_gate_cache_layers);
+    }
     let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
 
     let has_weights = config.has_model_weights
         || config.extract_level == larql_vindex::ExtractLevel::Inference
         || config.extract_level == larql_vindex::ExtractLevel::All;
 
+    if let Some((start, end)) = layer_range {
+        info!("  Layers: {start}–{} (of {})", end - 1, config.num_layers);
+    }
     info!(
         "  Model: {} ({} layers, {} features)",
         model_name, config.num_layers, total_features
@@ -142,8 +197,19 @@ fn load_single_vindex(
         Err(_) => info!("  Down features: not available"),
     }
     if let Ok(()) = index.load_up_features(&path) { info!("  Up features: loaded (full mmap FFN)") }
-    index.warmup();
-    info!("  Warmup: done");
+
+    // Warmup eagerly dequantises f16 gate vectors to f32 (~2x blowup). On a
+    // 31B vindex that's ~13 GB f16 → ~26 GB f32 resident before the first
+    // request. Skip it under `--ffn-only`: the server is meant to be a
+    // demand-paged FFN bank, not a warmup-and-wait cache. The f16 gate path
+    // has a lazy per-layer decode cache that fills on first touch, so
+    // correctness is unchanged — just a one-request cold cost per layer.
+    if ffn_only {
+        info!("  Warmup: skipped (--ffn-only, lazy gate decode on first request)");
+    } else {
+        index.warmup();
+        info!("  Warmup: done");
+    }
 
     let (embeddings, embed_scale) = load_vindex_embeddings(&path)?;
     info!("  Embeddings: {}x{}", embeddings.shape()[0], embeddings.shape()[1]);
@@ -170,6 +236,10 @@ fn load_single_vindex(
         info!("  Infer: not available (no model weights in vindex)");
     }
 
+    if release_mmap_after_request {
+        info!("  Mmap release: enabled (MADV_DONTNEED after each walk-ffn request)");
+    }
+
     let num_layers = config.num_layers;
     Ok(LoadedModel {
         id,
@@ -181,6 +251,7 @@ fn load_single_vindex(
         tokenizer,
         infer_disabled,
         ffn_only,
+        release_mmap_after_request,
         weights: std::sync::OnceLock::new(),
         probe_labels,
         ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(num_layers),
@@ -223,6 +294,8 @@ async fn main() -> Result<(), BoxError> {
 
     let mut models: Vec<Arc<LoadedModel>> = Vec::new();
 
+    let layer_range = cli.layers.as_deref().map(parse_layer_range).transpose()?;
+
     if let Some(ref dir) = cli.dir {
         let paths = discover_vindexes(dir);
         if paths.is_empty() {
@@ -230,13 +303,13 @@ async fn main() -> Result<(), BoxError> {
         }
         info!("Found {} vindexes in {}", paths.len(), dir.display());
         for p in &paths {
-            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only) {
+            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request) {
                 Ok(m) => models.push(Arc::new(m)),
                 Err(e) => warn!("  Skipping {}: {}", p.display(), e),
             }
         }
     } else if let Some(ref vindex_path) = cli.vindex_path {
-        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only)?;
+        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request)?;
         models.push(Arc::new(m));
     } else {
         return Err("must provide a vindex path or --dir".into());

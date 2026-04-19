@@ -19,6 +19,24 @@ impl VectorIndex {
         dir: &Path,
         callbacks: &mut dyn IndexLoadCallbacks,
     ) -> Result<Self, VindexError> {
+        Self::load_vindex_with_range(dir, callbacks, None)
+    }
+
+    /// Load a VectorIndex restricted to a layer range `(start, end)` where
+    /// `start` is inclusive and `end` is exclusive.
+    ///
+    /// Use this on layer-sharded servers to avoid allocating or touching mmap
+    /// pages for layers outside the owned range. The full vindex files are
+    /// still mmap'd (cheap — virtual address space only), but:
+    /// - `synthesize_gate_from_q4k` only dequantizes owned layers, so the
+    ///   anonymous allocation shrinks proportionally.
+    /// - `is_layer_owned(layer)` returns false for out-of-range layers,
+    ///   letting callers reject requests before touching any pages.
+    pub fn load_vindex_with_range(
+        dir: &Path,
+        callbacks: &mut dyn IndexLoadCallbacks,
+        layer_range: Option<(usize, usize)>,
+    ) -> Result<Self, VindexError> {
         // Read config
         let config_path = dir.join("index.json");
         let config_text = std::fs::read_to_string(&config_path)?;
@@ -76,7 +94,7 @@ impl VectorIndex {
             );
             let start = std::time::Instant::now();
             let (gate_mmap, gate_slices) =
-                synthesize_gate_from_q4k(dir, &config, hidden_size)?;
+                synthesize_gate_from_q4k(dir, &config, hidden_size, layer_range)?;
             let total: usize = gate_slices.iter().map(|s| s.num_features).sum();
             callbacks.on_file_done(
                 "gate_vectors (synth from Q4K)",
@@ -120,6 +138,10 @@ impl VectorIndex {
         // find up/down data without callers needing to know which flavour
         // is on disk. Each load_* returns Err(_) if its file isn't present;
         // those errors are non-fatal here.
+        if let Some(range) = layer_range {
+            index.set_layer_range(range);
+        }
+
         let _ = index.load_interleaved_q4k(dir);
         let _ = index.load_interleaved_q4(dir);
         let _ = index.load_interleaved(dir);
@@ -164,6 +186,7 @@ fn synthesize_gate_from_q4k(
     dir: &Path,
     config: &VindexConfig,
     hidden_size: usize,
+    layer_range: Option<(usize, usize)>,
 ) -> Result<
     (
         memmap2::Mmap,
@@ -188,15 +211,23 @@ fn synthesize_gate_from_q4k(
     .map_err(|e| VindexError::Parse(e.to_string()))?;
 
     let num_layers = config.num_layers;
-    // Allocate one anon MmapMut big enough for all layers at f16
-    // (2 bytes per float). macOS lazily commits — physical RAM only
-    // grows as we write.
+    // Allocate one anon MmapMut sized for owned layers only (f16, 2 bytes/float).
+    // When layer_range is set, unowned layers get a zero GateLayerSlice and are
+    // never accessed (is_layer_owned guard in callers). This shrinks the
+    // allocation proportionally — a 1/3-shard uses 1/3 the anon memory.
+    let is_owned = |layer: usize| -> bool {
+        match layer_range {
+            None => true,
+            Some((start, end)) => layer >= start && layer < end,
+        }
+    };
     let mut byte_offset: u64 = 0;
     let mut gate_slices = vec![
         crate::index::core::GateLayerSlice { float_offset: 0, num_features: 0 };
         num_layers
     ];
     for info in &config.layers {
+        if !is_owned(info.layer) { continue; }
         gate_slices[info.layer] = crate::index::core::GateLayerSlice {
             // Offset measured in floats (f16 → bpf=2).
             float_offset: (byte_offset as usize) / 2,
@@ -210,6 +241,7 @@ fn synthesize_gate_from_q4k(
         .map_err(|e| VindexError::Parse(format!("anon mmap: {e}")))?;
 
     for info in &config.layers {
+        if !is_owned(info.layer) { continue; }
         // Manifest entries per layer are [gate, up, down] in order.
         let base = info.layer * 3;
         let gate_entry = manifest_json.get(base).ok_or_else(|| {

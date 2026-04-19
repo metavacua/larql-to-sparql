@@ -27,6 +27,7 @@ pub mod stages;     // modular: stages/mod.rs → one file per pipeline stage
 pub mod calibrate;
 mod direct_ops;
 mod decode;
+mod decode_profile;
 mod decode_hybrid;
 mod pipeline;
 mod prefill;

@@ -69,6 +69,58 @@ impl GateData {
 
 /// Gate KNN methods for VectorIndex.
 impl VectorIndex {
+    /// Cap the number of decoded f16 gate layers held in
+    /// `f16_decode_cache`. Call with 0 for unlimited (default); non-zero
+    /// enables LRU eviction on the next insert that would exceed the cap.
+    ///
+    /// Typical use: `larql serve --max-gate-cache-layers N` to bound a
+    /// long-running server's RSS. A 31B f16 gate table decodes to ~433 MB
+    /// per layer, so `--max-gate-cache-layers 4` caps decoded gates at
+    /// ~1.7 GB (at the cost of repeated decode on evicted layers).
+    pub fn set_gate_cache_max_layers(&self, max_layers: usize) {
+        self.gate_cache_max_layers
+            .store(max_layers, std::sync::atomic::Ordering::Relaxed);
+        // Shrink eagerly if the new cap is below the current cache size.
+        if max_layers > 0 {
+            let mut cache = self.f16_decode_cache.lock().unwrap();
+            let mut lru = self.gate_cache_lru.lock().unwrap();
+            while lru.len() > max_layers {
+                if let Some(evict) = lru.pop_back() {
+                    if evict < cache.len() {
+                        cache[evict] = None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record a cache hit/miss on `layer`, evicting LRU entries if the
+    /// cap is reached. Must be called with `cache` already locked by the
+    /// caller; `just_inserted` is true when the caller *just* decoded and
+    /// wrote `cache[layer]`.
+    fn touch_gate_cache_lru(&self, layer: usize, just_inserted: bool, cache: &mut Vec<Option<Vec<f32>>>) {
+        let max = self.gate_cache_max_layers.load(std::sync::atomic::Ordering::Relaxed);
+        if max == 0 {
+            return;
+        }
+        let mut lru = self.gate_cache_lru.lock().unwrap();
+        // Move `layer` to the front (newest). If it's not in the queue
+        // yet, push it; otherwise rotate.
+        if let Some(pos) = lru.iter().position(|&l| l == layer) {
+            lru.remove(pos);
+        }
+        lru.push_front(layer);
+        if just_inserted {
+            while lru.len() > max {
+                if let Some(evict) = lru.pop_back() {
+                    if evict < cache.len() && evict != layer {
+                        cache[evict] = None;
+                    }
+                }
+            }
+        }
+    }
+
     /// Resolve the gate matrix for a layer as contiguous f32.
     /// Handles all storage paths: warmed → heap → mmap f32 → mmap f16.
     /// Returns owned data (zero-copy from mmap via to_vec on the hot path).
@@ -113,10 +165,12 @@ impl VectorIndex {
                     crate::config::dtype::StorageDtype::F16 => {
                         let mut cache = self.f16_decode_cache.lock().unwrap();
                         if cache.len() <= layer { cache.resize(layer + 1, None); }
-                        if cache[layer].is_none() {
+                        let miss = cache[layer].is_none();
+                        if miss {
                             let raw = &mmap[byte_offset..byte_end];
                             cache[layer] = Some(larql_models::quant::half::decode_f16(raw));
                         }
+                        self.touch_gate_cache_lru(layer, miss, &mut cache);
                         cache[layer].as_ref().unwrap().clone()
                     }
                 };
@@ -572,13 +626,15 @@ impl VectorIndex {
             let mmap = self.gate_mmap_bytes.as_ref()?;
             let mut cache = self.f16_decode_cache.lock().unwrap();
             if cache.len() <= layer { cache.resize(layer + 1, None); }
-            if cache[layer].is_none() {
+            let miss = cache[layer].is_none();
+            if miss {
                 let byte_offset = slice.float_offset * 2;
                 let byte_end = byte_offset + slice.num_features * self.hidden_size * 2;
                 if byte_end > mmap.len() { return None; }
                 let raw = &mmap[byte_offset..byte_end];
                 cache[layer] = Some(larql_models::quant::half::decode_f16(raw));
             }
+            self.touch_gate_cache_lru(layer, miss, &mut cache);
             let data = cache[layer].as_ref().unwrap();
             let view = ArrayView2::from_shape((slice.num_features, self.hidden_size), data.as_slice()).unwrap();
             return Some(gate_matmul(&view, &x.view()));

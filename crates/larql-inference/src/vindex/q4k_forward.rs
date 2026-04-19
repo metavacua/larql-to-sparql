@@ -186,6 +186,87 @@ pub fn predict_q4k(
     )
 }
 
+/// End-to-end predict on a Q4_K vindex with the FFN served by an external
+/// [`FfnBackend`] — typically [`crate::ffn::RemoteWalkBackend`] for the
+/// dense-remote demo where attention runs locally and each layer's FFN is
+/// one HTTP round trip to an `larql serve --ffn-only` server.
+///
+/// Mirrors [`predict_q4k`] except: only attention Q/K/V/O are dequantised
+/// per layer (FFN weights are never loaded client-side), and the per-layer
+/// FFN step is delegated to the passed backend rather than `WeightFfn`.
+/// Peak f32 heap drops from ~1.8 GB/layer to ~0.4 GB/layer on 31B.
+pub fn predict_q4k_with_ffn(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    token_ids: &[u32],
+    top_k: usize,
+    index: &VectorIndex,
+    ffn_backend: &dyn crate::ffn::FfnBackend,
+) -> PredictResult {
+    let num_layers = weights.num_layers;
+    let hidden = weights.hidden_size;
+
+    let mut h = embed_tokens_pub(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
+    let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
+
+    for layer in 0..num_layers {
+        // Attention Q/K/V/O only — FFN lives on the remote server.
+        let attn = index.attn_q4k_layer_data(layer)
+            .unwrap_or_else(|| panic!("attn Q4K slices missing for layer {layer}"));
+
+        let arch = &*weights.arch;
+        let num_q = arch.num_q_heads_for_layer(layer);
+        let num_kv = arch.num_kv_heads_for_layer(layer);
+        let head_dim = arch.head_dim_for_layer(layer);
+        let q_dim = num_q * head_dim;
+        let kv_dim = num_kv * head_dim;
+
+        let q_key = arch.attn_q_key(layer);
+        let k_key = arch.attn_k_key(layer);
+        let v_key = arch.attn_v_key(layer);
+        let o_key = arch.attn_o_key(layer);
+
+        let w_q = dequantize_matrix(attn[0].0, attn[0].1, q_dim, hidden);
+        let w_k = dequantize_matrix(attn[1].0, attn[1].1, kv_dim, hidden);
+        let w_v = dequantize_matrix(attn[2].0, attn[2].1, kv_dim, hidden);
+        let w_o = dequantize_matrix(attn[3].0, attn[3].1, hidden, q_dim);
+
+        weights.tensors.insert(q_key.clone(), w_q.into_shared());
+        weights.tensors.insert(k_key.clone(), w_k.into_shared());
+        weights.tensors.insert(v_key.clone(), w_v.into_shared());
+        weights.tensors.insert(o_key.clone(), w_o.into_shared());
+
+        let shared_kv = weights
+            .arch
+            .kv_shared_source_layer(layer)
+            .and_then(|src| kv_cache.get(&src));
+        if let Some((h_new, _, kv_out)) = run_layer_with_ffn(
+            weights,
+            &h,
+            layer,
+            ffn_backend,
+            false,
+            ple_inputs.get(layer),
+            shared_kv,
+        ) {
+            h = h_new;
+            if let Some(kv) = kv_out {
+                kv_cache.insert(layer, kv);
+            }
+        }
+
+        weights.tensors.remove(&q_key);
+        weights.tensors.remove(&k_key);
+        weights.tensors.remove(&v_key);
+        weights.tensors.remove(&o_key);
+    }
+
+    crate::forward::predict::logits_to_predictions_pub(
+        weights, &h, tokenizer, top_k, 1.0,
+    )
+}
+
 /// End-to-end predict on a Q4_K vindex driven by a Metal (or any Q4-capable)
 /// `ComputeBackend`. Prompt tokens are fed through `backend.decode_token` one
 /// position at a time — each call reads the token's embedding, appends its K/V
@@ -288,6 +369,50 @@ pub fn predict_q4k_metal(
     crate::forward::predict::logits_to_predictions_pub(
         weights, &h_last, tokenizer, top_k, 1.0,
     )
+}
+
+/// Run one layer's FFN forward on a Q4_K vindex — dequantise gate/up/down
+/// for just this layer and apply the architecture's activation gate.
+///
+/// Used by `larql-server`'s `/v1/walk-ffn` (full_output mode) when serving
+/// a Q4_K vindex: the FFN weights aren't materialised into `ModelWeights.tensors`
+/// at startup (would cost ~120 GB f32 on 31B), so we dequantise per-request
+/// per-layer. Working-set is ~3 GB on 31B (one layer's gate+up+down f32).
+///
+/// Requires `index.load_interleaved_q4k()` to have been called; panics
+/// otherwise.
+pub fn q4k_ffn_forward_layer(
+    arch: &dyn larql_models::ModelArchitecture,
+    index: &VectorIndex,
+    layer: usize,
+    x: &Array2<f32>,
+) -> Array2<f32> {
+    use crate::forward::dot_proj;
+    use crate::ffn::{silu_gate_up, gelu_tanh_gate_up};
+
+    let hidden = x.shape()[1];
+    let intermediate = index.num_features(layer);
+
+    let ffn = index.interleaved_q4k_layer_data(layer).unwrap_or_else(|| {
+        panic!(
+            "interleaved_q4k layer data missing for layer {layer} — \
+             server must call `load_interleaved_q4k` before serving walk-ffn"
+        )
+    });
+
+    let w_gate = dequantize_matrix(ffn[0].0, ffn[0].1, intermediate, hidden);
+    let w_up = dequantize_matrix(ffn[1].0, ffn[1].1, intermediate, hidden);
+    let w_down = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate);
+
+    let gate = dot_proj(x, &w_gate);
+    let up = dot_proj(x, &w_up);
+    let activation = match arch.activation() {
+        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
+            gelu_tanh_gate_up(&gate, &up)
+        }
+        _ => silu_gate_up(&gate, &up),
+    };
+    dot_proj(&activation, &w_down)
 }
 
 /// Dequantise a row-major Q4_K or Q6_K matrix into a dense f32 `Array2`.

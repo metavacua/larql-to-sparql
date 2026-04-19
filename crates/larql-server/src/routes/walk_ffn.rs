@@ -119,6 +119,23 @@ fn run_walk_ffn(
         ));
     };
 
+    // Reject layers outside this shard's owned range before touching any pages.
+    {
+        let patched = model.patched.blocking_read();
+        let base = patched.base();
+        for &layer in &scan_layers {
+            if !base.is_layer_owned(layer) {
+                let range_desc = match base.owned_layer_range() {
+                    Some((s, e)) => format!("{s}–{}", e - 1),
+                    None => "all".into(),
+                };
+                return Err(ServerError::BadRequest(format!(
+                    "layer {layer} not served by this shard (owned: {range_desc})"
+                )));
+            }
+        }
+    }
+
     let start = std::time::Instant::now();
 
     if req.full_output {
@@ -185,7 +202,17 @@ fn run_full_output(
         .map_err(ServerError::InferenceUnavailable)?;
 
     let patched = model.patched.blocking_read();
-    let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited(weights, &*patched);
+    // Q4_K vindexes take a per-layer dequantise path: the FFN weights live
+    // in `interleaved_q4k.bin` (mmap) and are never materialised into
+    // `weights.tensors` at load time. For each requested layer we dequant
+    // gate/up/down and run the FFN math directly. WalkFfn would panic
+    // otherwise (it reads `weights.tensors[ffn_gate_key]` etc.).
+    let is_q4k = model.config.quant == larql_vindex::QuantFormat::Q4k;
+    let walk_ffn = if is_q4k {
+        None
+    } else {
+        Some(larql_inference::vindex::WalkFfn::new_unlimited(weights, &*patched))
+    };
 
     // WalkFfn expects Array2 shaped [seq_len, hidden]; the wire format is row-major.
     let hidden = model.config.hidden_size;
@@ -228,7 +255,13 @@ fn run_full_output(
             None
         };
 
-        let out = walk_ffn.forward(layer, &x);
+        let out = if let Some(ref wf) = walk_ffn {
+            wf.forward(layer, &x)
+        } else {
+            larql_inference::vindex::q4k_ffn_forward_layer(
+                &*weights.arch, patched.base(), layer, &x,
+            )
+        };
         // out shape is [seq_len, hidden] — flatten row-major.
         let output: Vec<f32> = out.into_iter().collect();
         debug_assert_eq!(output.len(), seq_len * hidden);
@@ -270,8 +303,21 @@ pub async fn handle_walk_ffn(
     Json(req): Json<WalkFfnRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     state.bump_requests();
-    let result = tokio::task::spawn_blocking(move || run_walk_ffn(&state, &req))
-        .await
-        .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let result = tokio::task::spawn_blocking(move || {
+        let result = run_walk_ffn(&state, &req)?;
+        // Opt-in hard-RSS bound: after the request completes, advise the
+        // kernel to drop resident mmap pages. Done inside spawn_blocking so
+        // the sync `blocking_read` on `patched` doesn't hit a tokio worker.
+        if let Some(model) = state.model(None) {
+            if model.release_mmap_after_request {
+                let patched = model.patched.blocking_read();
+                patched.base().release_mmap_pages();
+            }
+        }
+        Ok::<_, ServerError>(result)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(e.to_string()))??;
+
     Ok(Json(result))
 }

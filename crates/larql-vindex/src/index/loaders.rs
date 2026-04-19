@@ -148,6 +148,8 @@ impl VectorIndex {
             down_overrides: HashMap::new(),
             up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
+            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
+            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(0),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
             up_features_mmap: None,
@@ -173,6 +175,7 @@ impl VectorIndex {
             attn_q8_manifest: None,
             num_layers,
             hidden_size,
+            layer_range: None,
         })
     }
 

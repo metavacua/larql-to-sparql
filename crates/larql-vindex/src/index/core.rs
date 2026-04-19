@@ -62,6 +62,15 @@ pub struct VectorIndex {
     /// Lazy decode cache for f16 gate vectors. Each layer decoded once on first
     /// KNN call, then reused. Eliminates repeated f16→f32 conversion.
     pub(crate) f16_decode_cache: Mutex<Vec<Option<Vec<f32>>>>,
+    /// LRU queue for `f16_decode_cache`. Back is oldest, front is newest.
+    /// Used with `gate_cache_max_layers` to cap decoded-gate heap growth
+    /// (a 31B f16 gate table decodes to ~26 GB if all 60 layers are kept).
+    pub(crate) gate_cache_lru: Mutex<std::collections::VecDeque<usize>>,
+    /// Cap on live entries in `f16_decode_cache`. 0 = unlimited (default —
+    /// historical behaviour, max speed). Set via `set_gate_cache_max_layers`
+    /// to bound RSS growth. When an insert would exceed the cap, the
+    /// least-recently-used layer is dropped.
+    pub(crate) gate_cache_max_layers: std::sync::atomic::AtomicUsize,
     pub(crate) warmed_gates: std::sync::RwLock<Vec<Option<Vec<f32>>>>,
     pub(crate) down_features_mmap: Option<Arc<memmap2::Mmap>>,
     pub(crate) up_features_mmap: Option<Arc<memmap2::Mmap>>,
@@ -93,6 +102,12 @@ pub struct VectorIndex {
     /// access via `q4k_ffn_layer`. Backs `walk_ffn_sparse`'s f32 view when
     /// no native f32 mmap exists (Q4K-only vindexes).
     pub(crate) q4k_ffn_cache: Mutex<Vec<[Option<Arc<Vec<f32>>>; 3]>>,
+
+    /// Layer range owned by this index instance (start inclusive, end exclusive).
+    /// `None` means all layers are owned (default, no sharding).
+    /// Set via `load_vindex_with_range` to restrict which layers are served,
+    /// preventing accidental page faults into out-of-shard mmap regions.
+    pub(crate) layer_range: Option<(usize, usize)>,
 
     /// Q4_0 gate vectors mmap — for fast Q4 KNN via larql-compute.
     pub(crate) gate_q4_mmap: Option<Arc<memmap2::Mmap>>,
@@ -128,6 +143,10 @@ impl Clone for VectorIndex {
             down_overrides: self.down_overrides.clone(),
             up_overrides: self.up_overrides.clone(),
             f16_decode_cache: Mutex::new(vec![None; self.num_layers]),
+            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
+            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(
+                self.gate_cache_max_layers.load(std::sync::atomic::Ordering::Relaxed),
+            ),
             warmed_gates: std::sync::RwLock::new(vec![None; self.num_layers]),
             down_features_mmap: self.down_features_mmap.clone(),
             up_features_mmap: self.up_features_mmap.clone(),
@@ -157,6 +176,7 @@ impl Clone for VectorIndex {
             attn_q4_manifest: self.attn_q4_manifest.clone(),
             attn_q8_mmap: self.attn_q8_mmap.clone(),
             attn_q8_manifest: self.attn_q8_manifest.clone(),
+            layer_range: self.layer_range,
         }
     }
 }
@@ -181,6 +201,8 @@ impl VectorIndex {
             down_overrides: HashMap::new(),
             up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
+            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
+            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(0),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
             up_features_mmap: None,
@@ -195,6 +217,7 @@ impl VectorIndex {
             interleaved_q4k_mmap: None,
             interleaved_q4k_manifest: None,
             q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
+            layer_range: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -229,6 +252,8 @@ impl VectorIndex {
             down_overrides: HashMap::new(),
             up_overrides: HashMap::new(),
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
+            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
+            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(0),
             warmed_gates: std::sync::RwLock::new(vec![None; num_layers]),
             down_features_mmap: None,
             up_features_mmap: None,
@@ -243,6 +268,7 @@ impl VectorIndex {
             interleaved_q4k_mmap: None,
             interleaved_q4k_manifest: None,
             q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
+            layer_range: None,
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
@@ -269,5 +295,26 @@ impl VectorIndex {
             .filter_map(|v| v.as_ref())
             .map(|m| m.len() * std::mem::size_of::<f32>())
             .sum()
+    }
+
+    /// Returns true if `layer` is owned by this shard (always true when no
+    /// range is set). Use this to guard accessor calls and reject requests
+    /// for layers outside the server's owned range before touching mmap pages.
+    pub fn is_layer_owned(&self, layer: usize) -> bool {
+        match self.layer_range {
+            None => true,
+            Some((start, end)) => layer >= start && layer < end,
+        }
+    }
+
+    /// Returns the owned layer range `(start_inclusive, end_exclusive)`, or
+    /// `None` if all layers are served.
+    pub fn owned_layer_range(&self) -> Option<(usize, usize)> {
+        self.layer_range
+    }
+
+    /// Set the owned layer range (used by `load_vindex_with_range`).
+    pub(crate) fn set_layer_range(&mut self, range: (usize, usize)) {
+        self.layer_range = Some(range);
     }
 }

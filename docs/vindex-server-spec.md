@@ -821,6 +821,109 @@ Single-layer mode: 34 round-trips per token. Batched mode: 1 round-trip (~200ms 
 
 ---
 
+## 13. FFN-Service Mode and Layer Sharding
+
+### 13.1 FFN-Service Mode (`--ffn-only`)
+
+Run the server as a dedicated FFN backend. The client holds attention weights locally;
+this server holds only the FFN weights and answers `/v1/walk-ffn` requests.
+
+```bash
+larql-server output/gemma3-4b-q4k.vindex --ffn-only --port 8080
+```
+
+**What changes under `--ffn-only`:**
+
+- `/v1/infer` is disabled (`infer_disabled = true`)
+- `/v1/stats` advertises `"mode": "ffn-service"` — `RemoteWalkBackend` on the client
+  uses this to confirm it has connected to the right endpoint
+- f16→f32 gate warmup is skipped; gate decode is lazy per layer on first request
+- Attention + embed + lm_head tensors are filtered from the weight manifest at load
+  time (pre-mmap filter — no allocation for ~3.4 GB of f32 tensors on 4B, ~14 GB on 31B)
+
+**Client usage:**
+
+```bash
+larql walk --ffn-remote http://server:8080 --predict \
+    --prompt "The capital of France is"
+```
+
+The client runs attention locally and calls the server for every FFN layer.
+
+---
+
+### 13.2 Layer Sharding (`--layers`)
+
+Restrict the server to a contiguous layer range. Only those layers are loaded into
+memory; requests for other layers are rejected immediately.
+
+```bash
+larql-server output/gemma3-4b-q4k.vindex --ffn-only --layers 0-16  --port 8080
+larql-server output/gemma3-4b-q4k.vindex --ffn-only --layers 17-33 --port 8081
+```
+
+`START-END` bounds are **inclusive**. A 34-layer model split into two shards:
+
+| Shard | Layers | Approximate RSS |
+|-------|--------|-----------------|
+| A | 0–16 (17 layers) | ~50% of full vindex |
+| B | 17–33 (17 layers) | ~50% of full vindex |
+
+**Memory model:**
+
+Out-of-range layers are never loaded into physical RAM:
+
+- For Q4K vindexes (`synthesize_gate_from_q4k`): the anonymous mmap is sized only
+  for owned layers. Unowned layers are skipped entirely during dequantisation.
+- For demand-paged files (`gate_vectors.bin`, `interleaved_q4k.bin`): the OS-level
+  mmap covers the full file (cheap — virtual address space only). `is_layer_owned()`
+  guards every accessor before any byte is read, so out-of-range pages never fault in.
+
+**Startup log:**
+
+```
+larql-server v0.1.0
+Loading: output/gemma3-4b-q4k.vindex
+  Layers: 0–16 (of 34)
+  Model: google/gemma-3-4b-it (34 layers, 348160 features)
+  Warmup: skipped (--ffn-only, lazy gate decode on first request)
+  Mode: ffn-service (--ffn-only)
+Listening: http://0.0.0.0:8080
+```
+
+**Out-of-range rejection:**
+
+```json
+POST /v1/walk-ffn {"layer": 20, "residual": [...]}
+→ 400 {"error": "layer 20 not served by this shard (owned: 0–16)"}
+```
+
+**CLI options summary:**
+
+| Flag | Description |
+|------|-------------|
+| `--ffn-only` | FFN-service mode; disables infer, skips warmup, filters attn weights |
+| `--layers START-END` | Inclusive layer range to load and serve |
+| `--max-gate-cache-layers N` | LRU cap on decoded f16 gate layers in memory (0 = unlimited) |
+
+---
+
+### 13.3 Deployment with a Router
+
+Layer-sharded servers are not meant to be addressed directly. Use `larql-router`
+(see `larql-router-spec.md`) as a transparent proxy in front of them. The client
+uses `--ffn-remote http://router:9090` and has no knowledge of the shard topology.
+
+```
+Client  →  larql-router:9090  →  shard-a:8080  (layers 0–16)
+                               →  shard-b:8081  (layers 17–33)
+```
+
+The router health-checks each shard on startup and rejects requests for layers that
+have no owning shard with a clear error before contacting any backend.
+
+---
+
 ## License
 
 Apache-2.0

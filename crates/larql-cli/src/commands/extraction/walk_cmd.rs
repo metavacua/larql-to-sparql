@@ -386,6 +386,9 @@ fn run_with_vindex_weights(
         // RSS now = attn weights + embeddings + norms. FFN payload (gate_vectors,
         // interleaved_q4k) is demand-paged; pages fault in during inference.
         vlog!(verbose, "  RSS after weights: {:.1} GB", rss_mb() / 1024.0);
+        if args.ffn_remote.is_some() {
+            return run_predict_q4k_remote(&mut weights, &tokenizer, args, vindex_path);
+        }
         return run_predict_q4k(&mut weights, &tokenizer, args, index);
     }
 
@@ -518,6 +521,70 @@ fn run_predict_q4k(
     vlog!(verbose, "Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
 
     print_predictions("walk (q4k)", &result.predictions, verbose);
+
+    Ok(())
+}
+
+/// Q4_K + remote FFN: local attention (dequant per layer), FFN over HTTP.
+///
+/// The existing `run_predict_remote` path expects attention tensors to live
+/// inside `ModelWeights.tensors`, which is true only after the per-layer
+/// Q4K dequant. So instead of routing through `run_predict_remote` we call
+/// `predict_q4k_with_ffn` directly with a `RemoteWalkBackend` — that path
+/// dequantises only Q/K/V/O per layer and skips the FFN dequant entirely.
+fn run_predict_q4k_remote(
+    weights: &mut ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    args: &WalkArgs,
+    vindex_path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let verbose = args.verbose;
+    let url = args.ffn_remote.as_ref().expect("ffn_remote is set");
+    let timeout = std::time::Duration::from_secs(args.ffn_remote_timeout_secs);
+    let config = RemoteFfnConfig::new(url).with_timeout(timeout);
+
+    vlog!(verbose, "Connecting to remote FFN: {url}");
+    let remote = RemoteWalkBackend::connect(config)?;
+    if remote.hidden_size() != weights.hidden_size {
+        return Err(format!(
+            "remote hidden_size {} != local hidden_size {} — client and server \
+             must be the same model",
+            remote.hidden_size(),
+            weights.hidden_size,
+        )
+        .into());
+    }
+    vlog!(verbose, "  connected: hidden={} url={}", remote.hidden_size(), remote.base_url());
+
+    // Build a fresh VectorIndex with the q4k attention mmap wired in.
+    // Q4K FFN mmap is NOT loaded — FFN runs on the server.
+    let mut cb = larql_vindex::SilentLoadCallbacks;
+    let mut q4_index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
+    q4_index.load_attn_q4k(vindex_path)?;
+
+    let token_ids = larql_inference::encode_prompt(
+        tokenizer,
+        &*weights.arch,
+        args.prompt.as_str(),
+    )
+    .map_err(|e| format!("tokenize error: {e}"))?;
+    vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+
+    let start = Instant::now();
+    let result = larql_inference::vindex::predict_q4k_with_ffn(
+        weights,
+        tokenizer,
+        &token_ids,
+        args.predict_top_k,
+        &q4_index,
+        &remote,
+    );
+    let elapsed = start.elapsed();
+
+    print_predictions("walk (q4k + ffn remote)", &result.predictions, verbose);
+    if verbose {
+        eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
+    }
 
     Ok(())
 }

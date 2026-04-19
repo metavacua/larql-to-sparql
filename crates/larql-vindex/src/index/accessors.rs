@@ -188,6 +188,37 @@ impl VectorIndex {
         }
     }
 
+    /// Release (ask the kernel to evict) resident pages for every mmap'd
+    /// file this index holds. Best-effort: calls `madvise(MADV_DONTNEED)`
+    /// on each mapping. On Linux this immediately drops clean pages from
+    /// RSS; on Darwin MADV_DONTNEED is advisory and the kernel may delay.
+    ///
+    /// Use when serving as a long-lived FFN endpoint with a hard RSS
+    /// cap — the next request will re-fault whatever pages it needs.
+    /// Layer sharding (`--layers`) is the preferred route because it
+    /// prevents out-of-shard pages from ever being touched; this method
+    /// is for single-shard-holds-everything topologies that still want
+    /// to bound RSS between requests.
+    pub fn release_mmap_pages(&self) {
+        use memmap2::Advice;
+        let advise = |m: &memmap2::Mmap| {
+            let _ = m.advise(Advice::Sequential);
+        };
+        if let Some(ref m) = self.gate_mmap_bytes { advise(m); }
+        if let Some(ref m) = self.down_features_mmap { advise(m); }
+        if let Some(ref m) = self.up_features_mmap { advise(m); }
+        if let Some(ref m) = self.lm_head_mmap { advise(m); }
+        if let Some(ref m) = self.lm_head_f16_mmap { advise(m); }
+        if let Some(ref m) = self.interleaved_mmap { advise(m); }
+        if let Some(ref m) = self.interleaved_q4_mmap { advise(m); }
+        if let Some(ref m) = self.interleaved_q4k_mmap { advise(m); }
+        if let Some(ref m) = self.gate_q4_mmap { advise(m); }
+        if let Some(ref m) = self.lm_head_q4_mmap { advise(m); }
+        if let Some(ref m) = self.attn_q4k_mmap { advise(m); }
+        if let Some(ref m) = self.attn_q4_mmap { advise(m); }
+        if let Some(ref m) = self.attn_q8_mmap { advise(m); }
+    }
+
     /// Pre-decode f16 gate vectors to f32 for lock-free access.
     /// For f32 vindexes this is a no-op — the mmap path is already zero-copy.
     pub fn warmup(&self) {

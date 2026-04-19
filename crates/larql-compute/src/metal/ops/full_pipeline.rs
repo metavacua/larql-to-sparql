@@ -311,43 +311,43 @@ fn encode_quant_matvec(
 ) {
     match format {
         crate::QuantFormat::Q4_K => {
+            use crate::metal::shaders::q4k_matvec as q4k;
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = (num_rows as u64).div_ceil(4); // Q4_K: 4 rows per TG
+            let tgs = (num_rows as u64).div_ceil(q4k::ROWS_PER_TG);
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
-            enc.set_buffer(1, Some(buf_input), 0);  // f32 input
+            enc.set_buffer(1, Some(buf_input), 0);
             enc.set_buffer(2, Some(buf_out), 0);
             enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
         }
         crate::QuantFormat::Q6_K => {
+            use crate::metal::shaders::q6k_matvec as q6k;
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = (num_rows as u64).div_ceil(4);
+            let tgs = (num_rows as u64).div_ceil(q6k::ROWS_PER_TG);
             enc.set_compute_pipeline_state(q6k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), 0);
             enc.set_buffer(2, Some(buf_out), 0);
             enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(q6k::THREADS_PER_TG, 1, 1));
         }
         crate::QuantFormat::Q4_KF => {
-            // Q4_KF: same as Q4_K but data layout is different (pre-baked scales)
-            // Uses the same q4k_matvec pipeline (standalone) as fallback
-            // In practice, Q4_KF goes through the fused QKV path, not here
+            use crate::metal::shaders::q4k_matvec as q4k;
             let n = num_rows as u32;
             let k = hidden as u32;
-            let tgs = (num_rows as u64).div_ceil(4);
+            let tgs = (num_rows as u64).div_ceil(q4k::ROWS_PER_TG);
             enc.set_compute_pipeline_state(q4k_pipeline);
             enc.set_buffer(0, Some(buf_w), 0);
             enc.set_buffer(1, Some(buf_input), 0);
             enc.set_buffer(2, Some(buf_out), 0);
             enc.set_bytes(3, 4, &n as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &k as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(128, 1, 1));
+            enc.dispatch_thread_groups(MTLSize::new(tgs, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
         }
         crate::QuantFormat::Q4_0 => {
             encode_q4_matvec(enc, q4_pipeline, buf_w, buf_input, buf_scales, buf_out, num_rows, hidden);
