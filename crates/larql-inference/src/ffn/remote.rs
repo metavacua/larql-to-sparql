@@ -281,6 +281,70 @@ impl RemoteWalkBackend {
         }
     }
 
+    /// Measure round-trip latency breakdown over `n` calls.
+    ///
+    /// Sends a zero residual batch covering `layers` each time and reports:
+    /// - `total_ms`: wall-clock time measured by the client
+    /// - `server_ms`: compute time reported by the server in the response header
+    /// - `overhead_ms`: `total_ms - server_ms` (HTTP + TCP + framing)
+    ///
+    /// First call is a warmup (excluded from stats). Results are averaged over
+    /// the remaining `n - 1` calls.
+    pub fn probe_latency(
+        &self,
+        layers: &[usize],
+        n: usize,
+    ) -> Result<RemoteLatencyStats, RemoteFfnError> {
+        assert!(n >= 2, "probe_latency: need at least 2 calls (1 warmup + 1 measured)");
+        let residual = vec![0.0f32; self.hidden_size];
+        let url = format!("{}/v1/walk-ffn", self.config.base_url);
+        let body = encode_binary_request(None, Some(layers), &residual, 1, true, 8092);
+
+        let mut totals = Vec::with_capacity(n - 1);
+        let mut servers = Vec::with_capacity(n - 1);
+
+        for i in 0..n {
+            let t0 = std::time::Instant::now();
+            let resp = self
+                .client
+                .post(&url)
+                .header(reqwest::header::CONTENT_TYPE, BINARY_CT)
+                .body(body.clone())
+                .send()
+                .map_err(|e| RemoteFfnError::Http { layer: layers[0], cause: e.to_string() })?;
+            if !resp.status().is_success() {
+                return Err(RemoteFfnError::ServerError {
+                    status: resp.status().as_u16(),
+                    body: resp.text().unwrap_or_default(),
+                });
+            }
+            let resp_bytes =
+                resp.bytes().map_err(|e| RemoteFfnError::BadResponse(e.to_string()))?;
+            let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+            // Extract server-reported latency from bytes 8-11 of response.
+            let server_ms = extract_response_latency_ms(&resp_bytes);
+
+            if i > 0 {
+                // Skip warmup call.
+                totals.push(total_ms);
+                servers.push(server_ms);
+            }
+        }
+
+        let avg = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let total_ms = avg(&totals);
+        let server_ms = avg(&servers);
+        Ok(RemoteLatencyStats {
+            total_ms,
+            server_ms,
+            overhead_ms: total_ms - server_ms,
+            hidden_size: self.hidden_size,
+            num_layers: layers.len(),
+            samples: n - 1,
+        })
+    }
+
     /// Run the full FFN forward pass for every layer in `layers`, returning
     /// a map from layer → `Array2<f32>` shaped `[seq_len, hidden]`.
     ///
@@ -351,6 +415,44 @@ impl FfnBackend for RemoteWalkBackend {
     fn name(&self) -> &str {
         "remote-walk"
     }
+}
+
+// ── Latency profiling ────────────────────────────────────────────────────────
+
+/// Breakdown returned by [`RemoteWalkBackend::probe_latency`].
+#[derive(Debug, Clone)]
+pub struct RemoteLatencyStats {
+    /// Wall-clock round-trip (client-measured), averaged over `samples` calls.
+    pub total_ms: f64,
+    /// FFN compute time reported by the server in the binary response header.
+    pub server_ms: f64,
+    /// `total_ms - server_ms`: HTTP framing + TCP + serialization overhead.
+    pub overhead_ms: f64,
+    pub hidden_size: usize,
+    pub num_layers: usize,
+    pub samples: usize,
+}
+
+impl std::fmt::Display for RemoteLatencyStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "layers={} hidden={} samples={}\n  total    {:7.2} ms\n  server   {:7.2} ms  (FFN compute)\n  overhead {:7.2} ms  (HTTP + TCP + framing)",
+            self.num_layers, self.hidden_size, self.samples,
+            self.total_ms, self.server_ms, self.overhead_ms,
+        )
+    }
+}
+
+/// Extract the `latency_ms` f32 embedded at bytes 8-11 of a binary response.
+/// Returns 0.0 if the body is too short or the value is non-finite.
+fn extract_response_latency_ms(body: &[u8]) -> f64 {
+    if body.len() < 12 {
+        return 0.0;
+    }
+    // Both single-layer and batch responses have latency_ms at offset 8.
+    let v = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    if v.is_finite() { v as f64 } else { 0.0 }
 }
 
 // ── Binary codec ──────────────────────────────────────────────────────────────

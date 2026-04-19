@@ -208,6 +208,20 @@ pub fn build_vindex_streaming(
                     offset += layer_bytes;
                 }
             }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): packed experts stored separately.
+            // gate_vectors.bin uses the dense FFN gate for KNN walk routing.
+            let gate_key = normalize_key(&arch.ffn_gate_key(layer), prefixes);
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &gate_key)? {
+                let num_features = tensor.shape()[0];
+                let data = tensor.as_slice().unwrap();
+                let length = write_floats(&mut gate_file, data, dtype)?;
+                layer_infos.push(VindexLayerInfo {
+                    layer, num_features, offset, length,
+                    num_experts: None, num_features_per_expert: None,
+                });
+                offset += length;
+            }
         } else if is_moe && n_experts > 0 {
             // Standard MoE (Mixtral): per-expert gate tensors
             let mut total_features = 0usize;
@@ -339,6 +353,14 @@ pub fn build_vindex_streaming(
                 }).collect()
             } else {
                 callbacks.on_layer_done("down", layer, 0.0); continue;
+            }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): use dense FFN down for down_meta.
+            // Expert down matrices are in experts_packed.bin for inference.
+            let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
+            match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
+                Some(t) => vec![t],
+                None => { callbacks.on_layer_done("down", layer, 0.0); continue; }
             }
         } else if is_moe && n_experts > 0 {
             let mut mats = Vec::new();

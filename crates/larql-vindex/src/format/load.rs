@@ -186,6 +186,7 @@ impl VectorIndex {
                     if mmap.len() >= expected_f16 && mmap.len() < expected_f16 * 2 {
                         if index.vocab_size == 0 { index.vocab_size = config.vocab_size; }
                         index.set_lm_head_f16_mmap(std::sync::Arc::new(mmap));
+                        index.synthesize_lm_head_q4();
                     }
                 }
             }

@@ -167,6 +167,7 @@ impl VectorIndex {
             gate_q4_mmap: None,
             gate_q4_slices: Vec::new(),
             lm_head_q4_mmap: None,
+            lm_head_q4_synth: None,
             attn_q4k_mmap: None,
             attn_q4k_manifest: None,
             attn_q4_mmap: None,

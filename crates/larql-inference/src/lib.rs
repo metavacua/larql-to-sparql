@@ -34,7 +34,7 @@ pub use capture::{
 pub use error::InferenceError;
 pub use ffn::{
     FfnBackend, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
-    SparseFfn, WeightFfn,
+    RemoteLatencyStats, SparseFfn, WeightFfn,
 };
 pub use attention::AttentionWeights;
 pub use forward::{

@@ -33,9 +33,39 @@ impl VectorIndex {
         Ok(())
     }
 
-    /// Whether Q4 lm_head is loaded.
+    /// Whether Q4 lm_head is loaded (from file or synthesized from f16 embeddings).
     pub fn has_lm_head_q4(&self) -> bool {
-        self.lm_head_q4_mmap.is_some()
+        self.lm_head_q4_mmap.is_some() || self.lm_head_q4_synth.is_some()
+    }
+
+    /// Synthesize Q4_0 lm_head in RAM from the f16 embeddings mmap.
+    /// No-op if a Q4 source already exists or preconditions are not met.
+    pub fn synthesize_lm_head_q4(&mut self) {
+        if self.lm_head_q4_mmap.is_some() || self.lm_head_q4_synth.is_some() { return; }
+        let vocab = self.vocab_size;
+        let hidden = self.hidden_size;
+        if vocab == 0 || hidden == 0 || hidden % 32 != 0 { return; }
+        let f16_mmap = match self.lm_head_f16_mmap.as_ref() {
+            Some(m) => m.clone(),
+            None => return,
+        };
+        let expected = vocab * hidden * 2;
+        if f16_mmap.len() < expected { return; }
+        let blocks_per_row = hidden / 32;
+        let bytes_per_row = blocks_per_row * 18;
+        let mut out = Vec::with_capacity(vocab * bytes_per_row);
+        let mut row_f32 = vec![0.0f32; hidden];
+        for row in 0..vocab {
+            let base = row * hidden * 2;
+            for i in 0..hidden {
+                let off = base + i * 2;
+                let bits = u16::from_le_bytes([f16_mmap[off], f16_mmap[off + 1]]);
+                row_f32[i] = larql_models::quant::half::f16_to_f32(bits);
+            }
+            let q4 = larql_compute::cpu::q4::quantize_q4_0(&row_f32);
+            out.extend_from_slice(&q4);
+        }
+        self.lm_head_q4_synth = Some(Arc::new(out));
     }
 
     /// Adopt the vindex's f16 `embeddings.bin` mmap as an f16 view of the
@@ -86,16 +116,19 @@ impl VectorIndex {
         top_k: usize,
         backend: &dyn larql_compute::ComputeBackend,
     ) -> Vec<(u32, f32)> {
-        // 1. Q4 path — ~1 ms on Metal.
+        // 1. Q4 path — ~1 ms on Metal (mmap file or synthesized from f16 embeddings).
         if backend.has_q4() {
-            if let Some(ref q4_mmap) = self.lm_head_q4_mmap {
+            let q4_bytes: Option<&[u8]> = self.lm_head_q4_mmap
+                .as_ref().map(|m| m.as_ref() as &[u8])
+                .or_else(|| self.lm_head_q4_synth.as_ref().map(|v| v.as_slice()));
+            if let Some(q4_data) = q4_bytes {
                 let vocab = self.vocab_size;
                 let hidden = self.hidden_size;
                 if vocab > 0 {
                     let x = query.as_slice().unwrap();
                     let (q8_x, q8_scales) = larql_compute::cpu::q4::quantize_to_q8(x);
                     if let Some(scores_vec) = backend.q4_matvec(
-                        q4_mmap.as_ref(), &q8_x, &q8_scales, vocab, hidden,
+                        q4_data, &q8_x, &q8_scales, vocab, hidden,
                     ) {
                         return Self::top_k_sorted(scores_vec, top_k);
                     }

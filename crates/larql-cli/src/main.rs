@@ -218,6 +218,9 @@ enum DevCommand {
 
     /// BFS extraction from a model endpoint.
     Bfs(bfs_cmd::BfsArgs),
+
+    /// Measure round-trip latency breakdown against a remote FFN server.
+    FfnLatency(ffn_latency_cmd::FfnLatencyArgs),
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -380,6 +383,7 @@ const LEGACY_DEV_NAMES: &[&str] = &[
     "bottleneck-test",
     "embedding-jump",
     "bfs",
+    "ffn-latency",
 ];
 
 fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
@@ -576,6 +580,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
         DevCommand::BottleneckTest(a) => bottleneck_test_cmd::run(a),
         DevCommand::EmbeddingJump(a) => embedding_jump_cmd::run(a),
         DevCommand::Bfs(a) => bfs_cmd::run(a),
+        DevCommand::FfnLatency(a) => ffn_latency_cmd::run(a),
     }
 }
 
