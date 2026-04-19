@@ -27,6 +27,9 @@ tokenizers = "0.21"
 # Checksums
 sha2 = "0.10"
 
+# base64 encoding for the HF preupload file-sample field.
+base64 = "0.22"
+
 # Model weights (for safetensors loading during extract)
 safetensors = "0.5"
 memmap2 = "0.9"

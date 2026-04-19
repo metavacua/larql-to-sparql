@@ -430,6 +430,25 @@ impl<R: std::io::Read> std::io::Read for CountingReader<R> {
     }
 }
 
+/// Upload a single file to a HuggingFace dataset repo via the real HF
+/// protocol:
+///
+///   1. **Preupload** — `POST /api/datasets/{repo}/preupload/main` with a
+///      base64 sample of the first 512 bytes. HF decides `lfs` vs `regular`
+///      based on size + `.gitattributes`.
+///   2. **LFS batch** (LFS path only) — `POST {repo}.git/info/lfs/objects/batch`
+///      returns a signed upload URL or tells us the file is already there.
+///   3. **Streaming PUT** to the signed URL, ticking `on_file_progress` as
+///      bytes flow. `CountingReader` + worker thread keeps the main thread
+///      free to poll.
+///   4. **Verify** — `POST {verify.href}` with `{oid, size}`.
+///   5. **Commit** — `POST /api/datasets/{repo}/commit/main` as NDJSON with
+///      a `lfsFile` (LFS) or `file` (regular, base64-inline) operation.
+///
+/// The old single-PUT "upload endpoint" this replaced was fictional — HF
+/// never exposed `PUT /api/datasets/{repo}/upload/main/{file}`. Requests
+/// to it 404 after the first few megabytes of body, which was the bug
+/// that triggered this rewrite.
 fn upload_file_to_hf(
     repo_id: &str,
     token: &str,
@@ -437,14 +456,287 @@ fn upload_file_to_hf(
     remote_filename: &str,
     callbacks: &mut dyn PublishCallbacks,
 ) -> Result<(), VindexError> {
+    let size = std::fs::metadata(local_path)?.len();
+    let sha256 = crate::format::checksums::sha256_file(local_path)?;
+
+    let decision = preupload_decide(repo_id, token, remote_filename, local_path, size)?;
+
+    if decision.should_ignore {
+        // HF's preupload told us the server would ignore this path
+        // (matches `.gitignore` / similar). Skip silently.
+        return Ok(());
+    }
+
+    match decision.mode.as_str() {
+        "lfs" => upload_lfs(repo_id, token, local_path, remote_filename, size, &sha256, callbacks),
+        "regular" => upload_regular(repo_id, token, local_path, remote_filename, size, callbacks),
+        other => Err(VindexError::Parse(format!(
+            "HF preupload returned unknown mode `{other}` for {remote_filename}"
+        ))),
+    }
+}
+
+struct PreuploadDecision {
+    mode: String,
+    should_ignore: bool,
+}
+
+/// Call `POST /api/datasets/{repo}/preupload/main` for a single file and
+/// return whether HF wants it uploaded via LFS or inlined in a regular
+/// commit. HF requires a base64 sample of the first ~512 bytes so it
+/// can sniff the file's format (text vs binary, etc.).
+fn preupload_decide(
+    repo_id: &str,
+    token: &str,
+    remote_filename: &str,
+    local_path: &Path,
+    size: u64,
+) -> Result<PreuploadDecision, VindexError> {
+    use base64::Engine;
+    use std::io::Read;
+
+    // Read up to 512 bytes for the format-sniff sample. HF accepts a
+    // smaller sample for small files without complaint.
+    let mut sample_buf = vec![0u8; 512.min(size as usize)];
+    if !sample_buf.is_empty() {
+        let mut file = std::fs::File::open(local_path)?;
+        file.read_exact(&mut sample_buf)?;
+    }
+    let sample_b64 = base64::prelude::BASE64_STANDARD.encode(&sample_buf);
+
+    let url = format!("https://huggingface.co/api/datasets/{repo_id}/preupload/main");
+    let body = serde_json::json!({
+        "files": [{
+            "path":   remote_filename,
+            "sample": sample_b64,
+            "size":   size,
+        }],
+    });
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .map_err(|e| VindexError::Parse(format!("preupload failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(VindexError::Parse(format!(
+            "preupload ({status}) for {remote_filename}: {body}"
+        )));
+    }
+    let json: serde_json::Value = resp
+        .json()
+        .map_err(|e| VindexError::Parse(format!("preupload JSON: {e}")))?;
+    let files = json
+        .get("files")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| VindexError::Parse("preupload response missing `files`".into()))?;
+    let entry = files
+        .first()
+        .ok_or_else(|| VindexError::Parse("preupload response files[] empty".into()))?;
+    let mode = entry
+        .get("uploadMode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("lfs")
+        .to_string();
+    let should_ignore = entry
+        .get("shouldIgnore")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    Ok(PreuploadDecision { mode, should_ignore })
+}
+
+/// LFS-mode upload: batch → PUT to signed URL → verify → commit pointer.
+fn upload_lfs(
+    repo_id: &str,
+    token: &str,
+    local_path: &Path,
+    remote_filename: &str,
+    size: u64,
+    sha256: &str,
+    callbacks: &mut dyn PublishCallbacks,
+) -> Result<(), VindexError> {
+    let batch = lfs_batch_upload(repo_id, token, sha256, size)?;
+
+    // If the response has no upload action, the object is already present
+    // on the LFS server — skip to verify (if present) + commit.
+    if let Some(ref upload) = batch.upload {
+        stream_put_with_progress(
+            &upload.href,
+            &upload.header,
+            local_path,
+            size,
+            remote_filename,
+            callbacks,
+        )?;
+    } else {
+        // Still tick the bar to 100% so the UX matches the upload path.
+        callbacks.on_file_progress(remote_filename, size, size);
+    }
+
+    if let Some(ref verify) = batch.verify {
+        lfs_verify(&verify.href, &verify.header, token, sha256, size)?;
+    }
+
+    commit_lfs_file(repo_id, token, remote_filename, sha256, size)
+}
+
+/// Small-file path: commit directly with the content inlined as base64
+/// in the NDJSON commit body. HF's preupload flags tiny text files for
+/// this path.
+fn upload_regular(
+    repo_id: &str,
+    token: &str,
+    local_path: &Path,
+    remote_filename: &str,
+    size: u64,
+    callbacks: &mut dyn PublishCallbacks,
+) -> Result<(), VindexError> {
+    use base64::Engine;
+    let data = std::fs::read(local_path)?;
+    // Fire start+end of the progress bar even though we don't stream —
+    // keeps the UX consistent across file sizes.
+    callbacks.on_file_progress(remote_filename, 0, size);
+    let encoded = base64::prelude::BASE64_STANDARD.encode(&data);
+
+    let url = format!("https://huggingface.co/api/datasets/{repo_id}/commit/main");
+    let mut ndjson = String::new();
+    ndjson.push_str(&serde_json::to_string(&serde_json::json!({
+        "key": "header",
+        "value": {
+            "summary": format!("Upload {remote_filename}"),
+        },
+    })).unwrap());
+    ndjson.push('\n');
+    ndjson.push_str(&serde_json::to_string(&serde_json::json!({
+        "key": "file",
+        "value": {
+            "path":     remote_filename,
+            "encoding": "base64",
+            "content":  encoded,
+        },
+    })).unwrap());
+    ndjson.push('\n');
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/x-ndjson")
+        .body(ndjson)
+        .send()
+        .map_err(|e| VindexError::Parse(format!("commit (regular) failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(VindexError::Parse(format!(
+            "commit (regular) {remote_filename} ({status}): {body}"
+        )));
+    }
+    callbacks.on_file_progress(remote_filename, size, size);
+    Ok(())
+}
+
+#[derive(Debug)]
+struct LfsAction {
+    href: String,
+    header: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug)]
+struct LfsBatchResponse {
+    upload: Option<LfsAction>,
+    verify: Option<LfsAction>,
+}
+
+/// POST to the LFS batch endpoint asking for an upload URL for one
+/// object. Returns the upload + verify actions (either or both may be
+/// absent — an absent `upload` means the object is already stored).
+fn lfs_batch_upload(
+    repo_id: &str,
+    token: &str,
+    sha256: &str,
+    size: u64,
+) -> Result<LfsBatchResponse, VindexError> {
+    let url = format!("https://huggingface.co/datasets/{repo_id}.git/info/lfs/objects/batch");
+    let body = serde_json::json!({
+        "operation":  "upload",
+        "transfers":  ["basic"],
+        "hash_algo":  "sha256",
+        "objects":    [{"oid": sha256, "size": size}],
+    });
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.git-lfs+json")
+        .header("Content-Type", "application/vnd.git-lfs+json")
+        .json(&body)
+        .send()
+        .map_err(|e| VindexError::Parse(format!("LFS batch failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(VindexError::Parse(format!(
+            "LFS batch ({status}): {body}"
+        )));
+    }
+    let json: serde_json::Value = resp
+        .json()
+        .map_err(|e| VindexError::Parse(format!("LFS batch JSON: {e}")))?;
+    let objects = json
+        .get("objects")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| VindexError::Parse("LFS batch response missing `objects`".into()))?;
+    let obj = objects
+        .first()
+        .ok_or_else(|| VindexError::Parse("LFS batch objects[] empty".into()))?;
+
+    // Per-object error surfaced in-line rather than as an HTTP status.
+    if let Some(err) = obj.get("error") {
+        return Err(VindexError::Parse(format!(
+            "LFS batch object error: {err}"
+        )));
+    }
+
+    let actions = obj.get("actions");
+    let parse_action = |key: &str| -> Option<LfsAction> {
+        let a = actions?.get(key)?;
+        let href = a.get("href").and_then(|v| v.as_str())?.to_string();
+        let header: std::collections::HashMap<String, String> = a
+            .get("header")
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(LfsAction { href, header })
+    };
+    Ok(LfsBatchResponse {
+        upload: parse_action("upload"),
+        verify: parse_action("verify"),
+    })
+}
+
+/// PUT the file contents to the signed LFS URL, streaming through a
+/// `CountingReader` so the worker thread can report progress.
+fn stream_put_with_progress(
+    href: &str,
+    extra_headers: &std::collections::HashMap<String, String>,
+    local_path: &Path,
+    size: u64,
+    remote_filename: &str,
+    callbacks: &mut dyn PublishCallbacks,
+) -> Result<(), VindexError> {
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::TryRecvError;
     use std::time::Duration;
 
-    let size = std::fs::metadata(local_path)?.len();
     let file = std::fs::File::open(local_path)?;
-
-    // Streaming body so a 27 GB server slice doesn't get pulled into RAM.
     let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let reader = CountingReader {
         inner: file,
@@ -452,28 +744,27 @@ fn upload_file_to_hf(
     };
     let body = reqwest::blocking::Body::sized(reader, size);
 
-    let url = format!(
-        "https://huggingface.co/api/datasets/{}/upload/main/{}",
-        repo_id, remote_filename
-    );
-
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3600)) // 1 hour — large slice uploads aren't fast
+        .timeout(Duration::from_secs(3600))
         .build()
         .map_err(|e| VindexError::Parse(format!("HTTP client error: {e}")))?;
 
-    // Run the upload on a worker thread so this thread can poll the
-    // byte counter + fire `on_file_progress` periodically.
-    let url_owned = url.clone();
-    let token_owned = token.to_string();
+    // Build the request on the worker thread (reqwest's Body needs to
+    // travel there). Include any signature headers the LFS server
+    // requested — on AWS-backed buckets these carry the AWS sigv4 bits.
+    let href_owned = href.to_string();
+    let headers_owned: Vec<(String, String)> = extra_headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = std::thread::spawn(move || {
-        let result = client
-            .put(&url_owned)
-            .header("Authorization", format!("Bearer {token_owned}"))
-            .header("Content-Type", "application/octet-stream")
-            .body(body)
-            .send();
+        let mut req = client.put(&href_owned);
+        for (k, v) in &headers_owned {
+            req = req.header(k.as_str(), v.as_str());
+        }
+        let result = req.body(body).send();
         let _ = tx.send(result);
     });
 
@@ -482,20 +773,16 @@ fn upload_file_to_hf(
             Ok(resp) => {
                 let _ = handle.join();
                 let resp = resp
-                    .map_err(|e| VindexError::Parse(format!("upload failed: {e}")))?;
+                    .map_err(|e| VindexError::Parse(format!("LFS PUT failed: {e}")))?;
                 if resp.status().is_success() {
-                    // Final tick so the bar reads 100 % even if the last
-                    // read() didn't line up exactly with `size`.
                     callbacks.on_file_progress(remote_filename, size, size);
                     return Ok(());
-                } else {
-                    let status = resp.status();
-                    let body = resp.text().unwrap_or_default();
-                    return Err(VindexError::Parse(format!(
-                        "upload {} failed ({status}): {body}",
-                        remote_filename
-                    )));
                 }
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                return Err(VindexError::Parse(format!(
+                    "LFS PUT {remote_filename} ({status}): {body}"
+                )));
             }
             Err(TryRecvError::Empty) => {
                 let sent = counter.load(Ordering::Relaxed);
@@ -510,6 +797,84 @@ fn upload_file_to_hf(
             }
         }
     }
+}
+
+/// POST `{oid, size}` to the verify URL the LFS batch returned. HF uses
+/// this to confirm the object made it to storage intact before the
+/// commit references it.
+fn lfs_verify(
+    href: &str,
+    extra_headers: &std::collections::HashMap<String, String>,
+    token: &str,
+    sha256: &str,
+    size: u64,
+) -> Result<(), VindexError> {
+    let body = serde_json::json!({"oid": sha256, "size": size});
+    let client = reqwest::blocking::Client::new();
+    let mut req = client
+        .post(href)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.git-lfs+json")
+        .header("Content-Type", "application/vnd.git-lfs+json");
+    for (k, v) in extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = req
+        .json(&body)
+        .send()
+        .map_err(|e| VindexError::Parse(format!("LFS verify failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(VindexError::Parse(format!("LFS verify ({status}): {body}")));
+    }
+    Ok(())
+}
+
+/// Commit a single LFS pointer into the repo via NDJSON. HF's commit
+/// API is one request per change set; we commit per file for simplicity
+/// (batching every file into one commit is a future optimisation).
+fn commit_lfs_file(
+    repo_id: &str,
+    token: &str,
+    remote_filename: &str,
+    sha256: &str,
+    size: u64,
+) -> Result<(), VindexError> {
+    let url = format!("https://huggingface.co/api/datasets/{repo_id}/commit/main");
+    let mut ndjson = String::new();
+    ndjson.push_str(&serde_json::to_string(&serde_json::json!({
+        "key": "header",
+        "value": {"summary": format!("Upload {remote_filename}")},
+    })).unwrap());
+    ndjson.push('\n');
+    ndjson.push_str(&serde_json::to_string(&serde_json::json!({
+        "key": "lfsFile",
+        "value": {
+            "path": remote_filename,
+            "algo": "sha256",
+            "oid":  sha256,
+            "size": size,
+        },
+    })).unwrap());
+    ndjson.push('\n');
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/x-ndjson")
+        .body(ndjson)
+        .send()
+        .map_err(|e| VindexError::Parse(format!("commit (LFS) failed: {e}")))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(VindexError::Parse(format!(
+            "commit (LFS) {remote_filename} ({status}): {body}"
+        )));
+    }
+    Ok(())
 }
 
 /// Check if a path is an hf:// reference.
