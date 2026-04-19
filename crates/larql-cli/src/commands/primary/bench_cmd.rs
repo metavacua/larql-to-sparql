@@ -166,6 +166,19 @@ fn run_larql(
     };
 
     let cached_layers = CachedLayerGraph::from_residuals(Vec::new());
+
+    // Pre-warm: one generate call to allocate the KV cache (~1 GB on Gemma 3 4B)
+    // and populate the Metal buffer caches. The prefill timer would otherwise
+    // include this one-time allocation cost even though it is amortized to zero
+    // in real multi-turn usage.
+    if metal {
+        let _ = generate(
+            &weights, &tokenizer, &token_ids,
+            1, &q4_index, &*backend,
+            &cached_layers, 0..weights.num_layers,
+        );
+    }
+
     let max_tokens = args.warmup + args.tokens;
     let t0 = Instant::now();
     let result = generate(

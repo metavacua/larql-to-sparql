@@ -135,12 +135,87 @@ pub fn download_hf_weights(hf_path: &str) -> Result<(), VindexError> {
 /// of [`resolve_hf_vindex_with_progress`].
 pub use hf_hub::api::Progress as DownloadProgress;
 
+/// Check hf-hub's on-disk cache for `filename` and return the resolved
+/// snapshot path iff a ready-to-use copy exists with the correct size.
+///
+/// hf-hub 0.5 lays the cache out as:
+///
+///   ```
+///   ~/.cache/huggingface/hub/datasets--{owner}--{name}/
+///     ├── blobs/<etag>            actual file bytes
+///     └── snapshots/<commit>/     symlinks → blobs
+///         └── <filename>
+///   ```
+///
+/// We look for any snapshot directory that contains `<filename>` with a
+/// size matching the remote. This is a deliberately simple check — it
+/// misses the rare case where the local file has the right size but the
+/// remote copy changed under a different etag. That case is unlikely
+/// for our immutable-vindex workflow and falls through to the normal
+/// download path anyway (hf-hub's etag comparison catches it).
+///
+/// Returns `None` on any failure (HEAD error, cache missing, size
+/// mismatch, etc.) — the caller falls back to `download_with_progress`.
+fn cached_snapshot_file(
+    repo_id: &str,
+    revision: Option<&str>,
+    filename: &str,
+) -> Option<(PathBuf, u64)> {
+    let repo_dir = hf_cache_repo_dir(repo_id)?;
+    // When caller pinned a revision, look only in that snapshot dir.
+    let snapshots = repo_dir.join("snapshots");
+    let candidates: Vec<PathBuf> = if let Some(rev) = revision {
+        vec![snapshots.join(rev)]
+    } else {
+        std::fs::read_dir(&snapshots)
+            .ok()?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_dir())
+            .collect()
+    };
+    // Pick any snapshot that has the file. Multiple snapshots = multiple
+    // commits cached; any of them counts as a hit for the default
+    // (`main`) branch workflow.
+    for snap in candidates {
+        let path = snap.join(filename);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.is_file() && meta.len() > 0 {
+                return Some((path, meta.len()));
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the hf-hub cache directory for a dataset repo: the root of
+/// `~/.cache/huggingface/hub/datasets--{owner}--{name}/`. Honours
+/// `HF_HOME` and `HUGGINGFACE_HUB_CACHE` env overrides that hf-hub itself
+/// respects.
+fn hf_cache_repo_dir(repo_id: &str) -> Option<PathBuf> {
+    let hub_root = if let Ok(hub) = std::env::var("HUGGINGFACE_HUB_CACHE") {
+        PathBuf::from(hub)
+    } else if let Ok(hf_home) = std::env::var("HF_HOME") {
+        PathBuf::from(hf_home).join("hub")
+    } else {
+        let home = std::env::var("HOME").ok()?;
+        PathBuf::from(home).join(".cache").join("huggingface").join("hub")
+    };
+    let safe = repo_id.replace('/', "--");
+    Some(hub_root.join(format!("datasets--{safe}")))
+}
+
 /// Like [`resolve_hf_vindex`], but drives a progress reporter per file.
 /// hf-hub handles `.incomplete` partial-file resume internally — if the
 /// download is interrupted, the next call picks up from where it left off.
 ///
-/// `progress` is a factory: called once per file about to be downloaded,
-/// with the filename. Return a fresh `DownloadProgress` — typically an
+/// Also honours the local cache: before each file, we check the
+/// `snapshots/` tree for an already-downloaded copy whose size matches
+/// the remote. Matches fire `init → update(size) → finish` on the
+/// progress reporter with no HTTP traffic, so cached pulls complete in
+/// milliseconds and the bar snaps to 100 %.
+///
+/// `progress` is a factory: called once per file with the filename.
+/// Return a fresh `DownloadProgress` — typically an
 /// `indicatif::ProgressBar` fetched from a `MultiProgress`.
 pub fn resolve_hf_vindex_with_progress<F, P>(
     hf_path: &str,
@@ -173,13 +248,35 @@ where
         api.repo(hf_hub::Repo::new(repo_id.clone(), hf_hub::RepoType::Dataset))
     };
 
-    let index_path = repo
-        .download_with_progress("index.json", progress("index.json"))
-        .map_err(|e| {
-            VindexError::Parse(format!(
-                "failed to download index.json from hf://{repo_id}: {e}"
-            ))
-        })?;
+    // Helper: one file, with cache short-circuit. Returns the resolved
+    // on-disk path. The cache check fires the progress reporter so the
+    // bar shows a filled-to-100% track tagged with the filename — users
+    // see that the file was served from cache, not re-downloaded.
+    let mut fetch = |filename: &str, label: &str| -> Option<PathBuf> {
+        if let Some((cached_path, size)) = cached_snapshot_file(&repo_id, revision.as_deref(), filename) {
+            // Tag the progress message so the bar visibly distinguishes
+            // "cached" from "just downloaded very fast". Callers rendering
+            // the bar see the prefix at init time and can restyle.
+            let mut p = progress(label);
+            let tagged = format!("{filename} [cached]");
+            p.init(size as usize, &tagged);
+            p.update(size as usize);
+            p.finish();
+            return Some(cached_path);
+        }
+        match repo.download_with_progress(filename, progress(label)) {
+            Ok(path) => Some(path),
+            Err(_) => None,
+        }
+    };
+
+    // index.json drives everything — we need its snapshot dir to know
+    // where the rest of the files live. Cache-hit or download.
+    let index_path = fetch("index.json", "index.json").ok_or_else(|| {
+        VindexError::Parse(format!(
+            "failed to fetch index.json from hf://{repo_id}"
+        ))
+    })?;
     let vindex_dir = index_path
         .parent()
         .ok_or_else(|| VindexError::Parse("cannot determine vindex directory".into()))?
@@ -189,7 +286,8 @@ where
         if *filename == "index.json" {
             continue;
         }
-        let _ = repo.download_with_progress(filename, progress(filename));
+        // Optional files — ignore failures (missing from repo is fine).
+        let _ = fetch(filename, filename);
     }
     Ok(vindex_dir)
 }

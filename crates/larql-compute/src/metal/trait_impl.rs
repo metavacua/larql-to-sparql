@@ -266,7 +266,14 @@ impl ComputeBackend for MetalBackend {
 
     fn reset_kv_cache(&self) {
         let mut cache_guard = self.kv_cache.lock().unwrap();
-        *cache_guard = None; // drop entirely so next decode_token re-creates with correct layer count
+        if let Some(ref mut kv) = *cache_guard {
+            // Reset sequence position only — keep the GPU buffers (avoids re-allocating ~1 GB
+            // of KV cache on every new prompt).
+            for layer in &mut kv.layers {
+                layer.current_len = 0;
+            }
+        }
+        // If cache is None it will be allocated on the next decode/prefill call.
     }
 
     fn decode_token(
