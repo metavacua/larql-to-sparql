@@ -133,7 +133,7 @@ pub fn encode_residual_add(
 /// Same as `encode_q4_matvec` but lets the caller point at a specific row of
 /// a multi-position staging buffer — used in prefill (`seq_len > 1`) where
 /// each position's Q8 input and output live at `pos * stride` byte offsets.
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn encode_q4_matvec_offset(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
@@ -254,7 +254,7 @@ fn encode_quant_matvec_offset(
 /// the QKV per-projection fallback. Thin wrapper around
 /// [`crate::metal::stages::quant_matvec::encode`] kept to preserve the
 /// old local-helper name while the refactor to `stages/` proceeds.
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn dispatch_ffn_matvec(
     enc: &ComputeCommandEncoderRef,
     format: crate::QuantFormat,
@@ -387,14 +387,14 @@ pub fn dispatch_full_pipeline(
     gelu_tanh_pipeline: &ComputePipelineState,
     q8_quant_pipeline: &ComputePipelineState,
     fused_attn_pipeline: Option<&ComputePipelineState>,
-    q8_matvec_pipeline: &ComputePipelineState,
+    _q8_matvec_pipeline: &ComputePipelineState,
     q8_qkv_proj_pipeline: &ComputePipelineState,
     q4k_matvec_pipeline: &ComputePipelineState,
     q6k_matvec_pipeline: &ComputePipelineState,
     rms_norm_pipeline: &ComputePipelineState,
     residual_add_pipeline: &ComputePipelineState,
     rms_norm_q8_pipeline: &ComputePipelineState,
-    residual_norm_q8_pipeline: &ComputePipelineState,
+    _residual_norm_q8_pipeline: &ComputePipelineState,
     q4k_qkv_proj_pipeline: Option<&ComputePipelineState>,
     q4kf_qkv_proj_pipeline: Option<&ComputePipelineState>,
     q4kf_proj_pipeline: Option<&ComputePipelineState>,
@@ -407,18 +407,18 @@ pub fn dispatch_full_pipeline(
     hidden: usize,
     inter: usize,
     q_dim: usize,
-    kv_dim: usize,
+    _kv_dim: usize,
     seq_len: usize,
-    num_q_heads: usize,
-    num_kv_heads: usize,
+    _num_q_heads: usize,
+    _num_kv_heads: usize,
     _head_dim: usize,
     _rope_base: f32, // global fallback; per-layer layers[l].rope_base used in loop
     use_qk_norm: bool,
     softcap: f32,
 ) -> Vec<f32> {
     let num_layers = layers.len();
-    let hidden_val = hidden as u32;
-    let inter_val = inter as u32;
+    let _hidden_val = hidden as u32;
+    let _inter_val = inter as u32;
     let _n_blocks = (hidden / 32) as u32;
 
     // Pre-cache Q8 attention weight buffers (higher precision for Q/K dot products)
@@ -431,7 +431,7 @@ pub fn dispatch_full_pipeline(
     let wv_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wv.data)).collect();
     let wv_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wv.scales.unwrap_or(&[]))).collect();
     let wo_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.wo.data)).collect();
-    let wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wo.scales.unwrap_or(&[]))).collect();
+    let _wo_scale_bufs: Vec<_> = layers.iter().map(|l| bufs.get_f32(l.wo.scales.unwrap_or(&[]))).collect();
     // Q4 FFN weight buffers
     let gate_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.gate.data)).collect();
     let up_bufs: Vec<_> = layers.iter().map(|l| bufs.get_bytes(l.up.data)).collect();
@@ -553,11 +553,11 @@ pub fn dispatch_full_pipeline(
         let h_off = |p: usize| (p * hidden * 4) as u64;
         let q_off = |p: usize| (p * layer_q_dim * 4) as u64;
         let kv_off = |p: usize| (p * layer_kv_dim * 4) as u64;
-        let inter_off = |p: usize| (p * inter * 4) as u64;
+        let _inter_off = |p: usize| (p * inter * 4) as u64;
         let q8_off = |p: usize| (p * q8_row_max) as u64;
         let q8s_off = |p: usize| (p * q8s_row_bytes) as u64;
-        let ffn_q8_off = |p: usize| (p * hidden) as u64;
-        let ffn_q8s_off = |p: usize| (p * ((hidden + 31) / 32) * 4) as u64;
+        let _ffn_q8_off = |p: usize| (p * hidden) as u64;
+        let _ffn_q8s_off = |p: usize| (p * ((hidden + 31) / 32) * 4) as u64;
 
         // Stage 1+2: input norm + Q/K/V projection, format-aware, per position.
         use crate::metal::stages::{input_norm, qkv_proj, quant_matvec};

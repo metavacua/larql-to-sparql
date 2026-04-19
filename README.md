@@ -123,14 +123,32 @@ Other presets: `browse` (DESCRIBE/WALK only, no forward pass), `router`
 (MoE router only, ADR-0003), `all` (full clone). See `larql slice --help`
 for the explicit part list.
 
+**3-tier topology (ADR-0008).** When laptop RAM matters, split the
+embedding table out to its own server:
+
+```bash
+# Attention-only client (no embed, no FFN — ~310 MB on 4B, 10× smaller than `client`)
+larql slice gemma3-4b.vindex --preset attn -o gemma3-4b.attn.vindex
+
+# Embed server slice (embed + tokenizer; paired with ADR-0008 embed-server)
+larql slice gemma3-4b.vindex --preset embed -o gemma3-4b.embed.vindex
+```
+
+The 3-tier client + embed server + FFN server split unlocks the
+"laptop in ~1 GB" version of the dense-remote topology for small
+models. Full rationale in
+[`docs/adr/0007-vindex-distribution.md`](docs/adr/0007-vindex-distribution.md)
+and [`docs/adr/0008-embed-server.md`](docs/adr/0008-embed-server.md).
+
 ### Publish to HuggingFace — full + slices + collections
 
 `larql publish` combines `slice` + `hf publish` and adds HuggingFace
-**collections**: one run uploads four sibling repos and files them into
+**collections**: one run uploads six sibling repos and files them into
 three nested collections (model / family / library) for discovery.
 
 ```bash
-# One command. Four repos. Three collections.
+# One command. Six repos (full + client + attn + embed + server + browse).
+# Three collections (model / family / library).
 larql publish gemma4-31b.vindex --repo chrishayuk/gemma-4-31b-it-vindex
 
 # Preview without touching HF
@@ -161,7 +179,8 @@ indicatif progress bar; hf-hub resumes interrupted downloads from the
 
 ```bash
 # Plain pull — the full vindex. Shows a hint at the end listing
-# any `-client` / `-server` / `-browse` siblings that exist on HF.
+# any `-client` / `-attn` / `-embed` / `-server` / `-browse` siblings
+# that exist on HF.
 larql pull chrishayuk/gemma-4-31b-it-vindex
 
 # Pull just the client slice (laptop side of `run --ffn URL`)

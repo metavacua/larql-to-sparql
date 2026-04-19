@@ -26,7 +26,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 /// Default sibling presets to probe / pull when the caller doesn't pass
 /// `--preset`. Matches the `publish` default set; the symmetry matters
 /// so `publish` and `pull` stay in lock-step.
-const DEFAULT_SIBLING_PRESETS: &[&str] = &["client", "server", "browse"];
+const DEFAULT_SIBLING_PRESETS: &[&str] = &["client", "attn", "embed", "server", "browse"];
 
 /// Same sibling-naming template as `publish` so `pull` can reverse what
 /// `publish` produced without a separate configuration handshake.
@@ -44,9 +44,9 @@ pub struct PullArgs {
     #[arg(long)]
     pub preset: Option<String>,
 
-    /// Pull the full vindex *and* every default slice sibling (`-client`,
-    /// `-server`, `-browse`) in one command. Missing siblings are warned-
-    /// about, not fatal.
+    /// Pull the full vindex *and* every default slice sibling
+    /// (`-client`, `-attn`, `-embed`, `-server`, `-browse`) in one
+    /// command. Missing siblings are warned-about, not fatal.
     #[arg(long)]
     pub all_slices: bool,
 
@@ -410,6 +410,10 @@ mod tests {
     fn default_sibling_presets_match_publish_defaults() {
         // Symmetry guard: if publish's default slice set changes, pull
         // must change in lock-step so sibling hints don't go stale.
-        assert_eq!(DEFAULT_SIBLING_PRESETS, &["client", "server", "browse"]);
+        // Keep in sync with `publish_cmd::DEFAULT_SLICES`.
+        assert_eq!(
+            DEFAULT_SIBLING_PRESETS,
+            &["client", "attn", "embed", "server", "browse"]
+        );
     }
 }

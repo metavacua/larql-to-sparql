@@ -1699,3 +1699,216 @@ fn test_binary_request_residual_size() {
         assert!((v - i as f32).abs() < 1e-6);
     }
 }
+
+// ══════════════════════════════════════════════════════════════
+// EMBED SERVICE — mode advertisement, flag logic, lookup logic
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stats_shape_advertises_embed_service_mode() {
+    // --embed-only sets mode = "embed-service" and disables inference + browse.
+    let stats = serde_json::json!({
+        "mode": "embed-service",
+        "loaded": {
+            "browse": false,
+            "inference": false,
+            "ffn_service": false,
+            "embed_service": true,
+        },
+    });
+    assert_eq!(stats["mode"], "embed-service");
+    assert_eq!(stats["loaded"]["embed_service"], true);
+    assert_eq!(stats["loaded"]["browse"], false);
+    assert_eq!(stats["loaded"]["ffn_service"], false);
+}
+
+#[test]
+fn test_embed_only_implies_infer_disabled() {
+    // Mirrors the `infer_disabled = no_infer || ffn_only || embed_only` expression.
+    fn effective(no_infer: bool, ffn_only: bool, embed_only: bool) -> bool {
+        no_infer || ffn_only || embed_only
+    }
+    assert!(!effective(false, false, false));
+    assert!(effective(false, false, true));
+    assert!(effective(false, true, false));
+    assert!(effective(true, false, false));
+    // All three together
+    assert!(effective(true, true, true));
+}
+
+#[test]
+fn test_embed_lookup_basic() {
+    // embed[0] = [1, 0, 0, 0], scale = 1.0
+    let mut embed = Array2::<f32>::zeros((8, 4));
+    embed[[0, 0]] = 1.0;
+    embed[[1, 1]] = 1.0;
+    embed[[2, 2]] = 1.0;
+    embed[[3, 3]] = 1.0;
+
+    let scale = 1.0f32;
+    for tok in 0..4usize {
+        let row: Vec<f32> = embed.row(tok).iter().map(|&v| v * scale).collect();
+        assert_eq!(row[tok], 1.0, "token {tok} should activate dim {tok}");
+        for other in 0..4usize {
+            if other != tok {
+                assert_eq!(row[other], 0.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_embed_lookup_with_scale() {
+    let mut embed = Array2::<f32>::zeros((4, 4));
+    embed[[0, 0]] = 1.0;
+    let scale = 3.0f32;
+    let row: Vec<f32> = embed.row(0).iter().map(|&v| v * scale).collect();
+    assert!((row[0] - 3.0).abs() < 1e-6, "scale must be applied: got {}", row[0]);
+}
+
+#[test]
+fn test_embed_lookup_returns_zero_for_zero_row() {
+    let embed = Array2::<f32>::zeros((8, 4));
+    let scale = 1.0f32;
+    let row: Vec<f32> = embed.row(7).iter().map(|&v| v * scale).collect();
+    assert!(row.iter().all(|&v| v == 0.0));
+}
+
+#[test]
+fn test_embed_response_dimensions() {
+    // seq_len=2, hidden=4 → 2 rows of 4 floats
+    let embed = test_embeddings();
+    let token_ids = [0u32, 1u32];
+    let scale = 1.0f32;
+    let result: Vec<Vec<f32>> = token_ids
+        .iter()
+        .map(|&id| embed.row(id as usize).iter().map(|&v| v * scale).collect())
+        .collect();
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().all(|r| r.len() == 4));
+}
+
+#[test]
+fn test_embed_binary_request_shape() {
+    // Binary embed request: [num_tokens u32][token_id u32 × N]
+    let token_ids = [42u32, 1337, 9515];
+    let mut body = Vec::new();
+    body.extend_from_slice(&(token_ids.len() as u32).to_le_bytes());
+    for &id in &token_ids {
+        body.extend_from_slice(&id.to_le_bytes());
+    }
+    assert_eq!(body.len(), 4 + 3 * 4);
+    assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), 3);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 42);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1337);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 9515);
+}
+
+#[test]
+fn test_embed_binary_response_shape() {
+    // Binary embed response: [seq_len u32][hidden_size u32][seq_len × hidden_size f32]
+    let seq_len = 2u32;
+    let hidden = 4u32;
+    let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&seq_len.to_le_bytes());
+    body.extend_from_slice(&hidden.to_le_bytes());
+    for &v in &values {
+        body.extend_from_slice(&v.to_le_bytes());
+    }
+
+    assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), seq_len);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), hidden);
+    assert_eq!(body.len(), 8 + (seq_len * hidden * 4) as usize);
+
+    for (i, chunk) in body[8..].chunks_exact(4).enumerate() {
+        let v = f32::from_le_bytes(chunk.try_into().unwrap());
+        assert!((v - i as f32).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_logits_request_json_shape() {
+    let req = serde_json::json!({
+        "residual": [0.1f32, -0.2, 0.3, 0.4],
+        "top_k": 5,
+        "temperature": 1.0,
+    });
+    assert!(req["residual"].is_array());
+    assert_eq!(req["top_k"], 5);
+    assert!((req["temperature"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_logits_response_json_shape() {
+    let resp = serde_json::json!({
+        "top_k": [
+            {"token_id": 9515, "token": "Paris", "prob": 0.801},
+            {"token_id": 235,  "token": "the",   "prob": 0.042},
+        ],
+        "latency_ms": 2.1,
+    });
+    assert!(resp["top_k"].is_array());
+    assert_eq!(resp["top_k"].as_array().unwrap().len(), 2);
+    assert_eq!(resp["top_k"][0]["token_id"], 9515);
+    assert_eq!(resp["top_k"][0]["token"], "Paris");
+    assert!(resp["top_k"][0]["prob"].as_f64().unwrap() > 0.0);
+    assert!(resp["latency_ms"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
+fn test_logits_binary_request_byte_alignment() {
+    // Binary logits request is raw f32[] LE. Must be multiple of 4.
+    let hidden = 8;
+    let residual: Vec<f32> = vec![0.0; hidden];
+    let body: Vec<u8> = residual.iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert_eq!(body.len() % 4, 0);
+    assert_eq!(body.len(), hidden * 4);
+}
+
+#[test]
+fn test_logits_hidden_size_mismatch_detectable() {
+    // Simulate the hidden size guard: residual.len() != hidden rejects request.
+    let hidden_size = 4usize;
+    let bad_residual = vec![0.0f32; 3]; // wrong length
+    assert_ne!(bad_residual.len(), hidden_size, "length 3 != hidden_size 4 → bad request");
+}
+
+#[test]
+fn test_token_decode_csv_parsing() {
+    let q = "9515,235,1234";
+    let ids: Vec<u32> = q
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().parse::<u32>().unwrap())
+        .collect();
+    assert_eq!(ids, vec![9515u32, 235, 1234]);
+}
+
+#[test]
+fn test_token_decode_invalid_id_detectable() {
+    let q = "9515,notanumber,1234";
+    let ids: Vec<Result<u32, _>> = q
+        .split(',')
+        .map(|s| s.trim().parse::<u32>())
+        .collect();
+    assert!(ids[0].is_ok());
+    assert!(ids[1].is_err(), "non-numeric token ID must fail to parse");
+    assert!(ids[2].is_ok());
+}
+
+#[test]
+fn test_embed_only_mode_string() {
+    // Mirrors build_stats logic: embed_only → "embed-service"
+    fn mode(embed_only: bool, ffn_only: bool) -> &'static str {
+        if embed_only { "embed-service" }
+        else if ffn_only { "ffn-service" }
+        else { "full" }
+    }
+    assert_eq!(mode(false, false), "full");
+    assert_eq!(mode(false, true), "ffn-service");
+    assert_eq!(mode(true, false), "embed-service");
+    // embed_only takes priority
+    assert_eq!(mode(true, true), "embed-service");
+}

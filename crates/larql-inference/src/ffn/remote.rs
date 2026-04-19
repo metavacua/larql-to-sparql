@@ -572,6 +572,7 @@ fn json_output_floats(v: &serde_json::Value) -> Result<Vec<f32>, RemoteFfnError>
 // ── wire types (JSON fallback) ────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct WalkFfnHttpRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     layer: Option<usize>,

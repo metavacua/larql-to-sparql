@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::embed_store::EmbedStoreF16;
+
 use larql_models::ModelWeights;
 use larql_vindex::{PatchedVindex, VindexConfig, ndarray::Array2, tokenizers};
 use tokio::sync::RwLock;
@@ -35,6 +37,14 @@ pub struct LoadedModel {
     /// endpoint. Memory-footprint optimization (skip attention weight
     /// load) is a separate follow-up.
     pub ffn_only: bool,
+    /// Whether this server is running in embed-service mode (--embed-only).
+    /// Implies `infer_disabled = true`. Loads only embeddings + lm_head +
+    /// tokenizer; skips FFN and attention weights.
+    pub embed_only: bool,
+    /// f16-at-rest embedding store — populated when `--embed-only` and
+    /// `embeddings.bin` is an f16 file. Halves embed-server RSS vs the
+    /// eager f32 heap copy (ADR-0008). `None` when f32 or not embed-only.
+    pub embed_store: Option<Arc<EmbedStoreF16>>,
     /// When true, `madvise(MADV_DONTNEED)` is issued on every mmap after
     /// each walk-ffn request. Opt-in via `--release-mmap-after-request`.
     /// Pairs with `--max-gate-cache-layers` to bound RSS hard; prefer
@@ -75,24 +85,40 @@ impl LoadedModel {
             larql_vindex::load_model_weights_q4k(&self.path, &mut cb)
                 .map_err(|e| format!("failed to load q4k model weights: {e}"))?
         } else {
-            // --ffn-only server: skip the f32 hidden-major FFN tensors
-            // (up_weights.bin / down_weights.bin). The walk-ffn endpoint uses
-            // `WalkFfn::walk_ffn_full_mmap` which reads from the feature-major
-            // mmap (up_features.bin / down_features.bin via VectorIndex), not
-            // from `weights.tensors`. Decoding up_weights.bin into f32 heap
-            // costs ~3.4 GB on 4B / ~14 GB on 31B for zero benefit.
-            let opts = larql_vindex::LoadWeightsOptions {
-                skip_attn: self.ffn_only,
-                skip_lm_head: self.ffn_only,
-                skip_embed: self.ffn_only,
-                skip_ffn: self.ffn_only,
-            };
-            if self.ffn_only {
+            let opts = if self.embed_only {
+                // --embed-only: keep lm_head + norm weights (needed for
+                // /v1/logits). Skip attn, FFN, and the embed matrix (the
+                // embed endpoint reads model.embeddings directly).
                 tracing::info!(
-                    "ffn-only: skipping attn + ffn + lm_head + embed at load \
-                     (pre-mmap filter — walk uses feature-major mmap instead)"
+                    "embed-only: loading lm_head + norms only; \
+                     skipping attn + ffn + embed tensors"
                 );
-            }
+                larql_vindex::LoadWeightsOptions {
+                    skip_attn: true,
+                    skip_lm_head: false,
+                    skip_embed: true,
+                    skip_ffn: true,
+                }
+            } else {
+                // --ffn-only server: skip the f32 hidden-major FFN tensors
+                // (up_weights.bin / down_weights.bin). The walk-ffn endpoint uses
+                // `WalkFfn::walk_ffn_full_mmap` which reads from the feature-major
+                // mmap (up_features.bin / down_features.bin via VectorIndex), not
+                // from `weights.tensors`. Decoding up_weights.bin into f32 heap
+                // costs ~3.4 GB on 4B / ~14 GB on 31B for zero benefit.
+                if self.ffn_only {
+                    tracing::info!(
+                        "ffn-only: skipping attn + ffn + lm_head + embed at load \
+                         (pre-mmap filter — walk uses feature-major mmap instead)"
+                    );
+                }
+                larql_vindex::LoadWeightsOptions {
+                    skip_attn: self.ffn_only,
+                    skip_lm_head: self.ffn_only,
+                    skip_embed: self.ffn_only,
+                    skip_ffn: self.ffn_only,
+                }
+            };
             larql_vindex::load_model_weights_with_opts(&self.path, &mut cb, opts)
                 .map_err(|e| format!("failed to load model weights: {e}"))?
         };
@@ -245,6 +271,8 @@ mod loaded_model_tests {
             tokenizer,
             infer_disabled: true,
             ffn_only: false,
+            embed_only: false,
+            embed_store: None,
             release_mmap_after_request: release_mmap,
             weights: std::sync::OnceLock::new(),
             probe_labels: HashMap::new(),

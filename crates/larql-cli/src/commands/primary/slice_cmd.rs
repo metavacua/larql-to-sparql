@@ -113,7 +113,20 @@ pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
     // doesn't run attention, but it still needs embed + norms to
     // instantiate a ModelWeights struct for the walk-ffn handler.
     let set: &[Part] = match preset.to_ascii_lowercase().as_str() {
+        // Default 2-tier client (holds the embedding table locally).
+        // Pairs with `larql run --ffn URL`.
         "client" => &[Embed, Norms, Attn, Tokenizer, Manifest, Labels],
+        // 3-tier client (ADR-0008). Attention only — embeddings +
+        // tokenizer are delegated to a remote embed server, FFN to the
+        // remote FFN server. Smallest client footprint (~1 GB on 4B).
+        // Pairs with `larql run --embed URL --ffn URL` (embed-URL flag
+        // lands with the embed-server work).
+        "attn" | "attention" => &[Norms, Attn, Manifest, Labels],
+        // Embed-server slice. Pairs with `larql serve --embed-only`
+        // (ADR-0008). No attention, no FFN — just the embedding table
+        // + tokenizer. Memory-bound service; one server can fan out to
+        // many attention workers.
+        "embed" | "embed-server" => &[Embed, Tokenizer, Labels],
         "server" | "ffn" | "ffn-service" => {
             &[Embed, Norms, Gate, DownMeta, Ffn, Tokenizer, Manifest, Labels]
         }
@@ -125,7 +138,7 @@ pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
         ],
         other => {
             return Err(format!(
-                "unknown preset '{other}'. Expected: client, server, browse, router, all"
+                "unknown preset '{other}'. Expected: client, attn, embed, server, browse, router, all"
             ));
         }
     };
@@ -154,8 +167,10 @@ pub struct SliceArgs {
     pub parts: Vec<String>,
 
     /// Preset that expands to a part list:
-    ///   * `client`  — attn + embed + norms + tokenizer (for `larql run --ffn URL`)
-    ///   * `server`  — gate + ffn + down_meta + tokenizer (for `larql serve --ffn-only`)
+    ///   * `client`  — attn + embed + norms + tokenizer (2-tier; pairs with `larql run --ffn URL`)
+    ///   * `attn`    — attn + norms only (3-tier; pairs with `larql run --embed URL --ffn URL`, ADR-0008)
+    ///   * `embed`   — embed + tokenizer (embed-server slice; pairs with `larql serve --embed-only`)
+    ///   * `server`  — gate + ffn + down_meta + embed + norms + tokenizer (pairs with `larql serve --ffn-only`)
     ///   * `browse`  — gate + embed + down_meta (no forward pass)
     ///   * `router`  — router_weights + tokenizer (MoE router; dense models error out)
     ///   * `all`     — every part (full vindex, useful for `--force` clones)
@@ -490,6 +505,71 @@ mod tests {
     #[test]
     fn preset_unknown_errors() {
         assert!(preset_parts("xyz").is_err());
+    }
+
+    #[test]
+    fn preset_attn_is_attention_without_embed() {
+        // 3-tier client — attn + norms only. Embedding table is
+        // delegated to an embed server per ADR-0008, so we specifically
+        // must NOT include Part::Embed. Size win on 4B is ~2.7 GB.
+        let parts = preset_parts("attn").unwrap();
+        assert!(parts.contains(&Part::Attn));
+        assert!(parts.contains(&Part::Norms));
+        assert!(!parts.contains(&Part::Embed), "attn preset must drop embed");
+        assert!(!parts.contains(&Part::Gate));
+        assert!(!parts.contains(&Part::Ffn));
+        assert!(!parts.contains(&Part::Tokenizer), "tokenizer lives with embed server");
+    }
+
+    #[test]
+    fn preset_attn_alias_attention() {
+        // `attention` is a spelling alias for `attn` — same part set.
+        let a = preset_parts("attn").unwrap();
+        let b = preset_parts("attention").unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn preset_embed_carries_embed_and_tokenizer_only() {
+        // Embed-server slice. The server from ADR-0008 needs the
+        // embedding table + tokenizer; it doesn't run any compute so
+        // attention, gate, and FFN all stay out.
+        let parts = preset_parts("embed").unwrap();
+        assert!(parts.contains(&Part::Embed));
+        assert!(parts.contains(&Part::Tokenizer));
+        assert!(!parts.contains(&Part::Attn));
+        assert!(!parts.contains(&Part::Gate));
+        assert!(!parts.contains(&Part::Ffn));
+        assert!(!parts.contains(&Part::Norms), "embed server doesn't run attention — no norms");
+    }
+
+    #[test]
+    fn preset_embed_alias_embed_server() {
+        let a = preset_parts("embed").unwrap();
+        let b = preset_parts("embed-server").unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn attn_plus_embed_equals_client_minus_manifests() {
+        // Sanity: an `attn` slice + an `embed` slice cover the same
+        // runtime bytes as the 2-tier `client` preset (modulo label
+        // bookkeeping). Concatenating the two shouldn't miss any
+        // deployment-critical part.
+        let client = preset_parts("client").unwrap();
+        let attn = preset_parts("attn").unwrap();
+        let embed = preset_parts("embed").unwrap();
+        let union: BTreeSet<Part> = attn.union(&embed).copied().collect();
+        // Client includes: Attn, Norms, Embed, Tokenizer, Manifest, Labels.
+        // attn ∪ embed includes: Attn, Norms, Manifest, Labels (attn) + Embed, Tokenizer, Labels (embed).
+        // Both cover Attn+Norms+Embed+Tokenizer — the actual runtime bytes.
+        for critical in [Part::Attn, Part::Norms, Part::Embed, Part::Tokenizer] {
+            assert!(
+                union.contains(&critical),
+                "attn ∪ embed missing {critical:?}, which client has"
+            );
+            assert!(client.contains(&critical));
+        }
     }
 
     #[test]

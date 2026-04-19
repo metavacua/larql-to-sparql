@@ -18,10 +18,10 @@ impl MetalBackend {
         inter: usize,
         q_dim: usize,
         kv_dim: usize,
-        num_q_heads: usize,
-        num_kv_heads: usize,
-        head_dim: usize,
-        rope_base: f32,
+        _num_q_heads: usize,
+        _num_kv_heads: usize,
+        _head_dim: usize,
+        _rope_base: f32,
     ) -> (Vec<f32>, f64, f64, f64) {
         let num_layers = layers.len();
         let hidden_val = hidden as u32;
@@ -283,7 +283,7 @@ impl MetalBackend {
                 ops::kv_cache::encode_kv_attend(enc, &kv_cache.layers[l], &self.kv_attend_pipeline, &q_out, &attn_out_buf, layer_num_q_heads, scale, window_size);
 
                 // O-projection
-                let ffn_uses_q4k = layer.gate.format == crate::QuantFormat::Q4_K
+                let _ffn_uses_q4k = layer.gate.format == crate::QuantFormat::Q4_K
                     || layer.gate.format == crate::QuantFormat::Q4_KF
                     || layer.gate.format == crate::QuantFormat::Q6_K;
                 if uses_q4k {

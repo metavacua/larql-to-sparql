@@ -135,8 +135,9 @@ pub fn download_hf_weights(hf_path: &str) -> Result<(), VindexError> {
 /// of [`resolve_hf_vindex_with_progress`].
 pub use hf_hub::api::Progress as DownloadProgress;
 
-/// Check hf-hub's on-disk cache for `filename` and return the resolved
-/// snapshot path iff a ready-to-use copy exists with the correct size.
+/// Check hf-hub's on-disk cache for `filename` and return `(path, size)`
+/// iff a ready-to-use copy exists whose content hash matches what HF
+/// reports on the remote.
 ///
 /// hf-hub 0.5 lays the cache out as:
 ///
@@ -147,44 +148,123 @@ pub use hf_hub::api::Progress as DownloadProgress;
 ///         └── <filename>
 ///   ```
 ///
-/// We look for any snapshot directory that contains `<filename>` with a
-/// size matching the remote. This is a deliberately simple check — it
-/// misses the rare case where the local file has the right size but the
-/// remote copy changed under a different etag. That case is unlikely
-/// for our immutable-vindex workflow and falls through to the normal
-/// download path anyway (hf-hub's etag comparison catches it).
+/// The etag is HF's content identifier: for LFS-tracked files it's the
+/// SHA-256 oid; for git-tracked small files it's the git blob SHA-1.
+/// Either way it uniquely identifies the bytes — so if `blobs/<etag>`
+/// exists locally, the content matches the remote and we can skip the
+/// download. This is stronger than the old size-only check: if the
+/// remote file changes (new commit rewriting the same filename), the
+/// etag changes, the cache probe misses, and we re-download.
 ///
-/// Returns `None` on any failure (HEAD error, cache missing, size
-/// mismatch, etc.) — the caller falls back to `download_with_progress`.
+/// The cost is one HEAD request per file. On a 10-file vindex that's a
+/// few hundred ms vs the GB we'd re-download otherwise — cheap.
+///
+/// Returns `None` on any failure (HEAD error, cache missing, etag
+/// absent, etc.); the caller falls back to `download_with_progress`.
 fn cached_snapshot_file(
     repo_id: &str,
     revision: Option<&str>,
     filename: &str,
 ) -> Option<(PathBuf, u64)> {
+    let (etag, size) = head_etag_and_size(repo_id, revision, filename)?;
     let repo_dir = hf_cache_repo_dir(repo_id)?;
-    // When caller pinned a revision, look only in that snapshot dir.
+    let blob_path = repo_dir.join("blobs").join(&etag);
+    let meta = std::fs::metadata(&blob_path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    // Size mismatch shouldn't happen if the etag matched, but treat it
+    // as cache-miss defensively.
+    if meta.len() != size {
+        return None;
+    }
+
+    // Return the snapshot path (symlink → blob) if the repo has one,
+    // otherwise the blob path itself. Either works — the caller only
+    // needs a file it can open.
     let snapshots = repo_dir.join("snapshots");
-    let candidates: Vec<PathBuf> = if let Some(rev) = revision {
-        vec![snapshots.join(rev)]
-    } else {
-        std::fs::read_dir(&snapshots)
-            .ok()?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.is_dir())
-            .collect()
-    };
-    // Pick any snapshot that has the file. Multiple snapshots = multiple
-    // commits cached; any of them counts as a hit for the default
-    // (`main`) branch workflow.
-    for snap in candidates {
-        let path = snap.join(filename);
-        if let Ok(meta) = std::fs::metadata(&path) {
-            if meta.is_file() && meta.len() > 0 {
-                return Some((path, meta.len()));
+    if let Ok(entries) = std::fs::read_dir(&snapshots) {
+        for entry in entries.flatten() {
+            let snap_file = entry.path().join(filename);
+            if snap_file.exists() {
+                return Some((snap_file, size));
             }
         }
     }
-    None
+    // Fall back to the pinned revision (if any) even if the symlink is
+    // missing — the blob still has the bytes.
+    if let Some(rev) = revision {
+        let snap_file = snapshots.join(rev).join(filename);
+        if snap_file.exists() {
+            return Some((snap_file, size));
+        }
+    }
+    Some((blob_path, size))
+}
+
+/// Issue a HEAD against HF's file-resolve endpoint for this repo+file
+/// and return `(etag, size)` from the response headers. HF redirects
+/// LFS files to S3 which also returns an etag, so we must follow
+/// redirects. Returns `None` for any failure: bad status, missing
+/// headers, malformed size, etc.
+fn head_etag_and_size(
+    repo_id: &str,
+    revision: Option<&str>,
+    filename: &str,
+) -> Option<(String, u64)> {
+    let rev = revision.unwrap_or("main");
+    let url = format!(
+        "https://huggingface.co/datasets/{repo_id}/resolve/{rev}/{filename}"
+    );
+    let token = get_hf_token().ok();
+
+    // **No redirects.** HF LFS files 302 → S3, and `X-Linked-Etag` +
+    // `X-Linked-Size` (the stable LFS oid + content length) only exist
+    // on HF's own first response. Following the redirect would lose
+    // those headers and leave us with S3's multipart ETag, which is
+    // MD5-based and doesn't match how hf-hub names blob files.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+    let mut req = client.head(&url);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+    let resp = req.send().ok()?;
+    // Accept both 2xx (git-tracked small files stay on HF) and 3xx
+    // (LFS files redirect to S3; the 302 carries the linked-etag we want).
+    let status = resp.status();
+    if !status.is_success() && !status.is_redirection() {
+        return None;
+    }
+
+    // Prefer `X-Linked-Etag` when present (LFS oid = SHA256, stable).
+    // Fall back to `ETag` for git-tracked files.
+    let raw_etag = resp
+        .headers()
+        .get("X-Linked-Etag")
+        .or_else(|| resp.headers().get("ETag"))
+        .and_then(|v| v.to_str().ok())?;
+    let etag = strip_etag_quoting(raw_etag);
+    let size_hdr = resp
+        .headers()
+        .get("X-Linked-Size")
+        .or_else(|| resp.headers().get("Content-Length"))
+        .and_then(|v| v.to_str().ok())?;
+    let size: u64 = size_hdr.parse().ok()?;
+    Some((etag, size))
+}
+
+/// Normalise an HTTP ETag header to the raw content hash hf-hub uses
+/// as blob filenames. Handles:
+///   * strong etag: `"abc123"` → `abc123`
+///   * weak etag:   `W/"abc123"` → `abc123`
+fn strip_etag_quoting(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let no_weak = trimmed.strip_prefix("W/").unwrap_or(trimmed);
+    no_weak.trim_matches('"').to_string()
 }
 
 /// Resolve the hf-hub cache directory for a dataset repo: the root of
@@ -1078,21 +1158,37 @@ fn create_collection(
         .json(&body)
         .send()
         .map_err(|e| VindexError::Parse(format!("HF collection create failed: {e}")))?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        return Err(VindexError::Parse(format!(
-            "HF collection create ({status}): {body}"
-        )));
+
+    let status = resp.status();
+    let body_text = resp.text().unwrap_or_default();
+
+    // Happy path — new collection created.
+    if status.is_success() {
+        let json: serde_json::Value = serde_json::from_str(&body_text)
+            .map_err(|e| VindexError::Parse(format!("HF collection JSON: {e}")))?;
+        let slug = json
+            .get("slug")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| VindexError::Parse("HF collection response missing slug".into()))?;
+        return Ok(slug.to_string());
     }
-    let json: serde_json::Value = resp
-        .json()
-        .map_err(|e| VindexError::Parse(format!("HF collection JSON: {e}")))?;
-    let slug = json
-        .get("slug")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| VindexError::Parse("HF collection response missing slug".into()))?;
-    Ok(slug.to_string())
+
+    // 409 Conflict — collection already exists. HF returns the existing
+    // slug in the error body. We hit this when `find_collection_slug`
+    // failed to find it (e.g. auth scope / list pagination issues) but
+    // the collection does exist. Short-circuiting here is the robust
+    // path regardless of why find missed it.
+    if status.as_u16() == 409 {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
+            if let Some(slug) = json.get("slug").and_then(|v| v.as_str()) {
+                return Ok(slug.to_string());
+            }
+        }
+    }
+
+    Err(VindexError::Parse(format!(
+        "HF collection create ({status}): {body_text}"
+    )))
 }
 
 fn add_collection_item(
@@ -1101,7 +1197,12 @@ fn add_collection_item(
     token: &str,
 ) -> Result<(), VindexError> {
     let client = reqwest::blocking::Client::new();
-    let url = format!("https://huggingface.co/api/collections/{slug}/item");
+    // HF's collection API uses `/items` (plural) for POST-to-append.
+    // The singular form is only valid as `PATCH/DELETE
+    // /api/collections/{slug}/item/{item_id}` for editing an existing
+    // entry. Got caught by this on the first real publish — the add
+    // failed with 404 after the four repos had already uploaded fine.
+    let url = format!("https://huggingface.co/api/collections/{slug}/items");
     let mut body = serde_json::json!({
         "item": {
             "type": item.repo_type,

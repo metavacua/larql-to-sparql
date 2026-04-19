@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 **Depends on:** ADR-0005 (FFN-Service Memory Bounds), ADR-0006 (Q4_K Remote FFN)
-**Relates to:** ADR-0003 (FFN Router), ADR-0004 (FFN Grid)
+**Relates to:** ADR-0003 (FFN Router), ADR-0004 (FFN Grid), ADR-0008 (Embed Server)
 
 ---
 
@@ -28,11 +28,12 @@ Three concrete problems:
    view for DESCRIBE/WALK users. Re-extracting from the safetensors
    source for each shape wastes compute and introduces drift.
 
-2. **Discovery across four repos.** Publishing a full vindex + three
-   slices means four separate HF repos. Without a landing page a user
-   hitting `hf://chrishayuk/gemma-4-31b-it-vindex` has no way to
-   discover the `-client` sibling, and it's not obvious which one they
-   need.
+2. **Discovery across six repos.** Publishing a full vindex + five
+   slices (`client`, `attn`, `embed`, `server`, `browse`) means six
+   separate HF repos. Without a landing page a user hitting
+   `hf://chrishayuk/gemma-4-31b-it-vindex` has no way to discover the
+   `-client` / `-attn` / `-embed` siblings, and it's not obvious which
+   one they need.
 
 3. **Re-publishing is expensive.** A 27 GB server slice uploaded via
    plain HTTP takes minutes. Most re-publishes are incremental — the
@@ -62,7 +63,7 @@ The three composition layers ship behind one command:
 larql publish gemma4-31b.vindex --repo chrishayuk/gemma-4-31b-it-vindex
 ```
 
-One invocation → four repos + three nested collections. Re-runs are
+One invocation → six repos + three nested collections. Re-runs are
 near-free when nothing changed.
 
 ---
@@ -96,11 +97,34 @@ copied regardless of the part set.
 
 ### Presets
 
+Two topologies supported side-by-side. Pick the row that matches your
+deployment:
+
+**2-tier (default — client holds embed locally)**
+
 | Preset | Parts | Pairs with |
 |---|---|---|
 | `client` | embed + norms + attn + tokenizer + manifest + labels | `larql run --ffn URL` |
 | `server` | embed + norms + gate + down_meta + ffn + tokenizer + manifest + labels | `larql serve --ffn-only` |
 | `browse` | embed + gate + down_meta + tokenizer + labels + readme | DESCRIBE / WALK / SELECT (no forward pass) |
+
+**3-tier (client delegates embed + FFN; ADR-0008)**
+
+| Preset | Parts | Pairs with |
+|---|---|---|
+| `attn` (alias: `attention`) | norms + attn + manifest + labels | `larql run --embed URL --ffn URL` (3-tier client) |
+| `embed` (alias: `embed-server`) | embed + tokenizer + labels | `larql serve --embed-only` (ADR-0008 embed-server) |
+| `server` | — | same as 2-tier row |
+
+The `attn` preset drops the embedding table entirely — ~2.7 GB saved on
+Gemma 3 4B (310 MB `attn` slice vs 3 GB `client` slice), ~2.6 GB on 31B
+Q4_K. Use when laptop RAM matters and you can run an embed server
+(ADR-0008) alongside the FFN server.
+
+**Other**
+
+| Preset | Parts | Pairs with |
+|---|---|---|
 | `router` | router + tokenizer + manifest + labels + readme | MoE router (ADR-0003) |
 | `all` | every part | full clone under a different name |
 
@@ -146,13 +170,15 @@ All on Gemma 4 31B Q4_K, macOS:
 | Slice | On-disk | Pair command | Notes |
 |---|---|---|---|
 | full | 32 GB | `larql run` | baseline |
-| `client` | 7.4 GB | `larql run --ffn URL` | 4.3× smaller than full |
+| `client` | 7.4 GB | `larql run --ffn URL` | 2-tier; 4.3× smaller than full |
+| `attn` | 4.8 GB | `larql run --embed URL --ffn URL` | 3-tier (ADR-0008); attn + norms only |
+| `embed` | 2.6 GB | `larql serve --embed-only` | embed + tokenizer for ADR-0008 server |
 | `server` | 27 GB | `larql serve --ffn-only` | no attention, still has embed+norms so the Q4K loader opens |
 | `browse` | 16 GB | `larql lql 'DESCRIBE …'` | no FFN, no attention |
 
 ---
 
-## `larql publish` — four repos + three collections
+## `larql publish` — six repos + three collections
 
 `crates/larql-cli/src/commands/primary/publish_cmd.rs` stages each
 slice in a temp directory via `slice_vindex`, uploads via
@@ -166,9 +192,11 @@ For `chrishayuk/gemma-4-31b-it-vindex`:
 
 ```
 chrishayuk/gemma-4-31b-it-vindex          (full)
-chrishayuk/gemma-4-31b-it-vindex-client   (attention only)
-chrishayuk/gemma-4-31b-it-vindex-server   (FFN only)
-chrishayuk/gemma-4-31b-it-vindex-browse   (DESCRIBE / WALK)
+chrishayuk/gemma-4-31b-it-vindex-client   (2-tier client: attn + embed + norms)
+chrishayuk/gemma-4-31b-it-vindex-attn     (3-tier client: attn + norms only — ADR-0008)
+chrishayuk/gemma-4-31b-it-vindex-embed    (embed server: embed + tokenizer — ADR-0008)
+chrishayuk/gemma-4-31b-it-vindex-server   (FFN server)
+chrishayuk/gemma-4-31b-it-vindex-browse   (DESCRIBE / WALK only)
 ```
 
 Override with `--slice-repo-template "{repo}/{preset}"` (folder-style)
@@ -181,7 +209,7 @@ Three nested levels, all auto-derived from the vindex's `model` field:
 
 | Level | Title | Holds |
 |---|---|---|
-| `model` | `Gemma 4 31B It — LARQL Vindex` | the four sibling repos for this model |
+| `model` | `Gemma 4 31B It — LARQL Vindex` | all six sibling repos for this model |
 | `family` | `Gemma Family — LARQL Vindexes` | every model of this architecture you've published |
 | `library` | `LARQL Vindex Library` | every vindex you've ever published |
 
@@ -303,6 +331,8 @@ Cached at: /.../datasets--chrishayuk--gemma-4-31b-it-vindex/...
 
   Also available on HuggingFace:
     --preset client   → hf://chrishayuk/gemma-4-31b-it-vindex-client
+    --preset attn     → hf://chrishayuk/gemma-4-31b-it-vindex-attn
+    --preset embed    → hf://chrishayuk/gemma-4-31b-it-vindex-embed
     --preset server   → hf://chrishayuk/gemma-4-31b-it-vindex-server
     --preset browse   → hf://chrishayuk/gemma-4-31b-it-vindex-browse
   Use `larql pull <repo> --all-slices` to grab them all.
@@ -348,7 +378,7 @@ failures.
 | Flag | Default | Effect |
 |---|---|---|
 | `--full` / `--no-full` | `--full` | Upload the full vindex to `--repo` |
-| `--slices a,b,c` | `client,server,browse` | Which presets to upload as siblings; `none` to skip |
+| `--slices a,b,c` | `client,attn,embed,server,browse` | Which presets to upload as siblings; `none` to skip. Covers both 2-tier and 3-tier (ADR-0008) topologies out of the box. |
 | `--slice-repo-template T` | `{repo}-{preset}` | Sibling naming; `{repo}` and `{preset}` substitute |
 | `--collections a,b,c` | `model,family,library` | Which collections to create/update; `none` to skip |
 | `--model-title T` | derived | Override the per-model collection title |

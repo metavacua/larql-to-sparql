@@ -31,7 +31,7 @@ See [`docs/cli.md`](../../docs/cli.md) for the full command reference.
 
 | Family | Commands | What they do |
 |---|---|---|
-| **Vindex lifecycle** | `extract-index`, `build`, `slice`, `publish`, `pull`, `compile`, `convert`, `verify`, `hf` | Extract, build from a Vindexfile, **carve deployment slices** (`client`/`server`/`browse`/`router`), **publish** (full + slices + collections to HF with SHA256-skip-if-unchanged), **pull** (with sibling hints, `--preset`, `--all-slices`, `--collection`), bake patches into weights, convert GGUF↔vindex↔safetensors, checksum, low-level HF helper |
+| **Vindex lifecycle** | `extract-index`, `build`, `slice`, `publish`, `pull`, `compile`, `convert`, `verify`, `hf` | Extract, build from a Vindexfile, **carve deployment slices** (`client`/`attn`/`embed`/`server`/`browse`/`router`), **publish** (full + 5 default slice siblings + collections to HF with SHA256-skip-if-unchanged), **pull** (with sibling hints, `--preset`, `--all-slices`, `--collection`), bake patches into weights, convert GGUF↔vindex↔safetensors, checksum, low-level HF helper |
 | **LQL** | `repl`, `lql`, `query`, `describe`, `filter`, `merge`, `validate`, `stats` | Interactive REPL + one-shot LQL, plus lower-level graph utilities |
 | **Weight-space extraction** | `weight-extract`, `attention-extract`, `vector-extract`, `index-gates`, `qk-templates`, `qk-rank`, `qk-modes`, `ov-gate`, `circuit-discover`, `fingerprint-extract` | Pull edges / templates / circuits from the model weights — zero forward passes |
 | **Forward-pass analysis** | `predict`, `walk`, `residuals`, `attention-capture`, `extract-routes`, `trajectory-trace`, `bfs` | Run the model and capture residuals, attention patterns, trajectories |

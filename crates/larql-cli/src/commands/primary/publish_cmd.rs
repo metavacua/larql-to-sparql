@@ -27,10 +27,21 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use crate::commands::primary::cache;
 use crate::commands::primary::slice_cmd::{preset_parts, slice_vindex, Part};
 
-/// Default sibling slice presets when `--slices` is not given. Dense-only:
+/// Default sibling slice presets when `--slices` is not given. Covers
+/// every deployment shape ADR-0007 and ADR-0008 support today:
+///
+///   * `client`  — 2-tier dense-remote (client holds embed locally)
+///   * `attn`    — 3-tier dense-remote client (embed delegated)
+///   * `embed`   — 3-tier embed server
+///   * `server`  — 3-tier / 2-tier FFN server
+///   * `browse`  — read-only DESCRIBE/WALK consumers
+///
 /// `router` is omitted because it would produce an empty repo on non-MoE
 /// vindexes; request it explicitly via `--slices router` when relevant.
-const DEFAULT_SLICES: &[&str] = &["client", "server", "browse"];
+/// Publishing all five by default is cheap: skip-if-unchanged keeps the
+/// re-upload cost at a few KB per slice once the LFS blobs are already
+/// on HF.
+const DEFAULT_SLICES: &[&str] = &["client", "attn", "embed", "server", "browse"];
 
 #[derive(Args)]
 pub struct PublishArgs {
@@ -52,8 +63,9 @@ pub struct PublishArgs {
     pub no_full: bool,
 
     /// Comma-separated slice presets to publish alongside the full vindex.
-    /// Defaults to `client,server,browse` (dense). Pass `none` to skip all
-    /// slice uploads.
+    /// Defaults to `client,attn,embed,server,browse` — covers both the
+    /// 2-tier and 3-tier (ADR-0008) topologies in one run. Pass `none`
+    /// to skip all slice uploads.
     #[arg(long, value_delimiter = ',')]
     pub slices: Vec<String>,
 
@@ -349,7 +361,13 @@ fn default_family(model_field: &str) -> String {
 
 fn note_for_preset(preset: &str) -> &'static str {
     match preset {
-        "client" => "Attention-only slice — pair with `larql run --ffn URL`.",
+        "client" => "2-tier client — attention + embed + norms. Pair with `larql run --ffn URL`.",
+        "attn" | "attention" => {
+            "3-tier attention client — attn + norms only. Pair with `larql run --embed URL --ffn URL` (ADR-0008)."
+        }
+        "embed" | "embed-server" => {
+            "Embed-server slice — embeddings + tokenizer. Pair with `larql serve --embed-only` (ADR-0008)."
+        }
         "server" => "FFN-only slice — pair with `larql serve --ffn-only`.",
         "browse" => "Browse-only slice — DESCRIBE / WALK / SELECT, no forward pass.",
         "router" => "Router slice — MoE router weights only (ADR-0003).",
@@ -464,7 +482,7 @@ fn resolve_slice_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::error:
         // before we start creating repos.
         preset_parts(trimmed).map_err(|e| {
             format!(
-                "invalid slice preset '{trimmed}': {e}. Valid: client, server, browse, router, all"
+                "invalid slice preset '{trimmed}': {e}. Valid: client, attn, embed, server, browse, router, all"
             )
         })?;
         out.push(trimmed.to_string());
@@ -592,23 +610,16 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
         }
     }
 
-    fn on_file_skipped(&mut self, filename: &str, size: u64, sha256: &str) {
-        // A finished bar that reads "skipped — sha256 abc123def456…" so the
-        // line stays visible in scrollback alongside the uploaded files.
-        let bar = self.mp.add(ProgressBar::new(size));
-        bar.set_style(
-            ProgressStyle::with_template(
-                "    {msg:28} [skipped — unchanged, sha256 {prefix:.dim}…]",
-            )
-            .unwrap(),
-        );
-        bar.set_message(truncate_msg(filename, 28));
+    fn on_file_skipped(&mut self, filename: &str, _size: u64, sha256: &str) {
+        // Print a plain line above the active bars rather than adding a
+        // finished-bar stub. `MultiProgress::println` cooperates with
+        // indicatif's cursor handling so the output stays one-line-per-
+        // file even on wide terminals; the earlier bar-based approach
+        // let indicatif pack multiple "skipped" entries on the same row
+        // when it thought it had horizontal space.
         let short_sha = sha256.get(..12).unwrap_or(sha256);
-        // indicatif doesn't expose custom template keys per-bar, so embed
-        // the hash via `with_finish_message` / a set-message variant.
-        // Simpler: just finish the bar with a preformatted message.
-        bar.finish_with_message(format!(
-            "{:<28} [skipped — unchanged, sha256 {}…]",
+        let _ = self.mp.println(format!(
+            "    {:<28} [skipped — unchanged, sha256 {}…]",
             truncate_msg(filename, 28),
             short_sha
         ));
@@ -641,9 +652,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_slice_list_is_dense_triplet() {
+    fn default_slice_list_is_full_publish_set() {
+        // Flipping this default changes what bare `larql publish` writes
+        // to HF — pin the exact order so the test fails loudly if it
+        // gets rearranged. Covers both 2-tier (`client`) and 3-tier
+        // (`attn` + `embed`) deployment shapes out of the box.
         let got = resolve_slice_list(&[]).unwrap();
-        assert_eq!(got, vec!["client", "server", "browse"]);
+        assert_eq!(got, vec!["client", "attn", "embed", "server", "browse"]);
     }
 
     #[test]
@@ -801,9 +816,14 @@ mod tests {
 
     #[test]
     fn note_for_preset_covers_every_default_slice() {
-        // The three default slice presets each get a hand-written note so
-        // the collection card reads cleanly.
-        assert!(note_for_preset("client").contains("Attention-only"));
+        // Every slice preset has a hand-written note so the collection
+        // card explains the variant. Any future preset wired into
+        // `slice_cmd::preset_parts` should also land here.
+        assert!(note_for_preset("client").contains("2-tier"));
+        assert!(note_for_preset("attn").contains("3-tier"));
+        assert!(note_for_preset("attention").contains("3-tier"));
+        assert!(note_for_preset("embed").contains("Embed-server"));
+        assert!(note_for_preset("embed-server").contains("Embed-server"));
         assert!(note_for_preset("server").contains("FFN-only"));
         assert!(note_for_preset("browse").contains("Browse-only"));
         assert!(note_for_preset("router").contains("MoE"));

@@ -1058,13 +1058,26 @@ rewrite — no re-extract.
 |---|---|---|
 | `<SRC>` | Source vindex: directory, `hf://owner/name`, cache shorthand | — |
 | `-o, --output <DST>` | Destination directory. Must not exist unless `--force`. | — |
-| `--preset <NAME>` | `client`, `server`, `browse`, `router`, `all` | — |
+| `--preset <NAME>` | `client`, `attn`, `embed`, `server`, `browse`, `router`, `all` | — |
 | `--parts <list>` | Explicit parts (embed, norms, attn, gate, down_meta, ffn, lm_head, router, tokenizer, manifest, labels, readme). `index.json` is always copied. | — |
 | `--force` | Overwrite `<DST>` if it exists | false |
 | `--dry-run` | Preview what would be copied | false |
 
-Slice sizes on Gemma 4 31B Q4_K: `client` 7.4 GB, `server` 27 GB,
-`browse` 16 GB, full 32 GB.
+**Preset sizes (Gemma 3 4B Q4_K measured; 31B figures scaled):**
+
+| Preset | Topology | 4B | 31B Q4K | Pairs with |
+|---|---|---|---|---|
+| `client` | 2-tier | 3.0 GB | 7.4 GB | `larql run --ffn URL` |
+| `attn` | 3-tier | 310 MB | 4.8 GB | `larql run --embed URL --ffn URL` (ADR-0008) |
+| `embed` | 3-tier | 1.28 GB | 2.6 GB | `larql serve --embed-only` (ADR-0008) |
+| `server` | either | 1.8 GB | 27 GB | `larql serve --ffn-only` |
+| `browse` | — | 1.3 GB | 16 GB | DESCRIBE/WALK only |
+| full | — | 1.3 GB | 32 GB | everything |
+
+Use `attn` + `embed` when laptop RAM matters and you can run an embed
+server alongside the FFN server. `attn` alone is 10× smaller than
+`client` on 4B because the embedding table (2.7 GB) is the biggest
+piece of a client vindex.
 
 ### `publish`
 
@@ -1076,7 +1089,7 @@ into three nested collections.
 | `<SRC>` | Source vindex | — |
 | `--repo <OWNER/NAME>` | HF repo ID for the full vindex. Siblings derive from `--slice-repo-template`. | required |
 | `--full` / `--no-full` | Upload the full vindex | `--full` |
-| `--slices <list>` | Presets to upload alongside. `none` to skip. | `client,server,browse` |
+| `--slices <list>` | Presets to upload alongside the full vindex. `none` to skip. Covers both 2-tier (`client`) and 3-tier (`attn` + `embed`) topologies by default. | `client,attn,embed,server,browse` |
 | `--slice-repo-template <T>` | `{repo}` → `--repo`, `{preset}` → preset. | `{repo}-{preset}` |
 | `--collections <list>` | `model`, `family`, `library`. `none` to skip. | `model,family,library` |
 | `--model-title <T>` | Override per-model collection title | derived |
@@ -1106,7 +1119,7 @@ internally.
 |---|---|---|
 | `<MODEL>` | `hf://owner/name[@rev]`, `owner/name`, or local path. Omit with `--collection`. | — |
 | `--preset <NAME>` | Pull `{repo}-{preset}` instead of the named repo. | — |
-| `--all-slices` | Full + every default sibling (`-client`, `-server`, `-browse`). Missing siblings warn, don't fail. | false |
+| `--all-slices` | Full + every default sibling (`-client`, `-attn`, `-embed`, `-server`, `-browse`). Missing siblings warn, don't fail. | false |
 | `--collection <SLUG\|URL>` | Pull every dataset in an HF collection. | — |
 | `--sibling-template <T>` | Must match `publish --slice-repo-template`. | `{repo}-{preset}` |
 
@@ -1119,6 +1132,8 @@ larql pull chrishayuk/gemma-4-31b-it-vindex
 # → progress bars per file, then:
 #   Also available on HuggingFace:
 #     --preset client   → hf://chrishayuk/gemma-4-31b-it-vindex-client
+#     --preset attn     → hf://chrishayuk/gemma-4-31b-it-vindex-attn
+#     --preset embed    → hf://chrishayuk/gemma-4-31b-it-vindex-embed
 #     --preset server   → hf://chrishayuk/gemma-4-31b-it-vindex-server
 #     --preset browse   → hf://chrishayuk/gemma-4-31b-it-vindex-browse
 #   Use `larql pull <repo> --all-slices` to grab them all.

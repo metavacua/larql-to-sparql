@@ -23,10 +23,12 @@ use larql_vindex::{GateIndex, WalkHit, WalkTrace};
 
 /// Helper enums for the K=full gemv path. Keep the backing storage alive
 /// (Arc<Vec<f32>> or native mmap view) so the ArrayView2 borrows are valid.
+#[allow(dead_code)]
 enum UpMatrix<'a> {
     View(ndarray::ArrayView2<'a, f32>),
     Arc(std::sync::Arc<Vec<f32>>),
 }
+#[allow(dead_code)]
 enum DownMatrix<'a> {
     View(ndarray::ArrayView2<'a, f32>),
     Arc(std::sync::Arc<Vec<f32>>),

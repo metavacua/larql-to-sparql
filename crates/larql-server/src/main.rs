@@ -3,6 +3,7 @@
 mod announce;
 mod auth;
 mod cache;
+mod embed_store;
 mod error;
 mod etag;
 mod ffn_l2_cache;
@@ -68,6 +69,18 @@ struct Cli {
     /// decode happens lazily per layer on first request instead.
     #[arg(long)]
     ffn_only: bool,
+
+    /// Run as an embed-service endpoint.
+    ///
+    /// Loads only embeddings.bin, lm_head, and the tokenizer — skips all
+    /// FFN and attention weights. Advertises `mode: embed-service` in
+    /// `/v1/stats`. Enables `/v1/embed`, `/v1/logits`, and `/v1/token/*`.
+    ///
+    /// Use this to offload the static embedding + lm_head lookup from
+    /// attention-only clients (ADR-0007). The embed slice is ~2-5% of the
+    /// full model weight — a minimal VPS can host it independently.
+    #[arg(long)]
+    embed_only: bool,
 
     /// Only load and serve layers in this range (inclusive, e.g. "0-19").
     /// Layers outside the range are not dequantized and their mmap pages are
@@ -173,6 +186,7 @@ fn load_single_vindex(
     path_str: &str,
     no_infer: bool,
     ffn_only: bool,
+    embed_only: bool,
     layer_range: Option<(usize, usize)>,
     max_gate_cache_layers: usize,
     release_mmap_after_request: bool,
@@ -210,21 +224,22 @@ fn load_single_vindex(
         model_name, config.num_layers, total_features
     );
 
-    // Load mmap'd feature-major vectors for walk FFN optimization
-    match index.load_down_features(&path) {
-        Ok(()) => info!("  Down features: loaded (mmap walk enabled)"),
-        Err(_) => info!("  Down features: not available"),
+    // Load mmap'd feature-major vectors for walk FFN optimization.
+    // Skip for embed_only — we never touch FFN paths.
+    if !embed_only {
+        match index.load_down_features(&path) {
+            Ok(()) => info!("  Down features: loaded (mmap walk enabled)"),
+            Err(_) => info!("  Down features: not available"),
+        }
+        if let Ok(()) = index.load_up_features(&path) { info!("  Up features: loaded (full mmap FFN)") }
     }
-    if let Ok(()) = index.load_up_features(&path) { info!("  Up features: loaded (full mmap FFN)") }
 
     // Warmup eagerly dequantises f16 gate vectors to f32 (~2x blowup). On a
     // 31B vindex that's ~13 GB f16 → ~26 GB f32 resident before the first
-    // request. Skip it under `--ffn-only`: the server is meant to be a
-    // demand-paged FFN bank, not a warmup-and-wait cache. The f16 gate path
-    // has a lazy per-layer decode cache that fills on first touch, so
-    // correctness is unchanged — just a one-request cold cost per layer.
-    if ffn_only {
-        info!("  Warmup: skipped (--ffn-only, lazy gate decode on first request)");
+    // request. Skip it under `--ffn-only` / `--embed-only`.
+    if ffn_only || embed_only {
+        let reason = if embed_only { "--embed-only" } else { "--ffn-only" };
+        info!("  Warmup: skipped ({reason})");
     } else {
         index.warmup();
         info!("  Warmup: done");
@@ -232,6 +247,33 @@ fn load_single_vindex(
 
     let (embeddings, embed_scale) = load_vindex_embeddings(&path)?;
     info!("  Embeddings: {}x{}", embeddings.shape()[0], embeddings.shape()[1]);
+
+    // In --embed-only mode, attempt an f16-at-rest store to halve RSS.
+    // Falls back silently if embeddings.bin is f32 (older vindexes).
+    let embed_store = if embed_only {
+        match crate::embed_store::EmbedStoreF16::open(
+            &path,
+            embed_scale,
+            config.vocab_size,
+            config.hidden_size,
+            5_000,
+        ) {
+            Ok(store) => {
+                let f16_bytes = config.vocab_size * config.hidden_size * 2;
+                info!(
+                    "  Embed store: f16 mmap ({:.1} GB, L1 cap 5000 tokens)",
+                    f16_bytes as f64 / 1e9
+                );
+                Some(std::sync::Arc::new(store))
+            }
+            Err(e) => {
+                info!("  Embed store: f16 mmap unavailable ({e}), using f32 heap");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let tokenizer = load_vindex_tokenizer(&path)?;
     let patched = PatchedVindex::new(index);
@@ -241,10 +283,12 @@ fn load_single_vindex(
         info!("  Labels: {} probe-confirmed", probe_labels.len());
     }
 
-    // --ffn-only implies --no-infer. The /v1/infer path needs full model
-    // weights; this mode serves just the FFN compute via /v1/walk-ffn.
-    let infer_disabled = no_infer || ffn_only;
-    if ffn_only {
+    // --ffn-only and --embed-only both disable /v1/infer.
+    let infer_disabled = no_infer || ffn_only || embed_only;
+    if embed_only {
+        info!("  Mode: embed-service (--embed-only)");
+        info!("  Infer: disabled (embed-service mode)");
+    } else if ffn_only {
         info!("  Mode: ffn-service (--ffn-only)");
         info!("  Infer: disabled (FFN-service mode)");
     } else if no_infer {
@@ -270,6 +314,8 @@ fn load_single_vindex(
         tokenizer,
         infer_disabled,
         ffn_only,
+        embed_only,
+        embed_store,
         release_mmap_after_request,
         weights: std::sync::OnceLock::new(),
         probe_labels,
@@ -322,13 +368,13 @@ async fn main() -> Result<(), BoxError> {
         }
         info!("Found {} vindexes in {}", paths.len(), dir.display());
         for p in &paths {
-            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request) {
+            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request) {
                 Ok(m) => models.push(Arc::new(m)),
                 Err(e) => warn!("  Skipping {}: {}", p.display(), e),
             }
         }
     } else if let Some(ref vindex_path) = cli.vindex_path {
-        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request)?;
+        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request)?;
         models.push(Arc::new(m));
     } else {
         return Err("must provide a vindex path or --dir".into());
