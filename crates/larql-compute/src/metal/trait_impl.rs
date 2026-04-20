@@ -193,14 +193,41 @@ impl ComputeBackend for MetalBackend {
     ) -> Option<Vec<f32>> {
         // Use full_pipeline with KV cache population via separate RoPE + skip_rope=1
         let num_layers = layers.len();
+        let shapes: Vec<(usize, usize)> = layers.iter()
+            .map(|l| (l.num_kv_heads, l.head_dim))
+            .collect();
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if cache_guard.is_none() {
-            *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+            *cache_guard = Some(ops::kv_cache::KVCache::new_per_layer(&self.bufs, &shapes, 4096));
         }
         let kv = cache_guard.as_mut().unwrap();
         while kv.layers.len() < num_layers {
-            kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, num_kv_heads, head_dim));
+            let (nkv, hd) = shapes[kv.layers.len()];
+            kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, nkv, hd));
         }
+
+        // Hybrid MoE models (Gemma 4 26B A4B): each layer requires a CPU MoE
+        // pass after the GPU dense FFN, so batched dispatch_full_pipeline (GPU-only)
+        // would skip MoE entirely. Instead, run token-by-token decode — each call
+        // correctly interleaves GPU dense FFN + CPU MoE + GPU scalars.
+        // The caller (generate.rs) only uses the last row of the prefill output,
+        // so we return a zero-padded vec with only the final position filled.
+        let has_moe = layers.iter().any(|l| l.moe.is_some());
+        if has_moe {
+            let mut last_h = vec![0.0f32; hidden];
+            for pos in 0..seq_len {
+                let x_pos = &x[pos * hidden..(pos + 1) * hidden];
+                last_h = MetalBackend::decode_token(
+                    self, kv, layers, x_pos, hidden, inter, q_dim, kv_dim,
+                    num_q_heads, num_kv_heads, head_dim, rope_base,
+                );
+            }
+            let mut result = vec![0.0f32; seq_len * hidden];
+            let dst_off = seq_len.saturating_sub(1) * hidden;
+            result[dst_off..dst_off + hidden].copy_from_slice(&last_h);
+            return Some(result);
+        }
+
         let geglu = if layers.first().is_some_and(|l| l.activation == crate::Activation::GeluTanh) {
             &self.geglu_gelu_tanh_pipeline
         } else {

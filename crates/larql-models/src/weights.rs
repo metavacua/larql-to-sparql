@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use ndarray::ArcArray2;
 use crate::ModelArchitecture;
+use memmap2::Mmap;
 
 /// Type alias for weight tensors — ArcArray2 supports both owned and shared storage.
 /// Owned: from safetensors loading (heap). Shared: from mmap (zero-copy).
@@ -14,7 +15,13 @@ pub struct ModelWeights {
     pub vectors: HashMap<String, Vec<f32>>,
     /// Raw bytes for tensors that must stay in their native dtype (e.g. packed BF16 expert
     /// weights for Gemma 4 26B A4B). Keyed by the same normalized tensor names as `tensors`.
+    /// Small tensors only — do not put large (>1 GB) data here.
     pub raw_bytes: HashMap<String, Vec<u8>>,
+    /// Memory-mapped files for large packed-byte tensors (experts_packed.bin, etc.).
+    /// Each entry maps a file name to its Mmap handle so the OS can page-in on demand.
+    pub packed_mmaps: HashMap<String, Mmap>,
+    /// Byte ranges into `packed_mmaps`: maps tensor key → (file_name, offset, length).
+    pub packed_byte_ranges: HashMap<String, (String, usize, usize)>,
     pub embed: WeightArray,
     /// Output projection matrix. Same as embed if tie_word_embeddings=true,
     /// separate lm_head.weight otherwise.
@@ -32,6 +39,13 @@ pub struct ModelWeights {
 }
 
 impl ModelWeights {
+    /// Return a byte slice into the mmap'd packed data for `key`, or `None`.
+    pub fn get_packed_bytes(&self, key: &str) -> Option<&[u8]> {
+        let (file, offset, length) = self.packed_byte_ranges.get(key)?;
+        let mmap = self.packed_mmaps.get(file)?;
+        Some(&mmap[*offset..*offset + *length])
+    }
+
     /// Drop FFN weight tensors (gate, up, down projections) from memory.
     /// After this, only attention, embedding, norm, and logits weights remain.
     /// Returns the number of bytes freed.

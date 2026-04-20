@@ -29,17 +29,42 @@ the demo narrative, and cross-crate work.
 
 ### Phase 1 — MoE inference path (blocks Act 2)
 
-The whole Act 2 story is MoE-distributed. The primitives don't exist
-in `larql-inference` yet.
+The whole Act 2 story is MoE-distributed.
 
-- [ ] **MoE-aware forward pass.** `larql-inference` has zero mentions
-  of `expert`/`MoE` today. Need a layer path that calls the router,
-  picks top-K experts, dispatches to a per-expert FFN backend, sums
-  weighted outputs. Fits on top of the existing `FfnBackend` trait.
-- [ ] **Gemma 4 MoE architecture hooks** in
-  `crates/larql-models/src/architectures/gemma4.rs` — copy the Mixtral
-  pattern (`is_moe`, `num_experts`, `num_experts_per_token`,
-  `moe_router_key`, `expert_ffn_{gate,up,down}_key`).
+- [x] **Gemma 4 MoE architecture hooks** in
+  `crates/larql-models/src/architectures/gemma4.rs` — `is_hybrid_moe`,
+  `num_experts`, `num_experts_per_token`, `moe_router_key`,
+  `packed_experts_gate_up_key`, `packed_experts_down_key`, per-layer
+  norms (`pre_feedforward_layernorm_2`, `post_feedforward_layernorm_2`),
+  `moe_router_per_expert_scale_key`, `layer_scalar_key`.
+- [x] **CPU MoE forward pass** (`crates/larql-compute/src/cpu/ops/moe.rs`):
+  BF16 expert dequant, router softmax, top-K selection, per-expert
+  gated FFN (gate_proj + up_proj + SiLU + down_proj), weighted sum,
+  post-experts RMSNorm. Wired into `decode_token` via GPU/CPU interleave.
+- [x] **Metal decode with CPU MoE interleave** — GPU runs dense FFN per
+  layer, CPU reads `h_post_attn` (unified memory), runs MoE, adds
+  output to `new_h`. Layer scalar correctly applied only to the
+  combined FFN+MoE delta (`h_post_attn + scalar * (dense + moe)`),
+  not to the full residual.
+- [x] **Gemma 4 26B A4B coherent output** — first confirmed working
+  Metal inference: "The capital of France is" → "Paris", Germany →
+  "Berlin", "hydrogen and" → "oxygen". (2026-04-20)
+- [ ] **Batched MoE prefill** — current MoE prefill uses token-by-token
+  `decode_token` calls (correct, but O(seq_len) serial GPU dispatches
+  per layer). Replace with a batched prefill that processes all prompt
+  positions in one pass, interleaving GPU dense FFN and CPU MoE at each
+  layer. See `crates/larql-compute/src/metal/trait_impl.rs::prefill_q4`
+  and `full_pipeline.rs::dispatch_full_pipeline`.
+- [ ] **Fix `dispatch_full_pipeline` layer_scalar** — currently scales
+  the full residual including `h_post_attn` instead of only the FFN
+  delta. Not hit for Gemma 4 26B (all-MoE bypasses this path) but
+  wrong for future non-MoE models with `layer_scalar`. Fix: scale
+  `normed_ffn` or `down_out` before the residual add in
+  `crates/larql-compute/src/metal/stages/residual.rs::encode_post_ffn`.
+- [ ] **MoE-aware forward pass on CPU path** — `predict_q4k` /
+  `WeightFfn::forward` has no MoE. The non-Metal CPU path produces
+  wrong output on Gemma 4 26B. Wire `cpu_moe_forward` into
+  `larql-inference/src/forward/layer.rs`.
 - [ ] Wire `RouterIndex` (already exists at
   `crates/larql-vindex/src/index/router.rs`) into the client-side
   forward pass so the router runs locally.
@@ -79,6 +104,162 @@ in `larql-inference` yet.
   isn't the default path in `forward/layer.rs`. Wire Metal/CUDA into
   the walk-only forward pass so client-side attention runs on GPU
   while FFN/experts go remote.
+
+---
+
+## P1 — Generation UX (chat template, sampling, stopping)
+
+The current `larql run` output loops ("ParisatthecapitalofFranceis...") because
+three standard inference features are missing. All are independent and any one
+improves the experience.
+
+### Chat template
+**Status**: Not started
+**Impact**: High — instruction-tuned models (Gemma 3/4 IT, Mistral-Instruct)
+loop or produce garbage without their expected prompt format.
+
+`larql run` sends raw text to the model. IT models expect a structured
+turn format, e.g. Gemma 4:
+```
+<start_of_turn>user
+The capital of France is<end_of_turn>
+<start_of_turn>model
+```
+Without it, the model sees a bare continuation task and loops greedily.
+
+Fix: read `tokenizer_config.json` from the vindex (already present for
+HF-extracted models — lives next to `config.json`). Parse the
+`chat_template` Jinja field. Apply it in `larql run` before tokenising.
+`minijinja` crate is the standard Rust choice. `larql chat` should always
+apply the template; `larql run` can expose `--no-chat-template` for raw use.
+
+### EOS detection and stop strings
+**Status**: Partial — `generate.rs` checks for `<eos>`, `</s>`,
+`<|endoftext|>` but Gemma 4 uses `<end_of_turn>` which is not in that list.
+**Impact**: High — without EOS stopping, greedy decode runs to `--max-tokens`.
+
+Fix: read `eos_token_id` (and `eos_token_ids` list) from `config.json`;
+also read `stop_strings` from `generation_config.json` (Gemma 4 lists
+`<end_of_turn>` there). Check decoded token string + token ID at every
+step in `generate.rs`. `run_cmd.rs` could expose `--stop STRING` for
+overrides.
+
+### Token spacing / detokenisation display
+**Status**: Not started
+**Impact**: Medium — "Paris at the capital..." prints as "Parisatthecapital".
+
+HuggingFace tokenizers use a leading-space convention (`▁Paris`) — the
+`tokenizers` crate's `decode` already handles this when
+`skip_special_tokens = true`. The bug is likely that `tokenizer.decode`
+is called per-token with `false` (keeps `▁` prefix stripped) instead of
+accumulating and decoding the full sequence, or that `trim()` is stripping
+the leading space. Fix in `generate.rs` decode loop: `decode(&[tid], false)`
+and keep the raw string; only trim the very first token.
+
+### Sampling (temperature / top-p / top-k)
+**Status**: Not started
+**Impact**: Medium for quality, needed for non-deterministic output.
+
+Current path is always greedy (argmax). Add `--temperature F`, `--top-p F`,
+`--top-k N` flags to `run_cmd.rs`. Sampling happens after the lm_head
+scores are computed in `generate.rs` — no GPU changes required.
+
+### Repetition penalty
+**Status**: Not started
+**Impact**: Medium — practical fix for the greedy looping problem without
+requiring a full chat template. Useful for raw-prompt (`larql run`) and
+base models where no chat template exists.
+
+Add `--repetition-penalty F` (default 1.0 = off). Before argmax / sampling,
+divide each token's logit by the penalty if that token appears in the
+recently generated window. Standard implementation: logit ÷ penalty for
+tokens in the last N generated positions. No GPU changes required — purely
+a logits post-processing step in `generate.rs`.
+
+### Multi-turn conversation state
+**Status**: Not started — `larql chat` resets KV cache per turn today.
+**Impact**: High — "chat" implies the model remembers what it said. Without
+this, each line in chat mode is an independent cold-start forward pass.
+
+Fix: maintain a running `token_ids` buffer across turns in `run_cmd.rs`.
+After each model response, append the response token IDs to the buffer
+before the next user turn. Wrap each turn pair in the chat template
+(`<start_of_turn>user … model …`) incrementally. Pass the full buffer
+to `generate()` so the KV cache grows across turns. Expose `--max-context N`
+to bound memory (evict oldest turns when the context window fills).
+
+### Token streaming
+
+### Long context / dynamic KV cache
+**Status**: Hard-capped at 4096 tokens today.
+**Impact**: High — Gemma 4's headline feature is 1M context. 4096 is a
+non-starter for long conversations and the demo's "database" framing.
+
+Two parts:
+1. **Configurable max** — expose `--max-context N` (default 8192).
+   `KVCache::new_per_layer` already takes `max_seq`; thread `N` through
+   `prefill_q4` / `decode_token` call sites in `generate.rs`.
+2. **Dynamic growth** — when `current_len` reaches `max_seq`, either
+   evict the oldest window (sliding, already implemented as
+   `--kv-cache markov-bounded`) or double the buffer. The Metal KV
+   cache buffers are pre-allocated; growth requires a realloc + copy on
+   the GPU side. A simpler interim: warn and truncate at `max_seq`,
+   document as a known limit.
+**Status**: Not started
+**Impact**: High for UX — without streaming, the CLI is silent until all
+`--max-tokens` are done. A 64-token run on Gemma 4 26B takes ~10s with no
+output; streaming makes it feel interactive immediately.
+
+Fix: `generate.rs` currently collects tokens into a `Vec` and returns.
+Change to accept a `on_token: impl FnMut(&str, f64)` callback (or a
+`std::sync::mpsc::Sender`). In `run_cmd.rs`, the callback prints each token
+to stdout and flushes. The `larql serve` OpenAI-compatible path (`/v1/chat/completions`
+with `stream: true`) would use SSE chunks from the same callback.
+Chat mode in `run_cmd.rs` already flushes stdout per turn — streaming
+just moves the flush inside the generate loop.
+
+### OpenAI-compatible `/v1/chat/completions`
+**Status**: Not started — `larql serve` has custom endpoints but no
+OpenAI-compatible chat surface.
+**Impact**: High for adoption — makes LARQL a drop-in backend for
+Continue.dev, Open WebUI, LiteLLM, and any tool that speaks the
+OpenAI API. The "you can do this too" demo moment needs a working URL.
+
+With chat template + streaming landing, this is largely wiring:
+- `POST /v1/chat/completions` — accept `{model, messages, stream,
+  temperature, max_tokens}`, apply the model's chat template to the
+  `messages` array, call `generate()`, return `ChatCompletionResponse`
+  (non-stream) or SSE `data: {"choices":[{"delta":...}]}` chunks (stream).
+- `GET /v1/models` — return the loaded vindex name so clients can
+  enumerate available models.
+- Wire into `larql-server/src/routes/` alongside the existing endpoints.
+
+### Auto-extract on `larql run hf://`
+**Status**: Not started.
+**Impact**: High for adoption — the current flow is `larql extract` →
+`larql link` → `larql run`. Three commands before inference starts.
+The "you can do this too" moment needs one.
+
+Fix: in `cache::resolve_model`, if the shorthand looks like `hf://owner/name`
+and no cached vindex matches, offer to run `larql extract` inline
+(with a confirmation prompt or `--yes` flag). Download the safetensors
+from HuggingFace, stream-extract to a temp directory, move to the
+local cache, then proceed with inference. Re-uses the existing
+`larql extract` pipeline — the new code is only in the cache resolver
+and a progress display wrapper.
+
+### Gemma 3 4B regression smoke test
+**Status**: Not started — no CI check verifies correctness after
+compute / inference changes.
+**Impact**: Medium — after the MoE and layer_scalar changes, nothing
+formally verifies Gemma 3 4B still produces "Paris" at expected
+probability. One bad merge could silently break the most-used model.
+
+Fix: add a `tests/integration/` test (or `larql-cli` example) that
+loads `gemma3-4b-q4k-streaming` (already in the local cache), runs
+`larql run "The capital of France is" -n 1 --metal`, and asserts the
+first token is "Paris". Gate on `CI_INTEGRATION=1` so it doesn't run
+on every PR but does run before release branches.
 
 ---
 

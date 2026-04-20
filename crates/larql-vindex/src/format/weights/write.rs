@@ -59,6 +59,10 @@ pub trait WeightSource {
 
     /// All 1D vector names (for norms).
     fn vector_names(&self) -> Vec<String>;
+
+    /// Raw BF16 bytes for a packed expert tensor (e.g. Gemma 4 experts.gate_up_proj).
+    /// Returns None if the key is absent or the tensor is not BF16.
+    fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>>;
 }
 
 // ── ModelWeights implementation ──
@@ -88,6 +92,10 @@ impl WeightSource for ModelWeights {
 
     fn vector_names(&self) -> Vec<String> {
         self.vectors.keys().cloned().collect()
+    }
+
+    fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>> {
+        self.raw_bytes.get(key).cloned()
     }
 }
 
@@ -164,6 +172,14 @@ impl<'a> WeightSource for StreamingWeights<'a> {
         }
         names.sort();
         names
+    }
+
+    fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>> {
+        let (shard_idx, tensor_name) = self.tensor_index.get(key)?;
+        let st = safetensors::SafeTensors::deserialize(self.shard_mmaps[*shard_idx]).ok()?;
+        let view = st.tensor(tensor_name).ok()?;
+        if view.dtype() != safetensors::Dtype::BF16 { return None; }
+        Some(view.data().to_vec())
     }
 }
 
@@ -718,6 +734,58 @@ pub fn write_model_weights_q4k_with_opts(
         .map_err(|e| VindexError::Parse(e.to_string()))?;
     std::fs::write(dir.join("interleaved_q4k_manifest.json"), ff_manifest_json)?;
 
+    // ── experts_packed.bin (hybrid MoE PackedBF16, e.g. Gemma 4 26B A4B) ──
+    //
+    // Expert gate_up_proj and down_proj are stored as raw BF16 bytes — NOT Q4_K.
+    // Converting to f32 would double the footprint (~50 GB); BF16 keeps it to ~26 GB.
+    // The forward pass reads these directly at inference time.
+    let mut packed_entries: Vec<WeightEntry> = Vec::new();
+    if arch.is_hybrid_moe() && arch.expert_format() == larql_models::ExpertFormat::PackedBF16 {
+        let num_experts = arch.num_experts();
+        let moe_inter = arch.moe_intermediate_size();
+        let hidden = arch.config().hidden_size;
+
+        let packed_path = dir.join("experts_packed.bin");
+        let mut packed_file = BufWriter::new(std::fs::File::create(&packed_path)?);
+        let mut packed_offset: u64 = 0;
+
+        for layer in 0..num_layers {
+            // gate_up: [num_experts, 2*moe_inter, hidden] in BF16
+            if let Some(key) = arch.packed_experts_gate_up_key(layer) {
+                if let Some(bytes) = source.get_packed_bf16(&key) {
+                    packed_file.write_all(&bytes)?;
+                    let len = bytes.len() as u64;
+                    packed_entries.push(WeightEntry {
+                        key,
+                        kind: "packed_bf16".into(),
+                        shape: vec![num_experts, 2 * moe_inter, hidden],
+                        offset: packed_offset,
+                        length: len,
+                        file: "experts_packed.bin".into(),
+                    });
+                    packed_offset += len;
+                }
+            }
+            // down: [num_experts, hidden, moe_inter] in BF16
+            if let Some(key) = arch.packed_experts_down_key(layer) {
+                if let Some(bytes) = source.get_packed_bf16(&key) {
+                    packed_file.write_all(&bytes)?;
+                    let len = bytes.len() as u64;
+                    packed_entries.push(WeightEntry {
+                        key,
+                        kind: "packed_bf16".into(),
+                        shape: vec![num_experts, hidden, moe_inter],
+                        offset: packed_offset,
+                        length: len,
+                        file: "experts_packed.bin".into(),
+                    });
+                    packed_offset += len;
+                }
+            }
+        }
+        packed_file.flush()?;
+    }
+
     // ── norms.bin (f32, small) ──
     let norms_path = dir.join("norms.bin");
     let mut norms_file = BufWriter::new(std::fs::File::create(&norms_path)?);
@@ -759,6 +827,51 @@ pub fn write_model_weights_q4k_with_opts(
                     file: "norms.bin".into(),
                 });
                 norms_offset += bytes.len() as u64;
+            }
+        }
+
+        // MoE router + norms (hybrid MoE, e.g. Gemma 4 26B A4B).
+        // router.proj.weight is 2D [num_experts, hidden] — flatten and store as "vector".
+        // All other MoE keys are 1D vectors.
+        if arch.is_hybrid_moe() {
+            // 2D router projection — flatten
+            if let Some(key) = arch.moe_router_key(layer) {
+                if let Some((data, _, _)) = source.get_tensor(&key) {
+                    let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+                    norms_file.write_all(&bytes)?;
+                    norm_entries.push(WeightEntry {
+                        key: key.clone(),
+                        kind: "vector".into(),
+                        shape: vec![data.len()],
+                        offset: norms_offset,
+                        length: bytes.len() as u64,
+                        file: "norms.bin".into(),
+                    });
+                    norms_offset += bytes.len() as u64;
+                }
+            }
+            // 1D MoE vectors
+            let moe_vec_keys: Vec<String> = [
+                arch.moe_router_scale_key(layer),
+                arch.moe_router_per_expert_scale_key(layer),
+                arch.moe_pre_experts_norm_key(layer),
+                arch.moe_post_ffn1_norm_key(layer),
+                arch.moe_post_experts_norm_key(layer),
+            ].into_iter().flatten().collect();
+            for key in moe_vec_keys {
+                if let Some(data) = source.get_vector(&key) {
+                    let bytes = crate::config::dtype::encode_floats(&data, norms_dtype);
+                    norms_file.write_all(&bytes)?;
+                    norm_entries.push(WeightEntry {
+                        key: key.clone(),
+                        kind: "vector".into(),
+                        shape: vec![data.len()],
+                        offset: norms_offset,
+                        length: bytes.len() as u64,
+                        file: "norms.bin".into(),
+                    });
+                    norms_offset += bytes.len() as u64;
+                }
             }
         }
     }
@@ -899,8 +1012,10 @@ pub fn write_model_weights_q4k_with_opts(
         });
     }
 
-    // norms + lm_head manifest (keeps weight_manifest.json meaningful even in Q4 mode)
-    let manifest_json = serde_json::to_string_pretty(&norm_entries)
+    // norms + packed experts + lm_head manifest
+    let mut all_entries = norm_entries;
+    all_entries.extend(packed_entries);
+    let manifest_json = serde_json::to_string_pretty(&all_entries)
         .map_err(|e| VindexError::Parse(e.to_string()))?;
     std::fs::write(dir.join("weight_manifest.json"), manifest_json)?;
 

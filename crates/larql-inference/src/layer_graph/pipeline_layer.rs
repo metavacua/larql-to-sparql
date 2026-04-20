@@ -106,8 +106,8 @@ fn build_moe_weights<'a>(
     let down_key = arch.packed_experts_down_key(layer)?;
     let router_key = arch.moe_router_key(layer)?;
 
-    let experts_gate_up = weights.raw_bytes.get(&gate_up_key)?.as_slice();
-    let experts_down = weights.raw_bytes.get(&down_key)?.as_slice();
+    let experts_gate_up = weights.get_packed_bytes(&gate_up_key)?;
+    let experts_down = weights.get_packed_bytes(&down_key)?;
     let router_proj = weights.vectors.get(&router_key)?.as_slice();
 
     let router_scale = arch.moe_router_scale_key(layer)

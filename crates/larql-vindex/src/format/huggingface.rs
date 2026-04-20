@@ -374,7 +374,7 @@ where
 
 /// Options controlling [`publish_vindex_with_opts`]. Kept as a struct so
 /// the signature can grow without breaking callers.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct PublishOptions {
     /// When true, skip uploading LFS-tracked files whose local SHA256
     /// already matches the remote `lfs.oid`. Small files (git-tracked
@@ -382,11 +382,35 @@ pub struct PublishOptions {
     /// the git blob SHA-1 format isn't directly derivable from the file
     /// content SHA256 without a separate hash.
     pub skip_unchanged: bool,
+    /// HuggingFace repo type: `"model"` (default) or `"dataset"`.
+    pub repo_type: String,
+}
+
+impl Default for PublishOptions {
+    fn default() -> Self {
+        Self { skip_unchanged: false, repo_type: "model".into() }
+    }
 }
 
 impl PublishOptions {
     pub fn skip_unchanged() -> Self {
-        Self { skip_unchanged: true }
+        Self { skip_unchanged: true, ..Self::default() }
+    }
+}
+
+/// Returns the HF API base URL for a repo: `https://huggingface.co/api/{models|datasets}/{repo_id}`.
+fn hf_api_url(repo_type: &str, repo_id: &str, path: &str) -> String {
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    format!("https://huggingface.co/api/{plural}/{repo_id}/{path}")
+}
+
+/// Returns the web / git base URL for a repo.
+/// Models: `https://huggingface.co/{repo_id}`, datasets: `https://huggingface.co/datasets/{repo_id}`.
+fn hf_repo_url(repo_type: &str, repo_id: &str) -> String {
+    if repo_type == "dataset" {
+        format!("https://huggingface.co/datasets/{repo_id}")
+    } else {
+        format!("https://huggingface.co/{repo_id}")
     }
 }
 
@@ -421,14 +445,15 @@ pub fn publish_vindex_with_opts(
     }
 
     let token = get_hf_token()?;
+    let repo_type = opts.repo_type.as_str();
     callbacks.on_start(repo_id);
-    create_hf_dataset_repo(repo_id, &token)?;
+    create_hf_repo(repo_id, &token, repo_type)?;
 
     // Pull remote LFS index so we can skip unchanged files. Non-fatal
     // if the tree API errors (brand-new repo returns 404 here) — we just
     // fall back to "upload everything".
     let remote_lfs: std::collections::HashMap<String, String> = if opts.skip_unchanged {
-        fetch_remote_lfs_oids(repo_id, &token).unwrap_or_default()
+        fetch_remote_lfs_oids(repo_id, &token, repo_type).unwrap_or_default()
     } else {
         std::collections::HashMap::new()
     };
@@ -460,11 +485,11 @@ pub fn publish_vindex_with_opts(
         }
 
         callbacks.on_file_start(&filename, size);
-        upload_file_to_hf(repo_id, &token, file_path, &filename, callbacks)?;
+        upload_file_to_hf(repo_id, &token, file_path, &filename, callbacks, repo_type)?;
         callbacks.on_file_done(&filename);
     }
 
-    let url = format!("https://huggingface.co/datasets/{}", repo_id);
+    let url = hf_repo_url(repo_type, repo_id);
     callbacks.on_complete(&url);
     Ok(url)
 }
@@ -475,10 +500,10 @@ pub fn publish_vindex_with_opts(
 fn fetch_remote_lfs_oids(
     repo_id: &str,
     token: &str,
+    repo_type: &str,
 ) -> Result<std::collections::HashMap<String, String>, VindexError> {
-    let url = format!(
-        "https://huggingface.co/api/datasets/{repo_id}/tree/main?recursive=true"
-    );
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    let url = format!("https://huggingface.co/api/{plural}/{repo_id}/tree/main?recursive=true");
     let client = reqwest::blocking::Client::new();
     let resp = client
         .get(&url)
@@ -569,14 +594,14 @@ fn get_hf_token() -> Result<String, VindexError> {
     ))
 }
 
-fn create_hf_dataset_repo(repo_id: &str, token: &str) -> Result<(), VindexError> {
+fn create_hf_repo(repo_id: &str, token: &str, repo_type: &str) -> Result<(), VindexError> {
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post("https://huggingface.co/api/repos/create")
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({
             "name": repo_id.split('/').next_back().unwrap_or(repo_id),
-            "type": "dataset",
+            "type": repo_type,
             "private": false,
         }))
         .send()
@@ -633,11 +658,12 @@ fn upload_file_to_hf(
     local_path: &Path,
     remote_filename: &str,
     callbacks: &mut dyn PublishCallbacks,
+    repo_type: &str,
 ) -> Result<(), VindexError> {
     let size = std::fs::metadata(local_path)?.len();
     let sha256 = crate::format::checksums::sha256_file(local_path)?;
 
-    let decision = preupload_decide(repo_id, token, remote_filename, local_path, size)?;
+    let decision = preupload_decide(repo_id, token, remote_filename, local_path, size, repo_type)?;
 
     if decision.should_ignore {
         // HF's preupload told us the server would ignore this path
@@ -646,8 +672,8 @@ fn upload_file_to_hf(
     }
 
     match decision.mode.as_str() {
-        "lfs" => upload_lfs(repo_id, token, local_path, remote_filename, size, &sha256, callbacks),
-        "regular" => upload_regular(repo_id, token, local_path, remote_filename, size, callbacks),
+        "lfs" => upload_lfs(repo_id, token, local_path, remote_filename, size, &sha256, callbacks, repo_type),
+        "regular" => upload_regular(repo_id, token, local_path, remote_filename, size, callbacks, repo_type),
         other => Err(VindexError::Parse(format!(
             "HF preupload returned unknown mode `{other}` for {remote_filename}"
         ))),
@@ -669,6 +695,7 @@ fn preupload_decide(
     remote_filename: &str,
     local_path: &Path,
     size: u64,
+    repo_type: &str,
 ) -> Result<PreuploadDecision, VindexError> {
     use base64::Engine;
     use std::io::Read;
@@ -682,7 +709,8 @@ fn preupload_decide(
     }
     let sample_b64 = base64::prelude::BASE64_STANDARD.encode(&sample_buf);
 
-    let url = format!("https://huggingface.co/api/datasets/{repo_id}/preupload/main");
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    let url = format!("https://huggingface.co/api/{plural}/{repo_id}/preupload/main");
     let body = serde_json::json!({
         "files": [{
             "path":   remote_filename,
@@ -735,8 +763,9 @@ fn upload_lfs(
     size: u64,
     sha256: &str,
     callbacks: &mut dyn PublishCallbacks,
+    repo_type: &str,
 ) -> Result<(), VindexError> {
-    let batch = lfs_batch_upload(repo_id, token, sha256, size)?;
+    let batch = lfs_batch_upload(repo_id, token, sha256, size, repo_type)?;
 
     // If the response has no upload action, the object is already present
     // on the LFS server — skip to verify (if present) + commit.
@@ -758,7 +787,7 @@ fn upload_lfs(
         lfs_verify(&verify.href, &verify.header, token, sha256, size)?;
     }
 
-    commit_lfs_file(repo_id, token, remote_filename, sha256, size)
+    commit_lfs_file(repo_id, token, remote_filename, sha256, size, repo_type)
 }
 
 /// Small-file path: commit directly with the content inlined as base64
@@ -771,6 +800,7 @@ fn upload_regular(
     remote_filename: &str,
     size: u64,
     callbacks: &mut dyn PublishCallbacks,
+    repo_type: &str,
 ) -> Result<(), VindexError> {
     use base64::Engine;
     let data = std::fs::read(local_path)?;
@@ -779,7 +809,8 @@ fn upload_regular(
     callbacks.on_file_progress(remote_filename, 0, size);
     let encoded = base64::prelude::BASE64_STANDARD.encode(&data);
 
-    let url = format!("https://huggingface.co/api/datasets/{repo_id}/commit/main");
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    let url = format!("https://huggingface.co/api/{plural}/{repo_id}/commit/main");
     let mut ndjson = String::new();
     ndjson.push_str(&serde_json::to_string(&serde_json::json!({
         "key": "header",
@@ -837,8 +868,9 @@ fn lfs_batch_upload(
     token: &str,
     sha256: &str,
     size: u64,
+    repo_type: &str,
 ) -> Result<LfsBatchResponse, VindexError> {
-    let url = format!("https://huggingface.co/datasets/{repo_id}.git/info/lfs/objects/batch");
+    let url = format!("{}.git/info/lfs/objects/batch", hf_repo_url(repo_type, repo_id));
     let body = serde_json::json!({
         "operation":  "upload",
         "transfers":  ["basic"],
@@ -1018,8 +1050,10 @@ fn commit_lfs_file(
     remote_filename: &str,
     sha256: &str,
     size: u64,
+    repo_type: &str,
 ) -> Result<(), VindexError> {
-    let url = format!("https://huggingface.co/api/datasets/{repo_id}/commit/main");
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    let url = format!("https://huggingface.co/api/{plural}/{repo_id}/commit/main");
     let mut ndjson = String::new();
     ndjson.push_str(&serde_json::to_string(&serde_json::json!({
         "key": "header",
@@ -1069,7 +1103,7 @@ pub fn is_hf_path(path: &str) -> bool {
 pub struct CollectionItem {
     /// Repo id (`owner/name`). Full form including namespace.
     pub repo_id: String,
-    /// `"dataset"` (vindex repos) or `"model"`.
+    /// `"model"` (vindex repos, default) or `"dataset"`.
     pub repo_type: String,
     /// Optional short note rendered on the collection card.
     pub note: Option<String>,
@@ -1234,8 +1268,13 @@ fn add_collection_item(
 /// optional; pass-through when available (lets callers see private
 /// repos they own).
 pub fn dataset_repo_exists(repo_id: &str) -> Result<bool, VindexError> {
+    repo_exists(repo_id, "model")
+}
+
+pub fn repo_exists(repo_id: &str, repo_type: &str) -> Result<bool, VindexError> {
     let token = get_hf_token().ok();
-    let url = format!("https://huggingface.co/api/datasets/{repo_id}");
+    let plural = if repo_type == "dataset" { "datasets" } else { "models" };
+    let url = format!("https://huggingface.co/api/{plural}/{repo_id}");
     let client = reqwest::blocking::Client::new();
     let mut req = client.head(&url);
     if let Some(t) = token {

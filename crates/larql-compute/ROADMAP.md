@@ -34,6 +34,41 @@ L0-12 are template-fixed (0.999 cosine similarity). At 0.25ms/layer × 8 layers 
 ### ✅ Fix O(N²) norm kernels
 **Status**: Complete — cooperative SIMD reduction in all norms. Saved ~10ms (the single biggest win).
 
+## P0.5: Gemma 4 26B A4B correctness (in progress)
+
+### ✅ CPU MoE decode interleave — DONE (2026-04-20)
+GPU dense FFN + CPU MoE per layer. Layer scalar correctly applied to
+the FFN+MoE delta only (`h_post_attn + scalar*(dense+moe)`). First
+coherent Gemma 4 26B output confirmed (Paris, Berlin, oxygen).
+
+### Batched MoE prefill
+**Effort**: Medium
+**Status**: Workaround shipped (token-by-token decode loop in `prefill_q4`)
+
+Current workaround is correct but serialises `seq_len` decode calls —
+O(seq_len × num_layers) GPU command buffers for a prompt. The real fix
+is a batched prefill that processes all positions in a single pass:
+for each layer, dispatch GPU dense FFN over all positions, then CPU MoE
+over all positions, then proceed to next layer. Requires restructuring
+`dispatch_full_pipeline` to accept a per-layer CPU callback.
+
+### Fix `dispatch_full_pipeline` layer_scalar
+**Effort**: Low
+**Status**: Not started — current models (Gemma 3 4B) not affected
+
+`dispatch_full_pipeline` applies `layer_scalar` to `h_bufs[l+1]`
+(full residual = `h_post_attn + ffn_delta`) instead of just the FFN
+delta. Correct formula: `h_post_attn + scalar * ffn_delta`.
+
+Fix: pass `(scale_pipeline, scalar)` into
+`residual::encode_post_ffn`, apply scalar to the normed FFN buffer
+before the residual add. Call sites: `full_pipeline.rs:844`,
+`tests/test_metal_shaders.rs:2696,2748` — add `None` for non-scaling.
+
+Not urgent: Gemma 3 4B has `layer_scalar = 0.0` (no scaling); Gemma 4
+26B is all-MoE and bypasses `dispatch_full_pipeline` via the new
+decode-loop prefill.
+
 ## P1: Production Hardening
 
 ### CUDA backend

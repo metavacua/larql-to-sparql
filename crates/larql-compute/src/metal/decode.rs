@@ -116,9 +116,11 @@ impl MetalBackend {
         let o_q8s_scratch = self.bufs.output((max_q_dim / 32 * 4) as u64);
         let scaled_scratch = self.bufs.output((hidden * 4) as u64);
 
-        // Single command buffer + single encoder for ALL layers.
-        let cmd = self.queue.new_command_buffer();
-        let enc = cmd.new_compute_command_encoder();
+        // Owned cmd+enc so they can be re-created mid-loop for MoE CPU interleave.
+        let has_moe = layers.iter().any(|l| l.moe.is_some());
+        let mut cmd = self.queue.new_command_buffer().to_owned();
+        let mut enc = cmd.new_compute_command_encoder().to_owned();
+        let mut encoder_ended = false;
 
         // Diagnostic: run only up to (and including) the specified layer,
         // then dump intermediates and exit. Pinpoints which sub-stage in
@@ -140,7 +142,7 @@ impl MetalBackend {
                 || layer.wq.format == crate::QuantFormat::Q6_K
                 || layer.wq.format == crate::QuantFormat::Q4_KF;
             let layer_q_dim = layer_num_q_heads * layer_head_dim;
-            let _layer_kv_dim = layer_num_kv_heads * layer_head_dim;
+            let layer_kv_dim = layer_num_kv_heads * layer_head_dim;
             let window_size = layer.sliding_window as u32;
 
             // ── Step 1: Input norm + Q/K/V projection ──
@@ -174,7 +176,7 @@ impl MetalBackend {
                         MTLSize::new(256.min(hidden as u64), 1, 1),
                     );
                 } else {
-                    encode_rms_norm(enc, &self.rms_norm_pipeline,
+                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
                         &h_buf, &input_norm_bufs[l], &norm_f32_buf,
                         hidden, eps, norm_offset);
                 }
@@ -201,20 +203,20 @@ impl MetalBackend {
                         &self.q4k_qkv_proj_pipeline
                     };
                     crate::metal::stages::qkv_proj::encode_fused_f32(
-                        enc, fused_pipe,
+                        &enc, fused_pipe,
                         &wq_bufs[l], &wk_bufs[l], &wv_bufs[l],
                         &norm_f32_buf, 0,
                         &q_out, 0, &k_out, 0, &v_out, 0,
-                        q_dim, kv_dim, hidden,
+                        layer_q_dim, layer_kv_dim, hidden,
                     );
                 } else if mixed_q4k_q6k_v {
                     // Fused Q4K Q/K + Q6K V — one dispatch for all three.
                     use crate::metal::shaders::q4k_q6k_qkv_proj as sh;
-                    let total_rows = (q_dim + kv_dim + kv_dim) as u64;
+                    let total_rows = (layer_q_dim + layer_kv_dim + layer_kv_dim) as u64;
                     let num_tgs = total_rows.div_ceil(sh::ROWS_PER_TG);
-                    let q_rows_u = q_dim as u32;
-                    let k_rows_u = kv_dim as u32;
-                    let v_rows_u = kv_dim as u32;
+                    let q_rows_u = layer_q_dim as u32;
+                    let k_rows_u = layer_kv_dim as u32;
+                    let v_rows_u = layer_kv_dim as u32;
                     let k_u = hidden as u32;
                     enc.set_compute_pipeline_state(&self.q4k_q6k_qkv_proj_pipeline);
                     enc.set_buffer(0, Some(&wq_bufs[l]), 0);
@@ -244,15 +246,15 @@ impl MetalBackend {
                         q4_matvec: &self.q4.matvec,
                     };
                     qkv_proj::encode_per_proj(
-                        enc, &pipes,
+                        &enc, &pipes,
                         &norm_f32_buf, 0,
                         // Q8 bufs unused for f32-input formats — pass the
                         // norm buffer as a harmless placeholder.
                         &norm_f32_buf, 0, &norm_f32_buf, 0,
                         [
-                            Proj { format: layer.wq.format, w_buf: &wq_bufs[l], out_buf: &q_out, out_off: 0, rows: q_dim },
-                            Proj { format: layer.wk.format, w_buf: &wk_bufs[l], out_buf: &k_out, out_off: 0, rows: kv_dim },
-                            Proj { format: layer.wv.format, w_buf: &wv_bufs[l], out_buf: &v_out, out_off: 0, rows: kv_dim },
+                            Proj { format: layer.wq.format, w_buf: &wq_bufs[l], out_buf: &q_out, out_off: 0, rows: layer_q_dim },
+                            Proj { format: layer.wk.format, w_buf: &wk_bufs[l], out_buf: &k_out, out_off: 0, rows: layer_kv_dim },
+                            Proj { format: layer.wv.format, w_buf: &wv_bufs[l], out_buf: &v_out, out_off: 0, rows: layer_kv_dim },
                         ],
                         hidden,
                     );
@@ -272,10 +274,10 @@ impl MetalBackend {
                 enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
                 enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
 
-                let total_rows = (q_dim + kv_dim + kv_dim) as u32;
-                let q_rows = q_dim as u32;
-                let k_rows = kv_dim as u32;
-                let v_rows = kv_dim as u32;
+                let total_rows = (layer_q_dim + layer_kv_dim + layer_kv_dim) as u32;
+                let q_rows = layer_q_dim as u32;
+                let k_rows = layer_kv_dim as u32;
+                let v_rows = layer_kv_dim as u32;
                 let k_val = hidden as u32;
                 enc.set_compute_pipeline_state(&self.q8_qkv_proj_pipeline);
                 enc.set_buffer(0, Some(&wq_bufs[l]), 0);
@@ -403,11 +405,11 @@ impl MetalBackend {
 
             let attn_out = &attn_out_buf;
             ops::kv_cache::encode_kv_append(
-                enc, &kv_cache.layers[l],
+                &enc, &kv_cache.layers[l],
                 &self.kv_append_pipeline, &k_out, &v_out,
             );
             ops::kv_cache::encode_kv_attend(
-                enc, &kv_cache.layers[l],
+                &enc, &kv_cache.layers[l],
                 &self.kv_attend_pipeline, &q_out, &attn_out,
                 layer_num_q_heads, scale, window_size,
             );
@@ -426,7 +428,7 @@ impl MetalBackend {
                     q4_matvec: &self.q4.matvec,
                 };
                 crate::metal::stages::o_proj::encode(
-                    enc, &pipes, &self.q8_quant_pipeline,
+                    &enc, &pipes, &self.q8_quant_pipeline,
                     layer.wo.format,
                     &wo_bufs[l],
                     &attn_out, 0,
@@ -476,7 +478,7 @@ impl MetalBackend {
                 let normed_o = &normed_scratch;
                 {
                     use crate::metal::ops::full_pipeline::encode_rms_norm;
-                    encode_rms_norm(enc, &self.rms_norm_pipeline,
+                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
                         &o_out_buf, &post_attn_norm_bufs[l], &normed_o, hidden, eps, norm_offset);
                 }
                 let pre_ffn_buf = if let Some(pfn) = layer.pre_ffn_norm {
@@ -498,7 +500,7 @@ impl MetalBackend {
                     // h_post_attn = h + normed_o (residual_norm also writes this to buffer 3? No — residual_norm only outputs normed.
                     // We need the pre-norm residual for the post-FFN add. Use residual_add separately.
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(enc, &self.residual_add_pipeline,
+                    encode_residual_add(&enc, &self.residual_add_pipeline,
                         &h_buf, &normed_o, &h_post_attn, hidden);
                 } else {
                     enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
@@ -526,7 +528,7 @@ impl MetalBackend {
                 enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                 // h_post_attn = h + o (pre-norm residual for post-FFN add)
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(enc, &self.residual_add_pipeline,
+                encode_residual_add(&enc, &self.residual_add_pipeline,
                     &h_buf, &o_out_buf, &h_post_attn, hidden);
             } else {
                 enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
@@ -590,7 +592,7 @@ impl MetalBackend {
                             q4_matvec: &self.q4.matvec,
                         };
                         qmv::encode(
-                            enc, layer.down.format, &down_bufs[l],
+                            &enc, layer.down.format, &down_bufs[l],
                             &act_buf, 0,
                             &act_buf, 0, &act_buf, 0,
                             &down_out, 0,
@@ -669,7 +671,7 @@ impl MetalBackend {
                             q4_matvec: &self.q4.matvec,
                         };
                         qmv::encode(
-                            enc, layer.down.format, &down_bufs[l],
+                            &enc, layer.down.format, &down_bufs[l],
                             &act_buf, 0,
                             &act_buf, 0, &act_buf, 0, // Q8 unused for f32 input
                             &down_out, 0,
@@ -767,48 +769,92 @@ impl MetalBackend {
                     let post_ffn_buf = self.bufs.get_f32(post_ffn);
                     let normed_ffn = &normed_scratch;
                     use crate::metal::ops::full_pipeline::encode_rms_norm;
-                    encode_rms_norm(enc, &self.rms_norm_pipeline,
+                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
                         &down_out, &post_ffn_buf, &normed_ffn, hidden, eps, norm_offset);
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(enc, &self.residual_add_pipeline,
+                    encode_residual_add(&enc, &self.residual_add_pipeline,
                         &h_post_attn, &normed_ffn, &new_h, hidden);
                 } else {
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(enc, &self.residual_add_pipeline,
+                    encode_residual_add(&enc, &self.residual_add_pipeline,
                         &h_post_attn, &down_out, &new_h, hidden);
                 }
             } else {
-                let len_val = hidden as u32;
-                enc.set_compute_pipeline_state(&self.residual_add_pipeline);
-                enc.set_buffer(0, Some(&h_post_attn), 0);
-                enc.set_buffer(1, Some(&down_out), 0);
-                enc.set_buffer(2, Some(&new_h), 0);
-                enc.set_bytes(3, 4, &len_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                use crate::metal::ops::full_pipeline::encode_residual_add;
+                encode_residual_add(&enc, &self.residual_add_pipeline,
+                    &h_post_attn, &down_out, &new_h, hidden);
             }
 
-            // ── Step 8: Optional layer scalar ──
-            //
-            // Note: stages::layer_scalar scales in-place (src == dst). Decode's
-            // original code wrote to a separate `scaled_scratch` buffer then
-            // pointed `h_buf` at it. In-place on `new_h` produces the same
-            // downstream residual read since nothing else aliases `new_h`
-            // between this write and the next layer's input norm read.
-            if layer.layer_scalar != 0.0 {
-                crate::metal::stages::layer_scalar::encode(
-                    enc, &self.scale_vector_pipeline,
-                    new_h, 1, hidden, layer.layer_scalar,
-                );
-            }
             h_buf = new_h;
             let _ = &scaled_scratch; // keep binding alive; no longer needed
+
+            // CPU MoE interleave for hybrid MoE models (e.g. Gemma 4 26B A4B).
+            // After the GPU dense-FFN pass, flush the encoder, run the expert block
+            // on CPU (direct shared-memory access), then restart for the next layer.
+            // layer_scalar is applied AFTER MoE so it scales the combined output
+            // (dense + MoE). Applying it before would leave the MoE contribution unscaled.
+            if has_moe {
+                if let Some(ref moe) = layer.moe {
+                    enc.end_encoding();
+                    cmd.commit();
+                    cmd.wait_until_completed();
+                    encoder_ended = true;
+
+                    // MoE and dense FFN run on the SAME input (h_post_attn, the
+                    // post-attention residual). Dense FFN output is already in new_h.
+                    // Read MoE input from h_post_attn, accumulate MoE output into new_h.
+                    let attn_ptr = h_post_attn.contents() as *const f32;
+                    let attn_slice = unsafe { std::slice::from_raw_parts(attn_ptr, hidden) };
+                    let moe_out = crate::cpu::ops::moe::cpu_moe_forward(
+                        attn_slice, moe, layer.norm_offset, layer.eps,
+                    );
+                    let h_ptr = new_h.contents() as *mut f32;
+                    let ha_ptr = h_post_attn.contents() as *const f32;
+                    unsafe {
+                        for (i, v) in moe_out.iter().enumerate() {
+                            *h_ptr.add(i) += v;
+                        }
+                    }
+
+                    // Layer scalar scales only the FFN+MoE delta, not the full residual.
+                    // new_h currently = h_post_attn + dense_ffn + moe
+                    // Correct: h_post_attn + scalar * (dense_ffn + moe)
+                    //        = h_post_attn + scalar * (new_h - h_post_attn)
+                    let scalar = layer.layer_scalar;
+                    if scalar != 0.0 && scalar != 1.0 {
+                        unsafe {
+                            for i in 0..hidden {
+                                let pa = *ha_ptr.add(i);
+                                *h_ptr.add(i) = pa + scalar * (*h_ptr.add(i) - pa);
+                            }
+                        }
+                    }
+
+                    if l + 1 < num_layers {
+                        cmd = self.queue.new_command_buffer().to_owned();
+                        enc = cmd.new_compute_command_encoder().to_owned();
+                        encoder_ended = false;
+                    }
+                }
+            } else {
+                // ── Step 8: Optional layer scalar (non-MoE layers) ──
+                // GPU in-place scale on new_h before it becomes the next layer's input.
+                if layer.layer_scalar != 0.0 {
+                    crate::metal::stages::layer_scalar::encode(
+                        &enc, &self.scale_vector_pipeline,
+                        new_h, 1, hidden, layer.layer_scalar,
+                    );
+                }
+            }
 
             // Diagnostic early-exit after layer `l`. Commits what we have,
             // reads the per-sub-stage buffers, and reports NaN counts.
             if diag_stop_layer == Some(l) {
-                enc.end_encoding();
-                cmd.commit();
-                cmd.wait_until_completed();
+                if !encoder_ended {
+                    enc.end_encoding();
+                    cmd.commit();
+                    cmd.wait_until_completed();
+                }
                 let stat = |name: &str, buf: &metal::Buffer, n: usize| {
                     let ptr = buf.contents() as *const f32;
                     if ptr.is_null() { eprintln!("[diag L{l}] {name}: null contents"); return; }
@@ -835,9 +881,11 @@ impl MetalBackend {
             }
         }
 
-        enc.end_encoding();
-        cmd.commit();
-        cmd.wait_until_completed();
+        if !encoder_ended {
+            enc.end_encoding();
+            cmd.commit();
+            cmd.wait_until_completed();
+        }
 
         super::buffers::read_buffer_f32(&h_buf, hidden)
     }

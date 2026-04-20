@@ -108,6 +108,10 @@ pub struct RunArgs {
     #[arg(long, default_value = "60")]
     pub ffn_timeout_secs: u64,
 
+    /// Use Metal GPU backend for Q4K inference (macOS only).
+    #[arg(long)]
+    pub metal: bool,
+
     /// Verbose load / timing output.
     #[arg(short, long)]
     pub verbose: bool,
@@ -203,7 +207,7 @@ fn build_walk_args(
         compare: false,
         down_top_k: 5,
         verbose: args.verbose,
-        metal: false,
+        metal: args.metal,
         ffn_remote: args.ffn.clone(),
         ffn_remote_timeout_secs: args.ffn_timeout_secs,
     }

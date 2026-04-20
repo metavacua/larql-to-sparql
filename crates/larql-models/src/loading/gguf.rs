@@ -353,7 +353,9 @@ pub fn load_gguf(path: &Path) -> Result<ModelWeights, ModelError> {
     Ok(ModelWeights {
         tensors: normalized_tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(), // GGUF uses dequantized f32; no raw bytes needed
+        raw_bytes: std::collections::HashMap::new(),
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers: cfg.num_layers,

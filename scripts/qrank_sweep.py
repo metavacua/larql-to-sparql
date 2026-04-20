@@ -82,7 +82,7 @@ def main():
             q_slice = W_Q[h * head_dim:(h + 1) * head_dim, :]
             kg = h // gqa_g
             k_slice = W_K[kg * head_dim:(kg + 1) * head_dim, :]
-            M = q_slice @ k_slice.T
+            M = (q_slice @ k_slice.T).float()
             _, S, _ = torch.linalg.svd(M, full_matrices=False)
             r = effective_rank(S, args.threshold)
             all_ranks.append((li, h, r))

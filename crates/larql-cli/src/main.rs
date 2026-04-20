@@ -260,6 +260,7 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             context_window: 0,
             ffn: c.ffn,
             ffn_timeout_secs: c.ffn_timeout_secs,
+            metal: false,
             verbose: c.verbose,
         }
     }

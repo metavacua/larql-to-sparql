@@ -206,6 +206,8 @@ pub fn load_model_dir_filtered(
         tensors,
         vectors,
         raw_bytes,
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers: cfg.num_layers,

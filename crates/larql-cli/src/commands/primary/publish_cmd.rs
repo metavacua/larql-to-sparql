@@ -116,6 +116,10 @@ pub struct PublishArgs {
     /// if you suspect a prior upload was truncated.
     #[arg(long)]
     pub force_upload: bool,
+
+    /// HuggingFace repo type: `model` (default) or `dataset`.
+    #[arg(long, default_value = "model")]
+    pub repo_type: String,
 }
 
 pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -215,7 +219,7 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 4. Execute each step.
     let mut results: Vec<StepOutcome> = Vec::new();
     for step in plan {
-        let url = execute_step(&src, &step, args.force_upload)?;
+        let url = execute_step(&src, &step, args.force_upload, &args.repo_type)?;
         results.push(StepOutcome {
             label: step.label,
             repo: step.repo,
@@ -404,7 +408,7 @@ fn build_collections(
         .iter()
         .map(|r| larql_vindex::CollectionItem {
             repo_id: r.repo.clone(),
-            repo_type: "dataset".into(),
+            repo_type: args.repo_type.clone(),
             note: Some(
                 if r.label == "full" {
                     note_for_full().into()
@@ -509,12 +513,13 @@ fn execute_step(
     src: &Path,
     step: &UploadStep,
     force_upload: bool,
+    repo_type: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     match (&step.preset, &step.staging) {
         // Full vindex — upload the source directory directly, no slicing.
         (None, _) => {
             println!("\n→ Uploading full vindex to {}", step.repo);
-            upload_dir(src, &step.repo, force_upload)
+            upload_dir(src, &step.repo, force_upload, repo_type)
         }
         // Sliced upload — carve into staging, upload, clean up.
         (Some(preset), Some(staging)) => {
@@ -529,7 +534,7 @@ fn execute_step(
                 staging.display()
             );
             println!("→ Uploading slice `{preset}` to {}", step.repo);
-            let result = upload_dir(staging, &step.repo, force_upload);
+            let result = upload_dir(staging, &step.repo, force_upload, repo_type);
             // Always try to clean up the staging dir, regardless of outcome.
             let _ = std::fs::remove_dir_all(staging);
             result
@@ -538,10 +543,11 @@ fn execute_step(
     }
 }
 
-fn upload_dir(dir: &Path, repo: &str, force_upload: bool) -> Result<String, Box<dyn std::error::Error>> {
+fn upload_dir(dir: &Path, repo: &str, force_upload: bool, repo_type: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut callbacks = CliPublishCallbacks::new();
     let opts = larql_vindex::PublishOptions {
         skip_unchanged: !force_upload,
+        repo_type: repo_type.to_string(),
     };
     let url = larql_vindex::publish_vindex_with_opts(dir, repo, &opts, &mut callbacks)?;
     Ok(url)
@@ -843,14 +849,14 @@ mod tests {
     #[test]
     fn force_upload_disables_skip() {
         // Simulate the flag state the CLI builds from `--force-upload`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: !true };
+        let opts = larql_vindex::PublishOptions { skip_unchanged: !true, ..Default::default() };
         assert!(!opts.skip_unchanged);
     }
 
     #[test]
     fn default_publish_options_skip_unchanged() {
         // Without `--force-upload`, `skip_unchanged: !false == true`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: !false };
+        let opts = larql_vindex::PublishOptions { skip_unchanged: !false, ..Default::default() };
         assert!(opts.skip_unchanged);
     }
 

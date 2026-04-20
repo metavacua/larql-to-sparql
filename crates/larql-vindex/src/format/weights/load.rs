@@ -311,7 +311,11 @@ pub fn load_model_weights_with_opts(
     };
 
     Ok(ModelWeights {
-        tensors, vectors, raw_bytes: std::collections::HashMap::new(), embed, lm_head,
+        tensors, vectors,
+        raw_bytes: std::collections::HashMap::new(),
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
+        embed, lm_head,
         num_layers: cfg.num_layers,
         hidden_size: cfg.hidden_size,
         intermediate_size: cfg.intermediate_size,
@@ -387,6 +391,12 @@ pub fn load_model_weights_q4k(
     if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
     if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
     if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
+    if let Some(ref moe) = model_cfg.moe {
+        obj.insert("num_experts".into(), moe.num_experts.into());
+        obj.insert("top_k_experts".into(), moe.top_k.into());
+        if let Some(v) = moe.moe_intermediate_size { obj.insert("moe_intermediate_size".into(), v.into()); }
+        if moe.hybrid { obj.insert("enable_moe_block".into(), true.into()); }
+    }
     let arch = larql_models::detect_from_json(&arch_obj);
 
     // Embeddings — required for token lookup at layer 0.
@@ -408,6 +418,8 @@ pub fn load_model_weights_q4k(
     let manifest_path = dir.join("weight_manifest.json");
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
     let mut tensors: HashMap<String, larql_models::WeightArray> = HashMap::new();
+    let mut packed_mmaps: HashMap<String, memmap2::Mmap> = HashMap::new();
+    let mut packed_byte_ranges: HashMap<String, (String, usize, usize)> = HashMap::new();
     let mut lm_head_loaded: Option<larql_models::WeightArray> = None;
 
     if manifest_path.exists() {
@@ -421,6 +433,7 @@ pub fn load_model_weights_q4k(
             if entry.kind != "vector"
                 && entry.kind != "tensor_q4k"
                 && entry.kind != "tensor_f16"
+                && entry.kind != "packed_bf16"
             { continue; }
 
             if !mmap_cache.contains_key(&entry.file) {
@@ -440,7 +453,14 @@ pub fn load_model_weights_q4k(
             if byte_offset + byte_count > data.len() { continue; }
             let raw_bytes = &data[byte_offset..byte_offset + byte_count];
 
-            if entry.kind == "vector" {
+            if entry.kind == "packed_bf16" {
+                // Record the byte range into the mmap — do NOT clone (could be 43 GB).
+                // The mmap stays alive in packed_mmaps; get_packed_bytes() returns the slice.
+                packed_byte_ranges.insert(
+                    entry.key.clone(),
+                    (entry.file.clone(), byte_offset, byte_count),
+                );
+            } else if entry.kind == "vector" {
                 let expected_floats: usize = entry.shape.iter().product();
                 let actual_dtype = if byte_count == expected_floats * 4 {
                     crate::config::dtype::StorageDtype::F32
@@ -481,6 +501,12 @@ pub fn load_model_weights_q4k(
                 }
             }
         }
+        // Move packed file mmaps into the outer map so they outlive this block.
+        for (filename, mmap) in mmap_cache {
+            if packed_byte_ranges.values().any(|(f, _, _)| f == &filename) {
+                packed_mmaps.insert(filename, mmap);
+            }
+        }
     }
 
     // lm_head_q4.bin (Q4_K of the output projection) — dequant to f32. If
@@ -510,6 +536,8 @@ pub fn load_model_weights_q4k(
         tensors,
         vectors,
         raw_bytes: std::collections::HashMap::new(),
+        packed_mmaps,
+        packed_byte_ranges,
         embed,
         lm_head,
         num_layers: cfg.num_layers,
