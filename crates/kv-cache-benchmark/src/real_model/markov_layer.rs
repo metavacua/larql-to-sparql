@@ -107,7 +107,7 @@ impl RsStore {
     }
 
     /// Evict old positions beyond the window, saving them in the cold tier.
-    fn clip_layer(&mut self, layer: usize, cold: &mut Vec<Array2<f32>>) {
+    pub(crate) fn clip_layer(&mut self, layer: usize, cold: &mut Vec<Array2<f32>>) {
         let window = match self.max_window {
             Some(w) => w,
             None => return,
@@ -320,7 +320,7 @@ pub fn rs_decode_step(
 ///   x_old = layernorm(h_old)
 ///   k_old = k_proj(x_old) → k_norm → RoPE at positions abs_start..
 ///   v_old = v_proj(x_old) → v_norm
-fn recompute_kv(
+pub(crate) fn recompute_kv(
     weights: &ModelWeights,
     h_stored: &Array2<f32>,   // [S, hidden_dim]
     layer: usize,

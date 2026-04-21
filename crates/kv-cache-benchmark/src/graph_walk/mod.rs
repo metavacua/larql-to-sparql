@@ -5,17 +5,21 @@ pub mod fallback;
 
 use crate::{KvStrategy, model_config::ModelConfig};
 
-/// Strategy 4: Residual Stream Graph Walk.
+/// Strategy 5: Residual Stream Graph Walk.
 ///
-/// Eliminates the forward pass itself. The forward pass IS a graph walk:
-///   FFN graph:       gate KNN → feature → down KNN → token (348K features in vindex)
-///   Attention graph:  routing table (352KB, 44 centroids, 100% precision @ 62% coverage)
+/// Target architecture once attention is cracked. Eliminates the forward pass itself.
+/// The forward pass IS a graph walk:
+///   FFN graph:       gate KNN → feature → down KNN → token (348K features in vindex, proven)
+///   Attention graph:  routing table (352KB, 44 centroids) — requires cracked attention (TODO)
 ///   Residual stream:  the walk state connecting them (Markov cursor)
+///
+/// Current status: FFN graph walk is proven. Attention elimination requires cracked attention
+/// which is not yet implemented. Until then Tier C (free-form) falls back to Markov RS.
 ///
 /// Three tiers:
 ///   Tier A: cached template walk — known template, entity KNN only (<0.1ms)
 ///   Tier B: dynamic graph walk — full routing table lookup (~1-5ms)
-///   Tier C: hybrid fallback — fall back to Markov RS for free-form generation
+///   Tier C: Markov RS fallback — full RS forward pass for anything outside the graph
 pub struct GraphWalk {
     /// Vindex size in bytes (shared, not per-conversation).
     pub vindex_bytes: usize,

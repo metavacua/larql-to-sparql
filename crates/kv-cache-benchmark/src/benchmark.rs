@@ -145,27 +145,30 @@ pub fn format_comparative_table(
     out.push_str("\n--- Computation per token ---\n\n");
     // 5-column computation table
     let ops = [
-        ("Attention matmul", "34 layers", "34 layers", "window only", "~1-2L dynamic", "ELIMINATED"),
-        ("FFN matmul",       "34 layers", "34 layers", "34 layers",   "ZERO (vindex)", "ELIMINATED"),
-        ("Logits matmul",    "1x",        "1x",        "1x",          "ZERO (KNN)",    "ELIMINATED"),
-        ("KV cache write",   "34 layers", "34L + quant","none",       "~1-2L dynamic", "none"),
-        ("Cached attn",      "none",      "none",       "none",       "~32-33L",       "none"),
-        ("Graph lookup",     "none",      "none",       "none",       "34L FFN",       "3 per hop"),
+        //                     StdKV         TQ4           MarkovRS      BoundaryRS    GraphWalk
+        ("Attention matmul", "34 layers",  "34 layers",  "window only","window only","ELIMINATED*"),
+        ("FFN matmul",       "34 layers",  "34 layers",  "34 layers",  "34 layers",  "ELIMINATED*"),
+        ("Logits matmul",    "1x",         "1x",         "1x",         "1x",         "ELIMINATED*"),
+        ("KV cache write",   "34 layers",  "34L + quant","none",       "none",       "none"),
+        ("Cold K/V replay",  "none",       "none",       "none",       "bdy+ids",    "none"),
+        ("Graph lookup",     "none",       "none",       "none",       "none",       "3 per hop*"),
     ];
 
     out.push_str(&format!(
-        "{:<20} {:>14} {:>14} {:>14} {:>14} {:>14}\n",
-        "Operation", "Standard KV", "TurboQuant", "Markov RS", "Hybrid RS+CA", "Graph Walk"
+        "{:<20} {:>14} {:>14} {:>12} {:>13} {:>13}\n",
+        "Operation", "Standard KV", "TurboQuant", "Markov RS", "Boundary RS", "Graph Walk"
     ));
     out.push_str(&"-".repeat(92));
     out.push('\n');
 
-    for (op, std, tq, mrs, hyb, gw) in &ops {
+    for (op, std, tq, mrs, brs, gw) in &ops {
         out.push_str(&format!(
-            "{:<20} {:>14} {:>14} {:>14} {:>14} {:>14}\n",
-            op, std, tq, mrs, hyb, gw,
+            "{:<20} {:>14} {:>14} {:>12} {:>13} {:>13}\n",
+            op, std, tq, mrs, brs, gw,
         ));
     }
+
+    out.push_str("\n* Graph Walk requires cracked attention (not yet implemented). Falls back to Markov RS.\n");
 
     out
 }

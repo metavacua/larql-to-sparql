@@ -1,4 +1,4 @@
-//! Real Model Benchmark: Standard KV vs TurboQuant vs Markov RS vs Hybrid RS+CA vs Graph Walk
+//! Real Model Benchmark: Standard KV vs TurboQuant vs Markov RS vs Boundary RS vs Hybrid RS+CA vs Graph Walk
 //!
 //! Usage:
 //!   cargo run --example real_model_bench --features real-model -- [model-path] [vindex-path]
@@ -51,13 +51,15 @@ fn main() {
     let config = kv_cache_benchmark::model_config::ModelConfig::gemma_4b();
     let standard = kv_cache_benchmark::standard_kv::StandardKv;
     let tq4 = kv_cache_benchmark::turboquant::TurboQuant::new(4);
+    // Markov RS W=512: full residuals for every hot-window position.
     let markov = kv_cache_benchmark::markov_residual::MarkovResidual::new(512);
+    // Boundary RS W=32: tiny hot window + one boundary vector + token IDs for cold.
+    // This is the production form of the Python unlimited_engine.py approach.
+    let boundary = kv_cache_benchmark::boundary_residual::BoundaryResidual::gemma_4b();
     let graph = kv_cache_benchmark::graph_walk::GraphWalk::gemma_4b();
 
-    let hybrid = kv_cache_benchmark::hybrid_cracked::HybridCrackedAttention::gemma_4b();
-
     use kv_cache_benchmark::KvStrategy;
-    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &hybrid, &graph];
+    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &boundary, &graph];
     println!("{}", kv_cache_benchmark::benchmark::format_comparative_table(&config, &strategies));
 
     // Write results JSON

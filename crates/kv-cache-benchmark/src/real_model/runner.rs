@@ -1,6 +1,6 @@
 //! Benchmark runner for real model integration.
 //!
-//! Runs all five strategies on the same prompt through Gemma 3-4B,
+//! Runs all four strategies on the same prompt through Gemma 3-4B,
 //! measures wall-clock, memory, and accuracy vs the Standard KV baseline.
 //!
 //! Strategy overview:
@@ -11,11 +11,7 @@
 //!                         (evicted residuals preserved for full-history replay)
 //!                         + new-token embed. Proven: KL=0.0 vs full-KV at any
 //!                         window size via cold-tier concatenation at decode time.
-//!   4. Hybrid RS+CA     — 97.1% parametric heads are static (cached once per
-//!                         template); only 4 dynamic layers (L1/L13/L26/L32)
-//!                         need live KV. Static layers use RS residual replay
-//!                         (same cold-tier mechanism as Strategy 3).
-//!   5. Graph Walk       — vindex FFN walk; no forward pass for factual queries.
+//!   4. Graph Walk       — vindex FFN walk; no forward pass for factual queries.
 
 use larql_inference::model::ModelWeights;
 use larql_inference::forward::logits_to_predictions_pub;
@@ -27,9 +23,7 @@ use super::turboquant_layer;
 use super::markov_layer;
 use super::graph_walk_layer;
 use crate::turboquant::TurboQuant;
-use crate::hybrid_cracked::HybridCrackedAttention;
-use crate::model_config::ModelConfig;
-use crate::KvStrategy;
+
 
 /// Result from running one strategy on a real model.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -66,7 +60,7 @@ impl<'a> RealModelBenchmark<'a> {
     }
 }
 
-/// Run all four strategies on a prompt and compare.
+/// Run all strategies on a prompt and compare.
 pub fn run_all_strategies(
     bench: &RealModelBenchmark,
     prompt: &str,
@@ -76,7 +70,7 @@ pub fn run_all_strategies(
     let encoding = bench.tokenizer.encode(prompt, true).expect("tokenize failed");
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-    let mut results = Vec::with_capacity(5);
+    let mut results = Vec::with_capacity(4);
 
     // === Strategy 1: Standard KV (baseline) ===
     let t0 = std::time::Instant::now();
@@ -178,35 +172,7 @@ pub fn run_all_strategies(
         hidden_cosine: Some(rs_cosine),
     });
 
-    // === Strategy 4: Hybrid RS + Cracked Attention ===
-    //
-    // Runs the same forward pass as Standard KV (predictions are identical).
-    // Reports what a true hybrid pipeline would need:
-    //   static layers  (97.1%): RS residual replay with cold-tier concatenation
-    //                           — same mechanism as Strategy 3; zero K/V stored.
-    //   dynamic layers (2.9%): live K/V for L1/L13/L26/L32 within window=32,768.
-    //   routing table: lightweight per-template head-classification cache.
-    let hybrid = HybridCrackedAttention::gemma_4b();
-    let hybrid_config = ModelConfig::gemma_4b();
-    let hybrid_mem = hybrid.memory_bytes(&hybrid_config, token_ids.len());
-
-    results.push(RealModelResult {
-        strategy: format!(
-            "Hybrid RS+CA ({:.1}% static, {}dyn L)",
-            hybrid.static_head_fraction * 100.0,
-            hybrid.dynamic_layers,
-        ),
-        prompt: prompt.to_string(),
-        top1_token: baseline_top1.clone(),
-        top1_prob: baseline_preds.predictions.first().map(|(_, p)| *p).unwrap_or(0.0),
-        top5: baseline_preds.predictions.clone(),
-        memory_bytes: hybrid_mem,
-        wall_clock_us: std_us,
-        top1_match: true,
-        hidden_cosine: Some(1.0),
-    });
-
-    // === Strategy 5: Graph Walk ===
+    // === Strategy 4: Graph Walk ===
     let t0 = std::time::Instant::now();
     let gw = graph_walk_layer::run_graph_walk(
         bench.weights, bench.tokenizer, bench.index, &token_ids, top_k,
