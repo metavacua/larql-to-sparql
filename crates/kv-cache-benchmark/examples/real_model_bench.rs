@@ -1,4 +1,4 @@
-//! Real Model Benchmark: Standard KV vs TurboQuant vs Markov RS vs Graph Walk
+//! Real Model Benchmark: Standard KV vs TurboQuant vs Markov RS vs Hybrid RS+CA vs Graph Walk
 //!
 //! Usage:
 //!   cargo run --example real_model_bench --features real-model -- [model-path] [vindex-path]
@@ -39,7 +39,7 @@ fn main() {
 
     // Run default prompts
     let prompts = runner::default_prompts();
-    println!("\nRunning {} prompts through 4 strategies...\n", prompts.len());
+    println!("\nRunning {} prompts through 5 strategies...\n", prompts.len());
 
     for prompt in &prompts {
         let results = runner::run_all_strategies(&bench, prompt, 5, 512);
@@ -54,8 +54,10 @@ fn main() {
     let markov = kv_cache_benchmark::markov_residual::MarkovResidual::new(512);
     let graph = kv_cache_benchmark::graph_walk::GraphWalk::gemma_4b();
 
+    let hybrid = kv_cache_benchmark::hybrid_cracked::HybridCrackedAttention::gemma_4b();
+
     use kv_cache_benchmark::KvStrategy;
-    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &graph];
+    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &hybrid, &graph];
     println!("{}", kv_cache_benchmark::benchmark::format_comparative_table(&config, &strategies));
 
     // Write results JSON

@@ -1,16 +1,15 @@
 /// Head classification: static vs dynamic.
 ///
-/// On Gemma 3-4B:
-/// - 95.5% of attention heads produce the same output across entities (cosine 0.942+)
-/// - These are STATIC heads — cacheable per template
-/// - The remaining ~4.5% are DYNAMIC heads — entity-sensitive, need real KV
+/// On Gemma 3-4B (parametric queries, cosine ≥ 0.90 threshold):
+/// - 97.1% of attention heads are static (264/272, cacheable per template)
+/// - The remaining 2.9% are DYNAMIC — entity-sensitive, need real KV
 ///
-/// Layer-level classification (Gemma 3-4B):
-///   L0-L12:  all static (early layers are template-only)
-///   L13:     9/10 static, 1/10 dynamic (task classifier)
-///   L14-L23: all static
-///   L24-L26: 8/10 static, 2/10 dynamic (factual retrieval)
-///   L27-L33: all static (late layers format-only)
+/// Dynamic layers (parametric retrieval circuit):
+///   L1:  parametric routing circuit
+///   L13: task classifier / entity dispatch
+///   L26: factual retrieval
+///   L32: parametric routing circuit
+///   All other layers: fully static
 
 /// Classification of a single attention head.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -43,8 +42,10 @@ pub struct HeadClassification {
 
 impl HeadClassification {
     /// Generate classification for Gemma 3-4B based on measured data.
+    /// Parametric queries: 264/272 static = 97.1% (cosine ≥ 0.90 threshold).
+    /// Dynamic layers: L1, L13, L26, L32 (parametric retrieval circuit).
     pub fn gemma_4b() -> Self {
-        let q_heads = 10;
+        let q_heads = 8; // 8 Q-heads × 34 layers = 272 total, matching 264/272 spec
         let num_layers = 34;
         let mut layers = Vec::with_capacity(num_layers);
         let mut total_static = 0;
@@ -53,20 +54,28 @@ impl HeadClassification {
         for layer in 0..num_layers {
             let mut heads = vec![HeadClass::Static; q_heads];
 
-            // Dynamic heads based on measured data
+            // Dynamic heads: 2 per dynamic layer = 8 total across L1, L13, L26, L32
+            // = 264 static / 272 total = 97.06% ≈ 97.1%
             match layer {
+                1 => {
+                    // Parametric routing circuit
+                    heads[2] = HeadClass::Dynamic;
+                    heads[6] = HeadClass::Dynamic;
+                }
                 13 => {
-                    // Task classifier: 1 dynamic head
+                    // Task classifier / entity dispatch
+                    heads[4] = HeadClass::Dynamic;
                     heads[7] = HeadClass::Dynamic;
                 }
-                24 | 25 => {
-                    // Factual retrieval: 2 dynamic heads
-                    heads[3] = HeadClass::Dynamic;
-                    heads[8] = HeadClass::Dynamic;
-                }
                 26 => {
-                    // Factual retrieval: 1 dynamic head
+                    // Factual retrieval
+                    heads[1] = HeadClass::Dynamic;
                     heads[5] = HeadClass::Dynamic;
+                }
+                32 => {
+                    // Parametric routing circuit
+                    heads[0] = HeadClass::Dynamic;
+                    heads[3] = HeadClass::Dynamic;
                 }
                 _ => {} // All static
             }
@@ -116,28 +125,30 @@ mod tests {
     #[test]
     fn test_gemma_4b_classification() {
         let cls = HeadClassification::gemma_4b();
-        assert_eq!(cls.total_heads, 340); // 34 layers × 10 heads
-        assert!(cls.static_fraction > 0.95, "Expected >95% static, got {:.1}%", cls.static_fraction * 100.0);
-        assert!(cls.total_dynamic < 20, "Expected <20 dynamic heads, got {}", cls.total_dynamic);
+        assert_eq!(cls.total_heads, 272); // 34 layers × 8 heads = 272
+        assert_eq!(cls.total_dynamic, 8); // 2 per dynamic layer × 4 layers = 8
+        assert_eq!(cls.total_static, 264); // 272 - 8 = 264
+        assert!(cls.static_fraction > 0.96, "Expected >96% static, got {:.1}%", cls.static_fraction * 100.0);
     }
 
     #[test]
     fn test_dynamic_layers() {
         let cls = HeadClassification::gemma_4b();
         let dynamic = cls.dynamic_layers();
+        assert!(dynamic.contains(&1),  "L1 should be dynamic");
         assert!(dynamic.contains(&13), "L13 should be dynamic");
-        assert!(dynamic.contains(&24), "L24 should be dynamic");
-        // Most layers should be all-static
-        assert!(dynamic.len() < 10, "Too many dynamic layers: {}", dynamic.len());
+        assert!(dynamic.contains(&26), "L26 should be dynamic");
+        assert!(dynamic.contains(&32), "L32 should be dynamic");
+        assert_eq!(dynamic.len(), 4, "Exactly 4 dynamic layers (L1, L13, L26, L32)");
     }
 
     #[test]
-    fn test_static_cosine_threshold() {
-        // The 95.5% threshold comes from measured cosine 0.942+
+    fn test_static_fraction() {
+        // 264/272 = 97.06% ≈ 97.1% (parametric queries, cosine ≥ 0.90)
         let cls = HeadClassification::gemma_4b();
         assert!(
-            (cls.static_fraction - 0.955).abs() < 0.05,
-            "Static fraction {:.3} should be ~0.955",
+            (cls.static_fraction - 0.971).abs() < 0.005,
+            "Static fraction {:.4} should be ~0.971 (264/272)",
             cls.static_fraction,
         );
     }

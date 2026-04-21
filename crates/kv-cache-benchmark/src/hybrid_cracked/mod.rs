@@ -7,14 +7,14 @@ use crate::{KvStrategy, model_config::ModelConfig};
 ///
 /// The near-term practical win. Doesn't require solving attention fully.
 ///
-/// - 95.5% of attention heads are cacheable (cosine 0.942+ across entities)
+/// - 97.1% of attention heads are cacheable for parametric queries (264/272, cosine ≥ 0.90)
 /// - FFN is already solved (vindex walk, zero matmul)
 /// - Cache the static head outputs per template
-/// - Only the ~4.5% dynamic heads need real KV cache
+/// - Only the ~2.9% dynamic heads need real KV cache (L1, L13, L26, L32)
 ///
 /// Memory breakdown:
 ///   Static heads:   cached per template (shared, not per-conversation)
-///   Dynamic heads:  tiny KV cache (~1-2 layers × kv_heads × head_dim × seq_len)
+///   Dynamic heads:  tiny KV cache (~4 layers × kv_heads × head_dim × seq_len)
 ///   FFN:            zero (vindex walk)
 ///   Cold tier:      token IDs (4 bytes per token)
 ///   Routing table:  352 KB (one-time)
@@ -33,13 +33,14 @@ pub struct HybridCrackedAttention {
 
 impl HybridCrackedAttention {
     /// Default for Gemma 3-4B based on measured head cacheability.
+    /// Parametric queries: 97.1% static (264/272), dynamic layers L1, L13, L26, L32.
     pub fn gemma_4b() -> Self {
         Self {
-            static_head_fraction: 0.955,
-            dynamic_layers: 2,          // ~L13, L24-L26 have dynamic heads
+            static_head_fraction: 0.971,
+            dynamic_layers: 4,          // L1, L13, L26, L32 (parametric retrieval circuit)
             routing_table_bytes: 360_448, // 352 KB
             template_cache_bytes: 1_500_000, // ~1.5 MB per template
-            dynamic_window: 512,
+            dynamic_window: 32_768,     // 32K active-token window for dynamic heads
         }
     }
 
@@ -59,7 +60,7 @@ impl HybridCrackedAttention {
     }
 
     /// Dynamic-head-only KV cache size at a given sequence length.
-    /// Only the dynamic layers store real K/V.
+    /// Uses a bounded window — beyond that, cold-tier token IDs cover the rest.
     fn dynamic_kv_bytes(&self, config: &ModelConfig, seq_len: usize) -> usize {
         let window = seq_len.min(self.dynamic_window);
         // dynamic_layers × 2(K+V) × kv_heads × head_dim × 2(fp16) × window
@@ -219,8 +220,7 @@ mod tests {
         let dynamic_kv = hybrid.dynamic_kv_bytes(&config, 4096);
         let full_kv = config.kv_memory(4096);
 
-        // Dynamic KV should be a small fraction of full KV
-        // Only ~2 of 34 layers, so ~2/34 ≈ 6% of the KV
+        // Dynamic KV at 4K (window 32K > 4K, so full context used): 4/34 ≈ 12%
         let ratio = dynamic_kv as f64 / full_kv as f64;
         assert!(
             ratio < 0.15,
@@ -232,8 +232,8 @@ mod tests {
     fn test_hybrid_static_head_fraction() {
         let hybrid = HybridCrackedAttention::gemma_4b();
         assert!(
-            (hybrid.static_head_fraction - 0.955).abs() < 0.01,
-            "Static head fraction should be ~95.5%"
+            (hybrid.static_head_fraction - 0.971).abs() < 0.01,
+            "Static head fraction should be ~97.1% (264/272 parametric)"
         );
     }
 

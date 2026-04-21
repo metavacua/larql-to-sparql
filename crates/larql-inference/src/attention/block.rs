@@ -29,7 +29,9 @@ pub fn run_attention_block_with_kv_out(
     capture_attention: bool,
     shared_kv: Option<&SharedKV>,
 ) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>, Array2<f32>, Array2<f32>)> {
-    run_attention_block_core(weights, h, layer, capture_attention, shared_kv)
+    let (h_post, attn_proj, attn_w, k, v, _pre_o) =
+        run_attention_block_core(weights, h, layer, capture_attention, shared_kv)?;
+    Some((h_post, attn_proj, attn_w, k, v))
 }
 
 /// Run attention with optional shared K/V (discards K/V output).
@@ -41,9 +43,22 @@ pub fn run_attention_block_shared(
     capture_attention: bool,
     shared_kv: Option<&SharedKV>,
 ) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>)> {
-    let (h_post, attn_proj, attn_w, _, _) =
+    let (h_post, attn_proj, attn_w, _, _, _) =
         run_attention_block_core(weights, h, layer, capture_attention, shared_kv)?;
     Some((h_post, attn_proj, attn_w))
+}
+
+/// Run attention, returning the pre-O-projection output per head.
+/// Returns `(h_post_attn, pre_o)` where `pre_o` has shape `[seq, num_q * head_dim]`.
+/// This is the equivalent of Python's `o_proj.register_forward_pre_hook`.
+pub fn run_attention_block_with_pre_o(
+    weights: &crate::model::ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+) -> Option<(Array2<f32>, Array2<f32>)> {
+    let (h_post, _, _, _, _, pre_o) =
+        run_attention_block_core(weights, h, layer, false, None)?;
+    Some((h_post, pre_o))
 }
 
 /// Core attention block implementation.
@@ -55,7 +70,7 @@ fn run_attention_block_core(
     layer: usize,
     capture_attention: bool,
     shared_kv: Option<&SharedKV>,
-) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>, Array2<f32>, Array2<f32>)> {
+) -> Option<(Array2<f32>, Array2<f32>, Option<AttentionWeights>, Array2<f32>, Array2<f32>, Array2<f32>)> {
     use crate::forward::{dot_proj, add_bias};
     use crate::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 
@@ -183,5 +198,5 @@ fn run_attention_block_core(
         h + &attn_projected
     };
 
-    Some((h_post_attn, attn_projected, attn_weights, k_rope, v_final))
+    Some((h_post_attn, attn_projected, attn_weights, k_rope, v_final, attn_out))
 }

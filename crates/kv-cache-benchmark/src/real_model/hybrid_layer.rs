@@ -6,10 +6,10 @@
 //! 2. Cache building: store static head attention outputs per template
 //! 3. Hybrid inference: cached static heads + dynamic-only KV + vindex FFN
 
-use ndarray::{Array2, ArrayView1, s};
+use ndarray::s;
 use larql_inference::model::ModelWeights;
-use larql_inference::attention::run_attention_block;
-use larql_inference::forward::{embed_tokens_pub, run_ffn, apply_norm};
+use larql_inference::attention::run_attention_block_with_pre_o;
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::ffn::WeightFfn;
 
 /// Per-head attention output for one entity on one layer.
@@ -48,6 +48,7 @@ pub struct ModelHeadClassification {
 
 /// Capture per-head attention outputs for a given prompt.
 /// Returns per-head output at the last token position for each layer.
+/// Uses the pre-O-projection output so each head's contribution is unmixed.
 pub fn capture_per_head_attention(
     weights: &ModelWeights,
     token_ids: &[u32],
@@ -61,38 +62,25 @@ pub fn capture_per_head_attention(
     let mut per_layer_heads = Vec::with_capacity(num_layers);
 
     for layer in 0..num_layers {
-        // Run attention with capture enabled to get the pre-O-projection output
-        let (h_post_attn, attn_projected, _attn_weights) =
-            run_attention_block(weights, &h, layer, false)
+        // Capture pre-O-projection output: shape [seq, num_q * head_dim].
+        // Equivalent to Python's `o_proj.register_forward_pre_hook`.
+        let (h_post_attn, pre_o) =
+            run_attention_block_with_pre_o(weights, &h, layer)
                 .expect("attention failed");
 
-        // Extract per-head output from attn_projected (post-O-projection, [seq, hidden])
-        // For classification, we use the last token's output.
-        // The O projection mixes heads, but for cosine comparison across entities
-        // on the same template, the mixed output still reflects per-head behavior
-        // because the O projection is the same for both entities.
         let seq_len = h.shape()[0];
-        let last_tok = attn_projected.row(seq_len - 1);
+        let last_tok_pre_o = pre_o.row(seq_len - 1);
 
-        // Split the hidden dimension into per-head chunks
-        // Note: attn_projected is [seq, hidden] after O-proj, not [seq, num_q * head_dim]
-        // For proper per-head analysis, we need the pre-O attention output.
-        // Approximation: use chunks of the projected output as head proxies.
-        let hidden = weights.hidden_size;
-        let chunk_size = hidden / num_q;
+        // Each head occupies head_dim contiguous elements in the pre-O output.
         let mut heads = Vec::with_capacity(num_q);
         for h_idx in 0..num_q {
-            let start = h_idx * chunk_size;
-            let end = start + chunk_size;
-            heads.push(last_tok.slice(s![start..end]).to_vec());
+            let start = h_idx * head_dim;
+            let end = start + head_dim;
+            heads.push(last_tok_pre_o.slice(s![start..end]).to_vec());
         }
 
-        per_layer_heads.push(PerHeadOutput {
-            layer,
-            heads,
-        });
+        per_layer_heads.push(PerHeadOutput { layer, heads });
 
-        // Continue forward pass
         let (h_out, _) = run_ffn(weights, &h_post_attn, layer, &ffn, false);
         h = h_out;
     }

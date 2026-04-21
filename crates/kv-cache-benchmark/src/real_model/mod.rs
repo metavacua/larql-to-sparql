@@ -14,5 +14,6 @@ pub mod turboquant_layer;
 pub mod markov_layer;
 pub mod graph_walk_layer;
 pub mod hybrid_layer;
+pub mod decode_comparison;
 
 pub use runner::{RealModelBenchmark, RealModelResult, run_all_strategies};
