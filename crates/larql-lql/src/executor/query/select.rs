@@ -514,7 +514,7 @@ impl Session {
                 }
                 if let Some(meta) = patched.feature_meta(*layer, feat) {
                     if let Some(tf) = token_filter {
-                        if !meta.top_token.to_lowercase().contains(&tf.to_lowercase()) {
+                        if meta.top_token.to_lowercase() != tf.to_lowercase() {
                             continue;
                         }
                     }
