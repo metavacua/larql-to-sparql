@@ -87,7 +87,15 @@ pub enum Statement {
         /// values push the inserted fact harder but dilute neighbours;
         /// smaller values reduce neighbour degradation at the cost of
         /// new-fact confidence. Validated range ~0.05–0.30.
+        /// Only used when `mode = Compose`.
         alpha: Option<f32>,
+        /// Install mode. `Knn` (default) stores an independent residual
+        /// key in the KnnStore — scales freely, no cross-fact interference.
+        /// `Compose` uses `install_compiled_slot` to write gate/up/down
+        /// overlays — features participate in the forward pass and can
+        /// chain for multi-hop, but has a Hopfield-style cap at
+        /// ~N=5-10 per layer under template-shared prompts.
+        mode: InsertMode,
     },
     Delete {
         conditions: Vec<Condition>,
@@ -100,6 +108,19 @@ pub enum Statement {
         source: String,
         target: Option<String>,
         conflict: Option<ConflictStrategy>,
+    },
+    /// Global rebalance pass — iterates every compose-mode installed
+    /// fact in the session, INFERs its canonical, adjusts its
+    /// down_vector up or down until its target probability lands in
+    /// the `[floor, ceiling]` band. Fixed-point loop capped at
+    /// `max_iters`. Used at end of batch install or before COMPILE
+    /// to push compose retrieval past the per-INSERT greedy ceiling.
+    ///
+    /// `REBALANCE [UNTIL CONVERGED] [MAX <n>] [FLOOR <p>] [CEILING <p>]`
+    Rebalance {
+        max_iters: Option<u32>,
+        floor: Option<f32>,
+        ceiling: Option<f32>,
     },
 
     // ── Introspection ──
@@ -123,6 +144,12 @@ pub enum Statement {
     ShowModels,
     Stats {
         vindex: Option<String>,
+    },
+    ShowCompactStatus,
+    CompactMinor,
+    CompactMajor {
+        full: bool,
+        lambda: Option<f32>,
     },
 
     // ── Patch ──
@@ -233,6 +260,20 @@ pub enum WalkMode {
 pub enum OutputFormat {
     Safetensors,
     Gguf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InsertMode {
+    /// Architecture B — residual key stored in KnnStore. Independent
+    /// per-fact entry, no cross-fact interference, scales freely.
+    /// Default: this is what you want for knowledge databases.
+    #[default]
+    Knn,
+    /// FFN-overlay — gate/up/down installed via install_compiled_slot.
+    /// Features participate in the forward pass and chain for multi-hop,
+    /// but have a cap at ~N=5-10 per layer under template-shared prompts.
+    /// Use for research demos and multi-hop composition.
+    Compose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

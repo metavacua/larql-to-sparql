@@ -52,7 +52,14 @@ fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
         match args[i].as_str() {
             "--model" => { i += 1; model = args[i].clone(); }
             "--vindex" => { i += 1; vindex = PathBuf::from(&args[i]); }
-            "--top-k" => { i += 1; top_k = args[i].parse().unwrap(); }
+            "--top-k" => {
+                i += 1;
+                top_k = if args[i] == "full" || args[i] == "unlimited" {
+                    usize::MAX
+                } else {
+                    args[i].parse().unwrap()
+                };
+            }
             "--prompts" => {
                 i += 1;
                 prompts = Some(

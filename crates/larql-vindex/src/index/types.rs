@@ -30,7 +30,7 @@ pub struct WalkTrace {
 /// Both `VectorIndex` (base, readonly) and `PatchedVindex` (with overlay)
 /// implement this trait, allowing `WalkFfn` and other consumers to work
 /// transparently with patched or unpatched indexes.
-pub trait GateIndex {
+pub trait GateIndex: Send + Sync {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)>;
     fn feature_meta(&self, layer: usize, feature: usize) -> Option<FeatureMeta>;
     fn num_features(&self, layer: usize) -> usize;
@@ -52,6 +52,20 @@ pub trait GateIndex {
     fn has_down_features(&self) -> bool { false }
     fn down_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> { None }
     fn gate_scores_batch(&self, _layer: usize, _x: &Array2<f32>) -> Option<Array2<f32>> { None }
+    /// Backend-aware variant of `gate_scores_batch`. When `backend` is a
+    /// Metal `ComputeBackend` and `x` is a single row, implementations
+    /// can dispatch `f32_gemv` instead of CPU BLAS — the gate matmul is
+    /// the dominant per-layer cost on 31B decode (60 % of token time).
+    /// Default implementation ignores the backend and calls the legacy
+    /// method.
+    fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        _backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Array2<f32>> {
+        self.gate_scores_batch(layer, x)
+    }
     fn up_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> { None }
     fn has_full_mmap_ffn(&self) -> bool { false }
     fn has_interleaved(&self) -> bool { false }
@@ -67,6 +81,55 @@ pub trait GateIndex {
     fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> { None }
     fn has_interleaved_q4k(&self) -> bool { false }
     fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> { None }
+    /// Per-layer FFN Q4_K/Q6_K slices — [gate, up, down] with format tags.
+    /// `None` when the FFN manifest wasn't emitted (older vindexes).
+    fn interleaved_q4k_layer_data(&self, _layer: usize) -> Option<[(&[u8], &str); 3]> { None }
+
+    /// Dequantised Q4K/Q6K FFN matrix for `(layer, component)` where
+    /// `component` is 0=gate, 1=up, 2=down. Lazily decoded and cached.
+    /// Returns `None` when the vindex has no Q4K interleaved data.
+    fn q4k_ffn_layer(&self, _layer: usize, _component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>> { None }
+
+    /// Decode one row of a Q4K FFN matrix without caching. Small-memory
+    /// alternative to `q4k_ffn_layer`. See `VectorIndex::q4k_ffn_row_into`.
+    fn q4k_ffn_row_into(&self, _layer: usize, _component: usize, _feat: usize, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Fused Q4K/Q6K decode + dot — returns `dot(dequant(row), x)` without
+    /// materialising the decoded row. See `VectorIndex::q4k_ffn_row_dot`.
+    fn q4k_ffn_row_dot(&self, _layer: usize, _component: usize, _feat: usize, _x: &[f32]) -> Option<f32> {
+        None
+    }
+
+    /// TEMP diagnostic — route row-dot through full-layer cache.
+    fn q4k_ffn_row_dot_via_cache(&self, _layer: usize, _component: usize, _feat: usize, _x: &[f32]) -> Option<f32> {
+        None
+    }
+    fn q4k_ffn_row_scaled_add_via_cache(&self, _layer: usize, _component: usize, _feat: usize, _alpha: f32, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Fused Q4K/Q6K decode + scaled-add — `out += alpha * dequant(row)`
+    /// without materialising the decoded row.
+    fn q4k_ffn_row_scaled_add(&self, _layer: usize, _component: usize, _feat: usize, _alpha: f32, _out: &mut [f32]) -> bool {
+        false
+    }
+
+    /// Direct Q4K/Q6K matmul — `Y = X @ W.T` against the layer's Q4K bytes.
+    /// See `VectorIndex::q4k_matmul_transb`. `x` is `[x_rows, w_cols]`.
+    /// `backend` (when provided) routes through Metal/CPU-SIMD kernels.
+    fn q4k_matmul_transb(
+        &self,
+        _layer: usize,
+        _component: usize,
+        _x: &[f32],
+        _x_rows: usize,
+        _backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        None
+    }
 
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.

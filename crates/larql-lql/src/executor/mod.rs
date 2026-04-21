@@ -3,6 +3,8 @@
 //! The base vindex is always readonly. All mutations go through a patch overlay.
 //! INSERT/DELETE/UPDATE auto-start an anonymous patch session if none is active.
 
+mod backend;
+mod compact;
 mod helpers;
 mod introspection;
 mod lifecycle;
@@ -14,44 +16,12 @@ mod trace;
 #[cfg(test)]
 mod tests;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::ast::*;
 use crate::error::LqlError;
-use crate::relations::RelationClassifier;
 
-/// The active backend for the session.
-/// The base vindex is always loaded readonly. A PatchedVindex overlay
-/// handles all mutations without modifying base files on disk.
-pub(crate) enum Backend {
-    Vindex {
-        path: PathBuf,
-        config: larql_vindex::VindexConfig,
-        /// Patched overlay on the readonly base. All queries and mutations
-        /// go through this. The base files on disk are never modified.
-        patched: larql_vindex::PatchedVindex,
-        relation_classifier: Option<RelationClassifier>,
-        /// MoE router index (if available). Used for MoE-aware DESCRIBE.
-        router: Option<larql_vindex::RouterIndex>,
-    },
-    /// Direct model weight access — no vindex extraction needed.
-    /// Supports INFER, EXPLAIN INFER, and STATS. Browse/mutation ops
-    /// require extraction to a vindex first.
-    Weight {
-        model_id: String,
-        weights: larql_inference::ModelWeights,
-        tokenizer: larql_inference::tokenizers::Tokenizer,
-    },
-    /// Remote server backend — queries forwarded via HTTP.
-    /// Local patches can be applied for client-side overlay.
-    Remote {
-        url: String,
-        client: reqwest::blocking::Client,
-        local_patches: Vec<larql_vindex::VindexPatch>,
-        session_id: String,
-    },
-    None,
-}
+pub(crate) use backend::{Backend, InstalledEdge, PatchRecording};
 
 /// Session state for the REPL / batch executor.
 pub struct Session {
@@ -81,12 +51,22 @@ pub struct Session {
         (usize, usize),
         larql_vindex::ndarray::Array1<f32>,
     >,
-}
-
-/// Active patch recording session (between BEGIN PATCH and SAVE PATCH).
-pub(crate) struct PatchRecording {
-    pub path: String,
-    pub operations: Vec<larql_vindex::PatchOp>,
+    /// Per-install fact metadata. Enables cross-fact balance: when a
+    /// new INSERT's local balance converges, we replay every prior
+    /// install's canonical prompt through INFER and scale the NEW
+    /// install's down_col further if any prior fact regressed below
+    /// the retrieval floor. Without this, a single install at N=5+
+    /// can grow a gate that fires on template-matched siblings,
+    /// hijacking their prior install's target (observed as "H" on
+    /// every template query after Hyrule→Hateno install).
+    #[allow(dead_code)]
+    pub(crate) installed_edges: Vec<InstalledEdge>,
+    /// LSM epoch counter — advances on every mutation (INSERT/DELETE/UPDATE).
+    pub(crate) epoch: u64,
+    /// Mutations since last minor compaction (L0 → L1).
+    pub(crate) mutations_since_minor: usize,
+    /// Mutations since last major compaction (L1 → L2).
+    pub(crate) mutations_since_major: usize,
 }
 
 impl Default for Session {
@@ -103,6 +83,10 @@ impl Session {
             auto_patch: false,
             decoy_residual_cache: std::collections::HashMap::new(),
             raw_install_residuals: std::collections::HashMap::new(),
+            installed_edges: Vec::new(),
+            epoch: 0,
+            mutations_since_minor: 0,
+            mutations_since_major: 0,
         }
     }
 
@@ -164,6 +148,9 @@ impl Session {
                 self.exec_show_entities(*layer, *limit)
             }
             Statement::ShowModels => self.exec_show_models(),
+            Statement::ShowCompactStatus => self.exec_show_compact_status(),
+            Statement::CompactMinor => self.exec_compact_minor(),
+            Statement::CompactMajor { full, lambda } => self.exec_compact_major(*full, *lambda),
             Statement::Extract { model, output, components, layers, extract_level } => {
                 self.exec_extract(model, output, components.as_deref(), layers.as_ref(), *extract_level)
             }
@@ -175,12 +162,13 @@ impl Session {
             Statement::Diff { a, b, layer, relation, limit, into_patch } => {
                 self.exec_diff(a, b, *layer, relation.as_deref(), *limit, into_patch.as_deref())
             }
-            Statement::Insert { entity, relation, target, layer, confidence, alpha } => {
+            Statement::Insert { entity, relation, target, layer, confidence, alpha, mode } => {
                 let mut out = self.ensure_patch_session();
                 out.extend(self.exec_insert(
                     entity, relation, target,
-                    *layer, *confidence, *alpha,
+                    *layer, *confidence, *alpha, *mode,
                 )?);
+                self.advance_epoch();
                 Ok(out)
             }
             Statement::Infer { prompt, top, compare } => {
@@ -189,16 +177,22 @@ impl Session {
             Statement::Delete { conditions } => {
                 let mut out = self.ensure_patch_session();
                 out.extend(self.exec_delete(conditions)?);
+                self.advance_epoch();
                 Ok(out)
             }
             Statement::Update { set, conditions } => {
                 let mut out = self.ensure_patch_session();
                 out.extend(self.exec_update(set, conditions)?);
+                self.advance_epoch();
                 Ok(out)
             }
             Statement::Merge { source, target, conflict } => {
                 self.exec_merge(source, target.as_deref(), *conflict)
             }
+            Statement::Rebalance { max_iters, floor, ceiling } => {
+                self.exec_rebalance(*max_iters, *floor, *ceiling)
+            }
+
             // ── Patch commands ──
             Statement::BeginPatch { path } => self.exec_begin_patch(path),
             Statement::SavePatch => self.exec_save_patch(),
@@ -227,10 +221,10 @@ impl Session {
             }
             Statement::Stats { .. } => self.remote_stats(),
             Statement::ShowRelations { mode, with_examples, .. } => self.remote_show_relations(*mode, *with_examples),
-            Statement::Insert { entity, relation, target, layer, confidence, alpha: _ } => {
-                // Remote backend doesn't forward ALPHA — the HTTP
-                // protocol doesn't have a schema for it yet. Local
-                // backend honours alpha via `exec_insert`.
+            Statement::Insert { entity, relation, target, layer, confidence, alpha: _, mode: _ } => {
+                // Remote backend doesn't forward ALPHA or MODE — the
+                // HTTP protocol doesn't have a schema for them yet.
+                // Local backend honours both via `exec_insert`.
                 self.remote_insert(entity, relation, target, *layer, *confidence)
             }
             Statement::Delete { conditions } => self.remote_delete(conditions),
@@ -401,104 +395,12 @@ impl Session {
         }
     }
 
-    // ── Backend accessors ──
-
-    /// Get readonly access to the patched vindex (base + overlay).
-    pub(crate) fn require_patched(
-        &self,
-    ) -> Result<&larql_vindex::PatchedVindex, LqlError> {
-        match &self.backend {
-            Backend::Vindex { patched, .. } => Ok(patched),
-            Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
-                "this operation requires a vindex. Extract first:\n  \
-                 EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
-                model_id,
-                model_id.split('/').next_back().unwrap_or(model_id),
-            ))),
-            _ => Err(LqlError::NoBackend),
-        }
-    }
-
-    /// Get mutable access to the patched overlay.
-    pub(crate) fn require_patched_mut(
-        &mut self,
-    ) -> Result<(&Path, &larql_vindex::VindexConfig, &mut larql_vindex::PatchedVindex), LqlError> {
-        match &mut self.backend {
-            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
-            Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
-                "mutation requires a vindex. Extract first:\n  \
-                 EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
-                model_id,
-                model_id.split('/').next_back().unwrap_or(model_id),
-            ))),
-            _ => Err(LqlError::NoBackend),
-        }
-    }
-
-    /// Get readonly access to path + config + base index.
-    pub(crate) fn require_vindex(
-        &self,
-    ) -> Result<(&Path, &larql_vindex::VindexConfig, &larql_vindex::PatchedVindex), LqlError>
-    {
-        match &self.backend {
-            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
-            Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
-                "this operation requires a vindex. Extract first:\n  \
-                 EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
-                model_id,
-                model_id.split('/').next_back().unwrap_or(model_id),
-            ))),
-            _ => Err(LqlError::NoBackend),
-        }
-    }
-
-    pub(crate) fn relation_classifier(&self) -> Option<&RelationClassifier> {
-        match &self.backend {
-            Backend::Vindex { relation_classifier, .. } => relation_classifier.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// Mutable access to the patch overlay of the current vindex backend,
-    /// for tests and benchmarks that need to inject patches without going
-    /// through the full INSERT pipeline (which would require a real
-    /// tokenizer + relation classifier the synthetic test fixtures don't
-    /// carry). Returns `None` if no vindex is loaded. Production code
-    /// should go through `INSERT`/`DELETE`/`UPDATE` statements instead.
-    pub fn patched_overlay_mut(&mut self) -> Option<&mut larql_vindex::PatchedVindex> {
-        match &mut self.backend {
-            Backend::Vindex { patched, .. } => Some(patched),
-            _ => None,
-        }
+    /// Bump the LSM epoch + minor/major mutation counters. Called after
+    /// every INSERT/DELETE/UPDATE.
+    pub(crate) fn advance_epoch(&mut self) {
+        self.epoch += 1;
+        self.mutations_since_minor += 1;
+        self.mutations_since_major += 1;
     }
 }
-
-#[allow(dead_code)]
-/// Architecture A: canonical decoy prompt set. Kept for backward compat.
-///
-/// Same set as `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
-/// These prompts span literary, philosophical, poetic, and common
-/// completion templates — the canonical bleed targets for a
-/// fact-install slot operating at `gate_scale=30`. Capturing residuals
-/// at the install layer through the clean base index and
-/// orthogonalising the installed gate against those residuals
-/// prevents the slot from firing on unrelated prompts.
-///
-/// The set is hardcoded so every session gets the same decoy
-/// defense without user configuration. A future refinement could
-/// move this to `EXTRACT ... WITH DECOYS` for per-vindex canonical
-/// sets, or let the user override via `INSERT ... WITH DECOYS`, but
-/// v0 ships a fixed list that covers the validated reference cases.
-pub(crate) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
-    "Once upon a time",
-    "The quick brown fox",
-    "To be or not to be",
-    "Water is a",
-    "A long time ago",
-    "In the beginning",
-    "The weather today is",
-    "She opened the door and",
-    "He looked at the sky",
-    "The children played in the",
-];
 

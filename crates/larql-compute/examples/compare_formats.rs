@@ -12,7 +12,7 @@ fn main() {
     {
         use std::time::Instant;
         use larql_compute::ComputeBackend;
-        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_k_gguf, quantize_q4_0, q4k_to_q4kf};
+        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_0, q4k_to_q4kf};
 
         let metal_raw = larql_compute::metal::MetalBackend::new().expect("Metal required");
         let metal: &dyn ComputeBackend = &metal_raw;
@@ -70,10 +70,10 @@ fn main() {
             let wo_q4kf = q4k_to_q4kf(&wo_q4k, o_rows, q_dim);
 
             // GGUF Q4_K (144-byte blocks, packed scales+mins)
-            let wq_gguf = quantize_q4_k_gguf(&pad256(&wq_f32));
-            let wk_gguf = quantize_q4_k_gguf(&pad256(&wk_f32));
-            let wv_gguf = quantize_q4_k_gguf(&pad256(&wv_f32));
-            let wo_gguf = quantize_q4_k_gguf(&pad256(&wo_f32));
+            let wq_gguf = quantize_q4_k(&pad256(&wq_f32));
+            let wk_gguf = quantize_q4_k(&pad256(&wk_f32));
+            let wv_gguf = quantize_q4_k(&pad256(&wv_f32));
+            let wo_gguf = quantize_q4_k(&pad256(&wo_f32));
 
             layers_data.push(LayerData {
                 wq_q4k, wk_q4k, wv_q4k, wo_q4k,
@@ -117,8 +117,11 @@ fn main() {
                 layer_scalar: 0.0,
                 input_norm_bias: None,
                 post_attn_norm_bias: None,
+                q_norm_weight: None,
+                k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
+            moe: None,
             }
         }).collect();
 
@@ -157,8 +160,11 @@ fn main() {
                 layer_scalar: 0.0,
                 input_norm_bias: None,
                 post_attn_norm_bias: None,
+                q_norm_weight: None,
+                k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
+            moe: None,
             }
         }).collect();
 
@@ -197,8 +203,11 @@ fn main() {
                 layer_scalar: 0.0,
                 input_norm_bias: None,
                 post_attn_norm_bias: None,
+                q_norm_weight: None,
+                k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
+            moe: None,
             }
         }).collect();
 

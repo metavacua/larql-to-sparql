@@ -111,16 +111,6 @@ fn silu_ffn_forward_with_activation(x: &Array2<f32>, w_gate: &Array2<f32>, w_up:
     }
 
     #[test]
-    fn test_highway_returns_zeros() {
-        let highway = HighwayFfn;
-        let x = make_input();
-        let out = highway.forward(0, &x);
-        assert_eq!(out.shape(), &[1, 4]);
-        let norm: f32 = out.iter().map(|v| v * v).sum::<f32>().sqrt();
-        assert!(norm < 1e-12);
-    }
-
-    #[test]
     fn test_silu_forward_and_with_activation_match() {
         let (gate, up, down) = make_weights();
         let x = make_input();

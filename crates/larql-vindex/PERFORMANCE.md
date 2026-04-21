@@ -74,6 +74,21 @@ Page fault:       0.064ms overhead on first cold access
 
 **A 1T model in 10.9 GB on a laptop.**
 
+## LM Head Dispatch (2026-04-19)
+
+`lm_head_knn_backend` tries three paths in order:
+
+| Path | Trigger | Latency | Notes |
+|------|---------|---------|-------|
+| Q4_0 matvec (mmap) | `lm_head_q4.bin` present | ~1ms | Explicit Q4 file |
+| Q4_0 matvec (synth) | tied-embed model + no Q4 file | ~2ms | Synthesized at load from f16 embeddings |
+| f16 gemv | tied-embed, Metal available | ~4ms | Avoids 5.6 GB f32 clone |
+| f32 BLAS fallback | all else | ~25ms | CPU only |
+
+**Synthesis**: `synthesize_lm_head_q4()` converts the `embeddings.bin` f16 mmap to Q4_0 in RAM
+at load time (one-time ~2s on Gemma 3 4B, then amortized). Reduces lm_head from 4.3ms to 2.0ms
+on M3 Max (2.2× speedup). The synthesized bytes are `vocab × (hidden/32 × 18)` = ~377 MB.
+
 ## Connection to larql-compute
 
 Vindex stores raw quantized bytes. Compute kernels dequant + multiply at inference.
@@ -82,7 +97,9 @@ Vindex stores raw quantized bytes. Compute kernels dequant + multiply at inferen
 |------------------|---------------|--------|
 | Gate KNN (f32) | `matmul_transb` | f32 BLAS |
 | Gate KNN (Q4) | `q4_matvec` | Q4_0 |
-| LM head KNN | `q4_matvec` / `matmul_transb` | Q4_0 / f32 |
+| LM head KNN (mmap) | `q4_matvec` | Q4_0 |
+| LM head KNN (synth) | `q4_matvec` | Q4_0 synthesized at load |
+| LM head KNN (f16) | `f16_gemv` | f16 mmap |
 | K-means clustering | `matmul_transb` | f32 BLAS |
 | HNSW projection | `matmul` | f32 BLAS |
 | MoE routing | `matmul` | f32 BLAS |
@@ -101,6 +118,7 @@ attn_weights_q4k.bin (Q6_K) → QuantFormat::Q6_K       → q6k_matvec shader   
 interleaved_q4k.bin  (Q4_K) → QuantFormat::Q4_K       → Q4_K FFN dispatch      ✅ NEW
 interleaved_q4.bin   (Q4_0) → QuantFormat::Q4_0       → q4_matvec_v4 (fallback)✅
 lm_head_q4.bin       (Q4_0) → q4_matvec                                        ✅
+embeddings.bin (f16) → synthesize_lm_head_q4() → Q4_0 in RAM → q4_matvec     ✅ NEW
 gate_vectors_q4.bin  (Q4_0) → q4_matvec                                        ✅
 
 Inference auto-selects: Q4_K FFN preferred → Q4_0 fallback

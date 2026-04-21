@@ -1,4 +1,4 @@
-//! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS.
+//! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS, SHOW COMPACT STATUS.
 
 use std::collections::HashMap;
 
@@ -6,6 +6,47 @@ use crate::ast::*;
 use crate::error::LqlError;
 use super::Session;
 use super::helpers::{format_number, format_bytes, dir_size, is_content_token};
+
+impl Session {
+    pub(crate) fn exec_show_compact_status(&self) -> Result<Vec<String>, LqlError> {
+        let (_path, _config, patched) = self.require_vindex()?;
+        let l0_entries = patched.knn_store.len();
+        let l1_edges = patched.num_overrides();
+        let l1_layers: std::collections::HashSet<usize> = patched
+            .overrides_gate_iter()
+            .map(|(layer, _, _)| layer)
+            .collect();
+        let n_layers = patched.num_layers();
+        let features_per_layer = if n_layers > 0 { patched.num_features(0) } else { 0 };
+        let hidden_dim = patched.hidden_size();
+        let memit_supported = hidden_dim >= 1024;
+
+        let mut out = Vec::new();
+        out.push(format!("Storage engine status (epoch {}):", self.epoch));
+        out.push(format!(
+            "  L0 (WAL/KNN):    {} entries (0 tombstones)",
+            l0_entries,
+        ));
+        out.push(format!(
+            "  L1 (arch-A):     {} edges across {} layers",
+            l1_edges,
+            l1_layers.len(),
+        ));
+        if memit_supported {
+            out.push("  L2 (MEMIT):      0 facts across 0 cycles".to_string());
+        } else {
+            out.push(format!(
+                "  L2 (MEMIT):      not available (hidden_dim={} < 1024)",
+                hidden_dim,
+            ));
+        }
+        out.push(format!(
+            "  Base model:      {} layers × {} features",
+            n_layers, features_per_layer,
+        ));
+        Ok(out)
+    }
+}
 
 impl Session {
     pub(crate) fn exec_show_relations(

@@ -14,3 +14,4 @@ pub mod vector;
 pub mod attention;
 pub mod geglu;
 pub mod linalg;
+pub mod moe;

@@ -7,10 +7,12 @@ license.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
 [dependencies]
+larql-compute = { path = "../larql-compute" }
 larql-core = { path = "../larql-core" }
 larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }
+ndarray = "0.16"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rustyline = "15"
 serde = { workspace = true, features = ["derive"] }

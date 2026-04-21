@@ -1,6 +1,7 @@
 //! Router setup — maps URL paths to handlers.
 
 pub mod describe;
+pub mod embed;
 pub mod explain;
 pub mod health;
 pub mod infer;
@@ -39,6 +40,12 @@ pub fn single_model_router(state: Arc<AppState>) -> Router {
         .route("/v1/stream", get(stream::handle_stream))
         .route("/v1/health", get(health::handle_health))
         .route("/v1/models", get(models::handle_models))
+        // Embed server endpoints (always available, required for --embed-only mode)
+        .route("/v1/embed", post(embed::handle_embed))
+        .route("/v1/embed/{token_id}", get(embed::handle_embed_single))
+        .route("/v1/logits", post(embed::handle_logits))
+        .route("/v1/token/encode", get(embed::handle_token_encode))
+        .route("/v1/token/decode", get(embed::handle_token_decode))
         .with_state(state)
 }
 
@@ -58,5 +65,11 @@ pub fn multi_model_router(state: Arc<AppState>) -> Router {
         .route("/v1/{model_id}/patches/{name}", delete(patches::handle_remove_patch_multi))
         .route("/v1/{model_id}/explain-infer", post(explain::handle_explain_multi))
         .route("/v1/{model_id}/insert", post(insert::handle_insert_multi))
+        // Embed server endpoints for multi-model mode
+        .route("/v1/{model_id}/embed", post(embed::handle_embed_multi))
+        .route("/v1/{model_id}/embed/{token_id}", get(embed::handle_embed_single_multi))
+        .route("/v1/{model_id}/logits", post(embed::handle_logits_multi))
+        .route("/v1/{model_id}/token/encode", get(embed::handle_token_encode_multi))
+        .route("/v1/{model_id}/token/decode", get(embed::handle_token_decode_multi))
         .with_state(state)
 }

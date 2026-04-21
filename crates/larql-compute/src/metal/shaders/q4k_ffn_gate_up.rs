@@ -1,77 +1,96 @@
 //! Fused Q4_K gate+up projection — two matvecs sharing the same input vector.
 //!
-//! Reads the f32 input ONCE, computes both gate and up projections in one dispatch.
-//! Uses uint4 vectorized loads, sub-block striped across lanes.
+//! **Parallelism: sub-block stride, 1 row per simdgroup.**
 //!
-//! Layout: threadgroups 0..ceil(N/ROWS_PER_TG)-1 do gate rows,
-//!         threadgroups ceil(N/ROWS_PER_TG)..2*ceil(N/ROWS_PER_TG)-1 do up rows.
+//! Lanes stride over sub-blocks. X loaded once into 16 KB shared memory.
+//! ROWS_PER_TG=8; dispatch = 2 × ceil(N/8) TGs (gate + up).
 
 pub const SHADER: &str = r#"
 constant uint Q4K_GU_ROWS_PER_TG = 8;
+constant uint Q4K_GU_BLOCK_SIZE  = 144;
+constant uint Q4K_GU_MAX_K       = 4096; // 16 KB
 
 kernel void q4k_ffn_gate_up(
-    device const block_q4_K* Wg     [[buffer(0)]],
-    device const block_q4_K* Wu     [[buffer(1)]],
-    device const float*      X      [[buffer(2)]],
-    device float*            G_out  [[buffer(3)]],
-    device float*            U_out  [[buffer(4)]],
-    constant uint&           N      [[buffer(5)]],
-    constant uint&           K      [[buffer(6)]],
+    device const uchar*  Wg    [[buffer(0)]],
+    device const uchar*  Wu    [[buffer(1)]],
+    device const float*  X     [[buffer(2)]],
+    device float*        G_out [[buffer(3)]],
+    device float*        U_out [[buffer(4)]],
+    constant uint&       N     [[buffer(5)]],
+    constant uint&       K     [[buffer(6)]],
     uint tg_id     [[threadgroup_position_in_grid]],
-    uint tid_in_tg [[thread_index_in_threadgroup]],
     uint lane      [[thread_index_in_simdgroup]],
     uint sg_id     [[simdgroup_index_in_threadgroup]])
 {
-    uint tgs_per_mat = (N + Q4K_GU_ROWS_PER_TG - 1) / Q4K_GU_ROWS_PER_TG;
-    bool is_up = (tg_id >= tgs_per_mat);
+    threadgroup float Xsh[Q4K_GU_MAX_K];
+    {
+        uint n_threads = Q4K_GU_ROWS_PER_TG * 32u;
+        uint tid = sg_id * 32u + lane;
+        for (uint k = tid; k < K; k += n_threads) {
+            Xsh[k] = X[k];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    uint tgs_per_mat = (N + Q4K_GU_ROWS_PER_TG - 1u) / Q4K_GU_ROWS_PER_TG;
+    bool is_up  = (tg_id >= tgs_per_mat);
     uint mat_tg = is_up ? (tg_id - tgs_per_mat) : tg_id;
 
-    uint row = mat_tg * Q4K_GU_ROWS_PER_TG + sg_id;
-    if (row >= N) return;
+    uint row_idx = mat_tg * Q4K_GU_ROWS_PER_TG + sg_id;
+    if (row_idx >= N) return;
 
-    uint superblocks = K / 256;
-    uint total_subs = superblocks * 8;
+    device const uchar* W = is_up ? Wu : Wg;
+    device float*    out_buf = is_up ? U_out : G_out;
 
-    device const block_q4_K* W = is_up ? Wu : Wg;
-    device float* out_buf = is_up ? U_out : G_out;
+    uint superblocks   = K / 256u;
+    uint bytes_per_row = superblocks * Q4K_GU_BLOCK_SIZE;
+    device const uchar* row_w = W + row_idx * bytes_per_row;
 
-    device const block_q4_K* W_row = W + row * superblocks;
+    uint n_sub = K / 32u;
     float acc = 0.0f;
 
-    for (uint sub = lane; sub < total_subs; sub += 32) {
-        uint sb = sub / 8;
-        uint j = sub % 8;
+    for (uint su = lane; su < n_sub; su += 32u) {
+        uint sb     = su / 8u;
+        uint j      = su % 8u;
+        uint group  = j / 2u;
+        bool hi     = (j & 1u) != 0u;
 
-        device const block_q4_K& blk = W_row[sb];
-        float d    = decode_f16_metal(blk.d);
-        float dmin = decode_f16_metal(blk.dmin);
+        device const uchar* block    = row_w + sb * Q4K_GU_BLOCK_SIZE;
+        ushort d_bits    = ushort(block[0]) | (ushort(block[1]) << 8);
+        ushort dmin_bits = ushort(block[2]) | (ushort(block[3]) << 8);
+        float d    = decode_f16_metal(d_bits);
+        float dmin = decode_f16_metal(dmin_bits);
 
-        float sc = d * float(blk.scales[j] & 0x3F);
-        float mn;
-        if (j < 4) mn = dmin * float(blk.mins[j] & 0x0F);
-        else mn = dmin * float((blk.mins[j - 4] >> 4) & 0x0F);
+        device const uchar* sb_bytes = block + 4u;
+        uint sc, mn;
+        if (j < 4u) {
+            sc = uint(sb_bytes[j])      & 0x3Fu;
+            mn = uint(sb_bytes[j + 4u]) & 0x3Fu;
+        } else {
+            sc = (uint(sb_bytes[j + 4u]) & 0x0Fu) | ((uint(sb_bytes[j - 4u]) >> 6u) << 4u);
+            mn = (uint(sb_bytes[j + 4u]) >> 4u)    | ((uint(sb_bytes[j])      >> 6u) << 4u);
+        }
+        float scale = d * float(sc);
+        float mmin  = dmin * float(mn);
 
-        device const uint4* qp = (device const uint4*)(blk.qs + j * 16);
-        uint4 w = qp[0];
-        uint xi = sb * 256 + j * 32;
+        device const uchar* qs = block + 16u + group * 32u;
+        uint x_base = sb * 256u + j * 32u;
 
-        float dot = 0.0f, xs = 0.0f;
-        #define P(W, S, I) { \
-            float a = X[xi+I], b = X[xi+I+1]; \
-            dot += float((W>>S)&0xFu)*a + float((W>>(S+4))&0xFu)*b; \
-            xs += a + b; }
-        P(w.x, 0, 0); P(w.x, 8, 2); P(w.x,16, 4); P(w.x,24, 6);
-        P(w.y, 0, 8); P(w.y, 8,10); P(w.y,16,12); P(w.y,24,14);
-        P(w.z, 0,16); P(w.z, 8,18); P(w.z,16,20); P(w.z,24,22);
-        P(w.w, 0,24); P(w.w, 8,26); P(w.w,16,28); P(w.w,24,30);
-        #undef P
-        acc += sc * dot - mn * xs;
+        float dot_acc = 0.0f, sum_acc = 0.0f;
+        for (uint l = 0u; l < 32u; l++) {
+            uchar byte = qs[l];
+            float nib  = hi ? float((byte >> 4u) & 0x0Fu) : float(byte & 0x0Fu);
+            float x    = Xsh[x_base + l];
+            dot_acc   = fma(nib, x, dot_acc);
+            sum_acc   += x;
+        }
+        acc += scale * dot_acc - mmin * sum_acc;
     }
 
     acc = simd_sum(acc);
-    if (lane == 0) out_buf[row] = acc;
+    if (lane == 0u) out_buf[row_idx] = acc;
 }
 "#;
 
 pub const ROWS_PER_TG: u64 = 8;
-pub const THREADS_PER_TG: u64 = 256; // 8 rows × 32 lanes
+pub const THREADS_PER_TG: u64 = 256;

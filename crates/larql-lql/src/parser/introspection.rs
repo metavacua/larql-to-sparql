@@ -109,8 +109,14 @@ impl Parser {
                 self.eat_semicolon();
                 Ok(Statement::ShowPatches)
             }
+            Token::Keyword(Keyword::Compact) => {
+                self.advance();
+                self.expect_keyword(Keyword::Status)?;
+                self.eat_semicolon();
+                Ok(Statement::ShowCompactStatus)
+            }
             _ => Err(ParseError(format!(
-                "expected RELATIONS, LAYERS, FEATURES, ENTITIES, MODELS, or PATCHES after SHOW, got {:?}",
+                "expected RELATIONS, LAYERS, FEATURES, ENTITIES, MODELS, PATCHES, or COMPACT after SHOW, got {:?}",
                 self.peek()
             ))),
         }

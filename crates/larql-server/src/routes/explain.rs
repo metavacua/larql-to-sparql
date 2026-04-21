@@ -50,7 +50,7 @@ fn explain_infer(
     };
 
     let patched = model.patched.blocking_read();
-    let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(weights, &*patched, 8092);
+    let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(weights, &*patched);
 
     let (predictions_raw, attention_captures, lens_residuals) = if req.with_attention {
         let r = larql_inference::predict_with_ffn_attention(
@@ -63,7 +63,14 @@ fn explain_infer(
         );
         (r.predictions, Vec::new(), Vec::new())
     };
-    let trace = walk_ffn.take_trace();
+    let residuals = walk_ffn.take_residuals();
+    let (predictions_raw, knn_override) = larql_inference::apply_knn_override(
+        predictions_raw,
+        &residuals,
+        Some(&patched.knn_store),
+        req.top,
+    );
+    let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &*patched);
 
     // Build logit lens: layer → (top_token, probability)
     let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals.iter()
@@ -121,7 +128,7 @@ fn explain_infer(
         .collect();
 
     let mut layers = Vec::new();
-    for (layer, hits) in &trace.layers {
+    for (layer, hits) in &trace_layers {
         if let Some((lo, hi)) = layer_range {
             if *layer < lo || *layer > hi {
                 continue;
@@ -187,12 +194,20 @@ fn explain_infer(
 
     let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    Ok(serde_json::json!({
+    let mut body = serde_json::json!({
         "prompt": req.prompt,
         "predictions": predictions,
         "trace": layers,
         "latency_ms": (latency_ms * 10.0).round() / 10.0,
-    }))
+    });
+    if let Some(ovr) = knn_override {
+        body["knn_override"] = serde_json::json!({
+            "token": ovr.token,
+            "cosine": ovr.cosine,
+            "layer": ovr.layer,
+        });
+    }
+    Ok(body)
 }
 
 pub async fn handle_explain(

@@ -73,7 +73,7 @@ pub fn predict_with_graph_vindex_logits(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Run a full forward pass using a LayerGraph for per-layer routing.
@@ -265,7 +265,7 @@ pub fn predict_split_pass(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Split pass using cached attention residuals — exact output at GPU speed.
@@ -318,7 +318,7 @@ pub fn predict_split_cached(
         })
         .collect();
 
-    crate::forward::PredictResult { predictions }
+    crate::forward::PredictResult { predictions, token_ids: Vec::new() }
 }
 
 /// Honest production pipeline: real computation, no over-caching.
@@ -367,9 +367,9 @@ pub fn predict_honest(
             let intermediate = gate_index.num_features(layer_range.start);
             let hidden = weights.hidden_size;
             if intermediate > 0 && (has_q4k || has_q8) {
-                // Q4_K: 148B/256vals, Q4_0: 18B/32vals
+                // Q4_K (GGUF): 144B/256vals, Q4_0: 18B/32vals
                 let q4_ffn_per_matrix = if ffn_is_q4k {
-                    (intermediate * hidden).div_ceil(256) * 148
+                    (intermediate * hidden).div_ceil(256) * 144
                 } else {
                     intermediate * hidden / 32 * 18
                 };

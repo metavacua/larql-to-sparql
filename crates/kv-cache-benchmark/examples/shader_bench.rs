@@ -21,14 +21,14 @@ fn main() {
         }
     }
 
-    // Memory comparison table (all 5 strategies)
+    // Memory comparison table
     println!("\n{}", kv_cache_benchmark::benchmark::format_comparative_table(
         &kv_cache_benchmark::model_config::ModelConfig::gemma_4b(),
         &[
             &kv_cache_benchmark::standard_kv::StandardKv as &dyn kv_cache_benchmark::KvStrategy,
             &kv_cache_benchmark::turboquant::TurboQuant::new(4),
             &kv_cache_benchmark::markov_residual::MarkovResidual::new(512),
-            &kv_cache_benchmark::hybrid_cracked::HybridCrackedAttention::gemma_4b(),
+            &kv_cache_benchmark::boundary_residual::BoundaryResidual::gemma_4b(),
             &kv_cache_benchmark::graph_walk::GraphWalk::gemma_4b(),
         ],
     ));

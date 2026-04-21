@@ -32,6 +32,7 @@ model.vindex/
 ├── interleaved.bin            gate|up|down packed per layer (f32, optional)
 ├── interleaved_q4.bin         Q4_0 quantized interleaved (optional)
 ├── interleaved_q4k.bin        Q4_K/Q6_K interleaved (optional)
+├── interleaved_q4k_manifest.json  Per-tensor offsets for interleaved_q4k.bin
 │
 ├── router_weights.bin         MoE router (optional, for MoE models)
 ├── relation_clusters.json     Discovered relation types (optional)
@@ -131,17 +132,85 @@ Total: ~5.8 KB for 100K features with top_k=10 (vs 160 MB JSONL).
 
 ## Q4_K Attention Manifest
 
+`attn_weights_q4k_manifest.json` — flat list of 4 entries per layer
+(Q, K, V, O in that order), layer-major. V carries `Q6_K`, the rest
+`Q4_K`. The `key` matches the original safetensors tensor name.
+
 ```json
 [
   {
-    "layer": 0,
-    "q": { "offset": 0, "length": 3788800, "format": "Q4_K" },
-    "k": { "offset": 3788800, "length": 1894400, "format": "Q4_K" },
-    "v": { "offset": 5683200, "length": 2520000, "format": "Q6_K" },
-    "o": { "offset": 8203200, "length": 3788800, "format": "Q4_K" }
+    "key": "model.layers.0.self_attn.q_proj.weight",
+    "shape": [3584, 3584],
+    "format": "Q4_K",
+    "offset": 0,
+    "length": 3788800
+  },
+  {
+    "key": "model.layers.0.self_attn.k_proj.weight",
+    "shape": [1792, 3584],
+    "format": "Q4_K",
+    "offset": 3788800,
+    "length": 1894400
+  },
+  {
+    "key": "model.layers.0.self_attn.v_proj.weight",
+    "shape": [1792, 3584],
+    "format": "Q6_K",
+    "offset": 5683200,
+    "length": 2520000
+  },
+  {
+    "key": "model.layers.0.self_attn.o_proj.weight",
+    "shape": [3584, 3584],
+    "format": "Q4_K",
+    "offset": 8203200,
+    "length": 3788800
   }
 ]
 ```
+
+**V-shares-K fallback** (Gemma 4 31B global layers). When the source
+has no `v_proj` AND `arch.v_shares_k(layer)` returns true, the writer
+falls back to K's bytes and stores them in the V slot — still tagged
+`Q6_K`, still with `key` = the V tensor name, so downstream 4-per-layer
+indexing stays valid.
+
+## Q4_K Interleaved (FFN) Manifest
+
+`interleaved_q4k_manifest.json` — symmetric to the attention manifest.
+3 entries per layer (gate, up, down) in that order, layer-major. Down
+carries `Q6_K`, gate and up carry `Q4_K`.
+
+```json
+[
+  {
+    "key": "model.layers.0.mlp.gate_proj.weight",
+    "shape": [14336, 3584],
+    "format": "Q4_K",
+    "offset": 0,
+    "length": 29692928
+  },
+  {
+    "key": "model.layers.0.mlp.up_proj.weight",
+    "shape": [14336, 3584],
+    "format": "Q4_K",
+    "offset": 29692928,
+    "length": 29692928
+  },
+  {
+    "key": "model.layers.0.mlp.down_proj.weight",
+    "shape": [3584, 14336],
+    "format": "Q6_K",
+    "offset": 59385856,
+    "length": 42164480
+  }
+]
+```
+
+Padding: each tensor is zero-padded to the next multiple of 256 f32
+elements before quantisation (Q4_K/Q6_K super-blocks require
+`len % 256 == 0`). Readers must multiply their expected element count
+by the block overhead to compute raw byte sizes.
 
 ## Interleaved Layout
 
@@ -155,3 +224,16 @@ Layer 1: [gate_vectors][up_vectors][down_vectors]
 
 Q4_0 interleaved: 18 bytes per 32 values, 3 matrices per layer.
 Q4_K interleaved: 148 bytes per 256 values, with Q6_K for down.
+
+## index.json `quant` field
+
+`VindexConfig.quant` tags the weight storage format so loaders can
+dispatch without sniffing filenames:
+
+| `quant` | Weight files | Manifest |
+|---------|---|---|
+| `"none"` | `attn_weights.bin`, `interleaved.bin` (optional) | `weight_manifest.json` (per-tensor offsets) |
+| `"q4k"` | `attn_weights_q4k.bin`, `interleaved_q4k.bin` | `attn_weights_q4k_manifest.json` + `interleaved_q4k_manifest.json` |
+
+Writers set this field alongside `has_model_weights = true`; cold
+loaders should branch on `quant` before opening any `.bin` file.

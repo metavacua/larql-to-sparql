@@ -37,7 +37,12 @@ libc = "0.2"
 criterion = "0.5"
 serde_json = "1"
 memmap2 = "0.9"
+larql-models = { path = "../larql-models" }
 
 [[bench]]
 name = "matmul"
+harness = false
+
+[[bench]]
+name = "linalg"
 harness = false

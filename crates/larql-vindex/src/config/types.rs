@@ -34,6 +34,13 @@ pub struct VindexConfig {
     /// Storage precision (f32 or f16).
     #[serde(default)]
     pub dtype: crate::config::dtype::StorageDtype,
+    /// Quantisation format of the model weights written alongside this
+    /// vindex. `None` means float storage controlled by `dtype`;
+    /// `Q4k` means Q4_K/Q6_K blocks in `attn_weights_q4k.bin` +
+    /// `interleaved_q4k.bin`. Loaders dispatch on this field so they
+    /// don't have to sniff filenames.
+    #[serde(default)]
+    pub quant: QuantFormat,
     /// Model-specific layer band boundaries for DESCRIBE and label matching.
     #[serde(default)]
     pub layer_bands: Option<LayerBands>,
@@ -64,27 +71,87 @@ pub struct VindexSource {
     pub larql_version: String,
 }
 
-/// What components are included in the vindex.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// What components are included in the vindex. Strictly increasing —
+/// each tier is a superset of the previous.
+///
+/// | Tier        | Adds                                   | Enables                                |
+/// |-------------|----------------------------------------|----------------------------------------|
+/// | `browse`    | gate, embed, down_meta, tokenizer      | WALK / DESCRIBE / SELECT               |
+/// | `attention` | + attention + norms                    | client-side of `run --ffn URL` (Act 2) |
+/// | `inference` | + FFN up/down                          | full local forward pass (INFER)        |
+/// | `all`       | + lm_head + any COMPILE extras         | COMPILE                                |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum ExtractLevel {
-    /// Gate + embed + down_meta only. Enables WALK, DESCRIBE, SELECT.
+    /// Gate + embed + down_meta + tokenizer. Enables WALK, DESCRIBE,
+    /// SELECT. No forward pass possible.
     #[default]
     Browse,
-    /// + attention weights. Enables INFER, EXPLAIN INFER.
+    /// + attention + norms. Enables the client-side half of
+    /// `larql run --ffn URL` (Act 2 of the Gemma 4 MoE demo). Cannot
+    /// run a forward pass alone — FFN must live somewhere else.
+    Attention,
+    /// + FFN up/down weights. Enables full local INFER.
     Inference,
-    /// + up, down (full), norms, lm_head. Enables COMPILE.
+    /// + lm_head (when not tied to embed) + anything else future
+    /// COMPILE passes need. Enables COMPILE.
     All,
 }
 
+impl ExtractLevel {
+    /// Whether this tier includes attention weights + norms.
+    /// True for Attention, Inference, All.
+    pub fn writes_attn(self) -> bool {
+        self >= Self::Attention
+    }
+
+    /// Whether this tier includes FFN up/down weight files (the full
+    /// compute weights, not just the gate used by KNN).
+    /// True for Inference, All.
+    pub fn writes_ffn(self) -> bool {
+        self >= Self::Inference
+    }
+
+    /// Whether this tier writes lm_head. When the model ties
+    /// embeddings (embed_tokens shares weights with lm_head), the
+    /// writer may still skip it — this is the intent flag.
+    /// True for Inference, All.
+    pub fn writes_lm_head(self) -> bool {
+        self >= Self::Inference
+    }
+}
 
 impl std::fmt::Display for ExtractLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Browse => write!(f, "browse"),
+            Self::Attention => write!(f, "attention"),
             Self::Inference => write!(f, "inference"),
             Self::All => write!(f, "all"),
+        }
+    }
+}
+
+/// Quantization format for the model weights written to a vindex.
+///
+/// `None` = float weights (dtype controlled separately by `StorageDtype`).
+/// `Q4K`  = Q4_K for Q/K/O/gate/up + Q6_K for V/down, Ollama-compatible.
+///          Skips the f32 intermediate entirely — quantisation happens in
+///          the streaming extract loop straight from bf16 safetensors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum QuantFormat {
+    #[default]
+    None,
+    Q4k,
+}
+
+impl std::fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Q4k => write!(f, "q4k"),
         }
     }
 }
@@ -116,6 +183,7 @@ impl LayerBands {
             ("gemma2", 46) => Some(Self { syntax: (0, 18), knowledge: (19, 37), output: (38, 45) }),
 
             // Gemma 4 family
+            ("gemma4", 30) => Some(Self { syntax: (0, 11), knowledge: (12, 23), output: (24, 29) }),
             ("gemma4", 36) => Some(Self { syntax: (0, 14), knowledge: (15, 28), output: (29, 35) }),
             ("gemma4", 35) => Some(Self { syntax: (0, 13), knowledge: (14, 27), output: (28, 34) }),
             ("gemma4", 60) => Some(Self { syntax: (0, 23), knowledge: (24, 47), output: (48, 59) }),
@@ -229,6 +297,12 @@ pub struct VindexModelConfig {
     /// Query pre-attention scalar (overrides 1/sqrt(head_dim)).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_pre_attn_scalar: Option<f64>,
+    /// Final-logit tanh softcap (Gemma 2/3/4: 30.0). Applied to logits
+    /// immediately before softmax in `logits_to_predictions`. Omitting it
+    /// leaves logits uncapped — on E2B this peaked the softmax on the
+    /// wrong token (observed: "Paris" → "hyperparameters").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_logit_softcapping: Option<f64>,
 }
 
 /// MoE (Mixture of Experts) configuration.
@@ -241,9 +315,17 @@ pub struct MoeConfig {
     /// Whether there's a shared expert always active (DeepSeek V2/V3).
     #[serde(default)]
     pub shared_expert: bool,
-    /// Router type (e.g., "top_k_softmax").
+    /// Router type (e.g., "top_k_softmax", "gemma4_top_k_softmax").
     #[serde(default = "default_router_type")]
     pub router_type: String,
+    /// Per-expert intermediate (hidden) dimension.
+    /// Differs from the dense FFN intermediate_size in hybrid models (Gemma 4 A4B).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moe_intermediate_size: Option<usize>,
+    /// Hybrid MoE: dense MLP and expert block coexist in each layer, outputs summed.
+    /// True for Gemma 4 A4B. False for pure MoE (Mixtral, DeepSeek).
+    #[serde(default)]
+    pub hybrid: bool,
 }
 
 fn default_router_type() -> String {

@@ -34,9 +34,13 @@ pub mod q6k_matvec;
 pub mod activation;
 pub mod layer_norm;
 pub mod v_norm;
+pub mod qk_norm;
 pub mod turboquant_encode;
 pub mod turboquant_decode;
 pub mod graph_walk_knn;
+pub mod f32_gemv;
+pub mod f16_gemv;
+pub mod q4k_q6k_qkv_proj;
 
 /// Concatenate all shaders into one MSL source string for compilation.
 pub fn all_shaders() -> String {
@@ -45,6 +49,8 @@ pub fn all_shaders() -> String {
     // f32 matmul
     src.push_str(sgemm::SHADER);
     src.push_str(sgemm_transb::SHADER);
+    src.push_str(f32_gemv::SHADER);
+    src.push_str(f16_gemv::SHADER);
     // Q4 dense matvec variants
     src.push_str(q4_matvec::SHADER);
     src.push_str(q4_matvec_v2::SHADER);
@@ -70,6 +76,7 @@ pub fn all_shaders() -> String {
     src.push_str(q8_attn_proj::SHADER);
     src.push_str(q4k_matvec::SHADER);
     src.push_str(q4k_qkv_proj::SHADER);
+    src.push_str(q4k_q6k_qkv_proj::SHADER);
     src.push_str(q4kf_qkv_proj::SHADER);
     src.push_str(q4k_ffn_gate_up::SHADER);
     src.push_str(q4k_geglu_down::SHADER);
@@ -81,6 +88,8 @@ pub fn all_shaders() -> String {
     src.push_str(layer_norm::SHADER);
     // V-norm (parameter-free, Gemma 4)
     src.push_str(v_norm::SHADER);
+    // QK-norm (learned-weight per-head RMS, Gemma 3/4)
+    src.push_str(qk_norm::SHADER);
     // TurboQuant (KV cache compression)
     src.push_str(turboquant_encode::SHADER);
     src.push_str(turboquant_decode::SHADER);

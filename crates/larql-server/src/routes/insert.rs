@@ -63,7 +63,7 @@ fn compute_residuals(
     };
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-    let walk_ffn = larql_inference::vindex::WalkFfn::new_with_trace(weights, patched, 8092);
+    let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(weights, patched);
     let _result = larql_inference::predict_with_ffn(
         weights, &model.tokenizer, &token_ids, 1, &walk_ffn,
     );

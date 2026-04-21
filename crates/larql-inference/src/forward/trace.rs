@@ -5,8 +5,55 @@ use crate::ffn::{FfnBackend, WeightFfn};
 use crate::model::ModelWeights;
 use super::{TraceResult, LayerAttentionCapture};
 use super::embed::embed_tokens;
-use super::ple::precompute_per_layer_inputs;
-use super::layer::{run_layer_with_ffn, run_layer_with_capture};
+use super::ple::{precompute_per_layer_inputs, apply_per_layer_embedding};
+use super::layer::{run_layer_with_ffn, run_layer_with_capture, run_attention, run_ffn, apply_layer_scalar};
+
+/// Per-layer residuals captured for speculation error analysis.
+pub struct SpecCapture {
+    /// Initial embedding (seq, hidden) before any transformer layers.
+    pub h_0: Array2<f32>,
+    /// Post-attention residual (last token only) at each layer — input to that layer's FFN.
+    pub post_attn_last: Vec<Vec<f32>>,
+    /// Post-full-layer residual (last token only) at each layer — output after FFN + PLE + scalar.
+    pub post_layer_last: Vec<Vec<f32>>,
+    /// Final hidden state (seq, hidden) after all layers, before final norm.
+    pub h_final: Array2<f32>,
+}
+
+/// Single-pass capture for speculation error analysis.
+///
+/// Returns per-layer post-attention residuals (for true FFN delta) and
+/// post-full-layer residuals (for logit-lens comparisons), plus the initial
+/// embedding and final hidden state.
+pub fn capture_spec_residuals(
+    weights: &ModelWeights,
+    token_ids: &[u32],
+) -> SpecCapture {
+    let ffn = WeightFfn { weights };
+    let h_0 = embed_tokens(weights, token_ids);
+    let ple_inputs = precompute_per_layer_inputs(weights, &h_0, token_ids);
+    let seq_len = token_ids.len();
+    let mut h = h_0.clone();
+
+    let mut post_attn_last = Vec::with_capacity(weights.num_layers);
+    let mut post_layer_last = Vec::with_capacity(weights.num_layers);
+
+    for layer in 0..weights.num_layers {
+        let h_post_attn = match run_attention(weights, &h, layer) {
+            Some(pa) => pa,
+            None => h.clone(),
+        };
+        post_attn_last.push(h_post_attn.row(seq_len - 1).to_vec());
+
+        let (h_post_ffn, _) = run_ffn(weights, &h_post_attn, layer, &ffn, false);
+        let mut h_new = apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_inputs.get(layer));
+        apply_layer_scalar(weights, &mut h_new, layer);
+        h = h_new;
+        post_layer_last.push(h.row(seq_len - 1).to_vec());
+    }
+
+    SpecCapture { h_0, post_attn_last, post_layer_last, h_final: h }
+}
 
 /// Run a forward pass through layers 0..=stop_layer and return the full
 /// hidden state matrix (seq_len, hidden_size) at that layer.

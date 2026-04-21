@@ -83,8 +83,11 @@ fn main() {
         layer_scalar: 0.0,
         input_norm_bias: None,
         post_attn_norm_bias: None,
+        q_norm_weight: None,
+        k_norm_weight: None,
         ffn_up_bias: None,
         ffn_down_bias: None,
+        moe: None,
     };
 
     // Test 1: All-Q4_K (synthetic, matching formats)
@@ -189,7 +192,8 @@ fn main() {
             head_dim, num_q_heads: num_q, num_kv_heads: num_kv,
             rope_base: 10000.0, rotary_dim: 0, sliding_window: 0,
             has_v_norm: false, layer_scalar: 0.0,
-            input_norm_bias: None, post_attn_norm_bias: None, ffn_up_bias: None, ffn_down_bias: None,
+            input_norm_bias: None, post_attn_norm_bias: None, q_norm_weight: None, k_norm_weight: None, ffn_up_bias: None, ffn_down_bias: None,
+            moe: None,
         };
         let mut kv4 = metal.create_kv_cache(1, 4096, num_kv, head_dim);
         let r = larql_compute::metal::MetalBackend::decode_token(
@@ -219,7 +223,8 @@ fn main() {
             head_dim, num_q_heads: num_q, num_kv_heads: num_kv,
             rope_base: 10000.0, rotary_dim: 0, sliding_window: 0,
             has_v_norm: false, layer_scalar: 0.0,
-            input_norm_bias: None, post_attn_norm_bias: None, ffn_up_bias: None, ffn_down_bias: None,
+            input_norm_bias: None, post_attn_norm_bias: None, q_norm_weight: None, k_norm_weight: None, ffn_up_bias: None, ffn_down_bias: None,
+            moe: None,
         };
         let mut kv5 = metal.create_kv_cache(1, 4096, num_kv, head_dim);
         let r = larql_compute::metal::MetalBackend::decode_token(

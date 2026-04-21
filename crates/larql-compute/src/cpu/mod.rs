@@ -7,11 +7,16 @@
 //! ## Modules
 //!
 //! - `ops/f32_matmul`: BLAS sgemm dispatch
-//! - `ops/q4_matvec`:  C kernel Q4×Q8 matrix-vector
-//! - `ops/q4_vecmat`:  C kernel Q4 vector-matrix
+//! - `ops/q4_matvec`:  C kernel Q4_0 × Q8 matrix-vector
+//! - `ops/q4_vecmat`:  C kernel Q4_0 vector-matrix
 //! - `ops/q4_common`:  Q8 quantization, C FFI declarations
+//! - `ops/q4k_matvec`: Q4_K matrix-vector (llama.cpp super-block format)
+//! - `ops/q6k_matvec`: Q6_K matrix-vector
+//! - `ops/q8_matvec`:  Q8 matrix-vector
 //! - `ops/geglu`:      Element-wise GEGLU activation
 //! - `ops/attention`:  Causal attention (fused QK softmax V)
+//! - `ops/vector`:     `dot`, `norm`, `cosine` over slices/views
+//! - `ops/linalg`:     Cholesky factor/solve, `ridge_decomposition_solve`
 
 pub mod ops;
 

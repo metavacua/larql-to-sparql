@@ -340,9 +340,97 @@ fn main() {
         serde_json::to_string(&serde_json::json!({"status": "ok"})).unwrap()
     });
 
+    println!("\n── Embed service — token lookup ──");
+    // Simulate the embed endpoint: index into the embedding table for each token.
+    // In production the table is mmap'd; here we use a heap Array2 of the same
+    // shape (Gemma 3 4B: 262208 × 2560 f32 = 2.68 GB).
+    let embed_vocab = 262208usize;
+    let embed_hidden = hidden; // use same hidden as bench index (256)
+    let embed_table = {
+        let mut e = Array2::<f32>::zeros((embed_vocab.min(8192), embed_hidden));
+        // Populate first 8K rows with recognizable patterns
+        for i in 0..e.shape()[0] {
+            e[[i, i % embed_hidden]] = 1.0;
+        }
+        e
+    };
+    let vocab_cap = embed_table.shape()[0];
+    let embed_scale = (embed_hidden as f32).sqrt(); // Gemma scale
+
+    bench("embed single token (decode step)", 1000, 100_000, || {
+        let tok_id = 9515usize % vocab_cap;
+        let row = embed_table.row(tok_id);
+        row.iter().map(|&v| v * embed_scale).sum::<f32>()
+    });
+    bench("embed 512-token prefill", 100, 5_000, || {
+        let mut h = Array2::<f32>::zeros((512, embed_hidden));
+        for (i, row) in h.rows_mut().into_iter().enumerate() {
+            let tok_id = (i * 7 + 13) % vocab_cap;
+            let src = embed_table.row(tok_id);
+            for (dst, &src) in row.into_iter().zip(src.iter()) {
+                *dst = src * embed_scale;
+            }
+        }
+        h
+    });
+    bench("embed 1-token binary encode (request)", 1000, 1_000_000, || {
+        let mut buf = Vec::with_capacity(8);
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&9515u32.to_le_bytes());
+        buf
+    });
+    bench("embed binary response encode (seq=1, hidden=256)", 1000, 100_000, || {
+        let mut buf = Vec::with_capacity(8 + embed_hidden * 4);
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&(embed_hidden as u32).to_le_bytes());
+        let row = embed_table.row(0);
+        for &v in row.iter() {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        buf
+    });
+
+    println!("\n── Embed service — logits projection ──");
+    // Simulate /v1/logits: one matmul residual @ lm_head.T
+    // At 256 hidden (bench size), this is cheaper than production.
+    // Real Gemma 3 4B: 262208 × 2560 ~ 2ms CPU. Scale shown in note.
+    let small_vocab = 1024usize; // representative sub-vocab for bench
+    let lm_head = embed_table.slice(larql_vindex::ndarray::s![..small_vocab, ..]);
+    let query = {
+        let mut q = Array1::<f32>::zeros(embed_hidden);
+        q[0] = 1.0; q[1] = 0.5; q[5] = 0.3;
+        q
+    };
+
+    bench("logits dot (1024 vocab, hidden=256)", 100, 50_000, || {
+        let mut scores: Vec<f32> = Vec::with_capacity(small_vocab);
+        for row in lm_head.rows() {
+            scores.push(row.iter().zip(query.iter()).map(|(&e, &r)| e * r).sum());
+        }
+        // Partial top-5 sort (representative of production argmax)
+        if scores.len() >= 5 {
+            scores.select_nth_unstable_by(5, |a, b| b.partial_cmp(a).unwrap());
+            scores.truncate(5);
+        }
+        scores
+    });
+
+    bench("logits binary response encode (5 tokens)", 1000, 500_000, || {
+        let top5 = [(9515u32, 0.801f32), (235, 0.042), (100, 0.012), (5, 0.008), (1, 0.003)];
+        let resp = serde_json::json!({
+            "top_k": top5.iter().map(|(id, p)| serde_json::json!({"token_id": id, "prob": p})).collect::<Vec<_>>(),
+            "latency_ms": 2.1f32,
+        });
+        serde_json::to_string(&resp).unwrap()
+    });
+
+    println!("  Note: production Gemma 3 4B logits = 262208 × 2560 ~ 2ms CPU, ~0.1ms Metal");
+
     println!("\n── Summary ──");
     let total_features: usize = all_layers.iter().map(|l| patched.num_features(*l)).sum();
     println!("  Index: {} layers, {} features/layer, {} total, hidden={}", all_layers.len(), 1024, total_features, hidden);
     println!("  All times include full operation (KNN + sort + truncate + metadata)");
     println!("\n  Expected server latency = operation time + serialization + network RTT");
+    println!("  Embed endpoint: dominated by table lookup (~O(1) with hot cache)");
+    println!("  Logits endpoint: dominated by matmul (~2ms CPU / ~0.1ms Metal on 31B)");
 }

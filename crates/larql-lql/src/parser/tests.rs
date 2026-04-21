@@ -751,13 +751,14 @@ fn parse_insert_minimal() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John Coyle", "lives-in", "Colchester");"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { entity, relation, target, layer, confidence, alpha } => {
+        Statement::Insert { entity, relation, target, layer, confidence, alpha, mode } => {
             assert_eq!(entity, "John Coyle");
             assert_eq!(relation, "lives-in");
             assert_eq!(target, "Colchester");
             assert!(layer.is_none());
             assert!(confidence.is_none());
             assert!(alpha.is_none());
+            assert_eq!(mode, InsertMode::Knn);
         }
         _ => panic!("expected Insert"),
     }
@@ -1068,6 +1069,157 @@ fn parse_show_features_with_where_and_limit() {
 fn parse_show_models() {
     let stmt = parse("SHOW MODELS;").unwrap();
     assert!(matches!(stmt, Statement::ShowModels));
+}
+
+// ── SHOW ENTITIES ──
+
+#[test]
+fn parse_show_entities_minimal() {
+    let stmt = parse("SHOW ENTITIES;").unwrap();
+    match stmt {
+        Statement::ShowEntities { layer, limit } => {
+            assert!(layer.is_none());
+            assert!(limit.is_none());
+        }
+        _ => panic!("expected ShowEntities"),
+    }
+}
+
+#[test]
+fn parse_show_entities_bare_layer() {
+    let stmt = parse("SHOW ENTITIES 26;").unwrap();
+    match stmt {
+        Statement::ShowEntities { layer, limit } => {
+            assert_eq!(layer, Some(26));
+            assert!(limit.is_none());
+        }
+        _ => panic!("expected ShowEntities"),
+    }
+}
+
+#[test]
+fn parse_show_entities_at_layer_with_limit() {
+    let stmt = parse("SHOW ENTITIES AT LAYER 26 LIMIT 50;").unwrap();
+    match stmt {
+        Statement::ShowEntities { layer, limit } => {
+            assert_eq!(layer, Some(26));
+            assert_eq!(limit, Some(50));
+        }
+        _ => panic!("expected ShowEntities"),
+    }
+}
+
+#[test]
+fn parse_show_entities_limit_only() {
+    let stmt = parse("SHOW ENTITIES LIMIT 100;").unwrap();
+    match stmt {
+        Statement::ShowEntities { layer, limit } => {
+            assert!(layer.is_none());
+            assert_eq!(limit, Some(100));
+        }
+        _ => panic!("expected ShowEntities"),
+    }
+}
+
+// ── REBALANCE ──
+
+#[test]
+fn parse_rebalance_minimal() {
+    let stmt = parse("REBALANCE;").unwrap();
+    match stmt {
+        Statement::Rebalance { max_iters, floor, ceiling } => {
+            assert!(max_iters.is_none());
+            assert!(floor.is_none());
+            assert!(ceiling.is_none());
+        }
+        _ => panic!("expected Rebalance"),
+    }
+}
+
+#[test]
+fn parse_rebalance_until_converged() {
+    let stmt = parse("REBALANCE UNTIL CONVERGED;").unwrap();
+    assert!(matches!(stmt, Statement::Rebalance { .. }));
+}
+
+#[test]
+fn parse_rebalance_max_iters() {
+    let stmt = parse("REBALANCE MAX 32;").unwrap();
+    match stmt {
+        Statement::Rebalance { max_iters, .. } => assert_eq!(max_iters, Some(32)),
+        _ => panic!("expected Rebalance"),
+    }
+}
+
+#[test]
+fn parse_rebalance_floor_ceiling() {
+    let stmt = parse("REBALANCE FLOOR 0.3 CEILING 0.9;").unwrap();
+    match stmt {
+        Statement::Rebalance { floor, ceiling, .. } => {
+            assert!((floor.unwrap() - 0.3).abs() < 1e-6);
+            assert!((ceiling.unwrap() - 0.9).abs() < 1e-6);
+        }
+        _ => panic!("expected Rebalance"),
+    }
+}
+
+#[test]
+fn parse_rebalance_all_clauses() {
+    let stmt = parse("REBALANCE UNTIL CONVERGED MAX 16 FLOOR = 0.25 CEILING = 0.95;").unwrap();
+    match stmt {
+        Statement::Rebalance { max_iters, floor, ceiling } => {
+            assert_eq!(max_iters, Some(16));
+            assert!((floor.unwrap() - 0.25).abs() < 1e-6);
+            assert!((ceiling.unwrap() - 0.95).abs() < 1e-6);
+        }
+        _ => panic!("expected Rebalance"),
+    }
+}
+
+// ── SHOW COMPACT STATUS ──
+
+#[test]
+fn parse_show_compact_status() {
+    let stmt = parse("SHOW COMPACT STATUS;").unwrap();
+    assert!(matches!(stmt, Statement::ShowCompactStatus));
+}
+
+#[test]
+fn parse_show_compact_status_no_semicolon() {
+    let stmt = parse("SHOW COMPACT STATUS").unwrap();
+    assert!(matches!(stmt, Statement::ShowCompactStatus));
+}
+
+// ── COMPACT ──
+
+#[test]
+fn parse_compact_minor() {
+    let stmt = parse("COMPACT MINOR;").unwrap();
+    assert!(matches!(stmt, Statement::CompactMinor));
+}
+
+#[test]
+fn parse_compact_major() {
+    let stmt = parse("COMPACT MAJOR;").unwrap();
+    assert!(matches!(stmt, Statement::CompactMajor { full: false, lambda: None }));
+}
+
+#[test]
+fn parse_compact_major_full() {
+    let stmt = parse("COMPACT MAJOR FULL;").unwrap();
+    assert!(matches!(stmt, Statement::CompactMajor { full: true, lambda: None }));
+}
+
+#[test]
+fn parse_compact_major_with_lambda() {
+    let stmt = parse("COMPACT MAJOR WITH LAMBDA = 0.001;").unwrap();
+    match stmt {
+        Statement::CompactMajor { full, lambda } => {
+            assert!(!full);
+            assert!((lambda.unwrap() - 0.001).abs() < 1e-6);
+        }
+        _ => panic!("expected CompactMajor"),
+    }
 }
 
 // ── STATS ──

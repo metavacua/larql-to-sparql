@@ -26,9 +26,18 @@ kernel void geglu_gelu_tanh(
 {
     if (tid >= N) return;
     float g = gate[tid];
-    // GELU with tanh approximation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+    // GELU with tanh approximation:
+    //   0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+    //
+    // Apple Silicon's `tanh` uses `(exp(2y)-1)/(exp(2y)+1)`, which overflows
+    // f32 and returns NaN once |y| ≳ 44 (ln(f32_max) / 2). For gate values
+    // around ±10 the argument `y` hits ~50 and poisons the activation with
+    // NaNs at isolated indices. Clamping at ±15 is safe: tanh(15) differs
+    // from 1.0 by < 1e-13, far below f32 precision.
     float c = 0.7978845608f; // sqrt(2/pi)
-    float t = tanh(c * (g + 0.044715f * g * g * g));
+    float y = c * (g + 0.044715f * g * g * g);
+    y = clamp(y, -15.0f, 15.0f);
+    float t = tanh(y);
     out[tid] = (0.5f * g * (1.0f + t)) * up[tid];
 }
 "#;

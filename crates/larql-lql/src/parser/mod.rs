@@ -64,6 +64,7 @@ impl Parser {
             Token::Keyword(Keyword::Delete) => self.parse_delete(),
             Token::Keyword(Keyword::Update) => self.parse_update(),
             Token::Keyword(Keyword::Merge) => self.parse_merge(),
+            Token::Keyword(Keyword::Rebalance) => self.parse_rebalance(),
             Token::Keyword(Keyword::Show) => self.parse_show(),
             Token::Keyword(Keyword::Stats) => self.parse_stats(),
             Token::Keyword(Keyword::Begin) => self.parse_begin(),
@@ -71,6 +72,7 @@ impl Parser {
             Token::Keyword(Keyword::Apply) => self.parse_apply(),
             Token::Keyword(Keyword::Remove) => self.parse_remove(),
             Token::Keyword(Keyword::Trace) => self.parse_trace(),
+            Token::Keyword(Keyword::Compact) => self.parse_compact(),
             _ => Err(ParseError(format!(
                 "expected statement keyword, got {:?}",
                 self.peek()

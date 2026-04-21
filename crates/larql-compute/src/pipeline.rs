@@ -52,6 +52,37 @@ pub enum Activation {
     GeluTanh,
 }
 
+/// Hybrid MoE (Mixture-of-Experts) weights for one layer.
+///
+/// Gemma 4 26B A4B runs a dense MLP and an expert block in parallel per layer,
+/// summing their outputs. This struct carries the expert-block tensors.
+pub struct MoeLayerWeights<'a> {
+    /// Packed expert gate+up weights as raw BF16 bytes.
+    /// Shape: [num_experts, 2 * moe_intermediate_size, hidden_size].
+    pub experts_gate_up: &'a [u8],
+    /// Packed expert down weights as raw BF16 bytes.
+    /// Shape: [num_experts, hidden_size, moe_intermediate_size].
+    pub experts_down: &'a [u8],
+    /// Router linear projection weight [num_experts, hidden_size].
+    pub router_proj: &'a [f32],
+    /// Router learned input-scale [hidden_size].
+    pub router_scale: &'a [f32],
+    /// Router per-expert output-scale [num_experts].
+    pub router_per_expert_scale: &'a [f32],
+    /// Pre-norm applied to residual before routing. [hidden_size].
+    pub pre_experts_norm: &'a [f32],
+    /// Post-norm for dense FFN output (replaces plain post_ffn_norm). [hidden_size].
+    pub post_ffn1_norm: &'a [f32],
+    /// Post-norm for expert block output. [hidden_size].
+    pub post_experts_norm: &'a [f32],
+    /// Total number of routed experts.
+    pub num_experts: usize,
+    /// Experts activated per token (top-K).
+    pub top_k: usize,
+    /// Per-expert intermediate (hidden) dimension.
+    pub intermediate_size: usize,
+}
+
 /// Per-layer quantized weights for the full pipeline.
 ///
 /// Carries all architecture-specific behavior per-layer — no model
@@ -113,16 +144,31 @@ pub struct FullPipelineLayer<'a> {
     pub has_v_norm: bool,
     /// Per-layer scalar multiplier. 0.0 = disabled (no scaling). Gemma 4: learned scalar.
     pub layer_scalar: f32,
+    /// QK-norm weight for Q heads (Gemma 3 / Gemma 4). Length = head_dim.
+    /// Applied per-head as RMS-norm before RoPE. `None` means skip QK-norm.
+    pub q_norm_weight: Option<&'a [f32]>,
+    /// QK-norm weight for K heads. Same shape as `q_norm_weight`.
+    pub k_norm_weight: Option<&'a [f32]>,
     /// FFN bias on up projection (StarCoder2). None = no bias.
     pub ffn_up_bias: Option<&'a [f32]>,
     /// FFN bias on down projection (StarCoder2). None = no bias.
     pub ffn_down_bias: Option<&'a [f32]>,
+
+    /// Hybrid MoE block (Gemma 4 26B A4B: dense MLP + expert block, outputs summed).
+    /// None for all dense models.
+    pub moe: Option<MoeLayerWeights<'a>>,
 }
 
 impl<'a> FullPipelineLayer<'a> {
     /// Whether this layer uses gated FFN (gate + up → GEGLU → down).
     pub fn is_gated(&self) -> bool {
         self.ffn_type == FfnType::Gated
+    }
+
+    /// Whether this layer has a hybrid MoE block alongside the dense FFN.
+    /// When true, the forward pass runs both branches and sums their outputs.
+    pub fn is_hybrid_moe(&self) -> bool {
+        self.moe.is_some()
     }
 }
 

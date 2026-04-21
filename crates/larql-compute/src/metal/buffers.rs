@@ -101,6 +101,7 @@ impl BufferCache {
         )
     }
 
+
     /// Create an empty output buffer of given byte size.
     pub fn output(&self, bytes: u64) -> Buffer {
         self.device.new_buffer(bytes, MTLResourceOptions::StorageModeShared)

@@ -3,6 +3,21 @@
 //! Decompile, browse, edit, and recompile neural networks.
 //! This crate owns the complete vindex lifecycle:
 //! extract, load, query, mutate, patch, save, compile.
+//!
+//! ## Module map
+//!
+//! - `extract`:    build a vindex from `safetensors` / GGUF.
+//! - `format`:     on-disk layout, checksums, HF Hub publish/resolve.
+//! - `index`:      `VectorIndex`, gate KNN, walk, HNSW, MoE router, residency.
+//! - `patch`:      `PatchedVindex` overlay, `KnnStore`, refine pass.
+//! - `storage`:    `StorageEngine` lifecycle, MEMIT decomposition (`memit_solve`).
+//! - `clustering`: kmeans + offset/cluster labelling.
+//! - `describe`:   token-level edge labelling.
+//! - `vindexfile`: declarative build pipeline.
+//! - `mmap_util`:  `madvise` hints for residency control.
+//!
+//! All matrix operations route through `larql_compute` (BLAS on CPU,
+//! Metal GPU when `--features metal`).
 
 // BLAS provided by larql-compute dependency (no direct blas_src needed)
 
@@ -15,6 +30,7 @@ pub mod extract;
 pub mod format;
 pub mod index;
 pub mod patch;
+pub mod storage;
 pub mod mmap_util;
 pub mod vindexfile;
 
@@ -27,7 +43,7 @@ pub use tokenizers;
 // Config
 pub use config::dtype::StorageDtype;
 pub use config::types::{
-    DownMetaRecord, DownMetaTopK, ExtractLevel, LayerBands, MoeConfig,
+    DownMetaRecord, DownMetaTopK, ExtractLevel, LayerBands, MoeConfig, QuantFormat,
     VindexConfig, VindexLayerInfo, VindexModelConfig, VindexSource,
 };
 
@@ -59,15 +75,28 @@ pub use format::load::{
 };
 // Model loading: use larql_models::{load_model_dir, resolve_model_path, load_gguf} directly
 pub use format::huggingface::{
-    resolve_hf_vindex, download_hf_weights, publish_vindex,
-    is_hf_path, PublishCallbacks, SilentPublishCallbacks,
+    resolve_hf_vindex, download_hf_weights, publish_vindex, publish_vindex_with_opts,
+    is_hf_path, PublishCallbacks, SilentPublishCallbacks, PublishOptions,
+    ensure_collection, CollectionItem, dataset_repo_exists, repo_exists, fetch_collection_items,
+    resolve_hf_vindex_with_progress, DownloadProgress,
 };
-pub use format::weights::{write_model_weights, load_model_weights, WeightSource, StreamingWeights};
+pub use format::weights::{
+    write_model_weights, write_model_weights_with_opts,
+    write_model_weights_q4k, write_model_weights_q4k_with_opts, Q4kWriteOptions,
+    load_model_weights, load_model_weights_with_opts, load_model_weights_q4k,
+    WeightSource, StreamingWeights, WriteWeightsOptions, LoadWeightsOptions,
+};
 
 // Patch
 pub use patch::core::{PatchOp, PatchedVindex, VindexPatch};
 pub use patch::knn_store::{KnnStore, KnnEntry};
 pub use patch::refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
+
+// Storage engine
+pub use storage::{
+    memit_solve, CompactStatus, Epoch, MemitCycle, MemitFact, MemitSolveResult, MemitStore,
+    StorageEngine,
+};
 
 // Vindexfile
 pub use vindexfile::{Vindexfile, VindexfileDirective, VindexfileStage, parse_vindexfile, build_from_vindexfile};

@@ -11,6 +11,36 @@ impl ComputeBackend for MetalBackend {
         self.f32_ops.matmul_transb(&self.queue, &self.bufs, a, b, self.flop_threshold.load(Ordering::Relaxed))
     }
 
+    fn f32_gemv(&self, w: ArrayView2<f32>, x: &[f32]) -> Option<Vec<f32>> {
+        let (n, k) = (w.shape()[0], w.shape()[1]);
+        if x.len() != k { return None; }
+        // Fall back below the GPU threshold — small gemvs are dominated by
+        // dispatch overhead.
+        if 2 * n * k < self.flop_threshold.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.encode_f32_gemv(w, x)
+    }
+
+    fn f32_gemv_force(&self, w: ArrayView2<f32>, x: &[f32]) -> Option<Vec<f32>> {
+        let (_n, k) = (w.shape()[0], w.shape()[1]);
+        if x.len() != k { return None; }
+        self.encode_f32_gemv(w, x)
+    }
+
+    fn f16_gemv(&self, w_f16: &[u8], x: &[f32], n: usize, k: usize) -> Option<Vec<f32>> {
+        if w_f16.len() < n * k * 2 || x.len() != k { return None; }
+        // Same below-threshold gate as `f32_gemv` — small gemvs are dispatch-bound.
+        if 2 * n * k < self.flop_threshold.load(Ordering::Relaxed) { return None; }
+        self.encode_f16_gemv(w_f16, x, n, k)
+    }
+
+    fn f16_gemv_force(&self, w_f16: &[u8], x: &[f32], n: usize, k: usize) -> Option<Vec<f32>> {
+        if w_f16.len() < n * k * 2 || x.len() != k { return None; }
+        self.encode_f16_gemv(w_f16, x, n, k)
+    }
+
+
     fn matmul_batch(&self, ops: &[MatMulOp]) -> Vec<Array2<f32>> {
         ops.iter().map(|op| {
             if op.transpose_b { self.matmul_transb(op.a.view(), op.b.view()) }
@@ -68,8 +98,13 @@ impl ComputeBackend for MetalBackend {
             &self.q4k_matvec_pipeline, &self.q6k_matvec_pipeline,
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
             &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
-            Some(&self.q4k_qkv_proj_pipeline), Some(&self.q4k_proj_pipeline),
-            None, None, // no rope_at_pos or KV cache for standard full_pipeline_q4
+            Some(&self.q4k_qkv_proj_pipeline),
+            Some(&self.q4kf_qkv_proj_pipeline),
+            Some(&self.q4kf_proj_pipeline),
+            None,                           // no rope_at_pos for standard full_pipeline_q4
+            Some(&self.qk_norm_pipeline),
+            Some(&self.scale_vector_pipeline),
+            None,                           // no KV cache for standard full_pipeline_q4
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
             rope_base, use_qk_norm, softcap,
@@ -158,14 +193,41 @@ impl ComputeBackend for MetalBackend {
     ) -> Option<Vec<f32>> {
         // Use full_pipeline with KV cache population via separate RoPE + skip_rope=1
         let num_layers = layers.len();
+        let shapes: Vec<(usize, usize)> = layers.iter()
+            .map(|l| (l.num_kv_heads, l.head_dim))
+            .collect();
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if cache_guard.is_none() {
-            *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+            *cache_guard = Some(ops::kv_cache::KVCache::new_per_layer(&self.bufs, &shapes, 4096));
         }
         let kv = cache_guard.as_mut().unwrap();
         while kv.layers.len() < num_layers {
-            kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, num_kv_heads, head_dim));
+            let (nkv, hd) = shapes[kv.layers.len()];
+            kv.layers.push(ops::kv_cache::LayerKVCache::new(&self.bufs, 4096, nkv, hd));
         }
+
+        // Hybrid MoE models (Gemma 4 26B A4B): each layer requires a CPU MoE
+        // pass after the GPU dense FFN, so batched dispatch_full_pipeline (GPU-only)
+        // would skip MoE entirely. Instead, run token-by-token decode — each call
+        // correctly interleaves GPU dense FFN + CPU MoE + GPU scalars.
+        // The caller (generate.rs) only uses the last row of the prefill output,
+        // so we return a zero-padded vec with only the final position filled.
+        let has_moe = layers.iter().any(|l| l.moe.is_some());
+        if has_moe {
+            let mut last_h = vec![0.0f32; hidden];
+            for pos in 0..seq_len {
+                let x_pos = &x[pos * hidden..(pos + 1) * hidden];
+                last_h = MetalBackend::decode_token(
+                    self, kv, layers, x_pos, hidden, inter, q_dim, kv_dim,
+                    num_q_heads, num_kv_heads, head_dim, rope_base,
+                );
+            }
+            let mut result = vec![0.0f32; seq_len * hidden];
+            let dst_off = seq_len.saturating_sub(1) * hidden;
+            result[dst_off..dst_off + hidden].copy_from_slice(&last_h);
+            return Some(result);
+        }
+
         let geglu = if layers.first().is_some_and(|l| l.activation == crate::Activation::GeluTanh) {
             &self.geglu_gelu_tanh_pipeline
         } else {
@@ -184,8 +246,13 @@ impl ComputeBackend for MetalBackend {
             &self.q4k_matvec_pipeline, &self.q6k_matvec_pipeline,
             &self.rms_norm_pipeline, &self.residual_add_pipeline,
             &self.rms_norm_q8_pipeline, &self.residual_norm_q8_pipeline,
-            Some(&self.q4k_qkv_proj_pipeline), Some(&self.q4k_proj_pipeline),
-            Some(&self.rope_at_pos_pipeline), Some(kv),
+            Some(&self.q4k_qkv_proj_pipeline),
+            Some(&self.q4kf_qkv_proj_pipeline),
+            Some(&self.q4kf_proj_pipeline),
+            Some(&self.rope_at_pos_pipeline),
+            Some(&self.qk_norm_pipeline),
+            Some(&self.scale_vector_pipeline),
+            Some(kv),
             layers, x, hidden, inter, q_dim, kv_dim,
             seq_len, num_q_heads, num_kv_heads, head_dim,
             rope_base, use_qk_norm, softcap,
@@ -226,7 +293,14 @@ impl ComputeBackend for MetalBackend {
 
     fn reset_kv_cache(&self) {
         let mut cache_guard = self.kv_cache.lock().unwrap();
-        *cache_guard = None; // drop entirely so next decode_token re-creates with correct layer count
+        if let Some(ref mut kv) = *cache_guard {
+            // Reset sequence position only — keep the GPU buffers (avoids re-allocating ~1 GB
+            // of KV cache on every new prompt).
+            for layer in &mut kv.layers {
+                layer.current_len = 0;
+            }
+        }
+        // If cache is None it will be allocated on the next decode/prefill call.
     }
 
     fn decode_token(
@@ -239,7 +313,6 @@ impl ComputeBackend for MetalBackend {
         rope_base: f32,
     ) -> Option<Vec<f32>> {
         let num_layers = layers.len();
-        // Lazily initialize KV cache
         let mut cache_guard = self.kv_cache.lock().unwrap();
         if cache_guard.is_none() {
             *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
@@ -249,11 +322,117 @@ impl ComputeBackend for MetalBackend {
             num_q_heads, num_kv_heads, head_dim, rope_base))
     }
 
+    fn decode_token_split_profile(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32,
+    ) -> (Option<Vec<f32>>, f64, f64, f64) {
+        let num_layers = layers.len();
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        if cache_guard.is_none() {
+            *cache_guard = Some(self.create_kv_cache(num_layers, 4096, num_kv_heads, head_dim));
+        }
+        let kv = cache_guard.as_mut().unwrap();
+        let (res, ta, tgu, td) = MetalBackend::decode_token_split_profile(
+            self, kv, layers, x, hidden, inter, q_dim, kv_dim,
+            num_q_heads, num_kv_heads, head_dim, rope_base,
+        );
+        (Some(res), ta, tgu, td)
+    }
+
     fn has_q4(&self) -> bool { true }
+
+    fn preallocate_kv_cache_per_layer(
+        &self, shapes: &[(usize, usize)], max_seq: usize,
+    ) {
+        // Replace any existing cache — callers invoke this once per model
+        // load, before the first decode dispatch. If we kept an old cache
+        // sized with the wrong per-layer dims the first decode would read
+        // off the end of a global-layer buffer.
+        let mut cache_guard = self.kv_cache.lock().unwrap();
+        *cache_guard = Some(self.create_kv_cache_per_layer(shapes, max_seq));
+    }
 
     fn name(&self) -> &str { "metal (GPU)" }
 
     fn device_info(&self) -> String {
         format!("Metal GPU, FLOP threshold: {}", self.flop_threshold())
+    }
+}
+
+impl MetalBackend {
+    /// Shared GPU dispatch body for [`ComputeBackend::f32_gemv`]
+    /// (threshold-gated) and [`ComputeBackend::f32_gemv_force`] (direct).
+    /// Kept inherent so we don't duplicate 30+ lines of Metal plumbing.
+    fn encode_f32_gemv(&self, w: ArrayView2<f32>, x: &[f32]) -> Option<Vec<f32>> {
+        let (n, k) = (w.shape()[0], w.shape()[1]);
+        if x.len() != k { return None; }
+        let w_buf = match w.as_slice() {
+            Some(s) => self.bufs.get_f32(s),
+            None => {
+                let owned = w.as_standard_layout().into_owned();
+                self.bufs.transient_from_f32(owned.as_slice().unwrap())
+            }
+        };
+        let x_buf = self.bufs.transient_from_f32(x);
+        let out_buf = self.bufs.output((n * 4) as u64);
+
+        use crate::metal::shaders::f32_gemv as sh;
+        let n_u32 = n as u32;
+        let k_u32 = k as u32;
+        let num_tgs = (n as u64).div_ceil(sh::ROWS_PER_TG);
+
+        let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&self.f32_gemv_pipeline);
+        enc.set_buffer(0, Some(&w_buf), 0);
+        enc.set_buffer(1, Some(&x_buf), 0);
+        enc.set_buffer(2, Some(&out_buf), 0);
+        enc.set_bytes(3, 4, &n_u32 as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &k_u32 as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(num_tgs, 1, 1),
+            metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+        );
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+
+        Some(super::buffers::read_buffer_f32(&out_buf, n))
+    }
+
+    /// Shared dispatch body for f16-weight gemv (behind both trait
+    /// variants: threshold-gated `f16_gemv` and direct `f16_gemv_force`).
+    fn encode_f16_gemv(&self, w_f16: &[u8], x: &[f32], n: usize, k: usize) -> Option<Vec<f32>> {
+        let w_buf = self.bufs.get_bytes(w_f16);
+        let x_buf = self.bufs.transient_from_f32(x);
+        let out_buf = self.bufs.output((n * 4) as u64);
+
+        use crate::metal::shaders::f16_gemv as sh;
+        let n_u32 = n as u32;
+        let k_u32 = k as u32;
+        let num_tgs = (n as u64).div_ceil(sh::ROWS_PER_TG);
+
+        let cmd = self.queue.new_command_buffer();
+        let enc = cmd.new_compute_command_encoder();
+        enc.set_compute_pipeline_state(&self.f16_gemv_pipeline);
+        enc.set_buffer(0, Some(&w_buf), 0);
+        enc.set_buffer(1, Some(&x_buf), 0);
+        enc.set_buffer(2, Some(&out_buf), 0);
+        enc.set_bytes(3, 4, &n_u32 as *const u32 as *const std::ffi::c_void);
+        enc.set_bytes(4, 4, &k_u32 as *const u32 as *const std::ffi::c_void);
+        enc.dispatch_thread_groups(
+            metal::MTLSize::new(num_tgs, 1, 1),
+            metal::MTLSize::new(sh::THREADS_PER_TG, 1, 1),
+        );
+        enc.end_encoding();
+        cmd.commit();
+        cmd.wait_until_completed();
+
+        Some(super::buffers::read_buffer_f32(&out_buf, n))
     }
 }

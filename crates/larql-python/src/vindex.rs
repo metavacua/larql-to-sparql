@@ -19,6 +19,7 @@ use larql_vindex::{
     SilentLoadCallbacks, load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
     tokenizers,
 };
+use larql_vindex::patch::knn_store::KnnStore;
 
 use larql_lql::relations::RelationClassifier;
 
@@ -228,6 +229,13 @@ pub struct PyVindex {
     pub(crate) config: VindexConfig,
     pub(crate) path: String,
     pub(crate) classifier: Option<RelationClassifier>,
+    /// Arch-B retrieval-override store. Loaded from `knn_store.bin` at
+    /// open time if present. `infer()` captures residuals and consults
+    /// this store before returning the raw model prediction; a stored
+    /// key with `cos > KNN_COSINE_THRESHOLD` overrides the top-1
+    /// prediction with the stored target token. Matches the LQL INFER
+    /// query path (`executor/query/infer.rs`).
+    pub(crate) knn_store: Option<KnnStore>,
     /// Lazy-loaded mmap'd weights for infer(). Created on first call, reused after.
     pub(crate) walk_model: std::cell::RefCell<Option<crate::walk::InferState>>,
 }
@@ -253,11 +261,47 @@ impl PyVindex {
         // Load relation classifier (clusters + labels) if available
         let classifier = RelationClassifier::from_vindex(dir);
 
+        // Load the arch-B KNN store if the compiled vindex bundled one.
+        let knn_path = dir.join("knn_store.bin");
+        let knn_store = if knn_path.exists() {
+            match KnnStore::load(&knn_path) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    eprintln!("warning: failed to load knn_store.bin: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             index, embeddings, embed_scale, tokenizer, config,
             path: path.to_string(), classifier,
+            knn_store,
             walk_model: std::cell::RefCell::new(None),
         })
+    }
+
+    /// Run a closure with a reference to the lazily-loaded walk FFN state.
+    /// Loads on first call; subsequent calls reuse the mmap'd weights.
+    fn with_walk_model<F, R>(&self, f: F) -> PyResult<R>
+    where
+        F: FnOnce(&crate::walk::InferState) -> PyResult<R>,
+    {
+        {
+            let mut state = self.walk_model.borrow_mut();
+            if state.is_none() {
+                let dir = std::path::Path::new(&self.path);
+                *state = Some(crate::walk::InferState::load(dir).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to load model weights: {e}"
+                    ))
+                })?);
+            }
+        }
+        let state = self.walk_model.borrow();
+        f(state.as_ref().unwrap())
     }
 
     /// Compute scaled embedding for entity text. Multi-token entities are averaged.
@@ -923,88 +967,177 @@ impl PyVindex {
     /// Model weights are mmap'd on first call and reused — zero-copy, fast.
     /// Subsequent calls reuse the cached weights (OS page cache warms up).
     ///
+    /// Routes through `larql_inference::infer_patched`, which is also the
+    /// entry point for the LQL `SELECT ... INFER` executor — the two paths
+    /// produce byte-identical top-k predictions on any vindex. See ADR 0001
+    /// (`docs/adr/0001-python-lql-infer-parity.md`).
+    ///
     /// Args:
     ///     prompt: input text
     ///     top_k_predictions: number of top predictions to return (default 5)
-    ///     top_k_features: features per layer for walk FFN (default 8192, lossless)
     ///
     /// Returns:
     ///     List of (token, probability) tuples
-    #[pyo3(signature = (prompt, top_k_predictions=5, top_k_features=8192))]
+    #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn infer(
-        &self, prompt: &str, top_k_predictions: usize, top_k_features: usize
+        &self, prompt: &str, top_k_predictions: usize,
     ) -> PyResult<Vec<(String, f64)>> {
-        // Lazy-load mmap'd weights on first call
-        {
-            let mut state = self.walk_model.borrow_mut();
-            if state.is_none() {
-                let dir = std::path::Path::new(&self.path);
-                *state = Some(crate::walk::InferState::load(dir)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                        format!("Failed to load model weights: {e}")
-                    ))?);
-            }
-        }
+        self.with_walk_model(|infer_state| {
+            let encoding = self.tokenizer.encode(prompt, true)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        let state = self.walk_model.borrow();
-        let infer_state = state.as_ref().unwrap();
-
-        // Tokenize prompt (with BOS token for correct inference)
-        let encoding = self.tokenizer.encode(prompt, true)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-
-        // Run forward pass with walk FFN (mmap'd weights, vindex gate KNN)
-        let walk_ffn = larql_inference::WalkFfn::new(&infer_state.weights, &self.index, top_k_features);
-        let result = larql_inference::predict_with_ffn(
-            &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn
-        );
-
-        Ok(result.predictions)
+            let result = larql_inference::infer_patched(
+                &infer_state.weights,
+                &self.tokenizer,
+                &self.index,
+                self.knn_store.as_ref(),
+                &token_ids,
+                top_k_predictions,
+            );
+            Ok(result.predictions)
+        })
     }
 
-    /// Run inference and capture per-layer residuals (last token position).
+    /// Layers that have at least one entry in the L0 KnnStore.
     ///
-    /// Returns (predictions, residuals) where:
-    ///   predictions: list of (token, probability) tuples
-    ///   residuals: list of numpy arrays, one per layer — the actual residual
-    ///              the gate_knn sees during inference at that layer.
+    /// Empty if the vindex has no `knn_store.bin` or it loaded as empty.
+    /// Used by measurement scripts that probe stored-key cosines against
+    /// held-out residuals without running the override themselves.
+    fn knn_layers(&self) -> Vec<usize> {
+        self.knn_store.as_ref().map(|s| s.layers()).unwrap_or_default()
+    }
+
+    /// Total number of entries across all layers in the L0 KnnStore.
+    fn knn_len(&self) -> usize {
+        self.knn_store.as_ref().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// Top-k cosine-similarity query against the L0 KnnStore at a single
+    /// layer. Returns `(entity, relation, target_token, cosine)` tuples
+    /// sorted descending by cosine.
     ///
-    /// Use these residuals to synthesise gate vectors that match the inference
-    /// path, not just the raw embedding.
-    #[pyo3(signature = (prompt, top_k_predictions=5, top_k_features=8192))]
+    /// `residual` is the query vector — L2-normalisation is handled inside
+    /// `query_knn`. Typical usage: capture residuals via `infer_trace`, then
+    /// probe each layer in `knn_layers()` to measure the negative-mass
+    /// distribution of held-out prompts against stored keys.
+    #[pyo3(signature = (residual, layer, k=2))]
+    fn knn_query(
+        &self,
+        residual: numpy::PyReadonlyArray1<f32>,
+        layer: usize,
+        k: usize,
+    ) -> PyResult<Vec<(String, String, String, f32)>> {
+        let store = match self.knn_store.as_ref() {
+            Some(s) => s,
+            None => return Ok(Vec::new()),
+        };
+        let slice = residual.as_slice().map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("residual must be contiguous: {e}"))
+        })?;
+        let hits = store.query_knn(layer, slice, k);
+        Ok(hits
+            .into_iter()
+            .map(|(entry, cos)| (
+                entry.entity.clone(),
+                entry.relation.clone(),
+                entry.target_token.clone(),
+                cos,
+            ))
+            .collect())
+    }
+
+    /// Per-fact target-delta optimisation (MEMIT phase 3).
+    ///
+    /// Returns (delta_array, baseline_loss, final_loss). Currently only
+    /// install_layer = n_layers-1 is supported; mid-layer backward
+    /// through attention+FFN is pending.
+    #[pyo3(signature = (prompt, target, install_layer, steps=60, lr=0.5, kl_weight=0.0625))]
+    fn optimise_target_delta<'py>(
+        &self,
+        py: Python<'py>,
+        prompt: &str,
+        target: &str,
+        install_layer: usize,
+        steps: usize,
+        lr: f32,
+        kl_weight: f32,
+    ) -> PyResult<(Bound<'py, PyArray1<f32>>, f32, f32)> {
+        self.with_walk_model(|infer_state| {
+            let prompt_enc = self.tokenizer.encode(prompt, true)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let prompt_ids: Vec<u32> = prompt_enc.get_ids().to_vec();
+            let target_spaced = format!(" {target}");
+            let target_enc = self.tokenizer.encode(target_spaced.as_str(), false)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let target_id: u32 = target_enc.get_ids().first().copied().unwrap_or(0);
+
+            let opts = larql_inference::TargetDeltaOpts {
+                steps,
+                lr,
+                kl_weight,
+                normalise: false,
+            };
+            let result = larql_inference::forward::target_delta::optimise_target_delta(
+                &infer_state.weights,
+                &prompt_ids,
+                target_id,
+                install_layer,
+                opts,
+            )
+            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+
+            let delta_vec = result.delta.to_vec();
+            let delta_np = numpy::PyArray1::from_vec(py, delta_vec);
+            Ok((delta_np, result.baseline_loss, result.final_loss))
+        })
+    }
+
+    /// Run inference and capture per-layer residuals — the actual query
+    /// vectors the walk FFN's `gate_knn` operates on at each layer
+    /// (post-attention, post-RMSNorm, last-token position).
+    ///
+    /// Routes through `larql_inference::infer_patched` — same pipeline as
+    /// `infer()` and the LQL `SELECT ... INFER` executor, so the returned
+    /// predictions match those surfaces byte-for-byte (ADR 0001).
+    ///
+    /// Residuals are returned as `(layer, array)` tuples because the walk
+    /// FFN only emits residuals for layers with vindex features — positional
+    /// indexing does not correspond to layer number. Iterate:
+    ///
+    ///     for layer, r in residuals:
+    ///         ...
+    ///
+    /// Returns:
+    ///   (predictions, residuals) where
+    ///     predictions: list of (token, probability) tuples
+    ///     residuals:   list of (layer_index, (hidden_size,) numpy array)
+    #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn infer_trace<'py>(
         &self, py: Python<'py>, prompt: &str,
-        top_k_predictions: usize, top_k_features: usize
-    ) -> PyResult<(Vec<(String, f64)>, Vec<Bound<'py, PyArray1<f32>>>)> {
-        {
-            let mut state = self.walk_model.borrow_mut();
-            if state.is_none() {
-                let dir = std::path::Path::new(&self.path);
-                *state = Some(crate::walk::InferState::load(dir)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                        format!("Failed to load model weights: {e}")
-                    ))?);
-            }
-        }
+        top_k_predictions: usize,
+    ) -> PyResult<(Vec<(String, f64)>, Vec<(usize, Bound<'py, PyArray1<f32>>)>)> {
+        self.with_walk_model(|infer_state| {
+            let encoding = self.tokenizer.encode(prompt, true)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-        let state = self.walk_model.borrow();
-        let infer_state = state.as_ref().unwrap();
+            let result = larql_inference::infer_patched(
+                &infer_state.weights,
+                &self.tokenizer,
+                &self.index,
+                self.knn_store.as_ref(),
+                &token_ids,
+                top_k_predictions,
+            );
 
-        let encoding = self.tokenizer.encode(prompt, true)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+            let residuals: Vec<(usize, Bound<'py, PyArray1<f32>>)> = result.residuals
+                .into_iter()
+                .map(|(layer, vec)| (layer, ndarray::Array1::from_vec(vec).into_pyarray(py)))
+                .collect();
 
-        let walk_ffn = larql_inference::WalkFfn::new(&infer_state.weights, &self.index, top_k_features);
-        let result = larql_inference::predict_with_ffn_trace(
-            &infer_state.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn
-        );
-
-        let residuals: Vec<Bound<'py, PyArray1<f32>>> = result.residuals.into_iter()
-            .map(|r| r.into_pyarray(py))
-            .collect();
-
-        Ok((result.predictions, residuals))
+            Ok((result.predictions, residuals))
+        })
     }
 
     /// Find features whose down weight vectors project toward a target token.
@@ -1018,73 +1151,50 @@ impl PyVindex {
     fn find_features_by_target(
         &self, target: &str, layers: Option<Vec<usize>>, top_k: usize
     ) -> PyResult<Vec<(usize, usize, f32, String)>> {
-        // Load inference weights if not already loaded
-        {
-            let mut state = self.walk_model.borrow_mut();
-            if state.is_none() {
-                let dir = std::path::Path::new(&self.path);
-                *state = Some(crate::walk::InferState::load(dir)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                        format!("Failed to load model weights: {e}")
-                    ))?);
+        self.with_walk_model(|infer_state| {
+            let weights = &infer_state.weights;
+
+            let encoding = self.tokenizer.encode(target, false)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            let token_ids = encoding.get_ids();
+            if token_ids.is_empty() {
+                return Ok(vec![]);
             }
-        }
+            let target_id = token_ids[0] as usize;
+            let lm_head_row = weights.lm_head.row(target_id);
 
-        let state = self.walk_model.borrow();
-        let infer_state = state.as_ref().unwrap();
-        let weights = &infer_state.weights;
+            let scan_layers = layers.unwrap_or_else(|| self.index.loaded_layers());
+            let mut results: Vec<(usize, usize, f32, String)> = Vec::new();
 
-        // Tokenize target — use first token
-        let encoding = self.tokenizer.encode(target, false)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-        let token_ids = encoding.get_ids();
-        if token_ids.is_empty() {
-            return Ok(vec![]);
-        }
+            for &layer in &scan_layers {
+                let arch = &*weights.arch;
+                let down_key = arch.ffn_down_key(layer);
+                let down_weights = match weights.tensors.get(&down_key) {
+                    Some(w) => w,
+                    None => continue,
+                };
+                let num_features = down_weights.shape()[0];
 
-        // Get the lm_head row for the target token — this is what the residual
-        // needs to align with to produce this token as output.
-        // lm_head shape: (vocab_size, hidden_size)
-        let target_id = token_ids[0] as usize;
-        let lm_head_row = weights.lm_head.row(target_id);
+                for feat in 0..num_features {
+                    let down_row = down_weights.row(feat);
+                    let score: f32 = lm_head_row.iter()
+                        .zip(down_row.iter())
+                        .map(|(a, b)| a * b)
+                        .sum();
 
-        let scan_layers = layers.unwrap_or_else(|| self.index.loaded_layers());
-
-        let mut results: Vec<(usize, usize, f32, String)> = Vec::new();
-
-        for &layer in &scan_layers {
-            let arch = &*weights.arch;
-            let down_key = arch.ffn_down_key(layer);
-            let down_weights = match weights.tensors.get(&down_key) {
-                Some(w) => w,
-                None => continue,
-            };
-            // down_weights shape: (intermediate_size, hidden_size)
-            // Each row is a feature's down projection vector.
-            let num_features = down_weights.shape()[0];
-
-            for feat in 0..num_features {
-                let down_row = down_weights.row(feat);
-                // Score: how much does this feature's output align with the target token?
-                let score: f32 = lm_head_row.iter()
-                    .zip(down_row.iter())
-                    .map(|(a, b)| a * b)
-                    .sum();
-
-                if score > 0.0 {
-                    let token = self.index.feature_meta(layer, feat)
-                        .map(|m| m.top_token.clone())
-                        .unwrap_or_default();
-                    results.push((layer, feat, score, token));
+                    if score > 0.0 {
+                        let token = self.index.feature_meta(layer, feat)
+                            .map(|m| m.top_token.clone())
+                            .unwrap_or_default();
+                        results.push((layer, feat, score, token));
+                    }
                 }
             }
-        }
 
-        // Sort by score descending and take top_k
-        results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(top_k);
-
-        Ok(results)
+            results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+            results.truncate(top_k);
+            Ok(results)
+        })
     }
 
     fn __repr__(&self) -> String {

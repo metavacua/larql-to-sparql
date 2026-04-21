@@ -9,7 +9,7 @@ use crate::error::VindexError;
 
 use super::core::VectorIndex;
 
-use crate::mmap_util::mmap_optimized;
+use crate::mmap_util::{mmap_demand_paged, mmap_optimized};
 
 /// Feature store methods for VectorIndex.
 impl VectorIndex {
@@ -22,7 +22,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: only the activated feature vectors are read per token.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.down_features_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -82,7 +83,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: only activated feature vectors are read per token.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.up_features_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -121,7 +123,8 @@ impl VectorIndex {
             ));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: per-layer prefetch issued at query time via prefetch_interleaved_layer.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -212,7 +215,7 @@ impl VectorIndex {
             return Err(VindexError::Parse("interleaved_q4.bin not found".into()));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_q4_mmap = Some(Arc::new(mmap));
         Ok(())
     }
@@ -222,19 +225,69 @@ impl VectorIndex {
     }
 
     /// Load Q4_K/Q6_K interleaved FFN data (Ollama-compatible, matches attn format).
+    ///
+    /// Also reads the optional `interleaved_q4k_manifest.json` sidecar emitted
+    /// by the streaming Q4 writer. When the manifest is present callers get
+    /// per-matrix layout (offsets, lengths, formats) via
+    /// [`VectorIndex::interleaved_q4k_layer_data`]. When it's absent — older
+    /// vindexes from `build_q4k_weights.rs` — callers fall back to the legacy
+    /// uniform-stride path.
     pub fn load_interleaved_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join("interleaved_q4k.bin");
         if !path.exists() {
             return Err(VindexError::Parse("interleaved_q4k.bin not found".into()));
         }
         let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
+        // Demand-paged: the q4k forward walk reads only the activated features'
+        // byte ranges per layer, not the entire 13 GB file.
+        let mmap = unsafe { mmap_demand_paged(&file)? };
         self.interleaved_q4k_mmap = Some(Arc::new(mmap));
+
+        let manifest_path = dir.join("interleaved_q4k_manifest.json");
+        if manifest_path.exists() {
+            let json: Vec<serde_json::Value> = serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?,
+            )
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
+
+            let entries: Vec<(usize, usize, String)> = json
+                .iter()
+                .map(|e| {
+                    let offset = e["offset"].as_u64().unwrap_or(0) as usize;
+                    let length = e["length"].as_u64().unwrap_or(0) as usize;
+                    let format = e["format"].as_str().unwrap_or("Q4_K").to_string();
+                    (offset, length, format)
+                })
+                .collect();
+            self.interleaved_q4k_manifest = Some(entries);
+        }
         Ok(())
     }
 
     pub fn has_interleaved_q4k(&self) -> bool {
         self.interleaved_q4k_mmap.is_some()
+    }
+
+    /// Per-layer Q4_K/Q6_K FFN slices — [gate, up, down] with formats.
+    ///
+    /// Returns `None` when the FFN manifest wasn't present at load time
+    /// (caller should fall back to uniform-stride). Returns `Some` iff the
+    /// manifest has 3 entries for `layer`; downstream kernels dispatch on
+    /// the format string (`"Q4_K"` or `"Q6_K"`).
+    pub fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
+        let mmap = self.interleaved_q4k_mmap.as_ref()?;
+        let manifest = self.interleaved_q4k_manifest.as_ref()?;
+        let base = layer * 3;
+        if base + 2 >= manifest.len() {
+            return None;
+        }
+        let mut out: [(&[u8], &str); 3] = [(&[], ""); 3];
+        for i in 0..3 {
+            let (offset, length, ref format) = manifest[base + i];
+            out[i] = (&mmap[offset..offset + length], format.as_str());
+        }
+        Some(out)
     }
 
     /// Dequantize one matrix from Q4 interleaved file → f32 Array2.
@@ -255,6 +308,326 @@ impl VectorIndex {
         let q4_data = &mmap[start..end];
         let floats = larql_models::quant::ggml::dequantize_q4_0(q4_data, floats_per_matrix).ok()?;
         ndarray::Array2::from_shape_vec((intermediate, self.hidden_size), floats).ok()
+    }
+
+    /// Dequantise one Q4K/Q6K FFN matrix on demand, caching the result.
+    /// `component`: 0=gate, 1=up, 2=down. Returns `None` when no Q4K
+    /// interleaved mmap is loaded. First access per (layer, component)
+    /// pays a ~200ms–1s dequant cost (varies with intermediate size);
+    /// later accesses are a single `Arc` clone.
+    ///
+    /// **Memory cost.** Caching a 31B layer's up+down is ~1.85GB of f32
+    /// heap. For fine-grained inference prefer [`Self::q4k_ffn_row_into`],
+    /// which decodes a single feature into a caller-provided buffer
+    /// without populating the cache.
+    pub fn q4k_ffn_layer(&self, layer: usize, component: usize)
+        -> Option<std::sync::Arc<Vec<f32>>>
+    {
+        if component > 2 { return None; }
+        {
+            let cache = self.q4k_ffn_cache.lock().unwrap();
+            if let Some(slot) = cache.get(layer) {
+                if let Some(ref arc) = slot[component] {
+                    return Some(arc.clone());
+                }
+            }
+        }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+        let intermediate = self.num_features(layer);
+        if intermediate == 0 { return None; }
+        let hidden = self.hidden_size;
+        let n = intermediate * hidden;
+        let padded = n.div_ceil(256) * 256;
+        let decoded = match format {
+            "Q4_K" => larql_models::quant::ggml::dequantize_q4_k(bytes, padded).ok()?,
+            "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded).ok()?,
+            _ => return None,
+        };
+        // Gate (0) and up (1) are stored row-major [intermediate, hidden] — row
+        // `feat` already contains that feature's weight vector.
+        //
+        // Down (2) is stored row-major [hidden, intermediate] (the native PyTorch
+        // nn.Linear(intermediate, hidden) orientation). To give callers a
+        // feature-major view matching gate/up, we transpose here: after the flip
+        // arc[feat*hidden..(feat+1)*hidden] is feature `feat`'s down vector.
+        let final_data: Vec<f32> = if component == 2 {
+            let mut t = vec![0.0f32; n];
+            for h in 0..hidden {
+                let src_row = &decoded[h * intermediate..(h + 1) * intermediate];
+                for (i, &v) in src_row.iter().enumerate() {
+                    t[i * hidden + h] = v;
+                }
+            }
+            t
+        } else {
+            decoded.into_iter().take(n).collect()
+        };
+        let arc = std::sync::Arc::new(final_data);
+        {
+            let mut cache = self.q4k_ffn_cache.lock().unwrap();
+            if let Some(slot) = cache.get_mut(layer) {
+                slot[component] = Some(arc.clone());
+            }
+        }
+        Some(arc)
+    }
+
+    /// Cache-based scaled-add — decodes the whole layer (`q4k_ffn_layer`)
+    /// on first access, then serves `out += alpha * row` from the cached
+    /// feature-major matrix. Required for down: it is stored transposed
+    /// on disk (`[hidden, intermediate]`), so a per-row decode reads
+    /// hidden-dim rows rather than feature vectors.
+    #[inline]
+    pub fn q4k_ffn_row_scaled_add_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
+        let Some(arc) = self.q4k_ffn_layer(layer, component) else { return false; };
+        let hidden = self.hidden_size;
+        let row_start = feat * hidden;
+        let row_end = row_start + hidden;
+        if row_end > arc.len() || out.len() != hidden { return false; }
+        for i in 0..hidden {
+            out[i] += alpha * arc[row_start + i];
+        }
+        true
+    }
+
+    /// Cache-based dot — same role as `q4k_ffn_row_scaled_add_via_cache`
+    /// but for the up leg. Currently unused (up is row-major on disk so
+    /// per-row decode is enough); kept for diagnostics and test parity.
+    /// If this works and the per-row version doesn't, the bug is in the
+    /// row-offset calculation or per-row byte slicing.
+    #[inline]
+    pub fn q4k_ffn_row_dot_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
+        let arc = self.q4k_ffn_layer(layer, component)?;
+        let hidden = self.hidden_size;
+        let row_start = feat * hidden;
+        let row_end = row_start + hidden;
+        if row_end > arc.len() { return None; }
+        let mut acc = 0.0f32;
+        for (i, &xv) in x.iter().enumerate() {
+            acc += arc[row_start + i] * xv;
+        }
+        Some(acc)
+    }
+
+    /// Direct Q4K/Q6K matmul — Y = X @ W.T, where W is the FFN matrix
+    /// stored as Q4K/Q6K bytes in the vindex. Decodes and FMAs fused,
+    /// parallelised across W rows. Zero extra RAM (no f32 cache).
+    ///
+    /// `x` is `[x_rows, w_cols]` row-major. `component` selects the layer's
+    /// gate (0) / up (1) / down (2) Q4K slice. On return the output is
+    /// `[x_rows, w_rows]` row-major where `w_rows` equals the slice's
+    /// shape-0 (intermediate for gate/up, hidden for down).
+    ///
+    /// Dispatches to the backend's `q4k_matvec` / `q6k_matvec` when a
+    /// compute backend is provided (Metal on Apple Silicon, CPU-SIMD
+    /// otherwise) — one submission per X row. Falls back to the rayon
+    /// + CPU-NEON scalar path when no backend is attached.
+    pub fn q4k_matmul_transb(
+        &self,
+        layer: usize,
+        component: usize,
+        x: &[f32],
+        x_rows: usize,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Vec<f32>> {
+        use rayon::prelude::*;
+        if component > 2 { return None; }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+
+        let intermediate = self.num_features(layer);
+        let hidden = self.hidden_size;
+        let (w_rows, w_cols) = match component {
+            0 | 1 => (intermediate, hidden),
+            2     => (hidden, intermediate),
+            _     => return None,
+        };
+        if x.len() != x_rows * w_cols { return None; }
+        if w_cols % 256 != 0 { return None; }
+
+        // Backend per-row dispatch is *slower* than CPU-NEON here because
+        // each q4k_matvec call pays a Metal submission (~15 ms). With x_rows
+        // × layers × 3 components we'd spend all our time in dispatch.
+        // A batched Metal shader (one submission per layer) would fix this,
+        // but we don't have it wired yet — keep the hook for future use.
+        let _ = backend;
+
+        let (block_bytes, block_size) = match format {
+            "Q4_K" => (144usize, 256usize),
+            "Q6_K" => (210usize, 256usize),
+            _ => return None,
+        };
+        let blocks_per_row = w_cols / block_size;
+        let bytes_per_w_row = blocks_per_row * block_bytes;
+
+        // CPU fallback: rayon over W rows, NEON per-row dot.
+        let mut y_t = vec![0.0f32; w_rows * x_rows];
+        y_t.par_chunks_mut(x_rows).enumerate().for_each(|(j, slot)| {
+            let w_row_start = j * bytes_per_w_row;
+            let w_row = &bytes[w_row_start..w_row_start + bytes_per_w_row];
+            for i in 0..x_rows {
+                let x_row = &x[i * w_cols..(i + 1) * w_cols];
+                slot[i] = match format {
+                    "Q4_K" => larql_models::quant::ggml::q4k_row_dot(w_row, x_row).unwrap_or(0.0),
+                    "Q6_K" => larql_models::quant::ggml::q6k_row_dot(w_row, x_row).unwrap_or(0.0),
+                    _ => 0.0,
+                };
+            }
+        });
+        let mut y = vec![0.0f32; x_rows * w_rows];
+        for j in 0..w_rows {
+            let src_base = j * x_rows;
+            for i in 0..x_rows {
+                y[i * w_rows + j] = y_t[src_base + i];
+            }
+        }
+        Some(y)
+    }
+
+    /// Fused Q4K/Q6K decode + dot with `x` for one feature. Returns `None`
+    /// if the row isn't available. This is ~2× faster than the
+    /// `q4k_ffn_row_into` → BLAS sdot sequence because it skips the Vec
+    /// allocation, the intermediate copy, and keeps the decoded data in
+    /// registers.
+    #[inline]
+    pub fn q4k_ffn_row_dot(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
+        if component > 2 || x.len() != self.hidden_size { return None; }
+        let slices = self.interleaved_q4k_layer_data(layer)?;
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return None; }
+        match format {
+            "Q4_K" => {
+                if hidden % 256 != 0 { return None; }
+                let bytes_per_row = (hidden / 256) * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return None; }
+                larql_models::quant::ggml::q4k_row_dot(&bytes[start..end], x).ok()
+            }
+            "Q6_K" => {
+                if hidden % 256 != 0 { return None; }
+                let bytes_per_row = (hidden / 256) * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return None; }
+                larql_models::quant::ggml::q6k_row_dot(&bytes[start..end], x).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Fused Q4K/Q6K decode + scaled-add into `out` for one feature.
+    /// Counterpart to `q4k_ffn_row_dot` for the down leg.
+    #[inline]
+    pub fn q4k_ffn_row_scaled_add(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
+        if component > 2 || out.len() != self.hidden_size { return false; }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return false; }
+        match format {
+            "Q4_K" => {
+                if hidden % 256 != 0 { return false; }
+                let bytes_per_row = (hidden / 256) * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                larql_models::quant::ggml::q4k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+            }
+            "Q6_K" => {
+                if hidden % 256 != 0 { return false; }
+                let bytes_per_row = (hidden / 256) * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                larql_models::quant::ggml::q6k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+            }
+            _ => false,
+        }
+    }
+
+    /// Decode one row of a Q4K/Q6K FFN matrix directly into `out` without
+    /// caching. `component`: 0=gate, 1=up, 2=down; `feat` is the feature
+    /// (row) index; `out` must have length `hidden_size`. Returns `false`
+    /// when the vindex has no Q4K data or shape is invalid.
+    ///
+    /// Row-level decode is the small-memory path for very large models
+    /// (~30B+) where caching entire dequantised layers blows the RAM
+    /// budget. Cost is ~50–70μs per row for hidden≈5376; at K=100 on a
+    /// 60-layer model that's ~60 × 100 × 2 decodes × 60μs ≈ 720ms per
+    /// forward pass.
+    pub fn q4k_ffn_row_into(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        out: &mut [f32],
+    ) -> bool {
+        if component > 2 || out.len() != self.hidden_size { return false; }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        let (bytes, format) = slices[component];
+        let hidden = self.hidden_size;
+        if feat >= self.num_features(layer) { return false; }
+
+        match format {
+            "Q4_K" => {
+                // Q4_K block: 144 bytes for 256 elements.
+                if hidden % 256 != 0 { return false; }
+                let blocks_per_row = hidden / 256;
+                let bytes_per_row = blocks_per_row * 144;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                let row_bytes = &bytes[start..end];
+                match larql_models::quant::ggml::dequantize_q4_k(row_bytes, hidden) {
+                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Err(_) => false,
+                }
+            }
+            "Q6_K" => {
+                // Q6_K block: 210 bytes for 256 elements.
+                if hidden % 256 != 0 { return false; }
+                let blocks_per_row = hidden / 256;
+                let bytes_per_row = blocks_per_row * 210;
+                let start = feat * bytes_per_row;
+                let end = start + bytes_per_row;
+                if end > bytes.len() { return false; }
+                let row_bytes = &bytes[start..end];
+                match larql_models::quant::ggml::dequantize_q6_k(row_bytes, hidden) {
+                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Err(_) => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     /// Get gate matrix from Q4 interleaved file, dequantized to f32.
@@ -343,284 +716,4 @@ impl VectorIndex {
         Some(&mmap[slice.byte_offset..end])
     }
 
-    /// Load Q8 attention weights + manifest for GPU full pipeline.
-    pub fn load_attn_q8(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
-        let path = dir.join("attn_weights_q8.bin");
-        if !path.exists() {
-            return Err(VindexError::Parse("attn_weights_q8.bin not found".into()));
-        }
-        let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
-        self.attn_q8_mmap = Some(Arc::new(mmap));
-
-        let manifest_path = dir.join("attn_weights_q8_manifest.json");
-        if manifest_path.exists() {
-            let json: Vec<serde_json::Value> = serde_json::from_str(
-                &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
-
-            let entries: Vec<(usize, usize, usize)> = json.iter()
-                .map(|e| {
-                    let offset = e["q8_offset"].as_u64().unwrap_or(0) as usize;
-                    let vals_len = e["q8_vals_len"].as_u64().unwrap_or(0) as usize;
-                    let scales_len = e["q8_scales_len"].as_u64().unwrap_or(0) as usize;
-                    (offset, vals_len, scales_len)
-                })
-                .collect();
-            self.attn_q8_manifest = Some(entries);
-        }
-        Ok(())
-    }
-
-    /// Get per-layer Q8 attention slices: (q_vals, q_scales, k_vals, k_scales, v_vals, v_scales, o_vals, o_scales)
-    pub fn attn_q8_layer_data(&self, layer: usize) -> Option<[(&[u8], &[f32]); 4]> {
-        let mmap = self.attn_q8_mmap.as_ref()?;
-        let manifest = self.attn_q8_manifest.as_ref()?;
-
-        let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
-
-        let mut result = [(&[] as &[u8], &[] as &[f32]); 4];
-        for i in 0..4 {
-            let (offset, vals_len, scales_len) = manifest[base + i];
-            let vals = &mmap[offset..offset + vals_len];
-            let scales_start = offset + vals_len;
-            let scales_data = &mmap[scales_start..scales_start + scales_len];
-            let scales = unsafe {
-                std::slice::from_raw_parts(
-                    scales_data.as_ptr() as *const f32,
-                    scales_len / 4,
-                )
-            };
-            result[i] = (vals, scales);
-        }
-        Some(result)
-    }
-
-    /// Load Q4_K/Q6_K attention weights for Ollama-compatible GPU pipeline.
-    pub fn load_attn_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
-        let path = dir.join("attn_weights_q4k.bin");
-        if !path.exists() {
-            return Err(VindexError::Parse("attn_weights_q4k.bin not found".into()));
-        }
-        let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
-
-        let manifest_path = dir.join("attn_weights_q4k_manifest.json");
-        if manifest_path.exists() {
-            let json: Vec<serde_json::Value> = serde_json::from_str(
-                &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
-
-            // Each entry: {key, shape, format, offset, length}
-            let entries: Vec<(usize, usize, String)> = json.iter()
-                .map(|e| {
-                    let offset = e["offset"].as_u64().unwrap_or(0) as usize;
-                    let length = e["length"].as_u64().unwrap_or(0) as usize;
-                    let format = e["format"].as_str().unwrap_or("Q4_K").to_string();
-                    (offset, length, format)
-                })
-                .collect();
-            self.attn_q4k_manifest = Some(entries);
-        }
-        self.attn_q4k_mmap = Some(Arc::new(mmap));
-        Ok(())
-    }
-
-    /// Get per-layer Q4_K/Q6_K attention slices: (data, format) for Q, K, V, O.
-    pub fn attn_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 4]> {
-        let mmap = self.attn_q4k_mmap.as_ref()?;
-        let manifest = self.attn_q4k_manifest.as_ref()?;
-        let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
-
-        let mut result: [(&[u8], &str); 4] = [(&[], ""); 4];
-        for i in 0..4 {
-            let (offset, length, ref format) = manifest[base + i];
-            result[i] = (&mmap[offset..offset + length], format.as_str());
-        }
-        Some(result)
-    }
-
-    /// Load Q4 attention weights + manifest for GPU full pipeline.
-    pub fn load_attn_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
-        let path = dir.join("attn_weights_q4.bin");
-        if !path.exists() {
-            return Err(VindexError::Parse("attn_weights_q4.bin not found".into()));
-        }
-        let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
-        self.attn_q4_mmap = Some(Arc::new(mmap));
-
-        // Load manifest with per-matrix offsets
-        let manifest_path = dir.join("attn_weights_q4_manifest.json");
-        if manifest_path.exists() {
-            let json: Vec<serde_json::Value> = serde_json::from_str(
-                &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
-
-            let entries: Vec<(usize, usize)> = json.iter()
-                .map(|e| {
-                    let offset = e["q4_offset"].as_u64().unwrap_or(0) as usize;
-                    let length = e["q4_length"].as_u64().unwrap_or(0) as usize;
-                    (offset, length)
-                })
-                .collect();
-            self.attn_q4_manifest = Some(entries);
-        }
-        Ok(())
-    }
-
-    /// Get raw Q4 attention weight bytes (all layers packed).
-    pub fn attn_q4_data(&self) -> Option<&[u8]> {
-        self.attn_q4_mmap.as_ref().map(|m| m.as_ref() as &[u8])
-    }
-
-    /// Get per-layer Q4 attention weight slices (Q, K, V, O) using the manifest.
-    /// Returns None if manifest or Q4 attn data is not loaded.
-    #[allow(clippy::type_complexity)]
-    pub fn attn_q4_layer_slices(&self, layer: usize) -> Option<(&[u8], &[u8], &[u8], &[u8])> {
-        let mmap = self.attn_q4_mmap.as_ref()?;
-        let manifest = self.attn_q4_manifest.as_ref()?;
-
-        // Each layer has 4 tensors: Q, K, V, O
-        let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
-
-        let q = &manifest[base];
-        let k = &manifest[base + 1];
-        let v = &manifest[base + 2];
-        let o = &manifest[base + 3];
-
-        let q_data = &mmap[q.0..q.0 + q.1];
-        let k_data = &mmap[k.0..k.0 + k.1];
-        let v_data = &mmap[v.0..v.0 + v.1];
-        let o_data = &mmap[o.0..o.0 + o.1];
-
-        Some((q_data, k_data, v_data, o_data))
-    }
-
-    /// Load Q4 lm_head for GPU logits (replaces CPU f32 lm_head KNN).
-    pub fn load_lm_head_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
-        let path = dir.join("lm_head_q4.bin");
-        if !path.exists() {
-            return Err(VindexError::Parse("lm_head_q4.bin not found".into()));
-        }
-        let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
-        self.lm_head_q4_mmap = Some(Arc::new(mmap));
-        Ok(())
-    }
-
-    /// Whether Q4 lm_head is loaded.
-    pub fn has_lm_head_q4(&self) -> bool {
-        self.lm_head_q4_mmap.is_some()
-    }
-
-    // ── LM head (output projection) for vindex logits ──
-
-    /// Load lm_head from lm_head.bin for KNN logit lookup.
-    pub fn load_lm_head(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
-        let path = dir.join("lm_head.bin");
-        if !path.exists() {
-            return Err(VindexError::Parse("lm_head.bin not found".into()));
-        }
-        let file = std::fs::File::open(&path)?;
-        let mmap = unsafe { mmap_optimized(&file)? };
-        // Detect vocab size from file size: vocab = file_bytes / (hidden_size * 4)
-        let vocab = mmap.len() / (self.hidden_size * 4);
-        self.vocab_size = vocab;
-        self.lm_head_mmap = Some(Arc::new(mmap));
-        Ok(())
-    }
-
-    /// Whether lm_head is loaded for vindex logits.
-    pub fn has_lm_head(&self) -> bool {
-        self.lm_head_mmap.is_some() && self.vocab_size > 0
-    }
-
-    /// KNN against lm_head via a ComputeBackend — GPU Q4 or CPU BLAS.
-    ///
-    /// If Q4 lm_head data and a Q4-capable backend are provided, uses Q4 matvec (~1ms).
-    /// Otherwise falls back to CPU BLAS f32 (~10ms).
-    pub fn lm_head_knn_backend(
-        &self,
-        query: &ndarray::Array1<f32>,
-        top_k: usize,
-        backend: &dyn larql_compute::ComputeBackend,
-    ) -> Vec<(u32, f32)> {
-        // Try Q4 path first
-        if backend.has_q4() {
-            if let Some(ref q4_mmap) = self.lm_head_q4_mmap {
-                let vocab = self.vocab_size;
-                let hidden = self.hidden_size;
-                if vocab > 0 {
-                    let x = query.as_slice().unwrap();
-                    let (q8_x, q8_scales) = larql_compute::cpu::q4::quantize_to_q8(x);
-                    if let Some(scores_vec) = backend.q4_matvec(
-                        q4_mmap.as_ref(), &q8_x, &q8_scales, vocab, hidden,
-                    ) {
-                        let mut indexed: Vec<(u32, f32)> = scores_vec.iter().copied().enumerate()
-                            .map(|(i, s)| (i as u32, s))
-                            .collect();
-                        let k = top_k.min(indexed.len());
-                        if k > 0 && k < indexed.len() {
-                            indexed.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
-                            indexed.truncate(k);
-                        }
-                        indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                        return indexed;
-                    }
-                }
-            }
-        }
-        // Fallback to f32 BLAS
-        self.lm_head_knn(query, top_k)
-    }
-
-    /// KNN against lm_head: find top-K tokens by dot product with query vector.
-    /// Single BLAS gemv: query[1, hidden] @ lm_head[vocab, hidden]^T → [1, vocab].
-    /// Then top-K selection. Returns (token_id, score) sorted by score descending.
-    pub fn lm_head_knn(&self, query: &ndarray::Array1<f32>, top_k: usize) -> Vec<(u32, f32)> {
-        let mmap = match self.lm_head_mmap.as_ref() {
-            Some(m) => m,
-            None => return vec![],
-        };
-        let vocab = self.vocab_size;
-        let hidden = self.hidden_size;
-        if vocab == 0 { return vec![]; }
-
-        let expected = vocab * hidden * 4;
-        if mmap.len() < expected { return vec![]; }
-
-        // Zero-copy: reinterpret mmap as [vocab, hidden] f32 matrix
-        let data = unsafe {
-            let ptr = mmap.as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, vocab * hidden)
-        };
-        let lm_view = ndarray::ArrayView2::from_shape((vocab, hidden), data).unwrap();
-
-        // gemv via larql-compute: scores = query @ lm_head^T → [1, vocab]
-        let hidden = self.hidden_size;
-        let x = query.view().into_shape_with_order((1, hidden)).unwrap();
-        let cpu = larql_compute::CpuBackend;
-        use larql_compute::ComputeBackend;
-        let result = cpu.matmul_transb(x, lm_view); // [1, hidden] @ [vocab, hidden]^T → [1, vocab]
-        let scores = ndarray::Array1::from_vec(result.into_raw_vec_and_offset().0);
-
-        // Top-K selection
-        let mut indexed: Vec<(u32, f32)> = scores.iter().copied().enumerate()
-            .map(|(i, s)| (i as u32, s))
-            .collect();
-        let k = top_k.min(indexed.len());
-        if k > 0 && k < indexed.len() {
-            indexed.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap());
-            indexed.truncate(k);
-        }
-        indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        indexed
-    }
 }

@@ -297,16 +297,19 @@ async fn handle_stream_infer(
 
     let start = std::time::Instant::now();
 
-    let pred = if mode == "dense" {
-        larql_inference::predict(weights, &model.tokenizer, &token_ids, top_k)
+    let predictions = if mode == "dense" {
+        larql_inference::predict(weights, &model.tokenizer, &token_ids, top_k).predictions
     } else {
         let patched = model.patched.blocking_read();
-        let walk_ffn = larql_inference::WalkFfn::new(weights, &*patched, 8092);
-        larql_inference::predict_with_ffn(weights, &model.tokenizer, &token_ids, top_k, &walk_ffn)
+        let r = larql_inference::infer_patched(
+            weights, &model.tokenizer, &*patched,
+            Some(&patched.knn_store), &token_ids, top_k,
+        );
+        r.predictions
     };
 
     // Stream each prediction.
-    for (rank, (token, prob)) in pred.predictions.iter().enumerate() {
+    for (rank, (token, prob)) in predictions.iter().enumerate() {
         let msg = serde_json::json!({
             "type": "prediction",
             "rank": rank + 1,
@@ -323,7 +326,7 @@ async fn handle_stream_infer(
         "type": "infer_done",
         "prompt": prompt,
         "mode": mode,
-        "predictions": pred.predictions.len(),
+        "predictions": predictions.len(),
         "latency_ms": (latency_ms * 10.0).round() / 10.0,
     });
     let _ = socket.send(Message::Text(done_msg.to_string().into())).await;

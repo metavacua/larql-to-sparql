@@ -18,11 +18,17 @@ thiserror = { workspace = true }
 # Matrix types (all compute via larql-compute)
 ndarray = "0.16"
 
+# Parallelism for the direct-Q4K matmul kernel (feature walk).
+rayon = "1.10"
+
 # Tokenizer (for embeddings loading + token resolution)
 tokenizers = "0.21"
 
 # Checksums
 sha2 = "0.10"
+
+# base64 encoding for the HF preupload file-sample field.
+base64 = "0.22"
 
 # Model weights (for safetensors loading during extract)
 safetensors = "0.5"
@@ -49,4 +55,16 @@ harness = false
 
 [[bench]]
 name = "vindex_scaling"
+harness = false
+
+[[bench]]
+name = "memit_solve"
+harness = false
+
+[[bench]]
+name = "extract_throughput"
+harness = false
+
+[[bench]]
+name = "q4k_vs_f32"
 harness = false

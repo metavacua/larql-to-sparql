@@ -129,6 +129,16 @@ pub enum Keyword {
     Raw,
     Attention,
     Alpha,
+    Knn,
+    Compose,
+    Rebalance,
+    Floor,
+    Ceiling,
+    Max,
+    Until,
+    Converged,
+    Compact,
+    Status,
 }
 
 impl Keyword {
@@ -205,6 +215,14 @@ impl Keyword {
                 Self::Decompose => "decompose", Self::Positions => "positions",
                 Self::Attention => "attention",
                 Self::Alpha => "alpha",
+                Self::Knn => "knn",
+                Self::Compose => "compose",
+                Self::Rebalance => "rebalance",
+                Self::Floor => "floor",
+                Self::Ceiling => "ceiling",
+                Self::Max => "max",
+                Self::Until => "until",
+                Self::Converged => "converged",
                 _ => unreachable!(),
             }
         }
@@ -307,6 +325,16 @@ impl Keyword {
             "RAW" => Some(Self::Raw),
             "ATTENTION" => Some(Self::Attention),
             "ALPHA" => Some(Self::Alpha),
+            "KNN" => Some(Self::Knn),
+            "COMPOSE" => Some(Self::Compose),
+            "REBALANCE" => Some(Self::Rebalance),
+            "FLOOR" => Some(Self::Floor),
+            "CEILING" => Some(Self::Ceiling),
+            "MAX" => Some(Self::Max),
+            "UNTIL" => Some(Self::Until),
+            "CONVERGED" => Some(Self::Converged),
+            "COMPACT" => Some(Self::Compact),
+            "STATUS" => Some(Self::Status),
             _ => None,
         }
     }

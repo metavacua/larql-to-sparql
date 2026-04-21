@@ -138,18 +138,45 @@ pub fn refine_gates(
     }
 }
 
-/// Gram-Schmidt: remove the projection of `target` onto every vector in
-/// `suppress`, one at a time. The order matters in principle but for
-/// well-conditioned suppression sets the result is stable.
+/// Project `target` onto the orthogonal complement of `span(suppress)`.
+///
+/// Does proper modified Gram-Schmidt: first orthonormalises the
+/// suppress vectors (so correlated vectors don't lead to incorrect
+/// projections), then subtracts each orthonormal component from the
+/// target. With an orthonormal basis `q_1..q_k` of `span(suppress)`,
+/// the result `v = target - Σ (target·q_i) q_i` is exactly orthogonal
+/// to every original suppress vector — even when the suppress set was
+/// highly correlated (cos ~ 0.99 at compose-time on Gemma L26).
+///
+/// The naive single-pass version (`v -= (v·u)/||u||² · u` for each raw
+/// `u`) only guarantees `v ⊥ u_last`; earlier orthogonality is lost as
+/// later projections re-introduce components. At N=50 with correlated
+/// template-dominated residuals this produced cross-slot interference
+/// strong enough to collapse compose to ~10 usable facts.
 fn orthogonalise(target: &Array1<f32>, suppress: &[&Array1<f32>]) -> Array1<f32> {
-    let mut v = target.clone();
+    // Step 1: build an orthonormal basis of span(suppress) via
+    // Gram-Schmidt over the suppress set itself. Numerical
+    // near-dependencies are dropped (||q|| < 1e-6 after projection).
+    let mut basis: Vec<Array1<f32>> = Vec::with_capacity(suppress.len());
     for u in suppress {
-        let un = u.dot(*u).sqrt();
-        if un < 1e-8 {
-            continue;
+        let mut q = (*u).clone();
+        for b in &basis {
+            let coef = q.dot(b);
+            q = &q - &(coef * b);
         }
-        let coef = v.dot(*u) / (un * un);
-        v = &v - &(coef * *u);
+        let qn = q.dot(&q).sqrt();
+        if qn > 1e-6 {
+            q.mapv_inplace(|v| v / qn);
+            basis.push(q);
+        }
+    }
+
+    // Step 2: project target onto the orthogonal complement of
+    // span(suppress) = span(basis).
+    let mut v = target.clone();
+    for q in &basis {
+        let coef = v.dot(q);
+        v = &v - &(coef * q);
     }
     v
 }

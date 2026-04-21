@@ -32,6 +32,7 @@ impl Parser {
         let mut layer = None;
         let mut confidence = None;
         let mut alpha = None;
+        let mut mode = InsertMode::default(); // Knn
 
         loop {
             match self.peek() {
@@ -48,6 +49,20 @@ impl Parser {
                     self.advance();
                     alpha = Some(self.expect_f32()?);
                 }
+                Token::Keyword(Keyword::Mode) => {
+                    self.advance();
+                    // Optional `=` for readability: `MODE = knn`
+                    if matches!(self.peek(), Token::Eq) {
+                        self.advance();
+                    }
+                    match self.peek() {
+                        Token::Keyword(Keyword::Knn) => { self.advance(); mode = InsertMode::Knn; }
+                        Token::Keyword(Keyword::Compose) => { self.advance(); mode = InsertMode::Compose; }
+                        other => return Err(ParseError(format!(
+                            "expected KNN or COMPOSE after MODE, got {other:?}"
+                        ))),
+                    }
+                }
                 _ => break,
             }
         }
@@ -60,6 +75,7 @@ impl Parser {
             layer,
             confidence,
             alpha,
+            mode,
         })
     }
 
@@ -84,6 +100,42 @@ impl Parser {
         let conditions = self.parse_conditions()?;
         self.eat_semicolon();
         Ok(Statement::Update { set, conditions })
+    }
+
+    pub(crate) fn parse_rebalance(&mut self) -> Result<Statement, ParseError> {
+        self.expect_keyword(Keyword::Rebalance)?;
+        let mut max_iters = None;
+        let mut floor = None;
+        let mut ceiling = None;
+        loop {
+            match self.peek() {
+                Token::Keyword(Keyword::Until) => {
+                    self.advance();
+                    self.expect_keyword(Keyword::Converged)?;
+                }
+                Token::Keyword(Keyword::Max) => {
+                    self.advance();
+                    max_iters = Some(self.expect_u32()?);
+                }
+                Token::Keyword(Keyword::Floor) => {
+                    self.advance();
+                    if matches!(self.peek(), Token::Eq) {
+                        self.advance();
+                    }
+                    floor = Some(self.expect_f32()?);
+                }
+                Token::Keyword(Keyword::Ceiling) => {
+                    self.advance();
+                    if matches!(self.peek(), Token::Eq) {
+                        self.advance();
+                    }
+                    ceiling = Some(self.expect_f32()?);
+                }
+                _ => break,
+            }
+        }
+        self.eat_semicolon();
+        Ok(Statement::Rebalance { max_iters, floor, ceiling })
     }
 
     pub(crate) fn parse_merge(&mut self) -> Result<Statement, ParseError> {

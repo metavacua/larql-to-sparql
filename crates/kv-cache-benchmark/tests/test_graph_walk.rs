@@ -112,7 +112,7 @@ fn test_graph_walk_fallback_triggers() {
         let state = WalkState::from_tokens(&tokens.iter().map(|s| *s).collect::<Vec<_>>());
         assert_eq!(
             state.tier,
-            WalkTier::HybridFallback,
+            WalkTier::MarkovFallback,
             "Expected fallback for: {:?}",
             tokens
         );

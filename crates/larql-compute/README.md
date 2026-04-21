@@ -89,6 +89,31 @@ let h = backend.prefill_q4(&layers, &x, hidden, inter, q_dim, kv_dim,
     seq_len, num_q_heads, num_kv_heads, head_dim, rope_base, qk_norm, softcap);
 ```
 
+## Linear algebra primitives (`cpu/ops/linalg.rs`)
+
+Beyond the matmul/quantization backends, `larql-compute` ships a small set
+of pure-CPU f64 linear algebra primitives used by the higher crates:
+
+| Primitive | Signature | Used by |
+|-----------|-----------|---------|
+| `cholesky(a, ridge)` | `(N,N) → L (N,N)` lower-triangular factor with optional ridge | MEMIT covariance solve, vindex MEMIT |
+| `cholesky_solve(L, B)` | solves `L L^T X = B` for any `(N,m)` RHS | as above |
+| `cholesky_inverse(L)` | A⁻¹ = `cholesky_solve(L, I)` | covariance whitening |
+| `ridge_decomposition_solve(K, T, λ)` | closed-form `ΔW = T^T (K K^T + λI)⁻¹ K`, returns `(d,d)` | `larql_vindex::memit_solve` (COMPACT MAJOR) |
+
+The N×N Cholesky runs in f64 — `K K^T` becomes ill-conditioned in f32 when
+keys share a dominant direction (canonical-form templates, exp 8). Inputs/
+outputs of `ridge_decomposition_solve` are f32 for caller convenience; the
+solve is f64 internally.
+
+Bench: `cargo bench -p larql-compute --bench linalg`
+Demo:  `cargo run --release -p larql-compute --example demo_ridge_solve`
+
+> The MEMIT-flavoured wrapper (`memit_solve` returning `MemitSolveResult`
+> with per-fact reconstruction quality) lives in `larql-vindex` next to
+> `MemitStore`. The production weight-edit pipeline with covariance
+> whitening is in `larql-inference/forward/memit.rs`.
+
 ## Architecture
 
 ```

@@ -25,6 +25,22 @@ impl std::fmt::Display for StorageDtype {
     }
 }
 
+/// Write `data` to `w`, encoded according to `dtype`. Returns bytes written.
+///
+/// Convenience wrapper around `encode_floats` for the binary writers in
+/// `extract::build`, `extract::streaming`, and `format::weights::write` —
+/// they all need the same f32→bytes encode + write + length-tracking
+/// pattern.
+pub fn write_floats(
+    w: &mut impl std::io::Write,
+    data: &[f32],
+    dtype: StorageDtype,
+) -> std::io::Result<u64> {
+    let bytes = encode_floats(data, dtype);
+    w.write_all(&bytes)?;
+    Ok(bytes.len() as u64)
+}
+
 /// Encode f32 data as either f32 or f16 bytes.
 pub fn encode_floats(data: &[f32], dtype: StorageDtype) -> Vec<u8> {
     match dtype {

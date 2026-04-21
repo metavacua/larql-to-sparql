@@ -8,7 +8,6 @@ pub mod forward;
 pub mod graph_ffn;
 pub mod layer_graph;
 pub mod model;
-pub mod route_ffn;
 pub mod residual;
 pub mod tokenizer;
 pub mod trace;
@@ -33,7 +32,10 @@ pub use capture::{
     CaptureCallbacks, CaptureConfig, InferenceModel, TopKEntry, VectorFileHeader, VectorRecord,
 };
 pub use error::InferenceError;
-pub use ffn::{FfnBackend, HighwayFfn, LayerFfnRouter, SparseFfn, WeightFfn};
+pub use ffn::{
+    FfnBackend, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
+    RemoteLatencyStats, SparseFfn, WeightFfn,
+};
 pub use attention::AttentionWeights;
 pub use forward::{
     calibrate_scalar_gains, capture_decoy_residuals, capture_ffn_activation_matrix,
@@ -43,22 +45,13 @@ pub use forward::{
     predict_with_strategy, trace_forward, trace_forward_full, trace_forward_with_ffn,
     LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention,
     PredictResultWithResiduals, TraceResult,
-    run_memit, MemitFact, MemitResult, MemitFactResult,
+    capture_spec_residuals, SpecCapture,
+    run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
+    TargetDelta, TargetDeltaOpts,
+    apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,
+    KnnOverride, KNN_COSINE_THRESHOLD,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
-#[allow(deprecated)]
-pub use ffn::experimental::cached::CachedFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::clustered::{ClusteredFfn, ClusteredGateIndex};
-#[allow(deprecated)]
-pub use ffn::experimental::down_clustered::{DownClusteredFfn, DownClusteredIndex};
-#[allow(deprecated)]
-pub use ffn::experimental::entity_routed::EntityRoutedFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::feature_list::FeatureListFfn;
-#[allow(deprecated)]
-pub use ffn::experimental::graph::GraphFfn;
-pub use route_ffn::{RouteFfn, RouteGuidedFfn, RouteTable};
 pub use trace::{
     trace_residuals, trace as trace_decomposed, AnswerWaypoint, LayerSummary,
     ResidualTrace, TraceNode, TracePositions, TraceStore, TraceWriter,
@@ -77,9 +70,9 @@ pub use layer_graph::{
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,
     detect_template,
 };
-pub use vindex::WalkFfn;
+pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache};
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
-pub use tokenizer::{decode_token, decode_token_raw, load_tokenizer};
+pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
 
 // Walker re-exports.
 pub use walker::attention_walker::{AttentionLayerResult, AttentionWalker};

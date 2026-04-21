@@ -11,7 +11,7 @@ use crate::residual::rms_norm;
 use super::apply_norm;
 use super::ple::{apply_per_layer_embedding};
 
-/// Public wrapper for run_attention (used by CachedFfn calibration).
+/// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(weights: &ModelWeights, h: &Array2<f32>, layer: usize) -> Option<Array2<f32>> {
     run_attention(weights, h, layer)
 }
@@ -57,6 +57,19 @@ pub fn run_ffn(
     let norm_offset = weights.arch.norm_weight_offset();
     let arch = &*weights.arch;
 
+    // Layer-0 stage dumps (LARQL_CPU_STAGE_DUMP=<dir>) — matches the
+    // Metal `LARQL_METAL_DUMP_LAYERS` convention. Lets us diff per-stage
+    // intermediates between CPU and Metal for the first layer.
+    let stage_dump_dir = if layer == 0 { std::env::var("LARQL_CPU_STAGE_DUMP").ok() } else { None };
+    let dump_f32 = |name: &str, arr: &Array2<f32>| {
+        if let Some(ref dir) = stage_dump_dir {
+            let slice = arr.as_slice().unwrap_or(&[]);
+            let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
+            let _ = std::fs::write(format!("{dir}/cpu_L0_{name}.f32"), &bytes);
+        }
+    };
+    dump_f32("h_post_attn", h_post_attn);
+
     let pre_ffn_key = if arch.has_post_norms() {
         arch.pre_feedforward_layernorm_key(layer)
     } else {
@@ -66,6 +79,7 @@ pub fn run_ffn(
         Some(key) => apply_norm(weights, h_post_attn, &key, norm_offset),
         None => rms_norm(h_post_attn, None, norm_offset),
     };
+    dump_f32("ffn_norm_out", &h_ffn);
 
     let (ffn_out, activation) = if capture_activation {
         let (out, act) = ffn.forward_with_activation(layer, &h_ffn);
@@ -73,6 +87,7 @@ pub fn run_ffn(
     } else {
         (ffn.forward(layer, &h_ffn), None)
     };
+    dump_f32("ffn_out_raw", &ffn_out);
 
     let res_mult = arch.residual_multiplier();
     let h_out = if arch.has_post_norms() {
@@ -108,8 +123,13 @@ pub(super) fn apply_layer_scalar(weights: &ModelWeights, h: &mut Array2<f32>, la
 }
 
 /// Run a single transformer layer with the given FFN backend.
+///
+/// Handles: attention → FFN → per-layer embedding → layer_scalar.
+/// All four steps are needed for Gemma 4 correctness. Exposed `pub` so
+/// alternate forward drivers (notably `vindex::predict_q4k`) get the same
+/// sequence as `predict_with_temperature` without duplicating logic.
 #[allow(clippy::type_complexity)]
-pub(super) fn run_layer_with_ffn(
+pub fn run_layer_with_ffn(
     weights: &ModelWeights,
     h: &Array2<f32>,
     layer: usize,

@@ -45,7 +45,11 @@ fn test_markov_much_smaller_than_standard() {
     let standard = kv_cache_benchmark::standard_kv::StandardKv;
     let markov = MarkovResidual::new(512);
 
-    for &seq_len in &[4096, 32768, 131072, 370_000] {
+    // MarkovRS W=512 hot window costs ~192 MB (fixed).
+    // At short contexts that's not much smaller than standard KV.
+    // The benefit is that it stays FLAT while standard KV grows O(n).
+    // At 32K+ the window is a fraction of standard KV.
+    for &seq_len in &[32768, 131072, 370_000] {
         let std_mem = standard.memory_bytes(&config, seq_len);
         let mrk_mem = markov.memory_bytes(&config, seq_len);
         assert!(
@@ -53,6 +57,34 @@ fn test_markov_much_smaller_than_standard() {
             "At {seq_len} tokens: Markov RS ({mrk_mem}) should be <10% of Standard KV ({std_mem})"
         );
     }
+
+    // At 4K the window still dominates, but MarkovRS is still smaller than standard.
+    let std_4k = standard.memory_bytes(&config, 4096);
+    let mrk_4k = markov.memory_bytes(&config, 4096);
+    assert!(mrk_4k < std_4k, "Markov RS should be smaller than standard KV at 4K");
+}
+
+#[test]
+fn test_boundary_residual_always_flat() {
+    let config = ModelConfig::gemma_4b();
+    let standard = kv_cache_benchmark::standard_kv::StandardKv;
+    let boundary = kv_cache_benchmark::boundary_residual::BoundaryResidual::gemma_4b();
+
+    // BoundaryRS W=32 is always much smaller: ~11 MB hot + tiny cold IDs.
+    // At 4K it's ~25× smaller; at 370K it's ~2000× smaller.
+    for &seq_len in &[4096, 32768, 131072, 370_000] {
+        let std_mem = standard.memory_bytes(&config, seq_len);
+        let brs_mem = boundary.memory_bytes(&config, seq_len);
+        assert!(
+            brs_mem * 20 < std_mem,
+            "At {seq_len}: Boundary RS ({brs_mem}) should be >20× smaller than Standard KV ({std_mem})"
+        );
+    }
+    // At 370K it's genuinely ~2000× compression.
+    let std_370k = standard.memory_bytes(&config, 370_000) as f64;
+    let brs_370k = boundary.memory_bytes(&config, 370_000) as f64;
+    assert!(std_370k / brs_370k > 1000.0,
+        "At 370K: compression ratio should exceed 1000× (got {:.0}×)", std_370k / brs_370k);
 }
 
 #[test]

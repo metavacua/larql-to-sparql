@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    # larql-specific
     "crates/larql-models",
     "crates/larql-compute",
     "crates/larql-core",
@@ -9,8 +10,12 @@ members = [
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
+    "crates/larql-router",
+    "crates/larql-router-protocol",
     "crates/larql-python",
     "crates/kv-cache-benchmark",
+    # portable (extract to sibling repos later, names stable)
+    "crates/model-compute",
 ]
 default-members = [
     "crates/larql-models",
@@ -21,7 +26,10 @@ default-members = [
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
+    "crates/larql-router",
+    "crates/larql-router-protocol",
     "crates/kv-cache-benchmark",
+    "crates/model-compute",
 ]
 
 [workspace.package]

@@ -1,0 +1,33 @@
+[package]
+name = "model-compute"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Bounded-cost compute for neural-model pipelines: native Rust kernels (default) and wasmtime-hosted WASM modules (opt-in)"
+keywords = ["wasm", "kernel", "deterministic", "solver", "aot"]
+categories = ["wasm", "mathematics"]
+
+[features]
+default = ["native"]
+native = ["dep:evalexpr", "dep:chrono"]
+wasm = ["dep:wasmtime"]
+
+[dependencies]
+thiserror = { workspace = true }
+
+# Feature: native kernels
+evalexpr = { version = "12", optional = true }
+chrono = { version = "0.4", optional = true, default-features = false, features = ["std", "clock"] }
+
+# Feature: wasm host
+wasmtime = { version = "29", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+
+[dev-dependencies]
+wat = "1"
+criterion = "0.5"
+
+[[bench]]
+name = "wasm_dispatch"
+harness = false
+required-features = ["wasm"]

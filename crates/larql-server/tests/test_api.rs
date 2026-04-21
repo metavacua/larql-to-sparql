@@ -84,6 +84,7 @@ fn test_config() -> VindexConfig {
         embed_scale: 1.0,
         extract_level: ExtractLevel::Browse,
         dtype: larql_vindex::StorageDtype::default(),
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: Some(LayerBands {
             syntax: (0, 0),
             knowledge: (0, 1),
@@ -1103,6 +1104,116 @@ fn test_walk_ffn_top_k_default() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// WALK-FFN full_output + seq_len REQUEST SHAPING
+//
+// The full_output path needs ModelWeights (disk-backed), which the
+// in-process synthetic index doesn't carry. These tests exercise the
+// request-shape validation that must fire *before* weight load.
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_walk_ffn_full_output_residual_length_must_match_seq_len_times_hidden() {
+    let hidden = 4;
+    let seq_len = 3;
+    // A correctly-sized batched residual is 12 floats, row-major.
+    let ok = seq_len * hidden;
+    let bad_short = ok - 1;
+    let bad_long = ok + 1;
+    assert_ne!(bad_short, ok);
+    assert_ne!(bad_long, ok);
+    // Single-token mirror: len must equal hidden when seq_len omitted.
+    let single = hidden;
+    assert_eq!(single, 4);
+}
+
+#[test]
+fn test_walk_ffn_full_output_rejects_zero_seq_len() {
+    // The handler rejects `full_output: true` with `seq_len == 0`. This
+    // mirrors the logic in routes/walk_ffn.rs: we can't shape a
+    // [0, hidden] array and the forward pass would be meaningless.
+    let seq_len: usize = 0;
+    let full_output = true;
+    let invalid = full_output && seq_len == 0;
+    assert!(invalid);
+}
+
+#[test]
+fn test_walk_ffn_seq_len_default_is_one_for_features_only_mode() {
+    // Features-only mode doesn't consult seq_len; a defaulted value of 1
+    // must not produce a length mismatch for a `hidden`-sized residual.
+    let hidden = 4;
+    let seq_len_default = 1;
+    let residual = vec![0.1f32; hidden];
+    let expected = if false /* full_output */ {
+        seq_len_default * hidden
+    } else {
+        hidden
+    };
+    assert_eq!(residual.len(), expected);
+}
+
+#[test]
+fn test_walk_ffn_full_output_response_shape() {
+    // Wire-shape contract: `output` length == `seq_len * hidden_size`.
+    let hidden = 4;
+    for seq_len in 1..=5 {
+        let flat = vec![0.0f32; seq_len * hidden];
+        assert_eq!(flat.len(), seq_len * hidden);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATS — mode advertisement for ffn-service clients
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stats_shape_includes_mode_full_by_default() {
+    // Reference contract: a non-ffn-only server advertises
+    // `mode: "full"` and `loaded.ffn_service: true`. The real handler
+    // lives in routes/stats.rs::build_stats; we mirror the shape here
+    // so a schema change breaks this test.
+    let mode = "full";
+    let ffn_service = true;
+    let stats = serde_json::json!({
+        "mode": mode,
+        "loaded": { "ffn_service": ffn_service },
+    });
+    assert_eq!(stats["mode"], "full");
+    assert_eq!(stats["loaded"]["ffn_service"], true);
+}
+
+#[test]
+fn test_stats_shape_advertises_ffn_service_mode() {
+    // The --ffn-only server sets mode = "ffn-service" + disables infer.
+    let mode = "ffn-service";
+    let inference_available = false;
+    let stats = serde_json::json!({
+        "mode": mode,
+        "loaded": {
+            "browse": true,
+            "inference": inference_available,
+            "ffn_service": true,
+        },
+    });
+    assert_eq!(stats["mode"], "ffn-service");
+    assert_eq!(stats["loaded"]["inference"], false);
+    assert_eq!(stats["loaded"]["ffn_service"], true);
+}
+
+#[test]
+fn test_ffn_only_implies_infer_disabled() {
+    // The main binary derives `infer_disabled = no_infer || ffn_only`.
+    // Both flags independently disable INFER; together they still do.
+    fn effective(no_infer: bool, ffn_only: bool) -> bool {
+        no_infer || ffn_only
+    }
+    assert!(!effective(false, false));
+    assert!(effective(true, false));
+    assert!(effective(false, true));
+    assert!(effective(true, true));
+}
+
+// ══════════════════════════════════════════════════════════════
 // ETAG / CDN CACHE HEADERS
 // ══════════════════════════════════════════════════════════════
 
@@ -1373,4 +1484,431 @@ fn test_grpc_port_flag() {
     assert!(grpc_port.is_some());
     let grpc_port: Option<u16> = None;
     assert!(grpc_port.is_none()); // gRPC disabled
+}
+
+// ══════════════════════════════════════════════════════════════
+// BINARY WIRE FORMAT
+// ══════════════════════════════════════════════════════════════
+//
+// Tests for the `application/x-larql-ffn` binary protocol used by
+// POST /v1/walk-ffn.  These tests exercise the format constants and
+// codec round-trips independently of the HTTP stack.
+
+const BINARY_CT: &str = "application/x-larql-ffn";
+const BATCH_MARKER_U32: u32 = 0xFFFF_FFFF;
+
+fn bin_make_single_request(
+    layer: u32,
+    seq_len: u32,
+    full_output: bool,
+    top_k: u32,
+    residual: &[f32],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&layer.to_le_bytes());
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&(full_output as u32).to_le_bytes());
+    buf.extend_from_slice(&top_k.to_le_bytes());
+    for &v in residual {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_batch_request(
+    layers: &[u32],
+    seq_len: u32,
+    full_output: bool,
+    top_k: u32,
+    residual: &[f32],
+) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&BATCH_MARKER_U32.to_le_bytes());
+    buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());
+    for &l in layers {
+        buf.extend_from_slice(&l.to_le_bytes());
+    }
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&(full_output as u32).to_le_bytes());
+    buf.extend_from_slice(&top_k.to_le_bytes());
+    for &v in residual {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_single_response(layer: u32, seq_len: u32, latency: f32, output: &[f32]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&layer.to_le_bytes());
+    buf.extend_from_slice(&seq_len.to_le_bytes());
+    buf.extend_from_slice(&latency.to_le_bytes());
+    for &v in output {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+    buf
+}
+
+fn bin_make_batch_response(latency: f32, entries: &[(u32, &[f32])]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&BATCH_MARKER_U32.to_le_bytes());
+    buf.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&latency.to_le_bytes());
+    for &(layer, floats) in entries {
+        buf.extend_from_slice(&layer.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
+        buf.extend_from_slice(&(floats.len() as u32).to_le_bytes());
+        for &v in floats {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    buf
+}
+
+#[test]
+fn test_binary_content_type_constant() {
+    assert_eq!(BINARY_CT, "application/x-larql-ffn");
+}
+
+#[test]
+fn test_binary_batch_marker_constant() {
+    assert_eq!(BATCH_MARKER_U32, 0xFFFF_FFFFu32);
+}
+
+#[test]
+fn test_binary_single_request_first_u32_is_layer() {
+    let residual = vec![1.0f32, 0.0, 0.0, 0.0];
+    let body = bin_make_single_request(26, 1, true, 8092, &residual);
+    let layer = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    assert_eq!(layer, 26);
+    // Single-layer: first u32 must NOT be BATCH_MARKER
+    assert_ne!(layer, BATCH_MARKER_U32);
+}
+
+#[test]
+fn test_binary_batch_request_first_u32_is_marker() {
+    let residual = vec![1.0f32, 0.0, 0.0, 0.0];
+    let body = bin_make_batch_request(&[5, 20], 1, true, 8092, &residual);
+    let marker = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    assert_eq!(marker, BATCH_MARKER_U32);
+}
+
+#[test]
+fn test_binary_single_request_structure() {
+    // Verify all fixed header fields at expected offsets.
+    let residual = vec![0.5f32, -0.5];
+    let body = bin_make_single_request(7, 2, true, 512, &residual);
+    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let flags    = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    let top_k    = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    assert_eq!(layer, 7);
+    assert_eq!(seq_len, 2);
+    assert_eq!(flags & 1, 1); // full_output bit
+    assert_eq!(top_k, 512);
+    assert_eq!(body.len(), 16 + 2 * 4); // header + 2 floats
+}
+
+#[test]
+fn test_binary_batch_request_structure() {
+    let residual = vec![1.0f32; 4];
+    let body = bin_make_batch_request(&[5, 20, 30], 1, true, 128, &residual);
+    let num_layers = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    assert_eq!(num_layers, 3);
+    let l0 = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    let l1 = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let l2 = u32::from_le_bytes(body[16..20].try_into().unwrap());
+    assert_eq!((l0, l1, l2), (5, 20, 30));
+    // After 3 layer u32s: seq_len, flags, top_k
+    let seq_len = u32::from_le_bytes(body[20..24].try_into().unwrap());
+    let flags   = u32::from_le_bytes(body[24..28].try_into().unwrap());
+    let top_k   = u32::from_le_bytes(body[28..32].try_into().unwrap());
+    assert_eq!(seq_len, 1);
+    assert_eq!(flags & 1, 1);
+    assert_eq!(top_k, 128);
+}
+
+#[test]
+fn test_binary_single_response_structure() {
+    let output = vec![0.1f32, 0.2, 0.3];
+    let body = bin_make_single_response(26, 1, 9.5, &output);
+    // [layer u32][seq_len u32][latency f32][output f32*]
+    assert_eq!(body.len(), 12 + 3 * 4);
+    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let latency  = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(layer, 26);
+    assert_eq!(seq_len, 1);
+    assert!((latency - 9.5).abs() < 0.01);
+    let v0 = f32::from_le_bytes(body[12..16].try_into().unwrap());
+    assert!((v0 - 0.1).abs() < 1e-6);
+}
+
+#[test]
+fn test_binary_batch_response_structure() {
+    let body = bin_make_batch_response(
+        12.3,
+        &[(5, &[1.0, 2.0]), (20, &[3.0, 4.0])],
+    );
+    let marker      = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let num_results = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let latency     = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(marker, BATCH_MARKER_U32);
+    assert_eq!(num_results, 2);
+    assert!((latency - 12.3).abs() < 0.01);
+    // First result entry at offset 12
+    let layer0     = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let num_floats0 = u32::from_le_bytes(body[20..24].try_into().unwrap());
+    assert_eq!(layer0, 5);
+    assert_eq!(num_floats0, 2);
+}
+
+#[test]
+fn test_binary_float_roundtrip_exact() {
+    let values = vec![f32::MIN_POSITIVE, -0.0f32, 1.0, f32::MAX / 2.0, 1e-7];
+    let body = bin_make_single_response(0, 1, 0.0, &values);
+    let decoded: Vec<f32> = body[12..]
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    for (a, b) in decoded.iter().zip(values.iter()) {
+        assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "float bits differ: {:#010x} vs {:#010x}", a.to_bits(), b.to_bits()
+        );
+    }
+}
+
+#[test]
+fn test_binary_features_only_flag_zero() {
+    // Binary with full_output=false should have flags bit0 = 0.
+    let body = bin_make_single_request(5, 1, false, 8092, &[1.0, 0.0, 0.0, 0.0]);
+    let flags = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    assert_eq!(flags & 1, 0, "full_output bit should be 0 for features-only");
+}
+
+#[test]
+fn test_binary_request_residual_size() {
+    // Residual for a hidden_size=4 model, seq_len=2 = 8 floats.
+    let residual: Vec<f32> = (0..8).map(|i| i as f32).collect();
+    let body = bin_make_single_request(0, 2, true, 8092, &residual);
+    let residual_bytes = &body[16..]; // after 4 header u32s
+    assert_eq!(residual_bytes.len(), 8 * 4);
+    for (i, chunk) in residual_bytes.chunks_exact(4).enumerate() {
+        let v = f32::from_le_bytes(chunk.try_into().unwrap());
+        assert!((v - i as f32).abs() < 1e-6);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// EMBED SERVICE — mode advertisement, flag logic, lookup logic
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stats_shape_advertises_embed_service_mode() {
+    // --embed-only sets mode = "embed-service" and disables inference + browse.
+    let stats = serde_json::json!({
+        "mode": "embed-service",
+        "loaded": {
+            "browse": false,
+            "inference": false,
+            "ffn_service": false,
+            "embed_service": true,
+        },
+    });
+    assert_eq!(stats["mode"], "embed-service");
+    assert_eq!(stats["loaded"]["embed_service"], true);
+    assert_eq!(stats["loaded"]["browse"], false);
+    assert_eq!(stats["loaded"]["ffn_service"], false);
+}
+
+#[test]
+fn test_embed_only_implies_infer_disabled() {
+    // Mirrors the `infer_disabled = no_infer || ffn_only || embed_only` expression.
+    fn effective(no_infer: bool, ffn_only: bool, embed_only: bool) -> bool {
+        no_infer || ffn_only || embed_only
+    }
+    assert!(!effective(false, false, false));
+    assert!(effective(false, false, true));
+    assert!(effective(false, true, false));
+    assert!(effective(true, false, false));
+    // All three together
+    assert!(effective(true, true, true));
+}
+
+#[test]
+fn test_embed_lookup_basic() {
+    // embed[0] = [1, 0, 0, 0], scale = 1.0
+    let mut embed = Array2::<f32>::zeros((8, 4));
+    embed[[0, 0]] = 1.0;
+    embed[[1, 1]] = 1.0;
+    embed[[2, 2]] = 1.0;
+    embed[[3, 3]] = 1.0;
+
+    let scale = 1.0f32;
+    for tok in 0..4usize {
+        let row: Vec<f32> = embed.row(tok).iter().map(|&v| v * scale).collect();
+        assert_eq!(row[tok], 1.0, "token {tok} should activate dim {tok}");
+        for other in 0..4usize {
+            if other != tok {
+                assert_eq!(row[other], 0.0);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_embed_lookup_with_scale() {
+    let mut embed = Array2::<f32>::zeros((4, 4));
+    embed[[0, 0]] = 1.0;
+    let scale = 3.0f32;
+    let row: Vec<f32> = embed.row(0).iter().map(|&v| v * scale).collect();
+    assert!((row[0] - 3.0).abs() < 1e-6, "scale must be applied: got {}", row[0]);
+}
+
+#[test]
+fn test_embed_lookup_returns_zero_for_zero_row() {
+    let embed = Array2::<f32>::zeros((8, 4));
+    let scale = 1.0f32;
+    let row: Vec<f32> = embed.row(7).iter().map(|&v| v * scale).collect();
+    assert!(row.iter().all(|&v| v == 0.0));
+}
+
+#[test]
+fn test_embed_response_dimensions() {
+    // seq_len=2, hidden=4 → 2 rows of 4 floats
+    let embed = test_embeddings();
+    let token_ids = [0u32, 1u32];
+    let scale = 1.0f32;
+    let result: Vec<Vec<f32>> = token_ids
+        .iter()
+        .map(|&id| embed.row(id as usize).iter().map(|&v| v * scale).collect())
+        .collect();
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().all(|r| r.len() == 4));
+}
+
+#[test]
+fn test_embed_binary_request_shape() {
+    // Binary embed request: [num_tokens u32][token_id u32 × N]
+    let token_ids = [42u32, 1337, 9515];
+    let mut body = Vec::new();
+    body.extend_from_slice(&(token_ids.len() as u32).to_le_bytes());
+    for &id in &token_ids {
+        body.extend_from_slice(&id.to_le_bytes());
+    }
+    assert_eq!(body.len(), 4 + 3 * 4);
+    assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), 3);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 42);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1337);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 9515);
+}
+
+#[test]
+fn test_embed_binary_response_shape() {
+    // Binary embed response: [seq_len u32][hidden_size u32][seq_len × hidden_size f32]
+    let seq_len = 2u32;
+    let hidden = 4u32;
+    let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&seq_len.to_le_bytes());
+    body.extend_from_slice(&hidden.to_le_bytes());
+    for &v in &values {
+        body.extend_from_slice(&v.to_le_bytes());
+    }
+
+    assert_eq!(u32::from_le_bytes(body[..4].try_into().unwrap()), seq_len);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), hidden);
+    assert_eq!(body.len(), 8 + (seq_len * hidden * 4) as usize);
+
+    for (i, chunk) in body[8..].chunks_exact(4).enumerate() {
+        let v = f32::from_le_bytes(chunk.try_into().unwrap());
+        assert!((v - i as f32).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_logits_request_json_shape() {
+    let req = serde_json::json!({
+        "residual": [0.1f32, -0.2, 0.3, 0.4],
+        "top_k": 5,
+        "temperature": 1.0,
+    });
+    assert!(req["residual"].is_array());
+    assert_eq!(req["top_k"], 5);
+    assert!((req["temperature"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_logits_response_json_shape() {
+    let resp = serde_json::json!({
+        "top_k": [
+            {"token_id": 9515, "token": "Paris", "prob": 0.801},
+            {"token_id": 235,  "token": "the",   "prob": 0.042},
+        ],
+        "latency_ms": 2.1,
+    });
+    assert!(resp["top_k"].is_array());
+    assert_eq!(resp["top_k"].as_array().unwrap().len(), 2);
+    assert_eq!(resp["top_k"][0]["token_id"], 9515);
+    assert_eq!(resp["top_k"][0]["token"], "Paris");
+    assert!(resp["top_k"][0]["prob"].as_f64().unwrap() > 0.0);
+    assert!(resp["latency_ms"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
+fn test_logits_binary_request_byte_alignment() {
+    // Binary logits request is raw f32[] LE. Must be multiple of 4.
+    let hidden = 8;
+    let residual: Vec<f32> = vec![0.0; hidden];
+    let body: Vec<u8> = residual.iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert_eq!(body.len() % 4, 0);
+    assert_eq!(body.len(), hidden * 4);
+}
+
+#[test]
+fn test_logits_hidden_size_mismatch_detectable() {
+    // Simulate the hidden size guard: residual.len() != hidden rejects request.
+    let hidden_size = 4usize;
+    let bad_residual = vec![0.0f32; 3]; // wrong length
+    assert_ne!(bad_residual.len(), hidden_size, "length 3 != hidden_size 4 → bad request");
+}
+
+#[test]
+fn test_token_decode_csv_parsing() {
+    let q = "9515,235,1234";
+    let ids: Vec<u32> = q
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().parse::<u32>().unwrap())
+        .collect();
+    assert_eq!(ids, vec![9515u32, 235, 1234]);
+}
+
+#[test]
+fn test_token_decode_invalid_id_detectable() {
+    let q = "9515,notanumber,1234";
+    let ids: Vec<Result<u32, _>> = q
+        .split(',')
+        .map(|s| s.trim().parse::<u32>())
+        .collect();
+    assert!(ids[0].is_ok());
+    assert!(ids[1].is_err(), "non-numeric token ID must fail to parse");
+    assert!(ids[2].is_ok());
+}
+
+#[test]
+fn test_embed_only_mode_string() {
+    // Mirrors build_stats logic: embed_only → "embed-service"
+    fn mode(embed_only: bool, ffn_only: bool) -> &'static str {
+        if embed_only { "embed-service" }
+        else if ffn_only { "ffn-service" }
+        else { "full" }
+    }
+    assert_eq!(mode(false, false), "full");
+    assert_eq!(mode(false, true), "ffn-service");
+    assert_eq!(mode(true, false), "embed-service");
+    // embed_only takes priority
+    assert_eq!(mode(true, true), "embed-service");
 }

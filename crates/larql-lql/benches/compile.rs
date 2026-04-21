@@ -84,6 +84,7 @@ fn make_compile_bench_vindex(tag: &str, with_down_weights: bool) -> PathBuf {
             ExtractLevel::Browse
         },
         dtype: StorageDtype::F32,
+        quant: larql_vindex::QuantFormat::None,
         layer_bands: None,
         layers: Vec::new(),
         down_top_k: 1,
@@ -149,9 +150,9 @@ fn bench_compile_no_patches(c: &mut Criterion) {
 /// overrides the down_weights file is hardlinked from source instead.
 ///
 /// The override-baking path itself (`patch_down_weights`) is unit-
-/// tested for correctness in `compile_into_vindex_tests` in
-/// `executor/lifecycle.rs`. End-to-end exercise of the override path
-/// against a real Gemma 4B vindex lives in the `compile_demo` example.
+/// tested for correctness in `executor/lifecycle/compile/bake.rs`'s
+/// in-module tests. End-to-end exercise of the override path against
+/// a real Gemma 4B vindex lives in the `compile_demo` example.
 fn bench_compile_with_weights(c: &mut Criterion) {
     let mut group = c.benchmark_group("compile_into_vindex");
     group.sample_size(20);

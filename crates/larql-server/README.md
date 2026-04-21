@@ -58,6 +58,11 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 | `--port <PORT>` | Listen port | 8080 |
 | `--host <HOST>` | Bind address | 0.0.0.0 |
 | `--no-infer` | Disable inference (browse-only, saves memory) | false |
+| `--ffn-only` | Run as an FFN-service endpoint for `RemoteWalkBackend` clients. Skips the f16→f32 gate warmup (10× smaller startup RSS on 31B Q4_K) | false |
+| `--embed-only` | Run as an embed-service endpoint (ADR-0008). Loads only embeddings + lm_head + tokenizer; skips all FFN and attention weights. Enables `/v1/embed`, `/v1/logits`, `/v1/token/*`. Advertises `mode: embed-service`. | false |
+| `--layers <START-END>` | Serve only this layer range. Out-of-range requests return HTTP 400. Pages outside the range are never touched. | all |
+| `--max-gate-cache-layers <N>` | LRU cap on decoded f16 gate layers. `0` = unlimited. Each decoded layer is ~433 MB on 31B. | 0 |
+| `--release-mmap-after-request` | `madvise(MADV_DONTNEED)` on all mmaps after each walk-ffn request. Linux: immediate RSS drop. Darwin: advisory. | false |
 | `--cors` | Enable CORS headers | false |
 | `--api-key <KEY>` | Require Bearer token auth (health exempt) | — |
 | `--rate-limit <SPEC>` | Per-IP rate limit (e.g., "100/min", "10/sec") | — |
@@ -67,6 +72,23 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 | `--tls-cert <PATH>` | TLS certificate for HTTPS | — |
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
 | `--log-level <LEVEL>` | Logging level | info |
+
+### Memory bounds — cheat sheet
+
+Measured on Gemma 4 31B Q4_K (macOS, CPU). See ADR-0005 for details.
+
+| Flags | Startup RSS | After 3 requests |
+|---|---|---|
+| default | 55 GB | 55 GB |
+| `--ffn-only` | 5.6 GB | 23 GB |
+| `--ffn-only --max-gate-cache-layers 4` | 5.6 GB | 23 GB |
+| `... --release-mmap-after-request` | 5.6 GB | 23 GB stable (Linux: ~6 GB) |
+| `... --layers 0-19` (sharding) | 5.6 GB | ~8 GB |
+
+`--layers` is the strict bound. The other flags target individual growth
+modes and compose cleanly (`--ffn-only` skips startup warmup,
+`--max-gate-cache-layers` caps decoded heap, `--release-mmap-after-request`
+hints the kernel to drop mmap pages).
 
 ## API Endpoints
 
@@ -250,6 +272,130 @@ POST /v1/walk-ffn
 {"layers": [0, 1, ..., 33], "residual": [0.12, -0.34, ...]}
 → {"results": [{"layer": 0, "features": [...], "scores": [...]}, ...], "latency_ms": 0.3}
 ```
+
+**Full-output mode** — returns the computed FFN output vector (gate KNN → up
+gather → down projection). Requires model weights (`--ffn-only` is sufficient).
+
+```json
+POST /v1/walk-ffn
+Content-Type: application/json
+{"layer": 26, "residual": [...], "seq_len": 1, "full_output": true}
+→ {"layer": 26, "output": [...], "seq_len": 1, "latency_ms": 8.1}
+```
+
+**Binary wire format** (`Content-Type: application/x-larql-ffn`) — eliminates
+JSON float serialization overhead. Only supported with `full_output: true`.
+
+```
+Single-layer request:
+  [4: layer u32 LE][4: seq_len u32][4: flags u32 (bit0=1)][4: top_k u32][residual f32[] LE]
+
+Single-layer response:
+  [4: layer u32 LE][4: seq_len u32][4: latency f32][output f32[] LE]
+
+Batch request:  [4: BATCH_MARKER=0xFFFFFFFF][4: num_layers u32][layers u32[] LE]...
+Batch response: [4: BATCH_MARKER][4: num_results u32][4: latency f32]
+                per result: [4: layer][4: seq_len][4: num_floats][output f32[] LE]
+```
+
+Performance vs JSON (Gemma 3 4B, hidden_size=3072, seq_len=1): ~33% smaller
+requests, ~0.5 ms/hop faster.
+
+`RemoteWalkBackend` in `larql-inference` uses binary format automatically and
+exposes `forward_all_layers()` for a batched single-round-trip forward pass.
+
+### Embed Service Endpoints (ADR-0008)
+
+Enabled on every server (including `--ffn-only` and default mode). The primary use case is `--embed-only`: offload the static embedding table and lm_head to a dedicated small server, shrinking the attention-only client from ~7 GB to ~1.9 GB on 31B models.
+
+```bash
+# Start an embed-only server
+larql-server output/gemma3-4b.vindex --embed-only --port 8082
+
+# Serving google/gemma-3-4b-it — mode: embed-service
+# Loaded: embeddings (1.3 GB), lm_head (tied), tokenizer
+# Listening: http://0.0.0.0:8082
+```
+
+#### POST /v1/embed
+
+Convert token IDs to scaled initial residual vectors.
+
+```json
+POST /v1/embed
+{"token_ids": [1, 5432, 235, 1234]}
+```
+
+```json
+{
+  "residual": [[0.12, -0.03, ...], [0.45, 0.01, ...]],
+  "seq_len": 4,
+  "hidden_size": 2560,
+  "latency_ms": 0.02
+}
+```
+
+Binary wire format (`Content-Type: application/x-larql-ffn`):
+
+```
+Request:  [num_tokens u32 LE][token_id u32 LE × N]
+Response: [seq_len u32 LE][hidden_size u32 LE][residuals f32[] LE]
+```
+
+**Measured (Gemma 3 4B, hidden=2560):** encode request 17 ns, encode response 1.5 µs.
+Binary is 6.7× faster and 3× smaller than JSON for the embed response. Use binary on the decode hot path.
+
+#### POST /v1/logits
+
+Project a final residual through lm_head to get token probabilities. Accepts JSON or binary input.
+
+```json
+POST /v1/logits
+{"residual": [0.12, -0.03, ...], "top_k": 5, "temperature": 1.0}
+```
+
+```json
+{
+  "top_k": [
+    {"token_id": 9515, "token": "Paris", "prob": 0.801},
+    {"token_id": 235,  "token": "the",   "prob": 0.042}
+  ],
+  "latency_ms": 2.1
+}
+```
+
+Binary input (`Content-Type: application/x-larql-ffn`): raw `[f32 × hidden_size]` little-endian bytes.
+
+Performance (measured, Gemma 3 4B): ~14ms CPU (BLAS), ~0.67ms Metal (Apple Silicon f32_gemv).
+
+#### GET /v1/token/encode
+
+```
+GET /v1/token/encode?text=Paris
+→ {"token_ids": [9515], "text": "Paris"}
+```
+
+#### GET /v1/token/decode
+
+```
+GET /v1/token/decode?ids=9515,235,1234
+→ {"text": "Paris the model", "token_ids": [9515, 235, 1234]}
+```
+
+#### Memory footprint — embed-only server
+
+Measured on Gemma 3 4B Q4K (macOS, release build). See ADR-0008 for full benchmark output.
+
+| Model | Disk (f16) | RSS (f32 heap) | Total RSS (with tokenizer) |
+|-------|-----------|----------------|---------------------------|
+| Gemma 3 4B | 1.34 GB | 2.69 GB | ~2.9 GB |
+| Gemma 4 31B | 2.67 GB | 5.37 GB | ~5.6 GB |
+| Llama 3 70B | 2.10 GB | 4.20 GB | ~4.5 GB |
+
+The current implementation decodes f16→f32 at load time (doubles RSS vs disk).
+A future f16-at-rest path will halve this — tracked in ADR-0008 open questions.
+
+The tokenizer alone takes ~244 MB for the Gemma 262K-vocab BPE model.
 
 ### gRPC
 

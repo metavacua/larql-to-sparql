@@ -4,7 +4,7 @@
 //! from larql-models and wiring them into larql-compute's FullPipelineLayer.
 //! Both GPU and CPU paths use this — no duplicated param extraction.
 
-use larql_compute::{QuantWeight, QuantFormat, FullPipelineLayer};
+use larql_compute::{QuantWeight, QuantFormat, FullPipelineLayer, MoeLayerWeights};
 use crate::model::ModelWeights;
 
 /// Extract per-layer architecture parameters into a FullPipelineLayer.
@@ -82,11 +82,68 @@ pub fn build_arch_params<'a>(
         layer_scalar,
         input_norm_bias: None,
         post_attn_norm_bias: None,
+        q_norm_weight: arch.attn_q_norm_key(layer)
+            .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+        k_norm_weight: arch.attn_k_norm_key(layer)
+            .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
         ffn_up_bias: arch.ffn_up_bias_key(layer)
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
         ffn_down_bias: arch.ffn_down_bias_key(layer)
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
+
+        moe: build_moe_weights(weights, arch, layer),
     }
+}
+
+fn build_moe_weights<'a>(
+    weights: &'a ModelWeights,
+    arch: &dyn larql_models::ModelArchitecture,
+    layer: usize,
+) -> Option<MoeLayerWeights<'a>> {
+    if !arch.is_hybrid_moe() { return None; }
+
+    let gate_up_key = arch.packed_experts_gate_up_key(layer)?;
+    let down_key = arch.packed_experts_down_key(layer)?;
+    let router_key = arch.moe_router_key(layer)?;
+
+    let experts_gate_up = weights.get_packed_bytes(&gate_up_key)?;
+    let experts_down = weights.get_packed_bytes(&down_key)?;
+    let router_proj = weights.vectors.get(&router_key)?.as_slice();
+
+    let router_scale = arch.moe_router_scale_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let router_per_expert_scale = arch.moe_router_per_expert_scale_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let pre_experts_norm = arch.moe_pre_experts_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let post_ffn1_norm = arch.moe_post_ffn1_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let post_experts_norm = arch.moe_post_experts_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+
+    Some(MoeLayerWeights {
+        experts_gate_up,
+        experts_down,
+        router_proj,
+        router_scale,
+        router_per_expert_scale,
+        pre_experts_norm,
+        post_ffn1_norm,
+        post_experts_norm,
+        num_experts: arch.num_experts(),
+        top_k: arch.num_experts_per_token(),
+        intermediate_size: arch.moe_intermediate_size(),
+    })
 }
 
 /// Helper: resolve attention weights from vindex (Q4_K preferred, Q8 fallback).
@@ -118,12 +175,35 @@ pub fn resolve_attn_weights<'a>(
 }
 
 /// Helper: resolve FFN weights from vindex interleaved mmap.
+///
+/// Prefers the per-matrix manifest when available (emitted by the streaming
+/// `--quant q4k` writer: gate/up Q4_K, down Q6_K — non-uniform stride). Falls
+/// back to the legacy uniform-stride layout produced by `build_q4k_weights.rs`
+/// when the manifest is absent so older vindexes still work.
 pub fn resolve_ffn_weights<'a>(
-    q4_ffn_mmap: &'a [u8],
+    index: &'a larql_vindex::VectorIndex,
     layer: usize,
+    q4_ffn_mmap: &'a [u8],
     q4_ffn_per_matrix: usize,
     ffn_format: QuantFormat,
 ) -> (QuantWeight<'a>, QuantWeight<'a>, QuantWeight<'a>) {
+    fn str_to_format(s: &str, fallback: QuantFormat) -> QuantFormat {
+        match s {
+            "Q6_K" => QuantFormat::Q6_K,
+            "Q4_K" => QuantFormat::Q4_K,
+            "Q4_0" => QuantFormat::Q4_0,
+            _ => fallback,
+        }
+    }
+
+    if let Some([gate, up, down]) = index.interleaved_q4k_layer_data(layer) {
+        return (
+            QuantWeight { data: gate.0, scales: None, format: str_to_format(gate.1, ffn_format) },
+            QuantWeight { data: up.0,   scales: None, format: str_to_format(up.1,   ffn_format) },
+            QuantWeight { data: down.0, scales: None, format: str_to_format(down.1, ffn_format) },
+        );
+    }
+
     let q4_ffn_per_layer = q4_ffn_per_matrix * 3;
     let fs = layer * q4_ffn_per_layer;
     (
@@ -147,7 +227,7 @@ pub fn build_pipeline_layers<'a>(
     layer_range.map(|layer| {
         let (wq, wk, wv, wo) = resolve_attn_weights(index, layer)
             .expect("No attention weights available for layer");
-        let (gate, up, down) = resolve_ffn_weights(q4_ffn_mmap, layer, q4_ffn_per_matrix, ffn_format);
+        let (gate, up, down) = resolve_ffn_weights(index, layer, q4_ffn_mmap, q4_ffn_per_matrix, ffn_format);
         build_arch_params(weights, layer, wq, wk, wv, wo, gate, up, down)
     }).collect()
 }

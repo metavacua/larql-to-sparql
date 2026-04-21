@@ -18,7 +18,7 @@ use super::{dot_proj, apply_norm};
 ///      Combined: (stream1 + stream2) * 1/sqrt(2)
 ///
 /// Returns a Vec of [seq, ple_dim] arrays, one per layer. Empty vec if PLE is not used.
-pub(super) fn precompute_per_layer_inputs(
+pub fn precompute_per_layer_inputs(
     weights: &ModelWeights,
     main_embeds: &Array2<f32>,
     token_ids: &[u32],

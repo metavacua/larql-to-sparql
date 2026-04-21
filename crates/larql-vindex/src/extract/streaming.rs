@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use ndarray::Array2;
 
 use crate::config::dtype::StorageDtype;
+use crate::config::types::QuantFormat;
 use crate::config::{VindexConfig, VindexLayerInfo, VindexModelConfig};
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
@@ -35,8 +36,21 @@ pub fn build_vindex_streaming(
     down_top_k: usize,
     extract_level: crate::ExtractLevel,
     dtype: StorageDtype,
+    quant: QuantFormat,
+    weight_opts: crate::format::weights::WriteWeightsOptions,
+    q4k_opts: crate::format::weights::Q4kWriteOptions,
+    // Skip writing `gate_vectors.bin` entirely. Only valid when
+    // `quant == Q4k` — the loader synthesizes gate from Q4K at load
+    // time. Refused otherwise because without a Q4K interleaved file
+    // the gate would be unrecoverable.
+    drop_gate_vectors: bool,
     callbacks: &mut dyn IndexBuildCallbacks,
 ) -> Result<(), VindexError> {
+    if drop_gate_vectors && quant != QuantFormat::Q4k {
+        return Err(VindexError::Parse(
+            "--drop-gate-vectors requires --quant q4k (the loader rebuilds gate from Q4K)".into(),
+        ));
+    }
     std::fs::create_dir_all(output_dir)?;
 
     // Detect architecture
@@ -103,9 +117,36 @@ pub fn build_vindex_streaming(
     callbacks.on_stage_done("loading", 0.0);
 
     // ── 1. Gate vectors (streaming, one layer at a time) ──
+    //
+    // If `drop_gate_vectors` is set we still walk every layer to build
+    // `layer_infos` (num_features per layer is part of `index.json`)
+    // but redirect writes to `/dev/null` (`io::sink`). The gate bytes
+    // are recoverable from `interleaved_q4k.bin` at load time.
     callbacks.on_stage("gate_vectors");
     let gate_path = output_dir.join("gate_vectors.bin");
-    let mut gate_file = BufWriter::new(std::fs::File::create(&gate_path)?);
+    enum GateSink {
+        File(BufWriter<std::fs::File>),
+        Discard(std::io::Sink),
+    }
+    impl std::io::Write for GateSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            match self {
+                GateSink::File(f) => f.write(buf),
+                GateSink::Discard(s) => s.write(buf),
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            match self {
+                GateSink::File(f) => f.flush(),
+                GateSink::Discard(s) => s.flush(),
+            }
+        }
+    }
+    let mut gate_file: GateSink = if drop_gate_vectors {
+        GateSink::Discard(std::io::sink())
+    } else {
+        GateSink::File(BufWriter::new(std::fs::File::create(&gate_path)?))
+    };
     let mut layer_infos: Vec<VindexLayerInfo> = Vec::new();
     let mut offset: u64 = 0;
 
@@ -167,6 +208,20 @@ pub fn build_vindex_streaming(
                     offset += layer_bytes;
                 }
             }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): packed experts stored separately.
+            // gate_vectors.bin uses the dense FFN gate for KNN walk routing.
+            let gate_key = normalize_key(&arch.ffn_gate_key(layer), prefixes);
+            if let Some(tensor) = get_tensor_f32(&shard_mmaps, &tensor_index, &gate_key)? {
+                let num_features = tensor.shape()[0];
+                let data = tensor.as_slice().unwrap();
+                let length = write_floats(&mut gate_file, data, dtype)?;
+                layer_infos.push(VindexLayerInfo {
+                    layer, num_features, offset, length,
+                    num_experts: None, num_features_per_expert: None,
+                });
+                offset += length;
+            }
         } else if is_moe && n_experts > 0 {
             // Standard MoE (Mixtral): per-expert gate tensors
             let mut total_features = 0usize;
@@ -213,6 +268,12 @@ pub fn build_vindex_streaming(
         callbacks.on_layer_done("gate", layer, start.elapsed().as_secs_f64() * 1000.0);
     }
     gate_file.flush()?;
+    // If we were only sinking bytes, don't leave a zero-byte
+    // gate_vectors.bin behind for the loader to trip over.
+    drop(gate_file);
+    if drop_gate_vectors && gate_path.exists() {
+        let _ = std::fs::remove_file(&gate_path);
+    }
     callbacks.on_stage_done("gate_vectors", 0.0);
 
     // ── 1b. Router weights (MoE models only) ──
@@ -261,7 +322,7 @@ pub fn build_vindex_streaming(
     let mut all_down_meta: Vec<Option<Vec<Option<crate::FeatureMeta>>>> = vec![None; num_layers];
 
     // Build whole-word vocab once
-    let (_ww_ids, _ww_embed) = super::build::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
+    let (_ww_ids, _ww_embed) = super::build_helpers::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
 
     for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(num_layers) {
         callbacks.on_layer_start("down", layer, num_layers);
@@ -292,6 +353,14 @@ pub fn build_vindex_streaming(
                 }).collect()
             } else {
                 callbacks.on_layer_done("down", layer, 0.0); continue;
+            }
+        } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
+            // Hybrid MoE (Gemma 4 26B A4B): use dense FFN down for down_meta.
+            // Expert down matrices are in experts_packed.bin for inference.
+            let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
+            match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
+                Some(t) => vec![t],
+                None => { callbacks.on_layer_done("down", layer, 0.0); continue; }
             }
         } else if is_moe && n_experts > 0 {
             let mut mats = Vec::new();
@@ -400,12 +469,13 @@ pub fn build_vindex_streaming(
             huggingface_repo: Some(model_name.to_string()),
             huggingface_revision: None,
             safetensors_sha256: None,
-            extracted_at: super::build::chrono_now(),
+            extracted_at: super::build_helpers::chrono_now(),
             larql_version: env!("CARGO_PKG_VERSION").to_string(),
         }),
         checksums: None,
         extract_level,
         dtype,
+        quant,
         layer_bands: crate::LayerBands::for_family(&family, num_layers),
         model_config: Some(VindexModelConfig {
             model_type: cfg.model_type.clone(),
@@ -419,7 +489,13 @@ pub fn build_vindex_streaming(
                     num_experts: n_experts,
                     top_k: arch.num_experts_per_token(),
                     shared_expert: arch.num_shared_experts() > 0,
-                    router_type: "top_k_softmax".to_string(),
+                    router_type: arch.moe_router_type().to_string(),
+                    moe_intermediate_size: if arch.moe_intermediate_size() > 0 {
+                        Some(arch.moe_intermediate_size())
+                    } else {
+                        None
+                    },
+                    hybrid: arch.is_hybrid_moe(),
                 })
             } else { None },
             // Per-layer geometry (Gemma 4)
@@ -433,6 +509,7 @@ pub fn build_vindex_streaming(
             per_layer_embed_dim: cfg.per_layer_embed_dim,
             rope_local_base: cfg.rope_local_base,
             query_pre_attn_scalar: cfg.query_pre_attn_scalar,
+            final_logit_softcapping: cfg.final_logit_softcapping,
         }),
     };
 
@@ -442,7 +519,12 @@ pub fn build_vindex_streaming(
     std::fs::write(output_dir.join("index.json"), config_json)?;
 
     // ── 6. Model weights (if extract level requires them) ──
-    if extract_level != crate::ExtractLevel::Browse {
+    // With quant=q4k we always materialise weights regardless of the
+    // declared level — the Q4_K writer emits all of attn, FFN, norms, lm_head
+    // in one pass and makes `--level browse --quant q4k` incoherent, so
+    // q4k implicitly promotes to "all".
+    let needs_weights = extract_level.writes_attn() || quant != QuantFormat::None;
+    if needs_weights {
         let shard_refs: Vec<&[u8]> = shard_mmaps.iter().map(|s| s.mmap.as_ref()).collect();
         let streaming_source = crate::format::weights::StreamingWeights {
             shard_mmaps: &shard_refs,
@@ -450,8 +532,27 @@ pub fn build_vindex_streaming(
             arch: &*arch,
             num_layers,
         };
-        crate::format::weights::write_model_weights(&streaming_source, output_dir, callbacks)?;
-        // write_model_weights updates index.json with has_model_weights=true
+        // Thread the extract level into the write options so the
+        // writer can skip attn/FFN/lm_head sections per tier.
+        let mut level_opts = weight_opts;
+        level_opts.level = extract_level;
+        match quant {
+            QuantFormat::None => {
+                crate::format::weights::write_model_weights_with_opts(
+                    &streaming_source, output_dir, callbacks, level_opts,
+                )?;
+            }
+            QuantFormat::Q4k => {
+                // Q4K doesn't write `up_weights.bin` / `down_weights.bin`
+                // at all — the FFN weights live in `interleaved_q4k.bin`.
+                // `ffn_compact` is a no-op here by construction. Level
+                // gating for Q4K is a future refinement (today Q4K
+                // always writes the full set).
+                crate::format::weights::write_model_weights_q4k_with_opts(
+                    &streaming_source, output_dir, callbacks, q4k_opts,
+                )?;
+            }
+        }
     }
 
     // Final checksums
@@ -511,8 +612,4 @@ fn normalize_key(key: &str, prefixes: &[&str]) -> String {
     key.to_string()
 }
 
-fn write_floats(w: &mut impl Write, data: &[f32], dtype: StorageDtype) -> Result<u64, VindexError> {
-    let bytes = crate::config::dtype::encode_floats(data, dtype);
-    w.write_all(&bytes)?;
-    Ok(bytes.len() as u64)
-}
+use crate::config::dtype::write_floats;

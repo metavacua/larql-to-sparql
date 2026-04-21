@@ -28,6 +28,33 @@ fn gate_matmul(gate: &ArrayView2<f32>, x: &ArrayView2<f32>) -> Array2<f32> {
     cpu.matmul_transb(*gate, *x)
 }
 
+/// GPU-accelerated gate matmul for the single-position decode case.
+///
+/// When `x` is a single row (seq_len == 1) and the caller passes a Metal
+/// backend, route the gate gemv through `f32_gemv` — the dedicated
+/// row-per-simdgroup kernel that closed lm_head on the 4B. Returns
+/// `None` if the gemv threshold isn't met or seq_len > 1; caller falls
+/// back to `gate_matmul` (CPU BLAS).
+///
+/// Shape note: returns the [N, 1] column vector laid out as [N]; caller
+/// wraps it into Array2 shape (N, 1) at the seam.
+fn gate_gemv_gpu(
+    gate: &ArrayView2<f32>,
+    x: &ArrayView2<f32>,
+    backend: &dyn larql_compute::ComputeBackend,
+) -> Option<Array2<f32>> {
+    if x.shape()[0] != 1 { return None; }
+    let x_row = x.row(0);
+    let x_slice = x_row.as_slice()?;
+    // Force GPU dispatch regardless of the backend's flop_threshold —
+    // per-layer gate gemvs are ~50–200 M FLOPs, below the default 500 M
+    // threshold that protects tiny one-off gemvs. At 34/60 layers × every
+    // decode token the aggregated saving is real even if each call alone
+    // would be dispatch-bound.
+    let scores = backend.f32_gemv_force(*gate, x_slice)?;
+    Array2::from_shape_vec((gate.shape()[0], 1), scores).ok()
+}
+
 /// Resolved gate matrix data — owned f32 with feature count.
 struct GateData {
     data: Vec<f32>,
@@ -42,6 +69,58 @@ impl GateData {
 
 /// Gate KNN methods for VectorIndex.
 impl VectorIndex {
+    /// Cap the number of decoded f16 gate layers held in
+    /// `f16_decode_cache`. Call with 0 for unlimited (default); non-zero
+    /// enables LRU eviction on the next insert that would exceed the cap.
+    ///
+    /// Typical use: `larql serve --max-gate-cache-layers N` to bound a
+    /// long-running server's RSS. A 31B f16 gate table decodes to ~433 MB
+    /// per layer, so `--max-gate-cache-layers 4` caps decoded gates at
+    /// ~1.7 GB (at the cost of repeated decode on evicted layers).
+    pub fn set_gate_cache_max_layers(&self, max_layers: usize) {
+        self.gate_cache_max_layers
+            .store(max_layers, std::sync::atomic::Ordering::Relaxed);
+        // Shrink eagerly if the new cap is below the current cache size.
+        if max_layers > 0 {
+            let mut cache = self.f16_decode_cache.lock().unwrap();
+            let mut lru = self.gate_cache_lru.lock().unwrap();
+            while lru.len() > max_layers {
+                if let Some(evict) = lru.pop_back() {
+                    if evict < cache.len() {
+                        cache[evict] = None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record a cache hit/miss on `layer`, evicting LRU entries if the
+    /// cap is reached. Must be called with `cache` already locked by the
+    /// caller; `just_inserted` is true when the caller *just* decoded and
+    /// wrote `cache[layer]`.
+    fn touch_gate_cache_lru(&self, layer: usize, just_inserted: bool, cache: &mut Vec<Option<Vec<f32>>>) {
+        let max = self.gate_cache_max_layers.load(std::sync::atomic::Ordering::Relaxed);
+        if max == 0 {
+            return;
+        }
+        let mut lru = self.gate_cache_lru.lock().unwrap();
+        // Move `layer` to the front (newest). If it's not in the queue
+        // yet, push it; otherwise rotate.
+        if let Some(pos) = lru.iter().position(|&l| l == layer) {
+            lru.remove(pos);
+        }
+        lru.push_front(layer);
+        if just_inserted {
+            while lru.len() > max {
+                if let Some(evict) = lru.pop_back() {
+                    if evict < cache.len() && evict != layer {
+                        cache[evict] = None;
+                    }
+                }
+            }
+        }
+    }
+
     /// Resolve the gate matrix for a layer as contiguous f32.
     /// Handles all storage paths: warmed → heap → mmap f32 → mmap f16.
     /// Returns owned data (zero-copy from mmap via to_vec on the hot path).
@@ -86,10 +165,12 @@ impl VectorIndex {
                     crate::config::dtype::StorageDtype::F16 => {
                         let mut cache = self.f16_decode_cache.lock().unwrap();
                         if cache.len() <= layer { cache.resize(layer + 1, None); }
-                        if cache[layer].is_none() {
+                        let miss = cache[layer].is_none();
+                        if miss {
                             let raw = &mmap[byte_offset..byte_end];
                             cache[layer] = Some(larql_models::quant::half::decode_f16(raw));
                         }
+                        self.touch_gate_cache_lru(layer, miss, &mut cache);
                         cache[layer].as_ref().unwrap().clone()
                     }
                 };
@@ -170,9 +251,9 @@ impl VectorIndex {
         None // Not on fast path — caller will use resolve_gate
     }
 
-    /// Per-feature gate walk: score each feature with an individual dot product.
-    /// No matrix multiplication. Iterates gate vectors from mmap and computes
-    /// dot products one feature at a time. Returns exact top-K.
+    /// Batched gate walk: scores all features via a single BLAS `gemv`, then
+    /// extracts the top-K. Despite the name, this is batched matrix-vector —
+    /// see [`Self::gate_walk_pure`] for a true per-feature implementation.
     pub fn gate_walk(
         &self,
         layer: usize,
@@ -346,152 +427,6 @@ impl VectorIndex {
         }
     }
 
-    /// Look up metadata for a specific feature.
-    /// Checks heap first (mutation overrides), then mmap (production read path).
-    pub fn feature_meta(&self, layer: usize, feature: usize) -> Option<FeatureMeta> {
-        // Heap path first — catches mutation overrides (INSERT/UPDATE)
-        if let Some(meta) = self.down_meta
-            .get(layer)
-            .and_then(|v| v.as_ref())
-            .and_then(|metas| metas.get(feature))
-            .and_then(|m| m.clone())
-        {
-            return Some(meta);
-        }
-        // Mmap path (production — zero heap, no mutations)
-        if let Some(ref dm) = self.down_meta_mmap {
-            return dm.feature_meta(layer, feature);
-        }
-        None
-    }
-
-    /// Number of features indexed at a layer.
-    pub fn num_features(&self, layer: usize) -> usize {
-        // Check mmap first
-        if self.gate_mmap_bytes.is_some() {
-            return self.gate_mmap_slices.get(layer)
-                .map(|s| s.num_features)
-                .unwrap_or(0);
-        }
-        self.gate_vectors
-            .get(layer)
-            .and_then(|v| v.as_ref())
-            .map(|m| m.shape()[0])
-            .unwrap_or(0)
-    }
-
-    /// Total gate vectors loaded across all layers.
-    pub fn total_gate_vectors(&self) -> usize {
-        if self.gate_mmap_bytes.is_some() {
-            return self.gate_mmap_slices.iter().map(|s| s.num_features).sum();
-        }
-        self.gate_vectors
-            .iter()
-            .filter_map(|v| v.as_ref())
-            .map(|m| m.shape()[0])
-            .sum()
-    }
-
-    /// Total down metadata entries loaded across all layers.
-    pub fn total_down_meta(&self) -> usize {
-        if let Some(ref dm) = self.down_meta_mmap {
-            return dm.total_features();
-        }
-        self.down_meta
-            .iter()
-            .filter_map(|v| v.as_ref())
-            .map(|metas| metas.iter().filter(|m| m.is_some()).count())
-            .sum()
-    }
-
-    /// Layers that have gate vectors loaded.
-    pub fn loaded_layers(&self) -> Vec<usize> {
-        if self.gate_mmap_bytes.is_some() {
-            return self.gate_mmap_slices.iter()
-                .enumerate()
-                .filter(|(_, s)| s.num_features > 0)
-                .map(|(i, _)| i)
-                .collect();
-        }
-        self.gate_vectors
-            .iter()
-            .enumerate()
-            .filter_map(|(i, v)| v.as_ref().map(|_| i))
-            .collect()
-    }
-
-    /// Access down metadata for a specific layer.
-    pub fn down_meta_at(&self, layer: usize) -> Option<&[Option<FeatureMeta>]> {
-        self.down_meta
-            .get(layer)
-            .and_then(|v| v.as_ref())
-            .map(|v| v.as_slice())
-    }
-
-    /// Access gate vectors matrix for a specific layer (heap mode only).
-    /// Returns None in mmap mode — use gate_knn() directly instead.
-    pub fn gate_vectors_at(&self, layer: usize) -> Option<&Array2<f32>> {
-        self.gate_vectors.get(layer).and_then(|v| v.as_ref())
-    }
-
-    /// Extract a single gate vector for a feature. Works in both heap and mmap mode.
-    /// Returns the raw f32 vector (hidden_size elements).
-    pub fn gate_vector(&self, layer: usize, feature: usize) -> Option<Vec<f32>> {
-        // Heap path
-        if let Some(Some(matrix)) = self.gate_vectors.get(layer) {
-            if feature < matrix.shape()[0] {
-                return Some(matrix.row(feature).to_vec());
-            }
-            return None;
-        }
-        // Mmap path
-        if let Some(ref mmap) = self.gate_mmap_bytes {
-            if let Some(slice) = self.gate_mmap_slices.get(layer) {
-                if feature >= slice.num_features { return None; }
-                let bpf = crate::config::dtype::bytes_per_float(self.gate_mmap_dtype);
-                let byte_offset = (slice.float_offset + feature * self.hidden_size) * bpf;
-                let byte_count = self.hidden_size * bpf;
-                if byte_offset + byte_count > mmap.len() { return None; }
-                let raw = &mmap[byte_offset..byte_offset + byte_count];
-                return Some(crate::config::dtype::decode_floats(raw, self.gate_mmap_dtype));
-            }
-        }
-        None
-    }
-
-    /// Extract all gate vectors at a layer as flat f32 data.
-    /// Returns (flat_data, num_features, hidden_size). Works in both heap and mmap mode.
-    /// Use for bulk operations (SVD, PCA, numpy export).
-    pub fn gate_vectors_flat(&self, layer: usize) -> Option<(Vec<f32>, usize, usize)> {
-        // Heap path
-        if let Some(Some(matrix)) = self.gate_vectors.get(layer) {
-            let (rows, cols) = (matrix.shape()[0], matrix.shape()[1]);
-            if let Some(data) = matrix.as_slice() {
-                return Some((data.to_vec(), rows, cols));
-            }
-            // Non-contiguous — copy row by row
-            let mut data = Vec::with_capacity(rows * cols);
-            for r in 0..rows {
-                data.extend(matrix.row(r).iter());
-            }
-            return Some((data, rows, cols));
-        }
-        // Mmap path
-        if let Some(ref mmap) = self.gate_mmap_bytes {
-            if let Some(slice) = self.gate_mmap_slices.get(layer) {
-                if slice.num_features == 0 { return None; }
-                let bpf = crate::config::dtype::bytes_per_float(self.gate_mmap_dtype);
-                let byte_offset = slice.float_offset * bpf;
-                let byte_count = slice.num_features * self.hidden_size * bpf;
-                if byte_offset + byte_count > mmap.len() { return None; }
-                let raw = &mmap[byte_offset..byte_offset + byte_count];
-                let data = crate::config::dtype::decode_floats(raw, self.gate_mmap_dtype);
-                return Some((data, slice.num_features, self.hidden_size));
-            }
-        }
-        None
-    }
-
     /// Batched gate KNN: compute scores for ALL sequence positions in one BLAS gemm.
     ///
     /// Input: x is [seq_len, hidden]. Computes gate_vectors @ x^T = [features, seq_len].
@@ -547,8 +482,34 @@ impl VectorIndex {
         layer: usize,
         x: &Array2<f32>,
     ) -> Option<Array2<f32>> {
+        self.gate_scores_batch_backend(layer, x, None)
+    }
+
+    /// Backend-aware gate scores. When `backend` is present and `x` is
+    /// a single row (seq_len == 1), route through `f32_gemv` — the
+    /// same row-per-simdgroup path that closed lm_head. On Gemma 4 31B
+    /// decode (hidden = 5376, ~18 K features, 60 layers) the CPU-BLAS
+    /// path clocks ~4.3 ms/layer × 60 = 258 ms/token = 60 % of decode.
+    /// Metal f32_gemv was measured at ~1 ms/layer on the lm_head of
+    /// similar shape, so the upside is ~200 ms/token.
+    pub fn gate_scores_batch_backend(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        backend: Option<&dyn larql_compute::ComputeBackend>,
+    ) -> Option<Array2<f32>> {
         if x.shape()[0] == 0 { return None; }
-        // Fast path first, then fallback
+
+        // Metal gemv fast path (decode / single-row prefill).
+        if let Some(be) = backend {
+            if x.shape()[0] == 1 {
+                if let Some(scores_2d) = self.gate_scores_2d_gpu(layer, x, be) {
+                    return Some(scores_2d.t().to_owned());
+                }
+            }
+        }
+
+        // BLAS paths — warmed f32 / mmap f32 / lazy-decoded f16.
         let scores_2d = if let Some(s) = self.gate_scores_2d_fast(layer, x) {
             s
         } else {
@@ -556,6 +517,74 @@ impl VectorIndex {
             gate_matmul(&gate.view(self.hidden_size), &x.view())
         };
         Some(scores_2d.t().to_owned())
+    }
+
+    /// Zero-copy GPU gate scores for f32 mmap/warmed, single-row `x`.
+    /// Matches `gate_scores_2d_fast` shape contract: returns [N, 1].
+    fn gate_scores_2d_gpu(
+        &self,
+        layer: usize,
+        x: &Array2<f32>,
+        backend: &dyn larql_compute::ComputeBackend,
+    ) -> Option<Array2<f32>> {
+        // Warmed cache (f32 heap).
+        {
+            let warmed = self.warmed_gates.read().unwrap();
+            if let Some(Some(ref data)) = warmed.get(layer) {
+                let nf = self.gate_mmap_slices.get(layer).map(|s| s.num_features).unwrap_or(0);
+                if nf > 0 {
+                    let view = ArrayView2::from_shape((nf, self.hidden_size), data.as_slice()).unwrap();
+                    if let Some(scores) = gate_gemv_gpu(&view, &x.view(), backend) {
+                        return Some(scores);
+                    }
+                }
+            }
+        }
+        // f32 mmap (zero-copy, the production path for f32 gate vectors).
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F32 {
+            if let Some(ref mmap) = self.gate_mmap_bytes {
+                if let Some(slice) = self.gate_mmap_slices.get(layer) {
+                    if slice.num_features == 0 { return None; }
+                    let byte_offset = slice.float_offset * 4;
+                    let byte_end = byte_offset + slice.num_features * self.hidden_size * 4;
+                    if byte_end > mmap.len() { return None; }
+                    let data = unsafe {
+                        let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
+                        std::slice::from_raw_parts(ptr, slice.num_features * self.hidden_size)
+                    };
+                    let view = ArrayView2::from_shape((slice.num_features, self.hidden_size), data).unwrap();
+                    if let Some(scores) = gate_gemv_gpu(&view, &x.view(), backend) {
+                        return Some(scores);
+                    }
+                }
+            }
+        }
+        // f16 mmap: zero-copy pass of raw f16 bytes to Metal's f16_gemv
+        // shader, skipping the f16→f32 decode cache entirely. On 31B with
+        // an ~18 K × 5376 gate matrix (387 MB f32, 194 MB f16) halving
+        // the memory bandwidth is the difference between hitting the
+        // CPU-BLAS ceiling and going faster on Metal.
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16 {
+            if x.shape()[0] == 1 {
+                let slice = self.gate_mmap_slices.get(layer)?;
+                if slice.num_features == 0 { return None; }
+                let mmap = self.gate_mmap_bytes.as_ref()?;
+                let byte_offset = slice.float_offset * 2;
+                let byte_end = byte_offset + slice.num_features * self.hidden_size * 2;
+                if byte_end <= mmap.len() {
+                    let raw = &mmap[byte_offset..byte_end];
+                    let x_row = x.row(0);
+                    if let Some(x_slice) = x_row.as_slice() {
+                        if let Some(scores) = backend.f16_gemv_force(
+                            raw, x_slice, slice.num_features, self.hidden_size,
+                        ) {
+                            return Array2::from_shape_vec((slice.num_features, 1), scores).ok();
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Zero-copy batch gate scores for f32 mmap/warmed — returns [features, seq].
@@ -587,6 +616,28 @@ impl VectorIndex {
                     return Some(gate_matmul(&view, &x.view()));
                 }
             }
+        }
+        // f16 mmap — lazy decode into cache, then borrow (no per-call clone).
+        // Holding the Mutex for the matmul is fine: forward passes are serial
+        // per-layer, and this replaces a 462MB clone with a direct view.
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16 {
+            let slice = self.gate_mmap_slices.get(layer)?;
+            if slice.num_features == 0 { return None; }
+            let mmap = self.gate_mmap_bytes.as_ref()?;
+            let mut cache = self.f16_decode_cache.lock().unwrap();
+            if cache.len() <= layer { cache.resize(layer + 1, None); }
+            let miss = cache[layer].is_none();
+            if miss {
+                let byte_offset = slice.float_offset * 2;
+                let byte_end = byte_offset + slice.num_features * self.hidden_size * 2;
+                if byte_end > mmap.len() { return None; }
+                let raw = &mmap[byte_offset..byte_end];
+                cache[layer] = Some(larql_models::quant::half::decode_f16(raw));
+            }
+            self.touch_gate_cache_lru(layer, miss, &mut cache);
+            let data = cache[layer].as_ref().unwrap();
+            let view = ArrayView2::from_shape((slice.num_features, self.hidden_size), data.as_slice()).unwrap();
+            return Some(gate_matmul(&view, &x.view()));
         }
         None
     }
@@ -730,37 +781,175 @@ impl VectorIndex {
         Some(Self::top_k_from_scores(&scores, top_k))
     }
 
-    /// Number of features at a layer (works in both heap and mmap mode).
-    pub fn num_features_at(&self, layer: usize) -> usize {
-        if self.gate_mmap_bytes.is_some() {
-            self.gate_mmap_slices.get(layer).map(|s| s.num_features).unwrap_or(0)
-        } else {
-            self.num_features(layer)
+}
+
+// ══════════════════════════════════════════════════════════════
+// Gate cache LRU tests
+//
+// Cover `set_gate_cache_max_layers` and `touch_gate_cache_lru` on an
+// f16 mmap-backed VectorIndex. Each `gate_knn` call at a new layer
+// lazily decodes the layer's gate matrix into `f16_decode_cache`;
+// callers should cap the number of resident decoded layers via
+// `set_gate_cache_max_layers` to bound RSS on long-running servers.
+// ══════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod gate_cache_lru_tests {
+    use super::super::core::VectorIndex;
+    use crate::config::dtype::StorageDtype;
+    use ndarray::Array1;
+
+    /// Build a minimal f16 mmap-backed VectorIndex suitable for exercising
+    /// the f16 decode cache. `num_layers` layers, each with `num_features`
+    /// features over `hidden` dims. The gate matrix at each layer is a
+    /// scaled identity (row i, col (i % hidden) = 1.0) so a query that's
+    /// 1.0 in dim 0 always hits feature 0.
+    fn f16_mmap_index(num_layers: usize, num_features: usize, hidden: usize) -> VectorIndex {
+        let per_layer_floats = num_features * hidden;
+        let per_layer_bytes = per_layer_floats * 2; // f16
+        let total_bytes = per_layer_bytes * num_layers;
+
+        let mut anon = memmap2::MmapMut::map_anon(total_bytes).unwrap();
+
+        let mut slices = Vec::with_capacity(num_layers);
+        for l in 0..num_layers {
+            // Row i dim (i % hidden) = 1.0, zeros elsewhere.
+            let mut data = vec![0.0f32; per_layer_floats];
+            for i in 0..num_features {
+                data[i * hidden + (i % hidden)] = 1.0;
+            }
+            let bytes = larql_models::quant::half::encode_f16(&data);
+            let off = l * per_layer_bytes;
+            anon[off..off + per_layer_bytes].copy_from_slice(&bytes);
+            slices.push(super::super::types::GateLayerSlice {
+                float_offset: (l * per_layer_bytes) / 2,
+                num_features,
+            });
+        }
+
+        let mmap = anon.make_read_only().unwrap();
+        VectorIndex::new_mmap(mmap, slices, StorageDtype::F16, None, num_layers, hidden)
+    }
+
+    /// Touch layer `l` to force a gate cache decode (or a hit if already cached).
+    fn touch(idx: &VectorIndex, layer: usize) {
+        let q = Array1::from_vec(vec![1.0f32; idx.hidden_size]);
+        let _ = idx.gate_knn(layer, &q, 1);
+    }
+
+    /// Number of layers currently resident in `f16_decode_cache`.
+    fn resident_layers(idx: &VectorIndex) -> usize {
+        idx.f16_decode_cache
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|slot| slot.is_some())
+            .count()
+    }
+
+    /// Snapshot of the LRU queue, front (newest) first.
+    fn lru_snapshot(idx: &VectorIndex) -> Vec<usize> {
+        idx.gate_cache_lru
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    #[test]
+    fn unlimited_cache_grows_without_eviction() {
+        let idx = f16_mmap_index(4, 2, 4);
+        // Default cap is 0 == unlimited (historical behaviour).
+        for l in 0..4 {
+            touch(&idx, l);
+        }
+        assert_eq!(resident_layers(&idx), 4, "all 4 layers must stay resident");
+        // The LRU queue is not populated when the cap is 0 — the fast path
+        // in `touch_gate_cache_lru` bails before touching it.
+        assert_eq!(
+            lru_snapshot(&idx).len(),
+            0,
+            "LRU queue should stay empty when the cap is unlimited"
+        );
+    }
+
+    #[test]
+    fn cap_two_evicts_lru_on_third_access() {
+        let idx = f16_mmap_index(4, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(resident_layers(&idx), 2);
+
+        // Third distinct layer must evict the oldest (layer 0).
+        touch(&idx, 2);
+        assert_eq!(resident_layers(&idx), 2, "cap of 2 holds");
+
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[0].is_none(), "layer 0 should have been evicted");
+        assert!(cache[1].is_some(), "layer 1 still cached");
+        assert!(cache[2].is_some(), "layer 2 newly cached");
+    }
+
+    #[test]
+    fn cache_hit_promotes_layer_to_newest() {
+        let idx = f16_mmap_index(4, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+
+        // Populate: [0, 1]. LRU front-to-back is [1, 0] (1 newest).
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(lru_snapshot(&idx), vec![1, 0]);
+
+        // Re-touch 0 → now 0 is newest. LRU front-to-back: [0, 1].
+        touch(&idx, 0);
+        assert_eq!(lru_snapshot(&idx), vec![0, 1]);
+
+        // Next insert should evict layer 1 (oldest), NOT layer 0.
+        touch(&idx, 2);
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[0].is_some(), "layer 0 was promoted on hit, must stay");
+        assert!(cache[1].is_none(), "layer 1 was oldest, must be evicted");
+        assert!(cache[2].is_some(), "layer 2 newly cached");
+    }
+
+    #[test]
+    fn shrinking_cap_evicts_down_to_new_bound() {
+        let idx = f16_mmap_index(4, 2, 4);
+        // Enable LRU first (so the cache records eviction candidates),
+        // then fill all 4 layers at the larger cap.
+        idx.set_gate_cache_max_layers(4);
+        for l in 0..4 {
+            touch(&idx, l);
+        }
+        assert_eq!(resident_layers(&idx), 4);
+        assert_eq!(lru_snapshot(&idx).len(), 4);
+
+        // Shrink to 1 — three oldest entries must be dropped immediately.
+        idx.set_gate_cache_max_layers(1);
+        assert_eq!(resident_layers(&idx), 1);
+        assert_eq!(lru_snapshot(&idx).len(), 1);
+
+        // The retained layer must be the most-recently-used one (layer 3).
+        let cache = idx.f16_decode_cache.lock().unwrap();
+        assert!(cache[3].is_some(), "newest layer should be the survivor");
+        for l in 0..3 {
+            assert!(cache[l].is_none(), "layer {l} should have been evicted");
         }
     }
 
-    /// Pre-decode f16 gate vectors to f32 for lock-free access.
-    /// For f32 vindexes this is a no-op — the mmap path is already zero-copy.
-    pub fn warmup(&self) {
-        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F32 { return; }
+    #[test]
+    fn set_cap_zero_is_noop_on_existing_entries() {
+        let idx = f16_mmap_index(3, 2, 4);
+        idx.set_gate_cache_max_layers(2);
+        touch(&idx, 0);
+        touch(&idx, 1);
+        assert_eq!(resident_layers(&idx), 2);
 
-        let Some(ref mmap) = self.gate_mmap_bytes else { return; };
-        let mut warmed = self.warmed_gates.write().unwrap();
-        if warmed.len() < self.num_layers {
-            warmed.resize_with(self.num_layers, || None);
-        }
-        for layer in 0..self.num_layers {
-            if warmed[layer].is_some() { continue; }
-            if let Some(slice) = self.gate_mmap_slices.get(layer) {
-                if slice.num_features == 0 { continue; }
-                let bpf = crate::config::dtype::bytes_per_float(self.gate_mmap_dtype);
-                let byte_offset = slice.float_offset * bpf;
-                let byte_count = slice.num_features * self.hidden_size * bpf;
-                let byte_end = byte_offset + byte_count;
-                if byte_end > mmap.len() { continue; }
-                let raw = &mmap[byte_offset..byte_end];
-                warmed[layer] = Some(larql_models::quant::half::decode_f16(raw));
-            }
-        }
+        // Switching back to unlimited must not evict anything.
+        idx.set_gate_cache_max_layers(0);
+        assert_eq!(resident_layers(&idx), 2);
     }
 }

@@ -4,7 +4,6 @@ use std::time::Instant;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_vindex::IndexBuildCallbacks;
-use larql_vindex::write_model_weights;
 use larql_inference::{ InferenceModel};
 
 #[derive(Args)]
@@ -26,30 +25,91 @@ pub struct ExtractIndexArgs {
     #[arg(long, default_value = "10")]
     down_top_k: usize,
 
-    /// Extract level: browse (gate+embed+down_meta), inference (+attention+norms),
-    /// all (+up+down+lm_head for COMPILE).
-    #[arg(long, default_value = "browse", value_parser = parse_extract_level)]
+    /// How much of the model to include in the vindex. Each tier is a
+    /// strict superset of the previous:
+    ///
+    ///   browse     — gate + embed + down_meta only. WALK / DESCRIBE only.
+    ///   attention  — + attention + norms. Client half of `run --ffn URL`.
+    ///   inference  — + FFN up/down. Full local forward pass (default).
+    ///   all        — + lm_head + anything for COMPILE.
+    #[arg(long, default_value = "inference", value_parser = parse_extract_level)]
     level: larql_vindex::ExtractLevel,
 
     /// Include full model weights. Alias for --level all (deprecated, use --level instead).
     #[arg(long)]
     include_weights: bool,
 
-    /// Store weights in f16 (half precision). Halves file sizes with negligible accuracy loss.
+    /// Opt out of the f16 default: store side-channel tensors
+    /// (gate_vectors.bin, embeddings.bin, attn/norms/lm_head when
+    /// `--quant none`) at f32 instead. Doubles file sizes for
+    /// negligible accuracy gain. Rarely wanted.
     #[arg(long)]
-    f16: bool,
+    f32: bool,
+
+    /// Quantise model forward-pass weights inline while extracting —
+    /// skips any f32 intermediate. `q4k`: Q4_K for Q/K/O/gate/up, Q6_K
+    /// for V/down (Ollama-compatible). Implies `--level all` (the Q4_K
+    /// writer materialises all components in one pass) and forces f16
+    /// on unquantised side-channels (gate_vectors, embeddings) even if
+    /// `--f32` was passed.
+    #[arg(long, default_value = "none", value_parser = parse_quant)]
+    quant: larql_vindex::QuantFormat,
+
+    /// Skip writing `up_weights.bin` + `down_weights.bin`. The up/down
+    /// weights are reconstructable from `up_features.bin` /
+    /// `down_features.bin` which are produced separately via
+    /// `build_{up,down}_features`. This saves ~3.4 GB on a 4B f16 vindex
+    /// / ~14 GB on a 31B vindex.
+    ///
+    /// **Caveat:** a compact vindex can only be read by `WalkFfn` (the
+    /// default inference path). `WeightFfn` / `larql dev walk --compare`
+    /// will panic on missing FFN tensors.
+    #[arg(long)]
+    compact: bool,
+
+    /// Skip writing `gate_vectors.bin`. Only valid with `--quant q4k`
+    /// — the loader rebuilds the f16 gate by dequantizing
+    /// `interleaved_q4k.bin` at vindex-load time. Saves ~1.7 GB on a
+    /// 4B q4k vindex / ~14 GB on a 31B q4k vindex; costs ~1.6 s / ~12 s
+    /// of CPU at load. See
+    /// `cargo run --release -p larql-vindex --example bench_gate_dequant`
+    /// for the measured trade-off.
+    #[arg(long)]
+    drop_gate_vectors: bool,
+
+    /// Quantise FFN down-proj as Q4_K instead of Q6_K. Only valid with
+    /// `--quant q4k`. Default keeps the Ollama-compatible mix (Q4_K for
+    /// gate/up, Q6_K for down). Enabling this saves ~30 MB/layer on 31B
+    /// (~1.8 GB total) and drops down matmul cost ~1.5-1.7× at decode.
+    /// Quantisation error on down is a scatter-sum over the intermediate
+    /// dimension — noise averages — but quality must be validated
+    /// against `walk_correctness` before adopting in production.
+    #[arg(long)]
+    down_q4k: bool,
 
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
     resume: bool,
 }
 
+fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
+    match s.to_lowercase().as_str() {
+        "none" | "" => Ok(larql_vindex::QuantFormat::None),
+        "q4k" | "q4_k" => Ok(larql_vindex::QuantFormat::Q4k),
+        _ => Err(format!("unknown quant format: {s} (expected: none, q4k)")),
+    }
+}
+
 fn parse_extract_level(s: &str) -> Result<larql_vindex::ExtractLevel, String> {
     match s.to_lowercase().as_str() {
         "browse" => Ok(larql_vindex::ExtractLevel::Browse),
-        "inference" => Ok(larql_vindex::ExtractLevel::Inference),
+        "attention" | "attn" => Ok(larql_vindex::ExtractLevel::Attention),
+        "inference" | "infer" => Ok(larql_vindex::ExtractLevel::Inference),
         "all" => Ok(larql_vindex::ExtractLevel::All),
-        _ => Err(format!("unknown extract level: {s} (expected: browse, inference, all)")),
+        _ => Err(format!(
+            "unknown extract level: {s} \
+             (expected: browse, attention, inference, all)"
+        )),
     }
 }
 
@@ -130,10 +190,20 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.level
     };
 
-    let dtype = if args.f16 {
-        larql_vindex::StorageDtype::F16
-    } else {
+    // Dtype resolution:
+    //   --f16                → F16
+    //   --quant q4k          → F16 (Q4K quantizes attn + FFN; pairing that
+    //                          with f32 gate_vectors/embeddings doubles
+    //                          the side-channel footprint for zero accuracy
+    //                          benefit. The f16 browse extract already
+    //                          proves f16 side-channels are correct.)
+    //   default              → F32
+    // f16 is the default now; --f32 opts out. `--quant q4k` always
+    // forces f16 on the side-channel tensors.
+    let dtype = if args.f32 && args.quant != larql_vindex::QuantFormat::Q4k {
         larql_vindex::StorageDtype::F32
+    } else {
+        larql_vindex::StorageDtype::F16
     };
 
     if let Some(ref vectors_dir) = args.from_vectors {
@@ -149,7 +219,13 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             )?;
             eprintln!("\nLoading model for weights: {}", model_name);
             let model = InferenceModel::load(model_name)?;
-            write_model_weights(model.weights(), &args.output, &mut callbacks)?;
+            let weight_opts = larql_vindex::WriteWeightsOptions {
+                level,
+                ffn_compact: args.compact,
+            };
+            larql_vindex::write_model_weights_with_opts(
+                model.weights(), &args.output, &mut callbacks, weight_opts,
+            )?;
         }
     } else {
         // Build from model — streaming mode (mmap safetensors, no full model load)
@@ -162,6 +238,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         let level_str = match level {
             larql_vindex::ExtractLevel::Browse => "browse",
+            larql_vindex::ExtractLevel::Attention => "attention",
             larql_vindex::ExtractLevel::Inference => "inference",
             larql_vindex::ExtractLevel::All => "all",
         };
@@ -169,8 +246,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             larql_vindex::StorageDtype::F32 => "f32",
             larql_vindex::StorageDtype::F16 => "f16",
         };
-        eprintln!("Extracting: {} → {} (level={}, dtype={})",
-            model_path.display(), args.output.display(), level_str, dtype_str);
+        eprintln!("Extracting: {} → {} (level={}, dtype={}, quant={})",
+            model_path.display(), args.output.display(), level_str, dtype_str, args.quant);
 
         let output = &args.output;
 
@@ -183,6 +260,22 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("tokenizer.json not found at {}", model_path.display()).into());
         };
 
+        let weight_opts = larql_vindex::WriteWeightsOptions {
+            level,
+            ffn_compact: args.compact,
+        };
+        if args.drop_gate_vectors && args.quant != larql_vindex::QuantFormat::Q4k {
+            return Err(
+                "--drop-gate-vectors requires --quant q4k (gate is rebuilt from Q4K at load)"
+                    .into(),
+            );
+        }
+        if args.down_q4k && args.quant != larql_vindex::QuantFormat::Q4k {
+            return Err(
+                "--down-q4k requires --quant q4k (only the Q4K writer honours this flag)".into(),
+            );
+        }
+        let q4k_opts = larql_vindex::Q4kWriteOptions { down_q4k: args.down_q4k };
         larql_vindex::build_vindex_streaming(
             &model_path,
             &tokenizer,
@@ -191,6 +284,10 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.down_top_k,
             level,
             dtype,
+            args.quant,
+            weight_opts,
+            q4k_opts,
+            args.drop_gate_vectors,
             &mut callbacks,
         )?;
     }

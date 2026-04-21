@@ -11,6 +11,28 @@ use ndarray::Array2;
 use crate::weights::ModelWeights;
 use crate::detect::ModelError;
 
+/// Returns true when `key` names a FFN weight tensor (gate/up/down projection
+/// or packed expert block). Used by `load_model_dir_walk_only` to skip
+/// decoding these entirely — critical for large models where decoding them
+/// into f32 heap would blow RAM before they can be dropped.
+pub fn is_ffn_tensor(key: &str) -> bool {
+    let ffn_patterns = ["gate_proj", "up_proj", "down_proj",
+                       "ffn_gate", "ffn_up", "ffn_down",
+                       "mlp.experts", "block_sparse_moe.experts",
+                       "packed_gate_up_blocks", "packed_down_blocks"];
+    ffn_patterns.iter().any(|p| key.contains(p))
+}
+
+/// Load model weights from a directory or file, never reading FFN tensors.
+///
+/// Equivalent to `load_model_dir` + `drop_ffn_weights` but without the heap
+/// spike: FFN tensors are skipped at deserialisation time, so peak RSS
+/// tracks only the retained (attention / embed / lm_head / norms) weights.
+/// Use this with vindex-backed FFN (walk-only inference).
+pub fn load_model_dir_walk_only(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
+    load_model_dir_filtered(path, |k| is_ffn_tensor(k))
+}
+
 /// Load model weights from a directory or file.
 ///
 /// Auto-detects the format:
@@ -20,6 +42,16 @@ use crate::detect::ModelError;
 ///
 /// Detects architecture from config.json (safetensors) or GGUF metadata.
 pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
+    load_model_dir_filtered(path, |_| false)
+}
+
+/// Same as `load_model_dir` but `skip_key` returning true causes a tensor to
+/// be dropped before decode — its bytes are never read from the mmap and no
+/// f32 heap allocation occurs for it.
+pub fn load_model_dir_filtered(
+    path: impl AsRef<Path>,
+    skip_key: impl Fn(&str) -> bool,
+) -> Result<ModelWeights, ModelError> {
     let path = path.as_ref();
 
     // Single GGUF file
@@ -79,6 +111,19 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
 
     let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
     let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut raw_bytes: HashMap<String, Vec<u8>> = HashMap::new();
+
+    let expert_format = arch.expert_format();
+    let is_packed_mxfp4 = expert_format == crate::ExpertFormat::PackedMxfp4;
+    let is_packed_bf16 = expert_format == crate::ExpertFormat::PackedBF16;
+
+    // Keys that must be preserved as raw bytes rather than converted to f32.
+    // For PackedBF16 (Gemma 4 26B A4B): experts.gate_up_proj and experts.down_proj
+    // are 3D tensors [num_experts, out_dim, in_dim] in BF16. Converting them to f32
+    // would double their memory footprint; the compute path dequantizes per-expert on demand.
+    let should_keep_raw = |key: &str| -> bool {
+        is_packed_bf16 && (key.contains("experts.gate_up_proj") || key.contains("experts.down_proj"))
+    };
 
     for st_path in &st_files {
         let file = std::fs::File::open(st_path)?;
@@ -88,7 +133,6 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
 
         // Check for MXFP4 packed expert tensors (GPT-OSS format)
         let tensor_names: Vec<String> = st.names().iter().map(|n| n.to_string()).collect();
-        let is_packed_mxfp4 = arch.expert_format() == crate::ExpertFormat::PackedMxfp4;
 
         if is_packed_mxfp4 {
             // MXFP4 path: dequantize packed expert blocks+scales into per-expert tensors
@@ -98,6 +142,7 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
                 let key = normalize_key(&name, prefixes);
                 let shape = view.shape();
                 if name.ends_with("_blocks") || name.ends_with("_scales") { continue; }
+                if skip_key(&key) { continue; }
                 let data = match tensor_to_f32(&view) {
                     Ok(d) => d,
                     Err(_) => continue,
@@ -113,10 +158,17 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
                 }
             }
         } else {
-            // Standard float path
             for (name, view) in st.tensors() {
                 let key = normalize_key(&name, prefixes);
                 let shape = view.shape();
+                if skip_key(&key) { continue; }
+
+                // PackedBF16 expert tensors: preserve raw bytes, skip f32 conversion
+                if should_keep_raw(&key) {
+                    raw_bytes.insert(key, view.data().to_vec());
+                    continue;
+                }
+
                 let data = match tensor_to_f32(&view) {
                     Ok(d) => d,
                     Err(_) => continue,
@@ -153,6 +205,9 @@ pub fn load_model_dir(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError
     Ok(ModelWeights {
         tensors,
         vectors,
+        raw_bytes,
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers: cfg.num_layers,

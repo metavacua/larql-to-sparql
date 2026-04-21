@@ -17,7 +17,7 @@ fn main() {
     {
         use std::time::Instant;
         use larql_compute::ComputeBackend;
-        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_k_gguf, quantize_to_q8};
+        use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_to_q8};
 
         let metal_raw = larql_compute::metal::MetalBackend::new().expect("Metal required");
         let metal: &dyn ComputeBackend = &metal_raw;
@@ -58,9 +58,9 @@ fn main() {
                     wq8: q8q.iter().map(|&x| x as u8).collect(), wk8: q8k.iter().map(|&x| x as u8).collect(),
                     wv8: q8v.iter().map(|&x| x as u8).collect(), wo8: q8o.iter().map(|&x| x as u8).collect(),
                     wq8s: q8qs, wk8s: q8ks, wv8s: q8vs, wo8s: q8os,
-                    g: quantize_q4_k_gguf(&pad(&(0..inter*hidden).map(|i| ((i+l*5000) as f32*0.0001).cos()).collect::<Vec<_>>())),
-                    u: quantize_q4_k_gguf(&pad(&(0..inter*hidden).map(|i| ((i+l*6000) as f32*0.0002).sin()).collect::<Vec<_>>())),
-                    d: quantize_q4_k_gguf(&pad(&(0..hidden*inter).map(|i| ((i+l*7000) as f32*0.0003).cos()).collect::<Vec<_>>())),
+                    g: quantize_q4_k(&pad(&(0..inter*hidden).map(|i| ((i+l*5000) as f32*0.0001).cos()).collect::<Vec<_>>())),
+                    u: quantize_q4_k(&pad(&(0..inter*hidden).map(|i| ((i+l*6000) as f32*0.0002).sin()).collect::<Vec<_>>())),
+                    d: quantize_q4_k(&pad(&(0..hidden*inter).map(|i| ((i+l*7000) as f32*0.0003).cos()).collect::<Vec<_>>())),
                     norm: vec![1.0f32; hidden],
                 }
             }).collect()
@@ -96,8 +96,11 @@ fn main() {
             layer_scalar: 0.0,
             input_norm_bias: None,
             post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
+        moe: None,
         }).collect();
 
         metal.reset_kv_cache();
@@ -133,8 +136,11 @@ fn main() {
             layer_scalar: 0.0,
             input_norm_bias: None,
             post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
+        moe: None,
         }).collect();
 
         metal.reset_kv_cache();
@@ -171,8 +177,11 @@ fn main() {
             layer_scalar: 0.0,
             input_norm_bias: None,
             post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
+        moe: None,
         }).collect();
 
         metal.reset_kv_cache();

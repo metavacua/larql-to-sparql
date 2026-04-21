@@ -205,7 +205,10 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let lm_head = lm_head_arr.unwrap_or_else(|| embed.clone());
 
     let weights = ModelWeights {
-        tensors, vectors, embed, lm_head,
+        tensors, vectors, raw_bytes: std::collections::HashMap::new(),
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
+        embed, lm_head,
         num_layers: config.num_layers,
         hidden_size: config.hidden_size,
         intermediate_size: config.intermediate_size,
