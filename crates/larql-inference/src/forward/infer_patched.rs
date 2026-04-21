@@ -17,11 +17,12 @@
 //! bundles both; `PyVindex` keeps them as separate fields. Both pass through
 //! here.
 
-use larql_vindex::{GateIndex, KnnStore, PatchedVindex, WalkHit};
+use larql_vindex::{GateIndex, KnnStore, PatchedVindex, VectorIndex, WalkHit};
 use tokenizers::Tokenizer;
 
 use crate::model::ModelWeights;
 use crate::vindex::WalkFfn;
+use crate::vindex::predict_q4k_with_ffn;
 
 use super::predict::predict_with_ffn;
 use super::PredictResult;
@@ -76,6 +77,41 @@ pub fn infer_patched(
     let start = std::time::Instant::now();
     let PredictResult { predictions: raw, .. } =
         predict_with_ffn(weights, tokenizer, token_ids, top_k, &walk_ffn);
+    let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let residuals = walk_ffn.take_residuals();
+    let (predictions, knn_override) = apply_knn_override(raw, &residuals, knn_store, top_k);
+
+    InferPatchedResult {
+        predictions,
+        knn_override,
+        residuals,
+        walk_ms,
+    }
+}
+
+/// Q4K variant of `infer_patched`. Identical contract but routes the forward
+/// pass through `predict_q4k_with_ffn`, which dequantises one layer at a time
+/// from the vindex instead of reading pre-loaded f32 tensors.
+pub fn infer_patched_q4k(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    gate_index: &dyn GateIndex,
+    knn_store: Option<&KnnStore>,
+    token_ids: &[u32],
+    top_k: usize,
+    index: &VectorIndex,
+) -> InferPatchedResult {
+    // SAFETY: WalkFfn reads only `weights.arch` and `weights.vectors` (neither
+    // of which is mutated by `predict_q4k_with_ffn`). The q4k forward pass
+    // mutates only `weights.tensors` (inserting/removing per-layer attn matrices).
+    // These are non-overlapping HashMap fields — the aliased read is sound.
+    let weights_ref: &ModelWeights = unsafe { &*(weights as *const ModelWeights) };
+    let walk_ffn = WalkFfn::new_unlimited_with_trace(weights_ref, gate_index);
+
+    let start = std::time::Instant::now();
+    let PredictResult { predictions: raw, .. } =
+        predict_q4k_with_ffn(weights, tokenizer, token_ids, top_k, index, &walk_ffn);
     let walk_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let residuals = walk_ffn.take_residuals();

@@ -48,7 +48,7 @@ pub use forward::{
     capture_spec_residuals, SpecCapture,
     run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
     TargetDelta, TargetDeltaOpts,
-    apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,
+    apply_knn_override, infer_patched, infer_patched_q4k, walk_trace_from_residuals, InferPatchedResult,
     KnnOverride, KNN_COSINE_THRESHOLD,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
@@ -70,7 +70,7 @@ pub use layer_graph::{
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,
     detect_template,
 };
-pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache};
+pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache, predict_q4k};
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
 
