@@ -34,7 +34,20 @@ impl BufferCache {
 
     /// Get or create a cached GPU buffer for f32 data.
     /// Uses zero-copy for page-aligned mmap data, copies otherwise.
+    /// Empty slices (absent optional weight arrays such as Q4_K scale vectors)
+    /// return a minimal 4-byte stub — Metal rejects zero-length allocations.
     pub fn get_f32(&self, data: &[f32]) -> Buffer {
+        if data.is_empty() {
+            // All empty-slice calls share the same stub key so the stub is
+            // allocated once and reused.
+            let stub_key: CacheKey = (0, 0);
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
+            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            cache.insert(stub_key, buf.clone());
+            return buf;
+        }
+
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
         if let Some(buf) = cache.get(&key) { return buf.clone(); }
@@ -59,7 +72,17 @@ impl BufferCache {
 
     /// Get or create a cached GPU buffer for raw byte data (Q4 packed weights).
     /// Uses zero-copy for page-aligned mmap data.
+    /// Empty slices return a minimal 4-byte stub (see `get_f32` for rationale).
     pub fn get_bytes(&self, data: &[u8]) -> Buffer {
+        if data.is_empty() {
+            let stub_key: CacheKey = (1, 0);
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
+            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            cache.insert(stub_key, buf.clone());
+            return buf;
+        }
+
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
         if let Some(buf) = cache.get(&key) { return buf.clone(); }

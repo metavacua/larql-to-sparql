@@ -13,6 +13,7 @@ pub mod tokenizer;
 pub mod trace;
 pub mod vindex;
 pub mod walker;
+pub mod experts;
 
 // Re-export dependencies for downstream crates.
 pub use larql_models;
