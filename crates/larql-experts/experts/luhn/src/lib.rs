@@ -17,7 +17,11 @@ expert_exports!(
     tier = 1,
     description = "Luhn algorithm: validation, check-digit generation, card-network detection",
     version = "0.2.0",
-    ops = ["check", "generate_check_digit", "card_type"],
+    ops = [
+        ("check",                ["number"]),
+        ("generate_check_digit", ["number"]),
+        ("card_type",            ["number"]),
+    ],
     dispatch = dispatch
 );
 

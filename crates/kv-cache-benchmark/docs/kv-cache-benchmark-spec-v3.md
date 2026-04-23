@@ -1,6 +1,14 @@
 # KV Cache Benchmark Spec v3
 
-## Standard KV vs TurboQuant vs Markov RS vs Hybrid RS + Cracked Attention vs RS Graph Walk
+> **Status note (2026-04-23):** Hybrid RS + Cracked Attention has been dropped
+> as a shipping strategy. The `hybrid_cracked/` module was never implemented.
+> Sections below that refer to "Strategy 4 / Hybrid RS+CA" are retained as
+> **design notes for future work** and should not be read as describing
+> delivered code. The authoritative rung ladder lives in the crate README
+> (five rungs: Standard KV, TurboQuant, Markov RS, UnlimitedContext, Apollo,
+> plus Graph Walk as a projected target).
+
+## Standard KV vs TurboQuant vs Markov RS vs RS Graph Walk
 
 ### Purpose
 

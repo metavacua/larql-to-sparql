@@ -8,7 +8,6 @@
 //!   34 layers × 2 (K,V) × 4 kv_heads × 256 head_dim × 2 bytes ≈ 139 KB
 //! (stored here as f32; multiply by 2 for the in-memory figure).
 
-use ndarray::Array2;
 use std::collections::HashMap;
 
 use larql_inference::attention::SharedKV;
@@ -75,6 +74,7 @@ impl CheckpointStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndarray::Array2;
 
     fn mk_kv(layers: usize, kv_dim: usize) -> Vec<SharedKV> {
         (0..layers)

@@ -18,7 +18,11 @@ expert_exports!(
     tier = 1,
     description = "Graph algorithms: shortest path, reachability, minimum spanning tree",
     version = "0.2.0",
-    ops = ["shortest_path", "reachable", "mst"],
+    ops = [
+        ("shortest_path", ["edges", "from", "to"]),
+        ("reachable",     ["edges", "from", "to"]),
+        ("mst",           ["edges"]),
+    ],
     dispatch = dispatch
 );
 

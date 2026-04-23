@@ -25,8 +25,17 @@ expert_exports!(
     description = "Statistics: mean, median, mode, stddev, variance, min, max, sum, sort, range",
     version = "0.2.0",
     ops = [
-        "mean", "median", "mode", "stddev", "variance",
-        "min", "max", "sum", "count", "range", "sort",
+        ("mean",     ["values"]),
+        ("median",   ["values"]),
+        ("mode",     ["values"]),
+        ("stddev",   ["values"]),
+        ("variance", ["values"]),
+        ("min",      ["values"]),
+        ("max",      ["values"]),
+        ("sum",      ["values"]),
+        ("count",    ["values"]),
+        ("range",    ["values"]),
+        ("sort",     ["values"]),
     ],
     dispatch = dispatch
 );

@@ -91,8 +91,8 @@ impl RoutingIndex {
     /// Total bytes used by the serialized index.
     pub fn total_bytes(&self) -> usize {
         self.index
-            .iter()
-            .map(|(_k, v)| 4 + v.len() * std::mem::size_of::<(u16, u32)>())
+            .values()
+            .map(|v| 4 + v.len() * std::mem::size_of::<(u16, u32)>())
             .sum()
     }
 

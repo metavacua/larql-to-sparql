@@ -6,7 +6,6 @@ pub mod metrics;
 pub mod standard_kv;
 pub mod turboquant;
 pub mod markov_residual;
-pub mod boundary_residual;
 pub mod graph_walk;
 pub mod benchmark;
 pub mod shader_bench;

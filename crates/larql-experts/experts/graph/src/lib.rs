@@ -22,12 +22,12 @@ expert_exports!(
     description = "Graph algorithms: centrality, cycle detection, components, topological sort, bipartite",
     version = "0.2.0",
     ops = [
-        "most_central",
-        "has_cycle",
-        "connected_components",
-        "topological_sort",
-        "is_bipartite",
-        "degrees",
+        ("most_central",         ["edges", "directed"]),
+        ("has_cycle",            ["edges", "directed"]),
+        ("connected_components", ["edges"]),
+        ("topological_sort",     ["edges", "directed"]),
+        ("is_bipartite",         ["edges"]),
+        ("degrees",              ["edges"]),
     ],
     dispatch = dispatch
 );

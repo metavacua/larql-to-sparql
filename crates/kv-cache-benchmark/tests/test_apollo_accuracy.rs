@@ -62,8 +62,8 @@ fn test_apollo_accuracy_sweep() {
     println!("{}", "=".repeat(100));
 
     println!(
-        "\n{:<48}  {:<20}  {:<20}  {}",
-        "query", "uncompressed top-1", "compressed top-1", "ctx ratio"
+        "\n{:<48}  {:<20}  {:<20}  ctx ratio",
+        "query", "uncompressed top-1", "compressed top-1",
     );
     println!("{}", "-".repeat(110));
 

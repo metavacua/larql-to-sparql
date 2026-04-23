@@ -140,7 +140,7 @@ impl ExpertRegistry {
         for (i, h) in self.experts.iter().enumerate() {
             for op in &h.metadata.ops {
                 // First writer wins (lower tier sorts earlier, so lower tier takes priority).
-                self.op_index.entry(op.clone()).or_insert(i);
+                self.op_index.entry(op.name.clone()).or_insert(i);
             }
         }
     }
@@ -161,6 +161,19 @@ impl ExpertRegistry {
     /// List metadata for all loaded experts.
     pub fn list(&self) -> Vec<&ExpertMetadata> {
         self.experts.iter().map(|h| &h.metadata).collect()
+    }
+
+    /// Every (op, args-schema) pair this registry can dispatch, sorted by
+    /// op name. Use this to render prompts that tell the model the exact
+    /// argument keys per op.
+    pub fn op_specs(&self) -> Vec<&crate::experts::caller::OpSpec> {
+        let mut specs: Vec<&crate::experts::caller::OpSpec> = self
+            .experts
+            .iter()
+            .flat_map(|h| h.metadata.ops.iter())
+            .collect();
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+        specs
     }
 
     /// List every op this registry can dispatch, in sorted order.

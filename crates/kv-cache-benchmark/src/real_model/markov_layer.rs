@@ -263,12 +263,12 @@ pub fn rs_decode_step(
 
     // Merge old hot residuals with new token's pre-layer residual.
     let mut updated_stored: Vec<Array2<f32>> = Vec::with_capacity(num_layers);
-    for layer in 0..num_layers {
-        let s_old = rs.stored[layer].shape()[0];
-        let hidden_dim = rs.stored[layer].shape()[1];
+    for (stored, new_row) in rs.stored.iter().zip(new_stored.iter()) {
+        let s_old = stored.shape()[0];
+        let hidden_dim = stored.shape()[1];
         let mut combined = Array2::<f32>::zeros((s_old + 1, hidden_dim));
-        combined.slice_mut(s![..s_old, ..]).assign(&rs.stored[layer]);
-        combined.slice_mut(s![s_old.., ..]).assign(&new_stored[layer]);
+        combined.slice_mut(s![..s_old, ..]).assign(stored);
+        combined.slice_mut(s![s_old.., ..]).assign(new_row);
         updated_stored.push(combined);
     }
 
@@ -406,7 +406,7 @@ mod tests {
                 // Each layer gets distinct row values so splits are verifiable.
                 let mut a = Array2::<f32>::zeros((seq_len, hidden));
                 for i in 0..seq_len {
-                    a.row_mut(i).fill(((l * 1000 + i) as f32));
+                    a.row_mut(i).fill((l * 1000 + i) as f32);
                 }
                 a
             })
@@ -468,9 +468,9 @@ mod tests {
         for layer in 0..3 {
             rs.clip_layer(layer, &mut cold);
         }
-        for l in 0..3 {
-            assert_eq!(cold[l].shape()[0], 5, "layer {l}: 5 cold rows");
-            assert_eq!(rs.stored[l].shape()[0], 3, "layer {l}: 3 hot rows");
+        for (l, (c, s)) in cold.iter().zip(rs.stored.iter()).enumerate() {
+            assert_eq!(c.shape()[0], 5, "layer {l}: 5 cold rows");
+            assert_eq!(s.shape()[0], 3, "layer {l}: 3 hot rows");
         }
     }
 
@@ -544,12 +544,11 @@ mod tests {
     fn decode_step_overflow_merges_into_cold() {
         // Simulate the overflow merge: hot at capacity + 1 new row → 1 row
         // spills to cold, cold grows by 1.
-        let num_layers = 1;
         let window = 3;
         let hidden = 4;
 
         // Start: hot = [window rows], cold = [2 rows] already
-        let mut hot: Vec<Array2<f32>> = vec![Array2::ones((window, hidden))];
+        let hot: Vec<Array2<f32>> = vec![Array2::ones((window, hidden))];
         let existing_cold: Vec<Array2<f32>> = vec![Array2::zeros((2, hidden))];
 
         let mut rs = RsStore {

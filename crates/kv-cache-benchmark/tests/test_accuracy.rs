@@ -215,7 +215,10 @@ fn test_retention_conversation_25_turns() {
 fn test_accuracy_result_token_match() {
     let r = AccuracyResult::token_match("Markov RS", "factual", "capital of France", true);
     assert!(r.top1_match);
-    assert_eq!(r.kl_divergence, 0.0);
+    // Top-1 match does not compute a distribution, so KL/JS are NaN and
+    // excluded from distribution-level aggregates.
+    assert!(r.kl_divergence.is_nan());
+    assert!(r.js_divergence.is_nan());
     assert_eq!(r.strategy, "Markov RS");
 }
 

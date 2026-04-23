@@ -93,7 +93,6 @@ pub fn run_decode_comparison(
     let rs_result = rs_prefill(weights, token_ids, Some(window_size));
 
     // Build per-layer mutable KV cache from captured tensors.
-    let num_layers = weights.num_layers;
     let mut kv_cache: Vec<(Array2<f32>, Array2<f32>)> = kv.keys
         .into_iter()
         .zip(kv.values)
@@ -177,17 +176,16 @@ pub fn run_decode_comparison(
 fn full_kv_step(
     weights: &ModelWeights,
     token_id: u32,
-    kv_cache: &mut Vec<(Array2<f32>, Array2<f32>)>,
+    kv_cache: &mut [(Array2<f32>, Array2<f32>)],
     abs_position: usize,
     ffn: &WeightFfn,
 ) -> Array2<f32> {
     let mut h = embed_tokens_pub(weights, &[token_id]);
-    for layer in 0..weights.num_layers {
-        let old_kv = &kv_cache[layer];
+    for (layer, kv_slot) in kv_cache.iter_mut().enumerate() {
         let (h_post, new_kv) = run_attention_block_decode_step(
-            weights, &h, layer, Some(old_kv), abs_position,
+            weights, &h, layer, Some(kv_slot), abs_position,
         ).expect("full-KV decode step failed");
-        kv_cache[layer] = new_kv;
+        *kv_slot = new_kv;
         let (h_out, _) = run_ffn(weights, &h_post, layer, ffn, false);
         h = h_out;
     }

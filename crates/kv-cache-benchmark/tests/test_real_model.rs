@@ -161,7 +161,7 @@ fn test_multi_turn_memory_bounded() {
     let mut standard_mems = Vec::new();
     let mut markov_mems = Vec::new();
 
-    for turn in 0..5 {
+    for _ in 0..5 {
         let results = run_all_strategies(&bench, &growing_prompt, 5, 512);
         standard_mems.push(results[0].memory_bytes);
         markov_mems.push(results[2].memory_bytes);
@@ -226,7 +226,7 @@ fn test_accuracy_top1_factual_20() {
     let total = prompts.len();
 
     // Per-strategy match counters: [Standard, TurboQuant, Markov, GraphWalk]
-    let mut strategy_matches = vec![0usize; 4];
+    let mut strategy_matches = [0usize; 4];
     let strategy_names = ["Standard KV", "TurboQuant 4b", "Markov RS", "Graph Walk"];
 
     for (prompt, expected) in &prompts {
@@ -350,7 +350,7 @@ fn test_adversarial_entity_confusion() {
 #[test]
 #[ignore]
 fn test_needle_scaling_context() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     let needle = "The secret project code name is AURORA-7749.";
     let query = " What is the secret project code name?";
@@ -407,7 +407,7 @@ fn test_needle_scaling_context() {
 #[test]
 #[ignore]
 fn test_needle_bounded_window_vs_full() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     let needle = "The secret project code name is AURORA-7749.";
     let query = " What is the secret project code name?";
@@ -497,12 +497,12 @@ fn test_needle_bounded_window_vs_full() {
 #[test]
 #[ignore]
 fn test_multi_turn_fact_retention() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     println!("\n=== Multi-Turn Fact Retention ===\n");
 
     // Establish facts then query them after filler turns
-    let facts = vec![
+    let facts = [
         ("My name is Alice and I work at Anthropic.", "Alice"),
         ("I live in San Francisco near the Golden Gate Bridge.", "San Francisco"),
         ("My current project is called Lighthouse and it launches in March.", "Lighthouse"),
@@ -530,7 +530,7 @@ fn test_multi_turn_fact_retention() {
     let mut conversation = String::new();
     
     // Establish facts (turns 1-3)
-    for (i, (fact, _)) in facts.iter().enumerate() {
+    for (fact, _) in facts.iter() {
         conversation.push_str(&format!("User: {fact}\nAssistant: I'll remember that.\n\n"));
     }
 
@@ -566,7 +566,7 @@ fn test_multi_turn_fact_retention() {
 #[test]
 #[ignore]
 fn test_generation_stability_50_tokens() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     println!("\n=== Generation Stability: 50 tokens ===\n");
 
@@ -579,14 +579,13 @@ fn test_generation_stability_50_tokens() {
     for prompt in &prompts {
         let encoding = model.tokenizer().encode(*prompt, true).expect("tokenize");
         let mut ids: Vec<u32> = encoding.get_ids().to_vec();
-        let prompt_len = ids.len();
 
         let mut generated_tokens: Vec<String> = Vec::new();
 
         // Generate 30 tokens greedily
         for step in 0..30 {
             let result = larql_inference::predict(model.weights(), model.tokenizer(), &ids, 1);
-            if let Some((token_str, prob)) = result.predictions.first() {
+            if let Some((token_str, _)) = result.predictions.first() {
                 // Encode the predicted token and append
                 if let Ok(tok_enc) = model.tokenizer().encode(token_str.as_str(), false) {
                     let new_ids = tok_enc.get_ids();
@@ -624,7 +623,7 @@ fn test_generation_stability_50_tokens() {
 #[test]
 #[ignore]
 fn test_needle_position_sweep() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     let needle = "The secret project code name is AURORA-7749.";
     let query = " What is the secret project code name?";
@@ -687,7 +686,7 @@ fn test_needle_position_sweep() {
 #[test]
 #[ignore]
 fn test_multifact_5_facts_at_2k() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     let filler = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
     let facts = vec![
@@ -766,7 +765,7 @@ fn test_multifact_5_facts_at_2k() {
 #[test]
 #[ignore]
 fn test_conflict_context_overrides_parametric() {
-    let (model, index) = load_test_model().expect("Model not available");
+    let (model, _index) = load_test_model().expect("Model not available");
 
     println!("\n=== In-Context vs Parametric Conflict ===\n");
 

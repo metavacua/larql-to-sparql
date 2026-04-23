@@ -4,7 +4,6 @@ use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::standard_kv::StandardKv;
 use kv_cache_benchmark::turboquant::TurboQuant;
 use kv_cache_benchmark::markov_residual::MarkovResidual;
-use kv_cache_benchmark::boundary_residual::BoundaryResidual;
 use kv_cache_benchmark::graph_walk::GraphWalk;
 
 #[test]
@@ -13,15 +12,13 @@ fn test_all_strategies_memory_ordering() {
     let standard = StandardKv;
     let tq4 = TurboQuant::new(4);
     let markov = MarkovResidual::new(512);
-    let boundary = BoundaryResidual::gemma_4b();
     let graph = GraphWalk::gemma_4b();
 
     for &seq_len in &[4096, 32768, 370_000] {
         let mem_std = standard.memory_bytes(&config, seq_len);
         let mem_tq = tq4.memory_bytes(&config, seq_len);
         let mem_mrk = markov.memory_bytes(&config, seq_len);
-        let mem_brs = boundary.memory_bytes(&config, seq_len);
-        let mem_gw = graph.memory_bytes(&config, seq_len);
+        let mem_gw = graph.memory_bytes(seq_len);
 
         // Standard KV is always the largest.
         assert!(mem_std > mem_tq,  "At {seq_len}: Standard ({mem_std}) > TurboQuant ({mem_tq})");
@@ -31,13 +28,8 @@ fn test_all_strategies_memory_ordering() {
         // At long contexts TurboQuant grows larger. Both beat standard KV.
         assert!(mem_std > mem_mrk, "At {seq_len}: Standard ({mem_std}) > Markov RS ({mem_mrk})");
 
-        // BoundaryRS W=32 is always the smallest storage (besides graph walk).
-        // Hot window is fixed ~11 MB; cold grows at 4 bytes/token.
-        assert!(mem_brs < mem_mrk, "At {seq_len}: Boundary RS ({mem_brs}) < Markov RS ({mem_mrk})");
-        assert!(mem_brs < mem_tq,  "At {seq_len}: Boundary RS ({mem_brs}) < TurboQuant ({mem_tq})");
-
-        // Graph Walk is the absolute minimum (vindex lookup, no K/V stored).
-        assert!(mem_gw < mem_brs,  "At {seq_len}: Graph Walk ({mem_gw}) < Boundary RS ({mem_brs})");
+        // Graph Walk is the per-conversation minimum (token IDs only).
+        assert!(mem_gw < mem_mrk,  "At {seq_len}: Graph Walk ({mem_gw}) < Markov RS ({mem_mrk})");
     }
 
     // At very long contexts, MarkovRS stays flat while TurboQuant grows O(n).
@@ -54,15 +46,14 @@ fn test_memory_sweep_produces_data() {
     let standard = StandardKv;
     let tq4 = TurboQuant::new(4);
     let markov = MarkovResidual::new(512);
-    let graph = GraphWalk::gemma_4b();
 
-    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &graph];
+    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov];
     let lengths = &[512, 4096, 32768];
 
     let points = benchmark::memory_sweep(&config, &strategies, lengths);
 
-    // 4 strategies × 3 lengths = 12 points
-    assert_eq!(points.len(), 12);
+    // 3 strategies × 3 lengths = 9 points
+    assert_eq!(points.len(), 9);
 
     for point in &points {
         assert!(point.memory_bytes > 0, "Zero memory for {}", point.strategy_name);
@@ -75,17 +66,14 @@ fn test_comparative_table_format() {
     let standard = StandardKv;
     let tq4 = TurboQuant::new(4);
     let markov = MarkovResidual::new(512);
-    let graph = GraphWalk::gemma_4b();
 
-    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &graph];
+    let strategies: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov];
     let table = benchmark::format_comparative_table(&config, &strategies);
 
     assert!(table.contains("Gemma 3-4B"));
-    assert!(table.contains("ELIMINATED"));
     assert!(table.contains("Standard KV"));
     assert!(table.contains("TurboQuant"));
-    assert!(table.contains("Markov RS"));
-    assert!(table.contains("Graph Walk"));
+    assert!(table.contains("Markov Residual Stream"));
 }
 
 #[test]
@@ -100,7 +88,7 @@ fn test_370k_memory_ratios() {
     let mem_std = standard.memory_bytes(&config, seq_len) as f64;
     let mem_tq = tq4.memory_bytes(&config, seq_len) as f64;
     let mem_mrk = markov.memory_bytes(&config, seq_len) as f64;
-    let mem_gw = graph.memory_bytes(&config, seq_len) as f64;
+    let mem_gw = graph.memory_bytes(seq_len) as f64;
 
     let ratio_tq = mem_std / mem_tq;
     let ratio_mrk = mem_std / mem_mrk;
@@ -113,7 +101,7 @@ fn test_370k_memory_ratios() {
     // Markov RS: 100×+ compression
     assert!(ratio_mrk > 100.0, "Markov ratio: {ratio_mrk:.1}×");
 
-    // Graph Walk: even more (same cold tier, no window overhead)
+    // Graph Walk: per-conversation is even smaller (token IDs only).
     assert!(ratio_gw > ratio_mrk, "Graph Walk should compress more than Markov RS");
 
     println!("At 370K tokens on {}:", config.name);
@@ -139,4 +127,3 @@ fn test_multi_model_memory() {
         );
     }
 }
-

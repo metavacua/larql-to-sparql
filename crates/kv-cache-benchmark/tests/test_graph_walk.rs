@@ -1,32 +1,18 @@
-use kv_cache_benchmark::*;
-use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::graph_walk::GraphWalk;
 use kv_cache_benchmark::graph_walk::walk_state::{WalkState, WalkMode, WalkTier};
 use kv_cache_benchmark::graph_walk::fallback::TierDistribution;
 
 #[test]
 fn test_graph_walk_memory_tiny() {
-    let config = ModelConfig::gemma_4b();
     let gw = GraphWalk::gemma_4b();
 
     // Per-conversation: just token IDs
-    let mem_4k = gw.memory_bytes(&config, 4096);
+    let mem_4k = gw.memory_bytes(4096);
     assert_eq!(mem_4k, 4096 * 4);
 
-    let mem_370k = gw.memory_bytes(&config, 370_000);
+    let mem_370k = gw.memory_bytes(370_000);
     assert_eq!(mem_370k, 370_000 * 4);
     assert!(mem_370k < 2_000_000, "Graph walk per-conversation should be < 2MB");
-}
-
-#[test]
-fn test_graph_walk_no_kv_stored() {
-    let gw = GraphWalk::gemma_4b();
-    let keys = vec![vec![1.0f32; 256]; 100];
-    let values = vec![vec![2.0f32; 256]; 100];
-
-    let encoded = gw.encode(&keys, &values);
-    // Header (4 bytes) + 100 token IDs (400 bytes)
-    assert_eq!(encoded.len(), 4 + 100 * 4);
 }
 
 #[test]
@@ -117,25 +103,6 @@ fn test_graph_walk_fallback_triggers() {
             tokens
         );
     }
-}
-
-#[test]
-fn test_graph_walk_no_matmul() {
-    // Graph Walk should have zero matrix multiplications in the encode path.
-    // Verify: encoded data is just token IDs, no vectors.
-    let gw = GraphWalk::gemma_4b();
-    let keys = vec![vec![99.0f32; 256]; 50];
-    let values = vec![vec![99.0f32; 256]; 50];
-
-    let encoded = gw.encode(&keys, &values);
-
-    // Should be header + token IDs only (no float data)
-    let expected_size = 4 + 50 * 4; // header + 50 × u32
-    assert_eq!(
-        encoded.len(),
-        expected_size,
-        "Encoded size suggests vector data was stored (matmul proxy)"
-    );
 }
 
 #[test]

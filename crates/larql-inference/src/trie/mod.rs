@@ -150,15 +150,36 @@ impl CascadeTrie {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        if let Ok(p) = std::env::var("LARQL_PROBE_PATH") {
-            let path = PathBuf::from(p);
+        Self::find_with_env(
+            model_id,
+            std::env::var("LARQL_PROBE_PATH").ok().map(PathBuf::from),
+            std::env::var("LARQL_PROBE_DIR").ok().map(PathBuf::from),
+            extra_dirs,
+        )
+    }
+
+    /// Pure version of [`Self::find`] — env-var values are passed in instead
+    /// of read from the process environment. Exposed so tests can exercise
+    /// the precedence chain without mutating shared env state (which would
+    /// race with parallel tests).
+    pub fn find_with_env<I, P>(
+        model_id: &str,
+        env_path: Option<PathBuf>,
+        env_dir: Option<PathBuf>,
+        extra_dirs: I,
+    ) -> Option<PathBuf>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        if let Some(path) = env_path {
             if path.is_file() {
                 return Some(path);
             }
         }
         let filename = Self::filename_for(model_id);
-        if let Ok(d) = std::env::var("LARQL_PROBE_DIR") {
-            let path = PathBuf::from(d).join(&filename);
+        if let Some(dir) = env_dir {
+            let path = dir.join(&filename);
             if path.is_file() {
                 return Some(path);
             }
@@ -222,5 +243,94 @@ mod tests {
         // First dir is empty; lookup should fall through to second.
         let found = CascadeTrie::find(mid, [first.path(), second.path()]).expect("found");
         assert_eq!(found, in_second);
+    }
+
+    #[test]
+    fn find_with_env_path_wins_over_dir_and_extra() {
+        // env_path → returned regardless of env_dir / extra_dirs.
+        let f = tempfile::NamedTempFile::new().expect("tempfile");
+        let p = f.path().to_path_buf();
+
+        let other = tempfile::tempdir().expect("tempdir");
+        std::fs::write(other.path().join(CascadeTrie::filename_for("m")), "{}").unwrap();
+
+        let found = CascadeTrie::find_with_env(
+            "m",
+            Some(p.clone()),
+            Some(other.path().to_path_buf()),
+            [other.path()],
+        )
+        .expect("found");
+        assert_eq!(found, p);
+    }
+
+    #[test]
+    fn find_with_env_path_falls_through_when_missing() {
+        // env_path set to a non-existent file → should not be returned;
+        // env_dir + filename should resolve next.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mid = "x/y";
+        let resolved = dir.path().join(CascadeTrie::filename_for(mid));
+        std::fs::write(&resolved, "{}").unwrap();
+
+        let found = CascadeTrie::find_with_env(
+            mid,
+            Some(PathBuf::from("/this/file/should/not/exist.json")),
+            Some(dir.path().to_path_buf()),
+            std::iter::empty::<PathBuf>(),
+        )
+        .expect("found");
+        assert_eq!(found, resolved);
+    }
+
+    #[test]
+    fn find_with_env_dir_wins_over_extra() {
+        // env_dir → preferred over extra_dirs.
+        let env_dir = tempfile::tempdir().expect("tempdir");
+        let extra_dir = tempfile::tempdir().expect("tempdir");
+        let mid = "m/n";
+        let in_env = env_dir.path().join(CascadeTrie::filename_for(mid));
+        let in_extra = extra_dir.path().join(CascadeTrie::filename_for(mid));
+        std::fs::write(&in_env, "{}").unwrap();
+        std::fs::write(&in_extra, "{}").unwrap();
+
+        let found = CascadeTrie::find_with_env(
+            mid,
+            None,
+            Some(env_dir.path().to_path_buf()),
+            [extra_dir.path()],
+        )
+        .expect("found");
+        assert_eq!(found, in_env);
+    }
+
+    #[test]
+    fn find_with_env_dir_missing_filename_falls_through_to_extra() {
+        // env_dir set but the filename isn't there → fall through to extra_dirs.
+        let env_dir = tempfile::tempdir().expect("tempdir"); // empty
+        let extra_dir = tempfile::tempdir().expect("tempdir");
+        let mid = "z/w";
+        let in_extra = extra_dir.path().join(CascadeTrie::filename_for(mid));
+        std::fs::write(&in_extra, "{}").unwrap();
+
+        let found = CascadeTrie::find_with_env(
+            mid,
+            None,
+            Some(env_dir.path().to_path_buf()),
+            [extra_dir.path()],
+        )
+        .expect("found");
+        assert_eq!(found, in_extra);
+    }
+
+    #[test]
+    fn find_with_env_returns_none_when_nothing_resolves() {
+        let none = CascadeTrie::find_with_env(
+            "no/where",
+            Some(PathBuf::from("/nope/path")),
+            Some(PathBuf::from("/nope/dir")),
+            std::iter::empty::<PathBuf>(),
+        );
+        assert!(none.is_none());
     }
 }

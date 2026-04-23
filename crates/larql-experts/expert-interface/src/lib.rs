@@ -35,14 +35,26 @@ pub struct ExpertResult {
     pub op: String,
 }
 
+/// One op the expert handles, plus its argument key schema.
+///
+/// `args` lists the JSON object keys the op reads. Hosts use this to render
+/// useful prompts (e.g. `gcd(a, b)` instead of just `gcd`) so models emit
+/// the right arg keys instead of guessing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpSpec {
+    pub name: String,
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExpertMetadata {
     pub id: String,
     pub tier: u8,
     pub description: String,
     pub version: String,
-    /// Language-neutral op identifiers this expert responds to.
-    pub ops: Vec<String>,
+    /// Language-neutral op identifiers this expert responds to, with their
+    /// argument key schemas.
+    pub ops: Vec<OpSpec>,
 }
 
 // ── WASM ABI helpers ─────────────────────────────────────────────────────────
@@ -154,7 +166,11 @@ pub fn arg_list_f64(args: &Value, key: &str) -> Option<Vec<f64>> {
 ///     tier = 1,
 ///     description = "Arithmetic and number theory",
 ///     version = "0.1.0",
-///     ops = ["add", "sub", "mul", "gcd", "is_prime"],
+///     ops = [
+///         ("add",      ["a", "b"]),
+///         ("gcd",      ["a", "b"]),
+///         ("is_prime", ["n"]),
+///     ],
 ///     dispatch = my_dispatch
 /// );
 ///
@@ -174,7 +190,7 @@ macro_rules! expert_exports {
         tier = $tier:expr,
         description = $desc:literal,
         version = $version:literal,
-        ops = [$($op:literal),* $(,)?],
+        ops = [$( ($op:literal, [$($arg:literal),* $(,)?]) ),* $(,)?],
         dispatch = $dispatch:ident $(,)?
     ) => {
         #[no_mangle]
@@ -210,7 +226,14 @@ macro_rules! expert_exports {
                 tier: $tier,
                 description: ::std::string::String::from($desc),
                 version: ::std::string::String::from($version),
-                ops: ::std::vec![$(::std::string::String::from($op)),*],
+                ops: ::std::vec![
+                    $(
+                        $crate::OpSpec {
+                            name: ::std::string::String::from($op),
+                            args: ::std::vec![$(::std::string::String::from($arg)),*],
+                        }
+                    ),*
+                ],
             };
             $crate::write_metadata(&meta)
         }

@@ -204,33 +204,6 @@ pub fn is_end_of_turn(token: &str) -> bool {
     )
 }
 
-#[cfg(test)]
-mod end_of_turn_tests {
-    use super::is_end_of_turn;
-
-    #[test]
-    fn recognises_known_terminators() {
-        for t in [
-            "<eos>",
-            "</s>",
-            "<|endoftext|>",
-            "<|im_end|>",
-            "<|end_of_turn|>",
-            "<end_of_turn>",
-            "<|eot_id|>",
-        ] {
-            assert!(is_end_of_turn(t), "expected {t:?} to be a terminator");
-        }
-    }
-
-    #[test]
-    fn does_not_match_arbitrary_tokens() {
-        for t in ["", " ", "the", "<eos", "eos>", "<EOS>", "<|im_start|>"] {
-            assert!(!is_end_of_turn(t), "did not expect {t:?} to be a terminator");
-        }
-    }
-}
-
 /// CPU autoregressive generation against a Q4_K / Q6_K vindex.
 ///
 /// Loops [`predict_q4k`] one token at a time. Stops on `max_tokens` or when
@@ -519,4 +492,31 @@ fn dequantize_matrix(bytes: &[u8], format: &str, rows: usize, cols: usize) -> Ar
     let truncated = if floats.len() > n { floats[..n].to_vec() } else { floats };
     Array2::from_shape_vec((rows, cols), truncated)
         .expect("shape mismatch dequantising Q4K matrix")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_end_of_turn;
+
+    #[test]
+    fn is_end_of_turn_recognises_known_terminators() {
+        for t in [
+            "<eos>",
+            "</s>",
+            "<|endoftext|>",
+            "<|im_end|>",
+            "<|end_of_turn|>",
+            "<end_of_turn>",
+            "<|eot_id|>",
+        ] {
+            assert!(is_end_of_turn(t), "expected {t:?} to be a terminator");
+        }
+    }
+
+    #[test]
+    fn is_end_of_turn_rejects_arbitrary_tokens() {
+        for t in ["", " ", "the", "<eos", "eos>", "<EOS>", "<|im_start|>"] {
+            assert!(!is_end_of_turn(t), "did not expect {t:?} to be a terminator");
+        }
+    }
 }

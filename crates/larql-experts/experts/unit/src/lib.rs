@@ -22,7 +22,11 @@ expert_exports!(
     tier = 1,
     description = "Unit conversion: length, mass, temperature, volume, speed, energy",
     version = "0.2.0",
-    ops = ["convert", "unit_info", "list_units"],
+    ops = [
+        ("convert",    ["value", "from", "to"]),
+        ("unit_info",  ["unit"]),
+        ("list_units", ["group"]),
+    ],
     dispatch = dispatch
 );
 

@@ -33,6 +33,10 @@ pub struct AccuracyResult {
 }
 
 impl AccuracyResult {
+    /// Result of a top-1 match test. KL/JS are not computed by this test
+    /// (a top-1 match says nothing about the rest of the distribution), so
+    /// they are set to NaN and excluded from distribution-level aggregates
+    /// via `is_finite()` filtering.
     pub fn token_match(strategy: &str, test_name: &str, prompt: &str, matched: bool) -> Self {
         Self {
             strategy: strategy.to_string(),
@@ -41,8 +45,8 @@ impl AccuracyResult {
             top1_match: matched,
             top5_overlap: if matched { 1.0 } else { 0.0 },
             baseline_token_rank: if matched { 1 } else { 0 },
-            kl_divergence: if matched { 0.0 } else { f64::NAN },
-            js_divergence: if matched { 0.0 } else { f64::NAN },
+            kl_divergence: f64::NAN,
+            js_divergence: f64::NAN,
             correct_token_prob: if matched { 1.0 } else { 0.0 },
             tokens_before_diverge: None,
             token_match_rate: None,
@@ -51,6 +55,7 @@ impl AccuracyResult {
         }
     }
 
+    /// Result of a needle retrieval test. KL/JS are not computed by this test.
     pub fn needle(strategy: &str, test_name: &str, prompt: &str, found: bool, exact: bool) -> Self {
         Self {
             strategy: strategy.to_string(),
@@ -59,8 +64,8 @@ impl AccuracyResult {
             top1_match: found,
             top5_overlap: 0.0,
             baseline_token_rank: 0,
-            kl_divergence: 0.0,
-            js_divergence: 0.0,
+            kl_divergence: f64::NAN,
+            js_divergence: f64::NAN,
             correct_token_prob: 0.0,
             tokens_before_diverge: None,
             token_match_rate: None,

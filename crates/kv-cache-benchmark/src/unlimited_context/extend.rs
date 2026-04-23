@@ -63,17 +63,16 @@ pub fn rs_extend_from_checkpoint(
         return None;
     }
 
-    let mut kv_cache: Vec<SharedKV> = prior_kv.iter().cloned().collect();
+    let mut kv_cache: Vec<SharedKV> = prior_kv.to_vec();
     let mut last_hidden: Option<Array2<f32>> = None;
 
     for (i, &token_id) in token_ids.iter().enumerate() {
         let abs_position = abs_start + i;
         let mut h = embed_tokens_pub(weights, &[token_id]);
 
-        for layer in 0..num_layers {
-            let prior_has_rows = kv_cache[layer].0.shape()[0] > 0;
-            let kv_entry: Option<&SharedKV> = if prior_has_rows {
-                Some(&kv_cache[layer])
+        for (layer, kv_slot) in kv_cache.iter_mut().enumerate() {
+            let kv_entry: Option<&SharedKV> = if kv_slot.0.shape()[0] > 0 {
+                Some(kv_slot)
             } else {
                 None
             };
@@ -83,7 +82,7 @@ pub fn rs_extend_from_checkpoint(
 
             let (h_out, _capture) = run_ffn(weights, &h_post_attn, layer, &ffn, false);
             h = h_out;
-            kv_cache[layer] = new_kv;
+            *kv_slot = new_kv;
         }
 
         last_hidden = Some(h);

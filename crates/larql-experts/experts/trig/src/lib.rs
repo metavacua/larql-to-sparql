@@ -25,10 +25,17 @@ expert_exports!(
     description = "Trigonometry: sin, cos, tan, arc functions, degree/radian conversion (angles in radians)",
     version = "0.2.0",
     ops = [
-        "sin", "cos", "tan",
-        "asin", "acos", "atan",
-        "sec", "csc", "cot",
-        "deg_to_rad", "rad_to_deg",
+        ("sin",        ["x"]),
+        ("cos",        ["x"]),
+        ("tan",        ["x"]),
+        ("asin",       ["x"]),
+        ("acos",       ["x"]),
+        ("atan",       ["x"]),
+        ("sec",        ["x"]),
+        ("csc",        ["x"]),
+        ("cot",        ["x"]),
+        ("deg_to_rad", ["deg"]),
+        ("rad_to_deg", ["rad"]),
     ],
     dispatch = dispatch
 );

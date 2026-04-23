@@ -508,6 +508,82 @@ mod tests {
     }
 
     #[test]
+    fn route_with_parameter_free_router_norm() {
+        // HF Gemma 4 codepath: router_norm is empty AND parameter_free=true →
+        // route() must call rms_norm_no_weight on the input. Without the
+        // helper this branch panics with "function not found"; with it, the
+        // route should still produce a valid top-k.
+        let num_experts = 4;
+        let hidden = 4;
+        let router_proj: Vec<f32> = (0..num_experts * hidden).map(|i| (i as f32) * 0.1).collect();
+        let router = MoeRouterWeights {
+            router_proj: &router_proj,
+            router_scale: &[],
+            router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: true,
+            router_input_scalar: 1.0,
+            pre_experts_norm: &[],
+            post_experts_norm: &[],
+            num_experts,
+            top_k: 2,
+        };
+        let h: Vec<f32> = vec![1.0, -2.0, 3.0, 0.5];
+        let (h_norm_out, indices, weights) = router.route(&h, 0.0, 1e-6);
+
+        // h_norm_out is the experts' input (pre_experts_norm output).
+        // Since pre_experts_norm is empty, h_norm_out should be h verbatim.
+        assert_eq!(h_norm_out, h);
+
+        // Top-K selected and weights renormalised to sum to 1.
+        assert_eq!(indices.len(), 2);
+        assert_eq!(weights.len(), 2);
+        let sum: f32 = weights.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5, "weights should sum to 1, got {sum}");
+        assert!(weights.iter().all(|&w| w >= 0.0));
+    }
+
+    #[test]
+    fn route_with_router_input_scalar() {
+        // HF Gemma 4 also uses router_input_scalar = hidden_size^-0.5.
+        // Verify the scalar is applied (changes which expert wins) without
+        // breaking the softmax+top-k pipeline.
+        let num_experts = 4;
+        let hidden = 4;
+        // Bias router_proj so expert 0 wins on un-scaled input.
+        let mut router_proj: Vec<f32> = vec![0.0; num_experts * hidden];
+        router_proj[0] = 100.0; // expert 0 row, dim 0
+        router_proj[hidden] = -100.0; // expert 1 row, dim 0
+
+        let h: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0];
+
+        let unscaled = MoeRouterWeights {
+            router_proj: &router_proj,
+            router_scale: &[],
+            router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
+            pre_experts_norm: &[],
+            post_experts_norm: &[],
+            num_experts,
+            top_k: 1,
+        };
+        let (_, idx_unscaled, _) = unscaled.route(&h, 0.0, 1e-6);
+        assert_eq!(idx_unscaled, vec![0]);
+
+        // With scalar = 0.5, the logit gap shrinks (50 vs -50 still picks
+        // expert 0). Use a negating scalar to flip the winner — this proves
+        // the scalar actually multiplies through.
+        let flipped = MoeRouterWeights {
+            router_input_scalar: -1.0,
+            ..unscaled
+        };
+        let (_, idx_flipped, _) = flipped.route(&h, 0.0, 1e-6);
+        assert_eq!(idx_flipped, vec![1], "negative scalar should flip the winner");
+    }
+
+    #[test]
     fn forward_moe_empty_input_returns_zero() {
         // Can't connect to a real server, but we can verify the early-exit path.
         // Construct a backend with an empty shard list via the raw struct (bypassing connect).

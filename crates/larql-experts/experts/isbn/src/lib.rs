@@ -17,7 +17,11 @@ expert_exports!(
     tier = 1,
     description = "ISBN-10 and ISBN-13 validation and conversion",
     version = "0.2.0",
-    ops = ["validate", "isbn10_to_isbn13", "isbn13_to_isbn10"],
+    ops = [
+        ("validate",         ["isbn"]),
+        ("isbn10_to_isbn13", ["isbn"]),
+        ("isbn13_to_isbn10", ["isbn"]),
+    ],
     dispatch = dispatch
 );
 

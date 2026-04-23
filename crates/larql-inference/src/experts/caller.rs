@@ -13,13 +13,20 @@ pub struct ExpertResult {
     pub op: String,
 }
 
+/// One op an expert handles, plus the JSON object keys it reads from `args`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpSpec {
+    pub name: String,
+    pub args: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpertMetadata {
     pub id: String,
     pub tier: u8,
     pub description: String,
     pub version: String,
-    pub ops: Vec<String>,
+    pub ops: Vec<OpSpec>,
 }
 
 /// Write a UTF-8 string into WASM linear memory via `larql_alloc`, return (ptr, len).

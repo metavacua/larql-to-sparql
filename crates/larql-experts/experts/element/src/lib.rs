@@ -18,7 +18,12 @@ expert_exports!(
     tier = 1,
     description = "Periodic table: lookup by IUPAC name, symbol, or atomic number",
     version = "0.2.0",
-    ops = ["by_number", "by_symbol", "by_name", "list"],
+    ops = [
+        ("by_number", ["z"]),
+        ("by_symbol", ["symbol"]),
+        ("by_name",   ["name"]),
+        ("list",      []),
+    ],
     dispatch = dispatch
 );
 

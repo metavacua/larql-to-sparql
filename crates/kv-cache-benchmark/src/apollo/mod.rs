@@ -1,23 +1,23 @@
-//! Tier 3 — Apollo v12 architecture (SCAFFOLD, not end-to-end).
+//! Tier 3 — Apollo v12 architecture (end-to-end on Gemma 3 4B).
 //!
-//! This is the Rust port target for the Python/MLX Apollo 11 demo system.
-//! It sits above Tier 2's RS-boundary mechanism and adds:
+//! Rust port of the Python/MLX Apollo 11 demo. Sits above Tier 2's
+//! `UnlimitedContextEngine` and trades per-window K/V checkpoints for a
+//! single-vector boundary plus retrieval-driven injection:
 //!
 //! 1. **Sparse single-vector boundary at `crystal_layer`** (10 KB per window
 //!    on Gemma 3 4B) rather than the per-layer K,V checkpoint Tier 2 uses.
-//! 2. **Routing index** (~120 KB on Apollo): maps query keywords → window IDs,
-//!    lets `replay_window` target the right window without scanning.
+//! 2. **Routing index** (~120 KB on Apollo 11): maps query keywords → window
+//!    IDs, so retrieval targets the right window without scanning.
 //! 3. **`vec_inject` retrieval index** + per-fact entries with
 //!    `(token_id, coefficient, window_id, position_in_window, fact_id)`.
-//! 4. **Injection at `injection_layer`** with a `inject_coefficient` ≈ 10×
-//!    natural: retrieved fact token embeddings are additively injected at
-//!    the residual stream to amplify them past the sparse-boundary
-//!    reconstruction noise.
+//! 4. **Injection at `injection_layer`** (L30 on Gemma 3 4B, coefficient
+//!    ≈ 10× natural): retrieved fact token embeddings are additively
+//!    injected at the residual stream to amplify them past the
+//!    sparse-boundary reconstruction noise.
 //!
 //! Total store on Apollo 11 (176 windows × 512 tokens = 90K tokens):
-//!   boundaries 1.76 MB + token archive ~350 KB + routing ~120 KB
-//!   + vec_inject entries ~60 KB ≈ **2.8 MB total**
-//!   vs ~56 GB standard KV cache.
+//! boundaries 1.76 MB + token archive ~350 KB + routing ~120 KB +
+//! vec_inject entries ~60 KB ≈ **2.8 MB total** vs ~56 GB standard KV cache.
 //!
 //! ## Correctness target (not bit-exact — task accuracy)
 //!
@@ -27,22 +27,27 @@
 //! produce the same top-1 token (and ideally same logit distribution
 //! within KL < 0.01) as running the full document in context.
 //!
-//! ## Status
+//! ## Implementation status
 //!
-//! **Scaffold only.** Types and the public API surface are defined, but
-//! none of the end-to-end functions are implemented. Porting targets:
+//! Four end-to-end query entry points land on real apollo11_store +
+//! Gemma 3 4B (see `engine::ApolloEngine`): `query_greedy`,
+//! `query_greedy_compressed`, `query_generate_uncompressed`,
+//! `query_generate_compressed`. The "compressed" variants forward the
+//! 10 KB boundary + query (~9 context tokens) and exercise the actual
+//! compression claim; the "uncompressed" variants forward the window
+//! tokens directly and are higher-fidelity but not compressed. Integration
+//! tests in `tests/test_apollo_*.rs` are `#[ignore]`-gated on model
+//! weights being present.
 //!
-//! | Python reference | Rust target |
-//! |---|---|
-//! | `chuk-mlx/.../vec_inject/_primitives.py::retrieve` | `engine::ApolloEngine::retrieve` |
-//! | `chuk-mlx/.../vec_inject/_primitives.py::inject_at_layer` | `engine::ApolloEngine::inject` |
-//! | `apollo-demo/apollo11_store/` format | `store::ApolloStore` load/save |
-//! | Routing index (tf-idf + keyword index) | `routing::RoutingIndex` |
+//! Known simplification vs the Python reference: injection happens at the
+//! last-token position only; Python injects at each entry's
+//! `position_in_window`. See `engine.rs` module docs for the full list.
 //!
-//! All unimplemented functions return `Err(NotImplemented)` or panic on
-//! a `todo!()` so it's impossible to accidentally depend on scaffolded
-//! behaviour. The intent is that subsequent work fills these in without
-//! having to re-design the module layout.
+//! ## Reference
+//!
+//! - `chuk-mlx/src/chuk_lazarus/inference/context/research/unlimited_engine.py`
+//! - `chuk-mlx/.../vec_inject/_primitives.py`
+//! - `apollo-demo/apollo11_store/` (store format reference)
 
 pub mod entry;
 pub mod npy;

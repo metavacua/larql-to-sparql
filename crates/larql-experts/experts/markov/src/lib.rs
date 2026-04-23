@@ -16,7 +16,10 @@ expert_exports!(
     tier = 1,
     description = "Markov chains: expected value, steady state (power method)",
     version = "0.2.0",
-    ops = ["expected_value", "steady_state"],
+    ops = [
+        ("expected_value", ["outcomes", "probabilities"]),
+        ("steady_state",   ["matrix"]),
+    ],
     dispatch = dispatch
 );
 

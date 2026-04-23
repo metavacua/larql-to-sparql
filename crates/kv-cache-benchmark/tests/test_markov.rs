@@ -65,29 +65,6 @@ fn test_markov_much_smaller_than_standard() {
 }
 
 #[test]
-fn test_boundary_residual_always_flat() {
-    let config = ModelConfig::gemma_4b();
-    let standard = kv_cache_benchmark::standard_kv::StandardKv;
-    let boundary = kv_cache_benchmark::boundary_residual::BoundaryResidual::gemma_4b();
-
-    // BoundaryRS W=32 is always much smaller: ~11 MB hot + tiny cold IDs.
-    // At 4K it's ~25× smaller; at 370K it's ~2000× smaller.
-    for &seq_len in &[4096, 32768, 131072, 370_000] {
-        let std_mem = standard.memory_bytes(&config, seq_len);
-        let brs_mem = boundary.memory_bytes(&config, seq_len);
-        assert!(
-            brs_mem * 20 < std_mem,
-            "At {seq_len}: Boundary RS ({brs_mem}) should be >20× smaller than Standard KV ({std_mem})"
-        );
-    }
-    // At 370K it's genuinely ~2000× compression.
-    let std_370k = standard.memory_bytes(&config, 370_000) as f64;
-    let brs_370k = boundary.memory_bytes(&config, 370_000) as f64;
-    assert!(std_370k / brs_370k > 1000.0,
-        "At 370K: compression ratio should exceed 1000× (got {:.0}×)", std_370k / brs_370k);
-}
-
-#[test]
 fn test_markov_encode_decode() {
     let strategy = MarkovResidual::new(4);
     let dim = 8;

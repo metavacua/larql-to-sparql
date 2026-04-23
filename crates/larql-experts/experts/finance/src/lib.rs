@@ -25,13 +25,15 @@ expert_exports!(
     description = "Finance: future/present value, interest, mortgage, NPV, Bayes, Kelly, ROI",
     version = "0.2.0",
     ops = [
-        "future_value", "present_value",
-        "compound_interest", "simple_interest",
-        "mortgage_payment",
-        "npv",
-        "bayes",
-        "kelly",
-        "roi",
+        ("future_value",      ["pv", "rate_pct", "years", "compounding"]),
+        ("present_value",     ["fv", "rate_pct", "years"]),
+        ("compound_interest", ["principal", "rate_pct", "years"]),
+        ("simple_interest",   ["principal", "rate_pct", "years"]),
+        ("mortgage_payment",  ["principal", "annual_rate_pct", "years"]),
+        ("npv",               ["cash_flows", "discount_pct"]),
+        ("bayes",             ["p_b_given_a", "p_a", "p_b"]),
+        ("kelly",             ["p", "b"]),
+        ("roi",               ["gain", "cost"]),
     ],
     dispatch = dispatch
 );

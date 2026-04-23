@@ -349,20 +349,33 @@ mod experts {
     ///   2. `LARQL_EXPERTS_DIR` env var.
     ///   3. Workspace build dir relative to the running CLI binary location.
     fn resolve_experts_dir(args: &RunArgs) -> Result<PathBuf, BoxErr> {
-        if let Some(p) = &args.experts_dir {
+        resolve_experts_dir_inner(
+            args.experts_dir.clone(),
+            std::env::var("LARQL_EXPERTS_DIR").ok().map(PathBuf::from),
+            std::env::current_exe().ok(),
+        )
+    }
+
+    /// Pure version of [`resolve_experts_dir`] — env var + current exe are
+    /// passed in. Lets unit tests exercise the precedence chain without
+    /// mutating shared process state.
+    fn resolve_experts_dir_inner(
+        arg_dir: Option<PathBuf>,
+        env_dir: Option<PathBuf>,
+        exe_path: Option<PathBuf>,
+    ) -> Result<PathBuf, BoxErr> {
+        if let Some(p) = arg_dir {
             if !p.is_dir() {
                 return Err(format!("--experts-dir does not exist: {}", p.display()).into());
             }
-            return Ok(p.clone());
+            return Ok(p);
         }
-        if let Ok(p) = std::env::var("LARQL_EXPERTS_DIR") {
-            let path = PathBuf::from(p);
+        if let Some(path) = env_dir {
             if path.is_dir() {
                 return Ok(path);
             }
         }
-        let exe = std::env::current_exe().ok();
-        if let Some(exe) = exe {
+        if let Some(exe) = exe_path {
             for ancestor in exe.ancestors() {
                 let candidate = ancestor
                     .join("crates/larql-experts/target/wasm32-wasip1/release");
@@ -383,9 +396,15 @@ mod experts {
         }
     }
 
-    /// Pick a strategy from quant + `--metal` + Metal availability.
-    fn pick_strategy(quant: larql_vindex::QuantFormat, want_metal: bool) -> Strategy {
-        let metal_ready = want_metal && larql_compute::default_backend().has_q4();
+    /// Whether the active compute backend can serve Q4 work-sets via Metal.
+    /// Wraps the impure `default_backend()` call so [`pick_strategy`] stays pure.
+    fn metal_ready_for_q4(want_metal: bool) -> bool {
+        want_metal && larql_compute::default_backend().has_q4()
+    }
+
+    /// Pure strategy selector: given the vindex quant format and whether
+    /// Metal is available + requested, pick a decode strategy.
+    fn pick_strategy(quant: larql_vindex::QuantFormat, metal_ready: bool) -> Strategy {
         match (quant, metal_ready) {
             (larql_vindex::QuantFormat::Q4k, true) => Strategy::MetalQ4K,
             (larql_vindex::QuantFormat::Q4k, false) => Strategy::CpuQ4K,
@@ -397,7 +416,7 @@ mod experts {
     fn load_runtime(vindex_path: &Path, args: &RunArgs) -> Result<Runtime, BoxErr> {
         let mut cb = SilentLoadCallbacks;
         let cfg = larql_vindex::load_vindex_config(vindex_path)?;
-        let strategy = pick_strategy(cfg.quant, args.metal);
+        let strategy = pick_strategy(cfg.quant, metal_ready_for_q4(args.metal));
 
         if args.verbose {
             eprintln!("strategy: {} (quant={:?}, metal_requested={})", strategy.name(), cfg.quant, args.metal);
@@ -526,6 +545,142 @@ mod experts {
             if let Err(e) = run_one(session, runtime, prompt, template, args) {
                 eprintln!("error: {e}");
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use larql_vindex::QuantFormat;
+
+        // ── pick_strategy ──────────────────────────────────────────────────
+
+        #[test]
+        fn pick_strategy_q4k_with_metal_picks_metal() {
+            assert!(matches!(
+                pick_strategy(QuantFormat::Q4k, true),
+                Strategy::MetalQ4K
+            ));
+        }
+
+        #[test]
+        fn pick_strategy_q4k_without_metal_picks_cpu_q4k() {
+            assert!(matches!(
+                pick_strategy(QuantFormat::Q4k, false),
+                Strategy::CpuQ4K
+            ));
+        }
+
+        #[test]
+        fn pick_strategy_non_q4k_with_metal_falls_back_to_f32() {
+            // Metal can't help with non-Q4K weights — backend has no f32 path.
+            assert!(matches!(
+                pick_strategy(QuantFormat::None, true),
+                Strategy::CpuF32
+            ));
+        }
+
+        #[test]
+        fn pick_strategy_non_q4k_without_metal_picks_cpu_f32() {
+            assert!(matches!(
+                pick_strategy(QuantFormat::None, false),
+                Strategy::CpuF32
+            ));
+        }
+
+        // ── resolve_experts_dir_inner ──────────────────────────────────────
+
+        #[test]
+        fn resolve_arg_dir_when_valid() {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let p = dir.path().to_path_buf();
+            let resolved = resolve_experts_dir_inner(Some(p.clone()), None, None).expect("ok");
+            assert_eq!(resolved, p);
+        }
+
+        #[test]
+        fn resolve_arg_dir_invalid_errors() {
+            let bogus = PathBuf::from("/this/path/does/not/exist/xyz");
+            let err = resolve_experts_dir_inner(Some(bogus.clone()), None, None).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("--experts-dir does not exist"), "got: {msg}");
+            assert!(msg.contains(bogus.to_str().unwrap()), "msg should name the path; got: {msg}");
+        }
+
+        #[test]
+        fn resolve_falls_through_to_env_dir() {
+            let env = tempfile::tempdir().expect("tempdir");
+            let resolved = resolve_experts_dir_inner(
+                None,
+                Some(env.path().to_path_buf()),
+                None,
+            )
+            .expect("ok");
+            assert_eq!(resolved, env.path());
+        }
+
+        #[test]
+        fn resolve_skips_invalid_env_dir_falls_to_workspace_walk() {
+            // env dir doesn't exist; workspace walk must then succeed.
+            // Build a fake "exe" inside a workspace-shaped tempdir tree.
+            let root = tempfile::tempdir().expect("tempdir");
+            let wasm_dir = root
+                .path()
+                .join("crates/larql-experts/target/wasm32-wasip1/release");
+            std::fs::create_dir_all(&wasm_dir).unwrap();
+            // exe is conceptually somewhere inside root, e.g. target/debug/larql.
+            let exe = root.path().join("target/debug/larql");
+            std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+
+            let resolved = resolve_experts_dir_inner(
+                None,
+                Some(PathBuf::from("/nonexistent/env/dir")),
+                Some(exe),
+            )
+            .expect("ok");
+            assert_eq!(resolved.canonicalize().unwrap(), wasm_dir.canonicalize().unwrap());
+        }
+
+        #[test]
+        fn resolve_returns_error_when_nothing_resolves() {
+            let err = resolve_experts_dir_inner(
+                None,
+                Some(PathBuf::from("/nope/env")),
+                Some(PathBuf::from("/nope/exe")),
+            )
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("could not locate"), "got: {msg}");
+            assert!(msg.contains("--experts-dir"), "should hint at the flag; got: {msg}");
+        }
+
+        // ── print_dispatch ─────────────────────────────────────────────────
+
+        #[test]
+        fn print_dispatch_unknown_op_errors() {
+            let outcome = Err(DispatchSkip::UnknownOp("foo".into()));
+            let err = print_dispatch("raw model output", outcome).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("unknown op `foo`"), "got: {msg}");
+            assert!(msg.contains("raw model output"), "should include raw output; got: {msg}");
+        }
+
+        #[test]
+        fn print_dispatch_expert_declined_errors() {
+            let outcome = Err(DispatchSkip::ExpertDeclined {
+                op: "gcd".into(),
+                args: serde_json::json!({"bad": true}),
+            });
+            let err = print_dispatch("output", outcome).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("expert `gcd` declined"), "got: {msg}");
+        }
+
+        #[test]
+        fn print_dispatch_no_op_call_succeeds() {
+            // No op-call is a soft case — print raw, return Ok.
+            let outcome = Err(DispatchSkip::NoOpCall);
+            assert!(print_dispatch("free text", outcome).is_ok());
         }
     }
 }

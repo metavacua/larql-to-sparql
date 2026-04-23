@@ -1,17 +1,15 @@
 //! Accuracy suite runner — produces the video frame table.
 //!
-//! Runs all 5 tests across all strategies and outputs:
+//! Runs all tests across all strategies and outputs:
 //! ```text
 //!                     Top-1    KL div    Gen stable    Needle@32K
 //! Standard KV         100%     0.0       baseline      100%
 //! TurboQuant 4-bit    ~99%     ~0.01     ~10 tokens    ~95%
 //! Markov RS           100%     0.0       100%          100%
-//! Hybrid RS+CA        ?        ?         ?             ?
 //! ```
 
 use larql_inference::model::ModelWeights;
-use larql_inference::forward::{predict, logits_to_predictions_pub, PredictResult};
-use larql_inference::ffn::WeightFfn;
+use larql_inference::forward::predict;
 use crate::accuracy;
 use super::prompts::TestPrompt;
 

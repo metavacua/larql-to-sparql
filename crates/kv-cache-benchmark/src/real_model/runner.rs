@@ -4,14 +4,14 @@
 //! measures wall-clock, memory, and accuracy vs the Standard KV baseline.
 //!
 //! Strategy overview:
-//!   1. Standard KV     — baseline, stores post-RoPE K/V in fp16.
-//!   2. TurboQuant 4-bit — WHT + Lloyd-Max quantisation of K/V.
-//!   3. Markov RS        — stores pre-layer residuals; K/V recomputed at decode.
-//!                         Three-tier: hot window (residuals) + cold tier
-//!                         (evicted residuals preserved for full-history replay)
-//!                         + new-token embed. Proven: KL=0.0 vs full-KV at any
-//!                         window size via cold-tier concatenation at decode time.
-//!   4. Graph Walk       — vindex FFN walk; no forward pass for factual queries.
+//!  1. Standard KV     — baseline, stores post-RoPE K/V in fp16.
+//!  2. TurboQuant 4-bit — WHT + Lloyd-Max quantisation of K/V.
+//!  3. Markov RS        — stores pre-layer residuals; K/V recomputed at decode.
+//!     Three-tier: hot window (residuals) + cold tier (evicted residuals
+//!     preserved for full-history replay) + new-token embed. Proven:
+//!     KL=0.0 vs full-KV at any window size via cold-tier concatenation at
+//!     decode time.
+//!  4. Graph Walk       — vindex FFN walk; no forward pass for factual queries.
 
 use larql_inference::model::ModelWeights;
 use larql_inference::forward::logits_to_predictions_pub;

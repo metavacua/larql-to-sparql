@@ -208,23 +208,6 @@ fn check_dtype(got: &str, expected: &'static str) -> Result<(), NpyError> {
     }
 }
 
-fn parse_string_field(header: &str, name: &str) -> Option<String> {
-    let needle = format!("'{name}':");
-    let start = header.find(&needle)?;
-    let after = &header[start + needle.len()..];
-    // Skip whitespace and opening quote (either ' or ").
-    let after = after.trim_start();
-    let (quote, rest) = if let Some(r) = after.strip_prefix('\'') {
-        ('\'', r)
-    } else if let Some(r) = after.strip_prefix('"') {
-        ('"', r)
-    } else {
-        return None;
-    };
-    let end = rest.find(quote)?;
-    Some(rest[..end].to_string())
-}
-
 /// Extract the raw text of a field value. Handles:
 ///   - quoted strings: `'<f4'` → `<f4`
 ///   - list literals: `[(...)]` → `[(...)]` (kept as-is for callers to parse)
@@ -273,7 +256,7 @@ fn parse_field_value(header: &str, name: &str) -> Option<String> {
         _ => {
             // Bare token up to comma or closing brace.
             let end = rest
-                .find(|c: char| c == ',' || c == '}')
+                .find([',', '}'])
                 .unwrap_or(rest.len());
             Some(rest[..end].trim().to_string())
         }
@@ -348,12 +331,6 @@ mod tests {
         let blob = synth_f32_1d(&vals);
         let parsed = read_f32_1d(&blob).expect("parse");
         assert_eq!(parsed, vals.to_vec());
-    }
-
-    #[test]
-    fn parse_string_field_handles_single_quotes() {
-        let hdr = "{'descr': '<f4', 'fortran_order': False, 'shape': (10,), }";
-        assert_eq!(parse_string_field(hdr, "descr"), Some("<f4".into()));
     }
 
     #[test]

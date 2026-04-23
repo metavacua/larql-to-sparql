@@ -19,7 +19,12 @@ expert_exports!(
     tier = 1,
     description = "Propositional logic: eval, simplify, truth table, classify (tautology/contradiction/contingent)",
     version = "0.2.0",
-    ops = ["eval", "simplify", "truth_table", "classify"],
+    ops = [
+        ("eval",        ["expr", "assignments"]),
+        ("simplify",    ["expr"]),
+        ("truth_table", ["expr"]),
+        ("classify",    ["expr"]),
+    ],
     dispatch = dispatch
 );
 

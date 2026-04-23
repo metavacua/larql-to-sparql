@@ -16,7 +16,10 @@ expert_exports!(
     tier = 1,
     description = "Conway's Game of Life: single step, N-generation simulation",
     version = "0.2.0",
-    ops = ["step", "simulate"],
+    ops = [
+        ("step",     ["grid"]),
+        ("simulate", ["grid", "generations"]),
+    ],
     dispatch = dispatch
 );
 

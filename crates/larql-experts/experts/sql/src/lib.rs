@@ -27,7 +27,9 @@ expert_exports!(
     tier = 1,
     description = "In-memory SQL evaluator: CREATE TABLE, INSERT, SELECT with aggregates and WHERE",
     version = "0.2.0",
-    ops = ["execute"],
+    ops = [
+        ("execute", ["sql"]),
+    ],
     dispatch = dispatch
 );
 

@@ -34,6 +34,12 @@ pub fn cpu_moe_forward(h: &[f32], moe: &MoeLayerWeights<'_>, norm_offset: f32, e
     if moe.router_proj.is_empty() || moe.experts_gate_up.is_empty() || moe.experts_down.is_empty() {
         return vec![0.0f32; hidden];
     }
+    // Diagnostic: bypass the expert block entirely. Dense FFN alone flows
+    // through the normal path; if this produces legible output, the MoE
+    // block is the broken piece. If still garbage, look upstream.
+    if std::env::var("SKIP_MOE").is_ok() {
+        return vec![0.0f32; hidden];
+    }
 
     // 1. Pre-experts norm — input for the expert matmuls (NOT the router).
     let h_norm = rms_norm(h, moe.pre_experts_norm, eps, norm_offset);

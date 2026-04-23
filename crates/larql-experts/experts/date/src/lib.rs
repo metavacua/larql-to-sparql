@@ -20,11 +20,12 @@ expert_exports!(
     description = "Date arithmetic: days between, day of week, date +/- N days, leap year",
     version = "0.2.0",
     ops = [
-        "days_between", "weeks_between",
-        "day_of_week",
-        "add_days",
-        "is_leap_year",
-        "days_in_month",
+        ("days_between",  ["from", "to"]),
+        ("weeks_between", ["from", "to"]),
+        ("day_of_week",   ["date"]),
+        ("add_days",      ["date", "days"]),
+        ("is_leap_year",  ["year"]),
+        ("days_in_month", ["year", "month"]),
     ],
     dispatch = dispatch
 );

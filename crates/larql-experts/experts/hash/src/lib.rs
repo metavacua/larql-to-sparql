@@ -23,10 +23,13 @@ expert_exports!(
     description = "Encoding: base64, hex, url (percent), FNV-1a 32-bit hash",
     version = "0.2.0",
     ops = [
-        "base64_encode", "base64_decode",
-        "hex_encode", "hex_decode",
-        "url_encode", "url_decode",
-        "fnv1a_32",
+        ("base64_encode", ["s"]),
+        ("base64_decode", ["s"]),
+        ("hex_encode",    ["s"]),
+        ("hex_decode",    ["s"]),
+        ("url_encode",    ["s"]),
+        ("url_decode",    ["s"]),
+        ("fnv1a_32",      ["s"]),
     ],
     dispatch = dispatch
 );

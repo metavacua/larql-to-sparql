@@ -14,7 +14,6 @@
 fn main() {
     use kv_cache_benchmark::accuracy_suite::prompts;
     use kv_cache_benchmark::accuracy_suite::runner;
-    use kv_cache_benchmark::accuracy_suite::needle;
 
     let args: Vec<String> = std::env::args().collect();
     let quick = args.iter().any(|a| a == "--quick");

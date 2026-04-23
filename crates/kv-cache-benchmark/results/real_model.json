@@ -28,7 +28,7 @@
         ]
       ],
       "memory_bytes": 835584,
-      "wall_clock_us": 1371011.208,
+      "wall_clock_us": 558273.708,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -60,7 +60,7 @@
         ]
       ],
       "memory_bytes": 215424,
-      "wall_clock_us": 1379397.9160000002,
+      "wall_clock_us": 565654.583,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -92,7 +92,7 @@
         ]
       ],
       "memory_bytes": 2088960,
-      "wall_clock_us": 1385152.75,
+      "wall_clock_us": 560958.0830000001,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -124,7 +124,7 @@
         ]
       ],
       "memory_bytes": 24,
-      "wall_clock_us": 1394657.667,
+      "wall_clock_us": 571057.166,
       "top1_match": true,
       "hidden_cosine": null
     }
@@ -158,7 +158,7 @@
         ]
       ],
       "memory_bytes": 835584,
-      "wall_clock_us": 1389050.5829999999,
+      "wall_clock_us": 568469.416,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -190,7 +190,7 @@
         ]
       ],
       "memory_bytes": 215424,
-      "wall_clock_us": 1397236.5829999999,
+      "wall_clock_us": 575610.374,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -222,7 +222,7 @@
         ]
       ],
       "memory_bytes": 2088960,
-      "wall_clock_us": 1386418.584,
+      "wall_clock_us": 557087.708,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -254,7 +254,7 @@
         ]
       ],
       "memory_bytes": 24,
-      "wall_clock_us": 1370008.417,
+      "wall_clock_us": 548853.125,
       "top1_match": true,
       "hidden_cosine": null
     }
@@ -288,7 +288,7 @@
         ]
       ],
       "memory_bytes": 835584,
-      "wall_clock_us": 1282329.459,
+      "wall_clock_us": 560918.25,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -320,7 +320,7 @@
         ]
       ],
       "memory_bytes": 215424,
-      "wall_clock_us": 1290706.959,
+      "wall_clock_us": 568089.334,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -352,7 +352,7 @@
         ]
       ],
       "memory_bytes": 2088960,
-      "wall_clock_us": 1461942.791,
+      "wall_clock_us": 564424.167,
       "top1_match": true,
       "hidden_cosine": 1.0000000000000002
     },
@@ -384,7 +384,7 @@
         ]
       ],
       "memory_bytes": 24,
-      "wall_clock_us": 1258572.292,
+      "wall_clock_us": 563749.083,
       "top1_match": true,
       "hidden_cosine": null
     }
@@ -418,7 +418,7 @@
         ]
       ],
       "memory_bytes": 557056,
-      "wall_clock_us": 1361486.9579999999,
+      "wall_clock_us": 552731.625,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -450,7 +450,7 @@
         ]
       ],
       "memory_bytes": 143616,
-      "wall_clock_us": 1366954.5829999999,
+      "wall_clock_us": 557574.375,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -482,7 +482,7 @@
         ]
       ],
       "memory_bytes": 1392640,
-      "wall_clock_us": 1381335.625,
+      "wall_clock_us": 555347.0419999999,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -514,7 +514,7 @@
         ]
       ],
       "memory_bytes": 16,
-      "wall_clock_us": 1297082.375,
+      "wall_clock_us": 552227.708,
       "top1_match": true,
       "hidden_cosine": null
     }
@@ -548,7 +548,7 @@
         ]
       ],
       "memory_bytes": 1253376,
-      "wall_clock_us": 1436850.4579999999,
+      "wall_clock_us": 571631.291,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -580,7 +580,7 @@
         ]
       ],
       "memory_bytes": 323136,
-      "wall_clock_us": 1449531.417,
+      "wall_clock_us": 582318.041,
       "top1_match": true,
       "hidden_cosine": 1.0
     },
@@ -612,7 +612,7 @@
         ]
       ],
       "memory_bytes": 3133440,
-      "wall_clock_us": 1428793.583,
+      "wall_clock_us": 568236.208,
       "top1_match": true,
       "hidden_cosine": 0.9999999999999998
     },
@@ -644,7 +644,7 @@
         ]
       ],
       "memory_bytes": 36,
-      "wall_clock_us": 1496135.5,
+      "wall_clock_us": 574664.042,
       "top1_match": true,
       "hidden_cosine": null
     }

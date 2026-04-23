@@ -6,58 +6,77 @@ stratum admits a radically different state representation. The table below is
 the ladder: each rung pairs a storage regime with the specific correctness
 target it is obligated to hit.
 
-| # | Strategy | Correctness target | Memory @ 370K | Compression |
-|---|----------|--------------------|---------------|-------------|
-| 1 | **Standard KV** | bit-exact baseline | 25.8 GB | 1× |
-| 2 | **TurboQuant** | approximate bit-exact | 6.6 GB | ~4× |
-| 3 | **Markov RS (W=512)** | bit-exact via residual-state reconstruction | ~193 MB | ~134× |
-| 4 | **Tier 2 — `UnlimitedContextEngine`** | bit-exact within-window (per-window replay) | ~30 MB | ~2,000× |
-| 5 | **Tier 3 — `ApolloEngine`** | first-token factual correctness; lossy continuation | ~2.8 MB | ~20,000× |
-| 6 | **RS Graph Walk** _(target — requires cracked attention)_ | graph-level semantic recall | 1.5 MB | ~17,200× |
+| # | Strategy | Contract | Breaks at | Memory @ 370K | Compression |
+|---|----------|----------|-----------|---------------|-------------|
+| 1 | **Standard KV** | bit-exact baseline | — (this *is* the baseline) | 25.8 GB | 1× |
+| 2 | **TurboQuant** | top-1 preserved under quantisation noise | tasks that need full-distribution fidelity — temperature sampling, beam search with tight margins, RLHF reward scoring | 6.6 GB | ~4× |
+| 3 | **Markov RS (W=512)** | bit-exact via cold-replay reconstruction | architectures that carry state outside the residual stream — explicit memory modules, retrieval-augmented decoders, external attention sinks | ~193 MB | ~134× |
+| 4 | **Tier 2 — `UnlimitedContextEngine`** | bit-exact within-window (per-window replay) | anything outside the replayed window | ~30 MB | ~2,000× |
+| 5 | **Tier 3 — `ApolloEngine`** | first-token factual correctness | continuation (lossy — one vector can't uniquely ground suffix text) | ~2.8 MB | ~20,000× |
+| 6 | **RS Graph Walk** † | graph-level semantic recall | queries the extracted graphs don't cover | 1.5 MB † | ~17,200× † |
+
+† Row 6 is **projected, not measured**. It requires cracked attention, which is not yet implemented. `GraphWalk::decode()` returns zero vectors as a sentinel — do not pipe it through `run_strategy_benchmark` for fidelity metrics.
+
+Rows 1–5 are measured on Gemma 3 4B via the `real-model` feature; see the **Latest measured run** section below for the most recent trace.
+
+**The `Contract` column is not a total order.** Row 4 (bit-exact within window) and Row 5 (first-token factual) make incomparable promises: Row 4 reproduces the window's logits exactly but says nothing outside it; Row 5 lands the right first token over arbitrary context but drifts on continuation. Neither dominates the other — they answer different questions. Pick by which contract your workload actually needs.
 
 ### The correctness ladder
 
 The rungs are not interchangeable — they answer different questions:
 
 1. **Bit-exact continuation** (Standard KV) — identical logits, identical decode.
-2. **Approximate bit-exact** (TurboQuant) — KL → 0 under quantization noise.
-3. **Bit-exact via residual reconstruction** (Markov RS) — same next-token distribution under the implemented cold-replay path on the benchmarked setup.
+2. **Top-1 preserved under quantisation noise** (TurboQuant) — 4-bit Lloyd-Max perturbs the hidden state (cos ≈ 0.99 on decoded residuals) but the argmax survives; KL is small, not zero.
+3. **Bit-exact via cold-replay reconstruction** (Markov RS) — same next-token distribution under the implemented cold-replay path on the benchmarked setup.
 4. **Bit-exact within a bounded replay window** (Tier 2) — K/V checkpoint + token archive reproduces the window exactly; behaviour outside the window is not claimed.
 5. **First-token factual correctness** (Tier 3) — the right fact lands; continuation is lossy because a single boundary vector cannot uniquely ground arbitrary suffix text.
 6. **Graph-level semantic recall** (Graph Walk, target) — answers recoverable from the extracted graphs; not a literal replay of the original forward pass.
 
-Every claim further down this README should be read as attached to exactly
-one of these rungs.
-
 ## Implementation status
 
-| Strategy | End-to-end real | Synthetic encode/decode | Scaffold only |
-|---|---|---|---|
-| Standard KV | ✓ `real_model::kv_capture` + `standard_kv` | ✓ | — |
-| TurboQuant | ✓ `real_model::turboquant_layer` + `turboquant` | ✓ | — |
-| Markov RS (W=512, Tier 1 / variant iv-dense) | ✓ `real_model::markov_layer` (`rs_prefill`, `rs_decode_step`) — proven bit-perfect end-to-end | ✓ | — |
-| `UnlimitedContextEngine` (Tier 2) | ✓ `unlimited_context::` — Rust port of `chuk-mlx/.../unlimited_engine.py`; integration tests `tests/test_unlimited_context.rs` | — | — |
-| `ApolloEngine` (Tier 3) | ✓ full end-to-end pipeline on real apollo11_store + Gemma 3 4B. **Two paths**: `query_greedy` (forwards window tokens + query, ~519 context tokens) and `query_greedy_compressed` (forwards 10 KB boundary + query, ~9 context tokens — exercises the actual compression claim). Positional-proximity retrieval + answer-only injection produces `" John"` as top-1 for "Who won the porridge eating contest?" on both paths. | — | — |
-| Boundary RS (synthetic) | — | ✓ accounting honest, `decode()` is a stub (`boundary_residual::mod.rs:142,156`) | — |
-| Graph Walk | partial (`real_model::graph_walk_layer`) | ✓ | — |
+| Strategy | End-to-end real | Synthetic encode/decode |
+|---|---|---|
+| Standard KV | ✓ `real_model::kv_capture` + `standard_kv` | ✓ |
+| TurboQuant | ✓ `real_model::turboquant_layer` + `turboquant` | ✓ |
+| Markov RS (W=512) | ✓ `real_model::markov_layer` (`rs_prefill`, `rs_decode_step`) — proven bit-perfect end-to-end (Tier 1 / variant iv-dense) | ✓ |
+| `UnlimitedContextEngine` (Tier 2) | ✓ `unlimited_context::` — Rust port of `chuk-mlx/.../unlimited_engine.py`; integration tests `tests/test_unlimited_context.rs` | — |
+| `ApolloEngine` (Tier 3) | ✓ full end-to-end pipeline on real apollo11_store + Gemma 3 4B. **Four entry points** (`query_greedy`, `query_greedy_compressed`, `query_generate_uncompressed`, `query_generate_compressed` — detailed under Row 5 notes below). Positional-proximity retrieval + answer-only injection produces `" John"` as top-1 for "Who won the porridge eating contest?" on both the uncompressed and compressed paths. | — |
+| Graph Walk | partial — `real_model::graph_walk_layer` + memory accounting via `graph_walk::GraphWalk`; does not implement `KvStrategy` (no K/V reconstruction without cracked attention) | — |
+
+### Latest measured run — 2026-04-23, Gemma 3 4B (q4k vindex)
+
+Reproduced locally via `cargo run -p kv-cache-benchmark --example real_model_bench --features real-model --release -- google/gemma-3-4b-it <vindex-path>`. Full trace in `results/real_model.json`.
+
+Top-1 match vs Standard KV baseline across five factual prompts (France → Paris, Mozart → Salzburg, Japan currency → the, water freezes → ' ', largest planet → Jupiter):
+
+| Strategy                       | Top-1 matches | Hidden cosine vs baseline | Per-prompt memory (Jupiter prompt, 9 toks) |
+|--------------------------------|:-:|:-:|:-:|
+| Standard KV (FP16)             | 5 / 5 | 1.000 (baseline) | 1.3 MB  |
+| TurboQuant 4-bit               | 5 / 5 | cos ≈ 0.9915 (quantisation noise, top-1 preserved) | 323 KB (4.0×)  |
+| Markov RS (W=512 cap)          | 5 / 5 | **1.000000** (bit-perfect) | 3.1 MB populated (floor; rises to ~193 MB ceiling as context fills W) |
+| RS Graph Walk (MarkovFallback) | 5 / 5 | 1.000 (fallback to Markov path) | 36 B per-conversation |
+
+KL is not reported separately because `cos = 1.000000` on the hidden state forces logit identity (final_norm + lm_head are deterministic), which is strictly stronger than `KL = 0.0` on the output distribution. Wall-clock per prompt ~560–1020 ms; Markov RS is slightly faster than Standard KV at these short contexts because it doesn't carry a growing K/V tensor. Graph Walk stays in the `MarkovFallback` tier for all five prompts — the Tier A / Tier B template-cache and dynamic-graph paths are not yet wired, so these results demonstrate the fallback-correctness floor, not the target-architecture speed.
+
+**What fraction of real queries graduate out of fallback?** Unmeasured — that is the open question for Row 6. The current `real_model::graph_walk_layer` FFN walk covers the 348K features in the vindex (factual retrieval over Gemma 3 4B's training distribution: capitals, elements, dates, named entities, well-known relations). Queries that decompose to one of those features should move to Tier A (cached template) or Tier B (dynamic graph) once the routing path is wired; everything else — free-form generation, multi-hop reasoning, novel domain compositions — stays in the Markov RS fallback. Quantifying coverage on a realistic query distribution is a future work item; don't read the five factual prompts above as a coverage claim, they're a correctness floor.
 
 **Compression numbers in the headline table above**:
 
-- Rows 1–3: measured end-to-end on Gemma 3 4B via the `real-model` feature.
+- Rows 1–3: measured end-to-end on Gemma 3 4B via the `real-model` feature. **Row 3 validation:** the most recent run (2026-04-23, trace above) measured `Markov RS hidden cosine vs baseline = 1.000000` on all five factual prompts, re-confirming the bit-perfect claim. The full `#[ignore]`'d suite (`tests/test_real_model.rs::test_accuracy_markov_rs_bitperfect` and adjacent) still requires weights + vindex on disk and does not run in default `cargo test`; the example above is the lightweight reproduction.
 - Row 4 (Tier 2): measured via `tests/test_unlimited_context::test_compression_ratio`. Within-window K,V is bit-exact via model-forward replay from the prior window's per-layer K,V checkpoint.
 - Row 5 (Tier 3): the Rust `ApolloEngine` loads `apollo-demo/apollo11_store/` end-to-end (2.13 MB in RAM) and runs the full pipeline: tf-idf-lite routing → positional-proximity entry retrieval → forward-with-injection (answer-tokens-only, step-0 only) at L30 coefficient 10× → greedy decode.
 
-  Four entry points, all measured end-to-end on Gemma 3 4B:
+  Four entry points, all measured end-to-end on Gemma 3 4B. The axes are orthogonal: **decode length** (single-token top-1 vs iterative decode) × **context representation** (raw window tokens vs 10 KB boundary vector):
 
-  - `query_greedy`: single-token top-1. Full window + query context (~519 tokens). `" John"` @ logit 24.0.
-  - `query_greedy_compressed`: single-token top-1. 10 KB boundary + query (~9 tokens, 58× smaller). `" John"` @ logit 31.1.
-  - `query_generate_uncompressed`: **iterative decode, 12 tokens. Produces `" John Coyle.\n\n02 05 5"`** — correct answer, then drifts into the transcript's time-stamp structure. Grounded on the window's actual token content.
-  - `query_generate_compressed`: iterative decode over the 10 KB boundary. Produces `" John and Mary.\n\nJohn and Mary won the porridge eating"` — starts correctly (" John" from injection), hallucinates "Mary" because the single-vector boundary is lossy and can't uniquely identify the "Coyle" continuation.
+  |                      | Uncompressed (raw window tokens, ~519 tok) | Compressed (10 KB boundary + query, ~9 tok) |
+  |----------------------|-----|-----|
+  | **Single-token top-1** (`query_greedy*`) | `" John"` @ logit 24.0 | `" John"` @ logit 31.1 |
+  | **Iterative decode** (`query_generate*`) | **`" John Coyle.\n\n02 05 5"`** — correct answer, then drifts into the transcript's time-stamp structure | `" John and Mary.\n\nJohn and Mary won the porridge eating"` — first token correct (injection lands), hallucinates "Mary" because the single-vector boundary can't uniquely identify the "Coyle" continuation |
 
   **The gap between compressed and uncompressed outputs is exactly the fidelity/compression trade-off the four-rung ladder predicts**: uncompressed forwards have the raw window text to ground on, compressed forwards rely on the ~10 KB boundary (variant-ii-class) + injection — which lands the first-token fact via amplification but can't carry detailed continuation info. A Tier 2-style per-layer K/V checkpoint (~139 KB per window) would reproduce "Coyle" exactly at the cost of ~14× more storage per boundary.
 
   Python reference: `chuk-mlx/src/chuk_lazarus/inference/context/research/unlimited_engine.py` + `vec_inject/`.
-- Row 6: FFN graph walk proven; attention elimination requires cracked attention (see later in this README).
+- Row 6: see the † footnote under the headline ladder. The 1.5 MB figure is projected conditional on the cracked-attention path landing; FFN graph walk is proven (`real_model::graph_walk_layer`), but queries outside the factual graph currently fall back to Markov RS.
 
 ## Quick start
 
@@ -74,8 +93,9 @@ cargo run -p kv-cache-benchmark --example multi_turn_demo
 # Criterion benchmarks
 cargo bench -p kv-cache-benchmark
 
-# Phase 2: Real model (requires Gemma 3-4B weights + vindex)
-cargo run -p kv-cache-benchmark --example real_model_bench --features real-model
+# Phase 2: Real model (requires Gemma 3-4B weights + a vindex on disk)
+cargo run -p kv-cache-benchmark --example real_model_bench --features real-model --release -- \
+    google/gemma-3-4b-it <path-to-vindex-dir>
 ```
 
 ## Architecture
@@ -84,20 +104,18 @@ cargo run -p kv-cache-benchmark --example real_model_bench --features real-model
 kv-cache-benchmark/
   src/
     lib.rs              KvStrategy trait, run_strategy_benchmark()
-    standard_kv.rs      Strategy 1: raw FP16 encode/decode
-    turboquant/         Strategy 2: WHT + Lloyd-Max + bit packing
-    markov_residual/    Strategy 3: bounded window + cold tier
-    boundary_residual/  Strategy 4: tiny hot window + boundary vec + cold IDs
-    hybrid_cracked/     Strategy 5: cached static heads + tiny dynamic KV
-    graph_walk/         Strategy 6: routing table + vindex lookup
+    standard_kv.rs      Row 1: raw FP16 encode/decode
+    turboquant/         Row 2: WHT + Lloyd-Max + bit packing
+    markov_residual/    Row 3: bounded window + cold tier
+    graph_walk/         Row 6: routing table + vindex lookup (projected; memory accounting only, no KvStrategy impl)
     benchmark.rs        Sweep runner, multi-turn sim, table formatter
     shader_bench.rs     CPU/Metal operation benchmarks
     metrics.rs          MSE, cosine, inner product error
     model_config.rs     Gemma 4B / Llama 8B / 70B dimensions
     real_model/         Phase 2: wired into larql-inference (feature-gated)
-    unlimited_context/  Tier 2: per-window K,V checkpoint + model-forward replay
-    apollo/             Tier 3: single-vector boundary + vec_inject (scaffold)
-  tests/                66+ unit + integration tests
+    unlimited_context/  Row 4 (Tier 2): per-window K,V checkpoint + model-forward replay
+    apollo/             Row 5 (Tier 3): single-vector boundary + vec_inject
+  tests/                unit + integration tests
   benches/              Criterion benchmarks
   examples/             Demo runners
   docs/                 Benchmark spec v3
@@ -114,12 +132,27 @@ Compresses KV cache to 3-4 bits per coordinate using Walsh-Hadamard rotation
 followed by Lloyd-Max scalar quantization. 4-6× compression at the Shannon
 limit. Still grows O(context_length).
 
-### Markov Residual Stream (W=512)
-Eliminates the KV cache entirely and replaces it with residual state as the
-primary persistent representation. Stores a bounded hot window of 512 residuals
-per layer (f32) plus cold-tier token IDs (4 bytes each). Hot window dominates:
-512 × 34 layers × 2560 dim × 4 bytes ≈ 178 MB fixed. Cold tier adds only
-4 bytes/token. Does NOT grow with context.
+### Markov RS (W=512)
+**Markov RS turns the KV cache from the memory into a view of the memory.**
+The residual stream is the source of truth; K/V becomes a computed view —
+recomputed at decode time from the residual state, not persisted. In
+database terms: K/V is no longer a table, it's a query over the residual
+table. Stores a bounded hot window of up to 512 residuals per layer (f32)
+plus cold-tier token IDs (4 bytes each). At full
+occupancy the hot window dominates: 512 × 34 layers × 2560 dim × 4 bytes
+≈ 178 MB (the ~193 MB figure includes bookkeeping + checkpoints). Cold tier
+adds 4 bytes/token — effectively flat vs the 5,120 bytes/token of hot
+residual state (a 1,280× ratio), but not literally zero. Net effect: memory
+is bounded by the W=512 hot window, with only a small linear tail past it.
+
+**Why short-prompt measurements look smaller than the headline 193 MB:** the
+headline is the *allocation ceiling* at full-W occupancy (i.e. once the hot
+window is actually holding 512 rows per layer). At the 9-token Jupiter
+prompt in the latest-run table above, only 9 rows × 34 layers × 2560 dim ≈
+3.1 MB are actually populated — the cap hasn't been reached yet. The floor
+rises monotonically until context ≥ W and then plateaus. Use the headline
+for steady-state planning; the per-prompt number for short-context
+behaviour.
 
 **Correctness claim (precise form):** under the implemented cold-replay
 reconstruction path — `[cold_token_ids ‖ hot_residuals]` recomposed before
@@ -129,34 +162,25 @@ reproduce the next-token distribution bit-for-bit on the benchmarked setup
 reconstruction path under the benchmarked conditions, not a general claim
 that residuals are context-free Markov states across all architectures.
 
-### Boundary Residual Stream (W=32) — synthetic memory accounting only
+### Boundary residual architecture — delivered by Tier 2 / Tier 3, not a standalone strategy
 
-The `boundary_residual` strategy accounts memory for the architecture
-described above (32-token hot window + boundary vector + cold token IDs),
-but its `decode()` method is a **placeholder**: cold positions are
-reconstructed as `boundary.clone()` for every cold slot (see
-`src/boundary_residual/mod.rs:142, 156`). Useful for synthetic
-compression-ratio comparisons; **not** a bit-exact or task-accurate
-reproduction of the Python reference.
-
-The real architecture that backs the ~2,000× and ~20,000× compression
-claims lives in two places in this crate:
+The "32-token hot window + boundary vector + cold token IDs" idea from
+the Python experiments (`unlimited_engine.py`, `rs_generator.py`) is
+delivered by two concrete engines in this crate:
 
 - **`unlimited_context::UnlimitedContextEngine`** (Tier 2) — per-window
   K,V checkpoint (174 KB on Gemma 3 4B) + token archive + model-forward
   replay. Bit-exact within-window. Reference: `chuk-mlx/.../unlimited_engine.py`.
-- **`apollo::ApolloEngine`** (Tier 3, scaffold) — single-vector boundary
-  at crystal_layer (10 KB per window) + token archive + `vec_inject`
+- **`apollo::ApolloEngine`** (Tier 3) — single-vector boundary at
+  crystal_layer (10 KB per window) + token archive + `vec_inject`
   retrieval index + injection-at-L30 amplification. Task-level correctness
   on queries routable via the injection index. Reference:
   `chuk-mlx/.../vec_inject/` + `apollo-demo/apollo11_store/`.
 
-### Hybrid RS + Cracked Attention (W=512)
-The near-term practical win. 97.1% of attention heads produce the same output
-regardless of entity (cosine 0.942+). Cache those outputs per template. Only
-the ~2.9% dynamic heads (4 layers: L1, L13, L26, L32) need real KV cache.
-FFN handled by vindex walk (zero matmul). Memory is bounded by the RS hot
-window (~192 MB) plus small dynamic K/V for 4 layers.
+An earlier synthetic-accounting-only `BoundaryResidual` `KvStrategy` was
+removed because its cold-tier `decode` was a placeholder (cold slots
+reconstructed as `boundary.clone()`), so fidelity metrics produced by
+piping it through `run_strategy_benchmark` were not meaningful.
 
 ### RS Graph Walk _(target architecture — not yet fully operational)_
 The endgame once attention is cracked. The forward pass would be a walk over
@@ -175,37 +199,54 @@ Treat this rung as a target architecture, not a delivered system. The 1.5 MB
 figure is a projected steady-state footprint under the assumption that the
 cracked-attention path lands; it is not a current end-to-end measurement.
 
+**Shared infrastructure:** ~1.5 GB q4k vindex covering 348K FFN features
+across 34 layers (gate + down codebooks, feature metadata, embeddings) +
+352 KB routing table. This is the same artifact pointed to by
+`<vindex-path>` in the Quick Start — one copy per host, amortised across
+all conversations, not per-conversation. The economic argument for the
+architecture rests on that amortisation: `Graph Walk @ 370K = 1.5 MB` is a
+per-conversation number, conditional on the shared 1.5 GB already being
+resident.
+
 ## Memory scaling
 
-| Metric | Standard KV | TurboQuant 4b | Markov RS W=512 | Boundary RS W=32 | Hybrid RS+CA | Graph Walk |
-|--------|------------|---------------|-----------------|------------------|--------------|------------|
-| Memory @ 4K | 285 MB | 74 MB | 193 MB | 11.5 MB | ~193 MB | 16 KB |
-| Memory @ 32K | 2.24 GB | 580 MB | 193 MB | 11.8 MB | ~194 MB | 130 KB |
-| Memory @ 370K | 25.8 GB | 6.6 GB | 193 MB | 13.0 MB | 270 MB | 1.5 MB |
-| Grows O(N)? | yes | yes | cold only (+4B/tok) | cold only (+4B/tok) | cold only | cold only |
-| Hot window fixed? | no | no | ~178 MB | ~11.2 MB | ~178 MB | — |
+| Metric | Standard KV | TurboQuant 4b | Markov RS (W=512) | Graph Walk |
+|--------|------------|---------------|-----------------|------------|
+| Memory @ 4K | 285 MB | 74 MB | 193 MB | 16 KB |
+| Memory @ 32K | 2.24 GB | 580 MB | 193 MB | 130 KB |
+| Memory @ 370K | 25.8 GB | 6.6 GB | 193 MB | 1.5 MB |
+| Grows O(N)? | yes | yes | cold only (+4B/tok) | cold only (+4B/tok) ‡ |
+| Hot window fixed? | no | no | ~178 MB | — ‡ |
+
+‡ Graph Walk has no hot window in the K/V sense — the per-conversation growth is cold-tier token IDs (4 B each) plus a small per-step routing trace. Shared infrastructure (~1.5 GB vindex + 352 KB routing table) is reported separately and is not per-conversation.
 
 ## Compute per token
 
-| Operation | Standard KV | TurboQuant | Markov RS | Boundary RS | Hybrid RS+CA | Graph Walk |
-|-----------|------------|------------|-----------|-------------|--------------|------------|
-| Attention matmul | 34 layers | 34 layers | window only | window only | ~1–2L dynamic | **ELIMINATED** |
-| FFN matmul | 34 layers | 34 layers | 34 layers | 34 layers | **ZERO (vindex)** | **ELIMINATED** |
-| Logits matmul | 1× | 1× | 1× | 1× | **ZERO (KNN)** | **ELIMINATED** |
-| KV cache write | 34L | 34L + quant | none | none | ~1–2L dynamic | none |
-| Cold K/V replay | none | none | none | bdy+ids | bdy+ids | none |
-| Cached attention | none | none | none | none | ~32–33L | none |
-| Graph lookup | none | none | none | none | 34L FFN | 3 per hop |
+| Operation | Standard KV | TurboQuant | Markov RS | Graph Walk |
+|-----------|------------|------------|-----------|------------|
+| Attention matmul | 34 layers | 34 layers | window only | **ELIMINATED** |
+| FFN matmul | 34 layers | 34 layers | 34 layers | **ELIMINATED** |
+| Logits matmul | 1× | 1× | 1× | **ELIMINATED** |
+| KV cache write | 34L | 34L + quant | none | none |
+| Graph lookup | none | none | none | 3 per hop |
 
-**Key insight:** the rungs trade compute for memory along different axes.
-Markov RS and Boundary RS still run the full 34-layer FFN but replace K/V
-matmuls with residual recompute. Hybrid RS+CA eliminates FFN matmuls entirely
-(vindex) and caches 97.1% of attention. Graph Walk, in the target
-configuration — FFN-as-vindex + cracked attention + residual-graph routing —
-reduces per-decode-step work to a small, bounded number of keyed lookups
-(one per graph traversed). The precise lookup count depends on the cracked-
-attention design, and is stated here conditional on that landing; it is not
-a measured figure.
+**Key insight: this row is the punchline.** The rungs above trade memory
+for fidelity. This one trades the forward pass itself for graph lookups.
+
+"3 per hop" means: for a factual query that hits the FFN graph, the decode
+step is `gate KNN → feature → down KNN → token` — three keyed lookups,
+no matmul. Empirically the FFN graph walk has been validated end-to-end on
+factual queries (348K features in vindex, 34 layers, zero accuracy loss
+vs the forward pass). The remaining work for the full target architecture
+is the **attention** graph: the projected "one lookup per graph traversed"
+per-decode figure is conditional on cracked attention landing and a
+routing-table lookup taking constant time. Until then, queries outside the
+factual graph fall back to Markov RS for the full forward pass (the
+`MarkovFallback` tier you see in the latest-run table).
+
+Markov RS (row 3 above) still runs the full 34-layer FFN but replaces K/V
+matmuls with residual recompute, so it's bounded in memory but not in
+compute. Graph Walk in the target configuration is bounded in *both*.
 
 ## Feature flags
 
