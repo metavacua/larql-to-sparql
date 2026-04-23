@@ -32,6 +32,17 @@ would save ~8ms on the 34-layer GPU path.
 
 ## P1: Production Hardening
 
+### Lift MarkovResidualEngine into larql-inference
+**Impact**: First-class KV-cache-free decode path; unblocks long-context use cases where KV memory is the bottleneck (long single conversations, multi-turn agents, bounded-memory local inference).
+**Effort**: Medium
+**Status**: Spec drafted — [docs/specs/markov-residual-engine.md](docs/specs/markov-residual-engine.md). Reference implementation validated in `kv-cache-benchmark::real_model::markov_layer` (hidden cosine vs Standard KV = 1.000000 on 5/5 factual prompts, Gemma 3 4B, 2026-04-23).
+
+Migration plan (spec §9): lift `rs_prefill` / `rs_decode_step` into `larql-inference::engines::markov_residual`; rewire the `KvStrategy` impl in `kv-cache-benchmark` to wrap the new engine rather than own the implementation; move the `#[ignore]`'d real-model test suite with the code.
+
+**Framing note:** Markov RS is the "KV is a view, not the memory" mechanism — the residual stream is the source of truth, K/V becomes a recomputed view. Mechanistically superior to KV as the exact-long-context primitive, but production ecosystems (vLLM, FlashAttention, paged KV allocators, FP8 KV quantisation) are still built around KV as the persistent object. The likely future is hybrid: KV-style cache on the short/hot path, Markov RS on the long/cold path, Tier 2/3 engines on task-memory workloads. Landing this engine in `larql-inference` makes LARQL an early implementation of the "KV is a view" direction rather than just compressing the legacy representation.
+
+**Preconditions** for adding a new architecture (spec §4): residual stream is a pre-attention sufficient statistic; deterministic RMSNorm/LayerNorm; position encoding is a pure function of token position (RoPE/ALiBi/sinusoidal OK); attention mask is a pure function of position. Gemma 3 4B passes. Llama 3 and Gemma 4 E2B/E4B should pass but need empirical validation.
+
 ### Clean up experimental FFN backends
 **Effort**: Low  
 **Status**: Not started

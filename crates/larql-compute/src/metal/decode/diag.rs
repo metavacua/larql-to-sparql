@@ -1,8 +1,12 @@
 //! Debug + diagnostic helpers for the decode pipeline.
 //!
-//! Two env-gated facilities:
+//! Three env-gated facilities:
 //! - `DECODE_DEBUG=1` — one-line summary of the first few decode calls
 //!   (input RMS, hidden/inter sizes, whether any layer is MoE).
+//! - `LARQL_DUMP_RESIDUALS=<path>` — binary dump of every layer's
+//!   `h_post_attn` (input to FFN block) and `new_h` (layer output). Used to
+//!   diff against an HF Python reference to locate bugs. See
+//!   [`ResidualDump`] / [`dump_file_format`].
 //! - A per-layer NaN/Inf stat dump used by the caller when a `diag_stop_layer`
 //!   is supplied; see [`dump_layer_buffers`].
 
@@ -85,4 +89,89 @@ pub(super) fn dump_layer_buffers(l: usize, bufs: &LayerDiagBufs<'_>) {
     stat("act_buf", bufs.act_buf, bufs.inter);
     stat("down_out", bufs.down_out, bufs.hidden);
     stat("new_h (h_out)", bufs.new_h, bufs.hidden);
+}
+
+// ── Residual dump for HF-reference diffs ──────────────────────────────────
+
+/// Wire format, repeated once per layer:
+/// ```text
+///   u32  layer_idx   (little-endian)
+///   u32  hidden
+///   f32 [hidden]     layer_in   (hidden state entering this decoder layer,
+///                                 == previous layer's output or embedding at L0)
+///   f32 [hidden]     h_post_attn (hidden state after attention block —
+///                                  `residual + post_attn_norm(self_attn(...))`,
+///                                  before the FFN/MoE block begins)
+///   f32 [hidden]     layer_out  (hidden state leaving this decoder layer,
+///                                 after FFN/MoE combine + layer_scalar)
+/// ```
+/// File starts with a 16-byte header:
+/// ```text
+///   b"LARQL_RES_V2\0\0\0\0"   (16 bytes — magic + reserved)
+/// ```
+/// Shape matches what you get by hooking `forward_pre_hook` on the layer
+/// (for `layer_in`), `forward_pre_hook` on `pre_feedforward_layernorm` (for
+/// `h_post_attn`), and `forward_hook` on the layer (for `layer_out`).
+pub(super) struct ResidualDump {
+    file: Option<std::fs::File>,
+}
+
+impl ResidualDump {
+    /// Create a dump sink if `LARQL_DUMP_RESIDUALS` is set, otherwise a no-op.
+    pub(super) fn from_env() -> Self {
+        let path = match std::env::var("LARQL_DUMP_RESIDUALS") {
+            Ok(p) if !p.is_empty() => p,
+            _ => return Self { file: None },
+        };
+        use std::io::Write;
+        let mut f = match std::fs::File::create(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("[residual-dump] create {path} failed: {e}");
+                return Self { file: None };
+            }
+        };
+        // 16-byte magic header so the reader can detect format mismatch.
+        if let Err(e) = f.write_all(b"LARQL_RES_V2\0\0\0\0") {
+            eprintln!("[residual-dump] write header failed: {e}");
+            return Self { file: None };
+        }
+        eprintln!("[residual-dump] writing to {path}");
+        Self { file: Some(f) }
+    }
+
+    /// Whether the dump is active. Callers can short-circuit the buffer reads
+    /// when dumping is off.
+    pub(super) fn is_enabled(&self) -> bool {
+        self.file.is_some()
+    }
+
+    /// Append one layer's `layer_in` + `h_post_attn` + `layer_out` to the dump file.
+    pub(super) fn record_layer(
+        &mut self,
+        layer_idx: usize,
+        layer_in: &[f32],
+        h_post_attn: &[f32],
+        layer_out: &[f32],
+    ) {
+        let Some(file) = self.file.as_mut() else { return };
+        use std::io::Write;
+        debug_assert_eq!(layer_in.len(), layer_out.len());
+        debug_assert_eq!(layer_in.len(), h_post_attn.len());
+        let hidden = layer_in.len() as u32;
+        let mut ok = true;
+        ok &= file.write_all(&(layer_idx as u32).to_le_bytes()).is_ok();
+        ok &= file.write_all(&hidden.to_le_bytes()).is_ok();
+        // f32 is always little-endian on the platforms we target.
+        let as_bytes = |s: &[f32]| -> &[u8] {
+            unsafe { std::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * 4) }
+        };
+        ok &= file.write_all(as_bytes(layer_in)).is_ok();
+        ok &= file.write_all(as_bytes(h_post_attn)).is_ok();
+        ok &= file.write_all(as_bytes(layer_out)).is_ok();
+        if !ok {
+            eprintln!("[residual-dump] write failed at layer {layer_idx}");
+            self.file = None; // stop writing further layers
+        }
+    }
 }

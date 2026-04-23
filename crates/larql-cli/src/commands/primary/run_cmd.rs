@@ -133,6 +133,13 @@ pub struct RunArgs {
     /// `$LARQL_EXPERTS_DIR` if set.
     #[arg(long, value_name = "DIR")]
     pub experts_dir: Option<PathBuf>,
+
+    /// Restrict `--experts` to a comma-separated subset of op names. The
+    /// system prompt enumerates only these ops, which dramatically improves
+    /// weak / mid-sized models' ability to pick the right op. Example:
+    /// `--ops gcd,is_prime,factorial,to_roman`.
+    #[arg(long, value_name = "OP1,OP2,...", value_delimiter = ',')]
+    pub ops: Vec<String>,
 }
 
 pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -251,7 +258,9 @@ fn build_walk_args(
 /// Chat mode (no prompt): drops into a stdin REPL over the same loaded model.
 mod experts {
     use super::*;
-    use larql_inference::experts::{DispatchOutcome, DispatchSkip, ExpertRegistry, ExpertSession};
+    use larql_inference::experts::{
+        DispatchOutcome, DispatchSkip, ExpertRegistry, ExpertSession, FilteredDispatcher,
+    };
     use larql_inference::prompt::ChatTemplate;
     use larql_inference::WeightFfn;
     use larql_vindex::{load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex};
@@ -387,9 +396,27 @@ mod experts {
         Err("could not locate WASM experts directory; pass --experts-dir or set LARQL_EXPERTS_DIR".into())
     }
 
-    /// Detect the chat template from a vindex's model config (`config.json`).
-    /// Falls back to `ChatTemplate::Plain` when the family can't be resolved.
+    /// Detect the chat template from a vindex.
+    ///
+    /// Vindexes ship their family in `index.json` (no `config.json` — that
+    /// only exists in raw safetensors directories), so we read it directly.
+    /// Falls back to [`larql_models::detect_architecture`] for non-vindex
+    /// model dirs, then to `Plain` if neither resolves.
     fn detect_template(vindex_path: &Path) -> ChatTemplate {
+        // Try vindex index.json first.
+        let index_path = vindex_path.join("index.json");
+        if let Ok(text) = std::fs::read_to_string(&index_path) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(family) = value.get("family").and_then(|v| v.as_str()) {
+                    return ChatTemplate::for_family(family);
+                }
+                // Fall back to model id → for_model_id heuristic if family is absent.
+                if let Some(id) = value.get("model").and_then(|v| v.as_str()) {
+                    return ChatTemplate::for_model_id(id);
+                }
+            }
+        }
+        // Fall back to safetensors-style config.json detection.
         match larql_models::detect_architecture(vindex_path) {
             Ok(arch) => ChatTemplate::for_family(arch.family()),
             Err(_) => ChatTemplate::Plain,
@@ -483,7 +510,18 @@ mod experts {
         if args.verbose {
             eprintln!("experts: loaded {} modules ({} ops)", registry.len(), registry.ops().len());
         }
-        let mut session = ExpertSession::new(registry);
+
+        // Optionally narrow the registry to a focused subset — small models
+        // pick the right op far more reliably with 5–15 options than 126.
+        let dispatcher: Box<dyn larql_inference::experts::Dispatcher> = if args.ops.is_empty() {
+            Box::new(registry)
+        } else {
+            if args.verbose {
+                eprintln!("experts: filtering to {} ops", args.ops.len());
+            }
+            Box::new(FilteredDispatcher::new(registry, args.ops.clone()))
+        };
+        let mut session = ExpertSession::new(dispatcher);
 
         // ── Detect template + load model ──
         let template = detect_template(vindex_path);
@@ -501,7 +539,7 @@ mod experts {
 
     /// Single dispatch: wrap → generate → dispatch → print.
     fn run_one(
-        session: &mut ExpertSession,
+        session: &mut ExpertSession<Box<dyn larql_inference::experts::Dispatcher>>,
         runtime: &mut Runtime,
         prompt: &str,
         template: ChatTemplate,
@@ -517,7 +555,7 @@ mod experts {
 
     /// REPL: read line → run_one → repeat. Loads model exactly once.
     fn run_chat(
-        session: &mut ExpertSession,
+        session: &mut ExpertSession<Box<dyn larql_inference::experts::Dispatcher>>,
         runtime: &mut Runtime,
         template: ChatTemplate,
         args: &RunArgs,

@@ -65,7 +65,7 @@ fn ops_for_route<'a>(route: &str, reg: &'a ExpertRegistry) -> Vec<&'a str> {
     reg.list()
         .into_iter()
         .filter(|m| expert_ids.contains(&m.id.as_str()))
-        .flat_map(|m| m.ops.iter().map(|s| s.as_str()))
+        .flat_map(|m| m.ops.iter().map(|s| s.name.as_str()))
         .collect()
 }
 

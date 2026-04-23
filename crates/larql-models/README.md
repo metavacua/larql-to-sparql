@@ -167,7 +167,7 @@ examples/
 cargo test -p larql-models
 ```
 
-130 tests (72 unit + 58 integration) covering all 12 architectures: detection, tensor key patterns, MoE expert formats (PerExpert vs PackedMxfp4), MLA compression keys, Gemma 2 softcapping + QK norm offsets, Gemma 3 sliding window + dual RoPE, Gemma 4 per-layer geometry (head_dim, KV heads, partial RoPE, KV sharing, PLE, V-norm, K=V), Qwen attention bias, StarCoder2 bias + LayerNorm + non-gated FFN, DeepSeek shared experts + MLA, Granite scaling multipliers, generic fallback defaults, quantization round-trips (Q4_0, Q8_0), and `drop_ffn_weights`.
+169 tests (111 unit + 58 integration) covering all 12 architectures: detection, tensor key patterns, MoE expert formats (PerExpert vs PackedMxfp4), MLA compression keys, Gemma 2 softcapping + QK norm offsets, Gemma 3 sliding window + dual RoPE, Gemma 4 per-layer geometry (head_dim, KV heads, partial RoPE, KV sharing, PLE, V-norm, K=V), Qwen attention bias, StarCoder2 bias + LayerNorm + non-gated FFN, DeepSeek shared experts + MLA, Granite scaling multipliers, generic fallback defaults, quantization round-trips (Q4_0, Q8_0), malformed-input rejection across every GGML dequantizer + MXFP4 + truncated GGUF files, and `drop_ffn_weights`.
 
 ## Examples
 

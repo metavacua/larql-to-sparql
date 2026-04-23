@@ -55,6 +55,66 @@ impl Dispatcher for ExpertRegistry {
     }
 }
 
+/// Forward `Dispatcher` through `Box<dyn Dispatcher>` so the CLI can swap
+/// concrete dispatchers (raw vs. filtered) at runtime without duplicating
+/// the surrounding generation code.
+impl Dispatcher for Box<dyn Dispatcher> {
+    fn op_specs(&self) -> Vec<OpSpec> {
+        (**self).op_specs()
+    }
+
+    fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
+        (**self).call(op, args)
+    }
+}
+
+/// Wrap a [`Dispatcher`] to expose only the named ops to the session.
+///
+/// Use this when a registry advertises 100+ ops but you want the system
+/// prompt to enumerate just a focused subset (e.g. only arithmetic ops).
+/// Smaller op lists dramatically improve weak-to-mid models' ability to
+/// pick the right op + emit the right arg keys.
+///
+/// Calls to disallowed ops short-circuit to `None` (treated by the session
+/// as `UnknownOp`) rather than reaching the inner dispatcher.
+pub struct FilteredDispatcher<D: Dispatcher> {
+    inner: D,
+    allowed: std::collections::HashSet<String>,
+}
+
+impl<D: Dispatcher> FilteredDispatcher<D> {
+    /// Wrap `inner`, restricting it to the named ops. Op names that aren't
+    /// advertised by `inner` are silently ignored — only the intersection
+    /// is exposed.
+    pub fn new<I, S>(inner: D, allowed: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            inner,
+            allowed: allowed.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl<D: Dispatcher> Dispatcher for FilteredDispatcher<D> {
+    fn op_specs(&self) -> Vec<OpSpec> {
+        self.inner
+            .op_specs()
+            .into_iter()
+            .filter(|s| self.allowed.contains(&s.name))
+            .collect()
+    }
+
+    fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
+        if !self.allowed.contains(op) {
+            return None;
+        }
+        self.inner.call(op, args)
+    }
+}
+
 /// Result of a successful expert dispatch.
 #[derive(Debug, Clone)]
 pub struct DispatchOutcome {
@@ -104,38 +164,45 @@ impl<D: Dispatcher> ExpertSession<D> {
     }
 
     /// Build a model-agnostic system prompt enumerating every advertised op
-    /// along with its argument keys, e.g. `gcd(a, b)`.
+    /// in a dense, model-friendly format: `op_name{"arg1","arg2"}`.
     ///
-    /// The format is deterministic (ops sorted alphabetically) so identical
-    /// registries produce byte-identical prompts — that matters for prompt
-    /// caching and reproducible benchmarking.
+    /// The compact single-line ops list is tuned for small-to-mid
+    /// instruction-tuned models (Mistral 7B Instruct, Gemma 3 4B). A
+    /// multi-line "Available ops:" list with one op per line blew past
+    /// the effective context for those models and they lost the ability
+    /// to emit valid JSON; this dense form keeps under ~2 KB even with
+    /// 100+ ops, mirroring the format known to work in
+    /// `tests/test_llm_dispatch.rs`.
+    ///
+    /// Output is deterministic (ops sorted alphabetically by name).
     pub fn system_prompt(&self) -> String {
         let mut specs = self.registry.op_specs();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut out = String::new();
-        out.push_str("You are a tool-using assistant. When the user's request \
-                      can be solved by exactly one of the ops below, respond \
-                      with a single JSON object and nothing else:\n");
-        out.push_str("  {\"op\":\"<op_name>\",\"args\":{...}}\n\n");
-        out.push_str("Available ops:\n");
-        for spec in &specs {
-            out.push_str("  - ");
-            out.push_str(&spec.name);
-            out.push('(');
-            for (i, arg) in spec.args.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                out.push_str(arg);
+        out.push_str(
+            "Respond with ONLY a JSON object {\"op\":\"...\",\"args\":{...}}.\n",
+        );
+        out.push_str("ops: ");
+
+        for (i, spec) in specs.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
             }
-            out.push_str(")\n");
+            out.push_str(&spec.name);
+            out.push('{');
+            for (j, arg) in spec.args.iter().enumerate() {
+                if j > 0 {
+                    out.push(',');
+                }
+                out.push('"');
+                out.push_str(arg);
+                out.push('"');
+            }
+            out.push('}');
         }
-        out.push_str("\nRules:\n");
-        out.push_str("  - Emit the JSON object only. No prose, no code fences, no commentary.\n");
-        out.push_str("  - Use exact op names from the list above.\n");
-        out.push_str("  - The keys inside `args` MUST match the parameter names in parentheses.\n");
-        out.push_str("  - All argument values must be JSON literals (numbers, strings, arrays, objects).\n");
+        out.push_str("\n");
+        out.push_str("No extra text.");
         out
     }
 
@@ -217,21 +284,23 @@ mod tests {
         let session = ExpertSession::new(reg);
         let p = session.system_prompt();
 
-        // Pull the lines between "Available ops:" and the following blank
-        // line (the Rules section also uses bulleted lines, so a naive prefix
-        // strip would conflate ops with rules).
-        let ops: Vec<&str> = p
+        // The op list lives on the line that starts with `ops: `. Splitting
+        // on ", " and stripping the args-brace gives op names in print order.
+        let ops_line = p
             .lines()
-            .skip_while(|l| !l.starts_with("Available ops:"))
-            .skip(1)
-            .take_while(|l| !l.is_empty())
-            .filter_map(|l| l.strip_prefix("  - "))
+            .find(|l| l.starts_with("ops: "))
+            .expect("ops line missing");
+        let names: Vec<&str> = ops_line
+            .trim_start_matches("ops: ")
+            .split(", ")
+            .map(|tok| tok.split('{').next().unwrap_or(""))
+            .filter(|s| !s.is_empty())
             .collect();
-        assert!(!ops.is_empty(), "expected ops list to be non-empty");
+        assert!(!names.is_empty(), "expected ops list to be non-empty");
 
-        let mut sorted = ops.clone();
+        let mut sorted = names.clone();
         sorted.sort_unstable();
-        assert_eq!(ops, sorted, "ops in system prompt must be sorted");
+        assert_eq!(names, sorted, "ops in system prompt must be sorted");
     }
 
     #[test]
@@ -241,7 +310,7 @@ mod tests {
         let wrapped = session.build_prompt("What is 2+2?", ChatTemplate::Gemma);
         assert!(wrapped.starts_with("<start_of_turn>user\n"));
         assert!(wrapped.contains("What is 2+2?"));
-        assert!(wrapped.contains("Available ops:"));
+        assert!(wrapped.contains("ops: "));
         assert!(wrapped.ends_with("<start_of_turn>model\n"));
     }
 
@@ -254,7 +323,7 @@ mod tests {
         assert!(!wrapped.contains("<start_of_turn>"));
         assert!(!wrapped.contains("[INST]"));
         // System prompt + user is present.
-        assert!(wrapped.contains("Available ops:"));
+        assert!(wrapped.contains("ops: "));
         assert!(wrapped.ends_with("hi"));
     }
 
@@ -381,7 +450,7 @@ mod mock_tests {
 
     #[test]
     fn system_prompt_is_deterministic_with_mock() {
-        let mock = MockDispatcher::new(&["b_op", "a_op"]);
+        let mock = MockDispatcher::new(&[("b_op", &[]), ("a_op", &[])]);
         let session = ExpertSession::new(mock);
         let a = session.system_prompt();
         let b = session.system_prompt();
@@ -391,7 +460,7 @@ mod mock_tests {
     #[test]
     fn system_prompt_lists_provided_ops_sorted() {
         // Mock returns ops out-of-order — system_prompt must sort them.
-        let mock = MockDispatcher::new(&["zzz", "aaa", "mmm"]);
+        let mock = MockDispatcher::new(&[("zzz", &[]), ("aaa", &[]), ("mmm", &[])]);
         let session = ExpertSession::new(mock);
         let p = session.system_prompt();
         let aaa = p.find("aaa").expect("aaa missing");
@@ -405,24 +474,39 @@ mod mock_tests {
         let mock = MockDispatcher::new(&[]);
         let session = ExpertSession::new(mock);
         let p = session.system_prompt();
-        assert!(p.contains("Available ops:"), "header missing:\n{p}");
-        // No bulleted op lines between header and Rules.
-        let between: Vec<&str> = p
-            .lines()
-            .skip_while(|l| !l.starts_with("Available ops:"))
-            .skip(1)
-            .take_while(|l| !l.is_empty())
-            .collect();
-        assert!(between.is_empty(), "expected no ops, got: {between:?}");
+        assert!(p.contains("ops: "), "header missing:\n{p}");
+        // The ops line should be just the bare prefix (no entries).
+        let ops_line = p.lines().find(|l| l.starts_with("ops: ")).expect("ops line missing");
+        assert_eq!(ops_line, "ops: ", "expected empty ops list, got: {ops_line:?}");
+    }
+
+    #[test]
+    fn system_prompt_renders_args_in_braces() {
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"]), ("is_prime", &["n"])]);
+        let session = ExpertSession::new(mock);
+        let p = session.system_prompt();
+        // Compact form: `op_name{"arg1","arg2"}`.
+        assert!(p.contains("gcd{\"a\",\"b\"}"), "missing gcd schema:\n{p}");
+        assert!(p.contains("is_prime{\"n\"}"), "missing is_prime schema:\n{p}");
+    }
+
+    #[test]
+    fn system_prompt_no_extra_text_directive_present() {
+        // The trailing "No extra text." directive proved necessary in
+        // test_llm_dispatch.rs to stop the model from rambling after JSON.
+        let mock = MockDispatcher::new(&[("foo", &["a"])]);
+        let session = ExpertSession::new(mock);
+        let p = session.system_prompt();
+        assert!(p.contains("No extra text"), "missing directive:\n{p}");
     }
 
     #[test]
     fn build_prompt_with_gemma_template_includes_system_and_user() {
-        let mock = MockDispatcher::new(&["foo"]);
+        let mock = MockDispatcher::new(&[("foo", &["a"])]);
         let session = ExpertSession::new(mock);
         let wrapped = session.build_prompt("hello", ChatTemplate::Gemma);
         assert!(wrapped.starts_with("<start_of_turn>user\n"));
-        assert!(wrapped.contains("Available ops:"));
+        assert!(wrapped.contains("ops: "));
         assert!(wrapped.contains("foo"));
         assert!(wrapped.contains("hello"));
         assert!(wrapped.ends_with("<start_of_turn>model\n"));
@@ -430,7 +514,7 @@ mod mock_tests {
 
     #[test]
     fn build_prompt_with_each_template_variant_round_trips() {
-        let mock = MockDispatcher::new(&["x"]);
+        let mock = MockDispatcher::new(&[("x", &["arg"])]);
         let session = ExpertSession::new(mock);
         for tpl in [
             ChatTemplate::Gemma,
@@ -447,7 +531,7 @@ mod mock_tests {
 
     #[test]
     fn dispatch_happy_path_with_mock() {
-        let mock = MockDispatcher::new(&["gcd"]).with_response("gcd", serde_json::json!(12));
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])]).with_response("gcd", serde_json::json!(12));
         let mut session = ExpertSession::new(mock);
         let out = session
             .dispatch(r#"{"op":"gcd","args":{"a":144,"b":60}}"#)
@@ -459,7 +543,7 @@ mod mock_tests {
 
     #[test]
     fn dispatch_no_op_call_with_mock() {
-        let mock = MockDispatcher::new(&["gcd"]);
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])]);
         let mut session = ExpertSession::new(mock);
         let err = session.dispatch("plain text, no JSON").unwrap_err();
         assert_eq!(err, DispatchSkip::NoOpCall);
@@ -467,7 +551,7 @@ mod mock_tests {
 
     #[test]
     fn dispatch_unknown_op_with_mock() {
-        let mock = MockDispatcher::new(&["gcd"]);
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])]);
         let mut session = ExpertSession::new(mock);
         let err = session
             .dispatch(r#"{"op":"unknown_op","args":{}}"#)
@@ -477,7 +561,7 @@ mod mock_tests {
 
     #[test]
     fn dispatch_expert_declined_with_mock() {
-        let mock = MockDispatcher::new(&["gcd"]).with_decline("gcd");
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])]).with_decline("gcd");
         let mut session = ExpertSession::new(mock);
         let err = session
             .dispatch(r#"{"op":"gcd","args":{"a":1}}"#)
@@ -492,7 +576,7 @@ mod mock_tests {
     fn dispatch_forwards_args_verbatim_to_dispatcher() {
         // Verify that whatever JSON args the parser produces are passed
         // through unchanged to the dispatcher.
-        let mock = MockDispatcher::new(&["echo"]).with_response("echo", serde_json::json!(true));
+        let mock = MockDispatcher::new(&[("echo", &["s"])]).with_response("echo", serde_json::json!(true));
         let mut session = ExpertSession::new(mock);
         let _ = session
             .dispatch(r#"{"op":"echo","args":{"nested":{"k":[1,2,3]},"s":"日本語"}}"#)

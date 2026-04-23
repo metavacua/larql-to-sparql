@@ -175,18 +175,36 @@ impl GgufFile {
         let mut vectors = HashMap::new();
 
         for info in &self.tensor_infos {
-            let abs_offset = self.data_offset + info.offset;
+            let abs_offset = self
+                .data_offset
+                .checked_add(info.offset)
+                .ok_or_else(|| ModelError::Parse(format!(
+                    "tensor {}: data_offset {} + tensor offset {} overflows u64",
+                    info.name, self.data_offset, info.offset,
+                )))?;
             let n_elements: u64 = info.dims.iter().product();
 
             let data_size = tensor_data_size(info.tensor_type, n_elements as usize)?;
-            if abs_offset as usize + data_size > mmap.len() {
+            let abs_offset_usize = usize::try_from(abs_offset).map_err(|_| {
+                ModelError::Parse(format!(
+                    "tensor {}: absolute offset {} exceeds usize on this platform",
+                    info.name, abs_offset,
+                ))
+            })?;
+            let end = abs_offset_usize.checked_add(data_size).ok_or_else(|| {
+                ModelError::Parse(format!(
+                    "tensor {}: offset {} + size {} overflows usize",
+                    info.name, abs_offset_usize, data_size,
+                ))
+            })?;
+            if end > mmap.len() {
                 return Err(ModelError::Parse(format!(
                     "tensor {} data out of bounds (offset {} + size {} > file {})",
                     info.name, abs_offset, data_size, mmap.len()
                 )));
             }
 
-            let raw = &mmap[abs_offset as usize..abs_offset as usize + data_size];
+            let raw = &mmap[abs_offset_usize..end];
             let floats = dequantize(raw, info.tensor_type, n_elements as usize)?;
 
             // Normalize key name (strip GGUF prefixes)
@@ -626,6 +644,54 @@ mod tests {
         assert_eq!(cfg["num_attention_heads"], 8);
         assert_eq!(cfg["num_key_value_heads"], 1);
         assert_eq!(cfg["vocab_size"], 262144);
+    }
+
+    /// Build a minimal GGUF file with one 2-D F32 tensor, but truncate the
+    /// tensor data region so that `offset + size > file len`. Loader must
+    /// reject this cleanly, not panic on a slice OOB.
+    #[test]
+    fn test_load_tensors_rejects_truncated_tensor_data() {
+        use std::io::{Seek, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("truncated.gguf");
+        let mut file = std::fs::File::create(&path).unwrap();
+
+        // Header
+        file.write_all(&GGUF_MAGIC.to_le_bytes()).unwrap();
+        file.write_all(&3u32.to_le_bytes()).unwrap(); // version
+        file.write_all(&1u64.to_le_bytes()).unwrap(); // n_tensors
+        file.write_all(&0u64.to_le_bytes()).unwrap(); // n_metadata
+
+        // Tensor info: declares 2×4 F32 (32 bytes of data) at tensor offset 0.
+        let name = b"blk.0.ffn_down.weight";
+        file.write_all(&(name.len() as u64).to_le_bytes()).unwrap();
+        file.write_all(name).unwrap();
+        file.write_all(&2u32.to_le_bytes()).unwrap();
+        file.write_all(&4u64.to_le_bytes()).unwrap();
+        file.write_all(&2u64.to_le_bytes()).unwrap();
+        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes()).unwrap();
+        file.write_all(&0u64.to_le_bytes()).unwrap();
+
+        // Pad to 32-byte boundary, then write only 16 bytes of tensor data
+        // (half of the declared 32). Loader must detect the shortfall.
+        let pos = file.stream_position().unwrap();
+        let aligned = pos.div_ceil(32) * 32;
+        file.write_all(&vec![0u8; (aligned - pos) as usize]).unwrap();
+        file.write_all(&[0u8; 16]).unwrap();
+        file.flush().unwrap();
+
+        let gguf = GgufFile::open(&path).unwrap();
+        match gguf.load_tensors() {
+            Err(ModelError::Parse(msg)) => {
+                assert!(
+                    msg.contains("out of bounds") || msg.contains("too short"),
+                    "unexpected error: {msg}"
+                );
+            }
+            Err(other) => panic!("expected Parse error, got {other:?}"),
+            Ok(_) => panic!("expected error, got Ok"),
+        }
     }
 
     // Dequant tests are in format::quant::ggml::tests

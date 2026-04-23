@@ -319,7 +319,7 @@ fn dequantize_mxfp4_experts(
         let expert_data = crate::quant::mxfp4::dequantize_all_experts(
             blocks_view.data(), scales_view.data(),
             num_experts, out_features, groups,
-        );
+        )?;
 
         // Extract layer number from key
         let base_key = normalize_key(name, prefixes);
@@ -353,7 +353,7 @@ fn dequantize_mxfp4_experts(
 
                 let down_experts = crate::quant::mxfp4::dequantize_all_experts(
                     db.data(), ds.data(), num_experts, down_out, down_groups,
-                );
+                )?;
 
                 for (e, data) in down_experts.iter().enumerate() {
                     let down_key = format!("{layer_prefix}.block_sparse_moe.experts.{e}.w2.weight");

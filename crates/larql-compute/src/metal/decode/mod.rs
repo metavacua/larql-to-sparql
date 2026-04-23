@@ -63,6 +63,10 @@ impl MetalBackend {
         let hidden_val = hidden as u32;
         let inter_val = inter as u32;
 
+        // Residual dump (env-gated) for HF-reference diffs. Active only when
+        // `LARQL_DUMP_RESIDUALS=<path>` is set.
+        let mut residual_dump = diag::ResidualDump::from_env();
+
         // Input RMS debug (first 3 calls, env-gated).
         static CALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let call_n = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -146,6 +150,19 @@ impl MetalBackend {
 
         for l in 0..num_layers {
             let layer = &layers[l];
+
+            // Snapshot the layer input for HF-reference diff. Must be taken
+            // before any compute since `h_buf` = layer-N input at this point
+            // (it's the previous layer's `new_h`, or the embedding for L0).
+            // GPU buffers are committed + waited at the end of each MoE
+            // iteration so the read returns consistent data.
+            let layer_in_snapshot: Option<Vec<f32>> = if residual_dump.is_enabled() {
+                Some(super::buffers::read_buffer_f32(h_buf, hidden))
+            } else {
+                None
+            };
+            let dump_l0_dir = if l == 0 { std::env::var("LARQL_DUMP_L0").ok() } else { None };
+
             let norm_offset = layer.norm_offset;
             let eps = layer.eps;
             let scale = layer.attn_scale;
@@ -837,10 +854,61 @@ impl MetalBackend {
                         }
                     }
 
+                    // L0-only intermediate dumps for HF diff. `LARQL_DUMP_L0=<dir>`
+                    // writes h_post_attn, dense_pre_outer (= _1(dense) = new_h - h_post_attn
+                    // before the MoE add, captured here as new_h - h_post_attn - moe_out),
+                    // and moe_out as separate binary files.
+                    if l == 0 {
+                        if let Some(ref dir) = dump_l0_dir {
+                            use std::io::Write;
+                            let ha_vec = super::buffers::read_buffer_f32(&h_post_attn, hidden);
+                            let new_h_vec = super::buffers::read_buffer_f32(new_h, hidden);
+                            let down_raw = super::buffers::read_buffer_f32(&down_out, hidden);
+                            let ffn_norm_in = super::buffers::read_buffer_f32(&ffn_norm_out, hidden);
+                            // new_h currently = h_post_attn + _1(dense) + moe_out.
+                            // Derive h1 = _1(dense) and keep raw moe_out separately.
+                            let h1: Vec<f32> = new_h_vec.iter()
+                                .zip(ha_vec.iter()).zip(moe_out.iter())
+                                .map(|((&n, &a), &m)| n - a - m)
+                                .collect();
+                            let write = |name: &str, data: &[f32]| {
+                                let path = format!("{dir}/{name}.bin");
+                                if let Ok(mut f) = std::fs::File::create(&path) {
+                                    let bytes = unsafe {
+                                        std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
+                                    };
+                                    let _ = f.write_all(bytes);
+                                    eprintln!("[l0-dump] wrote {path} ({} f32)", data.len());
+                                }
+                            };
+                            let gate_raw = super::buffers::read_buffer_f32(&gate_out_scratch, inter);
+                            let up_raw = super::buffers::read_buffer_f32(&up_out, inter);
+                            let act_raw = super::buffers::read_buffer_f32(&act_buf, inter);
+                            write("l0_h_post_attn", &ha_vec);
+                            write("l0_ffn_norm_out_pre_mlp", &ffn_norm_in);
+                            write("l0_gate_out", &gate_raw);
+                            write("l0_up_out", &up_raw);
+                            write("l0_act_geglu", &act_raw);
+                            write("l0_down_out_dense_raw", &down_raw);
+                            write("l0_h1_post_ffn_norm1_dense", &h1);
+                            write("l0_moe_out", &moe_out);
+                        }
+                    }
+
                     // Apply the architecture-driven outer combine (outer RMS
                     // norm for Gemma 4 hybrid MoE, or layer_scalar-only for
                     // legacy MoE). See `moe_combine.rs` for the full HF map.
                     moe_combine::apply_outer_combine(layer, new_h, &h_post_attn, hidden);
+
+                    // Optional residual capture for HF-reference diffs.
+                    // `layer_in_snapshot` was captured at the top of this
+                    // iteration; the command buffer has been waited so
+                    // both `h_post_attn` and `new_h` are consistent.
+                    if let Some(li) = layer_in_snapshot.as_ref() {
+                        let ha = super::buffers::read_buffer_f32(&h_post_attn, hidden);
+                        let lo = super::buffers::read_buffer_f32(new_h, hidden);
+                        residual_dump.record_layer(l, li, &ha, &lo);
+                    }
 
                     if l + 1 < num_layers {
                         cmd = self.queue.new_command_buffer().to_owned();

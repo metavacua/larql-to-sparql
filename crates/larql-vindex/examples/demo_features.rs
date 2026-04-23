@@ -402,7 +402,7 @@ STAGE edge
     let mxfp4_scales = vec![127u8]; // e8m0 = 1.0
     let mxfp4_result = larql_models::quant::mxfp4::dequantize_expert(
         &mxfp4_blocks, &mxfp4_scales, 1, 1,
-    );
+    ).expect("demo MXFP4 inputs are well-formed");
     println!("  MXFP4: scale=1.0(e8m0=127), quant=0x37 → [{:.1}, {:.1}, ...] (32 values) ✓",
         mxfp4_result[0], mxfp4_result[1]);
 

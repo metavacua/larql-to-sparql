@@ -50,8 +50,10 @@ fn experts_with_bogus_model_path_errors_cleanly() {
     );
 }
 
-/// Find a Q4_K vindex usable for end-to-end tests. Same lookup as the
-/// inference-crate integration test so both honour `LARQL_TEST_VINDEX`.
+/// Find a Q4_K vindex usable for end-to-end tests. Honours `LARQL_TEST_VINDEX`
+/// and otherwise prefers instruction-tuned models (base models like
+/// `mistral-7b-v0.1` collapse on the multi-line system prompt the experts
+/// pipeline emits).
 fn find_test_vindex() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("LARQL_TEST_VINDEX") {
         let path = PathBuf::from(p);
@@ -59,12 +61,20 @@ fn find_test_vindex() -> Option<PathBuf> {
             return Some(path);
         }
     }
+
+    // Workspace root = .../larql/crates/larql-cli/.. = .../larql.
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let home = std::env::var("HOME").ok()?;
+
+    // Prefer larger instruction-tuned models — small Q4K models (Gemma 3 4B,
+    // Gemma 4 E2B) hallucinate op names + arg keys, while 7B+ instruct models
+    // dispatch correctly.
     let candidates = [
-        PathBuf::from("output/gemma3-4b-q4k-v2.vindex"),
-        PathBuf::from("output/gemma4-e2b-q4k.vindex"),
-        PathBuf::from(&home).join(".cache/larql/local/mistral-7b-v0.1-q4k.vindex"),
+        PathBuf::from(&home).join(".cache/larql/local/mistral-7b-instruct-v0.3-q4k.vindex"),
+        workspace.join("output/gemma3-4b-q4k-v2.vindex"),
+        workspace.join("output/gemma4-e2b-q4k.vindex"),
         PathBuf::from(&home).join(".cache/larql/local/llama2-7b-q4k.vindex"),
+        PathBuf::from(&home).join(".cache/larql/local/mistral-7b-v0.1-q4k.vindex"),
     ];
     candidates.into_iter().find(|p| p.is_dir())
 }
@@ -109,6 +119,10 @@ fn experts_chat_mode_dispatches_via_stdin() {
             "--metal",
             "--max-tokens",
             "64",
+            // Narrow the op set so the model isn't drowning in 126 choices.
+            // Smaller models pick the right op far more reliably this way.
+            "--ops",
+            "gcd,is_prime,factorial,to_roman,is_leap_year",
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
