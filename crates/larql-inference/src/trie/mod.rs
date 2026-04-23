@@ -4,8 +4,15 @@
 //! Loaded from a JSON file exported by `experiments/export_trie_probe.py`.
 //! The exported file contains PCA components and LR weights; inference is
 //! pure arithmetic — no Python dependency at runtime.
+//!
+//! ## Probe file lookup
+//!
+//! Probes are model-specific (each model has its own hidden geometry). Use
+//! [`CascadeTrie::find`] to resolve a probe path for a given model id; it
+//! consults `LARQL_PROBE_PATH` and `LARQL_PROBE_DIR` env overrides before
+//! falling back to caller-supplied search directories.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -117,5 +124,103 @@ impl CascadeTrie {
     /// All route labels the probe was trained on.
     pub fn routes(&self) -> &[String] {
         &self.routes
+    }
+
+    /// Filesystem-safe slug for a model id (`google/gemma-3-4b-it` →
+    /// `google--gemma-3-4b-it`). Matches `experiments/export_trie_probe.py`.
+    pub fn slug(model_id: &str) -> String {
+        model_id.replace('/', "--")
+    }
+
+    /// Standard probe filename for a model id.
+    pub fn filename_for(model_id: &str) -> String {
+        format!("cascade_trie_{}_probe.json", Self::slug(model_id))
+    }
+
+    /// Resolve a probe path for `model_id` by searching a precedence chain.
+    ///
+    /// Search order:
+    ///   1. `LARQL_PROBE_PATH` env var — used verbatim if set and the file exists.
+    ///   2. `LARQL_PROBE_DIR` env var, joined with [`Self::filename_for`].
+    ///   3. Each entry in `extra_dirs`, joined with [`Self::filename_for`].
+    ///
+    /// Returns `None` if no probe is found anywhere in the chain.
+    pub fn find<I, P>(model_id: &str, extra_dirs: I) -> Option<PathBuf>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        if let Ok(p) = std::env::var("LARQL_PROBE_PATH") {
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        let filename = Self::filename_for(model_id);
+        if let Ok(d) = std::env::var("LARQL_PROBE_DIR") {
+            let path = PathBuf::from(d).join(&filename);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        for dir in extra_dirs {
+            let path = dir.as_ref().join(&filename);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_replaces_slashes() {
+        assert_eq!(CascadeTrie::slug("google/gemma-3-4b-it"), "google--gemma-3-4b-it");
+        assert_eq!(CascadeTrie::slug("a/b/c"), "a--b--c");
+        assert_eq!(CascadeTrie::slug("noslash"), "noslash");
+    }
+
+    #[test]
+    fn filename_for_uses_slug() {
+        assert_eq!(
+            CascadeTrie::filename_for("google/gemma-3-4b-it"),
+            "cascade_trie_google--gemma-3-4b-it_probe.json",
+        );
+    }
+
+    #[test]
+    fn find_returns_none_when_nothing_matches() {
+        // Don't pollute env: verify by passing only a non-existent dir.
+        let dir = std::env::temp_dir().join("larql-nonexistent-probe-dir-xyz");
+        let r = CascadeTrie::find("does/not/exist", [&dir]);
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn find_resolves_from_extra_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mid = "test/model";
+        let path = dir.path().join(CascadeTrie::filename_for(mid));
+        std::fs::write(&path, "{}").expect("write");
+
+        let found = CascadeTrie::find(mid, [dir.path()]).expect("found");
+        assert_eq!(found, path);
+    }
+
+    #[test]
+    fn find_extra_dirs_searched_in_order() {
+        let first = tempfile::tempdir().expect("tempdir");
+        let second = tempfile::tempdir().expect("tempdir");
+        let mid = "test/order";
+        let in_second = second.path().join(CascadeTrie::filename_for(mid));
+        std::fs::write(&in_second, "{}").expect("write");
+
+        // First dir is empty; lookup should fall through to second.
+        let found = CascadeTrie::find(mid, [first.path(), second.path()]).expect("found");
+        assert_eq!(found, in_second);
     }
 }

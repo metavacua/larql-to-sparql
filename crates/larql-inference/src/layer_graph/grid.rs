@@ -6,14 +6,14 @@
 //!
 //! The hook: `ComputeBackend::decode_token_with_moe(layers, x, ..., moe_fn)`
 //! where `moe_fn(layer, h_post_attn) -> Vec<f32>` calls
-//! `RemoteExpertBackend::forward_moe`.
+//! `RemoteMoeBackend::forward_moe`.
 
 use larql_compute::ComputeBackend;
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 
-use crate::ffn::RemoteExpertBackend;
-use crate::ffn::remote_expert::{MoeRouterWeights, RemoteExpertError};
+use crate::ffn::RemoteMoeBackend;
+use crate::ffn::moe_remote::{MoeRouterWeights, RemoteMoeError};
 use crate::layer_graph::pipeline_layer::build_pipeline_layers;
 use crate::layer_graph::generate::lm_head_topk as lm_topk;
 use crate::forward::{apply_norm, embed_tokens_pub};
@@ -28,15 +28,15 @@ pub struct GridGenerateResult {
 /// Requires a Metal (or Q4-capable) backend — attention and dense FFN run on
 /// the GPU exactly as in the normal `generate()` path.  Expert blocks are
 /// dispatched to `remote` instead of running locally.
-pub fn generate_with_remote_experts(
+pub fn generate_with_remote_moe(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
     prompt_ids: Vec<u32>,
     max_tokens: usize,
     index: &VectorIndex,
-    remote: &RemoteExpertBackend,
+    remote: &RemoteMoeBackend,
     backend: &dyn ComputeBackend,
-) -> Result<GridGenerateResult, RemoteExpertError> {
+) -> Result<GridGenerateResult, RemoteMoeError> {
     let arch = &*weights.arch;
     let norm_offset = arch.norm_weight_offset();
     let eps = arch.norm_eps();
@@ -49,7 +49,7 @@ pub fn generate_with_remote_experts(
     let gate_index: &dyn larql_vindex::GateIndex = index;
     let q4_ffn = gate_index.interleaved_q4k_mmap_ref()
         .or_else(|| gate_index.interleaved_q4_mmap_ref())
-        .ok_or_else(|| RemoteExpertError::BadResponse(
+        .ok_or_else(|| RemoteMoeError::BadResponse(
             "no interleaved Q4 FFN mmap in vindex".into()))?;
     let ffn_is_q4k = gate_index.interleaved_q4k_mmap_ref().is_some();
 
@@ -101,7 +101,7 @@ pub fn generate_with_remote_experts(
         &layers, &x, hidden, intermediate, q_dim, kv_dim,
         seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
         rope, qk_norm, softcap,
-    ).ok_or_else(|| RemoteExpertError::BadResponse(
+    ).ok_or_else(|| RemoteMoeError::BadResponse(
         "GPU prefill not available — need Metal backend".into()))?;
 
     // ── Decode loop ───────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ pub fn generate_with_remote_experts(
     // Get initial top-1 prediction from prefill output.
     let prefill_h_arr = ndarray::Array2::from_shape_vec(
         (seq_len, hidden), last_hidden_vec.clone()
-    ).map_err(|e| RemoteExpertError::BadResponse(e.to_string()))?;
+    ).map_err(|e| RemoteMoeError::BadResponse(e.to_string()))?;
     let h_norm0 = apply_norm(weights, &prefill_h_arr, arch.final_norm_key(), norm_offset);
     let last0 = h_norm0.row(seq_len - 1).to_owned();
     let first_id = lm_topk(index, weights, &last0, 1, backend)
@@ -137,7 +137,7 @@ pub fn generate_with_remote_experts(
 
         // Build the expert dispatch closure for this decode step.
         // Called once per MoE layer by `decode_token_with_moe`.
-        let mut step_error: Option<RemoteExpertError> = None;
+        let mut step_error: Option<RemoteMoeError> = None;
         // SKIP_MOE=1 zeroes out the expert block (diagnostic: checks if dense FFN alone is correct).
         let skip_moe = std::env::var("SKIP_MOE").is_ok();
 
@@ -167,11 +167,19 @@ pub fn generate_with_remote_experts(
             let post_experts_norm = arch.moe_post_experts_norm_key(layer)
                 .and_then(|k| weights.vectors.get(&k))
                 .map(|v| v.as_slice()).unwrap_or(&[]);
+            let router_norm = arch.moe_router_norm_key(layer)
+                .and_then(|k| weights.vectors.get(&k))
+                .map(|v| v.as_slice()).unwrap_or(&[]);
+            let router_norm_parameter_free = arch.moe_router_norm_parameter_free();
+            let router_input_scalar = arch.moe_router_input_scalar().unwrap_or(1.0);
 
             let router = MoeRouterWeights {
                 router_proj: router_proj.as_slice(),
                 router_scale,
                 router_per_expert_scale: per_expert_scale,
+                router_norm,
+                router_norm_parameter_free,
+                router_input_scalar,
                 pre_experts_norm,
                 post_experts_norm,
                 num_experts: arch.num_experts(),
@@ -195,13 +203,13 @@ pub fn generate_with_remote_experts(
 
         if let Some(err) = step_error { return Err(err); }
 
-        let h_vec = result.ok_or_else(|| RemoteExpertError::BadResponse(
+        let h_vec = result.ok_or_else(|| RemoteMoeError::BadResponse(
             "decode_token_with_moe returned None".into()))?;
 
         last_hidden_vec = h_vec;
 
         let h_arr = ndarray::Array2::from_shape_vec((1, hidden), last_hidden_vec.clone())
-            .map_err(|e| RemoteExpertError::BadResponse(e.to_string()))?;
+            .map_err(|e| RemoteMoeError::BadResponse(e.to_string()))?;
         let h_normed = apply_norm(weights, &h_arr, arch.final_norm_key(), norm_offset);
         let last_hidden = h_normed.row(0).to_owned();
         let next_id = lm_topk(index, weights, &last_hidden, 1, backend)

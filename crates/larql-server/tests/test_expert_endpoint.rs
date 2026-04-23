@@ -2,13 +2,13 @@
 //!
 //! Spins up the real `larql-server` router (same axum app that ships in
 //! production) on an OS-assigned port, then drives it through the real
-//! `RemoteExpertBackend` from `larql-inference`.  Output is compared
+//! `RemoteMoeBackend` from `larql-inference`.  Output is compared
 //! bit-for-bit against a local `cpu_moe_forward` call on the same weights.
 //!
 //! What this proves:
 //!   1. `routes::expert` handlers are correctly wired and reachable.
 //!   2. JSON wire format serialises/deserialises cleanly end-to-end.
-//!   3. `RemoteExpertBackend` routes, dispatches, and accumulates outputs
+//!   3. `RemoteMoeBackend` routes, dispatches, and accumulates outputs
 //!      identically to the local path.
 //!   4. Two-shard split gives the same result as a single shard.
 //!   5. `reshard()` swaps endpoints live without breaking the next call.
@@ -21,7 +21,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::net::TcpListener;
 
 use larql_inference::{
-    MoeLayerWeights, MoeRouterWeights, RemoteExpertBackend, RemoteExpertError, ShardConfig,
+    MoeLayerWeights, MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig,
     cpu_moe_forward,
     ndarray::ArcArray2,
 };
@@ -290,6 +290,9 @@ fn local_output(
             router_proj,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: pre_norm,
             post_ffn1_norm: &[],
             post_experts_norm: &[],
@@ -322,7 +325,7 @@ async fn expert_endpoint_single_shard_parity() {
 
     let url_c = url.clone();
     let backend = tokio::task::spawn_blocking(move || {
-        RemoteExpertBackend::connect(vec![ShardConfig::new(0, NUM_EXPERTS - 1, url_c)])
+        RemoteMoeBackend::connect(vec![ShardConfig::new(0, NUM_EXPERTS - 1, url_c)])
             .expect("connect")
     })
     .await
@@ -336,6 +339,9 @@ async fn expert_endpoint_single_shard_parity() {
             router_proj: &rp,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &pn,
             post_experts_norm: &[],
             num_experts: NUM_EXPERTS,
@@ -375,7 +381,7 @@ async fn expert_endpoint_two_shard_parity() {
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let backend = tokio::task::spawn_blocking(move || {
-        RemoteExpertBackend::connect(vec![
+        RemoteMoeBackend::connect(vec![
             ShardConfig::new(0, 1, url_a),
             ShardConfig::new(2, 3, url_b),
         ])
@@ -392,6 +398,9 @@ async fn expert_endpoint_two_shard_parity() {
             router_proj: &rp,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &pn,
             post_experts_norm: &[],
             num_experts: NUM_EXPERTS,
@@ -431,7 +440,7 @@ async fn expert_endpoint_reshard_same_output() {
     let url_a_c = url_a.clone();
     let backend = Arc::new(
         tokio::task::spawn_blocking(move || {
-            RemoteExpertBackend::connect(vec![ShardConfig::new(0, NUM_EXPERTS - 1, url_a_c)])
+            RemoteMoeBackend::connect(vec![ShardConfig::new(0, NUM_EXPERTS - 1, url_a_c)])
                 .expect("connect A")
         })
         .await
@@ -448,6 +457,9 @@ async fn expert_endpoint_reshard_same_output() {
             router_proj: &rp,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &pn,
             post_experts_norm: &[],
             num_experts: NUM_EXPERTS,
@@ -475,6 +487,9 @@ async fn expert_endpoint_reshard_same_output() {
             router_proj: &rp,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &pn,
             post_experts_norm: &[],
             num_experts: NUM_EXPERTS,
@@ -507,7 +522,7 @@ async fn expert_endpoint_no_shard_error() {
     let url_c = url.clone();
     let backend = tokio::task::spawn_blocking(move || {
         // This shard only owns experts 0-1.
-        RemoteExpertBackend::connect(vec![ShardConfig::new(0, 1, url_c)])
+        RemoteMoeBackend::connect(vec![ShardConfig::new(0, 1, url_c)])
             .expect("connect")
     })
     .await.unwrap();
@@ -523,6 +538,9 @@ async fn expert_endpoint_no_shard_error() {
             router_proj: &rp,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &pre_norm,
             post_experts_norm: &[],
             num_experts: NUM_EXPERTS,
@@ -533,7 +551,7 @@ async fn expert_endpoint_no_shard_error() {
     .await.unwrap();
 
     assert!(
-        matches!(err, Err(RemoteExpertError::NoShard { expert_id: 3 })),
+        matches!(err, Err(RemoteMoeError::NoShard { expert_id: 3 })),
         "expected NoShard(3), got {err:?}"
     );
 }

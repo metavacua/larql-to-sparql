@@ -265,6 +265,8 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             ffn_timeout_secs: c.ffn_timeout_secs,
             metal: false,
             verbose: c.verbose,
+            experts: false,
+            experts_dir: None,
         }
     }
 }

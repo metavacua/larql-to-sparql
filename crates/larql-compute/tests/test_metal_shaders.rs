@@ -848,7 +848,7 @@ fn rms_norm_large_vector_simd_cooperative() {
     let queue = device.new_command_queue();
 
     let len = 2560usize;
-    let x: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.0037).sin() * 2.0)).collect();
+    let x: Vec<f32> = (0..len).map(|i| (i as f32 * 0.0037).sin() * 2.0).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.8 + (i as f32 * 0.0001)).collect();
     let eps = 1e-6f32;
     let offset = 1.0f32;
@@ -897,8 +897,8 @@ fn residual_norm_large_vector_simd_cooperative() {
     let queue = device.new_command_queue();
 
     let len = 2560usize;
-    let a: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.003).cos() * 1.5)).collect();
-    let b: Vec<f32> = (0..len).map(|i| ((i as f32 * 0.007).sin() * 0.5)).collect();
+    let a: Vec<f32> = (0..len).map(|i| (i as f32 * 0.003).cos() * 1.5).collect();
+    let b: Vec<f32> = (0..len).map(|i| (i as f32 * 0.007).sin() * 0.5).collect();
     let weight: Vec<f32> = (0..len).map(|i| 0.9 + (i as f32 * 0.00005)).collect();
     let eps = 1e-6f32;
     let offset = 0.0f32;
@@ -1555,7 +1555,7 @@ fn full_pipeline_seq1_produces_nonzero() {
             k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
-    moe: None, moe_combined_output_norm: false,
+    moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
     };
 
     let result = metal.full_pipeline_q4(
@@ -2567,7 +2567,7 @@ fn stage_post_attn_pre_norm_matches_cpu() {
     let ffn_out = bufs.output((seq_len * hidden * 4) as u64);
     // Q8 bufs unused on this path, but the helper still takes them.
     let q8 = bufs.output((seq_len * hidden) as u64);
-    let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
+    let q8s = bufs.output((seq_len * hidden.div_ceil(32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
     let enc = cmd.new_compute_command_encoder();
@@ -2583,7 +2583,7 @@ fn stage_post_attn_pre_norm_matches_cpu() {
         /*ffn_needs_q8*/ false,
         (hidden * 4) as u64,
         hidden as u64,
-        (((hidden + 31) / 32) * 4) as u64,
+        (hidden.div_ceil(32) * 4) as u64,
     );
     enc.end_encoding();
     cmd.commit();
@@ -2641,7 +2641,7 @@ fn stage_post_attn_post_norm_matches_cpu() {
     let h_pa = bufs.output((seq_len * hidden * 4) as u64);
     let ffn_out = bufs.output((seq_len * hidden * 4) as u64);
     let q8 = bufs.output((seq_len * hidden) as u64);
-    let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
+    let q8s = bufs.output((seq_len * hidden.div_ceil(32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
     let enc = cmd.new_compute_command_encoder();
@@ -2657,7 +2657,7 @@ fn stage_post_attn_post_norm_matches_cpu() {
         /*ffn_needs_q8*/ false,
         (hidden * 4) as u64,
         hidden as u64,
-        (((hidden + 31) / 32) * 4) as u64,
+        (hidden.div_ceil(32) * 4) as u64,
     );
     enc.end_encoding();
     cmd.commit();
@@ -3071,6 +3071,7 @@ fn q4k_qkv_proj_matches_per_proj_dispatch() {
 /// first draft used the 148-byte `block_q4_K` MSL struct), this will
 /// catch it before real-vindex decode produces garbled tokens.
 #[test]
+#[allow(clippy::unusual_byte_groupings)]
 fn q4k_q6k_qkv_proj_matches_per_proj_dispatch() {
     let metal = get_metal();
 
@@ -3177,7 +3178,7 @@ fn stage_post_attn_q8_ffn_emits_roundtrippable_q8() {
     let h_pa = bufs.output((seq_len * hidden * 4) as u64);
     let ffn_out = bufs.output((seq_len * hidden * 4) as u64);
     let q8 = bufs.output((seq_len * hidden) as u64);
-    let q8s = bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64);
+    let q8s = bufs.output((seq_len * hidden.div_ceil(32) * 4) as u64);
 
     let cmd = queue.new_command_buffer();
     let enc = cmd.new_compute_command_encoder();
@@ -3193,7 +3194,7 @@ fn stage_post_attn_q8_ffn_emits_roundtrippable_q8() {
         /*ffn_needs_q8*/ true,
         (hidden * 4) as u64,
         hidden as u64,
-        (((hidden + 31) / 32) * 4) as u64,
+        (hidden.div_ceil(32) * 4) as u64,
     );
     enc.end_encoding();
     cmd.commit();
@@ -3206,7 +3207,7 @@ fn stage_post_attn_q8_ffn_emits_roundtrippable_q8() {
     let q8_bytes = unsafe {
         std::slice::from_raw_parts(q8.contents() as *const i8, seq_len * hidden)
     };
-    let blocks_per_pos = (hidden + 31) / 32;
+    let blocks_per_pos = hidden.div_ceil(32);
     let q8s_f32 = unsafe {
         std::slice::from_raw_parts(q8s.contents() as *const f32, seq_len * blocks_per_pos)
     };

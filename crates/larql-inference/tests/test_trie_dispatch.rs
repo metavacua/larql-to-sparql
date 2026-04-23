@@ -18,10 +18,11 @@ use std::path::PathBuf;
 use larql_inference::{
     encode_prompt,
     forward::{generate_cached_constrained, forward_to_layer},
+    prompt::ChatTemplate,
     trie::CascadeTrie,
     InferenceModel, WeightFfn,
 };
-use larql_inference::experts::ExpertRegistry;
+use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
@@ -35,67 +36,15 @@ fn wasm_dir() -> PathBuf {
         .join("../larql-experts/target/wasm32-wasip1/release")
 }
 
-/// Derive the probe filename for a given model ID using the same slug rule as
-/// export_trie_probe.py: replace "/" with "--".
-fn probe_path_for_model(mid: &str) -> PathBuf {
-    // Allow explicit override.
-    if let Ok(p) = std::env::var("LARQL_PROBE_PATH") {
-        return PathBuf::from(p);
-    }
-    let slug = mid.replace('/', "--");
-    let filename = format!("cascade_trie_{slug}_probe.json");
-    // CARGO_MANIFEST_DIR = .../chris-source/larql/crates/larql-inference
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../lazarus-play/experiments")
-        .join(filename)
-}
-
-/// Wrap a prompt in the correct chat template for the given model.
-fn chat_for_model(mid: &str, prompt: &str) -> String {
-    if mid.contains("Mistral") || mid.contains("mistral") {
-        // Mistral instruction format
-        format!("[INST] {prompt} [/INST]")
-    } else if mid.contains("Llama") || mid.contains("llama") {
-        // Llama-3 instruction format
-        format!(
-            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-        )
-    } else {
-        // Gemma (default)
-        format!("<start_of_turn>user\n{prompt}\n<end_of_turn>\n<start_of_turn>model\n")
-    }
-}
-
-/// Find the first valid JSON object that contains an "op" field.
-/// Tries each `{...}` block in order, normalising fullwidth punctuation first.
-fn extract_json(text: &str) -> Option<Value> {
-    // Normalise fullwidth punctuation first, then fix Mistral's missing comma
-    // before "args": `"VALUE"args":` → `"VALUE","args":`.
-    // Two-step: protect the already-correct `,"args":` form, then fix any
-    // remaining bare `"args":` (which shares its leading " with the value's
-    // closing "), then restore.
-    let normalised = text
-        .replace('，', ",")
-        .replace('：', ":")
-        .replace(",\"args\":", "\x01")        // protect correct form
-        .replace("\"args\":", "\",\"args\":") // fix missing comma, keep closing "
-        .replace('\x01', ",\"args\":");
-    let text = &*normalised;
-    let mut search_from = 0;
-    while let Some(rel) = text[search_from..].find('{') {
-        let start = search_from + rel;
-        let mut depth = 0usize;
-        let mut end = None;
-        for (i, ch) in text[start..].char_indices() {
-            match ch { '{' => depth += 1, '}' => { depth -= 1; if depth == 0 { end = Some(start + i + 1); break; } } _ => {} }
-        }
-        let end = match end { Some(e) => e, None => break };
-        if let Ok(v) = serde_json::from_str::<Value>(&text[start..end]) {
-            if v.get("op").is_some() { return Some(v); }
-        }
-        search_from = start + 1;
-    }
-    None
+/// Search dirs for the cascade trie probe, in precedence order after env vars.
+fn probe_search_dirs() -> Vec<PathBuf> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    vec![
+        // Vendored test fixture (gitignored — populate locally).
+        manifest.join("tests/data"),
+        // Sibling lazarus-play repo where probes are exported by default.
+        manifest.join("../../../lazarus-play/experiments"),
+    ]
 }
 
 // ── Route → ops mapping ───────────────────────────────────────────────────────
@@ -259,12 +208,20 @@ fn trie_dispatch_pipeline() {
     }
 
     let mid = model_id();
-    let pp = probe_path_for_model(&mid);
-    if !pp.exists() {
-        eprintln!("skip: probe missing for {mid} — run experiments/export_trie_probe.py --model {mid}");
-        eprintln!("  expected: {}", pp.display());
-        return;
-    }
+    let dirs = probe_search_dirs();
+    let pp = match CascadeTrie::find(&mid, &dirs) {
+        Some(p) => p,
+        None => {
+            eprintln!("skip: probe missing for {mid}");
+            eprintln!("  filename: {}", CascadeTrie::filename_for(&mid));
+            eprintln!("  searched env vars: LARQL_PROBE_PATH, LARQL_PROBE_DIR");
+            for d in &dirs {
+                eprintln!("  searched: {}", d.display());
+            }
+            eprintln!("  regen:    cd lazarus-play && python experiments/export_trie_probe.py --model {mid}");
+            return;
+        }
+    };
 
     let model = match InferenceModel::load(&mid) {
         Ok(m) => m,
@@ -277,6 +234,8 @@ fn trie_dispatch_pipeline() {
 
     let mut reg = ExpertRegistry::load_dir(&wasm_dir()).expect("load_dir");
     let ffn = WeightFfn { weights: model.weights() };
+    let template = ChatTemplate::for_model_id(&mid);
+    eprintln!("template: {}", template.name());
 
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -284,7 +243,7 @@ fn trie_dispatch_pipeline() {
     for case in cases() {
         let system = system_for_model(&mid);
         let full_prompt = format!("{system}\n\nQuestion: {}", case.prompt);
-        let wrapped = chat_for_model(&mid, &full_prompt);
+        let wrapped = template.wrap(&full_prompt);
 
         // Full wrapped prompt for generation.
         let ids_gen = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
@@ -327,15 +286,12 @@ fn trie_dispatch_pipeline() {
         );
         eprintln!("  raw out: {output:?}");
 
-        let parsed = match extract_json(&output) {
-            Some(v) => v,
-            None => { eprintln!("  FAIL: no JSON"); failed += 1; continue; }
+        let call = match parse_op_call(&output) {
+            Some(c) => c,
+            None => { eprintln!("  FAIL: no op-call JSON"); failed += 1; continue; }
         };
-        let op = match parsed.get("op").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => { eprintln!("  FAIL: no op"); failed += 1; continue; }
-        };
-        let args = parsed.get("args").cloned().unwrap_or(json!({}));
+        let op = call.op;
+        let args = call.args;
         eprintln!("  op={op}{}  args={args}",
             if op == case.expected_op { "" } else { " ← WRONG OP" });
 

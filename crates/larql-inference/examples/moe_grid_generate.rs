@@ -8,7 +8,7 @@
 //!   SHARDS="0-63:http://localhost:9191,64-127:http://localhost:9192" \
 //!   PROMPT="The capital of France is" \
 //!   MAX_TOKENS=8 \
-//!   cargo run --release --example expert_grid_generate
+//!   cargo run --release --example moe_grid_generate
 //!
 //! Single-server shortcut (all experts):
 //!   SHARDS="0-127:http://localhost:9191" ...
@@ -17,8 +17,8 @@ extern crate blas_src;
 
 use std::sync::Arc;
 use larql_inference::{
-    RemoteExpertBackend, ShardConfig,
-    layer_graph::grid::generate_with_remote_experts,
+    RemoteMoeBackend, ShardConfig,
+    layer_graph::grid::generate_with_remote_moe,
     encode_prompt,
 };
 use larql_vindex::{load_vindex_tokenizer, VectorIndex, SilentLoadCallbacks};
@@ -58,7 +58,7 @@ fn main() -> Result<(), BoxErr> {
     }).collect();
 
     println!("Connecting to {} shard(s)…", shard_configs.len());
-    let remote = Arc::new(RemoteExpertBackend::connect(shard_configs)?);
+    let remote = Arc::new(RemoteMoeBackend::connect(shard_configs)?);
     println!("Connected.\n");
 
     // ── Load vindex + model weights ───────────────────────────────────────────
@@ -93,7 +93,7 @@ fn main() -> Result<(), BoxErr> {
     print!("{prompt}");
     std::io::Write::flush(&mut std::io::stdout()).ok();
 
-    let result = generate_with_remote_experts(
+    let result = generate_with_remote_moe(
         &weights,
         &tokenizer,
         prompt_ids,

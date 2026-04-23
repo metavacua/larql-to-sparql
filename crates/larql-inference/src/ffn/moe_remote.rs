@@ -1,4 +1,8 @@
-//! RemoteExpertBackend — MoE expert dispatch over HTTP.
+//! `RemoteMoeBackend` — Mixture-of-Experts weight-shard dispatch over HTTP.
+//!
+//! Not to be confused with [`crate::experts`] — that module hosts deterministic
+//! WASM compute experts (gcd, base64, …). This module dispatches *MoE expert
+//! weights* (the FFN sub-blocks of an MoE transformer) to remote shard servers.
 //!
 //! For hybrid MoE models (e.g. Gemma 4 26B A4B), the client holds attention
 //! weights + router weights (~5.5 GB). Expert weights live on remote shard
@@ -36,7 +40,7 @@ use serde::{Deserialize, Serialize};
 // ── Public error type ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub enum RemoteExpertError {
+pub enum RemoteMoeError {
     /// Could not reach the shard server (connection refused, DNS failure, etc.).
     Unreachable { url: String, cause: String },
     /// The server responded with a non-2xx status.
@@ -49,7 +53,7 @@ pub enum RemoteExpertError {
     Client(String),
 }
 
-impl std::fmt::Display for RemoteExpertError {
+impl std::fmt::Display for RemoteMoeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unreachable { url, cause } => write!(f, "expert shard unreachable: {url} ({cause})"),
@@ -61,7 +65,7 @@ impl std::fmt::Display for RemoteExpertError {
     }
 }
 
-impl std::error::Error for RemoteExpertError {}
+impl std::error::Error for RemoteMoeError {}
 
 // ── Shard configuration ───────────────────────────────────────────────────────
 
@@ -107,20 +111,20 @@ struct Shard {
 }
 
 impl Shard {
-    fn connect(config: ShardConfig) -> Result<Self, RemoteExpertError> {
+    fn connect(config: ShardConfig) -> Result<Self, RemoteMoeError> {
         let client = reqwest::blocking::Client::builder()
             .timeout(config.timeout)
             .build()
-            .map_err(|e| RemoteExpertError::Client(e.to_string()))?;
+            .map_err(|e| RemoteMoeError::Client(e.to_string()))?;
 
         // Health check — fail fast rather than dying mid-forward-pass.
         let health_url = format!("{}/v1/health", config.url);
-        let resp = client.get(&health_url).send().map_err(|e| RemoteExpertError::Unreachable {
+        let resp = client.get(&health_url).send().map_err(|e| RemoteMoeError::Unreachable {
             url: health_url.clone(),
             cause: e.to_string(),
         })?;
         if !resp.status().is_success() {
-            return Err(RemoteExpertError::ServerError {
+            return Err(RemoteMoeError::ServerError {
                 status: resp.status().as_u16(),
                 body: resp.text().unwrap_or_default(),
             });
@@ -137,7 +141,7 @@ impl Shard {
     fn call_batch(
         &self,
         requests: &[ExpertCallItem],
-    ) -> Result<Vec<ExpertResultItem>, RemoteExpertError> {
+    ) -> Result<Vec<ExpertResultItem>, RemoteMoeError> {
         let url = format!("{}/v1/expert/batch", self.config.url);
         let body = BatchRequest { requests };
         let resp = self
@@ -145,13 +149,13 @@ impl Shard {
             .post(&url)
             .json(&body)
             .send()
-            .map_err(|e| RemoteExpertError::Unreachable {
+            .map_err(|e| RemoteMoeError::Unreachable {
                 url: url.clone(),
                 cause: e.to_string(),
             })?;
 
         if !resp.status().is_success() {
-            return Err(RemoteExpertError::ServerError {
+            return Err(RemoteMoeError::ServerError {
                 status: resp.status().as_u16(),
                 body: resp.text().unwrap_or_default(),
             });
@@ -159,7 +163,7 @@ impl Shard {
 
         let parsed: BatchResponse = resp
             .json()
-            .map_err(|e| RemoteExpertError::BadResponse(e.to_string()))?;
+            .map_err(|e| RemoteMoeError::BadResponse(e.to_string()))?;
         Ok(parsed.results)
     }
 }
@@ -200,6 +204,14 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> {
     x.iter().zip(w.iter()).map(|(&xi, &wi)| xi / rms * (wi + offset)).collect()
 }
 
+/// Parameter-free RMSNorm (HF `Gemma4RMSNorm(with_scale=False)`): scales
+/// `x` by `1/sqrt(mean(x²) + eps)` with no learned weight.
+fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
+    if x.is_empty() { return Vec::new(); }
+    let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32 + eps).sqrt();
+    x.iter().map(|v| v / rms).collect()
+}
+
 fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
     (0..out_rows).map(|row| {
         let w_row = &w[row * in_cols..(row + 1) * in_cols];
@@ -232,6 +244,17 @@ pub struct MoeRouterWeights<'a> {
     pub router_scale: &'a [f32],
     /// Optional per-expert output scale [num_experts].
     pub router_per_expert_scale: &'a [f32],
+    /// Optional router-specific RMSNorm weights [hidden_size]. When non-empty,
+    /// the router input is `rms_norm(h, router_norm)`; when empty AND
+    /// `router_norm_parameter_free` is true, it's parameter-free RMSNorm;
+    /// otherwise falls back to `rms_norm(h, pre_experts_norm)`.
+    pub router_norm: &'a [f32],
+    /// Parameter-free router RMSNorm (no learned weight). HF Gemma 4 sets
+    /// this true (`Gemma4RMSNorm(with_scale=False)`).
+    pub router_norm_parameter_free: bool,
+    /// Scalar multiplier on the router input after the norm and `router_scale`.
+    /// HF Gemma 4: `hidden_size^-0.5`. Use `1.0` for no scaling.
+    pub router_input_scalar: f32,
     /// Pre-experts RMSNorm weights [hidden_size].
     pub pre_experts_norm: &'a [f32],
     /// Post-experts RMSNorm weights [hidden_size]. Applied to the summed output.
@@ -242,19 +265,37 @@ pub struct MoeRouterWeights<'a> {
 
 impl MoeRouterWeights<'_> {
     /// Run steps 1-5 of the MoE forward pass (norm → scale → proj → softmax → top-K).
-    /// Returns `(h_norm, expert_indices, expert_weights)`.
+    /// Returns `(h_norm, expert_indices, expert_weights)` where `h_norm` is
+    /// the experts' input (pre_experts_norm output), not the router's input.
     pub fn route(&self, h: &[f32], norm_offset: f32, eps: f32) -> (Vec<f32>, Vec<usize>, Vec<f32>) {
         let hidden = h.len();
 
+        // Experts' input norm (used by callers for the expert matmuls).
         let h_norm = rms_norm(h, self.pre_experts_norm, eps, norm_offset);
 
-        let h_scaled: Vec<f32> = if !self.router_scale.is_empty() {
-            h_norm.iter().zip(self.router_scale.iter()).map(|(a, b)| a * b).collect()
+        // Router input norm. Priority:
+        //   1. learned router_norm weight (architectures that ship one),
+        //   2. parameter-free RMSNorm (HF Gemma 4 — `with_scale=False`),
+        //   3. fallback: experts' pre-norm (legacy / archs without an explicit
+        //      router norm).
+        let router_in_normed = if !self.router_norm.is_empty() {
+            rms_norm(h, self.router_norm, eps, norm_offset)
+        } else if self.router_norm_parameter_free {
+            rms_norm_no_weight(h, eps)
         } else {
             h_norm.clone()
         };
 
-        let mut logits = matmul_vec(&h_scaled, self.router_proj, self.num_experts, hidden);
+        let mut router_in: Vec<f32> = if !self.router_scale.is_empty() {
+            router_in_normed.iter().zip(self.router_scale.iter()).map(|(a, b)| a * b).collect()
+        } else {
+            router_in_normed
+        };
+        if self.router_input_scalar != 1.0 && self.router_input_scalar != 0.0 {
+            for v in router_in.iter_mut() { *v *= self.router_input_scalar; }
+        }
+
+        let mut logits = matmul_vec(&router_in, self.router_proj, self.num_experts, hidden);
         softmax(&mut logits);
 
         let (indices, mut weights) = top_k(&logits, self.top_k);
@@ -278,19 +319,19 @@ impl MoeRouterWeights<'_> {
     }
 }
 
-// ── RemoteExpertBackend ───────────────────────────────────────────────────────
+// ── RemoteMoeBackend ───────────────────────────────────────────────────────
 
 /// Remote MoE expert backend. Thread-safe — all methods take `&self`.
 ///
 /// The shard map is stored behind an `RwLock` so `reshard()` can replace it
 /// without interrupting in-flight `forward_moe` calls on other threads.
-pub struct RemoteExpertBackend {
+pub struct RemoteMoeBackend {
     shards: Arc<RwLock<Vec<Shard>>>,
 }
 
-impl RemoteExpertBackend {
+impl RemoteMoeBackend {
     /// Build from a shard list. Performs a health check on each shard.
-    pub fn connect(configs: Vec<ShardConfig>) -> Result<Self, RemoteExpertError> {
+    pub fn connect(configs: Vec<ShardConfig>) -> Result<Self, RemoteMoeError> {
         let shards: Result<Vec<Shard>, _> = configs.into_iter().map(Shard::connect).collect();
         Ok(Self { shards: Arc::new(RwLock::new(shards?)) })
     }
@@ -299,7 +340,7 @@ impl RemoteExpertBackend {
     ///
     /// Reconnects to new shards, then atomically swaps the map.
     /// In-flight requests against old shards complete normally.
-    pub fn reshard(&self, configs: Vec<ShardConfig>) -> Result<(), RemoteExpertError> {
+    pub fn reshard(&self, configs: Vec<ShardConfig>) -> Result<(), RemoteMoeError> {
         let new_shards: Result<Vec<Shard>, _> = configs.into_iter().map(Shard::connect).collect();
         *self.shards.write().unwrap() = new_shards?;
         Ok(())
@@ -336,7 +377,7 @@ impl RemoteExpertBackend {
         router: &MoeRouterWeights<'_>,
         norm_offset: f32,
         eps: f32,
-    ) -> Result<Vec<f32>, RemoteExpertError> {
+    ) -> Result<Vec<f32>, RemoteMoeError> {
         let hidden = h.len();
         if hidden == 0 || router.num_experts == 0 || router.top_k == 0 {
             return Ok(vec![0.0f32; hidden]);
@@ -354,7 +395,7 @@ impl RemoteExpertBackend {
             let shard_idx = shards
                 .iter()
                 .position(|s| s.owns(expert_id))
-                .ok_or(RemoteExpertError::NoShard { expert_id })?;
+                .ok_or(RemoteMoeError::NoShard { expert_id })?;
             shard_calls[shard_idx].1.push(ExpertCallItem {
                 layer,
                 expert_id,
@@ -369,7 +410,7 @@ impl RemoteExpertBackend {
             .map(|(si, items)| (*si, items))
             .collect();
 
-        let results_per_shard: Vec<Result<Vec<ExpertResultItem>, RemoteExpertError>> = non_empty
+        let results_per_shard: Vec<Result<Vec<ExpertResultItem>, RemoteMoeError>> = non_empty
             .par_iter()
             .map(|(si, items)| shards[*si].call_batch(items))
             .collect();
@@ -382,7 +423,7 @@ impl RemoteExpertBackend {
         for result in results_per_shard {
             for item in result? {
                 if item.output.len() != hidden {
-                    return Err(RemoteExpertError::BadResponse(format!(
+                    return Err(RemoteMoeError::BadResponse(format!(
                         "expert {}/{} returned {} floats, expected {hidden}",
                         item.layer, item.expert_id, item.output.len()
                     )));
@@ -451,6 +492,9 @@ mod tests {
             router_proj: &router_proj,
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &[],
             post_experts_norm: &[],
             num_experts,
@@ -467,13 +511,16 @@ mod tests {
     fn forward_moe_empty_input_returns_zero() {
         // Can't connect to a real server, but we can verify the early-exit path.
         // Construct a backend with an empty shard list via the raw struct (bypassing connect).
-        let backend = RemoteExpertBackend {
+        let backend = RemoteMoeBackend {
             shards: Arc::new(RwLock::new(vec![])),
         };
         let router = MoeRouterWeights {
             router_proj: &[],
             router_scale: &[],
             router_per_expert_scale: &[],
+            router_norm: &[],
+            router_norm_parameter_free: false,
+            router_input_scalar: 1.0,
             pre_experts_norm: &[],
             post_experts_norm: &[],
             num_experts: 0,

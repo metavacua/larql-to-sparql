@@ -278,6 +278,20 @@ impl ModelArchitecture for Gemma4Arch {
         }
     }
 
+    fn moe_router_norm_parameter_free(&self) -> bool {
+        // HF `Gemma4TextRouter` uses `Gemma4RMSNorm(with_scale=False)`, i.e.
+        // pure variance normalisation — no learned weight exists on disk.
+        self.config.enable_moe_block
+    }
+
+    fn moe_router_input_scalar(&self) -> Option<f32> {
+        if self.config.enable_moe_block {
+            Some((self.config.hidden_size as f32).powf(-0.5))
+        } else {
+            None
+        }
+    }
+
     /// All experts' gate+up weights packed: [num_experts, 2*moe_intermediate, hidden].
     fn packed_experts_gate_up_key(&self, layer: usize) -> Option<String> {
         if self.config.enable_moe_block {
@@ -336,6 +350,17 @@ impl ModelArchitecture for Gemma4Arch {
     fn moe_post_ffn1_norm_key(&self, layer: usize) -> Option<String> {
         // Alias for post_feedforward_layernorm_1 — same key, explicit name for clarity.
         self.post_feedforward_layernorm_key(layer)
+    }
+
+    fn moe_post_outer_norm_key(&self, layer: usize) -> Option<String> {
+        if self.config.enable_moe_block {
+            Some(format!(
+                "{}post_feedforward_layernorm.weight",
+                self.layer_prefix(layer)
+            ))
+        } else {
+            None
+        }
     }
 
     fn moe_has_combined_output_norm(&self) -> bool {

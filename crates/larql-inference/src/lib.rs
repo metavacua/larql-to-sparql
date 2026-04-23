@@ -8,6 +8,7 @@ pub mod forward;
 pub mod graph_ffn;
 pub mod layer_graph;
 pub mod model;
+pub mod prompt;
 pub mod residual;
 pub mod tokenizer;
 pub mod trace;
@@ -48,7 +49,7 @@ pub use error::InferenceError;
 pub use ffn::{
     FfnBackend, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
     RemoteLatencyStats, SparseFfn, WeightFfn,
-    RemoteExpertBackend, RemoteExpertError, ShardConfig, MoeRouterWeights,
+    MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig,
 };
 pub use attention::AttentionWeights;
 pub use forward::{
@@ -86,7 +87,7 @@ pub use layer_graph::{
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,
     detect_template,
     // Expert grid generation
-    grid::{generate_with_remote_experts, GridGenerateResult},
+    grid::{generate_with_remote_moe, GridGenerateResult},
 };
 pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache, predict_q4k};
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};

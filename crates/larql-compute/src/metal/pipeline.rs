@@ -48,7 +48,7 @@ impl MetalBackend {
                 k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
-                moe: None, moe_combined_output_norm: false,
+                moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
             }
         }).collect();
         ops::full_pipeline::dispatch_full_pipeline(

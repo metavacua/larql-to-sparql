@@ -1,5 +1,8 @@
 use super::*;
 
+mod diag;
+mod moe_combine;
+
 impl MetalBackend {
     /// Create a KV cache for decode mode with uniform per-layer dims.
     pub fn create_kv_cache(&self, num_layers: usize, max_seq: usize, num_kv_heads: usize, head_dim: usize) -> ops::kv_cache::KVCache {
@@ -60,14 +63,10 @@ impl MetalBackend {
         let hidden_val = hidden as u32;
         let inter_val = inter as u32;
 
-        // Input RMS debug
+        // Input RMS debug (first 3 calls, env-gated).
         static CALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let call_n = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if std::env::var("DECODE_DEBUG").is_ok() && call_n < 3 {
-            let rms = (x.iter().map(|v| v*v).sum::<f32>() / x.len() as f32).sqrt();
-            let has_combined = layers.iter().any(|l| l.moe_combined_output_norm);
-            eprintln!("[decode_token call={call_n}] x_rms={rms:.4} hidden={hidden} inter={inter} has_moe={} moe_combined_norm={}", layers.iter().any(|l| l.moe.is_some()), has_combined);
-        }
+        diag::log_decode_entry(call_n, x, hidden, inter, layers);
 
         // Scratch buffers are reused across all layers within the encoder.
         // When attention geometry varies layer to layer (Gemma 4 sliding=8192
@@ -829,55 +828,19 @@ impl MetalBackend {
                             attn_slice, moe, layer.norm_offset, layer.eps,
                         )
                     };
+                    // Accumulate the MoE contribution into the dense output
+                    // buffer: new_h = h_post_attn + _1(dense) + moe_out.
                     let h_ptr = new_h.contents() as *mut f32;
-                    let ha_ptr = h_post_attn.contents() as *const f32;
                     unsafe {
                         for (i, v) in moe_out.iter().enumerate() {
                             *h_ptr.add(i) += v;
                         }
                     }
 
-                    // Architecture-driven MoE output combination.
-                    //
-                    // Gemma 4 26B A4B (moe_combined_output_norm=true):
-                    //   combined = dense_contrib + expert_contrib
-                    //   new_h = h_post_attn + post_feedforward_layernorm(combined)
-                    //   Matches HF: hidden_states = self.post_feedforward_layernorm(h1+h2)
-                    //               hidden_states = residual + hidden_states
-                    //
-                    // Other models (moe_combined_output_norm=false):
-                    //   new_h = h_post_attn + layer_scalar * (dense_contrib + expert_contrib)
-                    if layer.moe_combined_output_norm {
-                    if let Some(post_ffn_w) = layer.post_ffn_norm {
-                        let norm_offset = layer.norm_offset;
-                        let eps = layer.eps;
-                        unsafe {
-                            // Compute combined = new_h - h_post_attn
-                            let combined: Vec<f32> = (0..hidden)
-                                .map(|i| *h_ptr.add(i) - *ha_ptr.add(i))
-                                .collect();
-                            // RMS norm the combined delta
-                            let rms = (combined.iter().map(|v| v * v).sum::<f32>()
-                                       / hidden as f32 + eps).sqrt();
-                            for (i, (&c, &w)) in combined.iter().zip(post_ffn_w.iter()).enumerate() {
-                                *h_ptr.add(i) = *ha_ptr.add(i) + c / rms * (w + norm_offset);
-                            }
-                        }
-                    } else {
-                        // No post_ffn_norm weights — skip for this MoE model
-                    }
-                    } else {
-                        // Standard MoE: scale the combined delta by layer_scalar
-                        let scalar = layer.layer_scalar;
-                        if scalar != 0.0 && scalar != 1.0 {
-                            unsafe {
-                                for i in 0..hidden {
-                                    let pa = *ha_ptr.add(i);
-                                    *h_ptr.add(i) = pa + scalar * (*h_ptr.add(i) - pa);
-                                }
-                            }
-                        }
-                    }
+                    // Apply the architecture-driven outer combine (outer RMS
+                    // norm for Gemma 4 hybrid MoE, or layer_scalar-only for
+                    // legacy MoE). See `moe_combine.rs` for the full HF map.
+                    moe_combine::apply_outer_combine(layer, new_h, &h_post_attn, hidden);
 
                     if l + 1 < num_layers {
                         cmd = self.queue.new_command_buffer().to_owned();
@@ -904,28 +867,18 @@ impl MetalBackend {
                     cmd.commit();
                     cmd.wait_until_completed();
                 }
-                let stat = |name: &str, buf: &metal::Buffer, n: usize| {
-                    let ptr = buf.contents() as *const f32;
-                    if ptr.is_null() { eprintln!("[diag L{l}] {name}: null contents"); return; }
-                    let s = unsafe { std::slice::from_raw_parts(ptr, n) };
-                    let nan = s.iter().filter(|v| v.is_nan()).count();
-                    let inf = s.iter().filter(|v| v.is_infinite()).count();
-                    let maxabs = s.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
-                    eprintln!("[diag L{l}] {name}: len={n} nan={nan} inf={inf} max_abs={maxabs:.3e}");
+                let bufs = diag::LayerDiagBufs {
+                    norm_f32_buf: &norm_f32_buf,
+                    q_out: &q_out, k_out: &k_out, v_out: &v_out,
+                    attn_out_buf: &attn_out_buf, o_out_buf: &o_out_buf,
+                    h_post_attn: &h_post_attn, ffn_norm_out: &ffn_norm_out,
+                    gate_out_scratch: &gate_out_scratch, up_out: &up_out,
+                    act_buf: &act_buf, down_out: &down_out, new_h,
+                    hidden, inter,
+                    layer_q_dim,
+                    layer_kv_dim: layer_num_kv_heads * layer_head_dim,
                 };
-                stat("norm_f32_buf", &norm_f32_buf, hidden);
-                stat("q_out",        &q_out,        layer_q_dim);
-                stat("k_out",        &k_out,        layer_num_kv_heads * layer_head_dim);
-                stat("v_out",        &v_out,        layer_num_kv_heads * layer_head_dim);
-                stat("attn_out_buf", &attn_out_buf, layer_q_dim);
-                stat("o_out_buf",    &o_out_buf,    hidden);
-                stat("h_post_attn",  &h_post_attn,  hidden);
-                stat("ffn_norm_out", &ffn_norm_out, hidden);
-                stat("gate_out_scratch", &gate_out_scratch, inter);
-                stat("up_out",       &up_out,       inter);
-                stat("act_buf",      &act_buf,      inter);
-                stat("down_out",     &down_out,     hidden);
-                stat("new_h (h_out)", new_h,        hidden);
+                diag::dump_layer_buffers(l, &bufs);
                 return super::buffers::read_buffer_f32(new_h, hidden);
             }
         }

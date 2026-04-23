@@ -415,12 +415,27 @@ pub fn write_model_weights_with_opts(
 
         // Per-layer norms
         for layer in 0..num_layers {
-            let norm_keys: Vec<String> = [
+            let mut norm_keys: Vec<String> = [
                 Some(arch.input_layernorm_key(layer)),
                 Some(arch.post_attention_layernorm_key(layer)),
                 arch.pre_feedforward_layernorm_key(layer),
                 arch.post_feedforward_layernorm_key(layer),
             ].into_iter().flatten().collect();
+
+            // Hybrid MoE additions: the pre_2/post_1/post_2 weights plus
+            // the outer post_feedforward_layernorm that wraps (h1+h2).
+            if arch.is_hybrid_moe() {
+                for k in [
+                    arch.moe_pre_experts_norm_key(layer),
+                    arch.moe_post_ffn1_norm_key(layer),
+                    arch.moe_post_experts_norm_key(layer),
+                    arch.moe_post_outer_norm_key(layer),
+                ].into_iter().flatten() {
+                    if !norm_keys.contains(&k) {
+                        norm_keys.push(k);
+                    }
+                }
+            }
 
             for key in norm_keys {
                 if let Some(data) = source.get_vector(&key) {
@@ -855,9 +870,14 @@ pub fn write_model_weights_q4k_with_opts(
             let moe_vec_keys: Vec<String> = [
                 arch.moe_router_scale_key(layer),
                 arch.moe_router_per_expert_scale_key(layer),
+                arch.moe_router_norm_key(layer),
                 arch.moe_pre_experts_norm_key(layer),
                 arch.moe_post_ffn1_norm_key(layer),
                 arch.moe_post_experts_norm_key(layer),
+                // Outer post-FFN norm used to re-normalise (h1 + h2) before
+                // the residual add in hybrid MoE (HF Gemma 4). Distinct from
+                // post_ffn1_norm, which is the dense-branch norm.
+                arch.moe_post_outer_norm_key(layer),
             ].into_iter().flatten().collect();
             for key in moe_vec_keys {
                 if let Some(data) = source.get_vector(&key) {

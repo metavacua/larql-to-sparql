@@ -186,6 +186,91 @@ pub fn predict_q4k(
     )
 }
 
+/// Common end-of-turn / EOS markers across Gemma, Llama, Mistral, ChatML.
+///
+/// Used by [`generate_q4k_cpu`] to halt generation when the model emits any
+/// of these. Catches a wider set than the raw EOS token id because chat
+/// templates tend to use family-specific terminators.
+pub fn is_end_of_turn(token: &str) -> bool {
+    matches!(
+        token,
+        "<eos>"
+            | "</s>"
+            | "<|endoftext|>"
+            | "<|im_end|>"
+            | "<|end_of_turn|>"
+            | "<end_of_turn>"
+            | "<|eot_id|>"
+    )
+}
+
+#[cfg(test)]
+mod end_of_turn_tests {
+    use super::is_end_of_turn;
+
+    #[test]
+    fn recognises_known_terminators() {
+        for t in [
+            "<eos>",
+            "</s>",
+            "<|endoftext|>",
+            "<|im_end|>",
+            "<|end_of_turn|>",
+            "<end_of_turn>",
+            "<|eot_id|>",
+        ] {
+            assert!(is_end_of_turn(t), "expected {t:?} to be a terminator");
+        }
+    }
+
+    #[test]
+    fn does_not_match_arbitrary_tokens() {
+        for t in ["", " ", "the", "<eos", "eos>", "<EOS>", "<|im_start|>"] {
+            assert!(!is_end_of_turn(t), "did not expect {t:?} to be a terminator");
+        }
+    }
+}
+
+/// CPU autoregressive generation against a Q4_K / Q6_K vindex.
+///
+/// Loops [`predict_q4k`] one token at a time. Stops on `max_tokens` or when
+/// the produced token text matches [`is_end_of_turn`]. Per-step cost is
+/// O(N²) in context length (no KV cache) — the same trade-off
+/// `larql dev walk --predict --max-tokens N` makes for the CPU path. For
+/// long outputs use the Metal backend instead via
+/// [`crate::layer_graph::generate`].
+///
+/// Returns `(token_text, token_id)` pairs in generation order.
+pub fn generate_q4k_cpu(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    prompt_ids: &[u32],
+    max_tokens: usize,
+    index: &VectorIndex,
+) -> Vec<(String, u32)> {
+    let mut ids = prompt_ids.to_vec();
+    let mut out: Vec<(String, u32)> = Vec::with_capacity(max_tokens);
+    for _ in 0..max_tokens {
+        let result = predict_q4k(weights, tokenizer, &ids, 1, index);
+        let next_id = match result.token_ids.first() {
+            Some(&id) => id,
+            None => break,
+        };
+        let tok = result
+            .predictions
+            .first()
+            .map(|p| p.0.clone())
+            .unwrap_or_default();
+        let stop = is_end_of_turn(&tok);
+        out.push((tok, next_id));
+        ids.push(next_id);
+        if stop {
+            break;
+        }
+    }
+    out
+}
+
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
 /// [`FfnBackend`] — typically [`crate::ffn::RemoteWalkBackend`] for the
 /// dense-remote demo where attention runs locally and each layer's FFN is

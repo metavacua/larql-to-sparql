@@ -15,9 +15,9 @@
 use std::path::PathBuf;
 
 use larql_inference::{
-    encode_prompt, forward::generate_cached, InferenceModel, WeightFfn,
+    encode_prompt, forward::generate_cached, prompt::ChatTemplate, InferenceModel, WeightFfn,
 };
-use larql_inference::experts::ExpertRegistry;
+use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
@@ -29,36 +29,6 @@ fn model_id() -> String {
 fn wasm_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../larql-experts/target/wasm32-wasip1/release")
-}
-
-/// Wrap prompt in Gemma instruction-tuning chat template.
-fn chat(prompt: &str) -> String {
-    format!(
-        "<start_of_turn>user\n{prompt}\n<end_of_turn>\n<start_of_turn>model\n"
-    )
-}
-
-/// Extract the first JSON object `{...}` from a model response string.
-fn extract_json(text: &str) -> Option<Value> {
-    let start = text.find('{')?;
-    // Walk forward matching braces to find the closing `}`
-    let mut depth = 0usize;
-    let mut end = None;
-    for (i, ch) in text[start..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = Some(start + i + 1);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    let json_str = &text[start..end?];
-    serde_json::from_str(json_str).ok()
 }
 
 // ── Cases ─────────────────────────────────────────────────────────────────────
@@ -148,6 +118,8 @@ fn llm_dispatch_pipeline() {
 
     let mut reg = ExpertRegistry::load_dir(&wasm_dir()).expect("load_dir");
     let ffn = WeightFfn { weights: model.weights() };
+    let template = ChatTemplate::for_model_id(&mid);
+    eprintln!("template: {}", template.name());
 
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -155,7 +127,7 @@ fn llm_dispatch_pipeline() {
     for case in cases() {
         // Build prompt: system context + question
         let full_prompt = format!("{SYSTEM}\n\nQuestion: {}", case.prompt);
-        let wrapped = chat(&full_prompt);
+        let wrapped = template.wrap(&full_prompt);
 
         let ids = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
             Ok(v) => v,
@@ -176,25 +148,16 @@ fn llm_dispatch_pipeline() {
         eprintln!("\n  prompt:  {}", case.prompt);
         eprintln!("  raw out: {output:?}");
 
-        // Parse JSON from output
-        let parsed = match extract_json(&output) {
-            Some(v) => v,
+        let call = match parse_op_call(&output) {
+            Some(c) => c,
             None => {
-                eprintln!("  FAIL: no JSON object in output");
+                eprintln!("  FAIL: no op-call JSON in output");
                 failed += 1;
                 continue;
             }
         };
-
-        let op = match parsed.get("op").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                eprintln!("  FAIL: JSON has no 'op' key: {parsed}");
-                failed += 1;
-                continue;
-            }
-        };
-        let args = parsed.get("args").cloned().unwrap_or(json!({}));
+        let op = call.op;
+        let args = call.args;
 
         eprintln!("  op={op}  args={args}");
 

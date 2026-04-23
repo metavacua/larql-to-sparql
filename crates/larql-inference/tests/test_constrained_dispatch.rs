@@ -16,9 +16,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use larql_inference::{
-    encode_prompt, forward::generate_cached_constrained, InferenceModel, WeightFfn,
+    encode_prompt, forward::generate_cached_constrained, prompt::ChatTemplate,
+    InferenceModel, WeightFfn,
 };
-use larql_inference::experts::ExpertRegistry;
+use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
@@ -30,27 +31,6 @@ fn model_id() -> String {
 fn wasm_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../larql-experts/target/wasm32-wasip1/release")
-}
-
-fn chat(prompt: &str) -> String {
-    format!("<start_of_turn>user\n{prompt}\n<end_of_turn>\n<start_of_turn>model\n")
-}
-
-fn extract_json(text: &str) -> Option<Value> {
-    let start = text.find('{')?;
-    let mut depth = 0usize;
-    let mut end = None;
-    for (i, ch) in text[start..].char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 { end = Some(start + i + 1); break; }
-            }
-            _ => {}
-        }
-    }
-    serde_json::from_str(&text[start..end?]).ok()
 }
 
 // ── Grammar mask ─────────────────────────────────────────────────────────────
@@ -242,12 +222,15 @@ fn constrained_dispatch_pipeline() {
     for op in &valid_ops { eprint!("  {op}"); }
     eprintln!();
 
+    let template = ChatTemplate::for_model_id(&mid);
+    eprintln!("template: {}", template.name());
+
     let mut passed = 0usize;
     let mut failed = 0usize;
 
     for case in cases() {
         let full_prompt = format!("{SYSTEM}\n\nQuestion: {}", case.prompt);
-        let wrapped = chat(&full_prompt);
+        let wrapped = template.wrap(&full_prompt);
 
         let ids = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
             Ok(v) => v,
@@ -271,16 +254,12 @@ fn constrained_dispatch_pipeline() {
         eprintln!("\n  prompt:  {}", case.prompt);
         eprintln!("  raw out: {output:?}");
 
-        let parsed = match extract_json(&output) {
-            Some(v) => v,
-            None => { eprintln!("  FAIL: no JSON"); failed += 1; continue; }
+        let call = match parse_op_call(&output) {
+            Some(c) => c,
+            None => { eprintln!("  FAIL: no op-call JSON"); failed += 1; continue; }
         };
-
-        let op = match parsed.get("op").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => { eprintln!("  FAIL: no op"); failed += 1; continue; }
-        };
-        let args = parsed.get("args").cloned().unwrap_or(json!({}));
+        let op = call.op;
+        let args = call.args;
 
         let correct_op = op == case.expected_op;
         eprintln!("  op={op}{}  args={args}",

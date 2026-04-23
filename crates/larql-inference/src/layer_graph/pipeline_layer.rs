@@ -93,6 +93,8 @@ pub fn build_arch_params<'a>(
 
         moe: build_moe_weights(weights, arch, layer),
         moe_combined_output_norm: arch.moe_has_combined_output_norm(),
+        moe_outer_post_norm: arch.moe_post_outer_norm_key(layer)
+            .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
     }
 }
 
@@ -131,6 +133,12 @@ fn build_moe_weights<'a>(
         .and_then(|k| weights.vectors.get(&k))
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
+    let router_norm = arch.moe_router_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let router_norm_parameter_free = arch.moe_router_norm_parameter_free();
+    let router_input_scalar = arch.moe_router_input_scalar().unwrap_or(1.0);
 
     let activation = match arch.activation() {
         larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
@@ -143,6 +151,9 @@ fn build_moe_weights<'a>(
         router_proj,
         router_scale,
         router_per_expert_scale,
+        router_norm,
+        router_norm_parameter_free,
+        router_input_scalar,
         pre_experts_norm,
         post_ffn1_norm,
         post_experts_norm,
