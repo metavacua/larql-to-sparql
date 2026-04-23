@@ -13,6 +13,12 @@ pub mod accuracy_suite;
 #[cfg(feature = "real-model")]
 pub mod real_model;
 
+#[cfg(feature = "real-model")]
+pub mod unlimited_context;
+
+#[cfg(feature = "real-model")]
+pub mod apollo;
+
 use metrics::Metrics;
 use model_config::ModelConfig;
 

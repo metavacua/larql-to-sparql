@@ -19,7 +19,7 @@ use super::CachedLayerGraph;
 /// a one-shot matvec per generated token — negligible compared to the
 /// per-layer attention + FFN. It lets every model generate tokens through
 /// the Metal pipeline regardless of how its vindex was packaged.
-fn lm_head_topk(
+pub(crate) fn lm_head_topk(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,
@@ -177,6 +177,17 @@ pub fn generate(
     // ── Phase 1: GPU prefill ──
     let prefill_start = std::time::Instant::now();
     backend.reset_kv_cache();
+
+    // Pre-allocate per-layer KV cache for models with asymmetric attention geometry
+    // (e.g. Gemma 4 26B: sliding layers use 8×256, global layers use 2×512).
+    // Without this, the lazy uniform allocation uses the first layer's dims for all layers,
+    // causing global layers to read/write off the end of under-sized KV buffers.
+    {
+        let kv_shapes: Vec<(usize, usize)> = (0..num_layers)
+            .map(|l| (arch.num_kv_heads_for_layer(l), arch.head_dim_for_layer(l)))
+            .collect();
+        backend.preallocate_kv_cache_per_layer(&kv_shapes, 4096);
+    }
     let seq_len = token_ids.len();
 
     let h_embed = crate::forward::embed_tokens_pub(weights, token_ids);

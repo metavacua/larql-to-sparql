@@ -112,17 +112,22 @@ pub unsafe fn read_str(ptr: u32, len: u32) -> &'static str {
 // ── Arg helpers (typed lookups into serde_json::Value objects) ───────────────
 
 pub fn arg_f64(args: &Value, key: &str) -> Option<f64> {
-    args.get(key)?.as_f64()
+    let v = args.get(key)?;
+    v.as_f64().or_else(|| v.as_str()?.parse::<f64>().ok())
 }
 
 pub fn arg_i64(args: &Value, key: &str) -> Option<i64> {
     let v = args.get(key)?;
-    v.as_i64().or_else(|| v.as_f64().map(|x| x as i64))
+    v.as_i64()
+        .or_else(|| v.as_f64().map(|x| x as i64))
+        .or_else(|| v.as_str()?.parse::<i64>().ok())
 }
 
 pub fn arg_u64(args: &Value, key: &str) -> Option<u64> {
     let v = args.get(key)?;
-    v.as_u64().or_else(|| v.as_f64().map(|x| x as u64))
+    v.as_u64()
+        .or_else(|| v.as_f64().map(|x| x as u64))
+        .or_else(|| v.as_str()?.parse::<u64>().ok())
 }
 
 pub fn arg_bool(args: &Value, key: &str) -> Option<bool> {

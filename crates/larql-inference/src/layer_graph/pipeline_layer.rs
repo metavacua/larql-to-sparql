@@ -131,6 +131,11 @@ fn build_moe_weights<'a>(
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
 
+    let activation = match arch.activation() {
+        larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
+        _ => larql_compute::Activation::Silu,
+    };
+
     Some(MoeLayerWeights {
         experts_gate_up,
         experts_down,
@@ -143,6 +148,7 @@ fn build_moe_weights<'a>(
         num_experts: arch.num_experts(),
         top_k: arch.num_experts_per_token(),
         intermediate_size: arch.moe_intermediate_size(),
+        activation,
     })
 }
 

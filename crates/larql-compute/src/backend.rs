@@ -168,6 +168,25 @@ pub trait ComputeBackend: Send + Sync {
         _rope_base: f32,
     ) -> Option<Vec<f32>> { None }
 
+    /// Like `decode_token` but calls `moe_fn(layer, h_post_attn)` instead of
+    /// the built-in `cpu_moe_forward` for MoE layers.  Default falls back to
+    /// `decode_token` (ignores the hook).  Override in Metal to enable remote
+    /// expert dispatch.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_token_with_moe(
+        &self,
+        layers: &[crate::FullPipelineLayer<'_>],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32,
+        _moe_fn: &mut dyn FnMut(usize, &[f32]) -> Vec<f32>,
+    ) -> Option<Vec<f32>> {
+        self.decode_token(layers, x, hidden, inter, q_dim, kv_dim,
+                          num_q_heads, num_kv_heads, head_dim, rope_base)
+    }
+
     /// Like `decode_token` but splits each layer into attn / gate+up / down
     /// command buffers and times each. Returns `(result, attn_ms, gate_up_ms,
     /// down_ms)` summed across all layers. Default delegates to `decode_token`

@@ -1,15 +1,47 @@
 # kv-cache-benchmark
 
-Six-way KV cache strategy comparison for the LARQL project:
+KV cache strategy comparison for the LARQL project. The strategies fall on
+two axes: (a) what correctness target they aim at — bit-exact vs joint
+forward, or task-level next-token accuracy — and (b) what they compress.
 
-| # | Strategy | What it does | Memory @ 370K | Compression |
-|---|----------|-------------|---------------|-------------|
-| 1 | **Standard KV** | FP16 keys + values, per-token, per-layer | 25.8 GB | 1× |
-| 2 | **TurboQuant** | WHT rotation + Lloyd-Max 3/4-bit quantization | 6.6 GB | ~4× |
-| 3 | **Markov RS** | Bounded hot window (W=512) + cold token IDs | ~193 MB | ~134× |
-| 4 | **Boundary RS** | Tiny hot window (W=32) + boundary vec + cold IDs | ~13 MB | ~1,985× |
-| 5 | **Hybrid RS+CA** | Cached static attention (97.1%) + tiny dynamic KV + vindex FFN | ~270 MB | ~95× |
-| 6 | **RS Graph Walk** _(target — requires cracked attention)_ | Graph lookup for factual queries; Markov RS fallback | 1.5 MB | ~17,200× |
+| # | Strategy | Correctness target | Memory @ 370K | Compression |
+|---|----------|--------------------|---------------|-------------|
+| 1 | **Standard KV** | bit-exact baseline | 25.8 GB | 1× |
+| 2 | **TurboQuant** | approximate bit-exact | 6.6 GB | ~4× |
+| 3 | **Markov RS (W=512)** | bit-exact via residual storage | ~193 MB | ~134× |
+| 4 | **Tier 2 — `UnlimitedContextEngine`** | bit-exact within-window | ~30 MB | ~2,000× |
+| 5 | **Tier 3 — `ApolloEngine`** _(scaffold)_ | task next-token correctness | ~2.8 MB | ~20,000× |
+| 6 | **RS Graph Walk** _(target — requires cracked attention)_ | factual query accuracy | 1.5 MB | ~17,200× |
+
+## Implementation status
+
+| Strategy | End-to-end real | Synthetic encode/decode | Scaffold only |
+|---|---|---|---|
+| Standard KV | ✓ `real_model::kv_capture` + `standard_kv` | ✓ | — |
+| TurboQuant | ✓ `real_model::turboquant_layer` + `turboquant` | ✓ | — |
+| Markov RS (W=512, Tier 1 / variant iv-dense) | ✓ `real_model::markov_layer` (`rs_prefill`, `rs_decode_step`) — proven bit-perfect end-to-end | ✓ | — |
+| `UnlimitedContextEngine` (Tier 2) | ✓ `unlimited_context::` — Rust port of `chuk-mlx/.../unlimited_engine.py`; integration tests `tests/test_unlimited_context.rs` | — | — |
+| `ApolloEngine` (Tier 3) | ✓ full end-to-end pipeline on real apollo11_store + Gemma 3 4B. **Two paths**: `query_greedy` (forwards window tokens + query, ~519 context tokens) and `query_greedy_compressed` (forwards 10 KB boundary + query, ~9 context tokens — exercises the actual compression claim). Positional-proximity retrieval + answer-only injection produces `" John"` as top-1 for "Who won the porridge eating contest?" on both paths. | — | — |
+| Boundary RS (synthetic) | — | ✓ accounting honest, `decode()` is a stub (`boundary_residual::mod.rs:142,156`) | — |
+| Graph Walk | partial (`real_model::graph_walk_layer`) | ✓ | — |
+
+**Compression numbers in the headline table above**:
+
+- Rows 1–3: measured end-to-end on Gemma 3 4B via the `real-model` feature.
+- Row 4 (Tier 2): measured via `tests/test_unlimited_context::test_compression_ratio`. Within-window K,V is bit-exact via model-forward replay from the prior window's per-layer K,V checkpoint.
+- Row 5 (Tier 3): the Rust `ApolloEngine` loads `apollo-demo/apollo11_store/` end-to-end (2.13 MB in RAM) and runs the full pipeline: tf-idf-lite routing → positional-proximity entry retrieval → forward-with-injection (answer-tokens-only, step-0 only) at L30 coefficient 10× → greedy decode.
+
+  Four entry points, all measured end-to-end on Gemma 3 4B:
+
+  - `query_greedy`: single-token top-1. Full window + query context (~519 tokens). `" John"` @ logit 24.0.
+  - `query_greedy_compressed`: single-token top-1. 10 KB boundary + query (~9 tokens, 58× smaller). `" John"` @ logit 31.1.
+  - `query_generate_uncompressed`: **iterative decode, 12 tokens. Produces `" John Coyle.\n\n02 05 5"`** — correct answer, then drifts into the transcript's time-stamp structure. Grounded on the window's actual token content.
+  - `query_generate_compressed`: iterative decode over the 10 KB boundary. Produces `" John and Mary.\n\nJohn and Mary won the porridge eating"` — starts correctly (" John" from injection), hallucinates "Mary" because the single-vector boundary is lossy and can't uniquely identify the "Coyle" continuation.
+
+  **The gap between compressed and uncompressed outputs is exactly the fidelity/compression trade-off the four-rung ladder predicts**: uncompressed forwards have the raw window text to ground on, compressed forwards rely on the ~10 KB boundary (variant-ii-class) + injection — which lands the first-token fact via amplification but can't carry detailed continuation info. A Tier 2-style per-layer K/V checkpoint (~139 KB per window) would reproduce "Coyle" exactly at the cost of ~14× more storage per boundary.
+
+  Python reference: `chuk-mlx/src/chuk_lazarus/inference/context/research/unlimited_engine.py` + `vec_inject/`.
+- Row 6: FFN graph walk proven; attention elimination requires cracked attention (see later in this README).
 
 ## Quick start
 
@@ -47,6 +79,8 @@ kv-cache-benchmark/
     metrics.rs          MSE, cosine, inner product error
     model_config.rs     Gemma 4B / Llama 8B / 70B dimensions
     real_model/         Phase 2: wired into larql-inference (feature-gated)
+    unlimited_context/  Tier 2: per-window K,V checkpoint + model-forward replay
+    apollo/             Tier 3: single-vector boundary + vec_inject (scaffold)
   tests/                66+ unit + integration tests
   benches/              Criterion benchmarks
   examples/             Demo runners
@@ -72,15 +106,27 @@ dominates: 512 × 34 layers × 2560 dim × 4 bytes ≈ 178 MB fixed. Cold tier a
 only 4 bytes/token. Does NOT grow with context. Proven bit-perfect (KL = 0.0)
 on Gemma 3-4B via cold-tier replay ([cold||hot] concatenation before recompute_kv).
 
-### Boundary Residual Stream (W=32) — production form
-The production form of the Python `unlimited_engine.py` approach. Stores:
-- Hot window: 32 residuals per layer ≈ 11.2 MB fixed
-- Boundary vector: 1 residual per layer ≈ 340 KB fixed (context boundary marker)
-- Cold tier: token IDs only, 4 bytes per token
+### Boundary Residual Stream (W=32) — synthetic memory accounting only
 
-Total stays flat at ~11–13 MB regardless of context length. At 370K tokens this
-is ~1,985× smaller than standard KV while achieving the same attention quality
-via cold-tier replay from token IDs.
+The `boundary_residual` strategy accounts memory for the architecture
+described above (32-token hot window + boundary vector + cold token IDs),
+but its `decode()` method is a **placeholder**: cold positions are
+reconstructed as `boundary.clone()` for every cold slot (see
+`src/boundary_residual/mod.rs:142, 156`). Useful for synthetic
+compression-ratio comparisons; **not** a bit-exact or task-accurate
+reproduction of the Python reference.
+
+The real architecture that backs the ~2,000× and ~20,000× compression
+claims lives in two places in this crate:
+
+- **`unlimited_context::UnlimitedContextEngine`** (Tier 2) — per-window
+  K,V checkpoint (174 KB on Gemma 3 4B) + token archive + model-forward
+  replay. Bit-exact within-window. Reference: `chuk-mlx/.../unlimited_engine.py`.
+- **`apollo::ApolloEngine`** (Tier 3, scaffold) — single-vector boundary
+  at crystal_layer (10 KB per window) + token archive + `vec_inject`
+  retrieval index + injection-at-L30 amplification. Task-level correctness
+  on queries routable via the injection index. Reference:
+  `chuk-mlx/.../vec_inject/` + `apollo-demo/apollo11_store/`.
 
 ### Hybrid RS + Cracked Attention (W=512)
 The near-term practical win. 97.1% of attention heads produce the same output

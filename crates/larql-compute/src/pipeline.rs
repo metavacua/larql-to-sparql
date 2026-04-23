@@ -81,6 +81,8 @@ pub struct MoeLayerWeights<'a> {
     pub top_k: usize,
     /// Per-expert intermediate (hidden) dimension.
     pub intermediate_size: usize,
+    /// Activation function for expert MLPs. Gemma 4 uses GeluTanh; Mixtral/others use Silu.
+    pub activation: Activation,
 }
 
 /// Per-layer quantized weights for the full pipeline.

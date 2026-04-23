@@ -86,7 +86,7 @@ pub fn run_graph_walk(
 
             preds
         }
-        WalkTier::HybridFallback => {
+        WalkTier::MarkovFallback => {
             // Fallback: full forward pass via standard predict
             let result = larql_inference::predict(weights, tokenizer, token_ids, top_k);
             result.predictions

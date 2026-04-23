@@ -49,6 +49,13 @@ fn silu(x: f32) -> f32 {
     x / (1.0 + (-x).exp())
 }
 
+/// GELU with tanh approximation (Gemma 4 expert FFN activation).
+#[inline]
+fn gelu_tanh(x: f32) -> f32 {
+    let c = 0.797_884_6_f32;
+    0.5 * x * (1.0 + (c * (x + 0.044715 * x * x * x)).tanh())
+}
+
 /// Compute y = x @ W.T where W is [out_rows, in_cols] stored row-major.
 fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
     debug_assert_eq!(w.len(), out_rows * in_cols);
@@ -76,6 +83,57 @@ fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let indices: Vec<usize> = indexed.iter().map(|(i, _)| *i).collect();
     let values: Vec<f32> = indexed.iter().map(|(_, v)| *v).collect();
     (indices, values)
+}
+
+/// Run a single expert's gated FFN given a pre-normed input vector.
+///
+/// Returns the expert's output (not yet weighted by router probability).
+/// `h_norm` must already be RMS-normed — use `run_single_expert_with_norm`
+/// when you have the raw residual.
+pub fn run_single_expert(
+    h_norm: &[f32],
+    experts_gate_up: &[u8],
+    experts_down: &[u8],
+    expert_idx: usize,
+    inter: usize,
+    activation: crate::Activation,
+) -> Vec<f32> {
+    let hidden = h_norm.len();
+    if inter == 0 || hidden == 0 { return vec![0.0f32; hidden]; }
+
+    let gate_up_w = extract_expert_weights(experts_gate_up, expert_idx, 2 * inter, hidden);
+    let gate_w = &gate_up_w[..inter * hidden];
+    let up_w = &gate_up_w[inter * hidden..];
+
+    let gate_out = matmul_vec(h_norm, gate_w, inter, hidden);
+    let up_out = matmul_vec(h_norm, up_w, inter, hidden);
+
+    let hidden_state: Vec<f32> = gate_out.iter().zip(up_out.iter())
+        .map(|(&g, &u)| match activation {
+            crate::Activation::GeluTanh => gelu_tanh(g) * u,
+            _ => silu(g) * u,
+        })
+        .collect();
+
+    let down_w = extract_expert_weights(experts_down, expert_idx, hidden, inter);
+    matmul_vec(&hidden_state, &down_w, hidden, inter)
+}
+
+/// Apply pre-experts norm then run a single expert. Used by the remote
+/// expert server endpoint where the raw residual arrives from the client.
+pub fn run_single_expert_with_norm(
+    h: &[f32],
+    experts_gate_up: &[u8],
+    experts_down: &[u8],
+    expert_idx: usize,
+    inter: usize,
+    pre_experts_norm: &[f32],
+    norm_offset: f32,
+    eps: f32,
+    activation: crate::Activation,
+) -> Vec<f32> {
+    let h_norm = rms_norm(h, pre_experts_norm, eps, norm_offset);
+    run_single_expert(&h_norm, experts_gate_up, experts_down, expert_idx, inter, activation)
 }
 
 /// Run the MoE expert block for one token.
@@ -115,7 +173,31 @@ pub fn cpu_moe_forward(h: &[f32], moe: &MoeLayerWeights<'_>, norm_offset: f32, e
     // 5. Top-k selection
     let (expert_indices, mut expert_weights) = top_k(&logits, top_k_val);
 
-    // 6. Per-expert output scale (Gemma 4 router learned scale)
+    // Debug: print routing per layer if MOE_DEBUG=1
+    static DEBUG_LAYER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if std::env::var("MOE_DEBUG").is_ok() {
+        let layer_n = DEBUG_LAYER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 30;
+        let h_rms = (h.iter().map(|v| v*v).sum::<f32>() / h.len() as f32).sqrt();
+        let hn_rms = (h_norm.iter().map(|v| v*v).sum::<f32>() / h_norm.len() as f32).sqrt();
+        let hs_rms = (h_scaled.iter().map(|v| v*v).sum::<f32>() / h_scaled.len() as f32).sqrt();
+        let logit_max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let logit_min = logits.iter().cloned().fold(f32::INFINITY, f32::min);
+        let pnorm_rms = (moe.pre_experts_norm.iter().map(|v| v*v).sum::<f32>() / moe.pre_experts_norm.len().max(1) as f32).sqrt();
+        let rscale_rms = (moe.router_scale.iter().map(|v| v*v).sum::<f32>() / moe.router_scale.len().max(1) as f32).sqrt();
+        eprintln!("[L{layer_n:02}] h_rms={h_rms:.2} hn_rms={hn_rms:.2} hs_rms={hs_rms:.2} | pnorm_rms={pnorm_rms:.2} rscale_rms={rscale_rms:.2} | logits [{logit_min:.3}..{logit_max:.3}] | experts:{expert_indices:?}");
+    }
+
+    // 6. Renormalize selected weights to sum to 1 (Gemma 4 gemma4_top_k_softmax).
+    // After softmax over all 128 experts, the selected top-8 weights sum to
+    // ~0.5-0.7, not 1.0.  Renormalising ensures the expert block contributes
+    // at the correct scale.  Without this the expert residual is undersized
+    // every layer and the model output is garbage.
+    let weight_sum: f32 = expert_weights.iter().sum();
+    if weight_sum > 0.0 {
+        for w in &mut expert_weights { *w /= weight_sum; }
+    }
+
+    // 7. Per-expert output scale (Gemma 4 learned per-expert scale)
     if !moe.router_per_expert_scale.is_empty() {
         for (i, &ei) in expert_indices.iter().enumerate() {
             if ei < moe.router_per_expert_scale.len() {
@@ -141,9 +223,12 @@ pub fn cpu_moe_forward(h: &[f32], moe: &MoeLayerWeights<'_>, norm_offset: f32, e
         let gate_out = matmul_vec(&h_norm, gate_w, inter, hidden);
         let up_out = matmul_vec(&h_norm, up_w, inter, hidden);
 
-        // Gated activation: SiLU(gate) * up
+        // Gated activation: ACT(gate) * up.  Gemma 4 uses GELU-tanh; Mixtral uses SiLU.
         let hidden_state: Vec<f32> = gate_out.iter().zip(up_out.iter())
-            .map(|(&g, &u)| silu(g) * u)
+            .map(|(&g, &u)| match moe.activation {
+                crate::Activation::GeluTanh => gelu_tanh(g) * u,
+                _ => silu(g) * u,
+            })
             .collect();
 
         // Down projection: [inter] → [hidden]
@@ -157,7 +242,16 @@ pub fn cpu_moe_forward(h: &[f32], moe: &MoeLayerWeights<'_>, norm_offset: f32, e
     }
 
     // 8. Post-experts norm
-    rms_norm(&expert_out, moe.post_experts_norm, eps, norm_offset)
+    let result = rms_norm(&expert_out, moe.post_experts_norm, eps, norm_offset);
+
+    if std::env::var("MOE_DEBUG").is_ok() {
+        let pre_rms = (expert_out.iter().map(|v| v*v).sum::<f32>() / expert_out.len() as f32).sqrt();
+        let post_rms = (result.iter().map(|v| v*v).sum::<f32>() / result.len() as f32).sqrt();
+        let pnorm2_rms = (moe.post_experts_norm.iter().map(|v| v*v).sum::<f32>() / moe.post_experts_norm.len().max(1) as f32).sqrt();
+        eprintln!("  pre_norm_rms={pre_rms:.3} post_norm2_rms={pnorm2_rms:.3} moe_out_rms={post_rms:.3}");
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -180,6 +274,7 @@ mod tests {
             num_experts,
             top_k,
             intermediate_size: inter,
+            activation: crate::Activation::Silu,
         }
     }
 

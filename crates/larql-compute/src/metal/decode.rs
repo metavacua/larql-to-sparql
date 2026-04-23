@@ -34,7 +34,13 @@ impl MetalBackend {
     ///   - Q4_K:  fused gate+up kernel + q4k_matvec (uint4, 8 rows/TG, nr0=2)
     ///   - Q4_0:  legacy Q8-input path
     #[allow(clippy::too_many_arguments)]
-    pub fn decode_token(
+    /// Decode one token with an optional MoE override function.
+    ///
+    /// When `moe_fn` is `Some`, it is called instead of `cpu_moe_forward` for
+    /// every MoE layer.  Signature: `moe_fn(layer_idx, h_post_attn) -> Vec<f32>`.
+    /// The returned vec must have length == `hidden`.  Pass `None` for the
+    /// normal local-expert path.
+    pub fn decode_token_with_moe_fn(
         &self,
         kv_cache: &mut ops::kv_cache::KVCache,
         layers: &[crate::FullPipelineLayer],
@@ -47,6 +53,7 @@ impl MetalBackend {
         _num_kv_heads: usize,
         _head_dim: usize,
         _rope_base: f32,
+        mut moe_fn: Option<&mut dyn FnMut(usize, &[f32]) -> Vec<f32>>,
     ) -> Vec<f32> {
         let num_layers = layers.len();
         let hidden_val = hidden as u32;
@@ -805,9 +812,13 @@ impl MetalBackend {
                     // Read MoE input from h_post_attn, accumulate MoE output into new_h.
                     let attn_ptr = h_post_attn.contents() as *const f32;
                     let attn_slice = unsafe { std::slice::from_raw_parts(attn_ptr, hidden) };
-                    let moe_out = crate::cpu::ops::moe::cpu_moe_forward(
-                        attn_slice, moe, layer.norm_offset, layer.eps,
-                    );
+                    let moe_out = if let Some(ref mut f) = moe_fn {
+                        f(l, attn_slice)
+                    } else {
+                        crate::cpu::ops::moe::cpu_moe_forward(
+                            attn_slice, moe, layer.norm_offset, layer.eps,
+                        )
+                    };
                     let h_ptr = new_h.contents() as *mut f32;
                     let ha_ptr = h_post_attn.contents() as *const f32;
                     unsafe {
@@ -888,5 +899,21 @@ impl MetalBackend {
         }
 
         super::buffers::read_buffer_f32(&h_buf, hidden)
+    }
+
+    /// Local-expert path — delegates to `decode_token_with_moe_fn` with no hook.
+    pub fn decode_token(
+        &self,
+        kv_cache: &mut ops::kv_cache::KVCache,
+        layers: &[crate::FullPipelineLayer],
+        x: &[f32],
+        hidden: usize, inter: usize,
+        q_dim: usize, kv_dim: usize,
+        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        rope_base: f32,
+    ) -> Vec<f32> {
+        self.decode_token_with_moe_fn(kv_cache, layers, x,
+            hidden, inter, q_dim, kv_dim,
+            num_q_heads, num_kv_heads, head_dim, rope_base, None)
     }
 }

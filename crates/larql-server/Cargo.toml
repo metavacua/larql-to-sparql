@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "HTTP server for vindex knowledge queries and inference"
 
+[lib]
+name = "larql_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "larql-server"
 path = "src/main.rs"
@@ -32,6 +36,9 @@ memmap2 = "0.9"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+larql-compute = { path = "../larql-compute" }
 
 [build-dependencies]
 tonic-build = "0.13"
