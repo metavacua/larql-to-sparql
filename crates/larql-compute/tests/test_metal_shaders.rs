@@ -1555,7 +1555,7 @@ fn full_pipeline_seq1_produces_nonzero() {
             k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
-    moe: None,
+    moe: None, moe_combined_output_norm: false,
     };
 
     let result = metal.full_pipeline_q4(

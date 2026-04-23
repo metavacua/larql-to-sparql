@@ -1,3 +1,6 @@
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::type_complexity)]
+
 use clap::{Parser, Subcommand};
 
 mod commands;
@@ -398,101 +401,6 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
     args
 }
 
-#[cfg(test)]
-mod trampoline_tests {
-    use super::*;
-
-    fn args(tokens: &[&str]) -> Vec<String> {
-        tokens.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn primary_verb_is_untouched() {
-        let input = args(&["larql", "run", "gemma3-4b.vindex", "hello"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn top_level_extract_is_untouched() {
-        let input = args(&["larql", "extract", "google/gemma-3-4b-it", "-o", "out"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn extract_index_alias_is_untouched() {
-        // `extract-index` is a distinct top-level variant, not a legacy
-        // research command — must not be rewritten to `dev extract-index`.
-        let input = args(&["larql", "extract-index", "google/gemma-3-4b-it"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn legacy_research_verb_is_rewritten() {
-        let input = args(&[
-            "larql",
-            "walk",
-            "--index",
-            "x.vindex",
-            "--prompt",
-            "hi",
-            "--predict",
-        ]);
-        let out = rewrite_legacy_argv(input);
-        assert_eq!(
-            out,
-            args(&[
-                "larql",
-                "dev",
-                "walk",
-                "--index",
-                "x.vindex",
-                "--prompt",
-                "hi",
-                "--predict"
-            ])
-        );
-    }
-
-    #[test]
-    fn legacy_research_flag_names_all_rewrite() {
-        // Spot-check each legacy name survives the rewrite.
-        for name in LEGACY_DEV_NAMES {
-            let input = args(&["larql", name, "--help"]);
-            let out = rewrite_legacy_argv(input);
-            assert_eq!(out[0], "larql");
-            assert_eq!(out[1], "dev");
-            assert_eq!(out[2], *name);
-            assert_eq!(out[3], "--help");
-        }
-    }
-
-    #[test]
-    fn no_args_returns_unchanged() {
-        let input = args(&["larql"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn unknown_verb_is_not_rewritten() {
-        // If `larql typo-command` comes in, don't wrap in `dev` — let
-        // clap produce its own "unrecognized subcommand" error.
-        let input = args(&["larql", "typo-command"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out, input);
-    }
-
-    #[test]
-    fn rewrite_preserves_argument_count_plus_one() {
-        let input = args(&["larql", "walk", "--flag", "value"]);
-        let out = rewrite_legacy_argv(input.clone());
-        assert_eq!(out.len(), input.len() + 1);
-    }
-}
-
 fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = rewrite_legacy_argv(raw_args);
@@ -672,5 +580,100 @@ fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
             );
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod trampoline_tests {
+    use super::*;
+
+    fn args(tokens: &[&str]) -> Vec<String> {
+        tokens.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn primary_verb_is_untouched() {
+        let input = args(&["larql", "run", "gemma3-4b.vindex", "hello"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn top_level_extract_is_untouched() {
+        let input = args(&["larql", "extract", "google/gemma-3-4b-it", "-o", "out"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn extract_index_alias_is_untouched() {
+        // `extract-index` is a distinct top-level variant, not a legacy
+        // research command — must not be rewritten to `dev extract-index`.
+        let input = args(&["larql", "extract-index", "google/gemma-3-4b-it"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn legacy_research_verb_is_rewritten() {
+        let input = args(&[
+            "larql",
+            "walk",
+            "--index",
+            "x.vindex",
+            "--prompt",
+            "hi",
+            "--predict",
+        ]);
+        let out = rewrite_legacy_argv(input);
+        assert_eq!(
+            out,
+            args(&[
+                "larql",
+                "dev",
+                "walk",
+                "--index",
+                "x.vindex",
+                "--prompt",
+                "hi",
+                "--predict"
+            ])
+        );
+    }
+
+    #[test]
+    fn legacy_research_flag_names_all_rewrite() {
+        // Spot-check each legacy name survives the rewrite.
+        for name in LEGACY_DEV_NAMES {
+            let input = args(&["larql", name, "--help"]);
+            let out = rewrite_legacy_argv(input);
+            assert_eq!(out[0], "larql");
+            assert_eq!(out[1], "dev");
+            assert_eq!(out[2], *name);
+            assert_eq!(out[3], "--help");
+        }
+    }
+
+    #[test]
+    fn no_args_returns_unchanged() {
+        let input = args(&["larql"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn unknown_verb_is_not_rewritten() {
+        // If `larql typo-command` comes in, don't wrap in `dev` — let
+        // clap produce its own "unrecognized subcommand" error.
+        let input = args(&["larql", "typo-command"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn rewrite_preserves_argument_count_plus_one() {
+        let input = args(&["larql", "walk", "--flag", "value"]);
+        let out = rewrite_legacy_argv(input.clone());
+        assert_eq!(out.len(), input.len() + 1);
     }
 }

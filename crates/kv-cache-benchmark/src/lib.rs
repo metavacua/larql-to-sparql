@@ -1,3 +1,6 @@
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::single_range_in_vec_init)]
+
 pub mod model_config;
 pub mod metrics;
 pub mod standard_kv;

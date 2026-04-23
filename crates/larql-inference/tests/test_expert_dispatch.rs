@@ -380,7 +380,7 @@ fn expert_dispatch_pipeline() {
     let cases = cases();
 
     let mut passed = 0usize;
-    let mut failed = 0usize;
+    let failed = 0usize;
 
     for case in &cases {
         // Panic on the first failure so the message is readable

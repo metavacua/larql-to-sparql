@@ -115,7 +115,7 @@ fn main() {
             k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
-            moe: None,
+            moe: None, moe_combined_output_norm: false,
         };
         let layers = vec![layer];
 

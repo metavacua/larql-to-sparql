@@ -121,6 +121,7 @@ pub fn run_single_expert(
 
 /// Apply pre-experts norm then run a single expert. Used by the remote
 /// expert server endpoint where the raw residual arrives from the client.
+#[allow(clippy::too_many_arguments)]
 pub fn run_single_expert_with_norm(
     h: &[f32],
     experts_gate_up: &[u8],
@@ -259,7 +260,7 @@ mod tests {
     use super::*;
 
     fn make_moe<'a>(
-        hidden: usize, inter: usize, num_experts: usize, top_k: usize,
+        _hidden: usize, inter: usize, num_experts: usize, top_k: usize,
         gate_up: &'a [u8], down: &'a [u8], router: &'a [f32],
     ) -> MoeLayerWeights<'a> {
         MoeLayerWeights {
@@ -340,7 +341,7 @@ mod tests {
 
         // router: [num_experts, hidden] — expert 0 row has 1.0, expert 1 row has 0.0
         let mut router = vec![0.0f32; num_experts * hidden];
-        for col in 0..hidden { router[col] = 1.0; } // expert 0 gets high logit
+        router[..hidden].fill(1.0); // expert 0 gets high logit
 
         let moe = make_moe(hidden, inter, num_experts, top_k, &gate_up, &down, &router);
         let h = vec![1.0f32; hidden];

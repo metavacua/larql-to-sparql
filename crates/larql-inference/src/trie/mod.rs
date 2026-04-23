@@ -88,13 +88,13 @@ impl CascadeTrie {
         // ── PCA projection ──
         // z[k] = dot(hidden - mean, components[k])
         let mut z = vec![0.0f32; self.n_components];
-        for k in 0..self.n_components {
+        for (k, z_k) in z.iter_mut().enumerate() {
             let row = &self.pca_components[k * self.hidden_size..(k + 1) * self.hidden_size];
             let mut dot = 0.0f32;
             for i in 0..self.hidden_size {
                 dot += (hidden[i] - self.pca_mean[i]) * row[i];
             }
-            z[k] = dot;
+            *z_k = dot;
         }
 
         // ── LR decision: argmax of (coef @ z + intercept) ──

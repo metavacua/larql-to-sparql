@@ -64,6 +64,7 @@ impl Default for KnnStore {
 
 impl KnnStore {
     /// Add an entry. The key is L2-normalized before storage.
+    #[allow(clippy::too_many_arguments)]
     pub fn add(
         &mut self,
         layer: usize,

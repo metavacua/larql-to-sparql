@@ -68,8 +68,8 @@ impl LoadedModel {
     ///
     /// For `--ffn-only` servers the loader filters attention + lm_head
     /// + embed entries from the weight manifest before mmap/decode,
-    /// so peak RSS during load reflects only what the walk-ffn
-    /// endpoint actually needs.
+    ///   so peak RSS during load reflects only what the walk-ffn
+    ///   endpoint actually needs.
     pub fn get_or_load_weights(&self) -> Result<&ModelWeights, String> {
         if let Some(w) = self.weights.get() {
             return Ok(w);

@@ -82,8 +82,8 @@ pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
-    let want_metal = requested_backends.iter().any(|b| *b == "metal");
-    let want_cpu = requested_backends.iter().any(|b| *b == "cpu");
+    let want_metal = requested_backends.contains(&"metal");
+    let want_cpu = requested_backends.contains(&"cpu");
     if !want_metal && !want_cpu && args.ollama.is_none() {
         return Err("no backends selected: pass --backends metal,cpu and/or --ollama".into());
     }
@@ -152,10 +152,9 @@ fn run_larql(
     }
     let weights = larql_vindex::load_model_weights_q4k(vindex_path, &mut cb)?;
     let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)?;
-    let token_ids: Vec<u32> = tokenizer.encode(args.prompt.as_str(), true)
-        .map_err(|e| format!("tokenize: {e}"))?
-        .get_ids()
-        .to_vec();
+    let token_ids: Vec<u32> = larql_inference::encode_prompt(
+        &tokenizer, &*weights.arch, args.prompt.as_str(),
+    ).map_err(|e| format!("tokenize: {e}"))?;
 
     let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
         let b = larql_compute::metal::MetalBackend::new()
@@ -277,8 +276,8 @@ fn run_ollama(model: &str, prompt: &str, num_predict: usize) -> BenchRow {
 
 fn print_table(rows: &[BenchRow]) {
     println!(
-        "  {:<20} {:>10} {:>12} {:>10} {:>6}  {}",
-        "Backend", "prefill", "ms/tok", "tok/s", "steps", "notes",
+        "  {:<20} {:>10} {:>12} {:>10} {:>6}  notes",
+        "Backend", "prefill", "ms/tok", "tok/s", "steps",
     );
     println!("  {}", "─".repeat(78));
     for r in rows {

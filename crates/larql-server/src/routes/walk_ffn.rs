@@ -188,7 +188,7 @@ pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, Serve
     let full_output = (flags & 1) != 0;
 
     let residual_bytes = &body[header_end + 12..];
-    if residual_bytes.len() % 4 != 0 {
+    if !residual_bytes.len().is_multiple_of(4) {
         return Err(ServerError::BadRequest(
             "binary: residual byte length is not a multiple of 4".into(),
         ));

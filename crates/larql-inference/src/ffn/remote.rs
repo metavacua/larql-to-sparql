@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn encode_residual_values_preserved() {
-        let residual = vec![-1.5f32, 0.0, 3.14159];
+        let residual = vec![-1.5f32, 0.0, 3.25];
         let body = encode_binary_request(Some(0), None, &residual, 1, true, 8092);
         let offset = 16; // 4 header u32s × 4 bytes
         let v0 = f32::from_le_bytes(body[offset..offset + 4].try_into().unwrap());
@@ -783,7 +783,7 @@ mod tests {
         let v2 = f32::from_le_bytes(body[offset + 8..offset + 12].try_into().unwrap());
         assert_eq!(v0.to_bits(), (-1.5f32).to_bits());
         assert_eq!(v1.to_bits(), 0.0f32.to_bits());
-        assert!((v2 - 3.14159f32).abs() < 1e-5);
+        assert!((v2 - 3.25f32).abs() < 1e-5);
     }
 
     // ── decode_binary_single ──────────────────────────────────────────────────

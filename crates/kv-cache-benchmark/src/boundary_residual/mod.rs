@@ -101,7 +101,7 @@ impl KvStrategy for BoundaryResidual {
         let total = keys.len();
         let window = total.min(self.window_size);
         let cold_count = total.saturating_sub(self.window_size);
-        let dim = keys.first().map_or(0, |v| v.len());
+        let _dim = keys.first().map_or(0, |v| v.len());
 
         let mut buf = Vec::new();
         buf.extend_from_slice(&(total as u32).to_le_bytes());
@@ -142,10 +142,10 @@ impl KvStrategy for BoundaryResidual {
         // Cold-tier tokens: replay from boundary (simulated as boundary vector for all cold).
         let boundary_start = 8;
         let mut boundary = vec![0.0f32; dim];
-        for j in 0..dim {
+        for (j, slot) in boundary.iter_mut().enumerate().take(dim) {
             let o = boundary_start + j * 4;
             if o + 4 <= encoded.len() {
-                boundary[j] = f32::from_le_bytes([encoded[o], encoded[o+1], encoded[o+2], encoded[o+3]]);
+                *slot = f32::from_le_bytes([encoded[o], encoded[o+1], encoded[o+2], encoded[o+3]]);
             }
         }
 
@@ -163,10 +163,10 @@ impl KvStrategy for BoundaryResidual {
         for i in 0..window.min(num_vectors.saturating_sub(cold_count)) {
             let offset = hot_start + i * dim * 4;
             let mut v = vec![0.0f32; dim];
-            for j in 0..dim {
+            for (j, slot) in v.iter_mut().enumerate().take(dim) {
                 let o = offset + j * 4;
                 if o + 4 <= encoded.len() {
-                    v[j] = f32::from_le_bytes([encoded[o], encoded[o+1], encoded[o+2], encoded[o+3]]);
+                    *slot = f32::from_le_bytes([encoded[o], encoded[o+1], encoded[o+2], encoded[o+3]]);
                 }
             }
             keys.push(v.clone());

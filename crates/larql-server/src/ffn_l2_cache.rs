@@ -193,7 +193,7 @@ mod tests {
     fn arc_values_are_shared_not_cloned() {
         let cache = FfnL2Cache::new(2);
         let key = FfnL2Cache::key(&[42]);
-        cache.insert(0, key, vec![3.14]);
+        cache.insert(0, key, vec![2.5]);
         let a = cache.get(0, key).unwrap();
         let b = cache.get(0, key).unwrap();
         // Both Arcs point at the same allocation

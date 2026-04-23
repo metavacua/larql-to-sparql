@@ -69,6 +69,7 @@ struct LlmCase {
     expected: LlmExpected,
 }
 
+#[allow(dead_code)]
 enum LlmExpected {
     Exact(Value),
     Approx(f64, f64),

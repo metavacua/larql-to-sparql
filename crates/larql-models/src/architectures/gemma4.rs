@@ -337,4 +337,14 @@ impl ModelArchitecture for Gemma4Arch {
         // Alias for post_feedforward_layernorm_1 — same key, explicit name for clarity.
         self.post_feedforward_layernorm_key(layer)
     }
+
+    fn moe_has_combined_output_norm(&self) -> bool {
+        // Gemma 4 hybrid MoE: after combining dense + expert outputs, apply
+        // post_feedforward_layernorm to the sum before adding to residual.
+        // Matches HF Gemma4TextDecoderLayer.forward():
+        //   hidden_states = h1 + h2
+        //   hidden_states = self.post_feedforward_layernorm(hidden_states)
+        //   hidden_states = residual + hidden_states
+        self.config.enable_moe_block
+    }
 }

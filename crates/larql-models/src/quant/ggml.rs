@@ -236,7 +236,7 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = x.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q4k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -250,7 +250,7 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     }
 
     #[cfg(target_arch = "aarch64")]
-    unsafe { return Ok(q4k_row_dot_neon(data, x, n_blocks)); }
+    unsafe { Ok(q4k_row_dot_neon(data, x, n_blocks))}
     #[cfg(not(target_arch = "aarch64"))]
     Ok(q4k_row_dot_scalar(data, x, n_blocks))
 }
@@ -371,7 +371,7 @@ pub fn q4k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = out.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q4k_row_scaled_add: row length {n} not a multiple of {SUPER}"
         )));
@@ -534,7 +534,7 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 210;
     const SUPER: usize = 256;
     let n = x.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q6k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -548,7 +548,7 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     }
 
     #[cfg(target_arch = "aarch64")]
-    unsafe { return Ok(q6k_row_dot_neon(data, x, n_blocks)); }
+    unsafe { Ok(q6k_row_dot_neon(data, x, n_blocks))}
     #[cfg(not(target_arch = "aarch64"))]
     Ok(q6k_row_dot_scalar(data, x, n_blocks))
 }
@@ -615,11 +615,11 @@ unsafe fn q6k_row_dot_neon(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
                 let qh_b = *qh_j.add(chunk);
                 let base = chunk * 4;
                 // Even idx: low nibble; odd idx: high nibble. hi2 = (qh >> (k*2)) & 3.
-                let lo0 = (ql_b0 & 0x0F) as u16 | ((((qh_b >> 0) & 0x03) as u16) << 4);
+                let lo0 = (ql_b0 & 0x0F) as u16 | (((qh_b & 0x03) as u16) << 4);
                 let lo1 = ((ql_b0 >> 4) & 0x0F) as u16 | ((((qh_b >> 2) & 0x03) as u16) << 4);
                 let lo2 = (ql_b1 & 0x0F) as u16 | ((((qh_b >> 4) & 0x03) as u16) << 4);
                 let lo3 = ((ql_b1 >> 4) & 0x0F) as u16 | ((((qh_b >> 6) & 0x03) as u16) << 4);
-                vals[base + 0] = (lo0 as i16 - 32) as i8;
+                vals[base] = (lo0 as i16 - 32) as i8;
                 vals[base + 1] = (lo1 as i16 - 32) as i8;
                 vals[base + 2] = (lo2 as i16 - 32) as i8;
                 vals[base + 3] = (lo3 as i16 - 32) as i8;
@@ -656,7 +656,7 @@ pub fn q6k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     let block_size = 210;
     let super_block = 256;
     let n = out.len();
-    if n % super_block != 0 {
+    if !n.is_multiple_of(super_block) {
         return Err(ModelError::Parse(format!(
             "q6k_row_scaled_add: row length {n} not a multiple of {super_block}"
         )));

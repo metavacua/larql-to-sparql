@@ -49,6 +49,7 @@ pub struct EdgeStats {
     pub alpha: f32,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn install_edge(
     tensors: &mut HashMap<String, ArcArray2<f32>>,
     gate_key: &str,

@@ -849,14 +849,14 @@ mod tests {
     #[test]
     fn force_upload_disables_skip() {
         // Simulate the flag state the CLI builds from `--force-upload`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: !true, ..Default::default() };
+        let opts = larql_vindex::PublishOptions { skip_unchanged: false, ..Default::default() };
         assert!(!opts.skip_unchanged);
     }
 
     #[test]
     fn default_publish_options_skip_unchanged() {
-        // Without `--force-upload`, `skip_unchanged: !false == true`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: !false, ..Default::default() };
+        // Without `--force-upload`, `skip_unchanged: true`.
+        let opts = larql_vindex::PublishOptions { skip_unchanged: true, ..Default::default() };
         assert!(opts.skip_unchanged);
     }
 

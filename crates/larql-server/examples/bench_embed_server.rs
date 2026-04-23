@@ -362,7 +362,7 @@ fn main() {
         let t0 = Instant::now();
         for i in 0..l1_cap {
             let tok = (i * 7 + 13) % vocab;
-            if !l1_cache.contains_key(&(tok as u32)) {
+            l1_cache.entry(tok as u32).or_insert_with(|| {
                 let offset = tok * hidden * 2;
                 let row: Vec<f32> = f16_mmap[offset..offset + hidden * 2]
                     .chunks_exact(2)
@@ -371,8 +371,8 @@ fn main() {
                         larql_models::quant::half::f16_to_f32(bits) * embed_scale
                     })
                     .collect();
-                l1_cache.insert(tok as u32, row);
-            }
+                row
+            });
         }
         let fill_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let (rss_after_l1, _) = mem_mb();

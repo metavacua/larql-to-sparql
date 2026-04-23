@@ -98,7 +98,7 @@ impl VectorIndex {
     /// cap is reached. Must be called with `cache` already locked by the
     /// caller; `just_inserted` is true when the caller *just* decoded and
     /// wrote `cache[layer]`.
-    fn touch_gate_cache_lru(&self, layer: usize, just_inserted: bool, cache: &mut Vec<Option<Vec<f32>>>) {
+    fn touch_gate_cache_lru(&self, layer: usize, just_inserted: bool, cache: &mut [Option<Vec<f32>>]) {
         let max = self.gate_cache_max_layers.load(std::sync::atomic::Ordering::Relaxed);
         if max == 0 {
             return;
@@ -564,8 +564,8 @@ impl VectorIndex {
         // an ~18 K × 5376 gate matrix (387 MB f32, 194 MB f16) halving
         // the memory bandwidth is the difference between hitting the
         // CPU-BLAS ceiling and going faster on Metal.
-        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16 {
-            if x.shape()[0] == 1 {
+        if self.gate_mmap_dtype == crate::config::dtype::StorageDtype::F16
+            && x.shape()[0] == 1 {
                 let slice = self.gate_mmap_slices.get(layer)?;
                 if slice.num_features == 0 { return None; }
                 let mmap = self.gate_mmap_bytes.as_ref()?;
@@ -583,7 +583,6 @@ impl VectorIndex {
                     }
                 }
             }
-        }
         None
     }
 

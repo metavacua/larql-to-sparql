@@ -92,6 +92,7 @@ pub fn build_arch_params<'a>(
             .and_then(|k| weights.vectors.get(&k)).map(|v| v.as_slice()),
 
         moe: build_moe_weights(weights, arch, layer),
+        moe_combined_output_norm: arch.moe_has_combined_output_norm(),
     }
 }
 

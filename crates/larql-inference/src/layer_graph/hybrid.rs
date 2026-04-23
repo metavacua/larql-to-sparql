@@ -49,6 +49,7 @@ pub fn predict_hybrid(
 
 /// Metal-specific hybrid implementation.
 #[cfg(feature = "metal")]
+#[allow(clippy::too_many_arguments)]
 fn predict_hybrid_metal(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

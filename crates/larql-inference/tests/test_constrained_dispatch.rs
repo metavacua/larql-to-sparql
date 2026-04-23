@@ -124,6 +124,7 @@ impl OpJsonMask {
 
     /// Called by `generate_cached_constrained` before each argmax.
     /// Updates the internal text buffer and masks logits when in OpName state.
+    #[allow(clippy::ptr_arg)]
     fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>) {
         self.generated_text = self.tokenizer
             .decode(generated_ids, true)

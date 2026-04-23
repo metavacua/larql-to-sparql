@@ -637,7 +637,7 @@ impl PyVindex {
 
         // Convert to edges with relation labels
         let mut edges: Vec<PyDescribeEdge> = Vec::new();
-        for (_, acc) in &edge_map {
+        for acc in edge_map.values() {
             let (relation, source) = if let Some(ref rc) = self.classifier {
                 if let Some(label) = rc.label_for_feature(acc.best_layer, acc.best_feature) {
                     let src = if rc.is_probe_label(acc.best_layer, acc.best_feature) {
@@ -877,7 +877,7 @@ impl PyVindex {
             c_score,
             top_k: vec![larql_models::TopKEntry {
                 token: top_token.to_string(),
-                token_id: token_id,
+                token_id,
                 logit: c_score,
             }],
         };

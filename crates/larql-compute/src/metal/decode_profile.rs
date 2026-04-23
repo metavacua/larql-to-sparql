@@ -122,7 +122,7 @@ impl MetalBackend {
                         if let Some(bias) = layer.input_norm_bias {
                             let bias_buf = self.bufs.get_f32(bias);
                             enc.set_compute_pipeline_state(&self.layer_norm_pipeline);
-                            enc.set_buffer(0, Some(&h_buf), 0);
+                            enc.set_buffer(0, Some(h_buf), 0);
                             enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
                             enc.set_buffer(2, Some(&bias_buf), 0);
                             enc.set_buffer(3, Some(&norm_f32_buf), 0);
@@ -131,7 +131,7 @@ impl MetalBackend {
                             enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
                         } else {
                             enc.set_compute_pipeline_state(&self.layer_norm_no_bias_pipeline);
-                            enc.set_buffer(0, Some(&h_buf), 0);
+                            enc.set_buffer(0, Some(h_buf), 0);
                             enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
                             enc.set_buffer(2, Some(&norm_f32_buf), 0);
                             enc.set_bytes(3, 4, &len_val as *const u32 as *const std::ffi::c_void);
@@ -140,7 +140,7 @@ impl MetalBackend {
                         }
                         enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                     } else {
-                        encode_rms_norm(enc, &self.rms_norm_pipeline, &h_buf, &input_norm_bufs[l], &norm_f32_buf, hidden, eps, norm_offset);
+                        encode_rms_norm(enc, &self.rms_norm_pipeline, h_buf, &input_norm_bufs[l], &norm_f32_buf, hidden, eps, norm_offset);
                     }
 
                     // QKV
@@ -197,10 +197,10 @@ impl MetalBackend {
                 } else {
                     let (q8_buf, q8s_buf) = (&ffn_q8, &ffn_q8s);
                     enc.set_compute_pipeline_state(&self.rms_norm_q8_pipeline);
-                    enc.set_buffer(0, Some(&h_buf), 0);
+                    enc.set_buffer(0, Some(h_buf), 0);
                     enc.set_buffer(1, Some(&input_norm_bufs[l]), 0);
-                    enc.set_buffer(2, Some(&q8_buf), 0);
-                    enc.set_buffer(3, Some(&q8s_buf), 0);
+                    enc.set_buffer(2, Some(q8_buf), 0);
+                    enc.set_buffer(3, Some(q8s_buf), 0);
                     enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
@@ -210,9 +210,9 @@ impl MetalBackend {
                     );
                     enc.set_compute_pipeline_state(&self.q8_qkv_proj_pipeline);
                     enc.set_buffer(0, Some(&wq_bufs[l]), 0); enc.set_buffer(1, Some(&wk_bufs[l]), 0);
-                    enc.set_buffer(2, Some(&wv_bufs[l]), 0); enc.set_buffer(3, Some(&q8_buf), 0);
+                    enc.set_buffer(2, Some(&wv_bufs[l]), 0); enc.set_buffer(3, Some(q8_buf), 0);
                     enc.set_buffer(4, Some(&wq_scale_bufs[l]), 0); enc.set_buffer(5, Some(&wk_scale_bufs[l]), 0);
-                    enc.set_buffer(6, Some(&wv_scale_bufs[l]), 0); enc.set_buffer(7, Some(&q8s_buf), 0);
+                    enc.set_buffer(6, Some(&wv_scale_bufs[l]), 0); enc.set_buffer(7, Some(q8s_buf), 0);
                     enc.set_buffer(8, Some(&q_out), 0); enc.set_buffer(9, Some(&k_out), 0);
                     enc.set_buffer(10, Some(&v_out), 0);
                     enc.set_bytes(11, 4, &q_rows as *const u32 as *const std::ffi::c_void);
@@ -319,23 +319,23 @@ impl MetalBackend {
                     || layer.gate.format == crate::QuantFormat::Q6_K;
                 if has_post_norms {
                     let normed_o = &normed_scratch;
-                    encode_rms_norm(enc, &self.rms_norm_pipeline, &o_out_buf, &post_attn_norm_bufs[l], &normed_o, hidden, eps, norm_offset);
+                    encode_rms_norm(enc, &self.rms_norm_pipeline, &o_out_buf, &post_attn_norm_bufs[l], normed_o, hidden, eps, norm_offset);
                     let pre_ffn_buf = if let Some(pfn) = layer.pre_ffn_norm {
                         self.bufs.get_f32(pfn)
                     } else { post_attn_norm_bufs[l].clone() };
                     if ffn_uses_q4k {
                         enc.set_compute_pipeline_state(&self.residual_norm_pipeline);
-                        enc.set_buffer(0, Some(&h_buf), 0); enc.set_buffer(1, Some(&normed_o), 0);
+                        enc.set_buffer(0, Some(h_buf), 0); enc.set_buffer(1, Some(normed_o), 0);
                         enc.set_buffer(2, Some(&pre_ffn_buf), 0); enc.set_buffer(3, Some(&ffn_norm_out), 0);
                         enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                         enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
                         enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                         use crate::metal::ops::full_pipeline::encode_residual_add;
-                        encode_residual_add(enc, &self.residual_add_pipeline, &h_buf, &normed_o, &h_post_attn, hidden);
+                        encode_residual_add(enc, &self.residual_add_pipeline, h_buf, normed_o, &h_post_attn, hidden);
                     } else {
                         enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
-                        enc.set_buffer(0, Some(&h_buf), 0); enc.set_buffer(1, Some(&normed_o), 0);
+                        enc.set_buffer(0, Some(h_buf), 0); enc.set_buffer(1, Some(normed_o), 0);
                         enc.set_buffer(2, Some(&pre_ffn_buf), 0); enc.set_buffer(3, Some(&ffn_q8), 0);
                         enc.set_buffer(4, Some(&ffn_q8s), 0); enc.set_buffer(5, Some(&h_post_attn), 0);
                         enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
@@ -345,17 +345,17 @@ impl MetalBackend {
                     }
                 } else if ffn_uses_q4k {
                     enc.set_compute_pipeline_state(&self.residual_norm_pipeline);
-                    enc.set_buffer(0, Some(&h_buf), 0); enc.set_buffer(1, Some(&o_out_buf), 0);
+                    enc.set_buffer(0, Some(h_buf), 0); enc.set_buffer(1, Some(&o_out_buf), 0);
                     enc.set_buffer(2, Some(&post_attn_norm_bufs[l]), 0); enc.set_buffer(3, Some(&ffn_norm_out), 0);
                     enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
                     enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(enc, &self.residual_add_pipeline, &h_buf, &o_out_buf, &h_post_attn, hidden);
+                    encode_residual_add(enc, &self.residual_add_pipeline, h_buf, &o_out_buf, &h_post_attn, hidden);
                 } else {
                     enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
-                    enc.set_buffer(0, Some(&h_buf), 0); enc.set_buffer(1, Some(&o_out_buf), 0);
+                    enc.set_buffer(0, Some(h_buf), 0); enc.set_buffer(1, Some(&o_out_buf), 0);
                     enc.set_buffer(2, Some(&post_attn_norm_bufs[l]), 0); enc.set_buffer(3, Some(&ffn_q8), 0);
                     enc.set_buffer(4, Some(&ffn_q8s), 0); enc.set_buffer(5, Some(&h_post_attn), 0);
                     enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
@@ -548,7 +548,7 @@ impl MetalBackend {
             h_buf = new_h;
         }
 
-        let result = super::buffers::read_buffer_f32(&h_buf, hidden);
+        let result = super::buffers::read_buffer_f32(h_buf, hidden);
         let total = t_attn + t_gate_up + t_down;
         let pct = |v: f64| if total > 0.0 { v / total * 100.0 } else { 0.0 };
         eprintln!(

@@ -135,6 +135,7 @@ fn bench_extract_throughput(c: &mut Criterion) {
                     StorageDtype::F32,
                     q,
                     larql_vindex::WriteWeightsOptions::default(),
+                    larql_vindex::Q4kWriteOptions::default(),
                     false,
                     &mut cb,
                 )

@@ -200,13 +200,11 @@ pub fn generate_haystack(
 
 /// Build a multi-turn fact retention conversation.
 pub fn build_retention_conversation(num_turns: usize) -> Vec<ConversationTurn> {
-    let facts = vec![
-        ("My name is Alice and I work at Anthropic.", "name", "Alice"),
+    let facts = [("My name is Alice and I work at Anthropic.", "name", "Alice"),
         ("I'm based in San Francisco.", "location", "San Francisco"),
         ("My project is called Lighthouse.", "project", "Lighthouse"),
         ("My favorite color is blue.", "color", "blue"),
-        ("I have two cats named Luna and Sol.", "pets", "Luna"),
-    ];
+        ("I have two cats named Luna and Sol.", "pets", "Luna")];
 
     let queries = vec![
         ("What project am I working on?", "project", "Lighthouse"),

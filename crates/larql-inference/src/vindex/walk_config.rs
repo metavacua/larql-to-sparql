@@ -30,8 +30,8 @@ impl WalkFfnConfig {
     /// Matches the "dense early, sparse late" split used in hybrid configs.
     pub fn hybrid(num_layers: usize, sparse_from: usize, k: usize) -> Self {
         let mut k_per_layer = vec![None; num_layers];
-        for layer in sparse_from.min(num_layers)..num_layers {
-            k_per_layer[layer] = Some(k);
+        for slot in &mut k_per_layer[sparse_from.min(num_layers)..] {
+            *slot = Some(k);
         }
         Self { k_per_layer, activation_floor: 0.0 }
     }

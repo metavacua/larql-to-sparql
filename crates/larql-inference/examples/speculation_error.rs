@@ -253,8 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              "Layer", "Mean err", "Min", "Max", "Feature overlap", "Top-1 match", "Verdict");
     println!("  {}", "─".repeat(75));
 
-    for layer in 0..num_layers {
-        let s = &stats[layer];
+    for (layer, s) in stats.iter().enumerate().take(num_layers) {
         if s.cosine_errs.is_empty() { continue; }
 
         let mean_err  = s.cosine_errs.iter().sum::<f32>() / s.cosine_errs.len() as f32;

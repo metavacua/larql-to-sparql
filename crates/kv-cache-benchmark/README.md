@@ -1,17 +1,33 @@
 # kv-cache-benchmark
 
-KV cache strategy comparison for the LARQL project. The strategies fall on
-two axes: (a) what correctness target they aim at — bit-exact vs joint
-forward, or task-level next-token accuracy — and (b) what they compress.
+An inference-memory ladder for the LARQL project. The framing here is not
+"compress KV better" — it is that **correctness can be stratified**, and each
+stratum admits a radically different state representation. The table below is
+the ladder: each rung pairs a storage regime with the specific correctness
+target it is obligated to hit.
 
 | # | Strategy | Correctness target | Memory @ 370K | Compression |
 |---|----------|--------------------|---------------|-------------|
 | 1 | **Standard KV** | bit-exact baseline | 25.8 GB | 1× |
 | 2 | **TurboQuant** | approximate bit-exact | 6.6 GB | ~4× |
-| 3 | **Markov RS (W=512)** | bit-exact via residual storage | ~193 MB | ~134× |
-| 4 | **Tier 2 — `UnlimitedContextEngine`** | bit-exact within-window | ~30 MB | ~2,000× |
-| 5 | **Tier 3 — `ApolloEngine`** _(scaffold)_ | task next-token correctness | ~2.8 MB | ~20,000× |
-| 6 | **RS Graph Walk** _(target — requires cracked attention)_ | factual query accuracy | 1.5 MB | ~17,200× |
+| 3 | **Markov RS (W=512)** | bit-exact via residual-state reconstruction | ~193 MB | ~134× |
+| 4 | **Tier 2 — `UnlimitedContextEngine`** | bit-exact within-window (per-window replay) | ~30 MB | ~2,000× |
+| 5 | **Tier 3 — `ApolloEngine`** | first-token factual correctness; lossy continuation | ~2.8 MB | ~20,000× |
+| 6 | **RS Graph Walk** _(target — requires cracked attention)_ | graph-level semantic recall | 1.5 MB | ~17,200× |
+
+### The correctness ladder
+
+The rungs are not interchangeable — they answer different questions:
+
+1. **Bit-exact continuation** (Standard KV) — identical logits, identical decode.
+2. **Approximate bit-exact** (TurboQuant) — KL → 0 under quantization noise.
+3. **Bit-exact via residual reconstruction** (Markov RS) — same next-token distribution under the implemented cold-replay path on the benchmarked setup.
+4. **Bit-exact within a bounded replay window** (Tier 2) — K/V checkpoint + token archive reproduces the window exactly; behaviour outside the window is not claimed.
+5. **First-token factual correctness** (Tier 3) — the right fact lands; continuation is lossy because a single boundary vector cannot uniquely ground arbitrary suffix text.
+6. **Graph-level semantic recall** (Graph Walk, target) — answers recoverable from the extracted graphs; not a literal replay of the original forward pass.
+
+Every claim further down this README should be read as attached to exactly
+one of these rungs.
 
 ## Implementation status
 
@@ -99,12 +115,19 @@ followed by Lloyd-Max scalar quantization. 4-6× compression at the Shannon
 limit. Still grows O(context_length).
 
 ### Markov Residual Stream (W=512)
-Eliminates the KV cache entirely. The residual stream has the Markov property:
-the current residual IS the complete state. Stores a bounded hot window of 512
-residuals per layer (f32) plus cold-tier token IDs (4 bytes each). Hot window
-dominates: 512 × 34 layers × 2560 dim × 4 bytes ≈ 178 MB fixed. Cold tier adds
-only 4 bytes/token. Does NOT grow with context. Proven bit-perfect (KL = 0.0)
-on Gemma 3-4B via cold-tier replay ([cold||hot] concatenation before recompute_kv).
+Eliminates the KV cache entirely and replaces it with residual state as the
+primary persistent representation. Stores a bounded hot window of 512 residuals
+per layer (f32) plus cold-tier token IDs (4 bytes each). Hot window dominates:
+512 × 34 layers × 2560 dim × 4 bytes ≈ 178 MB fixed. Cold tier adds only
+4 bytes/token. Does NOT grow with context.
+
+**Correctness claim (precise form):** under the implemented cold-replay
+reconstruction path — `[cold_token_ids ‖ hot_residuals]` recomposed before
+`recompute_kv` at each decode step — the stored state is sufficient to
+reproduce the next-token distribution bit-for-bit on the benchmarked setup
+(Gemma 3-4B, KL = 0.0 vs. Standard KV). This is a statement about the
+reconstruction path under the benchmarked conditions, not a general claim
+that residuals are context-free Markov states across all architectures.
 
 ### Boundary Residual Stream (W=32) — synthetic memory accounting only
 
@@ -136,14 +159,21 @@ FFN handled by vindex walk (zero matmul). Memory is bounded by the RS hot
 window (~192 MB) plus small dynamic K/V for 4 layers.
 
 ### RS Graph Walk _(target architecture — not yet fully operational)_
-The endgame once attention is cracked. The forward pass IS a graph walk over
-three composed graphs (FFN, attention, residual). Extract the graphs, walk them
-directly. No matrices, no multiplication.
+The endgame once attention is cracked. The forward pass would be a walk over
+three composed graphs (FFN, attention, residual). Extract the graphs, walk
+them directly.
 
-**Current status:** FFN graph walk is proven (348K features in vindex, 34 layers,
-zero accuracy loss on factual queries). Attention elimination requires cracked
-attention — not yet implemented. Until then, queries outside the factual graph
-fall back to Markov RS for the full forward pass.
+**Current status:**
+
+- FFN graph walk is proven (348K features in vindex, 34 layers, zero accuracy
+  loss on factual queries).
+- Attention elimination requires cracked attention — not yet implemented.
+- Until then, queries outside the factual graph fall back to Markov RS for the
+  full forward pass.
+
+Treat this rung as a target architecture, not a delivered system. The 1.5 MB
+figure is a projected steady-state footprint under the assumption that the
+cracked-attention path lands; it is not a current end-to-end measurement.
 
 ## Memory scaling
 
@@ -167,10 +197,15 @@ fall back to Markov RS for the full forward pass.
 | Cached attention | none | none | none | none | ~32–33L | none |
 | Graph lookup | none | none | none | none | 34L FFN | 3 per hop |
 
-**Key insight:** Markov RS and Boundary RS trade compute for memory — they still run
-the full 34-layer FFN, but replace K/V matmuls with residual recompute. Hybrid RS+CA
-eliminates FFN matmuls entirely (vindex) and caches 97.1% of attention. Graph Walk
-eliminates everything — it's three hash-table lookups per decode step.
+**Key insight:** the rungs trade compute for memory along different axes.
+Markov RS and Boundary RS still run the full 34-layer FFN but replace K/V
+matmuls with residual recompute. Hybrid RS+CA eliminates FFN matmuls entirely
+(vindex) and caches 97.1% of attention. Graph Walk, in the target
+configuration — FFN-as-vindex + cracked attention + residual-graph routing —
+reduces per-decode-step work to a small, bounded number of keyed lookups
+(one per graph traversed). The precise lookup count depends on the cracked-
+attention design, and is stated here conditional on that landing; it is not
+a measured figure.
 
 ## Feature flags
 

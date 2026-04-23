@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let prefill_result = backend.prefill_q4(
             &all_layers, &x_all, hidden, intermediate, q_dim, kv_dim,
             token_ids.len(), weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
-            weights.arch.rope_base_for_layer(0) as f32, qk_norm, softcap as f32,
+            weights.arch.rope_base_for_layer(0) as f32, qk_norm, softcap,
         );
         println!("prefill_q4 result: {}", if prefill_result.is_some() { "Some" } else { "None" });
         if let Some(ref h) = prefill_result {

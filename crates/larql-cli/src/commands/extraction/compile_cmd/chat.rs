@@ -37,7 +37,7 @@ pub fn render_user_prompt(
         .get("chat_template")
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            format!("tokenizer_config.json has no `chat_template` string; pass --no-chat-template to use the raw prompt")
+            "tokenizer_config.json has no `chat_template` string; pass --no-chat-template to use the raw prompt".to_string()
         })?
         .to_string();
 

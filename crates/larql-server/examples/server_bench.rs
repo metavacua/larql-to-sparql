@@ -237,11 +237,9 @@ fn main() {
         let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for l in 2..6 {
             if let Some(metas) = patched.down_meta_at(l) {
-                for meta_opt in metas.iter() {
-                    if let Some(meta) = meta_opt {
-                        if meta.c_score >= 0.2 {
-                            *counts.entry(meta.top_token.clone()).or_default() += 1;
-                        }
+                for meta in metas.iter().flatten() {
+                    if meta.c_score >= 0.2 {
+                        *counts.entry(meta.top_token.clone()).or_default() += 1;
                     }
                 }
             }

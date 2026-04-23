@@ -339,8 +339,7 @@ impl<'a> WalkFfn<'a> {
             // returned, so this pays for itself only on sparse K layers.
             let down_cache_local: Option<std::sync::Arc<Vec<f32>>> =
                 if parallelisable { self.index.q4k_ffn_layer(layer, 2) } else { None };
-            if parallelisable && down_cache_local.is_some() {
-                let down_arc = down_cache_local.as_ref().unwrap();
+            if let Some(down_arc) = down_cache_local.as_ref().filter(|_| parallelisable) {
                 let down_data: &[f32] = down_arc.as_slice();
                 // Hoist up-side Q4K slice out of the hot loop — one dyn call
                 // here, then the closure uses `&[u8]` directly.
@@ -366,12 +365,9 @@ impl<'a> WalkFfn<'a> {
                                 let bytes_per_row = (hidden / 256) * 144;
                                 let start = feat * bytes_per_row;
                                 let end = start + bytes_per_row;
-                                match larql_models::quant::ggml::q4k_row_dot(
+                                larql_models::quant::ggml::q4k_row_dot(
                                     &up_bytes[start..end], x_slice,
-                                ) {
-                                    Ok(v) => v,
-                                    Err(_) => 0.0,
-                                }
+                                ).unwrap_or(0.0)
                             } else {
                                 // Unknown up format — cheapest is to skip this
                                 // feature. Accuracy at K=full may suffer but the
@@ -424,16 +420,12 @@ impl<'a> WalkFfn<'a> {
                         } else if let Some(ref up_view) = up_native {
                             up_view.row(feat).dot(&x_row)
                         } else {
-                            match self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice) {
-                                Some(v) => v, None => return None,
-                            }
+                            self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice)?
                         }
                     } else if let Some(ref up_view) = up_native {
                         up_view.row(feat).dot(&x_row)
                     } else {
-                        match self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice) {
-                            Some(v) => v, None => return None,
-                        }
+                        self.index.q4k_ffn_row_dot(layer, 1, feat, x_slice)?
                     };
                     let activated_gate = if use_gelu {
                         crate::ffn::gelu_tanh(gate_score)

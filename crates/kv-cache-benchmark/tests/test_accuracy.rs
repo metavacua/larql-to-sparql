@@ -162,7 +162,7 @@ fn test_haystack_generation_short() {
 
 #[test]
 fn test_haystack_generation_long() {
-    let (context, needle) = generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
+    let (context, _needle) = generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
     assert!(context.contains("AURORA-7749"));
     assert!(context.len() > 10000);
 }

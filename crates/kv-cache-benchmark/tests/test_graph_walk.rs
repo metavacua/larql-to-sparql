@@ -82,7 +82,7 @@ fn test_graph_walk_routing_table_coverage() {
 
     let states: Vec<WalkState> = queries
         .iter()
-        .map(|q| WalkState::from_tokens(&q.iter().map(|s| *s).collect::<Vec<_>>()))
+        .map(|q| WalkState::from_tokens(&q.to_vec()))
         .collect();
 
     let dist = TierDistribution::from_states(&states);
@@ -109,7 +109,7 @@ fn test_graph_walk_fallback_triggers() {
     ];
 
     for tokens in &fallback_queries {
-        let state = WalkState::from_tokens(&tokens.iter().map(|s| *s).collect::<Vec<_>>());
+        let state = WalkState::from_tokens(&tokens.to_vec());
         assert_eq!(
             state.tier,
             WalkTier::MarkovFallback,

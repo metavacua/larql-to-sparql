@@ -73,11 +73,7 @@ impl KvStrategy for MarkovResidual {
         buf.extend_from_slice(&(window as u32).to_le_bytes());
 
         // Active window: store last W key vectors as residual proxies
-        let start = if total_vectors > self.window_size {
-            total_vectors - self.window_size
-        } else {
-            0
-        };
+        let start = total_vectors.saturating_sub(self.window_size);
         for v in &keys[start..] {
             for &x in v {
                 buf.extend_from_slice(&x.to_le_bytes());
@@ -138,7 +134,7 @@ mod tests {
         let strategy = MarkovResidual::new(512);
         let config = ModelConfig::gemma_4b();
 
-        let mem_4k = strategy.memory_bytes(&config, 4096);
+        let _mem_4k = strategy.memory_bytes(&config, 4096);
         let mem_370k = strategy.memory_bytes(&config, 370_000);
 
         // Hot window dominates (window × layers × hidden × 4): bounded regardless of seq_len.

@@ -103,6 +103,7 @@ impl GridState {
 
     /// Resolve all layers in one call — one lock acquisition covers the whole batch.
     /// Returns Ok(layer → url) or Err(first layer with no owning shard).
+    #[allow(dead_code)]
     pub fn route_all(
         &self,
         model_id: Option<&str>,
@@ -227,6 +228,7 @@ pub struct GridServiceImpl {
 }
 
 impl GridServiceImpl {
+    #[allow(dead_code)]
     pub fn new(state: Arc<RwLock<GridState>>) -> Self {
         Self { state, next_id: AtomicU64::new(1), grid_key: None }
     }

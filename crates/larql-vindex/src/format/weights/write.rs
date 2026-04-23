@@ -644,6 +644,7 @@ pub fn write_model_weights_q4k_with_opts(
 
         // Q, K, V, O in that order — use the same key string for V even when
         // the data is K's, so loaders that look up by position still work.
+        #[allow(clippy::type_complexity)]
         let slots: [(&str, Option<(Vec<f32>, usize, usize)>); 4] = [
             (q_key.as_str(), q),
             (k_key.as_str(), k),

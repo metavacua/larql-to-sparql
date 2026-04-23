@@ -609,6 +609,15 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    /// Whether the hybrid MoE forward applies a final RMS norm to the
+    /// combined (dense + expert) output before adding to the residual.
+    ///
+    /// Gemma 4 26B A4B: true — matches HF `post_feedforward_layernorm(combined)`.
+    /// All other models: false — use `layer_scalar * combined` instead.
+    fn moe_has_combined_output_norm(&self) -> bool {
+        false
+    }
+
     // ── MLA (Multi-head Latent Attention) ──
 
     /// Whether this model uses MLA instead of standard GQA.

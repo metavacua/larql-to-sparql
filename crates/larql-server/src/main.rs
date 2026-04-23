@@ -176,6 +176,7 @@ fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
     Ok((start, end + 1))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_single_vindex(
     path_str: &str,
     no_infer: bool,

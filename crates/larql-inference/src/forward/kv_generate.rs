@@ -57,6 +57,7 @@ where
 
 /// Variant of [`generate_cached`] that runs Q/K/V/O projections on a
 /// GPU `ComputeBackend` when provided. GQA softmax stays on CPU.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_cached_backend<F>(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -226,6 +227,8 @@ fn is_stop_token_str(s: &str) -> bool {
         s,
         "<eos>" | "</s>" | "<|endoftext|>" | "<|im_end|>"
             | "<|end_of_turn|>" | "<end_of_turn>"
+            // Llama-3: pretraining EOS, eom_id, eot_id (128001 / 128008 / 128009)
+            | "<|end_of_text|>" | "<|eom_id|>" | "<|eot_id|>"
     )
 }
 

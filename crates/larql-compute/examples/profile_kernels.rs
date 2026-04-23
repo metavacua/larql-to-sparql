@@ -16,7 +16,7 @@ use std::time::Instant;
 
 fn main() {
     #[cfg(not(feature = "metal"))]
-    { println!("Run with --features metal"); return; }
+    { println!("Run with --features metal");}
 
     #[cfg(feature = "metal")]
     {

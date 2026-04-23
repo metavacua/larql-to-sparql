@@ -30,7 +30,7 @@ pub fn is_ffn_tensor(key: &str) -> bool {
 /// tracks only the retained (attention / embed / lm_head / norms) weights.
 /// Use this with vindex-backed FFN (walk-only inference).
 pub fn load_model_dir_walk_only(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
-    load_model_dir_filtered(path, |k| is_ffn_tensor(k))
+    load_model_dir_filtered(path, is_ffn_tensor)
 }
 
 /// Load model weights from a directory or file.

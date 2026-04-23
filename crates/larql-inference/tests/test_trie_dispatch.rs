@@ -153,6 +153,7 @@ impl<'a> RouteOpMask<'a> {
         self.op_token_cache.as_ref().unwrap()
     }
 
+    #[allow(clippy::ptr_arg)]
     fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>) {
         self.generated_text = self.tokenizer.decode(generated_ids, true).unwrap_or_default();
 
@@ -180,7 +181,7 @@ impl<'a> RouteOpMask<'a> {
             .filter(|&id| {
                 let s = tokenizer.decode(&[id], false).unwrap_or_default();
                 if s == "\"" {
-                    allowed_ops.iter().any(|op| *op == so_far.as_str())
+                    allowed_ops.contains(&so_far.as_str())
                 } else if !s.is_empty() {
                     let candidate = format!("{so_far}{s}");
                     allowed_ops.iter().any(|op| op.starts_with(candidate.as_str()))

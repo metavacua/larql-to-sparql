@@ -1,3 +1,6 @@
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
+
 //! Vindex — the queryable model format.
 //!
 //! Decompile, browse, edit, and recompile neural networks.

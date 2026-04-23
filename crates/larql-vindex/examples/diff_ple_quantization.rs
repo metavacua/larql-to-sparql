@@ -14,7 +14,7 @@ fn main() {
     if args.len() < 3 {
         eprintln!(
             "usage: {} <model_dir> <vindex_dir>",
-            args.get(0).map(String::as_str).unwrap_or("diff_ple_quantization")
+            args.first().map(String::as_str).unwrap_or("diff_ple_quantization")
         );
         std::process::exit(2);
     }

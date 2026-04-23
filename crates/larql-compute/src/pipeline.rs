@@ -159,6 +159,11 @@ pub struct FullPipelineLayer<'a> {
     /// Hybrid MoE block (Gemma 4 26B A4B: dense MLP + expert block, outputs summed).
     /// None for all dense models.
     pub moe: Option<MoeLayerWeights<'a>>,
+
+    /// When true, a final RMS norm (using `post_ffn_norm` weights) is applied
+    /// to the combined (dense + expert) output before the residual add.
+    /// Gemma 4 26B A4B: true. Other models: false (use `layer_scalar` instead).
+    pub moe_combined_output_norm: bool,
 }
 
 impl<'a> FullPipelineLayer<'a> {

@@ -101,6 +101,7 @@ pub struct VectorIndex {
     /// matrix for component `c` (0=gate, 1=up, 2=down). Populated on first
     /// access via `q4k_ffn_layer`. Backs `walk_ffn_sparse`'s f32 view when
     /// no native f32 mmap exists (Q4K-only vindexes).
+    #[allow(clippy::type_complexity)]
     pub(crate) q4k_ffn_cache: Mutex<Vec<[Option<Arc<Vec<f32>>>; 3]>>,
 
     /// Layer range owned by this index instance (start inclusive, end exclusive).

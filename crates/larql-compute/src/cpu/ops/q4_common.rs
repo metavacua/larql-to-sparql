@@ -103,9 +103,9 @@ fn f32_to_f16(val: f32) -> u16 {
         // Include the implicit leading 1, shift right to align with f16's
         // subnormal scale.
         let shift = 1 - new_exp; // number of extra right-shifts past the normal encoding
-        let with_implicit = (mant | 0x800000) as u32;
+        let with_implicit = mant | 0x800000;
         let sub_mant = with_implicit >> (13 + shift as u32);
-        return (sign | sub_mant as u32) as u16;
+        return (sign | sub_mant) as u16;
     }
     (sign | ((new_exp as u32) << 10) | (mant >> 13)) as u16
 }
@@ -323,12 +323,12 @@ pub fn q4k_to_q4kf(q4k_data: &[u8], num_rows: usize, hidden: usize) -> Vec<u8> {
             }
 
             // Pre-bake d·scale and dmin·min, write as f16.
-            for j in 0..8 {
-                let s = d * q_scales[j] as f32;
+            for &qs in &q_scales {
+                let s = d * qs as f32;
                 out.extend_from_slice(&f32_to_f16(s).to_le_bytes());
             }
-            for j in 0..8 {
-                let m = dmin * q_mins[j] as f32;
+            for &qm in &q_mins {
+                let m = dmin * qm as f32;
                 out.extend_from_slice(&f32_to_f16(m).to_le_bytes());
             }
             // Copy 128 nibble bytes unchanged.
