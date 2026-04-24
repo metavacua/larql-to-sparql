@@ -62,6 +62,14 @@ impl MetalBackend {
         let num_layers = layers.len();
         let hidden_val = hidden as u32;
         let inter_val = inter as u32;
+        // Inner dim of down_proj is the intermediate size. Q4_K/Q6_K
+        // super-blocks hold 256 values, so when `inter % 256 != 0` each stored
+        // row must be padded up to `inter_padded` for the matvec to read the
+        // right bytes (see `pad_rows_to_256` in the extractor). The
+        // activation buffer fed into down_proj gets allocated at this size
+        // and zero-initialised so the padding columns contribute nothing.
+        let inter_padded = inter.div_ceil(256) * 256;
+        let inter_padded_val = inter_padded as u32;
 
         // Residual dump (env-gated) for HF-reference diffs. Active only when
         // `LARQL_DUMP_RESIDUALS=<path>` is set.
@@ -127,7 +135,15 @@ impl MetalBackend {
         let ffn_q8 = self.bufs.output(hidden as u64);
         let ffn_q8s = self.bufs.output((hidden / 32 * 4) as u64);
         let up_out = self.bufs.output((inter * 4) as u64);
-        let act_buf = self.bufs.output((inter * 4) as u64);
+        // Sized to `inter_padded` and zero-initialised so down_proj's matvec
+        // reads zero for any trailing padding columns. Only the first
+        // `inter` floats are written by GEGLU; the rest stay zero across all
+        // layers because nothing writes past `inter`.
+        let act_buf = self.bufs.output((inter_padded * 4) as u64);
+        {
+            let ptr = act_buf.contents() as *mut f32;
+            unsafe { std::ptr::write_bytes(ptr, 0, inter_padded); }
+        }
         let down_out = self.bufs.output((hidden * 4) as u64);
         let gate_out_scratch = self.bufs.output((inter * 4) as u64);
         // new_h is ping-ponged via h_a/h_b above
@@ -709,7 +725,11 @@ impl MetalBackend {
                             &act_buf, 0, &act_buf, 0, // Q8 unused for f32 input
                             &down_out, 0,
                             &pipes,
-                            hidden, inter,
+                            // K is the inner dim — use the padded value so the
+                            // shader's `K/256` superblock count matches what
+                            // extraction actually stored. `inter_padded == inter`
+                            // when already aligned, so aligned models are unaffected.
+                            hidden, inter_padded,
                         );
                         let _ = n_tgs_down;
                     } else {
@@ -735,7 +755,9 @@ impl MetalBackend {
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_buffer(2, Some(&down_out), 0);
                         enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
+                        // Use `inter_padded` (matches stored super-block layout);
+                        // see comment on the qmv::encode call above.
+                        enc.set_bytes(4, 4, &inter_padded_val as *const u32 as *const std::ffi::c_void);
                         enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
                     }
                 } else {
