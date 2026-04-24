@@ -24,6 +24,8 @@ pub mod grid;
 pub mod hybrid;
 pub mod predict;
 
+pub use generate::{generate, generate_constrained, GenerateResult, StageTimings};
+
 use ndarray::Array2;
 
 use crate::attention::AttentionWeights;

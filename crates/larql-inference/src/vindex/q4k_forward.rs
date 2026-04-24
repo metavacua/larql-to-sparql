@@ -58,19 +58,17 @@ use crate::forward::ple::precompute_per_layer_inputs;
 use crate::forward::PredictResult;
 use crate::forward::run_layer_with_ffn;
 
-/// End-to-end predict on a Q4_K/Q6_K vindex.
+/// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
+/// vindex, dequantising attn + FFN one layer at a time. Returns the
+/// `[seq_len, hidden]` array — caller owns the lm_head step (top-k
+/// predictions, raw logits, masking, etc.).
 ///
-/// `weights` must carry norms + embed + lm_head but is allowed — and
-/// expected — to have empty attn / FFN tensor entries; this function
-/// fills them in per layer from the vindex. Returns the top-k next-token
-/// predictions in the same shape as `larql_inference::predict`.
-pub fn predict_q4k(
+/// Shared by [`predict_q4k`] and [`generate_q4k_cpu_constrained`].
+fn predict_q4k_hidden(
     weights: &mut ModelWeights,
-    tokenizer: &Tokenizer,
     token_ids: &[u32],
-    top_k: usize,
     index: &VectorIndex,
-) -> PredictResult {
+) -> ndarray::Array2<f32> {
     let num_layers = weights.num_layers;
     let hidden = weights.hidden_size;
     // NOTE: don't use `weights.intermediate_size` — Gemma 4 E2B has
@@ -93,7 +91,6 @@ pub fn predict_q4k(
     }
 
     for layer in 0..num_layers {
-        // ── Dequantise this layer's Q/K/V/O and gate/up/down ──
         let attn = index.attn_q4k_layer_data(layer)
             .unwrap_or_else(|| panic!("attn Q4K slices missing for layer {layer}"));
         let ffn = index.interleaved_q4k_layer_data(layer)
@@ -105,8 +102,6 @@ pub fn predict_q4k(
         let head_dim = arch.head_dim_for_layer(layer);
         let q_dim = num_q * head_dim;
         let kv_dim = num_kv * head_dim;
-        // Per-layer intermediate size — 6144 on standard E2B layers,
-        // 12288 on double-wide ones.
         let intermediate = index.num_features(layer);
 
         let q_key = arch.attn_q_key(layer);
@@ -126,8 +121,6 @@ pub fn predict_q4k(
         let w_up = dequantize_matrix(ffn[1].0, ffn[1].1, intermediate, hidden);
         let w_down = dequantize_matrix(ffn[2].0, ffn[2].1, hidden, intermediate);
 
-        // Insert into weights.tensors so the existing f32 forward paths
-        // can find them. We own `&mut weights`, so this is direct.
         weights.tensors.insert(q_key.clone(), w_q.into_shared());
         weights.tensors.insert(k_key.clone(), w_k.into_shared());
         weights.tensors.insert(v_key.clone(), w_v.into_shared());
@@ -136,9 +129,6 @@ pub fn predict_q4k(
         weights.tensors.insert(up_key.clone(), w_up.into_shared());
         weights.tensors.insert(down_key.clone(), w_down.into_shared());
 
-        // ── Run the layer — reuses the standard block so layer_scalar,
-        //    per-layer embedding, and KV-sharing all apply identically to
-        //    the float `predict_with_temperature` path.
         let shared_kv = weights
             .arch
             .kv_shared_source_layer(layer)
@@ -159,7 +149,6 @@ pub fn predict_q4k(
             }
         }
 
-        // ── Drop this layer's f32 tensors before the next layer ──
         weights.tensors.remove(&q_key);
         weights.tensors.remove(&k_key);
         weights.tensors.remove(&v_key);
@@ -168,9 +157,6 @@ pub fn predict_q4k(
         weights.tensors.remove(&up_key);
         weights.tensors.remove(&down_key);
 
-        // Optional per-layer residual dump matching the Metal shader's
-        // LARQL_METAL_DUMP_LAYERS convention. Together these let us diff
-        // CPU vs Metal layer-by-layer and bisect the first divergence.
         if let Some(ref dir) = dump_dir {
             let slice = h.as_slice().unwrap_or(&[]);
             let bytes: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -181,9 +167,24 @@ pub fn predict_q4k(
         }
     }
 
-    crate::forward::predict::logits_to_predictions_pub(
-        weights, &h, tokenizer, top_k, 1.0,
-    )
+    h
+}
+
+/// End-to-end predict on a Q4_K/Q6_K vindex.
+///
+/// `weights` must carry norms + embed + lm_head but is allowed — and
+/// expected — to have empty attn / FFN tensor entries; this function
+/// fills them in per layer from the vindex. Returns the top-k next-token
+/// predictions in the same shape as `larql_inference::predict`.
+pub fn predict_q4k(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    token_ids: &[u32],
+    top_k: usize,
+    index: &VectorIndex,
+) -> PredictResult {
+    let h = predict_q4k_hidden(weights, token_ids, index);
+    crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// Common end-of-turn / EOS markers across Gemma, Llama, Mistral, ChatML.
@@ -237,6 +238,64 @@ pub fn generate_q4k_cpu(
         let stop = is_end_of_turn(&tok);
         out.push((tok, next_id));
         ids.push(next_id);
+        if stop {
+            break;
+        }
+    }
+    out
+}
+
+/// Constrained variant of [`generate_q4k_cpu`].
+///
+/// Computes raw logits at each step, calls `mask_fn(generated_ids, &mut logits)`
+/// to let the caller mask invalid token ids to `f32::NEG_INFINITY`, then takes
+/// the masked argmax. Returns the same `(token_text, token_id)` shape so it's
+/// drop-in interchangeable with the unconstrained loop.
+///
+/// The mask callback receives only the *generated* tokens (excluding prompt),
+/// so its grammar state is consistent across decode paths.
+pub fn generate_q4k_cpu_constrained<M>(
+    weights: &mut ModelWeights,
+    tokenizer: &Tokenizer,
+    prompt_ids: &[u32],
+    max_tokens: usize,
+    index: &VectorIndex,
+    mut mask_fn: M,
+) -> Vec<(String, u32)>
+where
+    M: FnMut(&[u32], &mut Vec<f32>),
+{
+    let mut ids = prompt_ids.to_vec();
+    let mut generated: Vec<u32> = Vec::with_capacity(max_tokens);
+    let mut out: Vec<(String, u32)> = Vec::with_capacity(max_tokens);
+
+    for _ in 0..max_tokens {
+        // Forward pass to the final hidden state.
+        let h = predict_q4k_hidden(weights, &ids, index);
+        let last_hidden = h.row(h.nrows().saturating_sub(1)).to_owned();
+        let last_2d = ndarray::Array2::from_shape_vec((1, last_hidden.len()), last_hidden.to_vec())
+            .expect("shape");
+
+        // Raw logits over vocab → mask → argmax.
+        let mut logits = crate::forward::hidden_to_raw_logits(weights, &last_2d);
+        mask_fn(&generated, &mut logits);
+
+        let (id, idx_score) = logits
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.is_nan() && v.is_finite())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, &s)| (i as u32, s))
+            .unwrap_or((0, f32::NEG_INFINITY));
+        if !idx_score.is_finite() {
+            break;
+        }
+        let tok = tokenizer.decode(&[id], true).unwrap_or_default();
+
+        let stop = is_end_of_turn(&tok);
+        out.push((tok, id));
+        ids.push(id);
+        generated.push(id);
         if stop {
             break;
         }

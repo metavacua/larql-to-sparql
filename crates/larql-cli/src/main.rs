@@ -268,6 +268,7 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             experts: false,
             experts_dir: None,
             ops: Vec::new(),
+            constrained: false,
         }
     }
 }

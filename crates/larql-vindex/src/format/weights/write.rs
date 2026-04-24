@@ -568,10 +568,10 @@ struct Q4kAttnEntry {
 /// Pad a row-major f32 buffer to the next multiple of 256 with zeros
 /// (Q4_K/Q6_K super-blocks require length % 256 == 0).
 ///
-/// Flat-padding only — use [`pad_rows_to_256`] for 2-D matrices whose *inner*
-/// dimension may not be a multiple of 256. Flat padding is sufficient for
-/// contiguous blobs (e.g. per-layer scalar-free sidecars) but corrupts
-/// matvec layouts when each row is a separate quantisation target.
+/// Kept only for unit-test coverage of the flat-padding helper pattern;
+/// production paths now use [`pad_rows_to_256`] since the shader reads
+/// each row as a fixed number of super-blocks.
+#[cfg(test)]
 fn pad_to_256(data: &[f32]) -> Vec<f32> {
     let padded_len = data.len().div_ceil(256) * 256;
     if padded_len == data.len() {

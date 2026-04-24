@@ -140,6 +140,13 @@ pub struct RunArgs {
     /// `--ops gcd,is_prime,factorial,to_roman`.
     #[arg(long, value_name = "OP1,OP2,...", value_delimiter = ',')]
     pub ops: Vec<String>,
+
+    /// Constrain the op-name field of generated `{"op":"...","args":{...}}`
+    /// to a prefix of one of the advertised op names. Forces weak models to
+    /// pick a real op instead of hallucinating (`gcdd`, `to_number`, etc.).
+    /// Slightly slower per token; large reliability win on small Q4K models.
+    #[arg(long)]
+    pub constrained: bool,
 }
 
 pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -259,7 +266,8 @@ fn build_walk_args(
 mod experts {
     use super::*;
     use larql_inference::experts::{
-        DispatchOutcome, DispatchSkip, ExpertRegistry, ExpertSession, FilteredDispatcher,
+        DispatchOutcome, DispatchSkip, Dispatcher, ExpertRegistry, ExpertSession,
+        FilteredDispatcher, OpNameMask,
     };
     use larql_inference::prompt::ChatTemplate;
     use larql_inference::WeightFfn;
@@ -297,7 +305,16 @@ mod experts {
     }
 
     impl Runtime {
-        fn generate(&mut self, wrapped: &str, max_tokens: usize) -> Result<String, BoxErr> {
+        /// Generate text from `wrapped`. When `mask_op_names` is `Some`,
+        /// constrained decoding restricts the op-name field of any
+        /// generated `{"op":"...","args":{...}}` to a prefix of one of
+        /// those op names. `None` is unconstrained generation.
+        fn generate(
+            &mut self,
+            wrapped: &str,
+            max_tokens: usize,
+            mask_op_names: Option<&[String]>,
+        ) -> Result<String, BoxErr> {
             let token_ids = larql_inference::encode_prompt(
                 &self.tokenizer,
                 &*self.weights.arch,
@@ -310,40 +327,80 @@ mod experts {
                     let q4_index = self.q4_index.as_ref().expect("metal-q4k needs q4_index");
                     let backend = larql_compute::default_backend();
                     let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
-                    let result = larql_inference::layer_graph::generate(
-                        &self.weights,
-                        &self.tokenizer,
-                        &token_ids,
-                        max_tokens,
-                        q4_index,
-                        &*backend,
-                        &cached_layers,
-                        0..self.weights.num_layers,
-                    );
+                    let result = if let Some(ops) = mask_op_names {
+                        let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        larql_inference::layer_graph::generate_constrained(
+                            &self.weights,
+                            &self.tokenizer,
+                            &token_ids,
+                            max_tokens,
+                            q4_index,
+                            &*backend,
+                            &cached_layers,
+                            0..self.weights.num_layers,
+                            |ids, logits| mask.apply(ids, logits),
+                        )
+                    } else {
+                        larql_inference::layer_graph::generate(
+                            &self.weights,
+                            &self.tokenizer,
+                            &token_ids,
+                            max_tokens,
+                            q4_index,
+                            &*backend,
+                            &cached_layers,
+                            0..self.weights.num_layers,
+                        )
+                    };
                     result.tokens.iter().map(|(t, _)| t.as_str()).collect()
                 }
                 Strategy::CpuQ4K => {
                     let q4_index = self.q4_index.as_ref().expect("cpu-q4k needs q4_index");
-                    let toks = larql_inference::vindex::generate_q4k_cpu(
-                        &mut self.weights,
-                        &self.tokenizer,
-                        &token_ids,
-                        max_tokens,
-                        q4_index,
-                    );
+                    let toks = if let Some(ops) = mask_op_names {
+                        let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        larql_inference::vindex::generate_q4k_cpu_constrained(
+                            &mut self.weights,
+                            &self.tokenizer,
+                            &token_ids,
+                            max_tokens,
+                            q4_index,
+                            |ids, logits| mask.apply(ids, logits),
+                        )
+                    } else {
+                        larql_inference::vindex::generate_q4k_cpu(
+                            &mut self.weights,
+                            &self.tokenizer,
+                            &token_ids,
+                            max_tokens,
+                            q4_index,
+                        )
+                    };
                     toks.into_iter().map(|(t, _)| t).collect()
                 }
                 Strategy::CpuF32 => {
                     let ffn = WeightFfn { weights: &self.weights };
                     let mut text = String::new();
-                    larql_inference::forward::generate_cached(
-                        &self.weights,
-                        &self.tokenizer,
-                        &ffn,
-                        &token_ids,
-                        max_tokens,
-                        |_id, tok| text.push_str(tok),
-                    );
+                    if let Some(ops) = mask_op_names {
+                        let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        larql_inference::forward::generate_cached_constrained(
+                            &self.weights,
+                            &self.tokenizer,
+                            &ffn,
+                            &token_ids,
+                            max_tokens,
+                            |ids, logits| mask.apply(ids, logits),
+                            |_id, tok| text.push_str(tok),
+                        );
+                    } else {
+                        larql_inference::forward::generate_cached(
+                            &self.weights,
+                            &self.tokenizer,
+                            &ffn,
+                            &token_ids,
+                            max_tokens,
+                            |_id, tok| text.push_str(tok),
+                        );
+                    }
                     text
                 }
             };
@@ -546,7 +603,23 @@ mod experts {
         args: &RunArgs,
     ) -> Result<(), BoxErr> {
         let wrapped = session.build_prompt(prompt, template);
-        let model_output = runtime.generate(&wrapped, args.max_tokens)?;
+        let mask_op_names: Option<Vec<String>> = if args.constrained {
+            Some(
+                session
+                    .registry()
+                    .op_specs()
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        let model_output = runtime.generate(
+            &wrapped,
+            args.max_tokens,
+            mask_op_names.as_deref(),
+        )?;
         if args.verbose {
             eprintln!("model output: {model_output:?}");
         }
