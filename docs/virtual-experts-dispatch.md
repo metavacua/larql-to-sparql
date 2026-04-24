@@ -376,10 +376,10 @@ together, and missing any one of them collapses the whole pipeline:
      fences, fullwidth punctuation, missing commas, escaped quotes inside
      string args. `parse_op_call` handles all of these without
      configuration.
-  5. **Constrained decode** — the unlock for weak models. Already
-     prototyped in `tests/test_constrained_dispatch.rs` and
-     `tests/test_trie_dispatch.rs`; not yet wired into `larql run`. See
-     "What's still loose."
+  5. **Constrained decode** — the unlock for weak models. Wired today
+     via `--constrained` (see
+     [§Constrained decode: from generation to selection](#constrained-decode-from-generation-to-selection)).
+     Lifts Mistral 7B Instruct v0.3 Q4K from 2/4 → 4/4 on the demo set.
 
 Orthogonal to those five — sitting under all of them — is **model capacity
 + instruction tuning**: at Q4K, 7B+ instruct works today, base models
@@ -395,14 +395,13 @@ real models against the pipeline.
   `toRoman`) and fabricate arg keys (`base`, `output`, `maxLen`). This
   behaved like a model-capacity / instruction-following issue rather than
   a dispatch or parser issue — the prompts arrived correctly and the
-  parser handled the malformed JSON cleanly. Constrained decoding
-  (already prototyped in
-  `tests/test_constrained_dispatch.rs` and `tests/test_trie_dispatch.rs`)
-  forces character-level masking onto the op vocabulary and is the right
-  unlock for weak models; wiring it into the CLI is the highest-leverage
-  next step.
-- **7B+ instruct models work.** Mistral 7B Instruct v0.3 Q4K dispatches
-  correctly with focused op subsets.
+  parser handled the malformed JSON cleanly. The fix is `--constrained`,
+  documented in its own section below.
+- **7B+ instruct models work end-to-end with `--constrained`.** Mistral 7B
+  Instruct v0.3 Q4K dispatches all four demo prompts correctly with the
+  flag on, including cases where its free-form prose answer would have
+  been factually wrong. The model becomes a router; the WASM expert
+  computes.
 - **The `--ops` filter is a feature, not a workaround.** Even strong
   models do better with 5–15 ops than 126. Production deployments should
   always scope.
@@ -416,6 +415,135 @@ real models against the pipeline.
 - **Chat templates matter enormously.** Sending the prompt without
   template wrapping degraded all models to garbage output. Detection from
   the vindex's metadata is non-optional.
+
+## Constrained decode: from generation to selection
+
+The production findings predicted the unlock; this section is the work that
+landed it. The four demo prompts that previously hit 2/4 on Mistral 7B
+Instruct v0.3 Q4K now hit 4/4 — including the two prompts where the model's
+own prose answer was factually wrong. With `--constrained`, the model's
+job is reduced to picking an op + supplying args; the WASM expert
+provides the deterministic computation.
+
+### The mask
+
+`larql_inference::experts::OpNameMask` was lifted from
+`tests/test_constrained_dispatch.rs` (where it was named `OpJsonMask`)
+and made public. It implements a tiny three-state grammar:
+
+```
+Free    → no `{"op":"` prefix seen yet, no constraint
+OpName  → inside the op-name field, constrain to valid prefixes
+Done    → past the closing quote, no constraint
+```
+
+Inside `OpName`, the mask zeroes (well, `f32::NEG_INFINITY`s) every token
+id whose decoded string is *not* either a continuation of some valid op
+name or the closing `"`. The candidate set (tokens whose characters are
+a subset of any op name's characters) is computed once on first
+in-op-name step — O(vocab_size) startup, O(candidate_set) per step.
+
+Six unit tests cover the state-machine transitions on synthetic text;
+no tokenizer needed for those. The decode-time path is exercised by the
+existing `tests/test_constrained_dispatch.rs` integration test.
+
+### Three decode paths
+
+The mask is decode-strategy-agnostic — it just consumes generated token
+ids and mutates a logits vector. Three production hooks consume it:
+
+| Strategy   | Function                                                         | LM-head  |
+|------------|------------------------------------------------------------------|----------|
+| CPU F32    | `forward::generate_cached_constrained` (already existed)         | Dense    |
+| CPU Q4K    | `vindex::generate_q4k_cpu_constrained` (new)                     | Dense    |
+| Metal Q4K  | `layer_graph::generate_constrained` (new)                        | Dense*   |
+
+\* The Metal path normally uses sparse vindex KNN over `lm_head` for
+top-K, which is faster but cannot apply an arbitrary mask (a masked-out
+token might be outside the KNN top-K). The constrained variant adds
+`backend_lm_head_scores` — the same gemv that powers the unconstrained
+path, just returning the full vocab-length score vector instead of
+truncating. On Metal this is still ~3–5 ms per token for the Gemma 3
+262K × 2560 tied LM head; the mask + argmax adds microseconds.
+
+The CPU Q4K path needed `predict_q4k_hidden` as a small refactor —
+extracting the per-layer dequantise-and-forward loop out of `predict_q4k`
+so the constrained path can reuse it without duplicating ~120 lines of
+attention-block-with-PLE-and-KV-sharing code.
+
+### The bug we hit on the first attempt
+
+Wiring the mask alone — `--constrained` on, mask active for all three
+strategies — produced **the exact same 2/4 result**. Same successes
+(`gcd`, `factorial`), same failures (`to_roman`, `is_prime`).
+
+The mask only fires when the `OpName` state is reached, and that
+requires the prefix `{"op":"` to appear in the generated text. On the
+two failing prompts the model never chose to emit JSON at all — it
+either echoed the system prompt's notation back at us
+(`ops:to_roman{"2024"}\nargs:{"n":2024}…`) or wrote prose
+(`Yes,97isnotaprimenumber.…`). The mask sat in `Free` state through
+the whole decode, doing nothing.
+
+The fix is **teacher forcing**: append `{"op":"` to the prompt before
+tokenisation, so the model starts decoding *inside* the op-name field.
+The mask is told via `set_seed_text` that the prefix is already there,
+so it activates on the very first generated token.
+
+```rust
+// In Runtime::generate, when --constrained:
+let effective_prompt = format!("{wrapped}{OP_CALL_PREFIX}");  // {"op":"
+let token_ids = encode_prompt(&self.tokenizer, arch, &effective_prompt)?;
+let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+mask.set_seed_text(OP_CALL_PREFIX);
+// ... generate ...
+let result = format!("{OP_CALL_PREFIX}{generated}");  // for parser
+```
+
+Two lines of plumbing on top of the mask, but the difference between a
+gimmick and a working dispatch path.
+
+### What this looks like in practice
+
+```
+$ larql run <vindex> --experts --metal --constrained \
+    --ops gcd,is_prime,factorial,to_roman \
+    "Is 97 a prime number?"
+{"args":{"n":97},"expert_id":"arithmetic","op":"is_prime","value":true}
+```
+
+Mistral's free-form answer to the same question, without `--constrained`:
+*"Yes, 97 is not a prime number…"* (factually wrong). With
+`--constrained`, Mistral's role is reduced to picking `op=is_prime` and
+filling in `n=97`. The WASM expert then deterministically returns the
+correct answer. Same dynamic for `to_roman(2024)` — Mistral free-forms
+"MCMXXIV", but the constrained path picks the op and the WASM expert
+returns "MMXXIV".
+
+That's the conceptual payoff of the doc's thesis. With constrained
+decode wired, "the model is not being asked to use a tool; it is being
+asked to route into a small advertised expert table" stops being a
+framing choice and becomes a structural property of the system.
+
+### Why not constrain the args too?
+
+The mask only constrains the op-name field, not the args. Args are left
+to free generation because:
+
+  - Argument keys are already advertised in the system prompt
+    (`gcd{"a","b"}`), so the model has the right schema in front of it
+    when it generates.
+  - `parse_op_call` tolerates ragged arg formatting (escaped quotes,
+    nested objects, fullwidth punctuation, missing commas before
+    `"args":`).
+  - True grammar-constrained args would need a JSON Schema decoder
+    (per-op schema, type-aware token masking) — a substantial separate
+    project.
+
+In practice, the args field works reliably enough across 7B+ instruct
+models that the additional engineering hasn't been needed. If a future
+model class hallucinates arg *values* (number ranges, string formats)
+we'd revisit.
 
 ## API surface added
 
@@ -434,6 +562,15 @@ pub struct ExpertSession<D: Dispatcher = ExpertRegistry>
 pub struct FilteredDispatcher<D: Dispatcher>
 pub enum DispatchSkip { NoOpCall, UnknownOp(String), ExpertDeclined { op, args } }
 
+// larql_inference::experts (constrained decode):
+pub struct OpNameMask<'tok> { /* ... */ }
+impl<'tok> OpNameMask<'tok> {
+    pub fn new(valid_ops: Vec<String>, tokenizer: &'tok Tokenizer) -> Self
+    pub fn from_op_specs(specs: &[OpSpec], tokenizer: &'tok Tokenizer) -> Self
+    pub fn set_seed_text(&mut self, seed: impl Into<String>)
+    pub fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>)
+}
+
 // larql_inference::prompt:
 pub enum ChatTemplate { Gemma, Mistral, Llama, ChatML, Plain }
 impl ChatTemplate {
@@ -445,7 +582,15 @@ impl ChatTemplate {
 // larql_inference::vindex:
 pub fn generate_q4k_cpu(weights, tokenizer, prompt_ids, max_tokens, index)
     -> Vec<(String, u32)>
+pub fn generate_q4k_cpu_constrained<M>(weights, tokenizer, prompt_ids,
+    max_tokens, index, mask_fn: M) -> Vec<(String, u32)>
+    where M: FnMut(&[u32], &mut Vec<f32>)
 pub fn is_end_of_turn(token: &str) -> bool
+
+// larql_inference::layer_graph:
+pub fn generate_constrained<M>(weights, tokenizer, token_ids, max_tokens,
+    index, backend, cached_layers, layer_range, mask_fn: M) -> GenerateResult
+    where M: FnMut(&[u32], &mut Vec<f32>)
 
 // larql_inference::trie:
 impl CascadeTrie {
@@ -456,17 +601,17 @@ impl CascadeTrie {
 }
 
 // larql-cli:
-larql run <model> --experts [--experts-dir <DIR>] [--ops <CSV>]
+larql run <model> --experts [--experts-dir <DIR>] [--ops <CSV>] [--constrained]
 ```
 
 ## Test inventory
 
 | Suite                                | `cargo test` default | With `-- --ignored` |
 |--------------------------------------|----------------------|---------------------|
-| `larql-inference` lib                | 867 pass             | 867 pass            |
+| `larql-inference` lib                | 873 pass             | 873 pass            |
 | `larql-cli` (lib + integration)      | 96 pass, 1 ignored   | 97 pass             |
 | `larql-inference --test test_generate_q4k_cpu` | 0 pass, 1 ignored | 1 pass     |
-| **Total**                            | **963 pass**         | **965 pass**        |
+| **Total**                            | **969 pass**         | **971 pass**        |
 
 `cargo test` in default config completes in ~3 seconds. The two
 `#[ignore]`d tests load a real 4B/7B model and take 30s–7min depending
@@ -474,12 +619,11 @@ on backend; explicitly opt-in via `--ignored`.
 
 ## What's still loose
 
-- **Constrained decode is not wired into `larql run --experts`.** The
-  `test_constrained_dispatch.rs` and `test_trie_dispatch.rs` files
-  demonstrate vocabulary-masked decoding that forces models to emit valid
-  op names character-by-character — this would make tool dispatch work
-  reliably even on weak models. Plumbing it through the CLI is a future
-  task.
+- **Args constrained decode.** The op-name field is masked but args are
+  free-form. `parse_op_call`'s tolerance + per-op arg keys in the system
+  prompt have been enough so far on 7B+ instruct models, but a JSON
+  Schema decoder for args is the natural next step if a future model
+  class hallucinates arg *values*.
 - **The cascade trie probe path** is documented + skip-aware but not
   vendored. CI runs skip; local runs with the probe present exercise the
   full pipeline.
@@ -503,16 +647,16 @@ on backend; explicitly opt-in via `--ignored`.
 ```
 crates/larql-experts/expert-interface/src/lib.rs       # ABI: OpSpec
 crates/larql-experts/experts/*/src/lib.rs              # 19 files: ops = [(name, args)]
-crates/larql-inference/src/experts/{caller,registry,parser,session,mod}.rs
+crates/larql-inference/src/experts/{caller,registry,parser,session,mask,mod}.rs
 crates/larql-inference/src/prompt.rs                   # ChatTemplate
 crates/larql-inference/src/trie/mod.rs                 # find_with_env
-crates/larql-inference/src/vindex/{q4k_forward,mod}.rs # generate_q4k_cpu
+crates/larql-inference/src/vindex/{q4k_forward,mod}.rs # generate_q4k_cpu + _constrained
 crates/larql-inference/src/ffn/{moe_remote,mod}.rs     # rename + new fields
-crates/larql-inference/src/layer_graph/grid.rs         # router_norm_parameter_free
+crates/larql-inference/src/layer_graph/{generate,grid,mod}.rs # generate_constrained
 crates/larql-inference/src/lib.rs                      # re-exports
 crates/larql-inference/tests/{data/,test_generate_q4k_cpu,test_*_dispatch}.rs
 crates/larql-inference/examples/moe_grid_generate.rs   # renamed
-crates/larql-cli/src/commands/primary/run_cmd.rs       # --experts wiring
+crates/larql-cli/src/commands/primary/run_cmd.rs       # --experts + --constrained
 crates/larql-cli/src/main.rs                           # ChatArgs ↔ RunArgs
 crates/larql-cli/tests/test_run_experts.rs             # CLI integration tests
 crates/larql-server/tests/test_expert_endpoint.rs      # rename callers
@@ -527,14 +671,17 @@ cargo build --target wasm32-wasip1 --release
 cd ../..
 
 # Run a focused tool-use session. In practice, always scope ops via --ops —
-# even strong models do better with 5–15 options than 126.
+# even strong models do better with 5–15 options than 126. Add --constrained
+# to teacher-force the JSON prefix and mask the op-name field, which
+# eliminates the "model decides not to emit JSON" failure mode entirely.
 larql run ~/.cache/larql/local/mistral-7b-instruct-v0.3-q4k.vindex \
     --experts \
     --metal \
+    --constrained \
     --ops gcd,is_prime,factorial,to_roman \
     "What is the GCD of 144 and 60?"
 ```
 
 For chat mode, omit the prompt. For non-Metal CPU decode, omit `--metal`;
 it works with any quant, but expect roughly minute-scale responses on 4B
-models.
+models. `--constrained` works with any backend.
