@@ -304,21 +304,37 @@ mod experts {
         strategy: Strategy,
     }
 
+    /// Teacher-forced prefix that drops the model into the op-name field
+    /// of an op-call JSON immediately. Used by `--constrained`.
+    const OP_CALL_PREFIX: &str = r#"{"op":""#;
+
     impl Runtime {
         /// Generate text from `wrapped`. When `mask_op_names` is `Some`,
-        /// constrained decoding restricts the op-name field of any
-        /// generated `{"op":"...","args":{...}}` to a prefix of one of
-        /// those op names. `None` is unconstrained generation.
+        /// constrained decoding (a) injects [`OP_CALL_PREFIX`] into the
+        /// prompt as teacher-forcing and (b) restricts the op-name field
+        /// of the generated text to a prefix of one of those op names.
+        /// `None` is unconstrained generation.
+        ///
+        /// Returns the generated text. When constrained, the returned
+        /// string includes the teacher-forced prefix so downstream
+        /// `parse_op_call` sees a complete `{"op":"..."}` block.
         fn generate(
             &mut self,
             wrapped: &str,
             max_tokens: usize,
             mask_op_names: Option<&[String]>,
         ) -> Result<String, BoxErr> {
+            // Teacher-force the JSON prefix when constrained — the model
+            // never has to "decide" to emit the op-call.
+            let effective_prompt: String = if mask_op_names.is_some() {
+                format!("{wrapped}{OP_CALL_PREFIX}")
+            } else {
+                wrapped.to_string()
+            };
             let token_ids = larql_inference::encode_prompt(
                 &self.tokenizer,
                 &*self.weights.arch,
-                wrapped,
+                &effective_prompt,
             )
             .map_err(|e| format!("tokenize: {e}"))?;
 
@@ -329,6 +345,7 @@ mod experts {
                     let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
                     let result = if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        mask.set_seed_text(OP_CALL_PREFIX);
                         larql_inference::layer_graph::generate_constrained(
                             &self.weights,
                             &self.tokenizer,
@@ -358,6 +375,7 @@ mod experts {
                     let q4_index = self.q4_index.as_ref().expect("cpu-q4k needs q4_index");
                     let toks = if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        mask.set_seed_text(OP_CALL_PREFIX);
                         larql_inference::vindex::generate_q4k_cpu_constrained(
                             &mut self.weights,
                             &self.tokenizer,
@@ -382,6 +400,7 @@ mod experts {
                     let mut text = String::new();
                     if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
+                        mask.set_seed_text(OP_CALL_PREFIX);
                         larql_inference::forward::generate_cached_constrained(
                             &self.weights,
                             &self.tokenizer,
@@ -404,7 +423,14 @@ mod experts {
                     text
                 }
             };
-            Ok(text)
+            // When constrained, prepend the teacher-forced prefix so the
+            // dispatcher sees a complete op-call JSON block.
+            let result = if mask_op_names.is_some() {
+                format!("{OP_CALL_PREFIX}{text}")
+            } else {
+                text
+            };
+            Ok(result)
         }
     }
 
