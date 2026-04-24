@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 pub fn compute_etag(body: &serde_json::Value) -> String {
     let mut hasher = DefaultHasher::new();
     body.to_string().hash(&mut hasher);
-    format!("\"{}\"", format!("{:x}", hasher.finish()))
+    format!("\"{:x}\"", hasher.finish())
 }
 
 /// Check if the request's If-None-Match header matches the ETag.

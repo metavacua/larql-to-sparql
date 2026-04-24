@@ -34,12 +34,58 @@ L0-12 are template-fixed (0.999 cosine similarity). At 0.25ms/layer × 8 layers 
 ### ✅ Fix O(N²) norm kernels
 **Status**: Complete — cooperative SIMD reduction in all norms. Saved ~10ms (the single biggest win).
 
-## P0.5: Gemma 4 26B A4B correctness (in progress)
+## P0.5: Gemma 4 26B A4B correctness
 
 ### ✅ CPU MoE decode interleave — DONE (2026-04-20)
-GPU dense FFN + CPU MoE per layer. Layer scalar correctly applied to
-the FFN+MoE delta only (`h_post_attn + scalar*(dense+moe)`). First
-coherent Gemma 4 26B output confirmed (Paris, Berlin, oxygen).
+GPU dense FFN + CPU MoE per layer. See `metal/decode/moe_combine.rs`
+for the outer combine math (HF Gemma 4 has three post-FFN norms per
+MoE layer: `_1` on dense, `_2` on MoE, and un-suffixed outer on the
+sum — only the un-suffixed one gets `layer_scalar` applied to the
+whole layer output after residual add).
+
+### ✅ Full end-to-end correctness — DONE (2026-04-24)
+Four coordinated fixes were needed (earlier "working" claim was only
+approximate — the Metal output was degenerate token repetition on a
+cold vindex). All verified against HF bf16 via layer-by-layer
+residual-cosine diff in `metal/decode/diag.rs::ResidualDump` +
+`/tmp/hf_residuals.py` + `/tmp/diff_residuals.py`.
+
+1. **Row-padded Q4_K / Q6_K storage** for matrices whose inner dim
+   isn't a multiple of 256. 26B A4B's `intermediate_size=2112` gives
+   8.25 super-blocks per row; old extraction stored contiguously and
+   the matvec shader read wrong bytes for every `down_proj` row past
+   row 0. `pad_rows_to_256` in `larql-vindex/format/weights/write.rs`
+   per-row-pads to the next 256-multiple; runtime dispatches
+   `down_proj` with `K = inter_padded` (see `metal/decode/mod.rs`).
+   `act_buf` allocated to `inter_padded * 4` bytes and zero-inited so
+   the trailing columns contribute nothing. Aligned models
+   (`inter_padded == inter`) are unchanged.
+2. **Parameter-free router RMSNorm** — HF `Gemma4TextRouter.norm` has
+   `with_scale=False`; no weight tensor exists on disk. Trait method
+   `moe_router_norm_parameter_free()` + `rms_norm_no_weight` branch
+   in `cpu/ops/moe/forward.rs`. Also added `router.scale *
+   hidden_size^-0.5` multiplier (HF's `scalar_root_size`).
+3. **Outer `post_feedforward_layernorm.weight`** (un-suffixed) added
+   to extraction + wired through `FullPipelineLayer.moe_outer_post_norm`.
+   Distinct from the `_1` dense-branch norm that was previously being
+   double-applied.
+4. **`layer_scalar` applied to the whole layer output** after residual
+   add (`new_h *= layer_scalar`) — matches HF's `hidden_states *=
+   self.layer_scalar` at the end of `Gemma4TextDecoderLayer.forward`.
+   Prior code folded it into the outer-norm scale (14× magnitude
+   error, collapsed the model to degenerate output).
+
+Artifacts for future regression checks:
+- `crates/larql-cli/examples/patch_down_proj.rs` — surgical vindex
+  patcher (re-quantises `down_proj` rows with per-row padding).
+  Avoids re-extracting 42 GB when the extraction side is fixed.
+- `crates/larql-compute/src/metal/decode/diag.rs::ResidualDump` —
+  env-gated (`LARQL_DUMP_RESIDUALS=<path>`) binary dump of every
+  layer's `layer_in` / `h_post_attn` / `layer_out` for HF-ref diff.
+- `crates/larql-inference/tests/test_arch_golden.rs` — architecture
+  regression suite with one `#[test]` per `(arch × backend)`,
+  skip-if-missing for vindexes. Caught the broken output immediately
+  and flagged which architecture-specific change broke it.
 
 ### Batched MoE prefill
 **Effort**: Medium

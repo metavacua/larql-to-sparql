@@ -162,7 +162,7 @@ fn test_haystack_generation_short() {
 
 #[test]
 fn test_haystack_generation_long() {
-    let (context, needle) = generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
+    let (context, _needle) = generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
     assert!(context.contains("AURORA-7749"));
     assert!(context.len() > 10000);
 }
@@ -215,7 +215,10 @@ fn test_retention_conversation_25_turns() {
 fn test_accuracy_result_token_match() {
     let r = AccuracyResult::token_match("Markov RS", "factual", "capital of France", true);
     assert!(r.top1_match);
-    assert_eq!(r.kl_divergence, 0.0);
+    // Top-1 match does not compute a distribution, so KL/JS are NaN and
+    // excluded from distribution-level aggregates.
+    assert!(r.kl_divergence.is_nan());
+    assert!(r.js_divergence.is_nan());
     assert_eq!(r.strategy, "Markov RS");
 }
 

@@ -1,18 +1,5 @@
 //! larql-server — HTTP server for vindex knowledge queries.
 
-mod announce;
-mod auth;
-mod cache;
-mod embed_store;
-mod error;
-mod etag;
-mod ffn_l2_cache;
-mod grpc;
-mod ratelimit;
-mod routes;
-mod session;
-mod state;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,9 +13,10 @@ use larql_vindex::{
     load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
 };
 
-use cache::DescribeCache;
-use session::SessionManager;
-use state::{AppState, LoadedModel, model_id_from_name, load_probe_labels};
+use larql_server::cache::DescribeCache;
+use larql_server::session::SessionManager;
+use larql_server::state::{AppState, LoadedModel, model_id_from_name, load_probe_labels};
+use larql_server::{announce, auth, grpc, ratelimit, routes};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -111,6 +99,12 @@ struct Cli {
     #[arg(long)]
     release_mmap_after_request: bool,
 
+    /// Only load and serve experts in this range (inclusive, e.g. "0-31").
+    /// Requests for out-of-range expert IDs are rejected with HTTP 400.
+    /// Used to shard the expert bank across multiple servers.
+    #[arg(long)]
+    experts: Option<String>,
+
     /// Enable CORS for browser access.
     #[arg(long)]
     cors: bool,
@@ -182,6 +176,7 @@ fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
     Ok((start, end + 1))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_single_vindex(
     path_str: &str,
     no_infer: bool,
@@ -190,6 +185,7 @@ fn load_single_vindex(
     layer_range: Option<(usize, usize)>,
     max_gate_cache_layers: usize,
     release_mmap_after_request: bool,
+    expert_filter: Option<(usize, usize)>,
 ) -> Result<LoadedModel, BoxError> {
     let path = if larql_vindex::is_hf_path(path_str) {
         info!("Resolving HuggingFace path: {}", path_str);
@@ -251,7 +247,7 @@ fn load_single_vindex(
     // In --embed-only mode, attempt an f16-at-rest store to halve RSS.
     // Falls back silently if embeddings.bin is f32 (older vindexes).
     let embed_store = if embed_only {
-        match crate::embed_store::EmbedStoreF16::open(
+        match larql_server::embed_store::EmbedStoreF16::open(
             &path,
             embed_scale,
             config.vocab_size,
@@ -303,6 +299,10 @@ fn load_single_vindex(
         info!("  Mmap release: enabled (MADV_DONTNEED after each walk-ffn request)");
     }
 
+    if let Some((start, end)) = expert_filter {
+        info!("  Experts: {start}–{end} (shard filter)");
+    }
+
     let num_layers = config.num_layers;
     Ok(LoadedModel {
         id,
@@ -319,7 +319,8 @@ fn load_single_vindex(
         release_mmap_after_request,
         weights: std::sync::OnceLock::new(),
         probe_labels,
-        ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(num_layers),
+        ffn_l2_cache: larql_server::ffn_l2_cache::FfnL2Cache::new(num_layers),
+        expert_filter,
     })
 }
 
@@ -360,6 +361,7 @@ async fn main() -> Result<(), BoxError> {
     let mut models: Vec<Arc<LoadedModel>> = Vec::new();
 
     let layer_range = cli.layers.as_deref().map(parse_layer_range).transpose()?;
+    let expert_filter = cli.experts.as_deref().map(parse_layer_range).transpose()?;
 
     if let Some(ref dir) = cli.dir {
         let paths = discover_vindexes(dir);
@@ -368,13 +370,13 @@ async fn main() -> Result<(), BoxError> {
         }
         info!("Found {} vindexes in {}", paths.len(), dir.display());
         for p in &paths {
-            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request) {
+            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request, expert_filter) {
                 Ok(m) => models.push(Arc::new(m)),
                 Err(e) => warn!("  Skipping {}: {}", p.display(), e),
             }
         }
     } else if let Some(ref vindex_path) = cli.vindex_path {
-        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request)?;
+        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request, expert_filter)?;
         models.push(Arc::new(m));
     } else {
         return Err("must provide a vindex path or --dir".into());

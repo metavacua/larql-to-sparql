@@ -637,7 +637,7 @@ impl PyVindex {
 
         // Convert to edges with relation labels
         let mut edges: Vec<PyDescribeEdge> = Vec::new();
-        for (_, acc) in &edge_map {
+        for acc in edge_map.values() {
             let (relation, source) = if let Some(ref rc) = self.classifier {
                 if let Some(label) = rc.label_for_feature(acc.best_layer, acc.best_feature) {
                     let src = if rc.is_probe_label(acc.best_layer, acc.best_feature) {
@@ -877,7 +877,7 @@ impl PyVindex {
             c_score,
             top_k: vec![larql_models::TopKEntry {
                 token: top_token.to_string(),
-                token_id: token_id,
+                token_id,
                 logit: c_score,
             }],
         };
@@ -1053,6 +1053,7 @@ impl PyVindex {
     /// install_layer = n_layers-1 is supported; mid-layer backward
     /// through attention+FFN is pending.
     #[pyo3(signature = (prompt, target, install_layer, steps=60, lr=0.5, kl_weight=0.0625))]
+    #[allow(clippy::too_many_arguments)]
     fn optimise_target_delta<'py>(
         &self,
         py: Python<'py>,
@@ -1113,6 +1114,7 @@ impl PyVindex {
     ///     predictions: list of (token, probability) tuples
     ///     residuals:   list of (layer_index, (hidden_size,) numpy array)
     #[pyo3(signature = (prompt, top_k_predictions=5))]
+    #[allow(clippy::type_complexity)]
     fn infer_trace<'py>(
         &self, py: Python<'py>, prompt: &str,
         top_k_predictions: usize,

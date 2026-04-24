@@ -189,11 +189,9 @@ fn main() {
     let mut token_counts: HashMap<String, usize> = HashMap::new();
     for layer in &all_layers {
         if let Some(metas) = patched.down_meta_at(*layer) {
-            for meta_opt in metas.iter() {
-                if let Some(meta) = meta_opt {
-                    if meta.top_token.len() >= 2 && meta.c_score >= 0.2 {
-                        *token_counts.entry(meta.top_token.clone()).or_default() += 1;
-                    }
+            for meta in metas.iter().flatten() {
+                if meta.top_token.len() >= 2 && meta.c_score >= 0.2 {
+                    *token_counts.entry(meta.top_token.clone()).or_default() += 1;
                 }
             }
         }
@@ -287,6 +285,7 @@ fn main() {
         for hit in hits.iter().take(2) {
             let tok = hit.meta.top_token.trim();
             if tok.len() < 2 { continue; }
+            #[allow(clippy::if_same_then_else)]
             let comma = if edge_idx > 0 { "" } else { "" };
             if let Some(label) = probe_labels.get(&(*layer, hit.feature)) {
                 println!(
@@ -413,7 +412,7 @@ fn main() {
     let body = serde_json::json!({"entity": "France", "edges": [{"target": "Paris"}]});
     let mut hasher = DefaultHasher::new();
     body.to_string().hash(&mut hasher);
-    let etag = format!("\"{}\"", format!("{:x}", hasher.finish()));
+    let etag = format!("\"{:x}\"", hasher.finish());
 
     println!("Response headers:");
     println!("  ETag: {etag}");

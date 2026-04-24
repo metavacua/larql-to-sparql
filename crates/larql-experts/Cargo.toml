@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "expert-interface",
+    "experts/arithmetic",
+    "experts/date",
+    "experts/unit",
+    "experts/logic",
+    "experts/dijkstra",
+    "experts/statistics",
+    "experts/geometry",
+    "experts/trig",
+    "experts/string_ops",
+    "experts/hash",
+    "experts/finance",
+    "experts/sql",
+    "experts/element",
+    "experts/http_status",
+    "experts/isbn",
+    "experts/luhn",
+    "experts/markov",
+    "experts/conway",
+    "experts/graph",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+expert-interface = { path = "expert-interface" }
+serde = { version = "1", features = ["derive"], default-features = false }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level   = "s"
+lto         = true
+codegen-units = 1
+strip       = true
+panic       = "abort"

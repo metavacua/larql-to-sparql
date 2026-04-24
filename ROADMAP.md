@@ -46,9 +46,27 @@ The whole Act 2 story is MoE-distributed.
   output to `new_h`. Layer scalar correctly applied only to the
   combined FFN+MoE delta (`h_post_attn + scalar * (dense + moe)`),
   not to the full residual.
-- [x] **Gemma 4 26B A4B coherent output** — first confirmed working
-  Metal inference: "The capital of France is" → "Paris", Germany →
-  "Berlin", "hydrogen and" → "oxygen". (2026-04-20)
+- [x] **Gemma 4 26B A4B coherent output** — first end-to-end working
+  Metal inference (2026-04-24). The four fixes that had to land together:
+    1. **Row-padded Q4_K/Q6_K storage** for matrices whose inner dim
+       isn't a multiple of 256 (26B A4B's dense `intermediate_size=2112`
+       → 8.25 super-blocks per row). Old extraction stored contiguously,
+       shader read wrong bytes for every `down_proj` row past 0. See
+       `pad_rows_to_256` in `crates/larql-vindex/src/format/weights/write.rs`
+       + `inter_padded` dispatch in `metal/decode/mod.rs`.
+    2. **Parameter-free router RMSNorm** — HF's `Gemma4TextRouter.norm`
+       is `with_scale=False` (no tensor on disk). Added arch trait
+       `moe_router_norm_parameter_free()` and the `rms_norm_no_weight`
+       branch in `cpu/ops/moe/forward.rs`.
+    3. **Outer `post_feedforward_layernorm.weight`** (un-suffixed)
+       extracted + applied to `(h1 + h2)` before the residual add —
+       distinct from the `_1` dense-branch norm.
+    4. **`layer_scalar` scales the whole layer output** (`new_h *=
+       layer_scalar`) not the FFN delta — matches HF's final
+       `hidden_states *= self.layer_scalar` in `DecoderLayer.forward`.
+  Validated end-to-end by residual-diff against HF bf16 (see
+  Correctness infrastructure below): L0 `layer_out` cos improved from
+  0.7018 → 0.9998; L29 cos from −0.27 → 0.93.
 - [ ] **Batched MoE prefill** — current MoE prefill uses token-by-token
   `decode_token` calls (correct, but O(seq_len) serial GPU dispatches
   per layer). Replace with a batched prefill that processes all prompt
@@ -56,11 +74,17 @@ The whole Act 2 story is MoE-distributed.
   layer. See `crates/larql-compute/src/metal/trait_impl.rs::prefill_q4`
   and `full_pipeline.rs::dispatch_full_pipeline`.
 - [ ] **Fix `dispatch_full_pipeline` layer_scalar** — currently scales
-  the full residual including `h_post_attn` instead of only the FFN
-  delta. Not hit for Gemma 4 26B (all-MoE bypasses this path) but
-  wrong for future non-MoE models with `layer_scalar`. Fix: scale
-  `normed_ffn` or `down_out` before the residual add in
-  `crates/larql-compute/src/metal/stages/residual.rs::encode_post_ffn`.
+  the full residual including `h_post_attn` instead of applying
+  `new_h *= layer_scalar` at the end of the layer (HF-accurate). The
+  decode path now does this correctly via `apply_whole_layer_scalar`
+  in `metal/decode/moe_combine.rs`; prefill path (only matters for
+  seq_len>1 with non-MoE `layer_scalar` models) still needs the same.
+- [ ] **Chat-template-aware prompting** — 26B A4B is instruct-tuned
+  and answers trivia confidently only via the chat template. On raw
+  prompts it wanders (HF top-1 on "The capital of France is" is
+  `' CAP'`, not `' Paris'`). The architecture regression test now
+  asserts against what HF actually produces, but the `run` CLI should
+  auto-apply the template for IT models — see P1 "Chat template" below.
 - [ ] **MoE-aware forward pass on CPU path** — `predict_q4k` /
   `WeightFfn::forward` has no MoE. The non-Metal CPU path produces
   wrong output on Gemma 4 26B. Wire `cpu_moe_forward` into
@@ -467,6 +491,53 @@ the attention weights taking a third of RAM.
 ---
 
 ## Done (ship log)
+
+### Gemma 4 26B A4B end-to-end correctness (2026-04-24)
+Closed four independent gaps that together produced garbage output on
+the hybrid-MoE 26B A4B model; aligned non-MoE models (Gemma 3 4B,
+Gemma 4 31B, Mistral 7B) were unaffected and continue to pass. See
+`crates/larql-compute/ROADMAP.md` P0.5 for full per-fix detail.
+
+- **Q4_K/Q6_K row alignment** — 26B A4B's `intermediate_size=2112`
+  isn't a multiple of 256, breaking `down_proj` matvec on any
+  matrix whose inner dim isn't super-block-aligned. Fix: per-row
+  zero-pad during extraction (`pad_rows_to_256`), dispatch with
+  `K = inter_padded`. Future vindexes with any non-256 inner dim
+  now work automatically.
+- **Parameter-free router RMSNorm** — Gemma 4's `Gemma4TextRouter.norm`
+  has no learned weight. Added arch flag + `rms_norm_no_weight`.
+- **Outer `post_feedforward_layernorm`** extracted and wired — was
+  being conflated with the `_1` dense-branch norm.
+- **`layer_scalar` applied to whole layer output** not the FFN
+  delta — matches HF's `hidden_states *= self.layer_scalar`.
+
+### Correctness infrastructure (2026-04-24)
+Tooling to keep the above from regressing, and to localise any
+future cross-model forward-pass bug to the right layer / block:
+
+- **Architecture regression suite** —
+  `crates/larql-inference/tests/test_arch_golden.rs` runs one
+  `#[test]` per `(arch × backend)`. Skip-if-missing for vindex
+  cache, so CI stays green but local runs catch breakage
+  immediately. Covers Gemma 3, Gemma 4 dense, Gemma 4 hybrid MoE,
+  Llama 2 base, Mistral 7B base across GPU + CPU backends.
+- **HF-reference residual diff** — `LARQL_DUMP_RESIDUALS=<path>`
+  writes every layer's `layer_in` / `h_post_attn` / `layer_out` in
+  a binary format symmetric with `/tmp/hf_residuals.py` (hooks
+  `Gemma4TextDecoderLayer` in HF transformers). `/tmp/diff_residuals.py`
+  prints per-layer cosine + RMS-delta and points at the first
+  layer where attention vs FFN diverges. Caught the row-alignment
+  bug by bisecting L0 sub-components (attention matched at
+  cos=0.9989; down_proj matvec dropped to 0.023).
+- **L0 intermediate dumps** (`LARQL_DUMP_L0=<dir>`) — writes
+  gate_out, up_out, GEGLU act, down_out, h1, moe_out for the first
+  layer. `/tmp/diff_l0_gate_up.py` computes HF's manual MLP from
+  the captured pre-norm input and diffs each projection.
+- **Vindex surgical patcher** —
+  `crates/larql-cli/examples/patch_down_proj.rs` re-quantises
+  `layers.N.mlp.down_proj.weight` entries with row-padding from an
+  existing vindex. Avoids a ~hour-long 42 GB re-extract when only
+  one tensor class needs redoing.
 
 ### CLI redesign (primary / dev split)
 - New verbs: `run`, `chat`, `pull`, `list`, `show`, `rm`, `link`.

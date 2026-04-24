@@ -177,8 +177,8 @@ pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // Reconstruct L13 last-token state: base + score * pc1
         let mut l13_last_token = vec![0.0f32; hidden];
-        for j in 0..hidden {
-            l13_last_token[j] = bn.base_vector[j] + score * bn.pc1_direction[j];
+        for (j, slot) in l13_last_token.iter_mut().enumerate() {
+            *slot = bn.base_vector[j] + score * bn.pc1_direction[j];
         }
 
         // Get real hidden state at L13 for all positions except last

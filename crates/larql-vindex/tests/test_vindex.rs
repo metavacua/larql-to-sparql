@@ -1752,6 +1752,8 @@ fn make_synthetic_model() -> larql_models::ModelWeights {
         tensors,
         vectors,
         raw_bytes: std::collections::HashMap::new(),
+        packed_mmaps: std::collections::HashMap::new(),
+        packed_byte_ranges: std::collections::HashMap::new(),
         embed,
         lm_head,
         num_layers,
@@ -3583,10 +3585,10 @@ fn streaming_extract_preserves_per_layer_intermediate_for_variable_ffn() {
     // ── VectorIndex::num_features(layer) — the accessor predict_q4k calls ──
     let mut lcb = larql_vindex::SilentLoadCallbacks;
     let index = larql_vindex::VectorIndex::load_vindex(&output_dir, &mut lcb).unwrap();
-    for layer in 0..num_layers {
+    for (layer, &inter) in intermediates.iter().enumerate().take(num_layers) {
         assert_eq!(
             index.num_features(layer),
-            intermediates[layer],
+            inter,
             "VectorIndex::num_features(layer={layer}) wrong"
         );
     }

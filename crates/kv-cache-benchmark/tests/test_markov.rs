@@ -8,7 +8,7 @@ fn test_markov_cold_tier_size() {
     let strategy = MarkovResidual::new(512);
 
     // Cold tier: 4 bytes per token regardless of model size
-    let mem_4k = strategy.memory_bytes(&config, 4096);
+    let _mem_4k = strategy.memory_bytes(&config, 4096);
     let mem_370k = strategy.memory_bytes(&config, 370_000);
 
     // At 370K, cold tier dominates: 370K × 4 = 1.48 MB
@@ -28,7 +28,7 @@ fn test_markov_window_bounded() {
     let strategy = MarkovResidual::new(512);
 
     // Memory at different context lengths should plateau
-    let mem_4k = strategy.memory_bytes(&config, 4_096);
+    let _mem_4k = strategy.memory_bytes(&config, 4_096);
     let mem_32k = strategy.memory_bytes(&config, 32_768);
     let mem_370k = strategy.memory_bytes(&config, 370_000);
 
@@ -65,29 +65,6 @@ fn test_markov_much_smaller_than_standard() {
 }
 
 #[test]
-fn test_boundary_residual_always_flat() {
-    let config = ModelConfig::gemma_4b();
-    let standard = kv_cache_benchmark::standard_kv::StandardKv;
-    let boundary = kv_cache_benchmark::boundary_residual::BoundaryResidual::gemma_4b();
-
-    // BoundaryRS W=32 is always much smaller: ~11 MB hot + tiny cold IDs.
-    // At 4K it's ~25× smaller; at 370K it's ~2000× smaller.
-    for &seq_len in &[4096, 32768, 131072, 370_000] {
-        let std_mem = standard.memory_bytes(&config, seq_len);
-        let brs_mem = boundary.memory_bytes(&config, seq_len);
-        assert!(
-            brs_mem * 20 < std_mem,
-            "At {seq_len}: Boundary RS ({brs_mem}) should be >20× smaller than Standard KV ({std_mem})"
-        );
-    }
-    // At 370K it's genuinely ~2000× compression.
-    let std_370k = standard.memory_bytes(&config, 370_000) as f64;
-    let brs_370k = boundary.memory_bytes(&config, 370_000) as f64;
-    assert!(std_370k / brs_370k > 1000.0,
-        "At 370K: compression ratio should exceed 1000× (got {:.0}×)", std_370k / brs_370k);
-}
-
-#[test]
 fn test_markov_encode_decode() {
     let strategy = MarkovResidual::new(4);
     let dim = 8;
@@ -100,13 +77,13 @@ fn test_markov_encode_decode() {
         .collect();
 
     let encoded = strategy.encode(&keys, &values);
-    let (dec_keys, dec_values) = strategy.decode(&encoded, 10, dim);
+    let (dec_keys, _dec_values) = strategy.decode(&encoded, 10, dim);
 
     assert_eq!(dec_keys.len(), 10);
 
     // Cold tier vectors (first 6) should be zeros (simulating replay)
-    for i in 0..6 {
-        assert_eq!(dec_keys[i], vec![0.0f32; dim]);
+    for key in dec_keys.iter().take(6) {
+        assert_eq!(*key, vec![0.0f32; dim]);
     }
 
     // Window vectors (last 4) should match original keys

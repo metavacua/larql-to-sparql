@@ -69,7 +69,18 @@ pub struct MoeLayerWeights<'a> {
     pub router_scale: &'a [f32],
     /// Router per-expert output-scale [num_experts].
     pub router_per_expert_scale: &'a [f32],
-    /// Pre-norm applied to residual before routing. [hidden_size].
+    /// Router's own RMS-norm weight applied to the router input before projection.
+    /// Empty slice → fall back to parameter-free RMSNorm (if the flag below
+    /// is set) or to `pre_experts_norm`.
+    pub router_norm: &'a [f32],
+    /// Parameter-free router RMSNorm: apply `x / sqrt(mean(x²) + eps)` on
+    /// the router input when `router_norm` is empty. HF Gemma 4 sets this
+    /// true (`Gemma4RMSNorm(with_scale=False)` — no learned weight on disk).
+    pub router_norm_parameter_free: bool,
+    /// Scalar multiplier on the router input after the norm and `router_scale`.
+    /// HF Gemma 4: `hidden_size^-0.5`. Use `1.0` to disable.
+    pub router_input_scalar: f32,
+    /// Pre-norm applied to the expert matmuls' input (not the router's). [hidden_size].
     pub pre_experts_norm: &'a [f32],
     /// Post-norm for dense FFN output (replaces plain post_ffn_norm). [hidden_size].
     pub post_ffn1_norm: &'a [f32],
@@ -81,6 +92,8 @@ pub struct MoeLayerWeights<'a> {
     pub top_k: usize,
     /// Per-expert intermediate (hidden) dimension.
     pub intermediate_size: usize,
+    /// Activation function for expert MLPs. Gemma 4 uses GeluTanh; Mixtral/others use Silu.
+    pub activation: Activation,
 }
 
 /// Per-layer quantized weights for the full pipeline.
@@ -157,6 +170,19 @@ pub struct FullPipelineLayer<'a> {
     /// Hybrid MoE block (Gemma 4 26B A4B: dense MLP + expert block, outputs summed).
     /// None for all dense models.
     pub moe: Option<MoeLayerWeights<'a>>,
+
+    /// When true, a final RMS norm is applied to the combined (dense + expert)
+    /// output before the residual add. Gemma 4 26B A4B: true. Other models:
+    /// false (use `layer_scalar` instead).
+    pub moe_combined_output_norm: bool,
+
+    /// Outer post-FFN norm weight applied to `(h1 + h2)` before the residual
+    /// add. When present and `moe_combined_output_norm` is true, this weight
+    /// is used instead of `post_ffn_norm` for the combined norm.
+    /// HF Gemma 4: `layers.N.post_feedforward_layernorm.weight` (un-suffixed,
+    /// distinct from the `_1` dense-branch norm stored in `post_ffn_norm`).
+    /// `None` → fall back to `post_ffn_norm` (legacy behavior).
+    pub moe_outer_post_norm: Option<&'a [f32]>,
 }
 
 impl<'a> FullPipelineLayer<'a> {

@@ -415,12 +415,27 @@ pub fn write_model_weights_with_opts(
 
         // Per-layer norms
         for layer in 0..num_layers {
-            let norm_keys: Vec<String> = [
+            let mut norm_keys: Vec<String> = [
                 Some(arch.input_layernorm_key(layer)),
                 Some(arch.post_attention_layernorm_key(layer)),
                 arch.pre_feedforward_layernorm_key(layer),
                 arch.post_feedforward_layernorm_key(layer),
             ].into_iter().flatten().collect();
+
+            // Hybrid MoE additions: the pre_2/post_1/post_2 weights plus
+            // the outer post_feedforward_layernorm that wraps (h1+h2).
+            if arch.is_hybrid_moe() {
+                for k in [
+                    arch.moe_pre_experts_norm_key(layer),
+                    arch.moe_post_ffn1_norm_key(layer),
+                    arch.moe_post_experts_norm_key(layer),
+                    arch.moe_post_outer_norm_key(layer),
+                ].into_iter().flatten() {
+                    if !norm_keys.contains(&k) {
+                        norm_keys.push(k);
+                    }
+                }
+            }
 
             for key in norm_keys {
                 if let Some(data) = source.get_vector(&key) {
@@ -552,6 +567,11 @@ struct Q4kAttnEntry {
 
 /// Pad a row-major f32 buffer to the next multiple of 256 with zeros
 /// (Q4_K/Q6_K super-blocks require length % 256 == 0).
+///
+/// Kept only for unit-test coverage of the flat-padding helper pattern;
+/// production paths now use [`pad_rows_to_256`] since the shader reads
+/// each row as a fixed number of super-blocks.
+#[cfg(test)]
 fn pad_to_256(data: &[f32]) -> Vec<f32> {
     let padded_len = data.len().div_ceil(256) * 256;
     if padded_len == data.len() {
@@ -562,6 +582,34 @@ fn pad_to_256(data: &[f32]) -> Vec<f32> {
         v.resize(padded_len, 0.0);
         v
     }
+}
+
+/// Pad each row of a 2-D row-major matrix to the next multiple of 256 with
+/// zeros. Returns `(padded_flat, padded_cols)`.
+///
+/// Why this exists: Q4_K/Q6_K super-blocks hold exactly 256 values, so the
+/// Metal matvec shader computes `bytes_per_row = (cols / 256) * block_size`.
+/// When `cols % 256 != 0` (e.g. Gemma 4 26B A4B's `intermediate_size=2112`),
+/// flat-padding the whole tensor leaves row boundaries misaligned with
+/// super-block boundaries and every row past row 0 reads wrong bytes. Per-row
+/// padding realigns each row onto a super-block boundary at the cost of a
+/// small storage overhead (the padding columns are zero and contribute
+/// nothing to the dot product at dispatch time, provided the caller also
+/// zero-pads the input vector to `padded_cols`).
+fn pad_rows_to_256(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, usize) {
+    debug_assert_eq!(data.len(), rows * cols);
+    let padded_cols = cols.div_ceil(256) * 256;
+    if padded_cols == cols {
+        return (data.to_vec(), cols);
+    }
+    let mut out = Vec::with_capacity(rows * padded_cols);
+    let pad = padded_cols - cols;
+    for r in 0..rows {
+        let row = &data[r * cols..(r + 1) * cols];
+        out.extend_from_slice(row);
+        out.extend(std::iter::repeat(0.0f32).take(pad));
+    }
+    (out, padded_cols)
 }
 
 /// Options for [`write_model_weights_q4k_with_opts`].
@@ -644,6 +692,7 @@ pub fn write_model_weights_q4k_with_opts(
 
         // Q, K, V, O in that order — use the same key string for V even when
         // the data is K's, so loaders that look up by position still work.
+        #[allow(clippy::type_complexity)]
         let slots: [(&str, Option<(Vec<f32>, usize, usize)>); 4] = [
             (q_key.as_str(), q),
             (k_key.as_str(), k),
@@ -659,7 +708,12 @@ pub fn write_model_weights_q4k_with_opts(
 
             // V (index 2) gets Q6_K, others get Q4_K.
             let is_v = i == 2;
-            let padded = pad_to_256(&data);
+            // Row-pad to 256 so each row aligns to a super-block boundary.
+            // Critical for models with non-256 inner dims (e.g. Gemma 4 26B A4B
+            // where the dense intermediate is 2112). `padded_cols` is what the
+            // matvec shader must use as `K`; callers also need to zero-pad the
+            // input vector to the same width.
+            let (padded, padded_cols) = pad_rows_to_256(&data, rows, cols);
             let q_bytes = if is_v { quantize_q6_k(&padded) } else { quantize_q4_k(&padded) };
             let format = if is_v { QuantBlockFormat::Q6K } else { QuantBlockFormat::Q4K };
 
@@ -667,7 +721,7 @@ pub fn write_model_weights_q4k_with_opts(
             let length = q_bytes.len() as u64;
             attn_manifest.push(Q4kAttnEntry {
                 key: key.to_string(),
-                shape: vec![rows, cols],
+                shape: vec![rows, padded_cols],
                 format,
                 offset: attn_offset,
                 length,
@@ -706,7 +760,12 @@ pub fn write_model_weights_q4k_with_opts(
             arch.ffn_down_key(layer),
         ].iter().enumerate() {
             if let Some((data, rows, cols)) = source.get_tensor(key) {
-                let padded = pad_to_256(&data);
+                // Row-pad to 256 so each row aligns to a super-block boundary.
+                // Without this, matrices with `cols % 256 != 0` (e.g. Gemma 4
+                // 26B A4B's down_proj with inner dim 2112) store contiguous
+                // quantisation that every row past row 0 reads wrong. See
+                // `pad_rows_to_256` docs.
+                let (padded, padded_cols) = pad_rows_to_256(&data, rows, cols);
                 // Gate (i=0) and up (i=1) always Q4_K. Down (i=2) defaults
                 // to Q6_K for llama.cpp compatibility, Q4_K when opts.down_q4k.
                 let is_down = i == 2;
@@ -717,7 +776,7 @@ pub fn write_model_weights_q4k_with_opts(
                 let length = q_bytes.len() as u64;
                 ff_manifest.push(Q4kAttnEntry {
                     key: key.clone(),
-                    shape: vec![rows, cols],
+                    shape: vec![rows, padded_cols],
                     format,
                     offset: ff_offset,
                     length,
@@ -854,9 +913,14 @@ pub fn write_model_weights_q4k_with_opts(
             let moe_vec_keys: Vec<String> = [
                 arch.moe_router_scale_key(layer),
                 arch.moe_router_per_expert_scale_key(layer),
+                arch.moe_router_norm_key(layer),
                 arch.moe_pre_experts_norm_key(layer),
                 arch.moe_post_ffn1_norm_key(layer),
                 arch.moe_post_experts_norm_key(layer),
+                // Outer post-FFN norm used to re-normalise (h1 + h2) before
+                // the residual add in hybrid MoE (HF Gemma 4). Distinct from
+                // post_ffn1_norm, which is the dense-branch norm.
+                arch.moe_post_outer_norm_key(layer),
             ].into_iter().flatten().collect();
             for key in moe_vec_keys {
                 if let Some(data) = source.get_vector(&key) {
@@ -997,15 +1061,18 @@ pub fn write_model_weights_q4k_with_opts(
 
     // ── lm_head_q4.bin ──
     if let Some((data, rows, cols)) = source.lm_head() {
-        let padded = pad_to_256(&data);
+        let (padded, padded_cols) = pad_rows_to_256(&data, rows, cols);
         let q_bytes = quantize_q4_k(&padded);
         std::fs::write(dir.join("lm_head_q4.bin"), &q_bytes)?;
         // Record in norms manifest so a single weight_manifest.json references
-        // everything non-quantised-via-layout.
+        // everything non-quantised-via-layout. Shape records the stored
+        // `padded_cols` — callers route through the matvec dispatch which
+        // uses shape[1] as `K`, so the padding stays invisible provided the
+        // input activation buffer is zero-padded to match.
         norm_entries.push(WeightEntry {
             key: "lm_head.weight".into(),
             kind: "tensor_q4k".into(),
-            shape: vec![rows, cols],
+            shape: vec![rows, padded_cols],
             offset: 0,
             length: q_bytes.len() as u64,
             file: "lm_head_q4.bin".into(),

@@ -187,7 +187,7 @@ pub fn build_vindex_streaming(
 
                 let experts = crate::format::quant::mxfp4::dequantize_all_experts(
                     blocks_view.data(), scales_view.data(), n_exp, out_features, groups,
-                );
+                )?;
 
                 let mut total_features = 0usize;
                 let mut layer_bytes = 0u64;
@@ -347,7 +347,7 @@ pub fn build_vindex_streaming(
                 let in_features = groups * 32;
                 let experts = crate::format::quant::mxfp4::dequantize_all_experts(
                     bv.data(), sv.data(), n_exp, out_features, groups,
-                );
+                )?;
                 experts.into_iter().map(|data| {
                     Array2::from_shape_vec((out_features, in_features), data).unwrap()
                 }).collect()

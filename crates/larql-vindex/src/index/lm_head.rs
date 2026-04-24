@@ -44,7 +44,7 @@ impl VectorIndex {
         if self.lm_head_q4_mmap.is_some() || self.lm_head_q4_synth.is_some() { return; }
         let vocab = self.vocab_size;
         let hidden = self.hidden_size;
-        if vocab == 0 || hidden == 0 || hidden % 32 != 0 { return; }
+        if vocab == 0 || hidden == 0 || !hidden.is_multiple_of(32) { return; }
         let f16_mmap = match self.lm_head_f16_mmap.as_ref() {
             Some(m) => m.clone(),
             None => return,
@@ -57,10 +57,10 @@ impl VectorIndex {
         let mut row_f32 = vec![0.0f32; hidden];
         for row in 0..vocab {
             let base = row * hidden * 2;
-            for i in 0..hidden {
+            for (i, slot) in row_f32.iter_mut().enumerate().take(hidden) {
                 let off = base + i * 2;
                 let bits = u16::from_le_bytes([f16_mmap[off], f16_mmap[off + 1]]);
-                row_f32[i] = larql_models::quant::half::f16_to_f32(bits);
+                *slot = larql_models::quant::half::f16_to_f32(bits);
             }
             let q4 = larql_compute::cpu::q4::quantize_q4_0(&row_f32);
             out.extend_from_slice(&q4);
@@ -266,7 +266,7 @@ mod tests {
         }
 
         // Minimal VectorIndex with the f16 mmap and known dims.
-        let mmap = Arc::new(unsafe {
+        let mmap = Arc::new({
             let mem = memmap2::MmapMut::map_anon(f16_bytes.len()).unwrap();
             let mut mem = mem;
             mem.copy_from_slice(&f16_bytes);

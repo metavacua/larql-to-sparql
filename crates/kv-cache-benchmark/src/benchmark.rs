@@ -115,7 +115,7 @@ pub fn multi_turn_simulation(
     results
 }
 
-/// Format results as a comparative table (the video frame).
+/// Format the memory-scaling table (per-strategy × context length).
 pub fn format_comparative_table(
     config: &ModelConfig,
     strategies: &[&dyn KvStrategy],
@@ -123,7 +123,6 @@ pub fn format_comparative_table(
     let mut out = String::new();
     out.push_str(&format!("\n=== KV Cache Strategy Comparison: {} ===\n\n", config.name));
 
-    // Dynamic header based on number of strategies
     let col_width = 15;
     out.push_str(&format!("{:<25}", "Context Length"));
     for s in strategies {
@@ -141,34 +140,6 @@ pub fn format_comparative_table(
         }
         out.push('\n');
     }
-
-    out.push_str("\n--- Computation per token ---\n\n");
-    // 5-column computation table
-    let ops = [
-        //                     StdKV         TQ4           MarkovRS      BoundaryRS    GraphWalk
-        ("Attention matmul", "34 layers",  "34 layers",  "window only","window only","ELIMINATED*"),
-        ("FFN matmul",       "34 layers",  "34 layers",  "34 layers",  "34 layers",  "ELIMINATED*"),
-        ("Logits matmul",    "1x",         "1x",         "1x",         "1x",         "ELIMINATED*"),
-        ("KV cache write",   "34 layers",  "34L + quant","none",       "none",       "none"),
-        ("Cold K/V replay",  "none",       "none",       "none",       "bdy+ids",    "none"),
-        ("Graph lookup",     "none",       "none",       "none",       "none",       "3 per hop*"),
-    ];
-
-    out.push_str(&format!(
-        "{:<20} {:>14} {:>14} {:>12} {:>13} {:>13}\n",
-        "Operation", "Standard KV", "TurboQuant", "Markov RS", "Boundary RS", "Graph Walk"
-    ));
-    out.push_str(&"-".repeat(92));
-    out.push('\n');
-
-    for (op, std, tq, mrs, brs, gw) in &ops {
-        out.push_str(&format!(
-            "{:<20} {:>14} {:>14} {:>12} {:>13} {:>13}\n",
-            op, std, tq, mrs, brs, gw,
-        ));
-    }
-
-    out.push_str("\n* Graph Walk requires cracked attention (not yet implemented). Falls back to Markov RS.\n");
 
     out
 }

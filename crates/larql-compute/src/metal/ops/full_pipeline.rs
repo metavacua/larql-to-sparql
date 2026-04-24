@@ -491,10 +491,10 @@ pub fn dispatch_full_pipeline(
         .map(|l| l.num_q_heads * l.head_dim)
         .max().unwrap_or(q_dim);
     let q8_row_max = hidden.max(max_layer_q_dim);
-    let q8s_row_bytes = ((q8_row_max + 31) / 32) * 4;
-    for l in 0..num_layers {
-        let lq = layers[l].num_q_heads * layers[l].head_dim;
-        let lkv = layers[l].num_kv_heads * layers[l].head_dim;
+    let q8s_row_bytes = q8_row_max.div_ceil(32) * 4;
+    for layer in layers.iter().take(num_layers) {
+        let lq = layer.num_q_heads * layer.head_dim;
+        let lkv = layer.num_kv_heads * layer.head_dim;
         norm_outs.push(bufs.output((seq_len * hidden * 4) as u64));
         q_outs.push(bufs.output((seq_len * lq * 4) as u64));
         k_outs.push(bufs.output((seq_len * lkv * 4) as u64));
@@ -511,7 +511,7 @@ pub fn dispatch_full_pipeline(
         q8_bufs.push(bufs.output((seq_len * q8_row_max) as u64));
         q8s_bufs.push(bufs.output((seq_len * q8s_row_bytes) as u64));
         ffn_q8_bufs.push(bufs.output((seq_len * hidden) as u64));
-        ffn_q8s_bufs.push(bufs.output((seq_len * ((hidden + 31) / 32) * 4) as u64));
+        ffn_q8s_bufs.push(bufs.output((seq_len * hidden.div_ceil(32) * 4) as u64));
     }
 
     let mut cmd = queue.new_command_buffer();
@@ -557,7 +557,7 @@ pub fn dispatch_full_pipeline(
         let q8_off = |p: usize| (p * q8_row_max) as u64;
         let q8s_off = |p: usize| (p * q8s_row_bytes) as u64;
         let _ffn_q8_off = |p: usize| (p * hidden) as u64;
-        let _ffn_q8s_off = |p: usize| (p * ((hidden + 31) / 32) * 4) as u64;
+        let _ffn_q8s_off = |p: usize| (p * hidden.div_ceil(32) * 4) as u64;
 
         // Stage 1+2: input norm + Q/K/V projection, format-aware, per position.
         use crate::metal::stages::{input_norm, qkv_proj, quant_matvec};
@@ -795,7 +795,7 @@ pub fn dispatch_full_pipeline(
                 has_post_norms, ffn_needs_q8,
                 (hidden * 4) as u64,
                 hidden as u64,
-                (((hidden + 31) / 32) * 4) as u64,
+                (hidden.div_ceil(32) * 4) as u64,
             );
             enc.end_encoding();
         }
@@ -810,7 +810,7 @@ pub fn dispatch_full_pipeline(
             let h_stride = (hidden * 4) as u64;
             let inter_stride = (inter * 4) as u64;
             let q8_stride = hidden as u64;
-            let q8s_stride = (((hidden + 31) / 32) * 4) as u64;
+            let q8s_stride = (hidden.div_ceil(32) * 4) as u64;
 
             let enc = cmd.new_compute_command_encoder();
             if layers[l].ffn_type == crate::FfnType::Standard {

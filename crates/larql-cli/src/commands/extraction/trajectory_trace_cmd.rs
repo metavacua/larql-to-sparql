@@ -568,10 +568,10 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
     //   pc_k = sum_i evec_k[i] * all_rows[i]  (then normalize)
     // Then project each residual onto these PCs.
     let mut pc_directions: Vec<Vec<f32>> = Vec::with_capacity(top_k);
-    for k in 0..shared_svs.len() {
+    for evec in shared_evecs.iter().take(shared_svs.len()) {
         let mut direction = vec![0.0f32; hidden_size];
         for (i, row) in all_rows.iter().enumerate() {
-            let coeff = shared_evecs[k][i];
+            let coeff = evec[i];
             for (j, v) in row.iter().enumerate() {
                 direction[j] += coeff * v;
             }

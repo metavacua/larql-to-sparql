@@ -8,11 +8,14 @@ pub mod forward;
 pub mod graph_ffn;
 pub mod layer_graph;
 pub mod model;
+pub mod prompt;
 pub mod residual;
 pub mod tokenizer;
 pub mod trace;
+pub mod trie;
 pub mod vindex;
 pub mod walker;
+pub mod experts;
 
 // Re-export dependencies for downstream crates.
 pub use larql_models;
@@ -24,6 +27,17 @@ pub use tokenizers;
 // Backend re-exports (from larql-compute).
 pub use larql_compute::{ComputeBackend, MatMulOp, default_backend, cpu_backend, dot_proj_gpu, matmul_gpu};
 pub use larql_compute::CpuBackend;
+pub use larql_compute::cpu::ops::moe::{run_single_expert, run_single_expert_with_norm, cpu_moe_forward};
+pub use larql_compute::MoeLayerWeights;
+pub use larql_compute::Activation as ComputeActivation;
+
+/// Map a model's activation function to the compute-layer `Activation` enum.
+pub fn activation_from_arch(arch: &dyn larql_models::ModelArchitecture) -> larql_compute::Activation {
+    match arch.activation() {
+        larql_models::Activation::GeluTanh => larql_compute::Activation::GeluTanh,
+        _ => larql_compute::Activation::Silu,
+    }
+}
 #[cfg(feature = "metal")]
 pub use larql_compute::MetalBackend;
 
@@ -35,6 +49,7 @@ pub use error::InferenceError;
 pub use ffn::{
     FfnBackend, LayerFfnRouter, RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend,
     RemoteLatencyStats, SparseFfn, WeightFfn,
+    MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig,
 };
 pub use attention::AttentionWeights;
 pub use forward::{
@@ -48,8 +63,10 @@ pub use forward::{
     capture_spec_residuals, SpecCapture,
     run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult,
     TargetDelta, TargetDeltaOpts,
-    apply_knn_override, infer_patched, walk_trace_from_residuals, InferPatchedResult,
+    apply_knn_override, infer_patched, infer_patched_q4k, walk_trace_from_residuals, InferPatchedResult,
     KnnOverride, KNN_COSINE_THRESHOLD,
+    forward_raw_logits, RawForward, hidden_to_raw_logits,
+    generate_cached_constrained,
 };
 pub use graph_ffn::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
 pub use trace::{
@@ -69,8 +86,10 @@ pub use layer_graph::{
     // Analysis/validation
     TemplatePattern, TemplateUniverse, GuidedWalkLayerGraph,
     detect_template,
+    // Expert grid generation
+    grid::{generate_with_remote_moe, GridGenerateResult},
 };
-pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache};
+pub use vindex::{WalkFfn, WalkFfnConfig, FfnL1Cache, predict_q4k};
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
 

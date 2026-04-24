@@ -39,11 +39,17 @@ pub struct ModelWeights {
 }
 
 impl ModelWeights {
-    /// Return a byte slice into the mmap'd packed data for `key`, or `None`.
+    /// Return a byte slice of packed data for `key`, or `None`.
+    ///
+    /// Checks mmap ranges first (production: large packed files), then
+    /// falls back to `raw_bytes` (tests and small in-memory tensors).
     pub fn get_packed_bytes(&self, key: &str) -> Option<&[u8]> {
-        let (file, offset, length) = self.packed_byte_ranges.get(key)?;
-        let mmap = self.packed_mmaps.get(file)?;
-        Some(&mmap[*offset..*offset + *length])
+        if let Some((file, offset, length)) = self.packed_byte_ranges.get(key) {
+            if let Some(mmap) = self.packed_mmaps.get(file) {
+                return Some(&mmap[*offset..*offset + *length]);
+            }
+        }
+        self.raw_bytes.get(key).map(|v| v.as_slice())
     }
 
     /// Drop FFN weight tensors (gate, up, down projections) from memory.

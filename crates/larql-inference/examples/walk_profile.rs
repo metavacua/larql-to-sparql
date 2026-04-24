@@ -15,13 +15,13 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use ndarray::{Array1, Array2};
+use ndarray::Array2;
 
 use larql_inference::{
     predict_with_ffn, FfnBackend, InferenceModel, WeightFfn,
     vindex::WalkFfn,
 };
-use larql_vindex::{GateIndex, SilentLoadCallbacks, VectorIndex};
+use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 // ── CLI ────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,7 @@ fn percentile(samples: &mut [f64], p: f64) -> f64 {
 #[derive(Default, Debug)]
 struct Stage {
     median_us: f64,
+    #[allow(dead_code)]
     p99_us: f64,
 }
 

@@ -1,0 +1,219 @@
+//! Model-agnostic chat-template helpers.
+//!
+//! Wraps a raw user prompt in the instruction-tuning format the target model
+//! was trained on. Selecting the wrong template produces garbage output, so
+//! detection is conservative: known families map to their canonical template,
+//! everything else falls back to [`ChatTemplate::Plain`] (pass-through).
+//!
+//! Resolution precedence used by [`ChatTemplate::for_model_id`]:
+//!
+//!   1. Substring match on common family tokens (`gemma`, `mistral`, …).
+//!   2. Fallback to `Plain` (no wrapping).
+//!
+//! When you have a loaded model, prefer [`ChatTemplate::for_family`] with the
+//! string returned by [`larql_models::ModelArchitecture::family`] — that's the
+//! authoritative signal.
+
+/// Chat-template format for instruction-tuned models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatTemplate {
+    /// Gemma 2/3/4 turn format:
+    /// `<start_of_turn>user\n{}\n<end_of_turn>\n<start_of_turn>model\n`
+    Gemma,
+    /// Mistral / Mixtral instruction format: `[INST] {} [/INST]`.
+    ///
+    /// The official HF template prefixes `<s>`, but `encode_prompt` calls the
+    /// tokenizer with `add_special_tokens=true`, which already prepends BOS.
+    /// Including a literal `<s>` here risks double-BOS depending on tokenizer
+    /// post-processor behavior, so we omit it.
+    Mistral,
+    /// Llama 3 chat format using `<|begin_of_text|>` and header tags.
+    Llama,
+    /// ChatML used by Qwen, DeepSeek, and others:
+    /// `<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n`.
+    ChatML,
+    /// Pass-through — returns the prompt verbatim. Default for unknown
+    /// families and base (non-instruct) models.
+    Plain,
+}
+
+impl ChatTemplate {
+    /// Heuristic resolution from a model id like `"google/gemma-3-4b-it"`.
+    ///
+    /// Use this when you only have a string identifier (CLI flag, HF id).
+    /// When a `ModelArchitecture` is in scope, prefer [`Self::for_family`].
+    pub fn for_model_id(model_id: &str) -> Self {
+        let id = model_id.to_ascii_lowercase();
+        // Order matters: more-specific patterns first.
+        if id.contains("gemma") {
+            Self::Gemma
+        } else if id.contains("mixtral") || id.contains("mistral") {
+            Self::Mistral
+        } else if id.contains("llama") {
+            Self::Llama
+        } else if id.contains("qwen") || id.contains("deepseek") || id.contains("chatml") {
+            Self::ChatML
+        } else {
+            Self::Plain
+        }
+    }
+
+    /// Resolution from a model-architecture family string (the value returned
+    /// by `ModelArchitecture::family()`).
+    ///
+    /// Recognised values: `gemma2`, `gemma3`, `gemma4`, `mistral`, `mixtral`,
+    /// `llama`, `qwen`, `qwen2`, `qwen3`, `deepseek`, `gpt_oss`. Anything else
+    /// (`generic`, `tinymodel`, `starcoder2`, …) falls back to `Plain`.
+    pub fn for_family(family: &str) -> Self {
+        match family {
+            "gemma2" | "gemma3" | "gemma4" => Self::Gemma,
+            "mistral" | "mixtral" => Self::Mistral,
+            "llama" => Self::Llama,
+            "qwen" | "qwen2" | "qwen3" | "deepseek" | "gpt_oss" => Self::ChatML,
+            _ => Self::Plain,
+        }
+    }
+
+    /// Wrap `user_prompt` in the template. The output is ready to feed to the
+    /// tokenizer — no extra BOS handling needed (templates that need a leading
+    /// `<s>` include it).
+    pub fn wrap(&self, user_prompt: &str) -> String {
+        match self {
+            Self::Gemma => format!(
+                "<start_of_turn>user\n{user_prompt}\n<end_of_turn>\n<start_of_turn>model\n"
+            ),
+            Self::Mistral => format!("[INST] {user_prompt} [/INST]"),
+            Self::Llama => format!(
+                "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n\
+                 {user_prompt}<|eot_id|>\
+                 <|start_header_id|>assistant<|end_header_id|>\n\n"
+            ),
+            Self::ChatML => format!(
+                "<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
+            ),
+            Self::Plain => user_prompt.to_string(),
+        }
+    }
+
+    /// Short identifier suitable for logging.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Gemma => "gemma",
+            Self::Mistral => "mistral",
+            Self::Llama => "llama",
+            Self::ChatML => "chatml",
+            Self::Plain => "plain",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn for_model_id_gemma() {
+        assert_eq!(ChatTemplate::for_model_id("google/gemma-3-4b-it"), ChatTemplate::Gemma);
+        assert_eq!(ChatTemplate::for_model_id("Gemma-2-2B"), ChatTemplate::Gemma);
+    }
+
+    #[test]
+    fn for_model_id_mistral_family() {
+        assert_eq!(ChatTemplate::for_model_id("mistralai/Mistral-7B-Instruct-v0.3"), ChatTemplate::Mistral);
+        assert_eq!(ChatTemplate::for_model_id("mistralai/Mixtral-8x7B"), ChatTemplate::Mistral);
+    }
+
+    #[test]
+    fn for_model_id_llama() {
+        assert_eq!(ChatTemplate::for_model_id("meta-llama/Llama-3.2-3B-Instruct"), ChatTemplate::Llama);
+        assert_eq!(ChatTemplate::for_model_id("TinyLlama/TinyLlama-1.1B"), ChatTemplate::Llama);
+    }
+
+    #[test]
+    fn for_model_id_chatml_family() {
+        assert_eq!(ChatTemplate::for_model_id("Qwen/Qwen2.5-7B-Instruct"), ChatTemplate::ChatML);
+        assert_eq!(ChatTemplate::for_model_id("deepseek-ai/DeepSeek-V2"), ChatTemplate::ChatML);
+    }
+
+    #[test]
+    fn for_model_id_unknown_falls_back_to_plain() {
+        assert_eq!(ChatTemplate::for_model_id("some-random-model"), ChatTemplate::Plain);
+        assert_eq!(ChatTemplate::for_model_id(""), ChatTemplate::Plain);
+    }
+
+    #[test]
+    fn for_family_recognises_all_canonical_strings() {
+        assert_eq!(ChatTemplate::for_family("gemma2"), ChatTemplate::Gemma);
+        assert_eq!(ChatTemplate::for_family("gemma3"), ChatTemplate::Gemma);
+        assert_eq!(ChatTemplate::for_family("gemma4"), ChatTemplate::Gemma);
+        assert_eq!(ChatTemplate::for_family("mistral"), ChatTemplate::Mistral);
+        assert_eq!(ChatTemplate::for_family("mixtral"), ChatTemplate::Mistral);
+        assert_eq!(ChatTemplate::for_family("llama"), ChatTemplate::Llama);
+        assert_eq!(ChatTemplate::for_family("qwen"), ChatTemplate::ChatML);
+        assert_eq!(ChatTemplate::for_family("qwen2"), ChatTemplate::ChatML);
+        assert_eq!(ChatTemplate::for_family("qwen3"), ChatTemplate::ChatML);
+        assert_eq!(ChatTemplate::for_family("deepseek"), ChatTemplate::ChatML);
+        assert_eq!(ChatTemplate::for_family("gpt_oss"), ChatTemplate::ChatML);
+    }
+
+    #[test]
+    fn for_family_unknown_falls_back_to_plain() {
+        assert_eq!(ChatTemplate::for_family("generic"), ChatTemplate::Plain);
+        assert_eq!(ChatTemplate::for_family("tinymodel"), ChatTemplate::Plain);
+        assert_eq!(ChatTemplate::for_family("starcoder2"), ChatTemplate::Plain);
+        assert_eq!(ChatTemplate::for_family(""), ChatTemplate::Plain);
+    }
+
+    #[test]
+    fn gemma_wrap_includes_turn_markers() {
+        let w = ChatTemplate::Gemma.wrap("hello");
+        assert!(w.starts_with("<start_of_turn>user\n"));
+        assert!(w.contains("hello"));
+        assert!(w.ends_with("<start_of_turn>model\n"));
+    }
+
+    #[test]
+    fn mistral_wrap_includes_inst_markers() {
+        assert_eq!(
+            ChatTemplate::Mistral.wrap("hello"),
+            "[INST] hello [/INST]"
+        );
+    }
+
+    #[test]
+    fn mistral_wrap_omits_literal_bos() {
+        // BOS is added by the tokenizer via add_special_tokens=true;
+        // including a literal `<s>` risks double-BOS.
+        assert!(!ChatTemplate::Mistral.wrap("hello").contains("<s>"));
+    }
+
+    #[test]
+    fn llama_wrap_includes_header_tags() {
+        let w = ChatTemplate::Llama.wrap("hello");
+        assert!(w.starts_with("<|begin_of_text|>"));
+        assert!(w.contains("<|eot_id|>"));
+        assert!(w.ends_with("assistant<|end_header_id|>\n\n"));
+    }
+
+    #[test]
+    fn chatml_wrap_includes_im_tags() {
+        let w = ChatTemplate::ChatML.wrap("hello");
+        assert!(w.starts_with("<|im_start|>user\nhello<|im_end|>\n"));
+        assert!(w.ends_with("<|im_start|>assistant\n"));
+    }
+
+    #[test]
+    fn plain_wrap_is_passthrough() {
+        assert_eq!(ChatTemplate::Plain.wrap("hello"), "hello");
+        assert_eq!(ChatTemplate::Plain.wrap(""), "");
+    }
+
+    #[test]
+    fn name_returns_lowercase_label() {
+        assert_eq!(ChatTemplate::Gemma.name(), "gemma");
+        assert_eq!(ChatTemplate::Mistral.name(), "mistral");
+        assert_eq!(ChatTemplate::Llama.name(), "llama");
+        assert_eq!(ChatTemplate::ChatML.name(), "chatml");
+        assert_eq!(ChatTemplate::Plain.name(), "plain");
+    }
+}

@@ -268,7 +268,7 @@ impl PyWalkModel {
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
         let (weights, mmaps) = load_mmap_weights(dir)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e))?;
+            .map_err(pyo3::exceptions::PyIOError::new_err)?;
 
         let tokenizer = load_vindex_tokenizer(dir)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;

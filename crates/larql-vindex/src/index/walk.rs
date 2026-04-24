@@ -518,7 +518,7 @@ impl VectorIndex {
         if feat >= self.num_features(layer) { return None; }
         match format {
             "Q4_K" => {
-                if hidden % 256 != 0 { return None; }
+                if !hidden.is_multiple_of(256) { return None; }
                 let bytes_per_row = (hidden / 256) * 144;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
@@ -526,7 +526,7 @@ impl VectorIndex {
                 larql_models::quant::ggml::q4k_row_dot(&bytes[start..end], x).ok()
             }
             "Q6_K" => {
-                if hidden % 256 != 0 { return None; }
+                if !hidden.is_multiple_of(256) { return None; }
                 let bytes_per_row = (hidden / 256) * 210;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
@@ -555,7 +555,7 @@ impl VectorIndex {
         if feat >= self.num_features(layer) { return false; }
         match format {
             "Q4_K" => {
-                if hidden % 256 != 0 { return false; }
+                if !hidden.is_multiple_of(256) { return false; }
                 let bytes_per_row = (hidden / 256) * 144;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
@@ -563,7 +563,7 @@ impl VectorIndex {
                 larql_models::quant::ggml::q4k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
             }
             "Q6_K" => {
-                if hidden % 256 != 0 { return false; }
+                if !hidden.is_multiple_of(256) { return false; }
                 let bytes_per_row = (hidden / 256) * 210;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
@@ -600,7 +600,7 @@ impl VectorIndex {
         match format {
             "Q4_K" => {
                 // Q4_K block: 144 bytes for 256 elements.
-                if hidden % 256 != 0 { return false; }
+                if !hidden.is_multiple_of(256) { return false; }
                 let blocks_per_row = hidden / 256;
                 let bytes_per_row = blocks_per_row * 144;
                 let start = feat * bytes_per_row;
@@ -614,7 +614,7 @@ impl VectorIndex {
             }
             "Q6_K" => {
                 // Q6_K block: 210 bytes for 256 elements.
-                if hidden % 256 != 0 { return false; }
+                if !hidden.is_multiple_of(256) { return false; }
                 let blocks_per_row = hidden / 256;
                 let bytes_per_row = blocks_per_row * 210;
                 let start = feat * bytes_per_row;

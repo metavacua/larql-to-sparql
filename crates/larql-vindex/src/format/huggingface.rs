@@ -344,10 +344,7 @@ where
             p.finish();
             return Some(cached_path);
         }
-        match repo.download_with_progress(filename, progress(label)) {
-            Ok(path) => Some(path),
-            Err(_) => None,
-        }
+        repo.download_with_progress(filename, progress(label)).ok()
     };
 
     // index.json drives everything — we need its snapshot dir to know
@@ -399,6 +396,7 @@ impl PublishOptions {
 }
 
 /// Returns the HF API base URL for a repo: `https://huggingface.co/api/{models|datasets}/{repo_id}`.
+#[allow(dead_code)]
 fn hf_api_url(repo_type: &str, repo_id: &str, path: &str) -> String {
     let plural = if repo_type == "dataset" { "datasets" } else { "models" };
     format!("https://huggingface.co/api/{plural}/{repo_id}/{path}")
@@ -755,6 +753,7 @@ fn preupload_decide(
 }
 
 /// LFS-mode upload: batch → PUT to signed URL → verify → commit pointer.
+#[allow(clippy::too_many_arguments)]
 fn upload_lfs(
     repo_id: &str,
     token: &str,

@@ -20,8 +20,11 @@ pub mod pipeline_layer;
 pub mod prefill;
 pub mod logits;
 pub mod generate;
+pub mod grid;
 pub mod hybrid;
 pub mod predict;
+
+pub use generate::{generate, generate_constrained, GenerateResult, StageTimings};
 
 use ndarray::Array2;
 

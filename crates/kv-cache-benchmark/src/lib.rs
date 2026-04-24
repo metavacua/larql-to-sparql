@@ -1,9 +1,11 @@
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::single_range_in_vec_init)]
+
 pub mod model_config;
 pub mod metrics;
 pub mod standard_kv;
 pub mod turboquant;
 pub mod markov_residual;
-pub mod boundary_residual;
 pub mod graph_walk;
 pub mod benchmark;
 pub mod shader_bench;
@@ -12,6 +14,12 @@ pub mod accuracy_suite;
 
 #[cfg(feature = "real-model")]
 pub mod real_model;
+
+#[cfg(feature = "real-model")]
+pub mod unlimited_context;
+
+#[cfg(feature = "real-model")]
+pub mod apollo;
 
 use metrics::Metrics;
 use model_config::ModelConfig;

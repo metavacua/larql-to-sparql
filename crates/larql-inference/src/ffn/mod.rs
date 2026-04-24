@@ -11,6 +11,7 @@ pub mod weight;
 pub mod sparse;
 pub mod sparse_compute;
 pub mod remote;
+pub mod moe_remote;
 #[cfg(test)]
 mod tests;
 
@@ -35,6 +36,7 @@ pub trait FfnBackend {
 pub use weight::WeightFfn;
 pub use sparse::SparseFfn;
 pub use remote::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, RemoteLatencyStats};
+pub use moe_remote::{MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig};
 pub use sparse_compute::{
     sparse_ffn_forward, sparse_ffn_forward_with_overrides,
     sparse_ffn_forward_with_full_overrides, FeatureSlotOverride,

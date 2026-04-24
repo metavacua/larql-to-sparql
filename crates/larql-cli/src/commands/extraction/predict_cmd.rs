@@ -188,8 +188,8 @@ fn run_with_mode(
             }
             other => return Err(format!("unknown mode: {other}. Use walk, sparse<K>, scalar.").into()),
         };
-        for l in start..=end.min(num_layers - 1) {
-            kinds[l] = kind.clone();
+        for slot in kinds.iter_mut().take(end.min(num_layers - 1) + 1).skip(start) {
+            *slot = kind.clone();
         }
     }
 

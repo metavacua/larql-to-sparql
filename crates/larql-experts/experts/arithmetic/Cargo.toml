@@ -1,0 +1,16 @@
+[package]
+name = "larql-expert-arithmetic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LARQL WASM expert: arithmetic"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+expert-interface.workspace = true
+
+[profile.release]
+opt-level = "s"
+lto = true

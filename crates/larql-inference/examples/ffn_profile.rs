@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use larql_inference::{default_backend, InferenceModel};
-use larql_vindex::{SilentLoadCallbacks, VectorIndex, GateIndex};
+use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 struct Args {
     model: String,
@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend_ref: Option<&dyn larql_compute::ComputeBackend> = Some(&*backend);
 
     // Synthetic x: [seq_len, hidden] random-ish, just for timing.
-    let x_vec: Vec<f32> = (0..args.seq_len * hidden).map(|i| ((i as f32 * 0.001).sin() * 0.1)).collect();
+    let x_vec: Vec<f32> = (0..args.seq_len * hidden).map(|i| (i as f32 * 0.001).sin() * 0.1).collect();
     let x = ndarray::Array2::from_shape_vec((args.seq_len, hidden), x_vec.clone())?;
     let x_flat: &[f32] = x.as_slice().unwrap();
 
@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // --- Down Q6K matmul (needs activation shaped [seq, intermediate]) ---
-    let act_vec: Vec<f32> = (0..args.seq_len * intermediate).map(|i| ((i as f32 * 0.002).cos() * 0.1)).collect();
+    let act_vec: Vec<f32> = (0..args.seq_len * intermediate).map(|i| (i as f32 * 0.002).cos() * 0.1).collect();
     let mut down_ms = Vec::with_capacity(args.iters);
     for _ in 0..args.iters {
         let t = Instant::now();

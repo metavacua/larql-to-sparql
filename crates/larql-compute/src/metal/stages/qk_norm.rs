@@ -72,6 +72,7 @@ pub fn encode_qk_norm(
 ///
 /// Weight is implicitly 1.0 (shader still takes a weight buffer — the
 /// caller stages an all-ones vector of length `head_dim`). Offset is 0.
+#[allow(clippy::too_many_arguments)]
 pub fn encode_v_norm(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,

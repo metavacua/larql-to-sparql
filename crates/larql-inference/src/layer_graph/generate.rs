@@ -19,7 +19,7 @@ use super::CachedLayerGraph;
 /// a one-shot matvec per generated token — negligible compared to the
 /// per-layer attention + FFN. It lets every model generate tokens through
 /// the Metal pipeline regardless of how its vindex was packaged.
-fn lm_head_topk(
+pub(crate) fn lm_head_topk(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
     query: &ndarray::Array1<f32>,
@@ -97,6 +97,60 @@ fn cpu_lm_head_topk(
     top_k: usize,
 ) -> Vec<(u32, f32)> {
     backend_lm_head_topk(weights, query, top_k, &larql_compute::CpuBackend)
+}
+
+/// Dense LM-head: full `Vec<f32>` of vocabulary scores. Required for
+/// constrained decoding — the sparse vindex KNN can't apply an arbitrary
+/// vocabulary mask because masked-out tokens might fall outside the top-K.
+/// Same compute kernel as [`backend_lm_head_topk`], just no truncation.
+fn backend_lm_head_scores(
+    weights: &ModelWeights,
+    query: &ndarray::Array1<f32>,
+    backend: &dyn ComputeBackend,
+) -> Vec<f32> {
+    let lm = &weights.lm_head;
+    if lm.is_empty() || query.is_empty() { return Vec::new(); }
+    let hidden = lm.shape()[1];
+    if hidden != query.len() { return Vec::new(); }
+    let query_slice = match query.as_slice() {
+        Some(s) => s,
+        None => &query.to_vec(),
+    };
+    if let Some(s) = backend.f32_gemv(lm.view(), query_slice) {
+        s
+    } else {
+        let q_row = match query.view().into_shape_with_order((1, hidden)) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        backend.matmul_transb(q_row, lm.view()).row(0).to_vec()
+    }
+}
+
+/// Apply `mask_fn` to dense logits, then return the argmax `(id, score)`
+/// over finite (post-mask) entries. Returns `None` if every entry is NaN
+/// or `-inf`.
+fn pick_next_token_masked<M>(
+    weights: &ModelWeights,
+    h_1d: &ndarray::Array1<f32>,
+    generated: &[u32],
+    backend: &dyn ComputeBackend,
+    mask_fn: &mut M,
+) -> Option<(u32, f32)>
+where
+    M: FnMut(&[u32], &mut Vec<f32>),
+{
+    let mut logits = backend_lm_head_scores(weights, h_1d, backend);
+    if logits.is_empty() {
+        return None;
+    }
+    mask_fn(generated, &mut logits);
+    logits
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| !v.is_nan() && v.is_finite())
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, &s)| (i as u32, s))
 }
 
 /// Multi-token generation: GPU prefill → decode loop with KV cache.
@@ -177,6 +231,17 @@ pub fn generate(
     // ── Phase 1: GPU prefill ──
     let prefill_start = std::time::Instant::now();
     backend.reset_kv_cache();
+
+    // Pre-allocate per-layer KV cache for models with asymmetric attention geometry
+    // (e.g. Gemma 4 26B: sliding layers use 8×256, global layers use 2×512).
+    // Without this, the lazy uniform allocation uses the first layer's dims for all layers,
+    // causing global layers to read/write off the end of under-sized KV buffers.
+    {
+        let kv_shapes: Vec<(usize, usize)> = (0..num_layers)
+            .map(|l| (arch.num_kv_heads_for_layer(l), arch.head_dim_for_layer(l)))
+            .collect();
+        backend.preallocate_kv_cache_per_layer(&kv_shapes, 4096);
+    }
     let seq_len = token_ids.len();
 
     let h_embed = crate::forward::embed_tokens_pub(weights, token_ids);
@@ -410,6 +475,207 @@ pub fn generate(
             lm_head_ms_total: t_lmhead,
             detok_ms_total: t_detok,
         },
+    }
+}
+
+/// Constrained variant of [`generate`] for grammar-controlled decoding.
+///
+/// Differs from `generate` in two places only:
+///
+///   1. The LM-head step uses a **dense** vocabulary score vector
+///      ([`backend_lm_head_scores`]) rather than the sparse vindex KNN.
+///      Required because an arbitrary mask can disqualify tokens that
+///      would otherwise have fallen outside the top-K.
+///   2. After scoring, `mask_fn(generated_ids, &mut logits)` runs and the
+///      next token is the masked argmax.
+///
+/// Per-token cost is slightly higher than unconstrained `generate` (full
+/// 2.68 GB tied LM-head gemv vs. KNN over the 5-NN partial), but on Metal
+/// it's still ~3-5 ms — acceptable for grammar-constrained dispatch.
+///
+/// Stops on EOS / common end-of-turn markers or when `max_tokens` is hit.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_constrained<M>(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    token_ids: &[u32],
+    max_tokens: usize,
+    index: &larql_vindex::VectorIndex,
+    backend: &dyn ComputeBackend,
+    cached_layers: &CachedLayerGraph,
+    layer_range: std::ops::Range<usize>,
+    mut mask_fn: M,
+) -> GenerateResult
+where
+    M: FnMut(&[u32], &mut Vec<f32>),
+{
+    let arch = &*weights.arch;
+    let norm_offset = arch.norm_weight_offset();
+    let hidden = weights.hidden_size;
+    let gate_index: &dyn larql_vindex::GateIndex = index;
+
+    let (q4_ffn, ffn_is_q4k) = if let Some(mmap) = gate_index.interleaved_q4k_mmap_ref() {
+        (Some(mmap), true)
+    } else {
+        (gate_index.interleaved_q4_mmap_ref(), false)
+    };
+    let has_q4k = index.attn_q4k_layer_data(layer_range.start).is_some();
+    let has_q8 = index.attn_q8_layer_data(layer_range.start).is_some();
+
+    // Constrained mode requires the GPU prefill + Q4 path to be available.
+    // Fall back to the unconstrained dense single-token predict if it isn't —
+    // the mask still applies to that one token via pick_next_token_masked.
+    if !backend.has_q4() || q4_ffn.is_none() {
+        // Dense single-token prediction with mask.
+        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        return GenerateResult {
+            tokens: r.predictions.into_iter().take(1).collect(),
+            prefill_ms: 0.0,
+            decode_ms: vec![],
+            stage_timings: StageTimings::default(),
+        };
+    }
+    let q4_ffn_mmap = q4_ffn.unwrap();
+    let intermediate = gate_index.num_features(layer_range.start);
+    if intermediate == 0 || (!has_q4k && !has_q8) {
+        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        return GenerateResult {
+            tokens: r.predictions.into_iter().take(1).collect(),
+            prefill_ms: 0.0,
+            decode_ms: vec![],
+            stage_timings: StageTimings::default(),
+        };
+    }
+
+    let q4_ffn_per_matrix = if ffn_is_q4k {
+        (intermediate * hidden).div_ceil(256) * 144
+    } else {
+        intermediate * hidden / 32 * 18
+    };
+    let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
+
+    let num_layers = weights.num_layers;
+    let layers = super::pipeline_layer::build_pipeline_layers(
+        weights, index, 0..num_layers,
+        q4_ffn_mmap, q4_ffn_per_matrix, ffn_format,
+    );
+
+    let q_dim = weights.num_q_heads * weights.head_dim;
+    let kv_dim = weights.num_kv_heads * weights.head_dim;
+    let rope = arch.rope_base_for_layer(layer_range.start) as f32;
+
+    // ── Phase 1: GPU prefill ──
+    let prefill_start = std::time::Instant::now();
+    backend.reset_kv_cache();
+    {
+        let kv_shapes: Vec<(usize, usize)> = (0..num_layers)
+            .map(|l| (arch.num_kv_heads_for_layer(l), arch.head_dim_for_layer(l)))
+            .collect();
+        backend.preallocate_kv_cache_per_layer(&kv_shapes, 4096);
+    }
+    let seq_len = token_ids.len();
+    let h_embed = crate::forward::embed_tokens_pub(weights, token_ids);
+    let x: Vec<f32> = h_embed.as_slice().unwrap_or(&[]).to_vec();
+    let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0);
+    let qk_norm_val = arch.attn_q_norm_key(0).is_some();
+
+    let h_vec = backend.prefill_q4(
+        &layers, &x, hidden, intermediate, q_dim, kv_dim,
+        seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
+        rope, qk_norm_val, softcap_val,
+    ).unwrap_or_else(|| {
+        // CPU fallback: same as unconstrained generate's fallback.
+        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
+        let mut h = h_embed.clone();
+        for layer in 0..num_layers {
+            let (h_post_attn, _, _) =
+                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
+            let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+            h = h_out;
+        }
+        h.as_slice().unwrap_or(&[]).to_vec()
+    });
+
+    let h_metal = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec.clone())
+        .unwrap_or_else(|_| h_embed.clone());
+    let h_1d = {
+        let h_final = crate::forward::apply_norm(weights, &h_metal, weights.arch.final_norm_key(), norm_offset);
+        h_final.row(seq_len - 1).to_owned()
+    };
+    let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
+
+    // ── First token: dense LM-head + mask + argmax ──
+    let mut tokens: Vec<(String, f64)> = Vec::with_capacity(max_tokens);
+    let mut decode_ms = Vec::with_capacity(max_tokens);
+    let mut generated: Vec<u32> = Vec::with_capacity(max_tokens);
+
+    let first = pick_next_token_masked(weights, &h_1d, &generated, backend, &mut mask_fn);
+    let mut current_token_id = match first {
+        Some((tid, _)) => {
+            let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default();
+            let is_eos = crate::vindex::is_end_of_turn(tok_str.trim());
+            tokens.push((tok_str, 1.0));
+            generated.push(tid);
+            if is_eos {
+                return GenerateResult { tokens, prefill_ms, decode_ms, stage_timings: StageTimings::default() };
+            }
+            tid
+        }
+        None => return GenerateResult { tokens, prefill_ms, decode_ms, stage_timings: StageTimings::default() },
+    };
+
+    let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
+
+    // ── Phase 2: GPU decode loop ──
+    for _step in 1..max_tokens {
+        let decode_start = std::time::Instant::now();
+
+        let h_tok = crate::forward::embed_tokens_pub(weights, &[current_token_id]);
+        let x_dec: Vec<f32> = h_tok.row(0).to_vec();
+
+        let result = backend.decode_token(
+            &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
+            weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+        );
+
+        let h_1d = if let Some(h_out) = result {
+            let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
+            let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
+            h_final.row(0).to_owned()
+        } else {
+            // CPU fallback for one decode step.
+            let mut h_dec = h_tok;
+            for layer in 0..num_layers {
+                let (h_post_attn, _, _) =
+                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None).unwrap();
+                let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                h_dec = h_out;
+            }
+            let h_final = crate::forward::apply_norm(weights, &h_dec, weights.arch.final_norm_key(), norm_offset);
+            h_final.row(0).to_owned()
+        };
+
+        let pick = pick_next_token_masked(weights, &h_1d, &generated, backend, &mut mask_fn);
+        decode_ms.push(decode_start.elapsed().as_secs_f64() * 1000.0);
+
+        match pick {
+            Some((tid, _)) => {
+                let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default();
+                let is_eos = crate::vindex::is_end_of_turn(tok_str.trim());
+                tokens.push((tok_str, 1.0));
+                generated.push(tid);
+                current_token_id = tid;
+                if is_eos { break; }
+            }
+            None => break,
+        }
+    }
+
+    GenerateResult {
+        tokens,
+        prefill_ms,
+        decode_ms,
+        stage_timings: StageTimings::default(),
     }
 }
 

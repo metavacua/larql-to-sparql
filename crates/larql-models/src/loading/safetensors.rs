@@ -30,7 +30,7 @@ pub fn is_ffn_tensor(key: &str) -> bool {
 /// tracks only the retained (attention / embed / lm_head / norms) weights.
 /// Use this with vindex-backed FFN (walk-only inference).
 pub fn load_model_dir_walk_only(path: impl AsRef<Path>) -> Result<ModelWeights, ModelError> {
-    load_model_dir_filtered(path, |k| is_ffn_tensor(k))
+    load_model_dir_filtered(path, is_ffn_tensor)
 }
 
 /// Load model weights from a directory or file.
@@ -319,7 +319,7 @@ fn dequantize_mxfp4_experts(
         let expert_data = crate::quant::mxfp4::dequantize_all_experts(
             blocks_view.data(), scales_view.data(),
             num_experts, out_features, groups,
-        );
+        )?;
 
         // Extract layer number from key
         let base_key = normalize_key(name, prefixes);
@@ -353,7 +353,7 @@ fn dequantize_mxfp4_experts(
 
                 let down_experts = crate::quant::mxfp4::dequantize_all_experts(
                     db.data(), ds.data(), num_experts, down_out, down_groups,
-                );
+                )?;
 
                 for (e, data) in down_experts.iter().enumerate() {
                     let down_key = format!("{layer_prefix}.block_sparse_moe.experts.{e}.w2.weight");

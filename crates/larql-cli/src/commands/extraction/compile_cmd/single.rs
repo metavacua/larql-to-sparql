@@ -149,7 +149,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
             .predictions
             .iter()
             .find(|(tok, _)| tok.trim() == answer.as_str())
-            .map(|(_, p)| *p as f64)
+            .map(|(_, p)| *p)
             .unwrap_or(0.0);
         eprintln!("  iter {}: prob('{}') = {:.3}", iter, answer, prob);
 

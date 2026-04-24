@@ -70,7 +70,7 @@ fn explain_infer(
         Some(&patched.knn_store),
         req.top,
     );
-    let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &*patched);
+    let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &patched);
 
     // Build logit lens: layer → (top_token, probability)
     let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals.iter()

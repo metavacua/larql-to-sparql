@@ -24,8 +24,8 @@ pub fn unpack_indices(data: &[u8], count: usize, bits: u8) -> Vec<u8> {
 /// Size of packed data in bytes (not including the norm).
 pub fn packed_size(count: usize, bits: u8) -> usize {
     match bits {
-        4 => (count + 1) / 2,
-        3 => (count * 3 + 7) / 8,
+        4 => count.div_ceil(2),
+        3 => (count * 3).div_ceil(8),
         _ => panic!("unsupported bit width: {bits}"),
     }
 }

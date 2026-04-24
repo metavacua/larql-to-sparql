@@ -544,7 +544,7 @@ mod tests {
         buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
         buf.extend_from_slice(&1u32.to_le_bytes()); // flags (full_output)
         buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat(0u8).take(residual_floats * 4));
+        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
         buf
     }
 
@@ -558,7 +558,7 @@ mod tests {
         buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
         buf.extend_from_slice(&1u32.to_le_bytes()); // flags
         buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat(0u8).take(residual_floats * 4));
+        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
         buf
     }
 

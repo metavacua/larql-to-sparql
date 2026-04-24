@@ -49,8 +49,8 @@
 //! FFN, RMSNorm) are landing in this module as `backward_*` helpers.
 //! Scope for this first drop: infrastructure + cross-entropy gradient
 //! + lm_head backward (tied embedding). Per-layer transformer-block
-//! backward is the remaining ~80% of the work — tracked as follow-ups
-//! on each `backward_*` stub.
+//!   backward is the remaining ~80% of the work — tracked as follow-ups
+//!   on each `backward_*` stub.
 //!
 //! Once complete, `optimise_target_delta` runs 60-80 Adam iters per
 //! fact in pure Rust; `run_memit` calls it and feeds the optimised
@@ -331,7 +331,7 @@ pub fn optimise_target_delta(
         .vectors
         .get(final_norm_key)
         .map(|v| {
-            let mut w = v.iter().copied().collect::<Vec<f32>>();
+            let mut w = v.to_vec();
             for x in w.iter_mut() {
                 *x += norm_offset;
             }

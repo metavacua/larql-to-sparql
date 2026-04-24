@@ -28,6 +28,7 @@ use crate::attention::{
 };
 use crate::ffn::FfnBackend;
 use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
+use crate::forward::predict::hidden_to_raw_logits;
 use crate::model::ModelWeights;
 
 /// Stream autoregressive generation with a KV cache.
@@ -56,6 +57,7 @@ where
 
 /// Variant of [`generate_cached`] that runs Q/K/V/O projections on a
 /// GPU `ComputeBackend` when provided. GQA softmax stays on CPU.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_cached_backend<F>(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -225,5 +227,115 @@ fn is_stop_token_str(s: &str) -> bool {
         s,
         "<eos>" | "</s>" | "<|endoftext|>" | "<|im_end|>"
             | "<|end_of_turn|>" | "<end_of_turn>"
+            // Llama-3: pretraining EOS, eom_id, eot_id (128001 / 128008 / 128009)
+            | "<|end_of_text|>" | "<|eom_id|>" | "<|eot_id|>"
     )
+}
+
+/// Autoregressive generation where a caller-supplied closure can mask the raw
+/// logits before each argmax step.
+///
+/// `mask_fn(generated_ids, logits)` is called after computing logits for each
+/// new token. It may modify `logits` in place (e.g. set unwanted token positions
+/// to `f32::NEG_INFINITY`) before the argmax is applied. Returning without
+/// modification gives the same result as unconstrained generation.
+///
+/// Useful for grammar-constrained generation: the caller tracks the partial
+/// output and restricts the vocabulary to tokens valid at each position.
+pub fn generate_cached_constrained<F, M>(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    max_new_tokens: usize,
+    mut mask_fn: M,
+    mut on_token: F,
+) -> Vec<u32>
+where
+    F: FnMut(u32, &str),
+    M: FnMut(&[u32], &mut Vec<f32>),
+{
+    if max_new_tokens == 0 || prompt_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let num_layers = weights.num_layers;
+    let mut cache = KvCache::with_layers(num_layers);
+
+    // ── Prefill ──
+    let mut h = embed_tokens_pub(weights, prompt_ids);
+    for layer in 0..num_layers {
+        let (h_post_attn, k_rope, v) =
+            match run_attention_with_kv_backend(weights, &h, layer, None) {
+                Some(t) => t,
+                None => return Vec::new(),
+            };
+        cache.layers[layer] = Some((k_rope, v));
+        let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+        h = h_out;
+    }
+    cache.next_position = prompt_ids.len();
+
+    // ── First token from prefill ──
+    let last_hidden = last_row_as_2d(&h);
+    let mut logits = hidden_to_raw_logits(weights, &last_hidden);
+    let mut generated: Vec<u32> = Vec::with_capacity(max_new_tokens);
+    mask_fn(&generated, &mut logits);
+    let (first_id, first_str) = match masked_argmax(&logits, tokenizer) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+    on_token(first_id, &first_str);
+    generated.push(first_id);
+    if is_stop_token_str(&first_str) || max_new_tokens == 1 {
+        return generated;
+    }
+
+    // ── Decode loop ──
+    let mut current_id = first_id;
+    for _step in 1..max_new_tokens {
+        let h_new = embed_tokens_pub(weights, &[current_id]);
+        let abs_position = cache.next_position;
+        let mut h_step = h_new;
+        for layer in 0..num_layers {
+            let kv_entry = cache.layers[layer].as_ref();
+            let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
+                weights, &h_step, layer, kv_entry, abs_position, None,
+            ) {
+                Some(t) => t,
+                None => return generated,
+            };
+            cache.layers[layer] = Some(new_kv);
+            let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+            h_step = h_out;
+        }
+        cache.next_position += 1;
+
+        let mut logits = hidden_to_raw_logits(weights, &h_step);
+        mask_fn(&generated, &mut logits);
+        let (id, tok_str) = match masked_argmax(&logits, tokenizer) {
+            Some(t) => t,
+            None => break,
+        };
+        on_token(id, &tok_str);
+        generated.push(id);
+        if is_stop_token_str(&tok_str) {
+            break;
+        }
+        current_id = id;
+    }
+
+    generated
+}
+
+/// Argmax over a (possibly masked) logit vector — returns `(token_id, decoded)`.
+fn masked_argmax(logits: &[f32], tokenizer: &tokenizers::Tokenizer) -> Option<(u32, String)> {
+    let (idx, _) = logits
+        .iter()
+        .enumerate()
+        .filter(|(_, &v)| !v.is_nan())
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+    let id = idx as u32;
+    let decoded = tokenizer.decode(&[id], true).ok()?;
+    Some((id, decoded))
 }

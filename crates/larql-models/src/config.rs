@@ -591,6 +591,44 @@ pub trait ModelArchitecture: Send + Sync {
         None
     }
 
+    /// Router's own RMS-norm weight, applied to the router's input *before*
+    /// the router projection. HF Gemma 4's `Gemma4TextRouter.norm` is
+    /// **parameter-free** (`with_scale=False`) so no tensor exists on disk —
+    /// see [`moe_router_norm_parameter_free`](Self::moe_router_norm_parameter_free).
+    /// This key is provided for architectures that DO ship a learned router
+    /// norm weight. Return `None` to fall back to either parameter-free
+    /// RMSNorm (when the flag is set) or the experts' pre-norm output.
+    fn moe_router_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
+    /// Whether the router applies a parameter-free RMSNorm to its input
+    /// before `router_scale`/projection. Gemma 4 sets this true. When true
+    /// AND `moe_router_norm_key` returns `None`, the forward pass runs
+    /// `x / sqrt(mean(x²) + eps)` on the raw residual instead of reusing
+    /// the experts' pre-norm (which would apply the wrong learned weight).
+    fn moe_router_norm_parameter_free(&self) -> bool {
+        false
+    }
+
+    /// Scalar multiplier applied to the router input after `router.norm` and
+    /// after the learned `router.scale` vector. Gemma 4 uses `hidden_size^-0.5`
+    /// (called `scalar_root_size` in HF). Return `None` for no scaling.
+    fn moe_router_input_scalar(&self) -> Option<f32> {
+        None
+    }
+
+    /// Outer post-FFN norm for hybrid MoE layers — applied to `(h1 + h2)`
+    /// before the residual add, where `h1 = post_ffn_norm_1(dense)` and
+    /// `h2 = post_ffn_norm_2(moe)`. HF Gemma 4 stores this at the un-suffixed
+    /// key `post_feedforward_layernorm.weight`, while the dense-branch norm
+    /// uses the suffixed `_1` variant (see `post_feedforward_layernorm_key`).
+    /// Return `None` for architectures that either don't combine via an outer
+    /// norm or reuse the dense-branch norm as the outer norm.
+    fn moe_post_outer_norm_key(&self, _layer: usize) -> Option<String> {
+        None
+    }
+
     /// Post-FFN norm for dense MLP output in hybrid MoE layers.
     /// Gemma 4 A4B: `post_feedforward_layernorm_1.weight` (replaces the plain variant).
     fn moe_post_ffn1_norm_key(&self, _layer: usize) -> Option<String> {
@@ -607,6 +645,15 @@ pub trait ModelArchitecture: Send + Sync {
     /// Gemma 4 A4B: `post_feedforward_layernorm_2.weight`.
     fn moe_post_experts_norm_key(&self, _layer: usize) -> Option<String> {
         None
+    }
+
+    /// Whether the hybrid MoE forward applies a final RMS norm to the
+    /// combined (dense + expert) output before adding to the residual.
+    ///
+    /// Gemma 4 26B A4B: true — matches HF `post_feedforward_layernorm(combined)`.
+    /// All other models: false — use `layer_scalar * combined` instead.
+    fn moe_has_combined_output_norm(&self) -> bool {
+        false
     }
 
     // ── MLA (Multi-head Latent Attention) ──

@@ -1,7 +1,7 @@
 //! Multi-Turn Simulation Demo
 //!
 //! Simulates a 25-turn conversation and shows how each strategy's
-//! memory and latency evolve. Produces the crossover plot data.
+//! memory evolves. Produces the crossover plot data.
 //!
 //! Usage:
 //!   cargo run --example multi_turn_demo
@@ -13,7 +13,6 @@ fn main() {
     use kv_cache_benchmark::standard_kv::StandardKv;
     use kv_cache_benchmark::turboquant::TurboQuant;
     use kv_cache_benchmark::markov_residual::MarkovResidual;
-    use kv_cache_benchmark::boundary_residual::BoundaryResidual;
     use kv_cache_benchmark::graph_walk::GraphWalk;
 
     let config = ModelConfig::gemma_4b();
@@ -23,7 +22,6 @@ fn main() {
     let standard = StandardKv;
     let tq4 = TurboQuant::new(4);
     let markov = MarkovResidual::new(512);
-    let boundary = BoundaryResidual::gemma_4b();
     let graph = GraphWalk::gemma_4b();
 
     println!("=== Multi-Turn Memory Simulation: {} ===", config.name);
@@ -31,10 +29,10 @@ fn main() {
 
     // Header
     println!(
-        "{:>5}  {:>8}  {:>12}  {:>12}  {:>12}  {:>14}  {:>12}",
-        "Turn", "Tokens", "Standard KV", "TurboQ 4b", "Markov RS", "Boundary RS", "Graph Walk",
+        "{:>5}  {:>8}  {:>12}  {:>12}  {:>12}  {:>12}",
+        "Turn", "Tokens", "Standard KV", "TurboQ 4b", "Markov RS", "Graph Walk",
     );
-    println!("{}", "-".repeat(95));
+    println!("{}", "-".repeat(80));
 
     for turn in 1..=num_turns {
         let cumulative = turn * tokens_per_turn;
@@ -42,17 +40,15 @@ fn main() {
         let mem_std = standard.memory_bytes(&config, cumulative);
         let mem_tq = tq4.memory_bytes(&config, cumulative);
         let mem_mrk = markov.memory_bytes(&config, cumulative);
-        let mem_brs = boundary.memory_bytes(&config, cumulative);
-        let mem_gw = graph.memory_bytes(&config, cumulative);
+        let mem_gw = graph.memory_bytes(cumulative);
 
         println!(
-            "{:>5}  {:>8}  {:>12}  {:>12}  {:>12}  {:>14}  {:>12}",
+            "{:>5}  {:>8}  {:>12}  {:>12}  {:>12}  {:>12}",
             turn,
             cumulative,
             format_bytes(mem_std),
             format_bytes(mem_tq),
             format_bytes(mem_mrk),
-            format_bytes(mem_brs),
             format_bytes(mem_gw),
         );
     }
@@ -65,8 +61,7 @@ fn main() {
         ("Standard KV", standard.memory_bytes(&config, final_tokens)),
         ("TurboQuant 4b", tq4.memory_bytes(&config, final_tokens)),
         ("Markov RS", markov.memory_bytes(&config, final_tokens)),
-        ("Boundary RS", boundary.memory_bytes(&config, final_tokens)),
-        ("Graph Walk", graph.memory_bytes(&config, final_tokens)),
+        ("Graph Walk", graph.memory_bytes(final_tokens)),
     ];
 
     let baseline = strategies[0].1;
@@ -75,8 +70,8 @@ fn main() {
         println!("  {:<15} {:>12}  ({:.1}× vs baseline)", name, format_bytes(*mem), ratio);
     }
 
-    // Full comparative table
-    let all: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov, &boundary, &graph];
+    // Full comparative table (KV-reconstructing strategies only).
+    let all: Vec<&dyn KvStrategy> = vec![&standard, &tq4, &markov];
     println!("{}", benchmark::format_comparative_table(&config, &all));
 
     // Crossover analysis
@@ -84,7 +79,6 @@ fn main() {
     println!("Standard KV grows linearly: every turn adds {} per token",
         format_bytes(config.kv_bytes_per_token()));
     println!("Markov RS is bounded: window = 512 tokens, cold tier = 4 bytes/token");
-    println!("Boundary RS is bounded: window = 32 tokens, cold tier = 4 bytes/token (production form)");
     println!("Graph Walk is constant: per-conversation = token IDs only (requires cracked attention)");
 
     // Find crossover point where Markov RS < Standard KV

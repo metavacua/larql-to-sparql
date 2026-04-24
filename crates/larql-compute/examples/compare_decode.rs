@@ -7,7 +7,7 @@ extern crate blas_src;
 
 fn main() {
     #[cfg(not(feature = "metal"))]
-    { println!("Run with --features metal"); return; }
+    { println!("Run with --features metal");}
 
     #[cfg(feature = "metal")]
     {
@@ -113,7 +113,7 @@ fn main() {
                 k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
-            moe: None,
+            moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
             }
         }).collect();
 
@@ -165,7 +165,7 @@ fn main() {
                 k_norm_weight: None,
                 ffn_up_bias: None,
                 ffn_down_bias: None,
-            moe: None,
+            moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
             }
         }).collect();
 

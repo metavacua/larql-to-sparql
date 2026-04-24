@@ -27,6 +27,44 @@ pub const TYPE_Q5_K: u32 = 13;
 pub const TYPE_Q6_K: u32 = 14;
 pub const TYPE_BF16: u32 = 30;
 
+/// Validate that `data` is large enough to hold `n_elements / block_elems`
+/// blocks of `block_size` bytes, and that `n_elements` is block-aligned.
+/// Returns `n_blocks` on success.
+///
+/// All block-quant dequantize functions slice the input by block; a short
+/// buffer would otherwise panic. This helper turns those panics into
+/// `ModelError::Parse` with context.
+#[inline]
+fn check_block_input(
+    name: &'static str,
+    data: &[u8],
+    n_elements: usize,
+    block_elems: usize,
+    block_size: usize,
+) -> Result<usize, ModelError> {
+    if !n_elements.is_multiple_of(block_elems) {
+        return Err(ModelError::Parse(format!(
+            "{name}: n_elements {n_elements} not a multiple of {block_elems}"
+        )));
+    }
+    let n_blocks = n_elements / block_elems;
+    let need = n_blocks.checked_mul(block_size).ok_or_else(|| {
+        ModelError::Parse(format!(
+            "{name}: byte-size overflow ({n_blocks} blocks × {block_size} bytes)"
+        ))
+    })?;
+    if data.len() < need {
+        return Err(ModelError::Parse(format!(
+            "{name}: data too short: {} bytes < expected {} ({} blocks × {} bytes)",
+            data.len(),
+            need,
+            n_blocks,
+            block_size
+        )));
+    }
+    Ok(n_blocks)
+}
+
 /// Compute byte size for a tensor of given type and element count.
 pub fn tensor_data_size(tensor_type: u32, n_elements: usize) -> Result<usize, ModelError> {
     match tensor_type {
@@ -67,15 +105,28 @@ pub fn type_name(tensor_type: u32) -> &'static str {
 }
 
 /// Dequantize raw bytes to f32 based on GGML tensor type.
+///
+/// Returns `ModelError::Parse` if `data` is too short for the requested
+/// number of elements rather than panicking on a slice OOB.
 pub fn dequantize(data: &[u8], tensor_type: u32, n_elements: usize) -> Result<Vec<f32>, ModelError> {
     match tensor_type {
         TYPE_F32 => {
-            Ok(data.chunks_exact(4)
+            let need = n_elements.checked_mul(4).ok_or_else(|| {
+                ModelError::Parse(format!("F32: size overflow ({n_elements}×4)"))
+            })?;
+            if data.len() < need {
+                return Err(ModelError::Parse(format!(
+                    "F32: data too short: {} bytes < expected {need} ({n_elements} elements)",
+                    data.len()
+                )));
+            }
+            Ok(data[..need]
+                .chunks_exact(4)
                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect())
         }
-        TYPE_F16 => Ok(super::half::decode_f16(data)),
-        TYPE_BF16 => Ok(super::half::decode_bf16(data)),
+        TYPE_F16 => decode_half(data, n_elements, "F16", super::half::decode_f16),
+        TYPE_BF16 => decode_half(data, n_elements, "BF16", super::half::decode_bf16),
         TYPE_Q4_0 => dequantize_q4_0(data, n_elements),
         TYPE_Q4_1 => dequantize_q4_1(data, n_elements),
         TYPE_Q8_0 => dequantize_q8_0(data, n_elements),
@@ -87,11 +138,30 @@ pub fn dequantize(data: &[u8], tensor_type: u32, n_elements: usize) -> Result<Ve
     }
 }
 
+#[inline]
+fn decode_half(
+    data: &[u8],
+    n_elements: usize,
+    name: &'static str,
+    decoder: fn(&[u8]) -> Vec<f32>,
+) -> Result<Vec<f32>, ModelError> {
+    let need = n_elements.checked_mul(2).ok_or_else(|| {
+        ModelError::Parse(format!("{name}: size overflow ({n_elements}×2)"))
+    })?;
+    if data.len() < need {
+        return Err(ModelError::Parse(format!(
+            "{name}: data too short: {} bytes < expected {need} ({n_elements} elements)",
+            data.len()
+        )));
+    }
+    Ok(decoder(&data[..need]))
+}
+
 /// Q4_0: block = f16 scale (2B) + 16 bytes of 4-bit quants. 32 elements per block.
 /// Each 4-bit value is unsigned [0,15], offset by -8 to give signed [-8, 7].
 pub fn dequantize_q4_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 18;
-    let n_blocks = n_elements / 32;
+    let n_blocks = check_block_input("Q4_0", data, n_elements, 32, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for i in 0..n_blocks {
@@ -113,7 +183,7 @@ pub fn dequantize_q4_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 /// value = quant * scale + min
 fn dequantize_q4_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 20;
-    let n_blocks = n_elements / 32;
+    let n_blocks = check_block_input("Q4_1", data, n_elements, 32, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for i in 0..n_blocks {
@@ -135,7 +205,7 @@ fn dequantize_q4_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelErro
 /// Q8_0: block = f16 scale (2B) + 32 signed int8 quants.
 fn dequantize_q8_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 34;
-    let n_blocks = n_elements / 32;
+    let n_blocks = check_block_input("Q8_0", data, n_elements, 32, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for i in 0..n_blocks {
@@ -154,7 +224,7 @@ fn dequantize_q8_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelErro
 /// combined = lo4 | (hi1 << 4), value = (combined - 16) * scale
 pub fn dequantize_q5_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 22;
-    let n_blocks = n_elements / 32;
+    let n_blocks = check_block_input("Q5_0", data, n_elements, 32, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for i in 0..n_blocks {
@@ -184,7 +254,7 @@ pub fn dequantize_q5_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 /// combined = lo4 | (hi1 << 4), value = combined * scale + min
 pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 24;
-    let n_blocks = n_elements / 32;
+    let n_blocks = check_block_input("Q5_1", data, n_elements, 32, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for i in 0..n_blocks {
@@ -236,7 +306,7 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = x.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q4k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -250,7 +320,7 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     }
 
     #[cfg(target_arch = "aarch64")]
-    unsafe { return Ok(q4k_row_dot_neon(data, x, n_blocks)); }
+    unsafe { Ok(q4k_row_dot_neon(data, x, n_blocks))}
     #[cfg(not(target_arch = "aarch64"))]
     Ok(q4k_row_dot_scalar(data, x, n_blocks))
 }
@@ -371,7 +441,7 @@ pub fn q4k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = out.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q4k_row_scaled_add: row length {n} not a multiple of {SUPER}"
         )));
@@ -476,7 +546,7 @@ unsafe fn q4k_row_scaled_add_neon(data: &[u8], alpha: f32, out: &mut [f32], n_bl
 pub fn dequantize_q4_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 144;   // 2 + 2 + 12 + 128, llama.cpp GGUF layout.
     let super_block = 256;
-    let n_blocks = n_elements / super_block;
+    let n_blocks = check_block_input("Q4_K", data, n_elements, super_block, block_size)?;
     let mut out = vec![0.0f32; n_elements];
 
     for sb in 0..n_blocks {
@@ -534,7 +604,7 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 210;
     const SUPER: usize = 256;
     let n = x.len();
-    if n % SUPER != 0 {
+    if !n.is_multiple_of(SUPER) {
         return Err(ModelError::Parse(format!(
             "q6k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -548,7 +618,7 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     }
 
     #[cfg(target_arch = "aarch64")]
-    unsafe { return Ok(q6k_row_dot_neon(data, x, n_blocks)); }
+    unsafe { Ok(q6k_row_dot_neon(data, x, n_blocks))}
     #[cfg(not(target_arch = "aarch64"))]
     Ok(q6k_row_dot_scalar(data, x, n_blocks))
 }
@@ -615,11 +685,11 @@ unsafe fn q6k_row_dot_neon(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
                 let qh_b = *qh_j.add(chunk);
                 let base = chunk * 4;
                 // Even idx: low nibble; odd idx: high nibble. hi2 = (qh >> (k*2)) & 3.
-                let lo0 = (ql_b0 & 0x0F) as u16 | ((((qh_b >> 0) & 0x03) as u16) << 4);
+                let lo0 = (ql_b0 & 0x0F) as u16 | (((qh_b & 0x03) as u16) << 4);
                 let lo1 = ((ql_b0 >> 4) & 0x0F) as u16 | ((((qh_b >> 2) & 0x03) as u16) << 4);
                 let lo2 = (ql_b1 & 0x0F) as u16 | ((((qh_b >> 4) & 0x03) as u16) << 4);
                 let lo3 = ((ql_b1 >> 4) & 0x0F) as u16 | ((((qh_b >> 6) & 0x03) as u16) << 4);
-                vals[base + 0] = (lo0 as i16 - 32) as i8;
+                vals[base] = (lo0 as i16 - 32) as i8;
                 vals[base + 1] = (lo1 as i16 - 32) as i8;
                 vals[base + 2] = (lo2 as i16 - 32) as i8;
                 vals[base + 3] = (lo3 as i16 - 32) as i8;
@@ -656,7 +726,7 @@ pub fn q6k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     let block_size = 210;
     let super_block = 256;
     let n = out.len();
-    if n % super_block != 0 {
+    if !n.is_multiple_of(super_block) {
         return Err(ModelError::Parse(format!(
             "q6k_row_scaled_add: row length {n} not a multiple of {super_block}"
         )));
@@ -694,7 +764,7 @@ pub fn q6k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
 pub fn dequantize_q6_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 210;
     let super_block = 256;
-    let n_blocks = n_elements / super_block;
+    let n_blocks = check_block_input("Q6_K", data, n_elements, super_block, block_size)?;
     let mut out = Vec::with_capacity(n_elements);
 
     for sb in 0..n_blocks {
@@ -1047,6 +1117,222 @@ mod tests {
             (scalar - dispatched).abs() < tol,
             "scalar={scalar} dispatched={dispatched} tol={tol}"
         );
+    }
+
+    // ── Bounds-check rejection (no panics on malformed input) ──
+
+    fn assert_short_buffer(res: Result<Vec<f32>, ModelError>, fmt: &str) {
+        match res {
+            Err(ModelError::Parse(msg)) => {
+                assert!(
+                    msg.contains("data too short") && msg.contains(fmt),
+                    "expected short-buffer error for {fmt}, got: {msg}"
+                );
+            }
+            Err(other) => panic!("expected Parse error for {fmt}, got {other:?}"),
+            Ok(v) => panic!("expected short-buffer error for {fmt}, got {} elements", v.len()),
+        }
+    }
+
+    #[test]
+    fn q4_0_rejects_short_buffer() {
+        // 32 elements need 18 bytes; give it 10.
+        assert_short_buffer(dequantize_q4_0(&[0u8; 10], 32), "Q4_0");
+    }
+
+    #[test]
+    fn q4_1_rejects_short_buffer() {
+        assert_short_buffer(dequantize(&[0u8; 4], TYPE_Q4_1, 32), "Q4_1");
+    }
+
+    #[test]
+    fn q8_0_rejects_short_buffer() {
+        // 64 elements = 2 blocks × 34 bytes = 68; give 40.
+        assert_short_buffer(dequantize(&[0u8; 40], TYPE_Q8_0, 64), "Q8_0");
+    }
+
+    #[test]
+    fn q5_0_rejects_short_buffer() {
+        assert_short_buffer(dequantize_q5_0(&[0u8; 10], 32), "Q5_0");
+    }
+
+    #[test]
+    fn q5_1_rejects_short_buffer() {
+        assert_short_buffer(dequantize_q5_1(&[0u8; 10], 32), "Q5_1");
+    }
+
+    #[test]
+    fn q4_k_rejects_short_buffer() {
+        // 256 elements = 1 super-block = 144 bytes; give 100.
+        assert_short_buffer(dequantize_q4_k(&[0u8; 100], 256), "Q4_K");
+    }
+
+    #[test]
+    fn q6_k_rejects_short_buffer() {
+        // 256 elements = 1 super-block = 210 bytes; give 100.
+        assert_short_buffer(dequantize_q6_k(&[0u8; 100], 256), "Q6_K");
+    }
+
+    #[test]
+    fn q4_0_rejects_misaligned_n_elements() {
+        // 33 is not a multiple of 32.
+        match dequantize_q4_0(&[0u8; 18], 33) {
+            Err(ModelError::Parse(msg)) => {
+                assert!(msg.contains("not a multiple of 32"), "got: {msg}");
+            }
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn q6_k_rejects_misaligned_n_elements() {
+        // 300 is not a multiple of 256.
+        match dequantize_q6_k(&[0u8; 210], 300) {
+            Err(ModelError::Parse(msg)) => {
+                assert!(msg.contains("not a multiple of 256"), "got: {msg}");
+            }
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn passthrough_f32_rejects_short_buffer() {
+        // 8 elements = 32 bytes; give 20.
+        match dequantize(&[0u8; 20], TYPE_F32, 8) {
+            Err(ModelError::Parse(msg)) => assert!(msg.contains("F32"), "got: {msg}"),
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn passthrough_f16_rejects_short_buffer() {
+        // 8 elements = 16 bytes; give 10.
+        match dequantize(&[0u8; 10], TYPE_F16, 8) {
+            Err(ModelError::Parse(msg)) => assert!(msg.contains("F16"), "got: {msg}"),
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn passthrough_bf16_rejects_short_buffer() {
+        match dequantize(&[0u8; 10], TYPE_BF16, 8) {
+            Err(ModelError::Parse(msg)) => assert!(msg.contains("BF16"), "got: {msg}"),
+            other => panic!("expected Parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_input_ok_when_zero_elements() {
+        // Zero-element tensor should succeed with empty output across all block types.
+        for &ty in &[TYPE_Q4_0, TYPE_Q4_1, TYPE_Q8_0, TYPE_Q5_0, TYPE_Q5_1, TYPE_Q4_K, TYPE_Q6_K] {
+            let out = dequantize(&[], ty, 0).unwrap_or_else(|e| panic!("type {ty} failed: {e:?}"));
+            assert!(out.is_empty(), "type {ty} produced {} elements", out.len());
+        }
+    }
+
+    // ── Quantize → dequantize round-trips ──
+
+    /// Max component-wise representation error for a given scale — Q4_0 maps
+    /// every value to the nearest multiple of `scale` in `[-8*scale, 7*scale]`,
+    /// so round-trip error is bounded by half a quantization step.
+    #[test]
+    fn q4_0_round_trip_preserves_within_half_step() {
+        // Inputs fit the ±7*scale range cleanly.
+        let vals: Vec<f32> = (0..64).map(|i| (i as f32 - 31.5) * 0.1).collect();
+        let packed = quantize_q4_0(&vals);
+        assert_eq!(packed.len(), 2 * 18);
+        let round = dequantize_q4_0(&packed, 64).unwrap();
+        let scale = 0.1 * 31.5 / 7.0; // amax / 7 per block
+        let max_step = scale * 0.5 + 1e-3;
+        for (i, (v, r)) in vals.iter().zip(&round).enumerate() {
+            assert!((v - r).abs() <= max_step,
+                "idx {i}: v={v} r={r} max_step={max_step}");
+        }
+    }
+
+    #[test]
+    fn q4_0_round_trip_all_zero() {
+        // Zero-scale corner: every value must decode to exactly 0.
+        let vals = vec![0.0f32; 32];
+        let packed = quantize_q4_0(&vals);
+        let round = dequantize_q4_0(&packed, 32).unwrap();
+        assert!(round.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn q8_0_round_trip_precise() {
+        // Q8_0 has 127 steps — 2 decimal places should survive cleanly.
+        let vals: Vec<f32> = (0..64).map(|i| ((i as f32 - 32.0) * 0.013).sin()).collect();
+        let packed = quantize_q8_0(&vals);
+        assert_eq!(packed.len(), 2 * 34);
+        let round = dequantize_q8_0(&packed, 64).unwrap();
+        // Per-block amax / 127 ≤ 1/127 ≈ 0.008, so round-trip error < 0.004.
+        for (i, (v, r)) in vals.iter().zip(&round).enumerate() {
+            assert!((v - r).abs() < 0.01, "idx {i}: v={v} r={r}");
+        }
+    }
+
+    #[test]
+    fn q8_0_round_trip_edges() {
+        // Values hitting the ±127/scale clamp edges. Scale is stored as f16
+        // (11-bit mantissa), so allow ~1e-3 for the quantized representation
+        // of ±1.0 after the f16-scale precision loss.
+        let mut vals = Vec::with_capacity(32);
+        for _ in 0..16 { vals.push(1.0); vals.push(-1.0); }
+        let packed = quantize_q8_0(&vals);
+        let round = dequantize_q8_0(&packed, 32).unwrap();
+        for (i, (v, r)) in vals.iter().zip(&round).enumerate() {
+            assert!((v - r).abs() < 1e-3, "idx {i}: v={v} r={r}");
+        }
+    }
+
+    // ── Dispatch coverage via dequantize() for the K-quants and Q4_0 ──
+
+    #[test]
+    fn q4_0_via_dequantize() {
+        let vals: Vec<f32> = (0..32).map(|i| (i as f32 - 15.5) * 0.05).collect();
+        let packed = quantize_q4_0(&vals);
+        let round = dequantize(&packed, TYPE_Q4_0, 32).unwrap();
+        assert_eq!(round.len(), 32);
+    }
+
+    #[test]
+    fn q8_0_via_dequantize() {
+        let vals: Vec<f32> = (0..32).map(|i| (i as f32) * 0.01).collect();
+        let packed = quantize_q8_0(&vals);
+        let round = dequantize(&packed, TYPE_Q8_0, 32).unwrap();
+        assert_eq!(round.len(), 32);
+        // Matches in-module Q8_0 path exactly.
+        let direct = dequantize_q8_0(&packed, 32).unwrap();
+        assert_eq!(round, direct);
+    }
+
+    #[test]
+    fn q4_k_via_dequantize_roundtrips_to_known_output() {
+        // Build a 144-byte Q4K block with scale 1.0, min 0.0, all sub-scales=1,
+        // sub-mins=0, nibbles = low nibble index 0..7 repeated — check shape,
+        // not exact values (the scale/min packing is lossy).
+        let mut block = vec![0u8; 144];
+        block[0] = 0x00; block[1] = 0x3C; // d = 1.0 (f16)
+        block[2] = 0x00; block[3] = 0x00; // dmin = 0.0
+        // bytes 4..16: scales[0..4] = 1, mins[0..4] = 0 (low 6 bits only)
+        for s in &mut block[4..8] { *s = 0x01; }
+        for _m in &mut block[8..12] { /* mins lo = 0 */ }
+        // Leave scales[4..8] = 0 (high nibble carrier) and quants zero.
+        let out = dequantize(&block, TYPE_Q4_K, 256).unwrap();
+        assert_eq!(out.len(), 256);
+        // First 128 elements use scales[0..4] = 1 so decoded = 0 (nibbles zero).
+        // Remaining 128 use scales[4..8] = 0 so also zero.
+        assert!(out.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn q6_k_via_dequantize() {
+        // Dispatch-path check — uses the single-block synth helper.
+        let block = synth_q6k_block(99);
+        let direct = dequantize_q6_k(&block, 256).unwrap();
+        let dispatched = dequantize(&block, TYPE_Q6_K, 256).unwrap();
+        assert_eq!(direct, dispatched);
     }
 
     #[test]

@@ -293,12 +293,7 @@ fn split_sibling_suffix(bare: &str) -> (&str, Option<&'static str>) {
     for preset in DEFAULT_SIBLING_PRESETS {
         let suffix = format!("-{preset}");
         if let Some(base) = bare.strip_suffix(&suffix) {
-            let preset_static: &'static str = match *preset {
-                "client" => "client",
-                "server" => "server",
-                "browse" => "browse",
-                other => other,
-            };
+            let preset_static: &'static str = preset;
             return (base, Some(preset_static));
         }
     }

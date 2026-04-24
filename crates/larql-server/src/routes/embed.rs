@@ -616,7 +616,7 @@ mod tests {
     fn binary_embed_response_float_roundtrip() {
         let seq_len = 1usize;
         let hidden = 4usize;
-        let values = [0.1f32, -0.5, 1.0, 3.14];
+        let values = [0.1f32, -0.5, 1.0, 2.5];
         let mut out = vec![0u8; 8];
         for &v in &values {
             out.extend_from_slice(&v.to_le_bytes());
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn binary_logits_odd_length_is_invalid() {
         // A body of 5 bytes is not a multiple of 4.
-        let body = vec![0u8; 5];
+        let body = [0u8; 5];
         assert_ne!(body.len() % 4, 0, "5 bytes must fail the alignment check");
     }
 
@@ -718,7 +718,7 @@ mod tests {
     fn embed_lookup_out_of_range_detected() {
         let embed = Array2::<f32>::zeros((8, 4));
         let vocab = embed.shape()[0];
-        assert!(!(8usize < vocab)); // token_id=8 is OOB for vocab=8
+        assert!((8usize >= vocab)); // token_id=8 is OOB for vocab=8
         assert!(7usize < vocab);   // token_id=7 is in range
     }
 

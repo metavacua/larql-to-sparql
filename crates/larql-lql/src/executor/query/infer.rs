@@ -54,8 +54,6 @@ impl Session {
         }
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
@@ -64,17 +62,49 @@ impl Session {
             .map_err(|e| LqlError::exec("tokenize error", e))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
+        let is_q4k = config.quant != larql_vindex::QuantFormat::None;
+
+        // For Q4K vindexes, load a separate VectorIndex with attn data. Gate KNN
+        // (for WalkFfn) comes from the already-loaded patched overlay.
+        let q4k_index: Option<larql_vindex::VectorIndex> = if is_q4k {
+            let mut idx = larql_vindex::VectorIndex::load_vindex(path, &mut cb)
+                .map_err(|e| LqlError::exec("failed to load q4k vindex", e))?;
+            idx.load_attn_q4k(path)
+                .map_err(|e| LqlError::exec("failed to load attn q4k", e))?;
+            idx.load_interleaved_q4k(path)
+                .map_err(|e| LqlError::exec("failed to load interleaved q4k", e))?;
+            Some(idx)
+        } else {
+            None
+        };
+
         // Shared INFER pipeline — walk FFN (unlimited features) plus KnnStore
         // side-channel override. Same code path as `PyVindex::infer`; see ADR
         // 0001 (docs/adr/0001-python-lql-infer-parity.md).
-        let infer = larql_inference::infer_patched(
-            &weights,
-            &tokenizer,
-            patched,
-            Some(&patched.knn_store),
-            &token_ids,
-            top_k,
-        );
+        let infer = if let Some(ref idx) = q4k_index {
+            let mut weights = larql_vindex::load_model_weights_q4k(path, &mut cb)
+                .map_err(|e| LqlError::exec("failed to load q4k model weights", e))?;
+            larql_inference::infer_patched_q4k(
+                &mut weights,
+                &tokenizer,
+                patched,
+                Some(&patched.knn_store),
+                &token_ids,
+                top_k,
+                idx,
+            )
+        } else {
+            let weights = larql_vindex::load_model_weights(path, &mut cb)
+                .map_err(|e| LqlError::exec("failed to load model weights", e))?;
+            larql_inference::infer_patched(
+                &weights,
+                &tokenizer,
+                patched,
+                Some(&patched.knn_store),
+                &token_ids,
+                top_k,
+            )
+        };
 
         let trace_layers = larql_inference::walk_trace_from_residuals(&infer.residuals, patched);
 
@@ -129,7 +159,15 @@ impl Session {
 
         if compare {
             let start = std::time::Instant::now();
-            let dense = larql_inference::predict(&weights, &tokenizer, &token_ids, top_k);
+            let dense = if let Some(ref idx) = q4k_index {
+                let mut weights = larql_vindex::load_model_weights_q4k(path, &mut cb)
+                    .map_err(|e| LqlError::exec("failed to load q4k model weights", e))?;
+                larql_inference::predict_q4k(&mut weights, &tokenizer, &token_ids, top_k, idx)
+            } else {
+                let weights = larql_vindex::load_model_weights(path, &mut cb)
+                    .map_err(|e| LqlError::exec("failed to load model weights", e))?;
+                larql_inference::predict(&weights, &tokenizer, &token_ids, top_k)
+            };
             let dense_ms = start.elapsed().as_secs_f64() * 1000.0;
 
             out.push(String::new());

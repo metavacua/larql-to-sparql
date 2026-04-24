@@ -57,6 +57,10 @@ pub struct LoadedModel {
     pub probe_labels: HashMap<(usize, usize), String>,
     /// L2 FFN output cache — shared across all clients, persists for server lifetime.
     pub ffn_l2_cache: FfnL2Cache,
+    /// Expert ID range this server owns (from `--experts START-END`).
+    /// `None` = serve all experts. Used by the expert endpoint to reject
+    /// requests for experts this shard doesn't hold.
+    pub expert_filter: Option<(usize, usize)>,
 }
 
 impl LoadedModel {
@@ -64,8 +68,8 @@ impl LoadedModel {
     ///
     /// For `--ffn-only` servers the loader filters attention + lm_head
     /// + embed entries from the weight manifest before mmap/decode,
-    /// so peak RSS during load reflects only what the walk-ffn
-    /// endpoint actually needs.
+    ///   so peak RSS during load reflects only what the walk-ffn
+    ///   endpoint actually needs.
     pub fn get_or_load_weights(&self) -> Result<&ModelWeights, String> {
         if let Some(w) = self.weights.get() {
             return Ok(w);
@@ -277,6 +281,7 @@ mod loaded_model_tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: HashMap::new(),
             ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(1),
+            expert_filter: None,
         }
     }
 

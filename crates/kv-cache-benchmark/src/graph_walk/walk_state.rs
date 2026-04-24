@@ -111,7 +111,7 @@ fn extract_entity(text: &str) -> Option<String> {
     for word in words.iter().rev() {
         let clean = word.trim_matches(|c: char| !c.is_alphanumeric());
         if clean.len() > 1
-            && clean.chars().next().map_or(false, |c| c.is_uppercase())
+            && clean.chars().next().is_some_and(|c| c.is_uppercase())
             && !["The", "What", "Who", "Where", "How", "Is", "Was", "Tell", "A"].contains(&clean)
         {
             return Some(clean.to_string());

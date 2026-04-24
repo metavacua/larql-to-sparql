@@ -101,7 +101,9 @@ use larql_models::quant::ggml;
 let q4_bytes = ggml::quantize_q4_0(&f32_data);      // f32 → packed Q4_0
 let q8_bytes = ggml::quantize_q8_0(&f32_data);      // f32 → packed Q8_0
 
-// Dequantize (any supported type)
+// Dequantize (any supported type). Returns ModelError::Parse if `bytes`
+// is shorter than the declared element count implies, or if num_elements
+// is not a multiple of the block size (32 for Q4/Q5/Q8, 256 for Q4_K/Q6_K).
 let f32_data = ggml::dequantize(&bytes, ggml::TYPE_Q4_0, num_elements)?;
 let f32_data = ggml::dequantize_q4_0(&bytes, num_elements)?;  // type-specific
 
@@ -177,11 +179,20 @@ Final value = e8m0_scale × fp4_value.
 use larql_models::quant::mxfp4;
 
 let scale = mxfp4::e8m0_to_f32(128);  // 2.0
-let value = mxfp4::fp4_to_f32(0x5);   // 3.0
 
-// Dequantize a block (scale_byte + 16 value bytes → 32 f32s)
-let f32_block = mxfp4::dequantize_block(scale_byte, &value_bytes);
+// Dequantize a single expert's projection:
+//   blocks = out_features × groups × 16 bytes (each byte = 2 × 4-bit values)
+//   scales = out_features × groups bytes (one e8m0 per group of 32 elements)
+let f32_row = mxfp4::dequantize_expert(&blocks, &scales, out_features, groups)?;
+
+// Dequantize all experts from packed [num_experts, out_features, groups, 16] tensors:
+let experts: Vec<Vec<f32>> =
+    mxfp4::dequantize_all_experts(&blocks, &scales, num_experts, out_features, groups)?;
 ```
+
+Both functions return `ModelError::Parse` if `blocks` or `scales` is too short
+for the declared shape — truncated inputs surface as clean errors rather than
+panicking on a slice OOB.
 
 ## Size Comparison
 

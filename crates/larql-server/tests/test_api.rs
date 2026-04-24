@@ -216,10 +216,8 @@ fn test_relations_listing() {
     let mut token_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for layer in patched.loaded_layers() {
         if let Some(metas) = patched.down_meta_at(layer) {
-            for meta_opt in metas.iter() {
-                if let Some(meta) = meta_opt {
-                    *token_counts.entry(meta.top_token.clone()).or_default() += 1;
-                }
+            for meta in metas.iter().flatten() {
+                *token_counts.entry(meta.top_token.clone()).or_default() += 1;
             }
         }
     }
@@ -468,7 +466,7 @@ fn test_layer_band_filtering() {
         output: (1, 1),
     };
 
-    let all_layers = vec![0, 1];
+    let all_layers = [0, 1];
 
     let syntax: Vec<usize> = all_layers.iter().copied()
         .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
@@ -548,7 +546,7 @@ fn test_parse_layer_range_filters_missing() {
 #[test]
 fn test_multi_model_lookup_by_id() {
     // Simulate AppState.model() logic
-    let models = vec!["gemma-3-4b-it", "llama-3-8b", "mistral-7b"];
+    let models = ["gemma-3-4b-it", "llama-3-8b", "mistral-7b"];
 
     let find = |id: &str| models.iter().find(|m| **m == id);
 
@@ -559,7 +557,7 @@ fn test_multi_model_lookup_by_id() {
 
 #[test]
 fn test_single_model_returns_first() {
-    let models = vec!["only-model"];
+    let models = ["only-model"];
 
     // Single model mode: None → returns first
     let result = if models.len() == 1 { models.first() } else { None };
@@ -568,7 +566,7 @@ fn test_single_model_returns_first() {
 
 #[test]
 fn test_multi_model_none_returns_none() {
-    let models = vec!["a", "b"];
+    let models = ["a", "b"];
 
     // Multi-model mode: None → returns None (must specify ID)
     let result: Option<&&str> = if models.len() == 1 { models.first() } else { None };
@@ -629,11 +627,7 @@ fn test_config_has_inference_capability() {
 #[test]
 fn test_bearer_token_extraction() {
     let header = "Bearer sk-abc123";
-    let token = if header.starts_with("Bearer ") {
-        Some(&header[7..])
-    } else {
-        None
-    };
+    let token = header.strip_prefix("Bearer ");
     assert_eq!(token, Some("sk-abc123"));
 }
 
@@ -730,7 +724,7 @@ fn test_cache_key_format() {
 fn test_cache_disabled_when_ttl_zero() {
     // TTL=0 means cache is disabled
     let ttl = 0u64;
-    assert!(!( ttl > 0));
+    assert_eq!(ttl, 0);
 }
 
 #[test]
@@ -742,7 +736,7 @@ fn test_cache_hit_and_miss() {
     let value = serde_json::json!({"entity": "France", "edges": []});
 
     // Miss
-    assert!(cache.get(&key).is_none());
+    assert!(!cache.contains_key(&key));
 
     // Insert
     cache.insert(key.clone(), value.clone());
@@ -879,7 +873,7 @@ fn test_describe_edge_aggregation_by_target() {
 #[test]
 fn test_describe_verbose_adds_layer_range() {
     // Verbose mode adds layer_min, layer_max, count
-    let layers = vec![14usize, 18, 22, 27];
+    let layers = [14usize, 18, 22, 27];
     let min_l = *layers.iter().min().unwrap();
     let max_l = *layers.iter().max().unwrap();
     assert_eq!(min_l, 14);
@@ -902,7 +896,7 @@ fn test_describe_self_reference_filtered() {
 
 #[test]
 fn test_select_order_by_confidence_desc() {
-    let mut rows = vec![(0.5f32, "a"), (0.9, "b"), (0.1, "c"), (0.7, "d")];
+    let mut rows = [(0.5f32, "a"), (0.9, "b"), (0.1, "c"), (0.7, "d")];
     rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     assert_eq!(rows[0].1, "b");
     assert_eq!(rows[1].1, "d");
@@ -912,7 +906,7 @@ fn test_select_order_by_confidence_desc() {
 
 #[test]
 fn test_select_order_by_confidence_asc() {
-    let mut rows = vec![(0.5f32, "a"), (0.9, "b"), (0.1, "c")];
+    let mut rows = [(0.5f32, "a"), (0.9, "b"), (0.1, "c")];
     rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     assert_eq!(rows[0].1, "c");
     assert_eq!(rows[1].1, "a");
@@ -998,7 +992,7 @@ fn test_error_empty_prompt() {
 
 #[test]
 fn test_error_nonexistent_model_in_multi() {
-    let models = vec!["model-a", "model-b"];
+    let models = ["model-a", "model-b"];
     let find = |id: &str| models.iter().find(|m| **m == id);
     assert!(find("model-c").is_none()); // → 404
 }
@@ -1010,7 +1004,6 @@ fn test_error_nonexistent_model_in_multi() {
 #[test]
 fn test_session_id_header_parsing() {
     let header_value = "sess-abc123";
-    assert!(!header_value.is_empty());
     assert_eq!(header_value, "sess-abc123");
 }
 
@@ -1084,8 +1077,8 @@ fn test_walk_ffn_batched_layers() {
 fn test_walk_ffn_residual_dimension_check() {
     // Handler validates residual length == hidden_size
     let expected_hidden = 4;
-    let residual_ok = vec![1.0f32; 4];
-    let residual_bad = vec![1.0f32; 8];
+    let residual_ok = [1.0f32; 4];
+    let residual_bad = [1.0f32; 8];
     assert_eq!(residual_ok.len(), expected_hidden);
     assert_ne!(residual_bad.len(), expected_hidden);
 }
@@ -1239,7 +1232,7 @@ fn test_etag_format() {
     let s = body.to_string();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     std::hash::Hash::hash(&s, &mut hasher);
-    let etag = format!("\"{}\"", format!("{:x}", std::hash::Hasher::finish(&hasher)));
+    let etag = format!("\"{:x}\"", std::hash::Hasher::finish(&hasher));
     assert!(etag.starts_with('"'));
     assert!(etag.ends_with('"'));
     assert!(etag.len() > 4); // At least "xx"
@@ -1347,7 +1340,7 @@ fn test_stream_layer_response_format() {
     });
     assert_eq!(msg["type"].as_str(), Some("layer"));
     assert_eq!(msg["layer"].as_u64(), Some(27));
-    assert!(msg["edges"].as_array().unwrap().len() > 0);
+    assert!(!msg["edges"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -1443,8 +1436,8 @@ fn test_grpc_describe_request_fields() {
     let verbose = false;
     let limit = 20u32;
     let min_score = 5.0f32;
-    assert!(!entity.is_empty());
-    assert!(!band.is_empty());
+    assert_eq!(entity, "France");
+    assert_eq!(band, "knowledge");
     assert!(!verbose);
     assert!(limit > 0);
     assert!(min_score > 0.0);
@@ -1470,8 +1463,8 @@ fn test_grpc_walk_response_structure() {
 #[test]
 fn test_grpc_infer_compare_response() {
     // Compare mode returns walk_predictions + dense_predictions separately
-    let walk_preds = vec![("Paris".to_string(), 0.9791f64)];
-    let dense_preds = vec![("Paris".to_string(), 0.9801f64)];
+    let walk_preds = [("Paris".to_string(), 0.9791f64)];
+    let dense_preds = [("Paris".to_string(), 0.9801f64)];
     assert_eq!(walk_preds.len(), 1);
     assert_eq!(dense_preds.len(), 1);
     assert_ne!(walk_preds[0].1, dense_preds[0].1); // Slightly different
@@ -1749,9 +1742,9 @@ fn test_embed_lookup_basic() {
     for tok in 0..4usize {
         let row: Vec<f32> = embed.row(tok).iter().map(|&v| v * scale).collect();
         assert_eq!(row[tok], 1.0, "token {tok} should activate dim {tok}");
-        for other in 0..4usize {
+        for (other, &v) in row.iter().enumerate().take(4) {
             if other != tok {
-                assert_eq!(row[other], 0.0);
+                assert_eq!(v, 0.0);
             }
         }
     }
@@ -1871,7 +1864,7 @@ fn test_logits_binary_request_byte_alignment() {
 fn test_logits_hidden_size_mismatch_detectable() {
     // Simulate the hidden size guard: residual.len() != hidden rejects request.
     let hidden_size = 4usize;
-    let bad_residual = vec![0.0f32; 3]; // wrong length
+    let bad_residual = [0.0f32; 3]; // wrong length
     assert_ne!(bad_residual.len(), hidden_size, "length 3 != hidden_size 4 → bad request");
 }
 
