@@ -8,11 +8,7 @@
 
 use std::time::Instant;
 
-use larql_inference::{
-    predict, predict_with_ffn,
-    InferenceModel, WeightFfn,
-    vindex::WalkFfn,
-};
+use larql_inference::{predict, predict_with_ffn, vindex::WalkFfn, InferenceModel, WeightFfn};
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,9 +19,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model_name = args[i].clone(); }
-            "--vindex" => { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
-            "--top-k" => { i += 1; top_k = args[i].parse().unwrap(); }
+            "--model" => {
+                i += 1;
+                model_name = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex_path = std::path::PathBuf::from(&args[i]);
+            }
+            "--top-k" => {
+                i += 1;
+                top_k = args[i].parse().unwrap();
+            }
             _ => {}
         }
         i += 1;
@@ -45,7 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     let mut cb = SilentLoadCallbacks;
     let mut index = VectorIndex::load_vindex(&vindex_path, &mut cb)?;
-    println!("Vindex loaded in {:.1}s ({} vectors)", t0.elapsed().as_secs_f64(), index.total_gate_vectors());
+    println!(
+        "Vindex loaded in {:.1}s ({} vectors)",
+        t0.elapsed().as_secs_f64(),
+        index.total_gate_vectors()
+    );
 
     // Pre-decode f16 gate vectors (skip for f32 — already zero-copy mmap)
     let t0 = Instant::now();
@@ -70,7 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
     let tokenizer = model.tokenizer();
     let num_layers = weights.num_layers;
-    println!("{num_layers} layers, hidden={}, top_k={top_k}\n", weights.hidden_size);
+    println!(
+        "{num_layers} layers, hidden={}, top_k={top_k}\n",
+        weights.hidden_size
+    );
 
     let prompt = "The capital of France is";
     let encoding = tokenizer.encode(prompt, true).map_err(|e| format!("{e}"))?;
@@ -89,10 +101,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let dense_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let dense_result = predict(weights, tokenizer, &token_ids, 5);
-    let (dense_tok, dense_prob) = dense_result.predictions.first()
-        .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
-    println!("  {dense_tok} ({:.2}%)  {dense_ms:.0}ms/token  ({:.1} tok/s)",
-        dense_prob * 100.0, 1000.0 / dense_ms);
+    let (dense_tok, dense_prob) = dense_result
+        .predictions
+        .first()
+        .map(|(t, p)| (t.clone(), *p))
+        .unwrap_or_default();
+    println!(
+        "  {dense_tok} ({:.2}%)  {dense_ms:.0}ms/token  ({:.1} tok/s)",
+        dense_prob * 100.0,
+        1000.0 / dense_ms
+    );
 
     // ── Walk brute-force (vindex FFN, all layers) ──
     println!("\n--- Walk brute-force (dense attention + vindex FFN, all {num_layers} layers) ---");
@@ -107,19 +125,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let walk_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let walk_result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn);
-    let (walk_tok, walk_prob) = walk_result.predictions.first()
-        .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
-    println!("  {walk_tok} ({:.2}%)  {walk_ms:.0}ms/token  ({:.1} tok/s)",
-        walk_prob * 100.0, 1000.0 / walk_ms);
+    let (walk_tok, walk_prob) = walk_result
+        .predictions
+        .first()
+        .map(|(t, p)| (t.clone(), *p))
+        .unwrap_or_default();
+    println!(
+        "  {walk_tok} ({:.2}%)  {walk_ms:.0}ms/token  ({:.1} tok/s)",
+        walk_prob * 100.0,
+        1000.0 / walk_ms
+    );
 
     // ── Component breakdown ──
     println!("\n--- Component breakdown (layer 0, 3 iters) ---");
 
     let weight_ffn = WeightFfn { weights };
     let h = larql_inference::forward_to_layer(weights, &token_ids, 0);
-    let h_norm = larql_inference::ndarray::Array2::from_shape_fn(
-        (h.shape()[0], h.shape()[1]), |(i, j)| h[[i, j]]
-    );
+    let h_norm =
+        larql_inference::ndarray::Array2::from_shape_fn((h.shape()[0], h.shape()[1]), |(i, j)| {
+            h[[i, j]]
+        });
 
     // Dense FFN
     let t0 = Instant::now();
@@ -151,14 +176,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let features = index.gate_knn_batch(0, &h_norm, top_k);
     let t0 = Instant::now();
     for _ in 0..3 {
-        let _ = larql_inference::ffn::sparse_compute::sparse_ffn_forward(weights, 0, &h_norm, &features);
+        let _ = larql_inference::ffn::sparse_compute::sparse_ffn_forward(
+            weights, 0, &h_norm, &features,
+        );
     }
     let sparse_ms = t0.elapsed().as_secs_f64() * 1000.0 / 3.0;
     println!("  Sparse FFN (K={}):  {sparse_ms:.1}ms", features.len());
     println!();
-    println!("  Gate KNN:    {:.0}% of walk FFN time", gate_ms / walk_ffn_ms.max(0.01) * 100.0);
-    println!("  Sparse FFN:  {:.0}% of walk FFN time", sparse_ms / walk_ffn_ms.max(0.01) * 100.0);
-    println!("  Dense/Walk:  {:.1}x", dense_ffn_ms / walk_ffn_ms.max(0.01));
+    println!(
+        "  Gate KNN:    {:.0}% of walk FFN time",
+        gate_ms / walk_ffn_ms.max(0.01) * 100.0
+    );
+    println!(
+        "  Sparse FFN:  {:.0}% of walk FFN time",
+        sparse_ms / walk_ffn_ms.max(0.01) * 100.0
+    );
+    println!(
+        "  Dense/Walk:  {:.1}x",
+        dense_ffn_ms / walk_ffn_ms.max(0.01)
+    );
 
     // ── Walk HNSW ──
     println!("\n--- Walk HNSW (graph search, all {num_layers} layers) ---");
@@ -177,20 +213,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let hnsw_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let hnsw_result = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_hnsw);
-    let (hnsw_tok, hnsw_prob) = hnsw_result.predictions.first()
-        .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
-    println!("  {hnsw_tok} ({:.2}%)  {hnsw_ms:.0}ms/token  ({:.1} tok/s)",
-        hnsw_prob * 100.0, 1000.0 / hnsw_ms);
+    let (hnsw_tok, hnsw_prob) = hnsw_result
+        .predictions
+        .first()
+        .map(|(t, p)| (t.clone(), *p))
+        .unwrap_or_default();
+    println!(
+        "  {hnsw_tok} ({:.2}%)  {hnsw_ms:.0}ms/token  ({:.1} tok/s)",
+        hnsw_prob * 100.0,
+        1000.0 / hnsw_ms
+    );
     index.disable_hnsw();
 
     // ── Summary ──
     println!("\n--- Summary ---\n");
-    println!("  Dense:       {dense_ms:>8.0}ms  ({:.1} tok/s)  {dense_tok} ({:.2}%)",
-        1000.0 / dense_ms, dense_prob * 100.0);
-    println!("  Walk brute:  {walk_ms:>8.0}ms  ({:.1} tok/s)  {walk_tok} ({:.2}%)",
-        1000.0 / walk_ms, walk_prob * 100.0);
-    println!("  Walk HNSW:   {hnsw_ms:>8.0}ms  ({:.1} tok/s)  {hnsw_tok} ({:.2}%)",
-        1000.0 / hnsw_ms, hnsw_prob * 100.0);
+    println!(
+        "  Dense:       {dense_ms:>8.0}ms  ({:.1} tok/s)  {dense_tok} ({:.2}%)",
+        1000.0 / dense_ms,
+        dense_prob * 100.0
+    );
+    println!(
+        "  Walk brute:  {walk_ms:>8.0}ms  ({:.1} tok/s)  {walk_tok} ({:.2}%)",
+        1000.0 / walk_ms,
+        walk_prob * 100.0
+    );
+    println!(
+        "  Walk HNSW:   {hnsw_ms:>8.0}ms  ({:.1} tok/s)  {hnsw_tok} ({:.2}%)",
+        1000.0 / hnsw_ms,
+        hnsw_prob * 100.0
+    );
     println!();
     println!("  Brute vs HNSW: {:.1}x", walk_ms / hnsw_ms.max(0.1));
     println!("  Dense vs HNSW: {:.1}x", dense_ms / hnsw_ms.max(0.1));

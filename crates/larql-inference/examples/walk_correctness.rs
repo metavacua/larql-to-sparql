@@ -28,8 +28,9 @@ use std::time::Instant;
 use ndarray::Array2;
 
 use larql_inference::{
-    predict, predict_with_ffn, FfnBackend, InferenceModel, WeightFfn,
+    predict, predict_with_ffn,
     vindex::{WalkFfn, WalkFfnConfig},
+    FfnBackend, InferenceModel, WeightFfn,
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
@@ -50,9 +51,18 @@ fn parse_args() -> Args {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model = args[i].clone(); }
-            "--vindex" => { i += 1; vindex = PathBuf::from(&args[i]); }
-            "--prompt" => { i += 1; prompt = args[i].clone(); }
+            "--model" => {
+                i += 1;
+                model = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex = PathBuf::from(&args[i]);
+            }
+            "--prompt" => {
+                i += 1;
+                prompt = args[i].clone();
+            }
             _ => {}
         }
         i += 1;
@@ -63,7 +73,11 @@ fn parse_args() -> Args {
         std::process::exit(1);
     }
 
-    Args { model, vindex, prompt }
+    Args {
+        model,
+        vindex,
+        prompt,
+    }
 }
 
 // ── Dual FFN wrapper ───────────────────────────────────────────────────
@@ -88,13 +102,9 @@ impl<'a> FfnBackend for DualFfn<'a> {
         self.forward_with_activation(layer, x).0
     }
 
-    fn forward_with_activation(
-        &self,
-        layer: usize,
-        x: &Array2<f32>,
-    ) -> (Array2<f32>, Array2<f32>) {
+    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let (p_out, p_act) = self.primary.forward_with_activation(layer, x);
-        let (s_out, _)     = self.secondary.forward_with_activation(layer, x);
+        let (s_out, _) = self.secondary.forward_with_activation(layer, x);
 
         let diff = layer_diff(&p_out, &s_out);
         self.diffs.borrow_mut().push((layer, diff));
@@ -102,7 +112,9 @@ impl<'a> FfnBackend for DualFfn<'a> {
         (p_out, p_act)
     }
 
-    fn name(&self) -> &str { "dual" }
+    fn name(&self) -> &str {
+        "dual"
+    }
 }
 
 /// Returns true when the interleaved Q4K manifest stores down_proj as Q4_K
@@ -110,9 +122,15 @@ impl<'a> FfnBackend for DualFfn<'a> {
 /// tighter-threshold default — on any parse or IO error.
 fn detect_down_q4k(vindex: &std::path::Path) -> bool {
     let manifest_path = vindex.join("interleaved_q4k_manifest.json");
-    let Ok(bytes) = std::fs::read(&manifest_path) else { return false };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return false };
-    let Some(entries) = value.as_array() else { return false };
+    let Ok(bytes) = std::fs::read(&manifest_path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    let Some(entries) = value.as_array() else {
+        return false;
+    };
     for entry in entries {
         let key = entry.get("key").and_then(|v| v.as_str()).unwrap_or("");
         if key.contains("down_proj") {
@@ -139,7 +157,9 @@ fn layer_diff(a: &Array2<f32>, b: &Array2<f32>) -> LayerDiff {
         let d = ai - bi;
         l2_sq += d * d;
         let abs_d = d.abs();
-        if abs_d > max_abs { max_abs = abs_d; }
+        if abs_d > max_abs {
+            max_abs = abs_d;
+        }
         dot += ai * bi;
         a_norm_sq += ai * ai;
         b_norm_sq += bi * bi;
@@ -149,7 +169,9 @@ fn layer_diff(a: &Array2<f32>, b: &Array2<f32>) -> LayerDiff {
     let b_norm = b_norm_sq.sqrt();
     let cos = if a_norm > 0.0 && b_norm > 0.0 {
         dot / (a_norm * b_norm)
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     LayerDiff {
         l2: l2_sq.sqrt(),
@@ -172,23 +194,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load model + vindex
     let t0 = Instant::now();
     let model = InferenceModel::load(&args.model)?;
-    println!("Model loaded in {:.1}s ({} layers, hidden={})",
+    println!(
+        "Model loaded in {:.1}s ({} layers, hidden={})",
         t0.elapsed().as_secs_f64(),
         model.weights().num_layers,
-        model.weights().hidden_size);
+        model.weights().hidden_size
+    );
 
     let t0 = Instant::now();
     let mut cb = SilentLoadCallbacks;
     let index = VectorIndex::load_vindex(&args.vindex, &mut cb)?;
-    println!("Vindex loaded in {:.1}s ({} vectors)\n",
+    println!(
+        "Vindex loaded in {:.1}s ({} vectors)\n",
         t0.elapsed().as_secs_f64(),
-        index.total_gate_vectors());
+        index.total_gate_vectors()
+    );
 
     let weights = model.weights();
     let tokenizer = model.tokenizer();
     let num_layers = weights.num_layers;
 
-    let encoding = tokenizer.encode(args.prompt.as_str(), true)
+    let encoding = tokenizer
+        .encode(args.prompt.as_str(), true)
         .map_err(|e| format!("tokenize: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
@@ -216,8 +243,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Dual forward pass: {:.2}s\n", t0.elapsed().as_secs_f64());
 
     let diffs = dual.diffs.borrow();
-    println!("  {:>4}  {:>10}  {:>10}  {:>10}  {:>12}  {:>12}",
-        "layer", "L2", "cos", "max|Δ|", "‖weight‖", "‖walk‖");
+    println!(
+        "  {:>4}  {:>10}  {:>10}  {:>10}  {:>12}  {:>12}",
+        "layer", "L2", "cos", "max|Δ|", "‖weight‖", "‖walk‖"
+    );
     println!("  {:-<78}", "");
 
     let mut max_l2 = 0.0f32;
@@ -226,17 +255,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut worst_layer = 0usize;
 
     for (layer, d) in diffs.iter() {
-        println!("  {:>4}  {:>10.3e}  {:>10.6}  {:>10.3e}  {:>12.4}  {:>12.4}",
-            layer, d.l2, d.cos, d.max_abs, d.primary_norm, d.secondary_norm);
-        if d.l2 > max_l2 { max_l2 = d.l2; worst_layer = *layer; }
-        if d.cos < min_cos { min_cos = d.cos; }
-        if d.max_abs > max_abs { max_abs = d.max_abs; }
+        println!(
+            "  {:>4}  {:>10.3e}  {:>10.6}  {:>10.3e}  {:>12.4}  {:>12.4}",
+            layer, d.l2, d.cos, d.max_abs, d.primary_norm, d.secondary_norm
+        );
+        if d.l2 > max_l2 {
+            max_l2 = d.l2;
+            worst_layer = *layer;
+        }
+        if d.cos < min_cos {
+            min_cos = d.cos;
+        }
+        if d.max_abs > max_abs {
+            max_abs = d.max_abs;
+        }
     }
     drop(diffs);
 
     println!();
-    println!("  Summary:  max L2={:.3e} (layer {})   min cos={:.6}   max|Δ|={:.3e}",
-        max_l2, worst_layer, min_cos, max_abs);
+    println!(
+        "  Summary:  max L2={:.3e} (layer {})   min cos={:.6}   max|Δ|={:.3e}",
+        max_l2, worst_layer, min_cos, max_abs
+    );
 
     // f32 vindexes hit bit-identity (L2=0, cos=1). Q4K/Q6K vindexes carry
     // quantisation noise — observed ~0.9 L2 / 0.998 cos on Gemma 3 4B. We
@@ -256,7 +296,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let walk_pred = predict_with_ffn(weights, tokenizer, &token_ids, 5, &walk_ffn2);
 
     let dense_top1 = dense_pred.predictions.first().cloned().unwrap_or_default();
-    let walk_top1  = walk_pred.predictions.first().cloned().unwrap_or_default();
+    let walk_top1 = walk_pred.predictions.first().cloned().unwrap_or_default();
 
     println!("  Dense top-5:");
     for (i, (tok, p)) in dense_pred.predictions.iter().enumerate().take(5) {
@@ -271,10 +311,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prob_delta = (dense_top1.1 - walk_top1.1).abs();
 
     // Top-5 Jaccard
-    let dense_set: std::collections::HashSet<_> = dense_pred.predictions.iter()
-        .take(5).map(|(t, _)| t.clone()).collect();
-    let walk_set: std::collections::HashSet<_> = walk_pred.predictions.iter()
-        .take(5).map(|(t, _)| t.clone()).collect();
+    let dense_set: std::collections::HashSet<_> = dense_pred
+        .predictions
+        .iter()
+        .take(5)
+        .map(|(t, _)| t.clone())
+        .collect();
+    let walk_set: std::collections::HashSet<_> = walk_pred
+        .predictions
+        .iter()
+        .take(5)
+        .map(|(t, _)| t.clone())
+        .collect();
     let jacc = dense_set.intersection(&walk_set).count() as f64
         / dense_set.union(&walk_set).count().max(1) as f64;
 
@@ -286,10 +334,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prob_delta_budget = if down_q4k { 0.035 } else { 0.02 };
 
     println!();
-    println!("  top-1 match: {}  (dense={:?} walk={:?})",
-        top1_match, dense_top1.0, walk_top1.0);
-    println!("  prob delta:  {:.6}  (budget {:.3}, down={})",
-        prob_delta, prob_delta_budget, if down_q4k { "Q4_K" } else { "Q6_K" });
+    println!(
+        "  top-1 match: {}  (dense={:?} walk={:?})",
+        top1_match, dense_top1.0, walk_top1.0
+    );
+    println!(
+        "  prob delta:  {:.6}  (budget {:.3}, down={})",
+        prob_delta,
+        prob_delta_budget,
+        if down_q4k { "Q4_K" } else { "Q6_K" }
+    );
     println!("  top-5 Jaccard: {:.3}", jacc);
 
     let phase_b_ok = top1_match && prob_delta <= prob_delta_budget;
@@ -297,8 +351,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Summary ────────────────────────────────────────────────────────
     println!("=== Summary ===");
-    println!("  Phase A (per-layer parity): {}", if phase_a_ok { "PASS" } else { "FAIL" });
-    println!("  Phase B (end-to-end parity): {}", if phase_b_ok { "PASS" } else { "FAIL" });
+    println!(
+        "  Phase A (per-layer parity): {}",
+        if phase_a_ok { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  Phase B (end-to-end parity): {}",
+        if phase_b_ok { "PASS" } else { "FAIL" }
+    );
 
     if phase_a_ok && phase_b_ok {
         println!("\n  ALL CHECKS PASS");

@@ -6,30 +6,36 @@
 //! Usage:
 //!   cargo run --release -p larql-vindex --example build_gate_vectors_q4 -- <vindex_dir>
 
+use larql_compute::cpu::q4::quantize_q4_0;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use larql_compute::cpu::q4::quantize_q4_0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args().nth(1)
-        .unwrap_or_else(|| { eprintln!("Usage: build_gate_vectors_q4 <vindex_dir>"); std::process::exit(1); });
+    let dir = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: build_gate_vectors_q4 <vindex_dir>");
+        std::process::exit(1);
+    });
     let dir = Path::new(&dir);
 
     // Load config
-    let config: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("index.json"))?
-    )?;
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("index.json"))?)?;
     let num_layers = config["num_layers"].as_u64().unwrap() as usize;
     let hidden_size = config["hidden_size"].as_u64().unwrap() as usize;
-    let dtype = config.get("dtype").and_then(|v| v.as_str()).unwrap_or("f32");
+    let dtype = config
+        .get("dtype")
+        .and_then(|v| v.as_str())
+        .unwrap_or("f32");
 
     // Load gate_vectors.bin
     let gate_path = dir.join("gate_vectors.bin");
     let file = std::fs::File::open(&gate_path)?;
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
-    let layers_info: Vec<(usize, usize)> = config["layers"].as_array().unwrap()
+    let layers_info: Vec<(usize, usize)> = config["layers"]
+        .as_array()
+        .unwrap()
         .iter()
         .map(|l| {
             let nf = l["num_features"].as_u64().unwrap_or(0) as usize;
@@ -38,7 +44,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     println!("=== Building gate_vectors_q4.bin ===");
-    println!("  Source: {} ({} layers, {})", gate_path.display(), num_layers, dtype);
+    println!(
+        "  Source: {} ({} layers, {})",
+        gate_path.display(),
+        num_layers,
+        dtype
+    );
 
     let t0 = Instant::now();
     let out_path = dir.join("gate_vectors_q4.bin");
@@ -50,7 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_offset = 0usize;
 
     for (layer, (num_features, num_floats)) in layers_info.iter().enumerate() {
-        if *num_features == 0 { continue; }
+        if *num_features == 0 {
+            continue;
+        }
 
         let byte_count = num_floats * bpf;
         let raw = &mmap[byte_offset..byte_offset + byte_count];
@@ -80,8 +93,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = t0.elapsed().as_secs_f64();
     let ratio = total_f32 as f64 / total_q4 as f64;
-    println!("  Output: {} ({:.1} MB, {:.1}x compression)",
-        out_path.display(), total_q4 as f64 / 1e6, ratio);
+    println!(
+        "  Output: {} ({:.1} MB, {:.1}x compression)",
+        out_path.display(),
+        total_q4 as f64 / 1e6,
+        ratio
+    );
     println!("  Time: {:.1}s", elapsed);
     println!("=== Done ===");
 

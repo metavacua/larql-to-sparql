@@ -59,48 +59,79 @@ fn bench_backend(label: &str, backend: &dyn ComputeBackend) {
     let h = synth_matrix(seq, hidden, 1);
     let w_q = synth_matrix(num_heads * head_dim, hidden, 2);
 
-    bench(&format!("Q proj [{seq},{hidden}] x [{},{hidden}]^T", num_heads * head_dim), 50, || {
-        let _ = backend.matmul_transb(h.view(), w_q.view());
-    });
+    bench(
+        &format!(
+            "Q proj [{seq},{hidden}] x [{},{hidden}]^T",
+            num_heads * head_dim
+        ),
+        50,
+        || {
+            let _ = backend.matmul_transb(h.view(), w_q.view());
+        },
+    );
 
     // QK^T per head: [seq, head_dim] x [seq, head_dim]^T
     let q = synth_matrix(seq, head_dim, 10);
     let k = synth_matrix(seq, head_dim, 11);
 
-    bench(&format!("QK^T [{seq},{head_dim}] x [{seq},{head_dim}]^T"), 200, || {
-        let _ = backend.matmul_transb(q.view(), k.view());
-    });
+    bench(
+        &format!("QK^T [{seq},{head_dim}] x [{seq},{head_dim}]^T"),
+        200,
+        || {
+            let _ = backend.matmul_transb(q.view(), k.view());
+        },
+    );
 
     // scores @ V: [seq, seq] x [seq, head_dim]
     let scores = synth_matrix(seq, seq, 20);
     let v = synth_matrix(seq, head_dim, 21);
 
-    bench(&format!("scores*V [{seq},{seq}] x [{seq},{head_dim}]"), 200, || {
-        let _ = backend.matmul(scores.view(), v.view());
-    });
+    bench(
+        &format!("scores*V [{seq},{seq}] x [{seq},{head_dim}]"),
+        200,
+        || {
+            let _ = backend.matmul(scores.view(), v.view());
+        },
+    );
 
     // O projection: [seq, num_heads*head_dim] x [hidden, num_heads*head_dim]^T
     let attn_out = synth_matrix(seq, num_heads * head_dim, 30);
     let w_o = synth_matrix(hidden, num_heads * head_dim, 31);
 
-    bench(&format!("O proj [{seq},{}] x [{hidden},{}]^T", num_heads * head_dim, num_heads * head_dim), 50, || {
-        let _ = backend.matmul_transb(attn_out.view(), w_o.view());
-    });
+    bench(
+        &format!(
+            "O proj [{seq},{}] x [{hidden},{}]^T",
+            num_heads * head_dim,
+            num_heads * head_dim
+        ),
+        50,
+        || {
+            let _ = backend.matmul_transb(attn_out.view(), w_o.view());
+        },
+    );
 
     // ── FFN projections ──
     let x = synth_matrix(seq, hidden, 40);
     let w_gate = synth_matrix(intermediate, hidden, 41);
 
-    bench(&format!("FFN gate [{seq},{hidden}] x [{intermediate},{hidden}]^T"), 20, || {
-        let _ = backend.matmul_transb(x.view(), w_gate.view());
-    });
+    bench(
+        &format!("FFN gate [{seq},{hidden}] x [{intermediate},{hidden}]^T"),
+        20,
+        || {
+            let _ = backend.matmul_transb(x.view(), w_gate.view());
+        },
+    );
 
     let act = synth_matrix(seq, intermediate, 50);
     let w_down = synth_matrix(hidden, intermediate, 51);
 
-    bench(&format!("FFN down [{seq},{intermediate}] x [{hidden},{intermediate}]^T"), 20, || {
-        let _ = backend.matmul_transb(act.view(), w_down.view());
-    });
+    bench(
+        &format!("FFN down [{seq},{intermediate}] x [{hidden},{intermediate}]^T"),
+        20,
+        || {
+            let _ = backend.matmul_transb(act.view(), w_down.view());
+        },
+    );
 
     // ── Batched attention heads ──
     let ops: Vec<MatMulOp> = (0..num_heads)
@@ -111,38 +142,59 @@ fn bench_backend(label: &str, backend: &dyn ComputeBackend) {
         })
         .collect();
 
-    bench(&format!("Batch QK^T ({num_heads} heads, 1 dispatch)"), 100, || {
-        let _ = backend.matmul_batch(&ops);
-    });
+    bench(
+        &format!("Batch QK^T ({num_heads} heads, 1 dispatch)"),
+        100,
+        || {
+            let _ = backend.matmul_batch(&ops);
+        },
+    );
 
-    bench(&format!("Serial QK^T ({num_heads} heads, {num_heads} calls)"), 100, || {
-        for op in &ops {
-            let _ = backend.matmul_transb(op.a.view(), op.b.view());
-        }
-    });
+    bench(
+        &format!("Serial QK^T ({num_heads} heads, {num_heads} calls)"),
+        100,
+        || {
+            for op in &ops {
+                let _ = backend.matmul_transb(op.a.view(), op.b.view());
+            }
+        },
+    );
 
     // ── Logits projection (the big one) ──
     let vocab = 262144;
     let last = synth_matrix(1, hidden, 300);
     let lm_head = synth_matrix(vocab, hidden, 301);
 
-    bench(&format!("Logits [1,{hidden}] x [{vocab},{hidden}]^T"), 5, || {
-        let _ = backend.matmul_transb(last.view(), lm_head.view());
-    });
+    bench(
+        &format!("Logits [1,{hidden}] x [{vocab},{hidden}]^T"),
+        5,
+        || {
+            let _ = backend.matmul_transb(last.view(), lm_head.view());
+        },
+    );
 
     // ── Sequence length scaling ──
     println!("\n  Sequence length scaling (Q projection):");
     for &s in &[1, 6, 12, 24, 48] {
         let h_s = synth_matrix(s, hidden, 400 + s as u64);
-        bench(&format!("  seq={s:<4} [{s},{hidden}] x [{},{hidden}]^T", num_heads * head_dim), 20, || {
-            let _ = backend.matmul_transb(h_s.view(), w_q.view());
-        });
+        bench(
+            &format!(
+                "  seq={s:<4} [{s},{hidden}] x [{},{hidden}]^T",
+                num_heads * head_dim
+            ),
+            20,
+            || {
+                let _ = backend.matmul_transb(h_s.view(), w_q.view());
+            },
+        );
     }
 }
 
 fn main() {
     println!("=== MatMul Backend Benchmark ===");
-    println!("Gemma-3 4B dimensions: hidden=2560, heads=10, head_dim=256, inter=10240, vocab=262144");
+    println!(
+        "Gemma-3 4B dimensions: hidden=2560, heads=10, head_dim=256, inter=10240, vocab=262144"
+    );
 
     // Always benchmark CPU
     let cpu = CpuBackend;
@@ -199,8 +251,10 @@ fn main() {
             } else {
                 format!("CPU wins {:.1}x", 1.0 / ratio)
             };
-            println!("  {name:<20} CPU: {cpu_us:>8.0} us  {}: {def_us:>8.0} us  ({winner})",
-                default.name());
+            println!(
+                "  {name:<20} CPU: {cpu_us:>8.0} us  {}: {def_us:>8.0} us  ({winner})",
+                default.name()
+            );
         }
     } else {
         println!("\n  (Metal not available — default is CPU)");

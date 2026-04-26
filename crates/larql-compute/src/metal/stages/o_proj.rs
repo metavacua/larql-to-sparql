@@ -9,8 +9,8 @@
 //!
 //! Single-vector per position. Multi-position prefill loops.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 use super::quant_matvec;
 
@@ -25,11 +25,16 @@ pub fn encode(
     q8_quant_pipeline: &ComputePipelineState,
     format: crate::QuantFormat,
     wo_buf: &Buffer,
-    attn_in: &Buffer, attn_in_off: u64,
-    q8_stage: &Buffer, q8_stage_off: u64,
-    q8s_stage: &Buffer, q8s_stage_off: u64,
-    o_out: &Buffer, o_out_off: u64,
-    q_dim: usize, hidden: usize,
+    attn_in: &Buffer,
+    attn_in_off: u64,
+    q8_stage: &Buffer,
+    q8_stage_off: u64,
+    q8s_stage: &Buffer,
+    q8s_stage_off: u64,
+    o_out: &Buffer,
+    o_out_off: u64,
+    q_dim: usize,
+    hidden: usize,
 ) {
     let is_f32_input = matches!(
         format,
@@ -52,11 +57,19 @@ pub fn encode(
     }
 
     quant_matvec::encode(
-        enc, format, wo_buf,
-        attn_in, attn_in_off,
-        q8_stage, q8_stage_off, q8s_stage, q8s_stage_off,
-        o_out, o_out_off,
+        enc,
+        format,
+        wo_buf,
+        attn_in,
+        attn_in_off,
+        q8_stage,
+        q8_stage_off,
+        q8s_stage,
+        q8s_stage_off,
+        o_out,
+        o_out_off,
         pipes,
-        hidden, q_dim,
+        hidden,
+        q_dim,
     );
 }

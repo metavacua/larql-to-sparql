@@ -14,7 +14,9 @@ fn main() {
     if args.len() < 3 {
         eprintln!(
             "usage: {} <model_dir> <vindex_dir>",
-            args.first().map(String::as_str).unwrap_or("diff_ple_quantization")
+            args.first()
+                .map(String::as_str)
+                .unwrap_or("diff_ple_quantization")
         );
         std::process::exit(2);
     }
@@ -33,9 +35,12 @@ fn main() {
     // Also dequantise layer 0's attn/FFN Q4K blocks into q4k.tensors so the
     // same diff loop covers the matmul weights, not just PLE tensors.
     let mut attn_cb = larql_vindex::SilentLoadCallbacks;
-    let mut index = larql_vindex::VectorIndex::load_vindex(&vindex_dir, &mut attn_cb).expect("vindex load");
+    let mut index =
+        larql_vindex::VectorIndex::load_vindex(&vindex_dir, &mut attn_cb).expect("vindex load");
     index.load_attn_q4k(&vindex_dir).expect("load_attn_q4k");
-    index.load_interleaved_q4k(&vindex_dir).expect("load_interleaved");
+    index
+        .load_interleaved_q4k(&vindex_dir)
+        .expect("load_interleaved");
     for layer in [0usize, 10] {
         let hidden = q4k.hidden_size;
         let intermediate = q4k.intermediate_size;
@@ -68,27 +73,42 @@ fn main() {
             };
             ndarray::Array2::from_shape_vec((rows, cols), floats[..n].to_vec()).unwrap()
         };
-        q4k.tensors.insert(q_key, dequant(attn[0], q_dim, hidden).into_shared());
-        q4k.tensors.insert(k_key, dequant(attn[1], kv_dim, hidden).into_shared());
-        q4k.tensors.insert(v_key, dequant(attn[2], kv_dim, hidden).into_shared());
-        q4k.tensors.insert(o_key, dequant(attn[3], hidden, q_dim).into_shared());
-        q4k.tensors.insert(g_key, dequant(ffn[0], intermediate, hidden).into_shared());
-        q4k.tensors.insert(u_key, dequant(ffn[1], intermediate, hidden).into_shared());
-        q4k.tensors.insert(d_key, dequant(ffn[2], hidden, intermediate).into_shared());
+        q4k.tensors
+            .insert(q_key, dequant(attn[0], q_dim, hidden).into_shared());
+        q4k.tensors
+            .insert(k_key, dequant(attn[1], kv_dim, hidden).into_shared());
+        q4k.tensors
+            .insert(v_key, dequant(attn[2], kv_dim, hidden).into_shared());
+        q4k.tensors
+            .insert(o_key, dequant(attn[3], hidden, q_dim).into_shared());
+        q4k.tensors
+            .insert(g_key, dequant(ffn[0], intermediate, hidden).into_shared());
+        q4k.tensors
+            .insert(u_key, dequant(ffn[1], intermediate, hidden).into_shared());
+        q4k.tensors
+            .insert(d_key, dequant(ffn[2], hidden, intermediate).into_shared());
     }
 
     // Key-set diff: collapse `.<digits>.` to `.N.` so per-layer keys
     // collapse to one pattern. Skip multimodal branches (vision/audio) —
     // Q4K vindex is text-only by design.
     let collapse = |k: &str| -> Option<String> {
-        if k.contains("audio_tower") || k.contains("vision_tower") || k.contains("embed_audio")
+        if k.contains("audio_tower")
+            || k.contains("vision_tower")
+            || k.contains("embed_audio")
             || k.contains("embed_vision")
         {
             return None;
         }
         let parts: Vec<String> = k
             .split('.')
-            .map(|p| if p.chars().all(|c| c.is_ascii_digit()) { "N".to_string() } else { p.to_string() })
+            .map(|p| {
+                if p.chars().all(|c| c.is_ascii_digit()) {
+                    "N".to_string()
+                } else {
+                    p.to_string()
+                }
+            })
             .collect();
         Some(parts.join("."))
     };
@@ -100,8 +120,7 @@ fn main() {
         q4k.tensors.keys().filter_map(|k| collapse(k)).collect();
     let dense_vec_pats: BTreeSet<String> =
         dense.vectors.keys().filter_map(|k| collapse(k)).collect();
-    let q4k_vec_pats: BTreeSet<String> =
-        q4k.vectors.keys().filter_map(|k| collapse(k)).collect();
+    let q4k_vec_pats: BTreeSet<String> = q4k.vectors.keys().filter_map(|k| collapse(k)).collect();
 
     println!("\n== TENSOR patterns in DENSE but MISSING from Q4K ==");
     for p in dense_tensor_pats.difference(&q4k_tensor_pats) {
@@ -137,8 +156,10 @@ fn main() {
     ];
 
     println!();
-    println!("{:55} {:>12} {:>14} {:>14} {:>10}",
-        "tensor", "n_elements", "max_abs_err", "mean_abs_err", "cos_sim");
+    println!(
+        "{:55} {:>12} {:>14} {:>14} {:>10}",
+        "tensor", "n_elements", "max_abs_err", "mean_abs_err", "cos_sim"
+    );
     println!("{}", "-".repeat(110));
 
     for key in targets {

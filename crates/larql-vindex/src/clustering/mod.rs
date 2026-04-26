@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 // Re-export the main entry points
 pub use kmeans::kmeans;
 pub use labeling::{auto_label_clusters, auto_label_clusters_from_embeddings};
-pub use pair_matching::{label_clusters_from_pairs, label_clusters_from_outputs, load_reference_databases};
+pub use pair_matching::{
+    label_clusters_from_outputs, label_clusters_from_pairs, load_reference_databases,
+};
 
 /// Result of clustering: centres + assignments + auto-generated labels.
 #[derive(Serialize, Deserialize, Clone)]
@@ -34,10 +36,7 @@ pub struct ClusterResult {
 
 /// Classify a direction vector against stored cluster centres.
 /// Returns (cluster_index, cosine_similarity).
-pub fn classify_direction(
-    direction: &Array1<f32>,
-    centres: &[Vec<f32>],
-) -> (usize, f32) {
+pub fn classify_direction(direction: &Array1<f32>, centres: &[Vec<f32>]) -> (usize, f32) {
     let mut best_c = 0;
     let mut best_sim = f32::NEG_INFINITY;
 

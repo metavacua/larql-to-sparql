@@ -36,10 +36,16 @@ fn default_templates() -> Vec<(String, String)> {
         ("located-in".into(), "France is located in".into()),
         ("currency".into(), "The currency of France is".into()),
         ("continent".into(), "The continent of France is".into()),
-        ("nationality".into(), "The nationality of someone from France is".into()),
+        (
+            "nationality".into(),
+            "The nationality of someone from France is".into(),
+        ),
         ("birthplace".into(), "The birthplace of Napoleon is".into()),
         ("known-for".into(), "France is known for".into()),
-        ("spoken-in".into(), "The language spoken in France is".into()),
+        (
+            "spoken-in".into(),
+            "The language spoken in France is".into(),
+        ),
         ("author-of".into(), "The author of Les Misérables is".into()),
         ("birth-year".into(), "Napoleon was born in the year".into()),
         ("death-year".into(), "Napoleon died in the year".into()),
@@ -56,7 +62,9 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     let head_dim = weights.head_dim;
     eprintln!(
         "  {} layers, {} heads, head_dim={} ({:.1}s)",
-        num_layers, num_heads, head_dim,
+        num_layers,
+        num_heads,
+        head_dim,
         start.elapsed().as_secs_f64()
     );
 
@@ -99,16 +107,17 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
         let labels: Vec<String> = token_ids
             .iter()
             .map(|&id| {
-                model.tokenizer().decode(&[id], true)
+                model
+                    .tokenizer()
+                    .decode(&[id], true)
                     .unwrap_or_else(|_| format!("T{id}"))
-                    .trim().to_string()
+                    .trim()
+                    .to_string()
             })
             .collect();
 
         eprint!("  {rel}...");
-        let trace = trace_forward_full(
-            weights, &token_ids, &layers, false, 0, true, &ffn,
-        );
+        let trace = trace_forward_full(weights, &token_ids, &layers, false, 0, true, &ffn);
 
         let mut prompt_captures: Vec<Vec<Vec<f32>>> = Vec::new();
         for capture in &trace.attention {
@@ -141,11 +150,19 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             for i in 0..templates.len() {
                 for j in (i + 1)..templates.len() {
-                    let w_i = match all_captures.get(i).and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                    let w_i = match all_captures
+                        .get(i)
+                        .and_then(|c| c.get(li))
+                        .and_then(|h| h.get(head))
+                    {
                         Some(w) => w,
                         None => continue,
                     };
-                    let w_j = match all_captures.get(j).and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                    let w_j = match all_captures
+                        .get(j)
+                        .and_then(|c| c.get(li))
+                        .and_then(|h| h.get(head))
+                    {
                         Some(w) => w,
                         None => continue,
                     };
@@ -169,7 +186,11 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             if avg_corr < args.threshold {
                 variable_heads.push(HeadInfo {
-                    layer, head, avg_corr, min_corr, max_attn,
+                    layer,
+                    head,
+                    avg_corr,
+                    min_corr,
+                    max_attn,
                 });
             } else {
                 fixed_count += 1;
@@ -179,7 +200,11 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     variable_heads.sort_by(|a, b| a.avg_corr.partial_cmp(&b.avg_corr).unwrap());
 
-    println!("\n═══ Variable Heads ({} variable, {} fixed) ═══\n", variable_heads.len(), fixed_count);
+    println!(
+        "\n═══ Variable Heads ({} variable, {} fixed) ═══\n",
+        variable_heads.len(),
+        fixed_count
+    );
     println!(
         "{:<8} {:<6} {:>8} {:>8} {:>8}",
         "Layer", "Head", "AvgCorr", "MinCorr", "MaxAttn"
@@ -207,7 +232,8 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{:<20} {}",
         "Template",
-        variable_heads.iter()
+        variable_heads
+            .iter()
             .take(15)
             .map(|h| format!("L{}H{}", h.layer, h.head))
             .collect::<Vec<_>>()
@@ -219,21 +245,28 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
         let mut cells: Vec<String> = Vec::new();
         for vh in variable_heads.iter().take(15) {
             let li = layers.iter().position(|&l| l == vh.layer).unwrap_or(0);
-            let pattern = all_captures.get(ti)
+            let pattern = all_captures
+                .get(ti)
                 .and_then(|c| c.get(li))
                 .and_then(|h| h.get(vh.head));
 
             if let Some(weights) = pattern {
                 // Find the position with max attention
-                let (max_pos, max_val) = weights.iter()
+                let (max_pos, max_val) = weights
+                    .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .unwrap_or((0, &0.0));
-                let label = all_token_labels.get(ti)
+                let label = all_token_labels
+                    .get(ti)
                     .and_then(|l| l.get(max_pos))
                     .map(|s| s.as_str())
                     .unwrap_or("?");
-                cells.push(format!("{:.0}%{}", max_val * 100.0, &label[..label.len().min(3)]));
+                cells.push(format!(
+                    "{:.0}%{}",
+                    max_val * 100.0,
+                    &label[..label.len().min(3)]
+                ));
             } else {
                 cells.push("---".into());
             }
@@ -250,7 +283,8 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
         let mut fp: Vec<f32> = Vec::new();
         for vh in &variable_heads {
             let li = layers.iter().position(|&l| l == vh.layer).unwrap_or(0);
-            if let Some(weights) = all_captures.get(ti)
+            if let Some(weights) = all_captures
+                .get(ti)
                 .and_then(|c| c.get(li))
                 .and_then(|h| h.get(vh.head))
             {
@@ -261,7 +295,8 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Print correlation matrix header
-    let short_names: Vec<String> = templates.iter()
+    let short_names: Vec<String> = templates
+        .iter()
         .map(|(r, _)| r.chars().take(10).collect())
         .collect();
 
@@ -317,14 +352,15 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     for (ci, cluster) in clusters.iter().enumerate() {
-        let members: Vec<String> = cluster.iter()
-            .map(|&i| templates[i].0.clone())
-            .collect();
+        let members: Vec<String> = cluster.iter().map(|&i| templates[i].0.clone()).collect();
         println!("  Cluster {}: {}", ci + 1, members.join(", "));
     }
 
-    println!("\n  {} distinct attention circuits for {} relation types",
-        clusters.len(), num_templates);
+    println!(
+        "\n  {} distinct attention circuits for {} relation types",
+        clusters.len(),
+        num_templates
+    );
 
     if clusters.len() < num_templates {
         println!("  → Some relations share attention circuits (can reuse cached patterns)");
@@ -351,7 +387,8 @@ fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>
     for part in spec.split(',') {
         let part = part.trim();
         if part.contains('-') {
-            let (a, b) = part.split_once('-')
+            let (a, b) = part
+                .split_once('-')
                 .ok_or_else(|| format!("invalid range: {part}"))?;
             let start: usize = a.parse()?;
             let end: usize = b.parse()?;

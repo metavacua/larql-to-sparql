@@ -107,7 +107,11 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
 
     eprintln!(
         "  {} layers, {}Q/{}KV heads, head_dim={}, hidden={} ({:.1}s)",
-        weights.num_layers, num_q, num_kv, head_dim, hidden,
+        weights.num_layers,
+        num_q,
+        num_kv,
+        head_dim,
+        hidden,
         start.elapsed().as_secs_f64()
     );
 
@@ -218,7 +222,9 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
             for _ in 0..modes {
                 let mut v = vec![1.0f32; head_dim];
                 let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-                for x in v.iter_mut() { *x /= n; }
+                for x in v.iter_mut() {
+                    *x /= n;
+                }
 
                 let mut ev = 0.0f32;
                 for _ in 0..80 {
@@ -230,10 +236,16 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
                     }
                     ev = mv.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
                     let n: f32 = mv.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    if n < 1e-12 { break; }
-                    for (x, m) in v.iter_mut().zip(mv.iter()) { *x = m / n; }
+                    if n < 1e-12 {
+                        break;
+                    }
+                    for (x, m) in v.iter_mut().zip(mv.iter()) {
+                        *x = m / n;
+                    }
                 }
-                if ev < 1e-8 { break; }
+                if ev < 1e-8 {
+                    break;
+                }
                 svs.push(ev.sqrt());
                 right_vecs.push(v.clone());
 
@@ -296,7 +308,12 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
 
             let cumvar: Vec<f32> = {
                 let mut cum = 0.0f32;
-                svs.iter().map(|s| { cum += s * s; round4(cum / total_var.max(1e-12)) }).collect()
+                svs.iter()
+                    .map(|s| {
+                        cum += s * s;
+                        round4(cum / total_var.max(1e-12))
+                    })
+                    .collect()
             };
 
             let record = HeadModes {
@@ -323,11 +340,14 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
         let tokens: Vec<&str> = token_str.split(',').collect();
         for tok_str in &tokens {
             let tok_str = tok_str.trim();
-            let encoding = model.tokenizer()
+            let encoding = model
+                .tokenizer()
                 .encode(format!(" {tok_str}").as_str(), false)
                 .map_err(|e| format!("tokenize error: {e}"))?;
             let ids = encoding.get_ids();
-            if ids.is_empty() { continue; }
+            if ids.is_empty() {
+                continue;
+            }
             let tok_id = *ids.last().unwrap();
 
             let tok_embed = embed.row(tok_id as usize);
@@ -335,10 +355,12 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
             let mut contributions = Vec::new();
             for &layer in &layers {
                 let w_v = match weights.tensors.get(&arch.attn_v_key(layer)) {
-                    Some(w) => w, None => continue,
+                    Some(w) => w,
+                    None => continue,
                 };
                 let w_o = match weights.tensors.get(&arch.attn_o_key(layer)) {
-                    Some(w) => w, None => continue,
+                    Some(w) => w,
+                    None => continue,
                 };
 
                 for q_head in 0..num_q {
@@ -350,7 +372,7 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
 
                     // OV contribution: O × V × embedding
                     let v_out = v_block.dot(&tok_embed); // (head_dim,)
-                    let ov_out = o_block.dot(&v_out);     // (hidden,)
+                    let ov_out = o_block.dot(&v_out); // (hidden,)
 
                     let norm: f32 = ov_out.iter().map(|x| x * x).sum::<f32>().sqrt();
                     let out_token = top_token(embed, &ov_out.to_vec(), model.tokenizer());
@@ -373,7 +395,12 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
             serde_json::to_writer(&mut out, &record)?;
             writeln!(out)?;
 
-            eprintln!("  Token '{}' (id={}): fingerprint computed across {} layers", tok_str, tok_id, layers.len());
+            eprintln!(
+                "  Token '{}' (id={}): fingerprint computed across {} layers",
+                tok_str,
+                tok_id,
+                layers.len()
+            );
         }
     }
 
@@ -415,7 +442,8 @@ fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>
     for part in spec.split(',') {
         let part = part.trim();
         if part.contains('-') {
-            let (a, b) = part.split_once('-')
+            let (a, b) = part
+                .split_once('-')
                 .ok_or_else(|| format!("invalid range: {part}"))?;
             layers.extend(a.parse::<usize>()?..=b.parse::<usize>()?);
         } else {

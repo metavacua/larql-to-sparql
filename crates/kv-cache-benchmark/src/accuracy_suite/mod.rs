@@ -9,8 +9,8 @@
 //! Requires `real-model` feature — needs actual model weights.
 
 #[cfg(feature = "real-model")]
+pub mod needle;
+#[cfg(feature = "real-model")]
 pub mod prompts;
 #[cfg(feature = "real-model")]
 pub mod runner;
-#[cfg(feature = "real-model")]
-pub mod needle;

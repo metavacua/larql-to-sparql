@@ -36,16 +36,21 @@ const SOURCE_VINDEX: &str = "output/gemma3-4b-f16.vindex";
 /// decoys result.
 const FACTS: &[(&str, &str, &str, &str)] = &[
     // (entity, relation, target, retrieval prompt)
-    ("Australia", "capital", "Canberra", "The capital of Australia is"),
-    ("France",    "capital", "Paris",    "The capital of France is"),
-    ("Germany",   "capital", "Berlin",   "The capital of Germany is"),
-    ("Japan",     "capital", "Tokyo",    "The capital of Japan is"),
-    ("Italy",     "capital", "Rome",     "The capital of Italy is"),
-    ("Spain",     "capital", "Madrid",   "The capital of Spain is"),
-    ("Canada",    "capital", "Ottawa",   "The capital of Canada is"),
-    ("Russia",    "capital", "Moscow",   "The capital of Russia is"),
-    ("China",     "capital", "Beijing",  "The capital of China is"),
-    ("Brazil",    "capital", "Brasília", "The capital of Brazil is"),
+    (
+        "Australia",
+        "capital",
+        "Canberra",
+        "The capital of Australia is",
+    ),
+    ("France", "capital", "Paris", "The capital of France is"),
+    ("Germany", "capital", "Berlin", "The capital of Germany is"),
+    ("Japan", "capital", "Tokyo", "The capital of Japan is"),
+    ("Italy", "capital", "Rome", "The capital of Italy is"),
+    ("Spain", "capital", "Madrid", "The capital of Spain is"),
+    ("Canada", "capital", "Ottawa", "The capital of Canada is"),
+    ("Russia", "capital", "Moscow", "The capital of Russia is"),
+    ("China", "capital", "Beijing", "The capital of China is"),
+    ("Brazil", "capital", "Brasília", "The capital of Brazil is"),
 ];
 
 const REGRESSION_PROMPTS: &[&str] = &[
@@ -85,7 +90,11 @@ fn main() {
     section("Phase 2a — Install + measure on PATCHED session (no compile)");
     let mut patched_session = Session::new();
     use_vindex(&mut patched_session, SOURCE_VINDEX);
-    run(&mut patched_session, r#"BEGIN PATCH "/tmp/larql_refine_demo_patched.vlp";"#, "BEGIN PATCH");
+    run(
+        &mut patched_session,
+        r#"BEGIN PATCH "/tmp/larql_refine_demo_patched.vlp";"#,
+        "BEGIN PATCH",
+    );
     // The install forward-passes the entity itself and uses the
     // resulting L20-L27 residuals as the gate directions. The user
     // doesn't need to supply the prompt — the entity alone is enough
@@ -114,9 +123,7 @@ fn main() {
         .into_owned();
     let _ = std::fs::remove_dir_all(&compiled_path);
     {
-        let stmt = format!(
-            r#"COMPILE CURRENT INTO VINDEX "{compiled_path}";"#
-        );
+        let stmt = format!(r#"COMPILE CURRENT INTO VINDEX "{compiled_path}";"#);
         run(&mut patched_session, &stmt, "COMPILE");
     }
     let mut compiled_session = Session::new();
@@ -135,9 +142,18 @@ fn main() {
     let compiled_bleed = regression_bleed(&baseline_regression, &compiled_regression);
 
     println!("  Retrieval (target token landed in top-1 of INFER):");
-    println!("    baseline (no install)               {baseline_hit:>2}/{}", FACTS.len());
-    println!("    PATCHED session (no compile yet)    {patched_hit:>2}/{}", FACTS.len());
-    println!("    compiled vindex (standalone)        {compiled_hit:>2}/{}", FACTS.len());
+    println!(
+        "    baseline (no install)               {baseline_hit:>2}/{}",
+        FACTS.len()
+    );
+    println!(
+        "    PATCHED session (no compile yet)    {patched_hit:>2}/{}",
+        FACTS.len()
+    );
+    println!(
+        "    compiled vindex (standalone)        {compiled_hit:>2}/{}",
+        FACTS.len()
+    );
     println!();
     println!("  Per-fact top-1 (baseline | patched | compiled):");
     for (_, _, target, prompt) in FACTS {
@@ -151,14 +167,26 @@ fn main() {
     }
     println!();
     println!("  Regression bleed (untouched prompts that moved off baseline):");
-    println!("    PATCHED session (no compile yet)    {patched_bleed:>2}/{}", REGRESSION_PROMPTS.len());
-    println!("    compiled vindex (standalone)        {compiled_bleed:>2}/{}", REGRESSION_PROMPTS.len());
+    println!(
+        "    PATCHED session (no compile yet)    {patched_bleed:>2}/{}",
+        REGRESSION_PROMPTS.len()
+    );
+    println!(
+        "    compiled vindex (standalone)        {compiled_bleed:>2}/{}",
+        REGRESSION_PROMPTS.len()
+    );
     println!();
     println!("  Per-prompt regression deltas (baseline | patched | compiled):");
     for prompt in REGRESSION_PROMPTS {
-        let base = baseline_regression.get(*prompt).cloned().unwrap_or_default();
+        let base = baseline_regression
+            .get(*prompt)
+            .cloned()
+            .unwrap_or_default();
         let pt = patched_regression.get(*prompt).cloned().unwrap_or_default();
-        let c = compiled_regression.get(*prompt).cloned().unwrap_or_default();
+        let c = compiled_regression
+            .get(*prompt)
+            .cloned()
+            .unwrap_or_default();
         let pt_mark = if pt == base { "✓" } else { "✗" };
         let c_mark = if c == base { "✓" } else { "✗" };
         println!("    {prompt:<25}");
@@ -170,7 +198,10 @@ fn main() {
 
     let mut all_passed = true;
     check(
-        &format!("PATCHED session retrieval is 10/{} (INFER works without compile)", FACTS.len()),
+        &format!(
+            "PATCHED session retrieval is 10/{} (INFER works without compile)",
+            FACTS.len()
+        ),
         patched_hit == FACTS.len(),
         &mut all_passed,
     );
@@ -209,7 +240,11 @@ fn section(name: &str) {
 }
 
 fn use_vindex(session: &mut Session, path: &str) {
-    run(session, &format!(r#"USE "{path}";"#), &format!("USE {path}"));
+    run(
+        session,
+        &format!(r#"USE "{path}";"#),
+        &format!("USE {path}"),
+    );
 }
 
 fn run(session: &mut Session, input: &str, label: &str) -> Vec<String> {

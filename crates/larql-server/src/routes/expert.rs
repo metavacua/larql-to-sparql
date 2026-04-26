@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
+use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ServerError;
@@ -104,9 +104,9 @@ fn run_expert(
     }
 
     // Retrieve MoE weight keys.
-    let gate_up_key = arch
-        .packed_experts_gate_up_key(layer)
-        .ok_or_else(|| ServerError::BadRequest(format!("no MoE gate/up weights for layer {layer}")))?;
+    let gate_up_key = arch.packed_experts_gate_up_key(layer).ok_or_else(|| {
+        ServerError::BadRequest(format!("no MoE gate/up weights for layer {layer}"))
+    })?;
     let down_key = arch
         .packed_experts_down_key(layer)
         .ok_or_else(|| ServerError::BadRequest(format!("no MoE down weights for layer {layer}")))?;
@@ -162,11 +162,10 @@ pub async fn handle_expert(
     state.bump_requests();
     let start = std::time::Instant::now();
 
-    let output = tokio::task::spawn_blocking(move || {
-        run_expert(&state, layer, expert_id, &req.residual)
-    })
-    .await
-    .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let output =
+        tokio::task::spawn_blocking(move || run_expert(&state, layer, expert_id, &req.residual))
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))??;
 
     let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok(Json(SingleExpertResponse { output, latency_ms }))
@@ -197,5 +196,8 @@ pub async fn handle_expert_batch(
     .map_err(|e| ServerError::Internal(e.to_string()))??;
 
     let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok(Json(BatchExpertResponse { results, latency_ms }))
+    Ok(Json(BatchExpertResponse {
+        results,
+        latency_ms,
+    }))
 }

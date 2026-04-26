@@ -14,12 +14,12 @@
 //!       --model google/gemma-3-4b-it \
 //!       [--threshold 0.05] [--prompt-sets factual,arithmetic,code]
 
-use ndarray::Array2;
 use larql_inference::{
-    forward::{run_ffn, apply_norm, dot_proj, capture_spec_residuals},
     ffn::WeightFfn,
+    forward::{apply_norm, capture_spec_residuals, dot_proj, run_ffn},
     InferenceModel,
 };
+use ndarray::Array2;
 
 // ── Prompts ─────────────────────────────────────────────────────────────
 
@@ -36,18 +36,9 @@ const PROMPTS_FACTUAL: &[&str] = &[
     "The Great Wall is located in",
 ];
 
-const PROMPTS_ARITHMETIC: &[&str] = &[
-    "2 + 2 =",
-    "7 × 8 =",
-    "15 - 6 =",
-    "100 / 4 =",
-];
+const PROMPTS_ARITHMETIC: &[&str] = &["2 + 2 =", "7 × 8 =", "15 - 6 =", "100 / 4 ="];
 
-const PROMPTS_CODE: &[&str] = &[
-    "def fibonacci(n):",
-    "import numpy as",
-    "for i in range(",
-];
+const PROMPTS_CODE: &[&str] = &["def fibonacci(n):", "import numpy as", "for i in range("];
 
 const TOP_K_FEATURES: usize = 200;
 
@@ -63,14 +54,27 @@ fn parse_args() -> Args {
     let raw: Vec<String> = std::env::args().collect();
     let mut model = String::new();
     let mut threshold = 0.05_f32;
-    let mut prompt_sets = vec!["factual".to_string(), "arithmetic".to_string(), "code".to_string()];
+    let mut prompt_sets = vec![
+        "factual".to_string(),
+        "arithmetic".to_string(),
+        "code".to_string(),
+    ];
 
     let mut i = 1;
     while i < raw.len() {
         match raw[i].as_str() {
-            "--model"       => { i += 1; model = raw[i].clone(); }
-            "--threshold"   => { i += 1; threshold = raw[i].parse().unwrap_or(0.05); }
-            "--prompt-sets" => { i += 1; prompt_sets = raw[i].split(',').map(|s| s.to_string()).collect(); }
+            "--model" => {
+                i += 1;
+                model = raw[i].clone();
+            }
+            "--threshold" => {
+                i += 1;
+                threshold = raw[i].parse().unwrap_or(0.05);
+            }
+            "--prompt-sets" => {
+                i += 1;
+                prompt_sets = raw[i].split(',').map(|s| s.to_string()).collect();
+            }
             _ => {}
         }
         i += 1;
@@ -81,7 +85,11 @@ fn parse_args() -> Args {
         std::process::exit(1);
     }
 
-    Args { model, threshold, prompt_sets }
+    Args {
+        model,
+        threshold,
+        prompt_sets,
+    }
 }
 
 // ── Math helpers ─────────────────────────────────────────────────────────
@@ -96,12 +104,20 @@ fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
         nb += bi * bi;
     }
     let denom = na.sqrt() * nb.sqrt();
-    if denom < 1e-12 { 1.0 } else { 1.0 - dot / denom }
+    if denom < 1e-12 {
+        1.0
+    } else {
+        1.0 - dot / denom
+    }
 }
 
 fn top_k_indices(vals: &[f32], k: usize) -> Vec<usize> {
     let mut indexed: Vec<(usize, f32)> = vals.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| {
+        b.1.abs()
+            .partial_cmp(&a.1.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     indexed.truncate(k);
     indexed.into_iter().map(|(i, _)| i).collect()
 }
@@ -112,7 +128,11 @@ fn jaccard(a: &[usize], b: &[usize]) -> f32 {
     let sb: HashSet<usize> = b.iter().copied().collect();
     let intersect = sa.intersection(&sb).count();
     let union_ = sa.union(&sb).count();
-    if union_ == 0 { 1.0 } else { intersect as f32 / union_ as f32 }
+    if union_ == 0 {
+        1.0
+    } else {
+        intersect as f32 / union_ as f32
+    }
 }
 
 fn lm_head_top1(weights: &larql_inference::ModelWeights, h_last: &[f32]) -> usize {
@@ -122,7 +142,8 @@ fn lm_head_top1(weights: &larql_inference::ModelWeights, h_last: &[f32]) -> usiz
     let h_normed = apply_norm(weights, &h_2d, weights.arch.final_norm_key(), norm_offset);
     let logits = dot_proj(&h_normed, &weights.lm_head);
     let row = logits.row(0);
-    row.iter().enumerate()
+    row.iter()
+        .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0)
@@ -146,9 +167,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prompts: Vec<String> = Vec::new();
     for set in &args.prompt_sets {
         match set.as_str() {
-            "factual"    => prompts.extend(PROMPTS_FACTUAL.iter().map(|s| s.to_string())),
+            "factual" => prompts.extend(PROMPTS_FACTUAL.iter().map(|s| s.to_string())),
             "arithmetic" => prompts.extend(PROMPTS_ARITHMETIC.iter().map(|s| s.to_string())),
-            "code"       => prompts.extend(PROMPTS_CODE.iter().map(|s| s.to_string())),
+            "code" => prompts.extend(PROMPTS_CODE.iter().map(|s| s.to_string())),
             other => eprintln!("unknown prompt set: {other}"),
         }
     }
@@ -165,7 +186,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weights = inference_model.weights();
     let tokenizer = inference_model.tokenizer();
     let num_layers = weights.num_layers;
-    eprintln!("  loaded in {:.1}s ({num_layers} layers, hidden={})\n", t0.elapsed().as_secs_f64(), weights.hidden_size);
+    eprintln!(
+        "  loaded in {:.1}s ({num_layers} layers, hidden={})\n",
+        t0.elapsed().as_secs_f64(),
+        weights.hidden_size
+    );
 
     let ffn = WeightFfn { weights };
 
@@ -173,10 +198,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stats: Vec<LayerStats> = (0..num_layers).map(|_| LayerStats::default()).collect();
 
     for (pi, prompt) in prompts.iter().enumerate() {
-        eprint!("  [{}/{}] {:?}... ", pi + 1, prompts.len(), &prompt[..prompt.len().min(40)]);
+        eprint!(
+            "  [{}/{}] {:?}... ",
+            pi + 1,
+            prompts.len(),
+            &prompt[..prompt.len().min(40)]
+        );
         let t = std::time::Instant::now();
 
-        let enc = tokenizer.encode(prompt.as_str(), true).map_err(|e| format!("tokenize: {e}"))?;
+        let enc = tokenizer
+            .encode(prompt.as_str(), true)
+            .map_err(|e| format!("tokenize: {e}"))?;
         let token_ids: Vec<u32> = enc.get_ids().to_vec();
         let seq_len = token_ids.len();
 
@@ -192,7 +224,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut spec_acts: Vec<Option<Array2<f32>>> = Vec::with_capacity(num_layers);
         for layer in 0..num_layers {
             let (spec_out, spec_act) = run_ffn(weights, &spec_2d, layer, &ffn, true);
-            let delta: Vec<f32> = spec_out.row(0).iter().zip(spec_h0.iter()).map(|(o, i)| o - i).collect();
+            let delta: Vec<f32> = spec_out
+                .row(0)
+                .iter()
+                .zip(spec_h0.iter())
+                .map(|(o, i)| o - i)
+                .collect();
             spec_deltas.push(delta);
             spec_acts.push(spec_act);
         }
@@ -205,7 +242,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let true_h: &[f32] = &capture.post_attn_last[layer];
             let true_2d = Array2::from_shape_vec((1, weights.hidden_size), true_h.to_vec())?;
             let (true_out, true_act_opt) = run_ffn(weights, &true_2d, layer, &ffn, true);
-            let true_delta: Vec<f32> = true_out.row(0).iter().zip(true_h.iter()).map(|(o, i)| o - i).collect();
+            let true_delta: Vec<f32> = true_out
+                .row(0)
+                .iter()
+                .zip(true_h.iter())
+                .map(|(o, i)| o - i)
+                .collect();
 
             let spec_delta = &spec_deltas[layer];
             let spec_act_opt = spec_acts[layer].as_ref();
@@ -249,17 +291,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Print header
     println!();
     println!("Per-layer cosine distance (true vs speculative delta):");
-    println!("  {:>5}  {:>9}  {:>6}  {:>6}  {:>16}  {:>11}  {:>10}",
-             "Layer", "Mean err", "Min", "Max", "Feature overlap", "Top-1 match", "Verdict");
+    println!(
+        "  {:>5}  {:>9}  {:>6}  {:>6}  {:>16}  {:>11}  {:>10}",
+        "Layer", "Mean err", "Min", "Max", "Feature overlap", "Top-1 match", "Verdict"
+    );
     println!("  {}", "─".repeat(75));
 
     for (layer, s) in stats.iter().enumerate().take(num_layers) {
-        if s.cosine_errs.is_empty() { continue; }
+        if s.cosine_errs.is_empty() {
+            continue;
+        }
 
-        let mean_err  = s.cosine_errs.iter().sum::<f32>() / s.cosine_errs.len() as f32;
-        let min_err   = s.cosine_errs.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max_err   = s.cosine_errs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let mean_ov   = s.feature_overlaps.iter().sum::<f32>() / s.feature_overlaps.len() as f32;
+        let mean_err = s.cosine_errs.iter().sum::<f32>() / s.cosine_errs.len() as f32;
+        let min_err = s.cosine_errs.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_err = s
+            .cosine_errs
+            .iter()
+            .cloned()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mean_ov = s.feature_overlaps.iter().sum::<f32>() / s.feature_overlaps.len() as f32;
         let mean_top1 = s.top1_matches.iter().sum::<f32>() / s.top1_matches.len() as f32;
 
         let verdict = if mean_err < threshold {
@@ -270,8 +320,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "serial"
         };
 
-        println!("  {:>5}  {:>9.4}  {:>6.4}  {:>6.4}  {:>16.3}  {:>11.3}  {:>10}",
-                 layer, mean_err, min_err, max_err, mean_ov, mean_top1, verdict);
+        println!(
+            "  {:>5}  {:>9.4}  {:>6.4}  {:>6.4}  {:>16.3}  {:>11.3}  {:>10}",
+            layer, mean_err, min_err, max_err, mean_ov, mean_top1, verdict
+        );
     }
 
     // ── Band structure ─────────────────────────────────────────────────
@@ -279,19 +331,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("Band structure (threshold = {threshold}):");
 
-    struct Band { kind: &'static str, start: usize, end: usize }
+    struct Band {
+        kind: &'static str,
+        start: usize,
+        end: usize,
+    }
     let mut bands: Vec<Band> = Vec::new();
 
     for layer in 0..num_layers {
-        let kind = if parallelisable.contains(&layer) { "PARALLEL" } else { "serial" };
+        let kind = if parallelisable.contains(&layer) {
+            "PARALLEL"
+        } else {
+            "serial"
+        };
         match bands.last_mut() {
-            Some(b) if b.kind == kind => { b.end = layer; }
-            _ => bands.push(Band { kind, start: layer, end: layer }),
+            Some(b) if b.kind == kind => {
+                b.end = layer;
+            }
+            _ => bands.push(Band {
+                kind,
+                start: layer,
+                end: layer,
+            }),
         }
     }
 
     let parallel_ms_per_band = 55.0_f32;
-    let serial_ms_per_layer  = 8.0_f32;
+    let serial_ms_per_layer = 8.0_f32;
     let mut estimated_ms = 0.0_f32;
 
     for b in &bands {
@@ -304,8 +370,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             estimated_ms += m;
             m
         };
-        println!("  L{:02}–L{:02}  ({:2} layers)  {}  ~{:.0}ms",
-                 b.start, b.end, n, b.kind, ms);
+        println!(
+            "  L{:02}–L{:02}  ({:2} layers)  {}  ~{:.0}ms",
+            b.start, b.end, n, b.kind, ms
+        );
     }
 
     let serial_baseline = num_layers as f32 * serial_ms_per_layer;
@@ -321,10 +389,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── Aggressive threshold ───────────────────────────────────────────
 
     let aggressive = 0.15_f32;
-    let agg_parallel = stats.iter().enumerate()
-        .filter(|(_, s)| !s.cosine_errs.is_empty() && {
-            let mean = s.cosine_errs.iter().sum::<f32>() / s.cosine_errs.len() as f32;
-            mean < aggressive
+    let agg_parallel = stats
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| {
+            !s.cosine_errs.is_empty() && {
+                let mean = s.cosine_errs.iter().sum::<f32>() / s.cosine_errs.len() as f32;
+                mean < aggressive
+            }
         })
         .count();
     let agg_serial = num_layers - agg_parallel;

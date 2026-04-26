@@ -4,9 +4,9 @@
 //! Two streams are combined: a model-level projection of the main embeddings,
 //! and a per-layer token embedding lookup, scaled and gated.
 
-use ndarray::Array2;
+use super::{apply_norm, dot_proj};
 use crate::model::ModelWeights;
-use super::{dot_proj, apply_norm};
+use ndarray::Array2;
 
 /// Precompute per-layer input signals from token embeddings.
 ///

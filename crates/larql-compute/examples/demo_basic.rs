@@ -6,8 +6,8 @@
 
 extern crate blas_src;
 
+use larql_compute::{cpu_backend, default_backend};
 use ndarray::Array2;
-use larql_compute::{default_backend, cpu_backend};
 
 fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     let mut state = seed;
@@ -43,8 +43,11 @@ fn main() {
     let result_default = default.matmul_transb(a.view(), b.view());
     let default_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-    let diff: f32 = result_cpu.iter().zip(result_default.iter())
-        .map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    let diff: f32 = result_cpu
+        .iter()
+        .zip(result_default.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
 
     println!("matmul_transb [6,2560] x [10240,2560]^T:");
     println!("  CPU:     {cpu_ms:.2}ms");
