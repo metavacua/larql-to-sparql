@@ -1,8 +1,8 @@
-use kv_cache_benchmark::*;
 use kv_cache_benchmark::metrics::Metrics;
 use kv_cache_benchmark::model_config::ModelConfig;
-use kv_cache_benchmark::turboquant::TurboQuant;
 use kv_cache_benchmark::turboquant::rotation;
+use kv_cache_benchmark::turboquant::TurboQuant;
+use kv_cache_benchmark::*;
 use rand::prelude::*;
 
 #[test]
@@ -138,7 +138,10 @@ fn test_turboquant_benchmark_runs() {
 
     let result = kv_cache_benchmark::run_strategy_benchmark(&tq, &config, 32, &mut rng);
     assert_eq!(result.strategy_name, "TurboQuant 4-bit");
-    assert!(result.metrics.mse > 0.0, "MSE should be non-zero for lossy compression");
+    assert!(
+        result.metrics.mse > 0.0,
+        "MSE should be non-zero for lossy compression"
+    );
     assert!(result.metrics.cosine_sim > 0.9, "Cosine should be high");
     assert!(result.metrics.compression_ratio > 1.0, "Should compress");
 }

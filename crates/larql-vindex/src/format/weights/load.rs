@@ -47,10 +47,16 @@ impl LoadWeightsOptions {
     /// in sync).
     fn is_ffn_key(key: &str) -> bool {
         const FFN_PATTERNS: &[&str] = &[
-            "gate_proj", "up_proj", "down_proj",
-            "ffn_gate", "ffn_up", "ffn_down",
-            "mlp.experts", "block_sparse_moe.experts",
-            "packed_gate_up_blocks", "packed_down_blocks",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+            "ffn_gate",
+            "ffn_up",
+            "ffn_down",
+            "mlp.experts",
+            "block_sparse_moe.experts",
+            "packed_gate_up_blocks",
+            "packed_down_blocks",
         ];
         FFN_PATTERNS.iter().any(|p| key.contains(p))
     }
@@ -59,18 +65,30 @@ impl LoadWeightsOptions {
     /// [`ModelWeights::drop_attn_weights`]).
     fn is_attn_key(key: &str) -> bool {
         const ATTN_PATTERNS: &[&str] = &[
-            "self_attn.q_proj", "self_attn.k_proj",
-            "self_attn.v_proj", "self_attn.o_proj",
-            "attn_q", "attn_k", "attn_v", "attn_o",
-            "q_norm", "k_norm",
+            "self_attn.q_proj",
+            "self_attn.k_proj",
+            "self_attn.v_proj",
+            "self_attn.o_proj",
+            "attn_q",
+            "attn_k",
+            "attn_v",
+            "attn_o",
+            "q_norm",
+            "k_norm",
         ];
         ATTN_PATTERNS.iter().any(|p| key.contains(p))
     }
 
     fn should_skip(&self, key: &str) -> bool {
-        if self.skip_ffn && Self::is_ffn_key(key) { return true; }
-        if self.skip_attn && Self::is_attn_key(key) { return true; }
-        if self.skip_lm_head && key == "lm_head.weight" { return true; }
+        if self.skip_ffn && Self::is_ffn_key(key) {
+            return true;
+        }
+        if self.skip_attn && Self::is_attn_key(key) {
+            return true;
+        }
+        if self.skip_lm_head && key == "lm_head.weight" {
+            return true;
+        }
         false
     }
 }
@@ -114,9 +132,10 @@ pub fn load_model_weights_with_opts(
         )));
     }
 
-    let model_cfg = config.model_config.as_ref().ok_or_else(|| {
-        VindexError::Parse("vindex missing model_config in index.json".into())
-    })?;
+    let model_cfg = config
+        .model_config
+        .as_ref()
+        .ok_or_else(|| VindexError::Parse("vindex missing model_config in index.json".into()))?;
 
     // Reconstruct full architecture config — includes per-layer geometry for Gemma 4.
     let mut arch_obj = serde_json::json!({
@@ -133,17 +152,42 @@ pub fn load_model_weights_with_opts(
     });
     // Pass through Gemma 4 per-layer geometry fields (if present in vindex config).
     let obj = arch_obj.as_object_mut().unwrap();
-    if let Some(v) = model_cfg.global_head_dim { obj.insert("global_head_dim".into(), v.into()); }
-    if let Some(v) = model_cfg.num_global_kv_heads { obj.insert("num_global_key_value_heads".into(), v.into()); }
-    if let Some(v) = model_cfg.partial_rotary_factor { obj.insert("partial_rotary_factor".into(), v.into()); }
-    if let Some(v) = model_cfg.sliding_window_pattern { obj.insert("sliding_window_pattern".into(), v.into()); }
-    if let Some(ref v) = model_cfg.layer_types { obj.insert("layer_types".into(), serde_json::to_value(v).unwrap_or_default()); }
-    if model_cfg.attention_k_eq_v { obj.insert("attention_k_eq_v".into(), true.into()); }
-    if let Some(v) = model_cfg.num_kv_shared_layers { obj.insert("num_kv_shared_layers".into(), v.into()); }
-    if let Some(v) = model_cfg.per_layer_embed_dim { obj.insert("hidden_size_per_layer_input".into(), v.into()); }
-    if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
-    if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
-    if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
+    if let Some(v) = model_cfg.global_head_dim {
+        obj.insert("global_head_dim".into(), v.into());
+    }
+    if let Some(v) = model_cfg.num_global_kv_heads {
+        obj.insert("num_global_key_value_heads".into(), v.into());
+    }
+    if let Some(v) = model_cfg.partial_rotary_factor {
+        obj.insert("partial_rotary_factor".into(), v.into());
+    }
+    if let Some(v) = model_cfg.sliding_window_pattern {
+        obj.insert("sliding_window_pattern".into(), v.into());
+    }
+    if let Some(ref v) = model_cfg.layer_types {
+        obj.insert(
+            "layer_types".into(),
+            serde_json::to_value(v).unwrap_or_default(),
+        );
+    }
+    if model_cfg.attention_k_eq_v {
+        obj.insert("attention_k_eq_v".into(), true.into());
+    }
+    if let Some(v) = model_cfg.num_kv_shared_layers {
+        obj.insert("num_kv_shared_layers".into(), v.into());
+    }
+    if let Some(v) = model_cfg.per_layer_embed_dim {
+        obj.insert("hidden_size_per_layer_input".into(), v.into());
+    }
+    if let Some(v) = model_cfg.rope_local_base {
+        obj.insert("rope_local_base_freq".into(), v.into());
+    }
+    if let Some(v) = model_cfg.query_pre_attn_scalar {
+        obj.insert("query_pre_attn_scalar".into(), v.into());
+    }
+    if let Some(v) = model_cfg.final_logit_softcapping {
+        obj.insert("final_logit_softcapping".into(), v.into());
+    }
     let arch = larql_models::detect_from_json(&arch_obj);
 
     // Embeddings — skippable for FFN-service servers that only handle
@@ -152,7 +196,10 @@ pub fn load_model_weights_with_opts(
         callbacks.on_file_start("embeddings (skipped)", "opts.skip_embed=true");
         Array2::<f32>::zeros((0, 0))
     } else {
-        callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
+        callbacks.on_file_start(
+            "embeddings",
+            &dir.join("embeddings.bin").display().to_string(),
+        );
         let embed_file = std::fs::File::open(dir.join("embeddings.bin"))?;
         let embed_mmap = unsafe { memmap2::Mmap::map(&embed_file)? };
         let expected_embed_f32 = config.vocab_size * config.hidden_size * 4;
@@ -174,8 +221,8 @@ pub fn load_model_weights_with_opts(
 
     callbacks.on_file_start("model_weights", "weight_manifest.json");
     let manifest_text = std::fs::read_to_string(&manifest_path)?;
-    let entries: Vec<WeightEntry> = serde_json::from_str(&manifest_text)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let entries: Vec<WeightEntry> =
+        serde_json::from_str(&manifest_text).map_err(|e| VindexError::Parse(e.to_string()))?;
 
     let mut mmap_cache: HashMap<String, memmap2::Mmap> = HashMap::new();
     let mut tensors: HashMap<String, larql_models::WeightArray> = HashMap::new();
@@ -189,7 +236,11 @@ pub fn load_model_weights_with_opts(
             continue;
         }
 
-        let filename = if entry.file.is_empty() { "model_weights.bin".to_string() } else { entry.file.clone() };
+        let filename = if entry.file.is_empty() {
+            "model_weights.bin".to_string()
+        } else {
+            entry.file.clone()
+        };
 
         if !mmap_cache.contains_key(&filename) {
             let fpath = dir.join(&filename);
@@ -205,11 +256,15 @@ pub fn load_model_weights_with_opts(
             Some(m) => m.as_ref(),
             None => continue,
         };
-        if data.is_empty() { continue; }
+        if data.is_empty() {
+            continue;
+        }
 
         let byte_offset = entry.offset as usize;
         let byte_count = entry.length as usize;
-        if byte_offset + byte_count > data.len() { continue; }
+        if byte_offset + byte_count > data.len() {
+            continue;
+        }
         let raw_bytes = &data[byte_offset..byte_offset + byte_count];
         // Detect actual dtype from byte count vs expected shape.
         // Gate vector conversion may have changed index.json dtype to f32
@@ -261,8 +316,10 @@ pub fn load_model_weights_with_opts(
             if float_offset + float_count <= gate_floats.len() {
                 let gate_data = &gate_floats[float_offset..float_offset + float_count];
                 let gate_matrix = Array2::from_shape_vec(
-                    (info.num_features, config.hidden_size), gate_data.to_vec(),
-                ).map_err(|e| VindexError::Parse(e.to_string()))?;
+                    (info.num_features, config.hidden_size),
+                    gate_data.to_vec(),
+                )
+                .map_err(|e| VindexError::Parse(e.to_string()))?;
                 tensors.insert(arch.ffn_gate_key(info.layer), gate_matrix.into_shared());
             }
         }
@@ -303,19 +360,19 @@ pub fn load_model_weights_with_opts(
     // weights. When the caller asked to skip lm_head we don't want to
     // clone embed into it — use an empty placeholder instead.
     let lm_head = if opts.skip_lm_head {
-        lm_head_loaded.unwrap_or_else(|| {
-            Array2::<f32>::zeros((0, 0)).into_shared()
-        })
+        lm_head_loaded.unwrap_or_else(|| Array2::<f32>::zeros((0, 0)).into_shared())
     } else {
         lm_head_loaded.unwrap_or_else(|| embed.clone())
     };
 
     Ok(ModelWeights {
-        tensors, vectors,
+        tensors,
+        vectors,
         raw_bytes: std::collections::HashMap::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
-        embed, lm_head,
+        embed,
+        lm_head,
         num_layers: cfg.num_layers,
         hidden_size: cfg.hidden_size,
         intermediate_size: cfg.intermediate_size,
@@ -361,9 +418,10 @@ pub fn load_model_weights_q4k(
         )));
     }
 
-    let model_cfg = config.model_config.as_ref().ok_or_else(|| {
-        VindexError::Parse("vindex missing model_config in index.json".into())
-    })?;
+    let model_cfg = config
+        .model_config
+        .as_ref()
+        .ok_or_else(|| VindexError::Parse("vindex missing model_config in index.json".into()))?;
 
     // Reconstruct architecture (same as load_model_weights — Gemma 4 per-layer
     // geometry propagates through model_cfg).
@@ -380,27 +438,59 @@ pub fn load_model_weights_q4k(
         "vocab_size": config.vocab_size,
     });
     let obj = arch_obj.as_object_mut().unwrap();
-    if let Some(v) = model_cfg.global_head_dim { obj.insert("global_head_dim".into(), v.into()); }
-    if let Some(v) = model_cfg.num_global_kv_heads { obj.insert("num_global_key_value_heads".into(), v.into()); }
-    if let Some(v) = model_cfg.partial_rotary_factor { obj.insert("partial_rotary_factor".into(), v.into()); }
-    if let Some(v) = model_cfg.sliding_window_pattern { obj.insert("sliding_window_pattern".into(), v.into()); }
-    if let Some(ref v) = model_cfg.layer_types { obj.insert("layer_types".into(), serde_json::to_value(v).unwrap_or_default()); }
-    if model_cfg.attention_k_eq_v { obj.insert("attention_k_eq_v".into(), true.into()); }
-    if let Some(v) = model_cfg.num_kv_shared_layers { obj.insert("num_kv_shared_layers".into(), v.into()); }
-    if let Some(v) = model_cfg.per_layer_embed_dim { obj.insert("hidden_size_per_layer_input".into(), v.into()); }
-    if let Some(v) = model_cfg.rope_local_base { obj.insert("rope_local_base_freq".into(), v.into()); }
-    if let Some(v) = model_cfg.query_pre_attn_scalar { obj.insert("query_pre_attn_scalar".into(), v.into()); }
-    if let Some(v) = model_cfg.final_logit_softcapping { obj.insert("final_logit_softcapping".into(), v.into()); }
+    if let Some(v) = model_cfg.global_head_dim {
+        obj.insert("global_head_dim".into(), v.into());
+    }
+    if let Some(v) = model_cfg.num_global_kv_heads {
+        obj.insert("num_global_key_value_heads".into(), v.into());
+    }
+    if let Some(v) = model_cfg.partial_rotary_factor {
+        obj.insert("partial_rotary_factor".into(), v.into());
+    }
+    if let Some(v) = model_cfg.sliding_window_pattern {
+        obj.insert("sliding_window_pattern".into(), v.into());
+    }
+    if let Some(ref v) = model_cfg.layer_types {
+        obj.insert(
+            "layer_types".into(),
+            serde_json::to_value(v).unwrap_or_default(),
+        );
+    }
+    if model_cfg.attention_k_eq_v {
+        obj.insert("attention_k_eq_v".into(), true.into());
+    }
+    if let Some(v) = model_cfg.num_kv_shared_layers {
+        obj.insert("num_kv_shared_layers".into(), v.into());
+    }
+    if let Some(v) = model_cfg.per_layer_embed_dim {
+        obj.insert("hidden_size_per_layer_input".into(), v.into());
+    }
+    if let Some(v) = model_cfg.rope_local_base {
+        obj.insert("rope_local_base_freq".into(), v.into());
+    }
+    if let Some(v) = model_cfg.query_pre_attn_scalar {
+        obj.insert("query_pre_attn_scalar".into(), v.into());
+    }
+    if let Some(v) = model_cfg.final_logit_softcapping {
+        obj.insert("final_logit_softcapping".into(), v.into());
+    }
     if let Some(ref moe) = model_cfg.moe {
         obj.insert("num_experts".into(), moe.num_experts.into());
         obj.insert("top_k_experts".into(), moe.top_k.into());
-        if let Some(v) = moe.moe_intermediate_size { obj.insert("moe_intermediate_size".into(), v.into()); }
-        if moe.hybrid { obj.insert("enable_moe_block".into(), true.into()); }
+        if let Some(v) = moe.moe_intermediate_size {
+            obj.insert("moe_intermediate_size".into(), v.into());
+        }
+        if moe.hybrid {
+            obj.insert("enable_moe_block".into(), true.into());
+        }
     }
     let arch = larql_models::detect_from_json(&arch_obj);
 
     // Embeddings — required for token lookup at layer 0.
-    callbacks.on_file_start("embeddings", &dir.join("embeddings.bin").display().to_string());
+    callbacks.on_file_start(
+        "embeddings",
+        &dir.join("embeddings.bin").display().to_string(),
+    );
     let embed_file = std::fs::File::open(dir.join("embeddings.bin"))?;
     let embed_mmap = unsafe { memmap2::Mmap::map(&embed_file)? };
     let expected_f32 = config.vocab_size * config.hidden_size * 4;
@@ -424,17 +514,21 @@ pub fn load_model_weights_q4k(
 
     if manifest_path.exists() {
         let manifest_text = std::fs::read_to_string(&manifest_path)?;
-        let entries: Vec<WeightEntry> = serde_json::from_str(&manifest_text)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let entries: Vec<WeightEntry> =
+            serde_json::from_str(&manifest_text).map_err(|e| VindexError::Parse(e.to_string()))?;
 
         let mut mmap_cache: HashMap<String, memmap2::Mmap> = HashMap::new();
         for entry in &entries {
-            if entry.file.is_empty() { continue; }
+            if entry.file.is_empty() {
+                continue;
+            }
             if entry.kind != "vector"
                 && entry.kind != "tensor_q4k"
                 && entry.kind != "tensor_f16"
                 && entry.kind != "packed_bf16"
-            { continue; }
+            {
+                continue;
+            }
 
             if !mmap_cache.contains_key(&entry.file) {
                 let fpath = dir.join(&entry.file);
@@ -450,7 +544,9 @@ pub fn load_model_weights_q4k(
             };
             let byte_offset = entry.offset as usize;
             let byte_count = entry.length as usize;
-            if byte_offset + byte_count > data.len() { continue; }
+            if byte_offset + byte_count > data.len() {
+                continue;
+            }
             let raw_bytes = &data[byte_offset..byte_offset + byte_count];
 
             if entry.kind == "packed_bf16" {
@@ -475,7 +571,9 @@ pub fn load_model_weights_q4k(
                 // tensor_q4k / tensor_f16: 2D tensor (PLE weights for Gemma 4
                 // E2B). Decode to f32 and insert into weights.tensors so
                 // `ple.rs` can look it up like any other dense matrix.
-                if entry.shape.len() != 2 { continue; }
+                if entry.shape.len() != 2 {
+                    continue;
+                }
                 let rows = entry.shape[0];
                 let cols = entry.shape[1];
                 let n = rows * cols;
@@ -491,10 +589,8 @@ pub fn load_model_weights_q4k(
                 };
                 if let Some(floats) = floats {
                     if floats.len() >= n {
-                        if let Ok(arr) = Array2::from_shape_vec(
-                            (rows, cols),
-                            floats[..n].to_vec(),
-                        ) {
+                        if let Ok(arr) = Array2::from_shape_vec((rows, cols), floats[..n].to_vec())
+                        {
                             tensors.insert(entry.key.clone(), arr.into_shared());
                         }
                     }
@@ -555,10 +651,14 @@ pub fn load_model_weights_q4k(
 /// Find the tokenizer path near a model or vindex directory.
 pub fn find_tokenizer_path(dir: &Path) -> Option<std::path::PathBuf> {
     let p = dir.join("tokenizer.json");
-    if p.exists() { return Some(p); }
+    if p.exists() {
+        return Some(p);
+    }
     if let Some(parent) = dir.parent() {
         let p = parent.join("tokenizer.json");
-        if p.exists() { return Some(p); }
+        if p.exists() {
+            return Some(p);
+        }
     }
     None
 }

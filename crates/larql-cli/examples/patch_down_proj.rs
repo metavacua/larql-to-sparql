@@ -36,8 +36,14 @@ use serde_json::Value;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let vindex_path: PathBuf = args.next().ok_or("usage: patch_down_proj <vindex> <hf-snapshot-root>")?.into();
-    let hf_root: PathBuf = args.next().ok_or("usage: patch_down_proj <vindex> <hf-snapshot-root>")?.into();
+    let vindex_path: PathBuf = args
+        .next()
+        .ok_or("usage: patch_down_proj <vindex> <hf-snapshot-root>")?
+        .into();
+    let hf_root: PathBuf = args
+        .next()
+        .ok_or("usage: patch_down_proj <vindex> <hf-snapshot-root>")?
+        .into();
 
     println!("vindex   = {}", vindex_path.display());
     println!("hf-root  = {}", hf_root.display());
@@ -69,7 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cache safetensors shards so we don't re-mmap per layer.
     let mut shards: BTreeMap<String, Mmap> = BTreeMap::new();
-    let shard_mmap = |name: &str, shards: &mut BTreeMap<String, Mmap>, hf_root: &Path| -> Result<(), Box<dyn std::error::Error>> {
+    let shard_mmap = |name: &str,
+                      shards: &mut BTreeMap<String, Mmap>,
+                      hf_root: &Path|
+     -> Result<(), Box<dyn std::error::Error>> {
         if !shards.contains_key(name) {
             let p = hf_root.join(name);
             let mm = unsafe { Mmap::map(&fs::File::open(&p)?)? };
@@ -90,9 +99,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gate_key = gate_e["key"].as_str().unwrap();
         let up_key = up_e["key"].as_str().unwrap();
         let down_key = down_e["key"].as_str().unwrap();
-        assert!(gate_key.ends_with(".mlp.gate_proj.weight"), "unexpected entry[0]: {gate_key}");
-        assert!(up_key.ends_with(".mlp.up_proj.weight"),   "unexpected entry[1]: {up_key}");
-        assert!(down_key.ends_with(".mlp.down_proj.weight"), "unexpected entry[2]: {down_key}");
+        assert!(
+            gate_key.ends_with(".mlp.gate_proj.weight"),
+            "unexpected entry[0]: {gate_key}"
+        );
+        assert!(
+            up_key.ends_with(".mlp.up_proj.weight"),
+            "unexpected entry[1]: {up_key}"
+        );
+        assert!(
+            down_key.ends_with(".mlp.down_proj.weight"),
+            "unexpected entry[2]: {down_key}"
+        );
 
         // Copy gate and up bytes unchanged.
         let copy_entry = |e: &Value, sink: &mut Vec<u8>| -> (u64, u64) {
@@ -155,8 +173,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "length": q_bytes.len(),
         }));
         if layer % 5 == 0 {
-            println!("  L{layer:02}  down {} → {} bytes (padded {}→{})",
-                down_e["length"], q_bytes.len(), cols, padded_cols);
+            println!(
+                "  L{layer:02}  down {} → {} bytes (padded {}→{})",
+                down_e["length"],
+                q_bytes.len(),
+                cols,
+                padded_cols
+            );
         }
     }
 

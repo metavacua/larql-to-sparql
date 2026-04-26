@@ -5,11 +5,11 @@
 //!
 //! Run: cargo run -p larql-inference --example clustering_demo
 
+use larql_vindex::clustering::labeling::detect_entity_pattern;
 use larql_vindex::clustering::{
     kmeans,
     pair_matching::{label_clusters_from_pairs, RelationDatabase},
 };
-use larql_vindex::clustering::labeling::detect_entity_pattern;
 
 fn main() {
     println!("=== Clustering & Relation Discovery Demo ===\n");
@@ -22,10 +22,8 @@ fn main() {
         (9, 2),
         vec![
             // Cluster 0: rightward
-            1.0, 0.1, 0.9, 0.2, 0.95, 0.05,
-            // Cluster 1: upward
-            0.1, 1.0, 0.2, 0.9, 0.05, 0.95,
-            // Cluster 2: diagonal
+            1.0, 0.1, 0.9, 0.2, 0.95, 0.05, // Cluster 1: upward
+            0.1, 1.0, 0.2, 0.9, 0.05, 0.95, // Cluster 2: diagonal
             0.7, 0.7, 0.6, 0.8, 0.8, 0.6,
         ],
     )
@@ -64,25 +62,19 @@ fn main() {
             vec!["january", "february", "march", "october", "november"],
             "month",
         ),
-        (
-            vec!["one", "two", "three", "four", "five"],
-            "number",
-        ),
-        (
-            vec!["ing", "tion", "ness", "ment"],
-            "morphological",
-        ),
-        (
-            vec!["Paris", "music", "running", "table"],
-            "(none)",
-        ),
+        (vec!["one", "two", "three", "four", "five"], "number"),
+        (vec!["ing", "tion", "ness", "ment"], "morphological"),
+        (vec!["Paris", "music", "running", "table"], "(none)"),
     ];
 
     for (members, expected) in &patterns {
         let members: Vec<String> = members.iter().map(|s| s.to_string()).collect();
-        let result = detect_entity_pattern(&members)
-            .unwrap_or_else(|| "(none)".into());
-        let status = if result == *expected { "OK" } else { "MISMATCH" };
+        let result = detect_entity_pattern(&members).unwrap_or_else(|| "(none)".into());
+        let status = if result == *expected {
+            "OK"
+        } else {
+            "MISMATCH"
+        };
         println!(
             "  {:40} → {:<15} {}",
             format!("[{}]", members.join(", ")),
@@ -98,57 +90,78 @@ fn main() {
     let mut db = RelationDatabase::default();
 
     // Add some Wikidata-style relations
-    db.add_relation("capital", vec![
-        ("france".into(), "paris".into()),
-        ("germany".into(), "berlin".into()),
-        ("japan".into(), "tokyo".into()),
-        ("italy".into(), "rome".into()),
-        ("spain".into(), "madrid".into()),
-    ]);
-    db.add_relation("language", vec![
-        ("france".into(), "french".into()),
-        ("germany".into(), "german".into()),
-        ("japan".into(), "japanese".into()),
-        ("italy".into(), "italian".into()),
-        ("spain".into(), "spanish".into()),
-    ]);
-    db.add_relation("synonym", vec![
-        ("big".into(), "large".into()),
-        ("fast".into(), "quick".into()),
-        ("happy".into(), "glad".into()),
-        ("small".into(), "tiny".into()),
-    ]);
+    db.add_relation(
+        "capital",
+        vec![
+            ("france".into(), "paris".into()),
+            ("germany".into(), "berlin".into()),
+            ("japan".into(), "tokyo".into()),
+            ("italy".into(), "rome".into()),
+            ("spain".into(), "madrid".into()),
+        ],
+    );
+    db.add_relation(
+        "language",
+        vec![
+            ("france".into(), "french".into()),
+            ("germany".into(), "german".into()),
+            ("japan".into(), "japanese".into()),
+            ("italy".into(), "italian".into()),
+            ("spain".into(), "spanish".into()),
+        ],
+    );
+    db.add_relation(
+        "synonym",
+        vec![
+            ("big".into(), "large".into()),
+            ("fast".into(), "quick".into()),
+            ("happy".into(), "glad".into()),
+            ("small".into(), "tiny".into()),
+        ],
+    );
 
-    println!("  Database: {} relations, {} pairs",
-        db.num_relations(), db.num_pairs());
+    println!(
+        "  Database: {} relations, {} pairs",
+        db.num_relations(),
+        db.num_pairs()
+    );
 
     // Simulate cluster features with (input, output) pairs
     // Cluster 0: capital features, Cluster 1: language features, Cluster 2: synonyms
     let assignments = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2];
     let inputs: Vec<String> = vec![
-        "France", "Germany", "Japan", "Italy", "Spain",
-        "France", "Germany", "Japan", "Italy", "Spain",
-        "big", "fast", "happy", "small",
-    ].into_iter().map(Into::into).collect();
+        "France", "Germany", "Japan", "Italy", "Spain", "France", "Germany", "Japan", "Italy",
+        "Spain", "big", "fast", "happy", "small",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
     let outputs: Vec<String> = vec![
-        "Paris", "Berlin", "Tokyo", "Rome", "Madrid",
-        "French", "German", "Japanese", "Italian", "Spanish",
-        "large", "quick", "glad", "tiny",
-    ].into_iter().map(Into::into).collect();
+        "Paris", "Berlin", "Tokyo", "Rome", "Madrid", "French", "German", "Japanese", "Italian",
+        "Spanish", "large", "quick", "glad", "tiny",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
 
-    let labels = label_clusters_from_pairs(
-        &assignments, &inputs, &outputs, 3, &[&db],
-    );
+    let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 3, &[&db]);
 
     println!("\n  Cluster labeling results:");
     for (i, label) in labels.iter().enumerate() {
         let label_str = label.as_deref().unwrap_or("(unlabeled)");
-        let members: Vec<&str> = assignments.iter().enumerate()
+        let members: Vec<&str> = assignments
+            .iter()
+            .enumerate()
             .filter(|(_, &c)| c == i)
             .take(3)
             .map(|(j, _)| outputs[j].as_str())
             .collect();
-        println!("    Cluster {}: {} → [{}]", i, label_str, members.join(", "));
+        println!(
+            "    Cluster {}: {} → [{}]",
+            i,
+            label_str,
+            members.join(", ")
+        );
     }
 
     assert_eq!(labels[0], Some("capital".to_string()));
@@ -164,8 +177,8 @@ fn main() {
         ("Germany", "Berlin"),
         ("France", "French"),
         ("big", "large"),
-        ("France", "Berlin"),  // wrong pair
-        ("dog", "cat"),        // not in database
+        ("France", "Berlin"), // wrong pair
+        ("dog", "cat"),       // not in database
     ];
 
     for (subject, object) in lookups {

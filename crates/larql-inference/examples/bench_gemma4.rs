@@ -8,21 +8,28 @@
 //!   cargo run --release -p larql-inference --example bench_gemma4 [-- model_name]
 //!   Default: google/gemma-4-E2B-it
 
-use std::time::Instant;
 use ndarray::Array2;
+use std::time::Instant;
 
 use larql_inference::attention::{apply_rope, apply_rope_partial, gqa_attention_with_weights};
-use larql_inference::forward::{embed_tokens_pub, apply_norm, dot_proj, predict, forward_to_layer};
+use larql_inference::forward::{apply_norm, dot_proj, embed_tokens_pub, forward_to_layer, predict};
 use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 use larql_models::{load_model_dir, resolve_model_path};
 
 fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) -> f64 {
-    for _ in 0..2.min(iters) { f(); }
+    for _ in 0..2.min(iters) {
+        f();
+    }
     let t0 = Instant::now();
-    for _ in 0..iters { f(); }
+    for _ in 0..iters {
+        f();
+    }
     let per_iter = t0.elapsed().as_micros() as f64 / iters as f64;
     if per_iter > 10_000.0 {
-        println!("  {name:<50} {:>8.2} ms  ({iters} iters)", per_iter / 1000.0);
+        println!(
+            "  {name:<50} {:>8.2} ms  ({iters} iters)",
+            per_iter / 1000.0
+        );
     } else {
         println!("  {name:<50} {:>8.1} us  ({iters} iters)", per_iter);
     }
@@ -40,9 +47,15 @@ fn main() {
     let t0 = Instant::now();
     let path = resolve_model_path(&model_name).expect("model not found");
     let weights = load_model_dir(&path).expect("failed to load");
-    println!("Loaded {} in {:.1}s", model_name, t0.elapsed().as_secs_f64());
-    println!("  {} layers, hidden={}, vocab={}\n",
-        weights.num_layers, weights.hidden_size, weights.vocab_size);
+    println!(
+        "Loaded {} in {:.1}s",
+        model_name,
+        t0.elapsed().as_secs_f64()
+    );
+    println!(
+        "  {} layers, hidden={}, vocab={}\n",
+        weights.num_layers, weights.hidden_size, weights.vocab_size
+    );
 
     let arch = &*weights.arch;
     let hidden = weights.hidden_size;
@@ -71,8 +84,12 @@ fn main() {
     let w_k = weights.tensors.get(&arch.attn_k_key(0)).unwrap();
     let w_v = weights.tensors.get(&arch.attn_v_key(0)).unwrap();
 
-    bench("Q projection (sliding L0)", 500, || { let _ = dot_proj(&h_norm, w_q); });
-    bench("K projection (sliding L0)", 500, || { let _ = dot_proj(&h_norm, w_k); });
+    bench("Q projection (sliding L0)", 500, || {
+        let _ = dot_proj(&h_norm, w_q);
+    });
+    bench("K projection (sliding L0)", 500, || {
+        let _ = dot_proj(&h_norm, w_k);
+    });
 
     let q = dot_proj(&h_norm, w_q);
     let k = dot_proj(&h_norm, w_k);
@@ -82,8 +99,14 @@ fn main() {
     let hd_sliding = arch.head_dim_for_layer(0);
     let nq = arch.num_q_heads_for_layer(0);
     let nkv = arch.num_kv_heads_for_layer(0);
-    let qk_w = weights.vectors.get(&arch.attn_q_norm_key(0).unwrap()).unwrap();
-    let kk_w = weights.vectors.get(&arch.attn_k_norm_key(0).unwrap()).unwrap();
+    let qk_w = weights
+        .vectors
+        .get(&arch.attn_q_norm_key(0).unwrap())
+        .unwrap();
+    let kk_w = weights
+        .vectors
+        .get(&arch.attn_k_norm_key(0).unwrap())
+        .unwrap();
 
     bench("QK-norm Q (sliding, per-head)", 1000, || {
         let _ = rms_norm_heads(&q, qk_w, nq, hd_sliding, 0.0);
@@ -109,13 +132,22 @@ fn main() {
     if arch.head_dim_for_layer(4) != hd_sliding {
         let hd_global = arch.head_dim_for_layer(4);
         let w_q_g = weights.tensors.get(&arch.attn_q_key(4)).unwrap();
-        let h_norm_g = apply_norm(&weights, &h_embed, &arch.input_layernorm_key(4), arch.norm_weight_offset());
+        let h_norm_g = apply_norm(
+            &weights,
+            &h_embed,
+            &arch.input_layernorm_key(4),
+            arch.norm_weight_offset(),
+        );
         let q_g = dot_proj(&h_norm_g, w_q_g);
         let frac = arch.rotary_fraction_for_layer(4);
 
-        bench(&format!("RoPE Q (global, {nq}×{hd_global}, {:.0}%)", frac * 100.0), 1000, || {
-            let _ = apply_rope_partial(&q_g, nq, hd_global, 1_000_000.0, frac);
-        });
+        bench(
+            &format!("RoPE Q (global, {nq}×{hd_global}, {:.0}%)", frac * 100.0),
+            1000,
+            || {
+                let _ = apply_rope_partial(&q_g, nq, hd_global, 1_000_000.0, frac);
+            },
+        );
     }
 
     // ── 7. GQA attention ──
@@ -126,7 +158,8 @@ fn main() {
 
     bench("GQA attention (sliding, scale=1.0)", 500, || {
         let _ = gqa_attention_with_weights(
-            &q_rope, &k_rope, &v_normed, nq, hd_sliding, reps, 1.0, seq_len, false, None);
+            &q_rope, &k_rope, &v_normed, nq, hd_sliding, reps, 1.0, seq_len, false, None,
+        );
     });
 
     // ── 8. FFN ──
@@ -135,7 +168,9 @@ fn main() {
     let w_down = weights.tensors.get(&arch.ffn_down_key(0)).unwrap();
     let inter = w_gate.shape()[0];
 
-    bench(&format!("FFN gate proj ({inter}×{hidden})"), 200, || { let _ = dot_proj(&h_norm, w_gate); });
+    bench(&format!("FFN gate proj ({inter}×{hidden})"), 200, || {
+        let _ = dot_proj(&h_norm, w_gate);
+    });
     bench("FFN full (gate+up+act+down)", 100, || {
         let gate = dot_proj(&h_norm, w_gate);
         let up = dot_proj(&h_norm, w_up);
@@ -158,38 +193,49 @@ fn main() {
     });
 
     let per_layer = full_us / weights.num_layers as f64;
-    println!("\n  Per-layer avg: {per_layer:.0} us ({} layers)", weights.num_layers);
+    println!(
+        "\n  Per-layer avg: {per_layer:.0} us ({} layers)",
+        weights.num_layers
+    );
     println!("  Throughput: {:.1} queries/sec\n", 1_000_000.0 / full_us);
 
     // ── 10. Layer-by-layer timing (first 5 + last 5) ──
     println!("--- Per-Layer Timing (forward_to_layer delta) ---\n");
 
     let mut prev_time = 0.0f64;
-    let layers_to_check: Vec<usize> = (0..5).chain(weights.num_layers-3..weights.num_layers).collect();
+    let layers_to_check: Vec<usize> = (0..5)
+        .chain(weights.num_layers - 3..weights.num_layers)
+        .collect();
 
     for &stop in &layers_to_check {
         let t0 = Instant::now();
         let _ = forward_to_layer(&weights, &token_ids, stop);
         let elapsed = t0.elapsed().as_micros() as f64;
         let delta = elapsed - prev_time;
-        let layer_type = if arch.is_sliding_window_layer(stop) { "sliding" } else { "GLOBAL " };
+        let layer_type = if arch.is_sliding_window_layer(stop) {
+            "sliding"
+        } else {
+            "GLOBAL "
+        };
         let kv_src = arch.kv_shared_source_layer(stop);
         let sharing = kv_src.map_or("own KV".to_string(), |s| format!("KV←L{s}"));
-        println!("  L{stop:2} ({layer_type}, {sharing}): {delta:>8.0} us (cumulative: {elapsed:.0} us)");
+        println!(
+            "  L{stop:2} ({layer_type}, {sharing}): {delta:>8.0} us (cumulative: {elapsed:.0} us)"
+        );
         prev_time = elapsed;
     }
 
     // ── 11. Ollama comparison (if available) ──
     println!("\n--- Ollama Comparison ---\n");
 
-    let ollama_result = std::process::Command::new("ollama")
-        .args(["list"])
-        .output();
+    let ollama_result = std::process::Command::new("ollama").args(["list"]).output();
 
     match ollama_result {
         Ok(output) if output.status.success() => {
             let list = String::from_utf8_lossy(&output.stdout);
-            let has_gemma4 = list.lines().any(|l| l.contains("gemma-4") || l.contains("gemma4"));
+            let has_gemma4 = list
+                .lines()
+                .any(|l| l.contains("gemma-4") || l.contains("gemma4"));
             if has_gemma4 {
                 println!("  Ollama has a Gemma 4 model. Benchmarking...");
                 // Run Ollama with timing
@@ -202,7 +248,10 @@ fn main() {
                 match result {
                     Ok(out) => {
                         let resp = String::from_utf8_lossy(&out.stdout);
-                        println!("  Ollama response: {}", resp.trim().lines().next().unwrap_or("(empty)"));
+                        println!(
+                            "  Ollama response: {}",
+                            resp.trim().lines().next().unwrap_or("(empty)")
+                        );
                         println!("  Ollama time: {ollama_ms} ms");
                         println!("  LARQL time:  {:.0} ms", full_us / 1000.0);
                         let ratio = ollama_ms as f64 / (full_us / 1000.0);
@@ -225,8 +274,15 @@ fn main() {
     println!("\n--- Summary ---\n");
     let result = predict(&weights, &tokenizer, &token_ids, 3);
     println!("  Model: {model_name}");
-    println!("  Predict: {:.0} ms ({:.1} qps)", full_us / 1000.0, 1_000_000.0 / full_us);
-    println!("  Top prediction: {} ({:.1}%)",
-        result.predictions[0].0, result.predictions[0].1 * 100.0);
+    println!(
+        "  Predict: {:.0} ms ({:.1} qps)",
+        full_us / 1000.0,
+        1_000_000.0 / full_us
+    );
+    println!(
+        "  Top prediction: {} ({:.1}%)",
+        result.predictions[0].0,
+        result.predictions[0].1 * 100.0
+    );
     println!();
 }

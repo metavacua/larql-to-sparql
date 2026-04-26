@@ -8,6 +8,6 @@
 //! This module handles data format encoding/decoding only.
 //! Compute operations (matvec, vecmat, GPU shaders) are in `larql-compute`.
 
-pub mod half;
 pub mod ggml;
+pub mod half;
 pub mod mxfp4;

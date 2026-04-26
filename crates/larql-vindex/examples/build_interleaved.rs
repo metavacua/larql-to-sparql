@@ -9,13 +9,14 @@
 //! Usage:
 //!   cargo run --release -p larql-vindex --example build_interleaved -- output/gemma3-4b-v2.vindex
 
-
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args().nth(1).ok_or("Usage: build_interleaved <vindex_dir>")?;
+    let dir = std::env::args()
+        .nth(1)
+        .ok_or("Usage: build_interleaved <vindex_dir>")?;
     let dir = Path::new(&dir);
 
     let config_text = std::fs::read_to_string(dir.join("index.json"))?;
@@ -30,9 +31,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Build Interleaved Vindex ===\n");
     println!("Layers: {num_layers}, hidden: {hidden_size}, intermediate: {intermediate_size}");
-    println!("Per matrix: {:.1} MB, per layer: {:.1} MB",
-        bytes_per_matrix as f64 / 1e6, bytes_per_layer as f64 / 1e6);
-    println!("Total: {:.1} GB\n", (bytes_per_layer * num_layers) as f64 / 1e9);
+    println!(
+        "Per matrix: {:.1} MB, per layer: {:.1} MB",
+        bytes_per_matrix as f64 / 1e6,
+        bytes_per_layer as f64 / 1e6
+    );
+    println!(
+        "Total: {:.1} GB\n",
+        (bytes_per_layer * num_layers) as f64 / 1e9
+    );
 
     // Open source files
     let gate_file = std::fs::File::open(dir.join("gate_vectors.bin"))?;
@@ -45,9 +52,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let down_mmap = unsafe { memmap2::Mmap::map(&down_file)? };
 
     println!("Source files:");
-    println!("  gate_vectors.bin:  {:.1} MB", gate_mmap.len() as f64 / 1e6);
+    println!(
+        "  gate_vectors.bin:  {:.1} MB",
+        gate_mmap.len() as f64 / 1e6
+    );
     println!("  up_features.bin:   {:.1} MB", up_mmap.len() as f64 / 1e6);
-    println!("  down_features.bin: {:.1} MB\n", down_mmap.len() as f64 / 1e6);
+    println!(
+        "  down_features.bin: {:.1} MB\n",
+        down_mmap.len() as f64 / 1e6
+    );
 
     // Gate vectors may be f32 already (same as features) or need dtype detection
     // For this build, assume all are f32 and same intermediate×hidden per layer
@@ -61,7 +74,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _expected_down = down_bytes_per_layer * num_layers;
 
     if gate_mmap.len() != expected_gate {
-        println!("WARNING: gate_vectors.bin size {} != expected {}", gate_mmap.len(), expected_gate);
+        println!(
+            "WARNING: gate_vectors.bin size {} != expected {}",
+            gate_mmap.len(),
+            expected_gate
+        );
         println!("  Gate may be f16 or have different layout. Checking...");
         // f16 gate vectors: half the size
         if gate_mmap.len() == expected_gate / 2 {
@@ -115,17 +132,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_bytes += down_bytes_per_layer as u64;
 
         if layer % 10 == 0 || layer == num_layers - 1 {
-            println!("  Layer {layer}: gate+up+down = {:.1} MB @ offset {:.1} GB",
+            println!(
+                "  Layer {layer}: gate+up+down = {:.1} MB @ offset {:.1} GB",
                 bytes_per_layer as f64 / 1e6,
-                (layer as u64 * bytes_per_layer as u64) as f64 / 1e9);
+                (layer as u64 * bytes_per_layer as u64) as f64 / 1e9
+            );
         }
     }
 
     out.flush()?;
     let elapsed = t0.elapsed();
 
-    println!("\nInterleaved file: {:.1} GB ({:.1}s)",
-        total_bytes as f64 / 1e9, elapsed.as_secs_f64());
+    println!(
+        "\nInterleaved file: {:.1} GB ({:.1}s)",
+        total_bytes as f64 / 1e9,
+        elapsed.as_secs_f64()
+    );
     println!("Layout: [gate|up|down] × {num_layers} layers, f32");
     println!("File: {}", out_path.display());
     println!("Done.");

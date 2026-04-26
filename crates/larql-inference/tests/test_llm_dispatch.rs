@@ -14,10 +14,10 @@
 /// cleanly — `cargo test` reports the test as passed (skipped).
 use std::path::PathBuf;
 
+use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use larql_inference::{
     encode_prompt, forward::generate_cached, prompt::ChatTemplate, InferenceModel, WeightFfn,
 };
-use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
@@ -27,8 +27,7 @@ fn model_id() -> String {
 }
 
 fn wasm_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../larql-experts/target/wasm32-wasip1/release")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../larql-experts/target/wasm32-wasip1/release")
 }
 
 // ── Cases ─────────────────────────────────────────────────────────────────────
@@ -117,7 +116,9 @@ fn llm_dispatch_pipeline() {
     eprintln!("model: {mid}  ({} layers)", model.num_layers());
 
     let mut reg = ExpertRegistry::load_dir(&wasm_dir()).expect("load_dir");
-    let ffn = WeightFfn { weights: model.weights() };
+    let ffn = WeightFfn {
+        weights: model.weights(),
+    };
     let template = ChatTemplate::for_model_id(&mid);
     eprintln!("template: {}", template.name());
 
@@ -131,7 +132,11 @@ fn llm_dispatch_pipeline() {
 
         let ids = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
             Ok(v) => v,
-            Err(e) => { eprintln!("  FAIL tokenize: {e}"); failed += 1; continue; }
+            Err(e) => {
+                eprintln!("  FAIL tokenize: {e}");
+                failed += 1;
+                continue;
+            }
         };
 
         // Generate — 128 tokens is plenty for a short JSON object
@@ -181,21 +186,27 @@ fn llm_dispatch_pipeline() {
         // Assert result
         let ok = match &case.expected {
             LlmExpected::Exact(exp) => {
-                if got == *exp { true } else {
+                if got == *exp {
+                    true
+                } else {
                     eprintln!("  FAIL: got {got}, expected {exp}");
                     false
                 }
             }
             LlmExpected::Approx(exp, tol) => {
                 let f = got.as_f64().unwrap_or(f64::NAN);
-                if (f - exp).abs() <= *tol { true } else {
+                if (f - exp).abs() <= *tol {
+                    true
+                } else {
                     eprintln!("  FAIL: got {f}, expected {exp} ± {tol}");
                     false
                 }
             }
             LlmExpected::Field(key, exp) => {
                 let field = got.get(key).unwrap_or(&Value::Null);
-                if field == exp { true } else {
+                if field == exp {
+                    true
+                } else {
                     eprintln!("  FAIL: field '{key}': got {field}, expected {exp}");
                     false
                 }

@@ -18,12 +18,18 @@ impl WalkFfnConfig {
     /// Dense walk for every layer. Produces the same math as the classic
     /// `gate @ up @ down` matmul pipeline, routed through mmap'd vectors.
     pub fn dense(num_layers: usize) -> Self {
-        Self { k_per_layer: vec![None; num_layers], activation_floor: 0.0 }
+        Self {
+            k_per_layer: vec![None; num_layers],
+            activation_floor: 0.0,
+        }
     }
 
     /// Uniform sparse walk at K per layer.
     pub fn sparse(num_layers: usize, k: usize) -> Self {
-        Self { k_per_layer: vec![Some(k); num_layers], activation_floor: 0.0 }
+        Self {
+            k_per_layer: vec![Some(k); num_layers],
+            activation_floor: 0.0,
+        }
     }
 
     /// Dense for `0..sparse_from`, sparse-K from `sparse_from..num_layers`.
@@ -33,7 +39,10 @@ impl WalkFfnConfig {
         for slot in &mut k_per_layer[sparse_from.min(num_layers)..] {
             *slot = Some(k);
         }
-        Self { k_per_layer, activation_floor: 0.0 }
+        Self {
+            k_per_layer,
+            activation_floor: 0.0,
+        }
     }
 
     /// Set the activation magnitude floor. Default 0.0 (no skip).
@@ -66,6 +75,9 @@ impl Default for WalkFfnConfig {
     /// Empty config — all layers resolve to dense (None). Callers
     /// should prefer the named constructors when num_layers is known.
     fn default() -> Self {
-        Self { k_per_layer: Vec::new(), activation_floor: 0.0 }
+        Self {
+            k_per_layer: Vec::new(),
+            activation_floor: 0.0,
+        }
     }
 }

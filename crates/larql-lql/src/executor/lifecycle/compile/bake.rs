@@ -190,7 +190,10 @@ pub(super) fn apply_memit_deltas_to_down_weights(
                 }
                 if dtype_bytes == 4 {
                     let cur = f32::from_le_bytes([
-                        buf[cell], buf[cell + 1], buf[cell + 2], buf[cell + 3],
+                        buf[cell],
+                        buf[cell + 1],
+                        buf[cell + 2],
+                        buf[cell + 3],
                     ]);
                     let next = cur + delta;
                     buf[cell..cell + 4].copy_from_slice(&next.to_le_bytes());
@@ -367,18 +370,32 @@ pub(super) fn patch_up_weights(
     // those layers is silently skipped.
     let mut layer_up_lookup: HashMap<usize, (String, u64, u64)> = HashMap::new();
     for entry in &entries {
-        let Some(key) = entry.get("key").and_then(|v| v.as_str()) else { continue };
+        let Some(key) = entry.get("key").and_then(|v| v.as_str()) else {
+            continue;
+        };
         if !key.contains("up_proj") {
             continue;
         }
-        let Some(file) = entry.get("file").and_then(|v| v.as_str()) else { continue };
-        let Some(offset) = entry.get("offset").and_then(|v| v.as_u64()) else { continue };
-        let Some(length) = entry.get("length").and_then(|v| v.as_u64()) else { continue };
+        let Some(file) = entry.get("file").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(offset) = entry.get("offset").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let Some(length) = entry.get("length").and_then(|v| v.as_u64()) else {
+            continue;
+        };
         // Extract the layer number from the key: the segment after
         // `layers.` and before the next `.`.
-        let Some(rest) = key.split("layers.").nth(1) else { continue };
-        let Some(layer_str) = rest.split('.').next() else { continue };
-        let Ok(layer) = layer_str.parse::<usize>() else { continue };
+        let Some(rest) = key.split("layers.").nth(1) else {
+            continue;
+        };
+        let Some(layer_str) = rest.split('.').next() else {
+            continue;
+        };
+        let Ok(layer) = layer_str.parse::<usize>() else {
+            continue;
+        };
         layer_up_lookup.insert(layer, (file.to_string(), offset, length));
     }
 
@@ -479,7 +496,11 @@ mod tests {
     /// Build a minimal `VindexConfig` shaped for these tests.
     /// Only the dimensions matter for `patch_down_weights`; everything
     /// else is dummy.
-    fn mini_config(num_layers: usize, hidden: usize, intermediate: usize) -> larql_vindex::VindexConfig {
+    fn mini_config(
+        num_layers: usize,
+        hidden: usize,
+        intermediate: usize,
+    ) -> larql_vindex::VindexConfig {
         larql_vindex::VindexConfig {
             version: 1,
             model: "test".into(),
@@ -554,7 +575,9 @@ mod tests {
         let mut out = Vec::with_capacity(hidden);
         for row in 0..hidden {
             let cell = (layer * layer_elems + row * intermediate + feature) * 4;
-            out.push(f32::from_le_bytes(bytes[cell..cell + 4].try_into().unwrap()));
+            out.push(f32::from_le_bytes(
+                bytes[cell..cell + 4].try_into().unwrap(),
+            ));
         }
         let _ = num_layers; // unused but documents the layout
         out
@@ -620,8 +643,9 @@ mod tests {
         // Adjacent column at L2 F4 must be untouched.
         let neighbour = read_column_f32(&dst, layer, feature - 1, num_layers, hidden, intermediate);
         for (row, val) in neighbour.iter().enumerate() {
-            let expected =
-                ((layer * hidden * intermediate + row * intermediate + (feature - 1)) as f32) * 0.001;
+            let expected = ((layer * hidden * intermediate + row * intermediate + (feature - 1))
+                as f32)
+                * 0.001;
             assert!(
                 (val - expected).abs() < 1e-6,
                 "L2 F4 row {row}: got {val}, expected {expected}"

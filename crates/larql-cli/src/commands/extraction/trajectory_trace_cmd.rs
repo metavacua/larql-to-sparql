@@ -317,7 +317,8 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
 
     eprintln!(
         "  {} layers, hidden_size={} ({:.1}s)",
-        num_layers, hidden_size,
+        num_layers,
+        hidden_size,
         start.elapsed().as_secs_f64()
     );
 
@@ -350,7 +351,7 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
         prompt: String,
         num_tokens: usize,
         layers: Vec<usize>,
-        residuals: Vec<Vec<f32>>,  // residuals[layer_idx] = hidden_size vector
+        residuals: Vec<Vec<f32>>, // residuals[layer_idx] = hidden_size vector
         prediction: String,
         confidence: f64,
     }
@@ -381,7 +382,12 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
         let elapsed = pass_start.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "  [{}/{}] {:40} → {:12} ({:.2})  {:.0}ms",
-            idx + 1, prompts.len(), prompt, prediction, confidence, elapsed
+            idx + 1,
+            prompts.len(),
+            prompt,
+            prediction,
+            confidence,
+            elapsed
         );
 
         trajectories.push(RawTrajectory {
@@ -444,7 +450,8 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
                     // Radial component = projection of delta onto prev direction
                     let radial_component = dot(&delta, prev) / prev_norm;
                     // Tangential = what's left (Pythagorean)
-                    let tang_sq = (delta_mag * delta_mag - radial_component * radial_component).max(0.0);
+                    let tang_sq =
+                        (delta_mag * delta_mag - radial_component * radial_component).max(0.0);
                     let tangential_component = tang_sq.sqrt();
                     let frac = if delta_mag > 0.0 {
                         (radial_component.abs() / delta_mag).clamp(0.0, 1.0)
@@ -684,7 +691,10 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
 
         eprintln!(
             "\n── Dumping raw vectors: {} prompts × {} layers × {} dims = {} floats ({:.1} MB) ──",
-            n_prompts, n_layers_captured, hidden_size, total_floats,
+            n_prompts,
+            n_layers_captured,
+            hidden_size,
+            total_floats,
             total_floats as f64 * 4.0 / 1_048_576.0
         );
 
@@ -695,10 +705,7 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
             for traj in &trajectories {
                 for res in &traj.residuals {
                     let bytes: &[u8] = unsafe {
-                        std::slice::from_raw_parts(
-                            res.as_ptr() as *const u8,
-                            res.len() * 4,
-                        )
+                        std::slice::from_raw_parts(res.as_ptr() as *const u8, res.len() * 4)
                     };
                     f.write_all(bytes)?;
                 }

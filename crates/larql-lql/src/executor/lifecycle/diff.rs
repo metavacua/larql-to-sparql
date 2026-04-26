@@ -65,12 +65,8 @@ impl Session {
                     break;
                 }
 
-                let meta_a = metas_a
-                    .and_then(|m| m.get(feat))
-                    .and_then(|m| m.as_ref());
-                let meta_b = metas_b
-                    .and_then(|m| m.get(feat))
-                    .and_then(|m| m.as_ref());
+                let meta_a = metas_a.and_then(|m| m.get(feat)).and_then(|m| m.as_ref());
+                let meta_b = metas_b.and_then(|m| m.get(feat)).and_then(|m| m.as_ref());
 
                 let status = match (meta_a, meta_b) {
                     (Some(a), Some(b)) => {
@@ -99,7 +95,10 @@ impl Session {
         if diff_count == 0 {
             out.push("  (no differences found)".into());
         } else {
-            out.push(format!("\n{} differences shown (limit {})", diff_count, limit));
+            out.push(format!(
+                "\n{} differences shown (limit {})",
+                diff_count, limit
+            ));
         }
 
         // If INTO PATCH specified, extract diff as a .vlp file
@@ -109,7 +108,9 @@ impl Session {
             // Re-scan without limit for the full diff
             for layer in &layers_a {
                 if let Some(l) = layer_filter {
-                    if *layer != l as usize { continue; }
+                    if *layer != l as usize {
+                        continue;
+                    }
                 }
                 let metas_a = index_a.down_meta_at(*layer);
                 let metas_b = index_b.down_meta_at(*layer);
@@ -121,7 +122,10 @@ impl Session {
                     let mb = metas_b.and_then(|m| m.get(feat)).and_then(|m| m.as_ref());
 
                     match (ma, mb) {
-                        (Some(_a), Some(b)) if _a.top_token != b.top_token || (_a.c_score - b.c_score).abs() > 0.01 => {
+                        (Some(_a), Some(b))
+                            if _a.top_token != b.top_token
+                                || (_a.c_score - b.c_score).abs() > 0.01 =>
+                        {
                             operations.push(larql_vindex::PatchOp::Update {
                                 layer: *layer,
                                 feature: feat,
@@ -172,18 +176,27 @@ impl Session {
                 base_model: model_name,
                 base_checksum: None,
                 created_at: String::new(),
-                description: Some(format!("Diff: {} vs {}", path_a.display(), path_b.display())),
+                description: Some(format!(
+                    "Diff: {} vs {}",
+                    path_a.display(),
+                    path_b.display()
+                )),
                 author: None,
                 tags: vec![],
                 operations,
             };
 
             let (ins, upd, del) = patch.counts();
-            patch.save(std::path::Path::new(patch_path))
+            patch
+                .save(std::path::Path::new(patch_path))
                 .map_err(|e| LqlError::exec("failed to save patch", e))?;
             out.push(format!(
                 "Extracted: {} ({} ops: {} inserts, {} updates, {} deletes)",
-                patch_path, patch.len(), ins, upd, del,
+                patch_path,
+                patch.len(),
+                ins,
+                upd,
+                del,
             ));
         }
 

@@ -23,9 +23,7 @@ impl Codebook {
 /// Quantize a scalar to its nearest centroid index using binary search on boundaries.
 pub fn quantize_scalar(value: f32, codebook: &Codebook) -> u8 {
     // Binary search: find the first boundary > value
-    let idx = codebook
-        .boundaries
-        .partition_point(|&b| b <= value);
+    let idx = codebook.boundaries.partition_point(|&b| b <= value);
     idx as u8
 }
 
@@ -53,10 +51,7 @@ pub fn compute_codebook(samples: &[f32], n_levels: usize, max_iters: usize) -> C
 
     for _ in 0..max_iters {
         // Compute boundaries (midpoints between adjacent centroids)
-        let boundaries: Vec<f32> = centroids
-            .windows(2)
-            .map(|w| (w[0] + w[1]) / 2.0)
-            .collect();
+        let boundaries: Vec<f32> = centroids.windows(2).map(|w| (w[0] + w[1]) / 2.0).collect();
 
         // Assign samples to nearest centroid and compute new means
         let mut sums = vec![0.0f64; n_levels];
@@ -84,10 +79,7 @@ pub fn compute_codebook(samples: &[f32], n_levels: usize, max_iters: usize) -> C
         }
     }
 
-    let boundaries: Vec<f32> = centroids
-        .windows(2)
-        .map(|w| (w[0] + w[1]) / 2.0)
-        .collect();
+    let boundaries: Vec<f32> = centroids.windows(2).map(|w| (w[0] + w[1]) / 2.0).collect();
 
     Codebook {
         boundaries,

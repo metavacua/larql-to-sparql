@@ -8,8 +8,8 @@
 
 extern crate blas_src;
 
-use larql_inference::{InferenceModel, predict};
-use larql_models::quant::ggml::{quantize_q4_0, dequantize_q4_0};
+use larql_inference::{predict, InferenceModel};
+use larql_models::quant::ggml::{dequantize_q4_0, quantize_q4_0};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = InferenceModel::load("google/gemma-3-4b-it")?;
@@ -37,7 +37,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for key in &keys {
             if let Some(w) = weights.tensors.get(key) {
                 let data = w.as_slice().unwrap();
-                if data.len() % 32 != 0 { continue; }
+                if data.len() % 32 != 0 {
+                    continue;
+                }
 
                 let q4 = quantize_q4_0(data);
                 let recon = dequantize_q4_0(&q4, data.len()).unwrap();
@@ -45,7 +47,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut layer_rmse = 0.0f64;
                 for i in 0..data.len() {
                     let err = (data[i] - recon[i]).abs();
-                    if err > total_max_error { total_max_error = err; }
+                    if err > total_max_error {
+                        total_max_error = err;
+                    }
                     layer_rmse += (err as f64) * (err as f64);
                 }
                 layer_rmse = (layer_rmse / data.len() as f64).sqrt();
@@ -64,14 +68,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 2. Weight statistics ──
     println!("\n  Weight statistics (sample layers):");
     for &layer in &[0, 13, 33] {
-        if layer >= num_layers { continue; }
+        if layer >= num_layers {
+            continue;
+        }
         let key = weights.arch.attn_q_key(layer);
         if let Some(w) = weights.tensors.get(&key) {
             let data = w.as_slice().unwrap();
             let min_v = data.iter().copied().fold(f32::INFINITY, f32::min);
             let max_v = data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let mean: f32 = data.iter().sum::<f32>() / data.len() as f32;
-            let std: f32 = (data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / data.len() as f32).sqrt();
+            let std: f32 =
+                (data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / data.len() as f32).sqrt();
             println!("    L{layer} Q proj {:?}: range=[{min_v:.4},{max_v:.4}] mean={mean:.6} std={std:.6} err/std={:.4}",
                 w.shape(), total_max_error / std);
         }
@@ -86,10 +93,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Python is a programming",
     ];
     for prompt in &prompts {
-        let encoding = tokenizer.encode(*prompt, true).map_err(|e| format!("{e}"))?;
+        let encoding = tokenizer
+            .encode(*prompt, true)
+            .map_err(|e| format!("{e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let result = predict(weights, tokenizer, &token_ids, 3);
-        let preds: Vec<String> = result.predictions.iter()
+        let preds: Vec<String> = result
+            .predictions
+            .iter()
             .map(|(t, p)| format!("{t} ({:.1}%)", p * 100.0))
             .collect();
         println!("    \"{prompt}\" → {}", preds.join(", "));
@@ -98,10 +109,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 4. Summary ──
     println!("\n  Q4 impact assessment:");
     let _q4_snr = avg_rmse / total_max_error as f64;
-    println!("    At RMSE {avg_rmse:.6}, the Q4 error is {:.1}% of weight max",
-        total_max_error as f64 / weights.tensors.get(&weights.arch.attn_q_key(0))
-            .map(|w| w.as_slice().unwrap().iter().map(|v| v.abs()).fold(0.0f32, f32::max))
-            .unwrap_or(1.0) as f64 * 100.0);
+    println!(
+        "    At RMSE {avg_rmse:.6}, the Q4 error is {:.1}% of weight max",
+        total_max_error as f64
+            / weights
+                .tensors
+                .get(&weights.arch.attn_q_key(0))
+                .map(|w| w
+                    .as_slice()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.abs())
+                    .fold(0.0f32, f32::max))
+                .unwrap_or(1.0) as f64
+            * 100.0
+    );
     println!("    llama.cpp uses Q4_K_M (per-group scaling) which has ~2× lower RMSE");
     println!("    For factual queries (strong top-1 signal), Q4_0 should be sufficient");
     println!("    For nuanced queries, Q8 attention may be needed as fallback");

@@ -8,14 +8,16 @@
 //!     Gemma 4 stores raw → offset 0.0; V-norm is parameter-free →
 //!     offset 0.0, weight = 1.0)
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// Compute the threadgroup width for a `head_dim`-long cooperative reduction.
 /// Rounds up to a power of two, capped at 512 (shader limit).
 fn tg_width(head_dim: usize) -> u64 {
     let mut tg: u64 = 1;
-    while (tg as usize) < head_dim && tg < 512 { tg <<= 1; }
+    while (tg as usize) < head_dim && tg < 512 {
+        tg <<= 1;
+    }
     tg
 }
 
@@ -30,11 +32,16 @@ fn tg_width(head_dim: usize) -> u64 {
 pub fn encode_qk_norm(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
-    q_buf: &Buffer, q_w_buf: &Buffer,
-    k_buf: &Buffer, k_w_buf: &Buffer,
+    q_buf: &Buffer,
+    q_w_buf: &Buffer,
+    k_buf: &Buffer,
+    k_w_buf: &Buffer,
     seq_len: usize,
-    num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
-    eps: f32, qk_norm_offset: f32,
+    num_q_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    eps: f32,
+    qk_norm_offset: f32,
 ) {
     let hd_val = head_dim as u32;
     let nq_val = num_q_heads as u32;
@@ -76,9 +83,11 @@ pub fn encode_qk_norm(
 pub fn encode_v_norm(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
-    v_buf: &Buffer, ones_buf: &Buffer,
+    v_buf: &Buffer,
+    ones_buf: &Buffer,
     seq_len: usize,
-    num_kv_heads: usize, head_dim: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
     eps: f32,
 ) {
     let hd_val = head_dim as u32;

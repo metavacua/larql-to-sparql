@@ -45,9 +45,7 @@ pub enum KvCacheKind {
 pub fn parse_kv_cache(s: &str) -> Result<KvCacheKind, String> {
     match s.to_lowercase().as_str() {
         "standard" | "full" | "fp32" => Ok(KvCacheKind::Standard),
-        "markov-bounded" | "markov" | "bounded" | "sliding" => {
-            Ok(KvCacheKind::MarkovBounded)
-        }
+        "markov-bounded" | "markov" | "bounded" | "sliding" => Ok(KvCacheKind::MarkovBounded),
         "none" | "off" => Ok(KvCacheKind::None),
         _ => Err(format!(
             "unknown kv-cache strategy: {s} \
@@ -187,13 +185,11 @@ fn run_chat(
     args: &RunArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !atty::is(atty::Stream::Stdin) {
-        return Err(
-            "error: interactive chat mode requires a TTY\n\
+        return Err("error: interactive chat mode requires a TTY\n\
              hint: provide a prompt as an argument (e.g. `larql run model 'hello'`)\n\
              hint: or pipe input with a newline separator and use a subshell\n\
              hint: refusing to enter chat mode in automated/piped contexts (bootstrap safety)"
-                .into(),
-        );
+            .into());
     }
     eprintln!(
         "larql chat — {} (Ctrl-D to exit)",
@@ -351,7 +347,8 @@ mod experts {
                 Strategy::MetalQ4K => {
                     let q4_index = self.q4_index.as_ref().expect("metal-q4k needs q4_index");
                     let backend = larql_compute::default_backend();
-                    let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
+                    let cached_layers =
+                        larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
                     let result = if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
                         mask.set_seed_text(OP_CALL_PREFIX);
@@ -405,7 +402,9 @@ mod experts {
                     toks.into_iter().map(|(t, _)| t).collect()
                 }
                 Strategy::CpuF32 => {
-                    let ffn = WeightFfn { weights: &self.weights };
+                    let ffn = WeightFfn {
+                        weights: &self.weights,
+                    };
                     let mut text = String::new();
                     if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
@@ -478,14 +477,16 @@ mod experts {
         }
         if let Some(exe) = exe_path {
             for ancestor in exe.ancestors() {
-                let candidate = ancestor
-                    .join("crates/larql-experts/target/wasm32-wasip1/release");
+                let candidate = ancestor.join("crates/larql-experts/target/wasm32-wasip1/release");
                 if candidate.is_dir() {
                     return Ok(candidate);
                 }
             }
         }
-        Err("could not locate WASM experts directory; pass --experts-dir or set LARQL_EXPERTS_DIR".into())
+        Err(
+            "could not locate WASM experts directory; pass --experts-dir or set LARQL_EXPERTS_DIR"
+                .into(),
+        )
     }
 
     /// Detect the chat template from a vindex.
@@ -538,7 +539,12 @@ mod experts {
         let strategy = pick_strategy(cfg.quant, metal_ready_for_q4(args.metal));
 
         if args.verbose {
-            eprintln!("strategy: {} (quant={:?}, metal_requested={})", strategy.name(), cfg.quant, args.metal);
+            eprintln!(
+                "strategy: {} (quant={:?}, metal_requested={})",
+                strategy.name(),
+                cfg.quant,
+                args.metal
+            );
         }
 
         let (weights, q4_index) = match strategy {
@@ -560,11 +566,19 @@ mod experts {
             }
         };
         let tokenizer = load_vindex_tokenizer(vindex_path)?;
-        Ok(Runtime { weights, tokenizer, q4_index, strategy })
+        Ok(Runtime {
+            weights,
+            tokenizer,
+            q4_index,
+            strategy,
+        })
     }
 
     /// Print a single dispatch outcome (or skip reason) to stdout/stderr.
-    fn print_dispatch(model_output: &str, outcome: Result<DispatchOutcome, DispatchSkip>) -> Result<(), BoxErr> {
+    fn print_dispatch(
+        model_output: &str,
+        outcome: Result<DispatchOutcome, DispatchSkip>,
+    ) -> Result<(), BoxErr> {
         match outcome {
             Ok(DispatchOutcome { call, result }) => {
                 println!(
@@ -586,9 +600,10 @@ mod experts {
             Err(DispatchSkip::UnknownOp(op)) => {
                 Err(format!("model emitted unknown op `{op}`; raw output: {model_output}").into())
             }
-            Err(DispatchSkip::ExpertDeclined { op, args }) => {
-                Err(format!("expert `{op}` declined args {args}; raw output: {model_output}").into())
-            }
+            Err(DispatchSkip::ExpertDeclined { op, args }) => Err(format!(
+                "expert `{op}` declined args {args}; raw output: {model_output}"
+            )
+            .into()),
         }
     }
 
@@ -600,7 +615,11 @@ mod experts {
         }
         let registry = ExpertRegistry::load_dir(&experts_dir)?;
         if args.verbose {
-            eprintln!("experts: loaded {} modules ({} ops)", registry.len(), registry.ops().len());
+            eprintln!(
+                "experts: loaded {} modules ({} ops)",
+                registry.len(),
+                registry.ops().len()
+            );
         }
 
         // Optionally narrow the registry to a focused subset — small models
@@ -650,11 +669,7 @@ mod experts {
         } else {
             None
         };
-        let model_output = runtime.generate(
-            &wrapped,
-            args.max_tokens,
-            mask_op_names.as_deref(),
-        )?;
+        let model_output = runtime.generate(&wrapped, args.max_tokens, mask_op_names.as_deref())?;
         if args.verbose {
             eprintln!("model output: {model_output:?}");
         }
@@ -750,18 +765,17 @@ mod experts {
             let err = resolve_experts_dir_inner(Some(bogus.clone()), None, None).unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("--experts-dir does not exist"), "got: {msg}");
-            assert!(msg.contains(bogus.to_str().unwrap()), "msg should name the path; got: {msg}");
+            assert!(
+                msg.contains(bogus.to_str().unwrap()),
+                "msg should name the path; got: {msg}"
+            );
         }
 
         #[test]
         fn resolve_falls_through_to_env_dir() {
             let env = tempfile::tempdir().expect("tempdir");
-            let resolved = resolve_experts_dir_inner(
-                None,
-                Some(env.path().to_path_buf()),
-                None,
-            )
-            .expect("ok");
+            let resolved =
+                resolve_experts_dir_inner(None, Some(env.path().to_path_buf()), None).expect("ok");
             assert_eq!(resolved, env.path());
         }
 
@@ -784,7 +798,10 @@ mod experts {
                 Some(exe),
             )
             .expect("ok");
-            assert_eq!(resolved.canonicalize().unwrap(), wasm_dir.canonicalize().unwrap());
+            assert_eq!(
+                resolved.canonicalize().unwrap(),
+                wasm_dir.canonicalize().unwrap()
+            );
         }
 
         #[test]
@@ -797,7 +814,10 @@ mod experts {
             .unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("could not locate"), "got: {msg}");
-            assert!(msg.contains("--experts-dir"), "should hint at the flag; got: {msg}");
+            assert!(
+                msg.contains("--experts-dir"),
+                "should hint at the flag; got: {msg}"
+            );
         }
 
         // ── print_dispatch ─────────────────────────────────────────────────
@@ -808,7 +828,10 @@ mod experts {
             let err = print_dispatch("raw model output", outcome).unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("unknown op `foo`"), "got: {msg}");
-            assert!(msg.contains("raw model output"), "should include raw output; got: {msg}");
+            assert!(
+                msg.contains("raw model output"),
+                "should include raw output; got: {msg}"
+            );
         }
 
         #[test]
@@ -830,4 +853,3 @@ mod experts {
         }
     }
 }
-

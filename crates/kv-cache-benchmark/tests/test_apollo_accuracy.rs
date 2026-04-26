@@ -51,14 +51,17 @@ fn test_apollo_accuracy_sweep() {
     let mut engine = ApolloEngine::new(InjectionConfig::default()).with_store(store);
     engine.build_routing_index().expect("build routing");
 
-    let model_path = std::env::var("LARQL_MODEL_PATH")
-        .unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
+    let model_path =
+        std::env::var("LARQL_MODEL_PATH").unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
     let model = larql_inference::InferenceModel::load(&model_path).expect("load model");
     let weights = model.weights();
     let tok = model.tokenizer();
 
     println!("\n{}", "=".repeat(100));
-    println!("Apollo accuracy sweep — {} queries × 2 paths", QUERIES.len());
+    println!(
+        "Apollo accuracy sweep — {} queries × 2 paths",
+        QUERIES.len()
+    );
     println!("{}", "=".repeat(100));
 
     println!(
@@ -75,9 +78,7 @@ fn test_apollo_accuracy_sweep() {
             match r {
                 Ok(t) => {
                     let t: &kv_cache_benchmark::apollo::QueryTrace = t;
-                    let txt = tok
-                        .decode(&[t.top1_token_id], false)
-                        .unwrap_or_default();
+                    let txt = tok.decode(&[t.top1_token_id], false).unwrap_or_default();
                     (
                         format!("{:?} @ {:.1}", txt, t.top1_logit),
                         t.context_tokens,
@@ -97,10 +98,7 @@ fn test_apollo_accuracy_sweep() {
         };
 
         let truncq: String = q.chars().take(46).collect();
-        println!(
-            "{:<48}  {:<20}  {:<20}  {}",
-            truncq, u_fmt, c_fmt, ratio
-        );
+        println!("{:<48}  {:<20}  {:<20}  {}", truncq, u_fmt, c_fmt, ratio);
     }
     println!();
 }
