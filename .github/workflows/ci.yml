@@ -37,8 +37,13 @@ jobs:
       - name: Check code formatting (rustfmt)
         run: make fmt-check
 
-      - name: Lint with Clippy
-        run: make lint
+      - name: Lint with Clippy (Linux, no Metal)
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --tests --no-default-features -- -D warnings
+
+      - name: Lint with Clippy (macOS, with Metal)
+        if: runner.os == 'macOS'
+        run: cargo clippy --workspace --tests --features metal -- -D warnings
 
       # ── Rust Tests ──
 
