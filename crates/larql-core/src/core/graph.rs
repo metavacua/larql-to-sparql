@@ -218,7 +218,7 @@ impl Graph {
         }
 
         let mut ranked: Vec<(usize, usize)> = scores.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|b| std::cmp::Reverse(b.1));
         ranked.truncate(max_results);
         ranked.iter().map(|(idx, _)| &self.edges[*idx]).collect()
     }
