@@ -43,10 +43,19 @@ fn components_finds_two_components() {
 #[test]
 fn components_europe_and_asia_separate() {
     let g = geo_graph();
-    assert!(are_connected(&g, "France", "Germany"), "France-Germany via Europe");
+    assert!(
+        are_connected(&g, "France", "Germany"),
+        "France-Germany via Europe"
+    );
     assert!(are_connected(&g, "France", "Paris"), "France-Paris direct");
-    assert!(!are_connected(&g, "France", "Japan"), "France-Japan disconnected");
-    assert!(!are_connected(&g, "Paris", "Tokyo"), "Paris-Tokyo disconnected");
+    assert!(
+        !are_connected(&g, "France", "Japan"),
+        "France-Japan disconnected"
+    );
+    assert!(
+        !are_connected(&g, "Paris", "Tokyo"),
+        "Paris-Tokyo disconnected"
+    );
 }
 
 #[test]

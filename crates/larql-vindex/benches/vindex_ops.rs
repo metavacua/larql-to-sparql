@@ -217,7 +217,8 @@ fn bench_save_load(c: &mut Criterion) {
         model_config: None,
     };
     VectorIndex::save_config(&config, &load_dir).unwrap();
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     std::fs::write(load_dir.join("tokenizer.json"), tok_json).unwrap();
 
     group.bench_function("load_vindex", |b| {

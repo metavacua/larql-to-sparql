@@ -4,8 +4,8 @@
 
 #[cfg(feature = "real-model")]
 mod with_model {
-    use kv_cache_benchmark::accuracy_suite::prompts;
     use kv_cache_benchmark::accuracy_suite::needle;
+    use kv_cache_benchmark::accuracy_suite::prompts;
     use kv_cache_benchmark::accuracy_suite::runner;
 
     #[test]
@@ -22,8 +22,14 @@ mod with_model {
         categories.dedup();
 
         let expected = vec![
-            "arithmetic", "code", "completion", "conversational",
-            "factual", "geographic", "reasoning", "scientific",
+            "arithmetic",
+            "code",
+            "completion",
+            "conversational",
+            "factual",
+            "geographic",
+            "reasoning",
+            "scientific",
         ];
         assert_eq!(categories, expected, "Missing categories");
     }
@@ -31,13 +37,17 @@ mod with_model {
     #[test]
     fn test_diverse_100_balanced_categories() {
         let prompts = prompts::diverse_100();
-        let mut categories: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        let mut categories: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
         for p in &prompts {
             *categories.entry(p.category).or_default() += 1;
         }
         // Each category should have at least 10 prompts
         for (cat, count) in &categories {
-            assert!(*count >= 10, "Category '{cat}' has {count} prompts, expected >=10");
+            assert!(
+                *count >= 10,
+                "Category '{cat}' has {count} prompts, expected >=10"
+            );
         }
         // Total should be 100
         let total: usize = categories.values().sum();
@@ -116,14 +126,20 @@ mod with_model {
     #[test]
     fn test_format_needle_results() {
         let results = vec![
-            (512, vec![
-                ("Standard KV".to_string(), true),
-                ("Markov RS".to_string(), true),
-            ]),
-            (32768, vec![
-                ("Standard KV".to_string(), false),
-                ("Markov RS".to_string(), true),
-            ]),
+            (
+                512,
+                vec![
+                    ("Standard KV".to_string(), true),
+                    ("Markov RS".to_string(), true),
+                ],
+            ),
+            (
+                32768,
+                vec![
+                    ("Standard KV".to_string(), false),
+                    ("Markov RS".to_string(), true),
+                ],
+            ),
         ];
         let table = needle::format_needle_results(&results);
         assert!(table.contains("PASS"));

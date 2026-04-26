@@ -3,8 +3,8 @@
 //! Memory-efficient: O(seq) per position, never materializes full [seq, seq] matrix.
 //! Uses BLAS gemv for both Q·K scores and softmax·V accumulation.
 
-use ndarray::Array2;
 use super::AttentionWeights;
+use ndarray::Array2;
 
 /// GQA with causal masking (no weight capture).
 /// q: (seq, num_q * head_dim), k: (seq, num_kv * head_dim), v: same as k
@@ -19,7 +19,8 @@ pub fn gqa_attention(
     scale: f64,
     seq_len: usize,
 ) -> Array2<f32> {
-    let (out, _) = gqa_attention_with_weights(q, k, v, num_q, head_dim, reps, scale, seq_len, false, None);
+    let (out, _) =
+        gqa_attention_with_weights(q, k, v, num_q, head_dim, reps, scale, seq_len, false, None);
     out
 }
 
@@ -101,7 +102,9 @@ pub fn gqa_attention_with_weights(
     }
 
     let weights = if capture {
-        Some(AttentionWeights { heads: captured_heads })
+        Some(AttentionWeights {
+            heads: captured_heads,
+        })
     } else {
         None
     };

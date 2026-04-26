@@ -13,15 +13,19 @@
 
 use std::time::Instant;
 
-use larql_inference::{vindex::WalkFfn, InferenceModel, FfnL1Cache};
 use larql_inference::ffn::FfnBackend;
+use larql_inference::{vindex::WalkFfn, FfnL1Cache, InferenceModel};
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 use ndarray::Array2;
 
 fn timed_iters<F: FnMut()>(name: &str, warmup: usize, iters: usize, mut f: F) -> f64 {
-    for _ in 0..warmup { f(); }
+    for _ in 0..warmup {
+        f();
+    }
     let t = Instant::now();
-    for _ in 0..iters { f(); }
+    for _ in 0..iters {
+        f();
+    }
     let ms = t.elapsed().as_secs_f64() * 1000.0 / iters as f64;
     println!("  {:<45} {:>8.3} ms/iter", name, ms);
     ms
@@ -36,10 +40,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model"  => { i += 1; model_name = args[i].clone(); }
-            "--vindex" => { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
-            "--top-k"  => { i += 1; top_k = args[i].parse()?; }
-            "--iters"  => { i += 1; iters = args[i].parse()?; }
+            "--model" => {
+                i += 1;
+                model_name = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex_path = std::path::PathBuf::from(&args[i]);
+            }
+            "--top-k" => {
+                i += 1;
+                top_k = args[i].parse()?;
+            }
+            "--iters" => {
+                i += 1;
+                iters = args[i].parse()?;
+            }
             _ => {}
         }
         i += 1;
@@ -66,7 +82,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let index = VectorIndex::load_vindex(&vindex_path, &mut cb)?;
     let num_layers = weights.num_layers;
     let hidden = weights.hidden_size;
-    println!("Vindex loaded in {:.1}s  ({num_layers} layers, hidden={hidden})\n", t0.elapsed().as_secs_f64());
+    println!(
+        "Vindex loaded in {:.1}s  ({num_layers} layers, hidden={hidden})\n",
+        t0.elapsed().as_secs_f64()
+    );
 
     // Synthetic residual — non-zero to exercise gate KNN
     let residual: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
@@ -95,7 +114,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = walk.forward(bench_layer, &x);
         });
         let (hits, misses) = walk.l1_cache_stats().unwrap_or((0, 0));
-        println!("  hits={hits}  misses={misses}  hit_rate={:.1}%", 100.0 * hits as f64 / (hits + misses).max(1) as f64);
+        println!(
+            "  hits={hits}  misses={misses}  hit_rate={:.1}%",
+            100.0 * hits as f64 / (hits + misses).max(1) as f64
+        );
         let _ = cold_ms;
     }
 
@@ -110,7 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = walk.forward(bench_layer, &x);
         });
         let (hits, misses) = walk.l1_cache_stats().unwrap_or((0, 0));
-        println!("  hits={hits}  misses={misses}  hit_rate={:.1}%", 100.0 * hits as f64 / (hits + misses).max(1) as f64);
+        println!(
+            "  hits={hits}  misses={misses}  hit_rate={:.1}%",
+            100.0 * hits as f64 / (hits + misses).max(1) as f64
+        );
         let _ = warm_ms;
     }
 
@@ -120,7 +145,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let vocab_size = 50;
         let residuals: Vec<Array2<f32>> = (0..vocab_size)
             .map(|t| {
-                let r: Vec<f32> = (0..hidden).map(|i| ((i + t) as f32 * 0.001).sin()).collect();
+                let r: Vec<f32> = (0..hidden)
+                    .map(|i| ((i + t) as f32 * 0.001).sin())
+                    .collect();
                 Array2::from_shape_vec((1, hidden), r).unwrap()
             })
             .collect();
@@ -135,14 +162,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Two-pass: second pass has residuals in cache from first
         let walk2 = WalkFfn::new(weights, &index, top_k).with_l1_cache(num_layers);
         // First pass: warm cache
-        for r in &residuals { let _ = walk2.forward(bench_layer, r); }
+        for r in &residuals {
+            let _ = walk2.forward(bench_layer, r);
+        }
         // Second pass: measure
         timed_iters("walk_ffn_sparse (2nd pass, 50 residuals)", 0, iters, || {
             let r = &residuals[fastrand_idx(vocab_size)];
             let _ = walk2.forward(bench_layer, r);
         });
         let (hits, misses) = walk2.l1_cache_stats().unwrap_or((0, 0));
-        println!("  hits={hits}  misses={misses}  hit_rate={:.1}%", 100.0 * hits as f64 / (hits + misses).max(1) as f64);
+        println!(
+            "  hits={hits}  misses={misses}  hit_rate={:.1}%",
+            100.0 * hits as f64 / (hits + misses).max(1) as f64
+        );
     }
 
     // ── Key computation overhead ────────────────────────────────────────

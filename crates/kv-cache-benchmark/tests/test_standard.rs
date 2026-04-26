@@ -1,6 +1,6 @@
-use kv_cache_benchmark::*;
 use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::standard_kv::StandardKv;
+use kv_cache_benchmark::*;
 use rand::prelude::*;
 
 #[test]
@@ -76,7 +76,11 @@ fn test_standard_kv_benchmark_runs() {
     assert_eq!(result.strategy_name, "Standard KV (FP16)");
     assert_eq!(result.seq_len, 64);
     // MSE should be very small (FP16 quantization noise only)
-    assert!(result.metrics.mse < 0.001, "MSE too high: {}", result.metrics.mse);
+    assert!(
+        result.metrics.mse < 0.001,
+        "MSE too high: {}",
+        result.metrics.mse
+    );
     // Cosine sim should be very high
     assert!(
         result.metrics.cosine_sim > 0.999,

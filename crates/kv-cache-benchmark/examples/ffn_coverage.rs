@@ -61,7 +61,11 @@ mod ffn_coverage {
             match raw[i].as_str() {
                 "--k" => {
                     let v = raw.get(i + 1).cloned().unwrap_or_else(|| "full".into());
-                    k = if v == "full" { None } else { Some(v.parse().expect("--k must be int or 'full'")) };
+                    k = if v == "full" {
+                        None
+                    } else {
+                        Some(v.parse().expect("--k must be int or 'full'"))
+                    };
                     raw.drain(i..i + 2);
                 }
                 "--output" | "-o" => {
@@ -69,7 +73,11 @@ mod ffn_coverage {
                     raw.drain(i..i + 2);
                 }
                 "--limit" => {
-                    limit = Some(raw.get(i + 1).and_then(|s| s.parse().ok()).expect("--limit needs int"));
+                    limit = Some(
+                        raw.get(i + 1)
+                            .and_then(|s| s.parse().ok())
+                            .expect("--limit needs int"),
+                    );
                     raw.drain(i..i + 2);
                 }
                 _ => i += 1,
@@ -77,10 +85,18 @@ mod ffn_coverage {
         }
 
         if raw.len() < 2 {
-            eprintln!("Usage: ffn_coverage <model> <vindex> [--k N|full] [--output PATH] [--limit N]");
+            eprintln!(
+                "Usage: ffn_coverage <model> <vindex> [--k N|full] [--output PATH] [--limit N]"
+            );
             std::process::exit(2);
         }
-        Args { model: raw[0].clone(), vindex: raw[1].clone(), output, k, limit }
+        Args {
+            model: raw[0].clone(),
+            vindex: raw[1].clone(),
+            output,
+            k,
+            limit,
+        }
     }
 
     // ── Measurement records ──
@@ -133,7 +149,9 @@ mod ffn_coverage {
 
     impl<'a> FfnBackend for InstrumentedFfn<'a> {
         fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
-            let dense = WeightFfn { weights: self.weights };
+            let dense = WeightFfn {
+                weights: self.weights,
+            };
             let dense_out = dense.forward(layer, x);
             let walk_out = self.walk.forward(layer, x);
 
@@ -145,11 +163,17 @@ mod ffn_coverage {
             // gate_knn internally; we re-run with a small K purely to grab
             // top-K scores for measurement. Redundant but cheap.
             let x_last = Array1::from_iter(x.row(last).iter().copied());
-            let top_hits = self.index.gate_knn(layer, &x_last, self.gate_k_for_measurement);
+            let top_hits = self
+                .index
+                .gate_knn(layer, &x_last, self.gate_k_for_measurement);
             let (feat0, score0) = top_hits.first().copied().unwrap_or((0, 0.0));
             let score1 = top_hits.get(1).map(|(_, s)| s.abs()).unwrap_or(0.0);
             let margin = score0.abs() - score1;
-            let token = self.index.feature_meta(layer, feat0).map(|m| m.top_token).unwrap_or_default();
+            let token = self
+                .index
+                .feature_meta(layer, feat0)
+                .map(|m| m.top_token)
+                .unwrap_or_default();
 
             // Lookup count: gate_knn (1) + K feature reads (K) + K down reads (K).
             // When K_walk = features, this is ~2*F + 1. Report the effective K
@@ -171,8 +195,15 @@ mod ffn_coverage {
             dense_out
         }
 
-        fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
-            let (out, act) = WeightFfn { weights: self.weights }.forward_with_activation(layer, x);
+        fn forward_with_activation(
+            &self,
+            layer: usize,
+            x: &Array2<f32>,
+        ) -> (Array2<f32>, Array2<f32>) {
+            let (out, act) = WeightFfn {
+                weights: self.weights,
+            }
+            .forward_with_activation(layer, x);
             // Re-run walk for measurement; discard its activation (we return dense).
             let _ = self.forward(layer, x);
             (out, act)
@@ -215,7 +246,9 @@ mod ffn_coverage {
         println!(
             "WalkFfn: {} layers, K = {}",
             num_layers,
-            args.k.map(|k| k.to_string()).unwrap_or_else(|| "full".into())
+            args.k
+                .map(|k| k.to_string())
+                .unwrap_or_else(|| "full".into())
         );
 
         let all_prompts = diverse_100();
@@ -263,8 +296,12 @@ mod ffn_coverage {
             let mut layers = instrumented.measurements.into_inner();
             layers.sort_by_key(|m| m.layer);
 
-            let worst_cos = layers.iter().map(|m| m.cos_walk_vs_dense).fold(f32::INFINITY, f32::min);
-            let mean_cos = layers.iter().map(|m| m.cos_walk_vs_dense).sum::<f32>() / layers.len() as f32;
+            let worst_cos = layers
+                .iter()
+                .map(|m| m.cos_walk_vs_dense)
+                .fold(f32::INFINITY, f32::min);
+            let mean_cos =
+                layers.iter().map(|m| m.cos_walk_vs_dense).sum::<f32>() / layers.len() as f32;
             println!(
                 "[{:>3}/{}] {:<60}  top1={:<15} mean_cos={:.4} worst_cos={:.4}  {:>6.1}s",
                 i + 1,
@@ -294,7 +331,11 @@ mod ffn_coverage {
         }
         let json = serde_json::to_string_pretty(&results).expect("serialize");
         std::fs::write(out_path, json).expect("write output");
-        println!("\nWrote {} query results to {}", results.len(), out_path.display());
+        println!(
+            "\nWrote {} query results to {}",
+            results.len(),
+            out_path.display()
+        );
 
         print_coverage_summary(&results);
     }
@@ -313,7 +354,11 @@ mod ffn_coverage {
         let thresholds: [f32; 5] = [0.95, 0.99, 0.999, 0.9999, 1.0];
 
         println!("\n── Coverage summary ──");
-        println!("queries={}, layers/query={}", results.len(), results.first().map(|r| r.layers.len()).unwrap_or(0));
+        println!(
+            "queries={}, layers/query={}",
+            results.len(),
+            results.first().map(|r| r.layers.len()).unwrap_or(0)
+        );
 
         println!("\nFully-walked rate (all layers cos ≥ τ):");
         for &tau in &thresholds {
@@ -321,15 +366,22 @@ mod ffn_coverage {
                 .iter()
                 .filter(|r| r.layers.iter().all(|m| m.cos_walk_vs_dense >= tau))
                 .count();
-            println!("  τ={:<8} fully-walked: {}/{} ({:>5.1}%)",
-                     format_tau(tau), fully_walked, results.len(),
-                     100.0 * fully_walked as f32 / results.len() as f32);
+            println!(
+                "  τ={:<8} fully-walked: {}/{} ({:>5.1}%)",
+                format_tau(tau),
+                fully_walked,
+                results.len(),
+                100.0 * fully_walked as f32 / results.len() as f32
+            );
         }
 
         println!("\nPer-layer walk rate at τ=0.99:");
         let num_layers = results.first().map(|r| r.layers.len()).unwrap_or(0);
         for l in 0..num_layers {
-            let hits = results.iter().filter(|r| r.layers[l].cos_walk_vs_dense >= 0.99).count();
+            let hits = results
+                .iter()
+                .filter(|r| r.layers[l].cos_walk_vs_dense >= 0.99)
+                .count();
             let bar = "█".repeat(((hits as f32 / results.len() as f32) * 20.0) as usize);
             println!("  L{:<2} {:<20} {}/{}", l, bar, hits, results.len());
         }

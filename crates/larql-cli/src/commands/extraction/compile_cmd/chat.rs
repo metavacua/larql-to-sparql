@@ -47,9 +47,15 @@ pub fn render_user_prompt(
 
     let mut env = Environment::new();
     // `raise_exception` is a convention some HF templates use for error paths.
-    env.add_function("raise_exception", |msg: String| -> Result<Value, minijinja::Error> {
-        Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, msg))
-    });
+    env.add_function(
+        "raise_exception",
+        |msg: String| -> Result<Value, minijinja::Error> {
+            Err(minijinja::Error::new(
+                minijinja::ErrorKind::InvalidOperation,
+                msg,
+            ))
+        },
+    );
     env.add_template("chat", &template)?;
     let tmpl = env.get_template("chat")?;
 

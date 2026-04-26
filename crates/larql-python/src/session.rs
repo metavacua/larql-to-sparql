@@ -7,8 +7,8 @@
 
 use pyo3::prelude::*;
 
-use larql_lql::{parse, Session};
 use crate::vindex::PyVindex;
+use larql_lql::{parse, Session};
 
 // ── PySession ──
 
@@ -28,7 +28,8 @@ impl PySession {
         let use_stmt = format!("USE \"{}\";", path.replace('"', "\\\""));
         let stmt = parse(&use_stmt)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Parse error: {e}")))?;
-        session.execute(&stmt)
+        session
+            .execute(&stmt)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("USE failed: {e}")))?;
 
         // Also load a PyVindex for direct array access
@@ -69,7 +70,8 @@ impl PySession {
         let stmt = parse(&input)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Parse error: {e}")))?;
 
-        self.session.execute(&stmt)
+        self.session
+            .execute(&stmt)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Execution error: {e}")))
     }
 
@@ -82,7 +84,8 @@ impl PySession {
     /// Access the underlying Vindex for direct numpy operations.
     #[getter]
     fn vindex(&self, py: Python<'_>) -> PyResult<Py<PyVindex>> {
-        self.vindex_obj.as_ref()
+        self.vindex_obj
+            .as_ref()
             .map(|v| v.clone_ref(py))
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("No vindex loaded"))
     }

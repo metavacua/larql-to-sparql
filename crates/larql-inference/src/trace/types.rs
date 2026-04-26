@@ -1,8 +1,8 @@
 //! Core trace types.
 
-use serde::{Deserialize, Serialize};
 use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;
+use serde::{Deserialize, Serialize};
 
 /// A single waypoint in the residual stream.
 #[derive(Clone)]
@@ -54,7 +54,9 @@ pub struct ResidualTrace {
 
 impl ResidualTrace {
     pub fn node(&self, layer: i32, position: usize) -> Option<&TraceNode> {
-        self.nodes.iter().find(|n| n.layer == layer && n.position == position)
+        self.nodes
+            .iter()
+            .find(|n| n.layer == layer && n.position == position)
     }
 
     pub fn last_node(&self, layer: i32) -> Option<&TraceNode> {
@@ -67,7 +69,9 @@ impl ResidualTrace {
     }
 
     pub fn position_trajectory(&self, position: usize) -> Vec<&TraceNode> {
-        let mut traj: Vec<&TraceNode> = self.nodes.iter()
+        let mut traj: Vec<&TraceNode> = self
+            .nodes
+            .iter()
             .filter(|n| n.position == position)
             .collect();
         traj.sort_by_key(|n| n.layer);
@@ -79,8 +83,12 @@ impl ResidualTrace {
     }
 
     pub fn top_k(
-        &self, weights: &ModelWeights, tokenizer: &tokenizers::Tokenizer,
-        layer: i32, position: usize, k: usize,
+        &self,
+        weights: &ModelWeights,
+        tokenizer: &tokenizers::Tokenizer,
+        layer: i32,
+        position: usize,
+        k: usize,
     ) -> Vec<(String, f32)> {
         let node = match self.node(layer, position) {
             Some(n) => n,
@@ -91,7 +99,9 @@ impl ResidualTrace {
     }
 
     pub fn answer_trajectory(
-        &self, weights: &ModelWeights, answer_token_id: u32,
+        &self,
+        weights: &ModelWeights,
+        answer_token_id: u32,
     ) -> Vec<AnswerWaypoint> {
         let last_pos = self.tokens.len().saturating_sub(1);
         let mut traj = Vec::new();
@@ -108,13 +118,21 @@ impl ResidualTrace {
 
             let attn_logit = if node.attn_delta.iter().any(|&x| x != 0.0) {
                 super::vocab::project_to_logits(weights, &node.attn_delta)[answer_token_id as usize]
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let ffn_logit = if node.ffn_delta.iter().any(|&x| x != 0.0) {
                 super::vocab::project_to_logits(weights, &node.ffn_delta)[answer_token_id as usize]
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             traj.push(AnswerWaypoint {
-                layer, rank, prob, attn_logit, ffn_logit,
+                layer,
+                rank,
+                prob,
+                attn_logit,
+                ffn_logit,
                 residual_norm: super::vocab::vec_norm(&node.residual),
             });
         }
@@ -122,7 +140,9 @@ impl ResidualTrace {
     }
 
     pub fn layer_summaries(
-        &self, weights: &ModelWeights, tokenizer: &tokenizers::Tokenizer,
+        &self,
+        weights: &ModelWeights,
+        tokenizer: &tokenizers::Tokenizer,
     ) -> Vec<LayerSummary> {
         let last_pos = self.tokens.len().saturating_sub(1);
         let mut summaries = Vec::new();
@@ -133,13 +153,17 @@ impl ResidualTrace {
             };
             let logits = super::vocab::project_to_logits(weights, &node.residual);
             let top = super::vocab::top_k_from_logits(&logits, tokenizer, 1);
-            let (tok, prob) = top.first().map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+            let (tok, prob) = top
+                .first()
+                .map(|(t, p)| (t.clone(), *p))
+                .unwrap_or_default();
             summaries.push(LayerSummary {
                 layer,
                 residual_norm: super::vocab::vec_norm(&node.residual),
                 attn_delta_norm: super::vocab::vec_norm(&node.attn_delta),
                 ffn_delta_norm: super::vocab::vec_norm(&node.ffn_delta),
-                top1_token: tok, top1_prob: prob,
+                top1_token: tok,
+                top1_prob: prob,
             });
         }
         summaries

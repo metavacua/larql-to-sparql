@@ -67,7 +67,10 @@ fn main() {
 
     demo("USE (vindex)", r#"USE "gemma3-4b.vindex";"#);
     demo("USE MODEL", r#"USE MODEL "google/gemma-3-4b-it";"#);
-    demo("USE MODEL AUTO_EXTRACT", r#"USE MODEL "google/gemma-3-4b-it" AUTO_EXTRACT;"#);
+    demo(
+        "USE MODEL AUTO_EXTRACT",
+        r#"USE MODEL "google/gemma-3-4b-it" AUTO_EXTRACT;"#,
+    );
 
     // ── Query Statements ──
     section("Query");
@@ -95,11 +98,17 @@ fn main() {
     demo("DESCRIBE VERBOSE", r#"DESCRIBE "France" VERBOSE;"#);
     demo("DESCRIBE RAW", r#"DESCRIBE "France" RAW;"#);
     demo("DESCRIBE SYNTAX (L0-13)", r#"DESCRIBE "def" SYNTAX;"#);
-    demo("DESCRIBE KNOWLEDGE (L14-27)", r#"DESCRIBE "France" KNOWLEDGE;"#);
+    demo(
+        "DESCRIBE KNOWLEDGE (L14-27)",
+        r#"DESCRIBE "France" KNOWLEDGE;"#,
+    );
     demo("DESCRIBE OUTPUT (L28-33)", r#"DESCRIBE "France" OUTPUT;"#);
     demo("DESCRIBE ALL LAYERS", r#"DESCRIBE "France" ALL LAYERS;"#);
     demo("DESCRIBE AT LAYER", r#"DESCRIBE "Mozart" AT LAYER 26;"#);
-    demo("DESCRIBE RELATIONS ONLY", r#"DESCRIBE "France" RELATIONS ONLY;"#);
+    demo(
+        "DESCRIBE RELATIONS ONLY",
+        r#"DESCRIBE "France" RELATIONS ONLY;"#,
+    );
     demo(
         "DESCRIBE band + RELATIONS ONLY",
         r#"DESCRIBE "France" KNOWLEDGE RELATIONS ONLY;"#,
@@ -108,18 +117,30 @@ fn main() {
     // ── EXPLAIN ──
     section("Explain");
 
-    demo("EXPLAIN WALK", r#"EXPLAIN WALK "The capital of France is";"#);
+    demo(
+        "EXPLAIN WALK",
+        r#"EXPLAIN WALK "The capital of France is";"#,
+    );
     demo(
         "EXPLAIN WALK (with options)",
         r#"EXPLAIN WALK "prompt" LAYERS 24-33 TOP 3 VERBOSE;"#,
     );
-    demo("EXPLAIN INFER", r#"EXPLAIN INFER "The capital of France is" TOP 5;"#);
+    demo(
+        "EXPLAIN INFER",
+        r#"EXPLAIN INFER "The capital of France is" TOP 5;"#,
+    );
 
     // ── Inference Statements ──
     section("Inference");
 
-    demo("INFER (minimal)", r#"INFER "The capital of France is" TOP 5;"#);
-    demo("INFER (with compare)", r#"INFER "The capital of France is" TOP 5 COMPARE;"#);
+    demo(
+        "INFER (minimal)",
+        r#"INFER "The capital of France is" TOP 5;"#,
+    );
+    demo(
+        "INFER (with compare)",
+        r#"INFER "The capital of France is" TOP 5 COMPARE;"#,
+    );
 
     // ── Mutation Statements ──
     section("Mutation");
@@ -140,7 +161,10 @@ fn main() {
         "INSERT (all knobs: layer + confidence + alpha)",
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.3;"#,
     );
-    demo("DELETE", r#"DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";"#);
+    demo(
+        "DELETE",
+        r#"DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";"#,
+    );
     demo(
         "UPDATE",
         r#"UPDATE EDGES SET target = "London" WHERE entity = "John Coyle" AND relation = "lives-in";"#,
@@ -178,14 +202,20 @@ fn main() {
     demo("SHOW RELATIONS", "SHOW RELATIONS;");
     demo("SHOW RELATIONS VERBOSE", "SHOW RELATIONS VERBOSE;");
     demo("SHOW RELATIONS RAW", "SHOW RELATIONS RAW;");
-    demo("SHOW RELATIONS WITH EXAMPLES", "SHOW RELATIONS WITH EXAMPLES;");
+    demo(
+        "SHOW RELATIONS WITH EXAMPLES",
+        "SHOW RELATIONS WITH EXAMPLES;",
+    );
     demo("SHOW RELATIONS AT LAYER", "SHOW RELATIONS AT LAYER 26;");
     demo("SHOW LAYERS", "SHOW LAYERS;");
     demo("SHOW LAYERS (range)", "SHOW LAYERS RANGE 0-10;");
     demo("SHOW LAYERS (bare range)", "SHOW LAYERS 0-10;");
     demo("SHOW FEATURES", "SHOW FEATURES 26;");
     demo("SHOW ENTITIES", "SHOW ENTITIES;");
-    demo("SHOW ENTITIES AT LAYER", "SHOW ENTITIES AT LAYER 26 LIMIT 20;");
+    demo(
+        "SHOW ENTITIES AT LAYER",
+        "SHOW ENTITIES AT LAYER 26 LIMIT 20;",
+    );
     demo("SHOW ENTITIES bare layer", "SHOW ENTITIES 26;");
     demo("SHOW MODELS", "SHOW MODELS;");
     demo("STATS", "STATS;");

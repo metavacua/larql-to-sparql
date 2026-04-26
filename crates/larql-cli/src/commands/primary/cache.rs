@@ -318,10 +318,7 @@ pub fn resolve_cached_from(
                 .map(|c| format!("  - {} [{}]", c.repo, c.source.label()))
                 .collect::<Vec<_>>()
                 .join("\n");
-            Err(format!(
-                "shorthand `{key}` is ambiguous — matches:\n{candidates}"
-            )
-            .into())
+            Err(format!("shorthand `{key}` is ambiguous — matches:\n{candidates}").into())
         }
     }
 }
@@ -399,7 +396,10 @@ mod tests {
         std::fs::create_dir_all(&bare).unwrap();
         std::fs::write(bare.join("not-a-vindex.txt"), b"hi").unwrap();
         let out = scan_hf_hub_at(tmp.path()).unwrap();
-        assert!(out.is_empty(), "snapshot without index.json should be skipped");
+        assert!(
+            out.is_empty(),
+            "snapshot without index.json should be skipped"
+        );
     }
 
     #[test]

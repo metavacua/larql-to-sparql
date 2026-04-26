@@ -18,11 +18,19 @@ fn main() {
     let ref_dbs = load_reference_databases();
     let mut dbs: Vec<&RelationDatabase> = Vec::new();
     if let Some(ref wk) = ref_dbs.wikidata {
-        println!("  Wikidata: {} relations, {} pairs", wk.num_relations(), wk.num_pairs());
+        println!(
+            "  Wikidata: {} relations, {} pairs",
+            wk.num_relations(),
+            wk.num_pairs()
+        );
         dbs.push(wk);
     }
     if let Some(ref wn) = ref_dbs.wordnet {
-        println!("  WordNet: {} relations, {} pairs", wn.num_relations(), wn.num_pairs());
+        println!(
+            "  WordNet: {} relations, {} pairs",
+            wn.num_relations(),
+            wn.num_pairs()
+        );
         dbs.push(wn);
     }
     if dbs.is_empty() {
@@ -47,8 +55,8 @@ fn main() {
         ("happy", "glad"),
         ("dog", "animal"),
         ("read", "reading"),
-        ("France", "Berlin"),  // wrong
-        ("xyz", "abc"),        // not in any DB
+        ("France", "Berlin"), // wrong
+        ("xyz", "abc"),       // not in any DB
     ];
 
     for (subject, object) in &test_pairs {
@@ -71,32 +79,46 @@ fn main() {
     // Cluster 1: language-like (country → language)
     // Cluster 2: random/unknown
     let assignments = vec![
-        0, 0, 0, 0, 0,    // cluster 0
-        1, 1, 1, 1, 1,    // cluster 1
-        2, 2, 2, 2, 2,    // cluster 2
+        0, 0, 0, 0, 0, // cluster 0
+        1, 1, 1, 1, 1, // cluster 1
+        2, 2, 2, 2, 2, // cluster 2
     ];
 
     let inputs: Vec<String> = vec![
         // Cluster 0: countries
-        "France", "Germany", "Japan", "Kenya", "Brazil",
-        // Cluster 1: countries
-        "France", "Germany", "Japan", "Kenya", "Brazil",
-        // Cluster 2: random
+        "France", "Germany", "Japan", "Kenya", "Brazil", // Cluster 1: countries
+        "France", "Germany", "Japan", "Kenya", "Brazil", // Cluster 2: random
         "table", "running", "blue", "quickly", "seven",
-    ].into_iter().map(Into::into).collect();
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
 
     let outputs: Vec<String> = vec![
         // Cluster 0: capitals
-        "Paris", "Berlin", "Tokyo", "Nairobi", "Brasília",
+        "Paris",
+        "Berlin",
+        "Tokyo",
+        "Nairobi",
+        "Brasília",
         // Cluster 1: languages
-        "French", "German", "Japanese", "Swahili", "Portuguese",
+        "French",
+        "German",
+        "Japanese",
+        "Swahili",
+        "Portuguese",
         // Cluster 2: random
-        "chair", "jogging", "red", "slowly", "eight",
-    ].into_iter().map(Into::into).collect();
+        "chair",
+        "jogging",
+        "red",
+        "slowly",
+        "eight",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
 
-    let labels = label_clusters_from_pairs(
-        &assignments, &inputs, &outputs, 3, &dbs,
-    );
+    let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 3, &dbs);
 
     println!("  Results:");
     for (i, label) in labels.iter().enumerate() {
@@ -107,7 +129,12 @@ fn main() {
                 format!("{}→{}", inputs[idx], outputs[idx])
             })
             .collect();
-        println!("    Cluster {}: {:<25} [{}]", i, label_str, sample_pairs.join(", "));
+        println!(
+            "    Cluster {}: {:<25} [{}]",
+            i,
+            label_str,
+            sample_pairs.join(", ")
+        );
     }
 
     // ── Show what the Wikidata DB contains ──
@@ -144,39 +171,54 @@ fn run_with_builtin() {
     section("Built-in Test Data");
 
     let mut db = RelationDatabase::default();
-    db.add_relation("capital", vec![
-        ("france".into(), "paris".into()),
-        ("germany".into(), "berlin".into()),
-        ("japan".into(), "tokyo".into()),
-        ("italy".into(), "rome".into()),
-        ("spain".into(), "madrid".into()),
-        ("kenya".into(), "nairobi".into()),
-    ]);
-    db.add_relation("official language", vec![
-        ("france".into(), "french".into()),
-        ("germany".into(), "german".into()),
-        ("japan".into(), "japanese".into()),
-        ("spain".into(), "spanish".into()),
-        ("kenya".into(), "swahili".into()),
-    ]);
-    db.add_relation("continent", vec![
-        ("france".into(), "europe".into()),
-        ("japan".into(), "asia".into()),
-        ("kenya".into(), "africa".into()),
-        ("brazil".into(), "south america".into()),
-    ]);
-    db.add_relation("synonym", vec![
-        ("big".into(), "large".into()),
-        ("fast".into(), "quick".into()),
-        ("happy".into(), "glad".into()),
-        ("small".into(), "tiny".into()),
-    ]);
+    db.add_relation(
+        "capital",
+        vec![
+            ("france".into(), "paris".into()),
+            ("germany".into(), "berlin".into()),
+            ("japan".into(), "tokyo".into()),
+            ("italy".into(), "rome".into()),
+            ("spain".into(), "madrid".into()),
+            ("kenya".into(), "nairobi".into()),
+        ],
+    );
+    db.add_relation(
+        "official language",
+        vec![
+            ("france".into(), "french".into()),
+            ("germany".into(), "german".into()),
+            ("japan".into(), "japanese".into()),
+            ("spain".into(), "spanish".into()),
+            ("kenya".into(), "swahili".into()),
+        ],
+    );
+    db.add_relation(
+        "continent",
+        vec![
+            ("france".into(), "europe".into()),
+            ("japan".into(), "asia".into()),
+            ("kenya".into(), "africa".into()),
+            ("brazil".into(), "south america".into()),
+        ],
+    );
+    db.add_relation(
+        "synonym",
+        vec![
+            ("big".into(), "large".into()),
+            ("fast".into(), "quick".into()),
+            ("happy".into(), "glad".into()),
+            ("small".into(), "tiny".into()),
+        ],
+    );
 
     // Test lookups
     println!("  Lookups:");
     let tests = vec![
-        ("France", "Paris"), ("France", "French"), ("Kenya", "Africa"),
-        ("big", "large"), ("France", "Berlin"),
+        ("France", "Paris"),
+        ("France", "French"),
+        ("Kenya", "Africa"),
+        ("big", "large"),
+        ("France", "Berlin"),
     ];
     for (s, o) in tests {
         let rels = db.lookup(s, o);
@@ -190,19 +232,21 @@ fn run_with_builtin() {
     // Test cluster labeling
     let assignments = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2];
     let inputs: Vec<String> = vec![
-        "France", "Germany", "Japan", "Italy", "Spain",
-        "France", "Germany", "Japan", "Spain", "Kenya",
-        "big", "fast", "happy", "small",
-    ].into_iter().map(Into::into).collect();
+        "France", "Germany", "Japan", "Italy", "Spain", "France", "Germany", "Japan", "Spain",
+        "Kenya", "big", "fast", "happy", "small",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
     let outputs: Vec<String> = vec![
-        "Paris", "Berlin", "Tokyo", "Rome", "Madrid",
-        "French", "German", "Japanese", "Spanish", "Swahili",
-        "large", "quick", "glad", "tiny",
-    ].into_iter().map(Into::into).collect();
+        "Paris", "Berlin", "Tokyo", "Rome", "Madrid", "French", "German", "Japanese", "Spanish",
+        "Swahili", "large", "quick", "glad", "tiny",
+    ]
+    .into_iter()
+    .map(Into::into)
+    .collect();
 
-    let labels = label_clusters_from_pairs(
-        &assignments, &inputs, &outputs, 3, &[&db],
-    );
+    let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 3, &[&db]);
 
     println!("\n  Cluster labels:");
     let cluster_names = ["capitals", "languages", "synonyms"];
@@ -210,7 +254,10 @@ fn run_with_builtin() {
         let label_str = label.as_deref().unwrap_or("(unlabeled)");
         let expected = cluster_names.get(i).unwrap_or(&"?");
         let status = if label.is_some() { "OK" } else { "MISS" };
-        println!("    Cluster {} ({}): {:<25} {}", i, expected, label_str, status);
+        println!(
+            "    Cluster {} ({}): {:<25} {}",
+            i, expected, label_str, status
+        );
     }
 
     println!("\n=== Done ===");
