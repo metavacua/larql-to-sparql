@@ -128,9 +128,7 @@ impl<'tok> OpNameMask<'tok> {
             let mut ids: Vec<u32> = Vec::new();
             for id in 0..vocab_size as u32 {
                 if let Ok(s) = self.tokenizer.decode(&[id], false) {
-                    if s == "\"" {
-                        ids.push(id);
-                    } else if !s.is_empty() && s.chars().all(|c| valid_chars.contains(&c)) {
+                    if s == "\"" || (!s.is_empty() && s.chars().all(|c| valid_chars.contains(&c))) {
                         ids.push(id);
                     }
                 }
@@ -142,7 +140,7 @@ impl<'tok> OpNameMask<'tok> {
 
     /// Apply the mask to `logits` given the tokens generated so far.
     /// Plug into the `mask_fn` slot of `generate_cached_constrained`.
-    pub fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>) {
+    pub fn apply(&mut self, generated_ids: &[u32], logits: &mut [f32]) {
         let decoded = self
             .tokenizer
             .decode(generated_ids, true)
@@ -275,7 +273,7 @@ mod tests {
         // Verify the constructor unwraps OpSpec to just names — args are
         // intentionally ignored at the token level (handled by the system
         // prompt + parser tolerance).
-        let specs = vec![
+        let specs = [
             OpSpec {
                 name: "gcd".into(),
                 args: vec!["a".into(), "b".into()],
