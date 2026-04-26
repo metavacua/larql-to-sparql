@@ -186,6 +186,15 @@ fn run_chat(
     vindex_path: &std::path::Path,
     args: &RunArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if !atty::is(atty::Stream::Stdin) {
+        return Err(
+            "error: interactive chat mode requires a TTY\n\
+             hint: provide a prompt as an argument (e.g. `larql run model 'hello'`)\n\
+             hint: or pipe input with a newline separator and use a subshell\n\
+             hint: refusing to enter chat mode in automated/piped contexts (bootstrap safety)"
+                .into(),
+        );
+    }
     eprintln!(
         "larql chat — {} (Ctrl-D to exit)",
         vindex_path

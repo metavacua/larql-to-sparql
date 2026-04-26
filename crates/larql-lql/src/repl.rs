@@ -27,6 +27,13 @@ fn dirs_or_home() -> Option<std::path::PathBuf> {
 
 /// Run the interactive REPL.
 pub fn run_repl() {
+    if !atty::is(atty::Stream::Stdin) {
+        eprintln!("error: interactive REPL requires a TTY");
+        eprintln!("hint: use `larql lql '<statement>'` for non-interactive queries");
+        eprintln!("hint: refusing to enter REPL in automated/piped contexts (bootstrap safety)");
+        return;
+    }
+
     println!("{BANNER}");
 
     let mut session = Session::new();
