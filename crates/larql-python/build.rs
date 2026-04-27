@@ -1,4 +1,4 @@
-use larql_platform::{Platform, OperatingSystem};
+use larql_platform::{OperatingSystem, Platform};
 
 fn main() {
     let platform = Platform::detect();
