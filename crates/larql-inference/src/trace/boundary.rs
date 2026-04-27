@@ -19,7 +19,7 @@
 //! Mmap'd for zero-copy reads. RSS ≈ one boundary at a time.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use memmap2::Mmap;
@@ -36,9 +36,9 @@ struct BoundaryHeader {
     magic: [u8; 4],
     version: u32,
     hidden_size: u32,
-    window_size: u32,       // tokens per window
-    n_boundaries: u32,      // number of stored boundaries
-    total_tokens: u32,      // total tokens processed
+    window_size: u32,  // tokens per window
+    n_boundaries: u32, // number of stored boundaries
+    total_tokens: u32, // total tokens processed
     _reserved: [u8; 40],
 }
 
@@ -130,16 +130,28 @@ impl BoundaryStore {
         Ok(Self { mmap, header })
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
-    pub fn hidden_size(&self) -> usize { self.header.hidden_size as usize }
-    pub fn window_size(&self) -> usize { self.header.window_size as usize }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
+    pub fn hidden_size(&self) -> usize {
+        self.header.hidden_size as usize
+    }
+    pub fn window_size(&self) -> usize {
+        self.header.window_size as usize
+    }
 
     /// Get the index entry for boundary i.
     fn entry(&self, i: usize) -> Option<BoundaryEntry> {
-        if i >= self.header.n_boundaries as usize { return None; }
+        if i >= self.header.n_boundaries as usize {
+            return None;
+        }
         let offset = self.header.index_offset() + i * ENTRY_SIZE;
-        if offset + ENTRY_SIZE > self.mmap.len() { return None; }
+        if offset + ENTRY_SIZE > self.mmap.len() {
+            return None;
+        }
         let mut bytes = [0u8; ENTRY_SIZE];
         bytes.copy_from_slice(&self.mmap[offset..offset + ENTRY_SIZE]);
         Some(BoundaryEntry::from_bytes(&bytes))
@@ -151,7 +163,9 @@ impl BoundaryStore {
         let hidden = self.header.hidden_size as usize;
         let start = entry.data_offset as usize;
         let end = start + hidden * 4;
-        if end > self.mmap.len() { return None; }
+        if end > self.mmap.len() {
+            return None;
+        }
         let slice = &self.mmap[start..end];
         Some(unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) })
     }
@@ -172,7 +186,10 @@ impl BoundaryStore {
     /// Get the token range for boundary i.
     pub fn token_range(&self, i: usize) -> Option<(usize, usize)> {
         let entry = self.entry(i)?;
-        Some((entry.token_offset as usize, entry.token_offset as usize + entry.window_tokens as usize))
+        Some((
+            entry.token_offset as usize,
+            entry.token_offset as usize + entry.window_tokens as usize,
+        ))
     }
 
     /// File size in bytes.
@@ -217,7 +234,10 @@ impl BoundaryWriter {
         };
 
         let mut file = OpenOptions::new()
-            .read(true).write(true).create(true).truncate(true)
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
             .open(path)?;
 
         // Write header
@@ -228,7 +248,12 @@ impl BoundaryWriter {
         file.write_all(&index_bytes)?;
         file.flush()?;
 
-        Ok(Self { file, header, path: path.to_path_buf(), max_boundaries })
+        Ok(Self {
+            file,
+            header,
+            path: path.to_path_buf(),
+            max_boundaries,
+        })
     }
 
     /// Append a boundary residual.
@@ -260,9 +285,8 @@ impl BoundaryWriter {
         // Write residual data at end of file
         self.file.seek(SeekFrom::End(0))?;
         let data_pos = self.file.stream_position()? as u32;
-        let r_bytes = unsafe {
-            std::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4)
-        };
+        let r_bytes =
+            unsafe { std::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4) };
         self.file.write_all(r_bytes)?;
 
         // Write index entry
@@ -286,8 +310,12 @@ impl BoundaryWriter {
         Ok(())
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
 
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;

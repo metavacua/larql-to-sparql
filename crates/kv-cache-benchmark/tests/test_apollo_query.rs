@@ -32,8 +32,8 @@ fn store_path() -> std::path::PathBuf {
 }
 
 fn load_model() -> larql_inference::InferenceModel {
-    let model_path = std::env::var("LARQL_MODEL_PATH")
-        .unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
+    let model_path =
+        std::env::var("LARQL_MODEL_PATH").unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
     larql_inference::InferenceModel::load(&model_path).expect("load gemma")
 }
 
@@ -49,11 +49,7 @@ fn test_routing_resolves_porridge_to_w170_region() {
     let model = load_model();
     let tok = model.tokenizer();
 
-    for query in [
-        "porridge eating contest",
-        "Corby England",
-        "John Coyle",
-    ] {
+    for query in ["porridge eating contest", "Corby England", "John Coyle"] {
         let enc = tok.encode(query, false).expect("tokenize");
         let qids: Vec<u32> = enc.get_ids().to_vec();
         let q = kv_cache_benchmark::apollo::RoutingQuery { token_ids: qids };
@@ -85,9 +81,7 @@ fn test_retrieve_entries_for_query() {
     assert!(!windows.is_empty());
 
     // Retrieve entries scoped to routed windows
-    let entries = engine
-        .retrieve_entries(&qids, &windows)
-        .expect("retrieve");
+    let entries = engine.retrieve_entries(&qids, &windows).expect("retrieve");
     println!("  retrieved {} entries", entries.len());
     for e in entries.iter().take(10) {
         let txt = tok.decode(&[e.token_id], false).unwrap_or_default();
@@ -135,7 +129,9 @@ fn test_end_to_end_query_produces_nonempty_answer() {
         );
     }
     println!("  context tokens: {}", trace.context_tokens);
-    let top1_txt = tok.decode(&[trace.top1_token_id], false).unwrap_or_default();
+    let top1_txt = tok
+        .decode(&[trace.top1_token_id], false)
+        .unwrap_or_default();
     println!(
         "  top-1 prediction: token {} ({top1_txt:?}) logit={:.3}",
         trace.top1_token_id, trace.top1_logit,
@@ -189,7 +185,9 @@ fn test_end_to_end_query_compressed_path() {
             e.token_id, e.coefficient, e.window_id,
         );
     }
-    let top1_txt = tok.decode(&[trace.top1_token_id], false).unwrap_or_default();
+    let top1_txt = tok
+        .decode(&[trace.top1_token_id], false)
+        .unwrap_or_default();
     println!(
         "  top-1 prediction: token {} ({top1_txt:?}) logit={:.3}",
         trace.top1_token_id, trace.top1_logit,
@@ -231,18 +229,12 @@ fn test_apollo_generate_compressed() {
 
     println!("\n=== Apollo iterative decode (COMPRESSED path) ===");
     println!("  query:  {query:?}");
-    println!(
-        "  routed windows: {:?}",
-        trace.routed_windows
-    );
+    println!("  routed windows: {:?}", trace.routed_windows);
     println!(
         "  initial context: {} tokens (boundary + query)",
         trace.initial_context_tokens,
     );
-    println!(
-        "  injected entries ({}):",
-        trace.injected_entries.len()
-    );
+    println!("  injected entries ({}):", trace.injected_entries.len());
     for e in &trace.injected_entries {
         let txt = tok.decode(&[e.token_id], false).unwrap_or_default();
         println!(
@@ -250,7 +242,11 @@ fn test_apollo_generate_compressed() {
             e.token_id, e.coefficient,
         );
     }
-    println!("  generated ({} tokens, stopped_on_eos={}):", trace.generated_token_ids.len(), trace.stopped_on_eos);
+    println!(
+        "  generated ({} tokens, stopped_on_eos={}):",
+        trace.generated_token_ids.len(),
+        trace.stopped_on_eos
+    );
     println!("    {generated_text:?}");
     print!("  per-step logits:");
     for v in &trace.per_step_logits {

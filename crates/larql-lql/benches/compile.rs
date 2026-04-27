@@ -16,10 +16,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use larql_lql::{parse, Session};
 use larql_models::TopKEntry;
-use larql_vindex::{
-    ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig,
-};
 use larql_vindex::ndarray::Array2;
+use larql_vindex::{ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig};
 use std::path::PathBuf;
 
 /// Build a synthetic vindex with the SHAPE of a real model (so the byte
@@ -96,7 +94,8 @@ fn make_compile_bench_vindex(tag: &str, with_down_weights: bool) -> PathBuf {
     // Embeddings, tokenizer.
     let embed_bytes = vec![0u8; vocab_size * hidden * 4];
     std::fs::write(dir.join("embeddings.bin"), embed_bytes).unwrap();
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
 
     if with_down_weights {
@@ -131,8 +130,11 @@ fn bench_compile_no_patches(c: &mut Criterion) {
             let mut session = Session::new();
             let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
             session.execute(&use_stmt).unwrap();
-            let stmt = parse(&format!(r#"COMPILE CURRENT INTO VINDEX "{}";"#, dst.display()))
-                .unwrap();
+            let stmt = parse(&format!(
+                r#"COMPILE CURRENT INTO VINDEX "{}";"#,
+                dst.display()
+            ))
+            .unwrap();
             session.execute(&stmt).unwrap();
         });
         let _ = std::fs::remove_dir_all(&dst);
@@ -166,8 +168,11 @@ fn bench_compile_with_weights(c: &mut Criterion) {
             let mut session = Session::new();
             let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
             session.execute(&use_stmt).unwrap();
-            let stmt = parse(&format!(r#"COMPILE CURRENT INTO VINDEX "{}";"#, dst.display()))
-                .unwrap();
+            let stmt = parse(&format!(
+                r#"COMPILE CURRENT INTO VINDEX "{}";"#,
+                dst.display()
+            ))
+            .unwrap();
             session.execute(&stmt).unwrap();
         });
         let _ = std::fs::remove_dir_all(&dst);

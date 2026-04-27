@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use kv_cache_benchmark::*;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use kv_cache_benchmark::markov_residual::MarkovResidual;
 use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::standard_kv::StandardKv;
 use kv_cache_benchmark::turboquant::TurboQuant;
-use kv_cache_benchmark::markov_residual::MarkovResidual;
+use kv_cache_benchmark::*;
 use rand::prelude::*;
 
 fn bench_encode(c: &mut Criterion) {
@@ -47,7 +47,9 @@ fn bench_wht(c: &mut Criterion) {
     let mut group = c.benchmark_group("wht");
 
     for dim in [128, 256] {
-        let x: Vec<f32> = (0..dim).map(|i| (i as f32 - dim as f32 / 2.0) / 100.0).collect();
+        let x: Vec<f32> = (0..dim)
+            .map(|i| (i as f32 - dim as f32 / 2.0) / 100.0)
+            .collect();
         group.bench_with_input(BenchmarkId::new("wht", dim), &x, |b, x| {
             b.iter(|| kv_cache_benchmark::turboquant::rotation::wht(x))
         });

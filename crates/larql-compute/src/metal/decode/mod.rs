@@ -5,14 +5,24 @@ mod moe_combine;
 
 impl MetalBackend {
     /// Create a KV cache for decode mode with uniform per-layer dims.
-    pub fn create_kv_cache(&self, num_layers: usize, max_seq: usize, num_kv_heads: usize, head_dim: usize) -> ops::kv_cache::KVCache {
+    pub fn create_kv_cache(
+        &self,
+        num_layers: usize,
+        max_seq: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+    ) -> ops::kv_cache::KVCache {
         ops::kv_cache::KVCache::new(&self.bufs, num_layers, max_seq, num_kv_heads, head_dim)
     }
 
     /// Create a KV cache with per-layer shapes for models with asymmetric
     /// attention geometry (Gemma 4 31B sliding=16×256 / global=4×512).
     /// `shapes[i] = (num_kv_heads_i, head_dim_i)` for layer i.
-    pub fn create_kv_cache_per_layer(&self, shapes: &[(usize, usize)], max_seq: usize) -> ops::kv_cache::KVCache {
+    pub fn create_kv_cache_per_layer(
+        &self,
+        shapes: &[(usize, usize)],
+        max_seq: usize,
+    ) -> ops::kv_cache::KVCache {
         ops::kv_cache::KVCache::new_per_layer(&self.bufs, shapes, max_seq)
     }
 
@@ -98,22 +108,61 @@ impl MetalBackend {
             .unwrap_or(kv_dim);
 
         // Pre-cache weight buffers
-        let wq_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wq.data)).collect();
-        let wk_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wk.data)).collect();
-        let wv_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wv.data)).collect();
-        let wo_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.wo.data)).collect();
+        let wq_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.wq.data))
+            .collect();
+        let wk_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.wk.data))
+            .collect();
+        let wv_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.wv.data))
+            .collect();
+        let wo_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.wo.data))
+            .collect();
         // Stable across decode calls → cache by slice identity. Skips ~136
         // per-token Metal-buffer allocations for scales/norms on 34-layer
         // Gemma 3. `get_f32` hits the cache from the second decode onward.
-        let wq_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wq.scales.unwrap_or(&[]))).collect();
-        let wk_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wk.scales.unwrap_or(&[]))).collect();
-        let wv_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wv.scales.unwrap_or(&[]))).collect();
-        let wo_scale_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.wo.scales.unwrap_or(&[]))).collect();
-        let gate_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.gate.data)).collect();
-        let up_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.up.data)).collect();
-        let down_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_bytes(l.down.data)).collect();
-        let input_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.input_norm)).collect();
-        let post_attn_norm_bufs: Vec<_> = layers.iter().map(|l| self.bufs.get_f32(l.post_attn_norm)).collect();
+        let wq_scale_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.wq.scales.unwrap_or(&[])))
+            .collect();
+        let wk_scale_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.wk.scales.unwrap_or(&[])))
+            .collect();
+        let wv_scale_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.wv.scales.unwrap_or(&[])))
+            .collect();
+        let wo_scale_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.wo.scales.unwrap_or(&[])))
+            .collect();
+        let gate_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.gate.data))
+            .collect();
+        let up_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.up.data))
+            .collect();
+        let down_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_bytes(l.down.data))
+            .collect();
+        let input_norm_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.input_norm))
+            .collect();
+        let post_attn_norm_bufs: Vec<_> = layers
+            .iter()
+            .map(|l| self.bufs.get_f32(l.post_attn_norm))
+            .collect();
 
         // Two h buffers for ping-pong: even layers write to h_a, odd to h_b.
         let h_init = self.bufs.transient_from_f32(x);
@@ -142,7 +191,9 @@ impl MetalBackend {
         let act_buf = self.bufs.output((inter_padded * 4) as u64);
         {
             let ptr = act_buf.contents() as *mut f32;
-            unsafe { std::ptr::write_bytes(ptr, 0, inter_padded); }
+            unsafe {
+                std::ptr::write_bytes(ptr, 0, inter_padded);
+            }
         }
         let down_out = self.bufs.output((hidden * 4) as u64);
         let gate_out_scratch = self.bufs.output((inter * 4) as u64);
@@ -162,7 +213,8 @@ impl MetalBackend {
         // then dump intermediates and exit. Pinpoints which sub-stage in
         // which layer first produces NaN on real-vindex decode.
         let diag_stop_layer: Option<usize> = std::env::var("LARQL_DECODE_DIAG_LAYER")
-            .ok().and_then(|v| v.parse::<usize>().ok());
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok());
 
         for l in 0..num_layers {
             let layer = &layers[l];
@@ -177,7 +229,11 @@ impl MetalBackend {
             } else {
                 None
             };
-            let dump_l0_dir = if l == 0 { std::env::var("LARQL_DUMP_L0").ok() } else { None };
+            let dump_l0_dir = if l == 0 {
+                std::env::var("LARQL_DUMP_L0").ok()
+            } else {
+                None
+            };
 
             let norm_offset = layer.norm_offset;
             let eps = layer.eps;
@@ -186,7 +242,11 @@ impl MetalBackend {
             let layer_num_q_heads = layer.num_q_heads;
             let layer_num_kv_heads = layer.num_kv_heads;
             let layer_rope_base = layer.rope_base;
-            let layer_rotary_dim = if layer.rotary_dim > 0 { layer.rotary_dim } else { layer_head_dim };
+            let layer_rotary_dim = if layer.rotary_dim > 0 {
+                layer.rotary_dim
+            } else {
+                layer_head_dim
+            };
             let uses_q4k = layer.wq.format == crate::QuantFormat::Q4_K
                 || layer.wq.format == crate::QuantFormat::Q6_K
                 || layer.wq.format == crate::QuantFormat::Q4_KF;
@@ -225,9 +285,16 @@ impl MetalBackend {
                         MTLSize::new(256.min(hidden as u64), 1, 1),
                     );
                 } else {
-                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
-                        h_buf, &input_norm_bufs[l], &norm_f32_buf,
-                        hidden, eps, norm_offset);
+                    encode_rms_norm(
+                        &enc,
+                        &self.rms_norm_pipeline,
+                        h_buf,
+                        &input_norm_bufs[l],
+                        &norm_f32_buf,
+                        hidden,
+                        eps,
+                        norm_offset,
+                    );
                 }
 
                 // Dispatch 2+: QKV projections. Three paths in priority order:
@@ -252,11 +319,22 @@ impl MetalBackend {
                         &self.q4k_qkv_proj_pipeline
                     };
                     crate::metal::stages::qkv_proj::encode_fused_f32(
-                        &enc, fused_pipe,
-                        &wq_bufs[l], &wk_bufs[l], &wv_bufs[l],
-                        &norm_f32_buf, 0,
-                        &q_out, 0, &k_out, 0, &v_out, 0,
-                        layer_q_dim, layer_kv_dim, hidden,
+                        &enc,
+                        fused_pipe,
+                        &wq_bufs[l],
+                        &wk_bufs[l],
+                        &wv_bufs[l],
+                        &norm_f32_buf,
+                        0,
+                        &q_out,
+                        0,
+                        &k_out,
+                        0,
+                        &v_out,
+                        0,
+                        layer_q_dim,
+                        layer_kv_dim,
+                        hidden,
                     );
                 } else if mixed_q4k_q6k_v {
                     // Fused Q4K Q/K + Q6K V — one dispatch for all three.
@@ -295,15 +373,38 @@ impl MetalBackend {
                         q4_matvec: &self.q4.matvec,
                     };
                     qkv_proj::encode_per_proj(
-                        &enc, &pipes,
-                        &norm_f32_buf, 0,
+                        &enc,
+                        &pipes,
+                        &norm_f32_buf,
+                        0,
                         // Q8 bufs unused for f32-input formats — pass the
                         // norm buffer as a harmless placeholder.
-                        &norm_f32_buf, 0, &norm_f32_buf, 0,
+                        &norm_f32_buf,
+                        0,
+                        &norm_f32_buf,
+                        0,
                         [
-                            Proj { format: layer.wq.format, w_buf: &wq_bufs[l], out_buf: &q_out, out_off: 0, rows: layer_q_dim },
-                            Proj { format: layer.wk.format, w_buf: &wk_bufs[l], out_buf: &k_out, out_off: 0, rows: layer_kv_dim },
-                            Proj { format: layer.wv.format, w_buf: &wv_bufs[l], out_buf: &v_out, out_off: 0, rows: layer_kv_dim },
+                            Proj {
+                                format: layer.wq.format,
+                                w_buf: &wq_bufs[l],
+                                out_buf: &q_out,
+                                out_off: 0,
+                                rows: layer_q_dim,
+                            },
+                            Proj {
+                                format: layer.wk.format,
+                                w_buf: &wk_bufs[l],
+                                out_buf: &k_out,
+                                out_off: 0,
+                                rows: layer_kv_dim,
+                            },
+                            Proj {
+                                format: layer.wv.format,
+                                w_buf: &wv_bufs[l],
+                                out_buf: &v_out,
+                                out_off: 0,
+                                rows: layer_kv_dim,
+                            },
                         ],
                         hidden,
                     );
@@ -321,7 +422,10 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(
+                    MTLSize::new(1, 1, 1),
+                    MTLSize::new(256.min(hidden as u64), 1, 1),
+                );
 
                 let total_rows = (layer_q_dim + layer_kv_dim + layer_kv_dim) as u32;
                 let q_rows = layer_q_dim as u32;
@@ -371,7 +475,9 @@ impl MetalBackend {
                 // One threadgroup per head; threads per tg = min(head_dim, 512)
                 // rounded up to a power of two for the tree reduction.
                 let mut tg_w: usize = 1;
-                while tg_w < layer_head_dim && tg_w < 512 { tg_w <<= 1; }
+                while tg_w < layer_head_dim && tg_w < 512 {
+                    tg_w <<= 1;
+                }
 
                 // Q heads
                 let q_w_buf = self.bufs.get_f32(q_w);
@@ -415,7 +521,11 @@ impl MetalBackend {
                 enc.set_compute_pipeline_state(&self.rope_at_pos_batched_pipeline);
                 enc.set_buffer(0, Some(&q_out), 0);
                 enc.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-                enc.set_bytes(2, 4, &layer_rope_base as *const f32 as *const std::ffi::c_void);
+                enc.set_bytes(
+                    2,
+                    4,
+                    &layer_rope_base as *const f32 as *const std::ffi::c_void,
+                );
                 enc.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(4, 4, &rdim as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &num_q as *const u32 as *const std::ffi::c_void);
@@ -454,16 +564,23 @@ impl MetalBackend {
 
             let attn_out = &attn_out_buf;
             ops::kv_cache::encode_kv_append(
-                &enc, &kv_cache.layers[l],
-                &self.kv_append_pipeline, &k_out, &v_out,
+                &enc,
+                &kv_cache.layers[l],
+                &self.kv_append_pipeline,
+                &k_out,
+                &v_out,
             );
             ops::kv_cache::encode_kv_attend(
-                &enc, &kv_cache.layers[l],
-                &self.kv_attend_pipeline, &q_out, attn_out,
-                layer_num_q_heads, scale, window_size,
+                &enc,
+                &kv_cache.layers[l],
+                &self.kv_attend_pipeline,
+                &q_out,
+                attn_out,
+                layer_num_q_heads,
+                scale,
+                window_size,
             );
             kv_cache.layers[l].current_len += 1;
-
 
             // Scratch buffers pre-allocated above — reused each layer.
             let new_h = if l % 2 == 0 { &h_a } else { &h_b };
@@ -477,13 +594,21 @@ impl MetalBackend {
                     q4_matvec: &self.q4.matvec,
                 };
                 crate::metal::stages::o_proj::encode(
-                    &enc, &pipes, &self.q8_quant_pipeline,
+                    &enc,
+                    &pipes,
+                    &self.q8_quant_pipeline,
                     layer.wo.format,
                     &wo_bufs[l],
-                    attn_out, 0,
-                    &o_q8_scratch, 0, &o_q8s_scratch, 0,
-                    &o_out_buf, 0,
-                    layer_q_dim, hidden,
+                    attn_out,
+                    0,
+                    &o_q8_scratch,
+                    0,
+                    &o_q8s_scratch,
+                    0,
+                    &o_out_buf,
+                    0,
+                    layer_q_dim,
+                    hidden,
                 );
             } else {
                 // Q8 legacy path: decode-specific `q8_matvec` shader (not in
@@ -498,7 +623,10 @@ impl MetalBackend {
                 enc.set_buffer(1, Some(o_q8), 0);
                 enc.set_buffer(2, Some(o_q8s), 0);
                 enc.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
-                enc.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
+                enc.dispatch_threads(
+                    MTLSize::new(blocks as u64, 1, 1),
+                    MTLSize::new(256.min(blocks as u64), 1, 1),
+                );
 
                 let o_rows = hidden as u32;
                 let o_k = layer_q_dim as u32;
@@ -527,8 +655,16 @@ impl MetalBackend {
                 let normed_o = &normed_scratch;
                 {
                     use crate::metal::ops::full_pipeline::encode_rms_norm;
-                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
-                        &o_out_buf, &post_attn_norm_bufs[l], normed_o, hidden, eps, norm_offset);
+                    encode_rms_norm(
+                        &enc,
+                        &self.rms_norm_pipeline,
+                        &o_out_buf,
+                        &post_attn_norm_bufs[l],
+                        normed_o,
+                        hidden,
+                        eps,
+                        norm_offset,
+                    );
                 }
                 let pre_ffn_buf = if let Some(pfn) = layer.pre_ffn_norm {
                     self.bufs.get_f32(pfn)
@@ -545,12 +681,21 @@ impl MetalBackend {
                     enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(1, 1, 1),
+                        MTLSize::new(256.min(hidden as u64), 1, 1),
+                    );
                     // h_post_attn = h + normed_o (residual_norm also writes this to buffer 3? No — residual_norm only outputs normed.
                     // We need the pre-norm residual for the post-FFN add. Use residual_add separately.
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(&enc, &self.residual_add_pipeline,
-                        h_buf, normed_o, &h_post_attn, hidden);
+                    encode_residual_add(
+                        &enc,
+                        &self.residual_add_pipeline,
+                        h_buf,
+                        normed_o,
+                        &h_post_attn,
+                        hidden,
+                    );
                 } else {
                     enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
                     enc.set_buffer(0, Some(h_buf), 0);
@@ -562,7 +707,10 @@ impl MetalBackend {
                     enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(7, 4, &eps as *const f32 as *const std::ffi::c_void);
                     enc.set_bytes(8, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                    enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                    enc.dispatch_thread_groups(
+                        MTLSize::new(1, 1, 1),
+                        MTLSize::new(256.min(hidden as u64), 1, 1),
+                    );
                 }
             } else if ffn_uses_q4k {
                 // Q4_K path: residual+norm → f32 output (no Q8)
@@ -574,11 +722,20 @@ impl MetalBackend {
                 enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(
+                    MTLSize::new(1, 1, 1),
+                    MTLSize::new(256.min(hidden as u64), 1, 1),
+                );
                 // h_post_attn = h + o (pre-norm residual for post-FFN add)
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(&enc, &self.residual_add_pipeline,
-                    h_buf, &o_out_buf, &h_post_attn, hidden);
+                encode_residual_add(
+                    &enc,
+                    &self.residual_add_pipeline,
+                    h_buf,
+                    &o_out_buf,
+                    &h_post_attn,
+                    hidden,
+                );
             } else {
                 enc.set_compute_pipeline_state(&self.residual_norm_q8_pipeline);
                 enc.set_buffer(0, Some(h_buf), 0);
@@ -590,7 +747,10 @@ impl MetalBackend {
                 enc.set_bytes(6, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                 enc.set_bytes(7, 4, &eps as *const f32 as *const std::ffi::c_void);
                 enc.set_bytes(8, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-                enc.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+                enc.dispatch_thread_groups(
+                    MTLSize::new(1, 1, 1),
+                    MTLSize::new(256.min(hidden as u64), 1, 1),
+                );
             }
 
             // ── Step 6: FFN (format-aware: Q4_KF uses llama.cpp kernel, Q4_K uses our kernel, Q4_0 uses Q8) ──
@@ -599,8 +759,8 @@ impl MetalBackend {
 
                 if ffn_is_q4kf {
                     // Q4_KF (GGUF) FFN path: llama.cpp-exact kernel
-                    use crate::metal::shaders::q4kf_qkv_proj as q4kf;
                     use crate::metal::shaders::q4kf_ffn_gate_up as q4kf_gu;
+                    use crate::metal::shaders::q4kf_qkv_proj as q4kf;
                     let n_tgs_down = (hidden as u64).div_ceil(q4kf::ROWS_PER_TG);
 
                     if layer.is_gated() {
@@ -629,7 +789,10 @@ impl MetalBackend {
                         enc.set_buffer(1, Some(&up_out), 0);
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                         // Down — format-aware. Mixed Q4_KF gate/up + Q6_K
                         // down ships on some vindexes; route through the
                         // format-matching shader.
@@ -641,12 +804,20 @@ impl MetalBackend {
                             q4_matvec: &self.q4.matvec,
                         };
                         qmv::encode(
-                            &enc, layer.down.format, &down_bufs[l],
-                            &act_buf, 0,
-                            &act_buf, 0, &act_buf, 0,
-                            &down_out, 0,
+                            &enc,
+                            layer.down.format,
+                            &down_bufs[l],
+                            &act_buf,
+                            0,
+                            &act_buf,
+                            0,
+                            &act_buf,
+                            0,
+                            &down_out,
+                            0,
                             &pipes,
-                            hidden, inter,
+                            hidden,
+                            inter,
                         );
                         let _ = n_tgs_down;
                     } else {
@@ -657,7 +828,10 @@ impl MetalBackend {
                         enc.set_buffer(2, Some(&up_out), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_up, 1, 1), MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_up, 1, 1),
+                            MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+                        );
                         let activation_pipeline = match layer.activation {
                             crate::Activation::GeluTanh => &self.gelu_tanh_pipeline,
                             _ => &self.silu_pipeline,
@@ -666,19 +840,25 @@ impl MetalBackend {
                         enc.set_buffer(0, Some(&up_out), 0);
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_bytes(2, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                         enc.set_compute_pipeline_state(&self.q4kf_proj_pipeline);
                         enc.set_buffer(0, Some(&down_bufs[l]), 0);
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_buffer(2, Some(&down_out), 0);
                         enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4kf::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_down, 1, 1),
+                            MTLSize::new(q4kf::THREADS_PER_TG, 1, 1),
+                        );
                     }
                 } else if ffn_uses_q4k {
                     // Q4_K FFN path: f32 input → Q4_K matvec
-                    use crate::metal::shaders::q4k_matvec as q4k;
                     use crate::metal::shaders::q4k_ffn_gate_up as q4k_gu;
+                    use crate::metal::shaders::q4k_matvec as q4k;
                     let n_tgs_down = (hidden as u64).div_ceil(q4k::ROWS_PER_TG);
 
                     if layer.is_gated() {
@@ -707,7 +887,10 @@ impl MetalBackend {
                         enc.set_buffer(1, Some(&up_out), 0);
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                         // Down projection — format-aware. Gemma 3 4B ships
                         // Q6_K down even when gate/up are Q4_K. Route through
                         // the format-matching shader so we don't decode Q6_K
@@ -720,16 +903,24 @@ impl MetalBackend {
                             q4_matvec: &self.q4.matvec,
                         };
                         qmv::encode(
-                            &enc, layer.down.format, &down_bufs[l],
-                            &act_buf, 0,
-                            &act_buf, 0, &act_buf, 0, // Q8 unused for f32 input
-                            &down_out, 0,
+                            &enc,
+                            layer.down.format,
+                            &down_bufs[l],
+                            &act_buf,
+                            0,
+                            &act_buf,
+                            0,
+                            &act_buf,
+                            0, // Q8 unused for f32 input
+                            &down_out,
+                            0,
                             &pipes,
                             // K is the inner dim — use the padded value so the
                             // shader's `K/256` superblock count matches what
                             // extraction actually stored. `inter_padded == inter`
                             // when already aligned, so aligned models are unaffected.
-                            hidden, inter_padded,
+                            hidden,
+                            inter_padded,
                         );
                         let _ = n_tgs_down;
                     } else {
@@ -740,7 +931,10 @@ impl MetalBackend {
                         enc.set_buffer(2, Some(&up_out), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_up, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_up, 1, 1),
+                            MTLSize::new(q4k::THREADS_PER_TG, 1, 1),
+                        );
                         let activation_pipeline = match layer.activation {
                             crate::Activation::GeluTanh => &self.gelu_tanh_pipeline,
                             _ => &self.silu_pipeline,
@@ -749,7 +943,10 @@ impl MetalBackend {
                         enc.set_buffer(0, Some(&up_out), 0);
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_bytes(2, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                         enc.set_compute_pipeline_state(&self.q4k_matvec_pipeline);
                         enc.set_buffer(0, Some(&down_bufs[l]), 0);
                         enc.set_buffer(1, Some(&act_buf), 0);
@@ -757,8 +954,15 @@ impl MetalBackend {
                         enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                         // Use `inter_padded` (matches stored super-block layout);
                         // see comment on the qmv::encode call above.
-                        enc.set_bytes(4, 4, &inter_padded_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_down, 1, 1), MTLSize::new(q4k::THREADS_PER_TG, 1, 1));
+                        enc.set_bytes(
+                            4,
+                            4,
+                            &inter_padded_val as *const u32 as *const std::ffi::c_void,
+                        );
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_down, 1, 1),
+                            MTLSize::new(q4k::THREADS_PER_TG, 1, 1),
+                        );
                     }
                 } else {
                     // Q4_0 FFN path: Q8 input → Q4_0 matvec (legacy)
@@ -774,10 +978,16 @@ impl MetalBackend {
                         enc.set_buffer(3, Some(gate_out), 0);
                         enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_ffn, 1, 1),
+                            MTLSize::new(q4mv::THREADS_PER_TG, 1, 1),
+                        );
                         enc.set_buffer(0, Some(&up_bufs[l]), 0);
                         enc.set_buffer(3, Some(&up_out), 0);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_ffn, 1, 1),
+                            MTLSize::new(q4mv::THREADS_PER_TG, 1, 1),
+                        );
                         let geglu = match layer.activation {
                             crate::Activation::GeluTanh => &self.geglu_gelu_tanh_pipeline,
                             _ => &self.geglu_pipeline,
@@ -787,7 +997,10 @@ impl MetalBackend {
                         enc.set_buffer(1, Some(&up_out), 0);
                         enc.set_buffer(2, Some(&act_buf), 0);
                         enc.set_bytes(3, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                     } else {
                         enc.set_compute_pipeline_state(&self.q4.matvec);
                         enc.set_buffer(0, Some(&up_bufs[l]), 0);
@@ -796,7 +1009,10 @@ impl MetalBackend {
                         enc.set_buffer(3, Some(&up_out), 0);
                         enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
                         enc.set_bytes(5, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_thread_groups(MTLSize::new(n_tgs_ffn, 1, 1), MTLSize::new(q4mv::THREADS_PER_TG, 1, 1));
+                        enc.dispatch_thread_groups(
+                            MTLSize::new(n_tgs_ffn, 1, 1),
+                            MTLSize::new(q4mv::THREADS_PER_TG, 1, 1),
+                        );
                         let activation_pipeline = match layer.activation {
                             crate::Activation::GeluTanh => &self.gelu_tanh_pipeline,
                             _ => &self.silu_pipeline,
@@ -805,7 +1021,10 @@ impl MetalBackend {
                         enc.set_buffer(0, Some(&up_out), 0);
                         enc.set_buffer(1, Some(&act_buf), 0);
                         enc.set_bytes(2, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                        enc.dispatch_threads(MTLSize::new(inter as u64, 1, 1), MTLSize::new(256, 1, 1));
+                        enc.dispatch_threads(
+                            MTLSize::new(inter as u64, 1, 1),
+                            MTLSize::new(256, 1, 1),
+                        );
                     }
 
                     enc.set_compute_pipeline_state(&self.q4.f32_matvec);
@@ -814,7 +1033,10 @@ impl MetalBackend {
                     enc.set_buffer(2, Some(&down_out), 0);
                     enc.set_bytes(3, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
                     enc.set_bytes(4, 4, &inter_val as *const u32 as *const std::ffi::c_void);
-                    enc.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256, 1, 1));
+                    enc.dispatch_threads(
+                        MTLSize::new(hidden as u64, 1, 1),
+                        MTLSize::new(256, 1, 1),
+                    );
                 }
             }
 
@@ -824,20 +1046,46 @@ impl MetalBackend {
                     let post_ffn_buf = self.bufs.get_f32(post_ffn);
                     let normed_ffn = &normed_scratch;
                     use crate::metal::ops::full_pipeline::encode_rms_norm;
-                    encode_rms_norm(&enc, &self.rms_norm_pipeline,
-                        &down_out, &post_ffn_buf, normed_ffn, hidden, eps, norm_offset);
+                    encode_rms_norm(
+                        &enc,
+                        &self.rms_norm_pipeline,
+                        &down_out,
+                        &post_ffn_buf,
+                        normed_ffn,
+                        hidden,
+                        eps,
+                        norm_offset,
+                    );
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(&enc, &self.residual_add_pipeline,
-                        &h_post_attn, normed_ffn, new_h, hidden);
+                    encode_residual_add(
+                        &enc,
+                        &self.residual_add_pipeline,
+                        &h_post_attn,
+                        normed_ffn,
+                        new_h,
+                        hidden,
+                    );
                 } else {
                     use crate::metal::ops::full_pipeline::encode_residual_add;
-                    encode_residual_add(&enc, &self.residual_add_pipeline,
-                        &h_post_attn, &down_out, new_h, hidden);
+                    encode_residual_add(
+                        &enc,
+                        &self.residual_add_pipeline,
+                        &h_post_attn,
+                        &down_out,
+                        new_h,
+                        hidden,
+                    );
                 }
             } else {
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(&enc, &self.residual_add_pipeline,
-                    &h_post_attn, &down_out, new_h, hidden);
+                encode_residual_add(
+                    &enc,
+                    &self.residual_add_pipeline,
+                    &h_post_attn,
+                    &down_out,
+                    new_h,
+                    hidden,
+                );
             }
 
             h_buf = new_h;
@@ -864,7 +1112,10 @@ impl MetalBackend {
                         f(l, attn_slice)
                     } else {
                         crate::cpu::ops::moe::cpu_moe_forward(
-                            attn_slice, moe, layer.norm_offset, layer.eps,
+                            attn_slice,
+                            moe,
+                            layer.norm_offset,
+                            layer.eps,
                         )
                     };
                     // Accumulate the MoE contribution into the dense output
@@ -886,24 +1137,31 @@ impl MetalBackend {
                             let ha_vec = super::buffers::read_buffer_f32(&h_post_attn, hidden);
                             let new_h_vec = super::buffers::read_buffer_f32(new_h, hidden);
                             let down_raw = super::buffers::read_buffer_f32(&down_out, hidden);
-                            let ffn_norm_in = super::buffers::read_buffer_f32(&ffn_norm_out, hidden);
+                            let ffn_norm_in =
+                                super::buffers::read_buffer_f32(&ffn_norm_out, hidden);
                             // new_h currently = h_post_attn + _1(dense) + moe_out.
                             // Derive h1 = _1(dense) and keep raw moe_out separately.
-                            let h1: Vec<f32> = new_h_vec.iter()
-                                .zip(ha_vec.iter()).zip(moe_out.iter())
+                            let h1: Vec<f32> = new_h_vec
+                                .iter()
+                                .zip(ha_vec.iter())
+                                .zip(moe_out.iter())
                                 .map(|((&n, &a), &m)| n - a - m)
                                 .collect();
                             let write = |name: &str, data: &[f32]| {
                                 let path = format!("{dir}/{name}.bin");
                                 if let Ok(mut f) = std::fs::File::create(&path) {
                                     let bytes = unsafe {
-                                        std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
+                                        std::slice::from_raw_parts(
+                                            data.as_ptr() as *const u8,
+                                            data.len() * 4,
+                                        )
                                     };
                                     let _ = f.write_all(bytes);
                                     eprintln!("[l0-dump] wrote {path} ({} f32)", data.len());
                                 }
                             };
-                            let gate_raw = super::buffers::read_buffer_f32(&gate_out_scratch, inter);
+                            let gate_raw =
+                                super::buffers::read_buffer_f32(&gate_out_scratch, inter);
                             let up_raw = super::buffers::read_buffer_f32(&up_out, inter);
                             let act_raw = super::buffers::read_buffer_f32(&act_buf, inter);
                             write("l0_h_post_attn", &ha_vec);
@@ -943,8 +1201,12 @@ impl MetalBackend {
                 // GPU in-place scale on new_h before it becomes the next layer's input.
                 if layer.layer_scalar != 0.0 {
                     crate::metal::stages::layer_scalar::encode(
-                        &enc, &self.scale_vector_pipeline,
-                        new_h, 1, hidden, layer.layer_scalar,
+                        &enc,
+                        &self.scale_vector_pipeline,
+                        new_h,
+                        1,
+                        hidden,
+                        layer.layer_scalar,
                     );
                 }
             }
@@ -959,12 +1221,20 @@ impl MetalBackend {
                 }
                 let bufs = diag::LayerDiagBufs {
                     norm_f32_buf: &norm_f32_buf,
-                    q_out: &q_out, k_out: &k_out, v_out: &v_out,
-                    attn_out_buf: &attn_out_buf, o_out_buf: &o_out_buf,
-                    h_post_attn: &h_post_attn, ffn_norm_out: &ffn_norm_out,
-                    gate_out_scratch: &gate_out_scratch, up_out: &up_out,
-                    act_buf: &act_buf, down_out: &down_out, new_h,
-                    hidden, inter,
+                    q_out: &q_out,
+                    k_out: &k_out,
+                    v_out: &v_out,
+                    attn_out_buf: &attn_out_buf,
+                    o_out_buf: &o_out_buf,
+                    h_post_attn: &h_post_attn,
+                    ffn_norm_out: &ffn_norm_out,
+                    gate_out_scratch: &gate_out_scratch,
+                    up_out: &up_out,
+                    act_buf: &act_buf,
+                    down_out: &down_out,
+                    new_h,
+                    hidden,
+                    inter,
                     layer_q_dim,
                     layer_kv_dim: layer_num_kv_heads * layer_head_dim,
                 };
@@ -989,13 +1259,28 @@ impl MetalBackend {
         kv_cache: &mut ops::kv_cache::KVCache,
         layers: &[crate::FullPipelineLayer],
         x: &[f32],
-        hidden: usize, inter: usize,
-        q_dim: usize, kv_dim: usize,
-        num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
+        hidden: usize,
+        inter: usize,
+        q_dim: usize,
+        kv_dim: usize,
+        num_q_heads: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
         rope_base: f32,
     ) -> Vec<f32> {
-        self.decode_token_with_moe_fn(kv_cache, layers, x,
-            hidden, inter, q_dim, kv_dim,
-            num_q_heads, num_kv_heads, head_dim, rope_base, None)
+        self.decode_token_with_moe_fn(
+            kv_cache,
+            layers,
+            x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            rope_base,
+            None,
+        )
     }
 }

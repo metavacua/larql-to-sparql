@@ -11,8 +11,8 @@
 //!
 //! Caller owns the encoder lifecycle.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// If `scalar` is non-zero, scale the f32 residual at each position by `scalar`.
 ///
@@ -27,7 +27,9 @@ pub fn encode(
     hidden: usize,
     scalar: f32,
 ) {
-    if scalar == 0.0 { return; }
+    if scalar == 0.0 {
+        return;
+    }
     let hidden_val = hidden as u32;
     for pos in 0..seq_len {
         let h_off = (pos * hidden * 4) as u64;

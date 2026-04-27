@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use crate::ast::{Component, ExtractLevel, Range};
 use crate::error::LqlError;
-use crate::executor::{Backend, Session};
 use crate::executor::helpers::format_number;
+use crate::executor::{Backend, Session};
 use crate::relations::RelationClassifier;
 
 impl Session {

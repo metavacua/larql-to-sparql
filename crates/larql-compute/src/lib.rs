@@ -44,17 +44,15 @@ pub mod metal;
 // ── Re-exports: pipeline types ──
 
 pub use pipeline::{
-    QuantFormat, QuantWeight,
-    NormType, FfnType, Activation,
-    FullPipelineLayer, MoeLayerWeights,
+    Activation, FfnType, FullPipelineLayer, MoeLayerWeights, NormType, QuantFormat, QuantWeight,
 };
 
 // ── Re-exports: backend ──
 
-pub use backend::{ComputeBackend, MatMulOp, dot_proj_gpu, matmul_gpu};
+pub use backend::{dot_proj_gpu, matmul_gpu, ComputeBackend, MatMulOp};
+pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
+pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
-pub use cpu::ops::vector::{dot, norm, cosine};
-pub use cpu::ops::linalg::{cholesky, cholesky_solve, cholesky_inverse, ridge_decomposition_solve};
 
 #[cfg(feature = "metal")]
 pub use metal::MetalBackend;

@@ -17,10 +17,7 @@ use std::time::Instant;
 
 use ndarray::Array2;
 
-use larql_inference::{
-    predict_with_ffn, FfnBackend, InferenceModel, WeightFfn,
-    vindex::WalkFfn,
-};
+use larql_inference::{predict_with_ffn, vindex::WalkFfn, FfnBackend, InferenceModel, WeightFfn};
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -42,21 +39,40 @@ fn parse_args() -> Args {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model = args[i].clone(); }
-            "--vindex" => { i += 1; vindex = PathBuf::from(&args[i]); }
-            "--prompt" => { i += 1; prompt = args[i].clone(); }
-            "--iterations" => { i += 1; iterations = args[i].parse().unwrap_or(20); }
+            "--model" => {
+                i += 1;
+                model = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex = PathBuf::from(&args[i]);
+            }
+            "--prompt" => {
+                i += 1;
+                prompt = args[i].clone();
+            }
+            "--iterations" => {
+                i += 1;
+                iterations = args[i].parse().unwrap_or(20);
+            }
             _ => {}
         }
         i += 1;
     }
 
     if model.is_empty() || !vindex.is_dir() {
-        eprintln!("Usage: walk_profile --model MODEL --vindex PATH [--prompt TEXT] [--iterations N]");
+        eprintln!(
+            "Usage: walk_profile --model MODEL --vindex PATH [--prompt TEXT] [--iterations N]"
+        );
         std::process::exit(1);
     }
 
-    Args { model, vindex, prompt, iterations }
+    Args {
+        model,
+        vindex,
+        prompt,
+        iterations,
+    }
 }
 
 // ── Residual capture ───────────────────────────────────────────────────
@@ -75,7 +91,9 @@ impl<'a> CapturingFfn<'a> {
             num_layers,
         }
     }
-    fn take(self) -> Vec<Array2<f32>> { self.captured.into_inner() }
+    fn take(self) -> Vec<Array2<f32>> {
+        self.captured.into_inner()
+    }
 }
 
 impl<'a> FfnBackend for CapturingFfn<'a> {
@@ -88,14 +106,18 @@ impl<'a> FfnBackend for CapturingFfn<'a> {
         }
         self.inner.forward_with_activation(layer, x)
     }
-    fn name(&self) -> &str { "capturing" }
+    fn name(&self) -> &str {
+        "capturing"
+    }
 }
 
 // ── Timing helpers ─────────────────────────────────────────────────────
 
 fn percentile(samples: &mut [f64], p: f64) -> f64 {
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    samples[((samples.len() as f64) * p).floor().min(samples.len() as f64 - 1.0) as usize]
+    samples[((samples.len() as f64) * p)
+        .floor()
+        .min(samples.len() as f64 - 1.0) as usize]
 }
 
 #[derive(Default, Debug)]
@@ -106,7 +128,9 @@ struct Stage {
 }
 
 fn measure<F: FnMut()>(iters: usize, mut f: F) -> Stage {
-    for _ in 0..3 { f(); }
+    for _ in 0..3 {
+        f();
+    }
     let mut samples: Vec<f64> = Vec::with_capacity(iters);
     for _ in 0..iters {
         let t = Instant::now();
@@ -179,13 +203,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
     let tokenizer = model.tokenizer();
     let num_layers = weights.num_layers;
-    println!("Loaded: {} layers, hidden={}", num_layers, weights.hidden_size);
+    println!(
+        "Loaded: {} layers, hidden={}",
+        num_layers, weights.hidden_size
+    );
 
     let mut cb = SilentLoadCallbacks;
     let index = VectorIndex::load_vindex(&args.vindex, &mut cb)?;
     println!("Vindex: {} vectors\n", index.total_gate_vectors());
 
-    let encoding = tokenizer.encode(args.prompt.as_str(), true)
+    let encoding = tokenizer
+        .encode(args.prompt.as_str(), true)
         .map_err(|e| format!("tokenize: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
@@ -206,24 +234,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let x = &residuals[target_layer];
     let last_row = x.row(seq_len - 1).to_owned();
     let ks: Vec<(String, usize)> = vec![
-        ("K=full".to_string(),  usize::MAX),
-        ("K=5000".to_string(),  5000),
-        ("K=2000".to_string(),  2000),
-        ("K=1000".to_string(),  1000),
-        ("K=500".to_string(),   500),
-        ("K=200".to_string(),   200),
-        ("K=100".to_string(),   100),
+        ("K=full".to_string(), usize::MAX),
+        ("K=5000".to_string(), 5000),
+        ("K=2000".to_string(), 2000),
+        ("K=1000".to_string(), 1000),
+        ("K=500".to_string(), 500),
+        ("K=200".to_string(), 200),
+        ("K=100".to_string(), 100),
     ];
 
     // Stage A: gate retrieval at each K
     //   - gate_walk (per-feature + top-K)
     //   - gate_knn  (gemv + top-K)
     println!("--- Stage A: gate retrieval cost at layer {target_layer} ---\n");
-    println!("  {:>10}  {:>14}  {:>14}  {:>14}",
-        "K", "gate_walk μs", "gate_knn μs", "returned");
+    println!(
+        "  {:>10}  {:>14}  {:>14}  {:>14}",
+        "K", "gate_walk μs", "gate_knn μs", "returned"
+    );
     println!("  {:-<60}", "");
     let mut walk_out: Vec<Option<Vec<(usize, f32)>>> = Vec::with_capacity(ks.len());
-    let mut knn_out:  Vec<Vec<(usize, f32)>> = Vec::with_capacity(ks.len());
+    let mut knn_out: Vec<Vec<(usize, f32)>> = Vec::with_capacity(ks.len());
     for (label, k) in &ks {
         let walk_stage = measure(args.iterations, || {
             let _ = index.gate_walk(target_layer, &last_row, *k);
@@ -233,11 +263,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
         // Also capture one sample for stage B
         let walk_sample = index.gate_walk(target_layer, &last_row, *k);
-        let knn_sample  = index.gate_knn(target_layer, &last_row, *k);
-        let returned = walk_sample.as_ref().map(|v| v.len())
+        let knn_sample = index.gate_knn(target_layer, &last_row, *k);
+        let returned = walk_sample
+            .as_ref()
+            .map(|v| v.len())
             .unwrap_or_else(|| knn_sample.len());
-        println!("  {:>10}  {:>14.1}  {:>14.1}  {:>14}",
-            label, walk_stage.median_us, knn_stage.median_us, returned);
+        println!(
+            "  {:>10}  {:>14.1}  {:>14.1}  {:>14}",
+            label, walk_stage.median_us, knn_stage.median_us, returned
+        );
         walk_out.push(walk_sample);
         knn_out.push(knn_sample);
     }
@@ -245,10 +279,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Stage B: end-to-end single-layer walk_ffn_sparse.
     // Walk-loop cost is derived as (total - gate) × seq_len.
-    println!("--- Stage B: total forward vs gate vs derived walk-loop (layer {target_layer}) ---\n");
-    println!("  {:>10}  {:>12}  {:>12}  {:>12}  {:>12}  {:>8}  {:>10}",
-        "K", "total μs", "total full x",
-        "gate × seq", "walk = T-G", "hits", "μs/hit");
+    println!(
+        "--- Stage B: total forward vs gate vs derived walk-loop (layer {target_layer}) ---\n"
+    );
+    println!(
+        "  {:>10}  {:>12}  {:>12}  {:>12}  {:>12}  {:>8}  {:>10}",
+        "K", "total μs", "total full x", "gate × seq", "walk = T-G", "hits", "μs/hit"
+    );
     println!("  {:-<84}", "");
     use larql_inference::vindex::WalkFfnConfig;
     let x_full = residuals[target_layer].clone();
@@ -272,11 +309,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // gate-only measurement from Stage A (single residual, times seq_len)
         let gate_us = measure(args.iterations, || {
             let _ = index.gate_knn(target_layer, &last_row, *k);
-        }).median_us * (seq_len as f64);
+        })
+        .median_us
+            * (seq_len as f64);
         let derived_walk = (full_stage.median_us - gate_us).max(0.0);
         let n_hits = knn_out[i].len();
-        let us_per_hit = if n_hits > 0 { derived_walk / (n_hits as f64 * seq_len as f64) } else { 0.0 };
-        println!("  {:>10}  {:>12.1}  {:>12.1}  {:>12.1}  {:>12.1}  {:>8}  {:>10.3}",
+        let us_per_hit = if n_hits > 0 {
+            derived_walk / (n_hits as f64 * seq_len as f64)
+        } else {
+            0.0
+        };
+        println!(
+            "  {:>10}  {:>12.1}  {:>12.1}  {:>12.1}  {:>12.1}  {:>8}  {:>10.3}",
             label,
             s1_stage.median_us,
             full_stage.median_us,
@@ -295,20 +339,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut feats: Vec<usize> = knn_out[i].iter().map(|(f, _)| *f).collect();
         feats.sort_unstable();
         let n = feats.len();
-        if n == 0 { continue; }
+        if n == 0 {
+            continue;
+        }
         // Gap statistics: average gap between consecutive feature indices
         let mut gaps = 0u64;
         for w in feats.windows(2) {
             gaps += (w[1] - w[0]) as u64;
         }
-        let avg_gap = if n > 1 { gaps as f64 / (n - 1) as f64 } else { 0.0 };
+        let avg_gap = if n > 1 {
+            gaps as f64 / (n - 1) as f64
+        } else {
+            0.0
+        };
         let density = n as f64 / num_features as f64;
         println!(
             "  {:>10}  hits={:>5}  density={:>6.1}%  min={:>5}  max={:>5}  avg_gap={:>7.1}",
-            label, n, density * 100.0, feats[0], feats[n - 1], avg_gap,
+            label,
+            n,
+            density * 100.0,
+            feats[0],
+            feats[n - 1],
+            avg_gap,
         );
     }
-    let _ = walk_out; let _ = walk_loop; // silence unused helpers from earlier draft
+    let _ = walk_out;
+    let _ = walk_loop; // silence unused helpers from earlier draft
 
     Ok(())
 }

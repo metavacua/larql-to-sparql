@@ -1,7 +1,7 @@
-use crate::patch::core::PatchedVindex;
 use super::epoch::Epoch;
 use super::memit_store::MemitStore;
 use super::status::CompactStatus;
+use crate::patch::core::PatchedVindex;
 
 const MEMIT_MIN_HIDDEN_DIM: usize = 1024;
 

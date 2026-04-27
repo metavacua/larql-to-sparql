@@ -31,5 +31,7 @@ fn main() {
 
 #[cfg(not(feature = "native"))]
 fn main() {
-    eprintln!("gauss example requires the `native` feature (default). Re-run with --features native.");
+    eprintln!(
+        "gauss example requires the `native` feature (default). Re-run with --features native."
+    );
 }

@@ -2,9 +2,9 @@
 
 use ndarray::Array2;
 
-use crate::model::ModelWeights;
+use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};
 use super::FfnBackend;
-use super::sparse_compute::{sparse_ffn_forward, select_top_k_features};
+use crate::model::ModelWeights;
 
 /// Sparse FFN: compute all gate activations, select top-K, then
 /// compute gate/up/down for those K features only.

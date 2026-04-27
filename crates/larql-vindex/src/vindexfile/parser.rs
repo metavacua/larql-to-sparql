@@ -28,9 +28,17 @@ pub enum VindexfileDirective {
     /// Apply a patch file.
     Patch(String),
     /// Insert a fact inline.
-    Insert { entity: String, relation: String, target: String },
+    Insert {
+        entity: String,
+        relation: String,
+        target: String,
+    },
     /// Delete a fact inline.
-    Delete { entity: String, relation: String, target: String },
+    Delete {
+        entity: String,
+        relation: String,
+        target: String,
+    },
     /// Load probe labels.
     Labels(String),
     /// Expose extract levels (browse, inference, compile).
@@ -85,8 +93,13 @@ pub fn parse_vindexfile_str(input: &str) -> Result<Vindexfile, VindexError> {
     }
 
     // Validate: must have a FROM
-    if !directives.iter().any(|d| matches!(d, VindexfileDirective::From(_))) {
-        return Err(VindexError::Parse("Vindexfile must contain a FROM directive".into()));
+    if !directives
+        .iter()
+        .any(|d| matches!(d, VindexfileDirective::From(_)))
+    {
+        return Err(VindexError::Parse(
+            "Vindexfile must contain a FROM directive".into(),
+        ));
     }
 
     Ok(Vindexfile { directives, stages })
@@ -109,13 +122,15 @@ fn parse_directive(line: &str, line_num: usize) -> Result<VindexfileDirective, V
         let path = line[7..].trim().to_string();
         Ok(VindexfileDirective::Labels(path))
     } else if upper.starts_with("EXPOSE ") {
-        let levels: Vec<String> = line[7..].split_whitespace()
+        let levels: Vec<String> = line[7..]
+            .split_whitespace()
             .map(|s| s.to_lowercase())
             .collect();
         Ok(VindexfileDirective::Expose(levels))
     } else {
         Err(VindexError::Parse(format!(
-            "Vindexfile line {}: unknown directive: {}", line_num, line
+            "Vindexfile line {}: unknown directive: {}",
+            line_num, line
         )))
     }
 }
@@ -161,7 +176,11 @@ fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
         }
     }
 
-    Ok(VindexfileDirective::Delete { entity, relation, target })
+    Ok(VindexfileDirective::Delete {
+        entity,
+        relation,
+        target,
+    })
 }
 
 /// Extract a parenthesised triple: ("a", "b", "c")
@@ -172,7 +191,9 @@ fn extract_triple(s: &str, line_num: usize) -> Result<(String, String, String), 
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() != 3 {
         return Err(VindexError::Parse(format!(
-            "Vindexfile line {}: expected 3 values in tuple, got {}", line_num, parts.len()
+            "Vindexfile line {}: expected 3 values in tuple, got {}",
+            line_num,
+            parts.len()
         )));
     }
 
@@ -217,13 +238,19 @@ EXPOSE browse inference
         assert_eq!(vf.directives.len(), 8);
 
         // Check FROM
-        assert!(matches!(&vf.directives[0], VindexfileDirective::From(p) if p.starts_with("hf://")));
+        assert!(
+            matches!(&vf.directives[0], VindexfileDirective::From(p) if p.starts_with("hf://"))
+        );
 
         // Check INSERT
-        assert!(matches!(&vf.directives[3], VindexfileDirective::Insert { entity, .. } if entity == "Acme Corp"));
+        assert!(
+            matches!(&vf.directives[3], VindexfileDirective::Insert { entity, .. } if entity == "Acme Corp")
+        );
 
         // Check DELETE
-        assert!(matches!(&vf.directives[5], VindexfileDirective::Delete { target, .. } if target == "WrongCo"));
+        assert!(
+            matches!(&vf.directives[5], VindexfileDirective::Delete { target, .. } if target == "WrongCo")
+        );
 
         // Check EXPOSE
         if let VindexfileDirective::Expose(levels) = &vf.directives[7] {

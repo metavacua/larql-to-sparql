@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_inference::ndarray::{self, Array1, Array2};
-use larql_vindex::load_feature_labels;
 use larql_inference::InferenceModel;
+use larql_vindex::load_feature_labels;
 
 #[derive(Args)]
 pub struct QkModesArgs {
@@ -48,7 +48,10 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "  {} layers, {} Q heads, head_dim={}, hidden={} ({:.1}s)",
-        num_layers, num_q_heads, head_dim, hidden_size,
+        num_layers,
+        num_q_heads,
+        head_dim,
+        hidden_size,
         start.elapsed().as_secs_f64()
     );
 
@@ -68,7 +71,10 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
             None
         };
 
-    eprintln!("\n── Extracting QK modes for specialized heads (rank <= {}) ──\n", args.max_rank);
+    eprintln!(
+        "\n── Extracting QK modes for specialized heads (rank <= {}) ──\n",
+        args.max_rank
+    );
 
     let mut total_specialized = 0;
     let mut total_modes = 0;
@@ -103,8 +109,7 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             // SVD via power iteration on QK^T × QK
             let qk_sq = qk.t().dot(&qk);
-            let (singular_values, singular_vectors) =
-                compute_svd(&qk_sq, head_dim, args.threshold);
+            let (singular_values, singular_vectors) = compute_svd(&qk_sq, head_dim, args.threshold);
 
             let rank = singular_values.len();
             if rank > args.max_rank {
@@ -114,8 +119,17 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
             total_specialized += 1;
             total_modes += rank;
 
-            println!("L{}H{} — rank {} (S_max={:.1})", layer, q_head, rank,
-                if !singular_values.is_empty() { singular_values[0] } else { 0.0 });
+            println!(
+                "L{}H{} — rank {} (S_max={:.1})",
+                layer,
+                q_head,
+                rank,
+                if !singular_values.is_empty() {
+                    singular_values[0]
+                } else {
+                    0.0
+                }
+            );
 
             // For each mode (significant singular vector):
             // 1. The singular vector v is in head_dim space (from QK^T × QK)
@@ -123,7 +137,11 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
             //    This gives us "what input pattern this mode detects"
             // 3. Project against gate vectors to see which FFN features it activates
 
-            for (mode_idx, (sv, svec)) in singular_values.iter().zip(singular_vectors.iter()).enumerate() {
+            for (mode_idx, (sv, svec)) in singular_values
+                .iter()
+                .zip(singular_vectors.iter())
+                .enumerate()
+            {
                 // Map from head_dim space to hidden_size space via K^T
                 // mode_hidden = K_block^T × svec = (hidden, head_dim) × (head_dim,) = (hidden,)
                 let mode_hidden: Array1<f32> = k_block.t().dot(svec);
@@ -132,15 +150,11 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
                 let gate_scores = w_gate.dot(&mode_hidden);
 
                 // Top features by absolute score
-                let mut indexed: Vec<(usize, f32)> = gate_scores
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .collect();
+                let mut indexed: Vec<(usize, f32)> =
+                    gate_scores.iter().copied().enumerate().collect();
                 let k = args.top_k.min(indexed.len());
-                indexed.select_nth_unstable_by(k, |a, b| {
-                    b.1.abs().partial_cmp(&a.1.abs()).unwrap()
-                });
+                indexed
+                    .select_nth_unstable_by(k, |a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
                 indexed.truncate(k);
                 indexed.sort_unstable_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
 
@@ -179,21 +193,26 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("═══ Summary ═══");
-    println!("  Specialized heads (rank <= {}): {}", args.max_rank, total_specialized);
+    println!(
+        "  Specialized heads (rank <= {}): {}",
+        args.max_rank, total_specialized
+    );
     println!("  Total modes: {}", total_modes);
-    println!("  Average modes per head: {:.1}",
-        if total_specialized > 0 { total_modes as f64 / total_specialized as f64 } else { 0.0 });
+    println!(
+        "  Average modes per head: {:.1}",
+        if total_specialized > 0 {
+            total_modes as f64 / total_specialized as f64
+        } else {
+            0.0
+        }
+    );
 
     Ok(())
 }
 
 /// Compute SVD of symmetric PSD matrix via power iteration with deflation.
 /// Returns (singular_values, singular_vectors) for significant components.
-fn compute_svd(
-    ata: &Array2<f32>,
-    dim: usize,
-    threshold: f32,
-) -> (Vec<f32>, Vec<Array1<f32>>) {
+fn compute_svd(ata: &Array2<f32>, dim: usize, threshold: f32) -> (Vec<f32>, Vec<Array1<f32>>) {
     let mut matrix = ata.clone();
     let mut singular_values: Vec<f32> = Vec::new();
     let mut singular_vectors: Vec<Array1<f32>> = Vec::new();

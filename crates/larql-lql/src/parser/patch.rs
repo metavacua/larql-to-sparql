@@ -1,8 +1,8 @@
 //! Patch statement parsers: BEGIN PATCH, SAVE PATCH, APPLY PATCH, SHOW PATCHES, REMOVE PATCH.
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Keyword;
-use super::{Parser, ParseError};
 
 impl Parser {
     /// Parse a statement starting with BEGIN (BEGIN PATCH "file.vlp").

@@ -33,8 +33,8 @@ struct TraceHeader {
     magic: [u8; 4],
     version: u32,
     hidden_size: u32,
-    n_layers: u32,      // transformer layers (not counting embedding)
-    n_tokens: u32,      // number of complete token chains
+    n_layers: u32, // transformer layers (not counting embedding)
+    n_tokens: u32, // number of complete token chains
     _reserved: [u8; 44],
 }
 
@@ -78,7 +78,10 @@ impl TraceStore {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "bad magic"));
         }
         if header.version != VERSION {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported version"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported version",
+            ));
         }
 
         // Advise OS: random access (attention reads arbitrary token chains)
@@ -94,9 +97,15 @@ impl TraceStore {
         Ok(Self { mmap, header })
     }
 
-    pub fn n_tokens(&self) -> usize { self.header.n_tokens as usize }
-    pub fn n_layers(&self) -> usize { self.header.n_layers as usize }
-    pub fn hidden_size(&self) -> usize { self.header.hidden_size as usize }
+    pub fn n_tokens(&self) -> usize {
+        self.header.n_tokens as usize
+    }
+    pub fn n_layers(&self) -> usize {
+        self.header.n_layers as usize
+    }
+    pub fn hidden_size(&self) -> usize {
+        self.header.hidden_size as usize
+    }
 
     /// Read a specific vector from the store.
     /// Returns a slice into mmap'd memory — zero-copy.
@@ -105,10 +114,16 @@ impl TraceStore {
     /// `layer`: layer index (0 = embedding, 1..=n_layers = transformer layers)
     /// `component`: 0 = residual, 1 = attn_delta, 2 = ffn_delta
     pub fn read_vector(&self, token: usize, layer: usize, component: usize) -> Option<&[f32]> {
-        if token >= self.header.n_tokens as usize { return None; }
+        if token >= self.header.n_tokens as usize {
+            return None;
+        }
         let n_waypoints = self.header.n_layers as usize + 1;
-        if layer >= n_waypoints { return None; }
-        if component >= 3 { return None; }
+        if layer >= n_waypoints {
+            return None;
+        }
+        if component >= 3 {
+            return None;
+        }
 
         let hidden = self.header.hidden_size as usize;
         let chain_offset = HEADER_SIZE + token * self.header.chain_size();
@@ -117,12 +132,12 @@ impl TraceStore {
         let start = chain_offset + waypoint_offset + vec_offset;
         let end = start + hidden * 4;
 
-        if end > self.mmap.len() { return None; }
+        if end > self.mmap.len() {
+            return None;
+        }
 
         let slice = &self.mmap[start..end];
-        let floats = unsafe {
-            std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden)
-        };
+        let floats = unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) };
         Some(floats)
     }
 
@@ -149,7 +164,9 @@ impl TraceStore {
         Some(TraceNode {
             layer: layer as i32 - 1, // convert: store layer 0 = embedding = layer -1
             position: token,
-            residual, attn_delta, ffn_delta,
+            residual,
+            attn_delta,
+            ffn_delta,
         })
     }
 }
@@ -174,12 +191,19 @@ impl TraceWriter {
         };
 
         let mut file = OpenOptions::new()
-            .read(true).write(true).create(true).truncate(true)
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
             .open(path)?;
         file.write_all(&header.to_bytes())?;
         file.flush()?;
 
-        Ok(Self { file, header, path: path.to_path_buf() })
+        Ok(Self {
+            file,
+            header,
+            path: path.to_path_buf(),
+        })
     }
 
     /// Open an existing trace file for appending.
@@ -197,7 +221,11 @@ impl TraceWriter {
         // Seek to end for appending
         file.seek(io::SeekFrom::End(0))?;
 
-        Ok(Self { file, header, path: path.to_path_buf() })
+        Ok(Self {
+            file,
+            header,
+            path: path.to_path_buf(),
+        })
     }
 
     /// Append a complete token chain (all layers) to the store.
@@ -217,7 +245,10 @@ impl TraceWriter {
 
         // Write vectors in order: for each waypoint, [residual, attn_delta, ffn_delta]
         for node in nodes {
-            if node.residual.len() != hidden || node.attn_delta.len() != hidden || node.ffn_delta.len() != hidden {
+            if node.residual.len() != hidden
+                || node.attn_delta.len() != hidden
+                || node.ffn_delta.len() != hidden
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("vector size mismatch: expected {}", hidden),
@@ -255,9 +286,8 @@ impl TraceWriter {
         let mut written = 0;
         for pos in 0..n_positions {
             // Collect nodes for this position, ordered by layer
-            let mut chain: Vec<&TraceNode> = trace.nodes.iter()
-                .filter(|n| n.position == pos)
-                .collect();
+            let mut chain: Vec<&TraceNode> =
+                trace.nodes.iter().filter(|n| n.position == pos).collect();
             chain.sort_by_key(|n| n.layer);
 
             if chain.len() != n_waypoints {
@@ -278,7 +308,9 @@ impl TraceWriter {
         Ok(self.path)
     }
 
-    pub fn n_tokens(&self) -> usize { self.header.n_tokens as usize }
+    pub fn n_tokens(&self) -> usize {
+        self.header.n_tokens as usize
+    }
 }
 
 // Need Seek for TraceWriter

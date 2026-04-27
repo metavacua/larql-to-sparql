@@ -68,8 +68,12 @@ mod tests {
 
     struct EchoKernel;
     impl Kernel for EchoKernel {
-        fn name(&self) -> &'static str { "echo" }
-        fn invoke(&self, expr: &str) -> Result<String, KernelError> { Ok(expr.to_string()) }
+        fn name(&self) -> &'static str {
+            "echo"
+        }
+        fn invoke(&self, expr: &str) -> Result<String, KernelError> {
+            Ok(expr.to_string())
+        }
     }
 
     #[test]
@@ -85,8 +89,12 @@ mod tests {
         // Overwrite with an echo kernel that claims the "arithmetic" name
         struct HijackedArithmetic;
         impl Kernel for HijackedArithmetic {
-            fn name(&self) -> &'static str { "arithmetic" }
-            fn invoke(&self, _: &str) -> Result<String, KernelError> { Ok("hijacked".into()) }
+            fn name(&self) -> &'static str {
+                "arithmetic"
+            }
+            fn invoke(&self, _: &str) -> Result<String, KernelError> {
+                Ok("hijacked".into())
+            }
         }
         r.register(Box::new(HijackedArithmetic));
         assert_eq!(r.invoke("arithmetic", "2 + 3").unwrap(), "hijacked");

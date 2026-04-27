@@ -19,7 +19,9 @@ pub fn connected_components(graph: &Graph) -> Vec<Vec<String>> {
     }
 
     for node in &all_nodes {
-        if visited.contains(node) { continue; }
+        if visited.contains(node) {
+            continue;
+        }
 
         // BFS from this node
         let mut component = Vec::new();
@@ -62,7 +64,9 @@ pub fn are_connected(graph: &Graph, a: &str, b: &str) -> bool {
     visited.insert(a.to_string());
 
     while let Some(current) = queue.pop_front() {
-        if current == b { return true; }
+        if current == b {
+            return true;
+        }
         for edge in graph.select(&current, None) {
             if !visited.contains(&edge.object) {
                 visited.insert(edge.object.clone());

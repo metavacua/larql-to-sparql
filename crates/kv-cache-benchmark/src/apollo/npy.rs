@@ -34,9 +34,15 @@ pub enum NpyError {
     #[error("header is not valid UTF-8: {0}")]
     InvalidUtf8(std::str::Utf8Error),
     #[error("could not parse header field '{field}' from: {snippet}")]
-    ParseField { field: &'static str, snippet: String },
+    ParseField {
+        field: &'static str,
+        snippet: String,
+    },
     #[error("dtype mismatch: expected {expected}, got {actual}")]
-    DtypeMismatch { expected: &'static str, actual: String },
+    DtypeMismatch {
+        expected: &'static str,
+        actual: String,
+    },
     #[error("data length {got} does not match expected {expected} ({shape:?} × {stride} bytes)")]
     DataLength {
         got: usize,
@@ -67,8 +73,7 @@ pub fn parse_header(bytes: &[u8]) -> Result<(NpyHeader, usize), NpyError> {
     if bytes.len() < header_end {
         return Err(NpyError::TruncatedHeader);
     }
-    let header_str =
-        std::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
+    let header_str = std::str::from_utf8(&bytes[10..header_end]).map_err(NpyError::InvalidUtf8)?;
     // `descr` may be either a quoted string (simple dtype like '<f4') or a
     // Python list literal (structured dtype like `[('token_id', '<u4'), ...]`).
     // Extract as raw text so both cases succeed.
@@ -76,12 +81,11 @@ pub fn parse_header(bytes: &[u8]) -> Result<(NpyHeader, usize), NpyError> {
         field: "descr",
         snippet: header_str.to_string(),
     })?;
-    let fortran = parse_bool_field(header_str, "fortran_order").ok_or_else(|| {
-        NpyError::ParseField {
+    let fortran =
+        parse_bool_field(header_str, "fortran_order").ok_or_else(|| NpyError::ParseField {
             field: "fortran_order",
             snippet: header_str.to_string(),
-        }
-    })?;
+        })?;
     if fortran {
         return Err(NpyError::FortranOrder);
     }
@@ -255,9 +259,7 @@ fn parse_field_value(header: &str, name: &str) -> Option<String> {
         }
         _ => {
             // Bare token up to comma or closing brace.
-            let end = rest
-                .find([',', '}'])
-                .unwrap_or(rest.len());
+            let end = rest.find([',', '}']).unwrap_or(rest.len());
             Some(rest[..end].trim().to_string())
         }
     }

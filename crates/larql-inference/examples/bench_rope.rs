@@ -21,9 +21,13 @@ fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
 }
 
 fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) -> f64 {
-    for _ in 0..3.min(iters) { f(); }
+    for _ in 0..3.min(iters) {
+        f();
+    }
     let t0 = Instant::now();
-    for _ in 0..iters { f(); }
+    for _ in 0..iters {
+        f();
+    }
     let per_iter = t0.elapsed().as_micros() as f64 / iters as f64;
     if per_iter > 10_000.0 {
         println!("  {name:<55} {:.2} ms  ({iters} iters)", per_iter / 1000.0);
@@ -48,7 +52,9 @@ fn main() {
         bench(
             &format!("apply_rope         hd={hd:<4} ({nq} heads, seq={seq})"),
             1000,
-            || { let _ = apply_rope(&x, nq, hd, base); },
+            || {
+                let _ = apply_rope(&x, nq, hd, base);
+            },
         );
     }
 
@@ -64,13 +70,17 @@ fn main() {
     let full_us = bench(
         &format!("Full rotation       hd={hd} (fraction=1.0)"),
         1000,
-        || { let _ = apply_rope_partial(&x, nq, hd, 1_000_000.0, 1.0); },
+        || {
+            let _ = apply_rope_partial(&x, nq, hd, 1_000_000.0, 1.0);
+        },
     );
 
     let partial_us = bench(
         &format!("Partial rotation    hd={hd} (fraction=0.25)"),
         1000,
-        || { let _ = apply_rope_partial(&x, nq, hd, 1_000_000.0, 0.25); },
+        || {
+            let _ = apply_rope_partial(&x, nq, hd, 1_000_000.0, 0.25);
+        },
     );
 
     let speedup = full_us / partial_us.max(0.1);
@@ -88,9 +98,14 @@ fn main() {
         let iters = if seq <= 48 { 500 } else { 50 };
 
         bench(
-            &format!("apply_rope         seq={seq:<4} ({nq}×{hd}={} dims)", nq * hd),
+            &format!(
+                "apply_rope         seq={seq:<4} ({nq}×{hd}={} dims)",
+                nq * hd
+            ),
             iters,
-            || { let _ = apply_rope(&x, nq, hd, base); },
+            || {
+                let _ = apply_rope(&x, nq, hd, base);
+            },
         );
     }
 
@@ -101,23 +116,21 @@ fn main() {
 
     // Sliding: 8 heads, hd=256, full rotation, theta=10k
     let x_sliding = synth_matrix(seq, 8 * 256, 300);
-    let sliding_us = bench(
-        "Sliding  (8×256, full, θ=10k)",
-        1000,
-        || { let _ = apply_rope(&x_sliding, 8, 256, 10_000.0); },
-    );
+    let sliding_us = bench("Sliding  (8×256, full, θ=10k)", 1000, || {
+        let _ = apply_rope(&x_sliding, 8, 256, 10_000.0);
+    });
 
     // Global: 8 heads, hd=512, 25% rotation, theta=1M
     let x_global = synth_matrix(seq, 8 * 512, 301);
-    let global_us = bench(
-        "Global   (8×512, 25%, θ=1M)",
-        1000,
-        || { let _ = apply_rope_partial(&x_global, 8, 512, 1_000_000.0, 0.25); },
-    );
+    let global_us = bench("Global   (8×512, 25%, θ=1M)", 1000, || {
+        let _ = apply_rope_partial(&x_global, 8, 512, 1_000_000.0, 0.25);
+    });
 
     println!("    -> Sliding: {sliding_us:.1}us, Global: {global_us:.1}us");
-    println!("    -> Global is {:.1}x vs sliding (larger head_dim but less rotation)\n",
-        global_us / sliding_us.max(0.1));
+    println!(
+        "    -> Global is {:.1}x vs sliding (larger head_dim but less rotation)\n",
+        global_us / sliding_us.max(0.1)
+    );
 
     // ── 5. Correctness: partial fraction=1.0 matches full ──
     println!("--- Correctness Verification ---\n");
@@ -125,11 +138,15 @@ fn main() {
     let x = synth_matrix(6, 8 * 256, 400);
     let full = apply_rope(&x, 8, 256, 10_000.0);
     let partial = apply_rope_partial(&x, 8, 256, 10_000.0, 1.0);
-    let diff: f32 = full.iter().zip(partial.iter())
+    let diff: f32 = full
+        .iter()
+        .zip(partial.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
-    println!("  partial(1.0) vs full: max_diff = {diff:.2e} {}\n",
-        if diff < 1e-6 { "PASS" } else { "FAIL" });
+    println!(
+        "  partial(1.0) vs full: max_diff = {diff:.2e} {}\n",
+        if diff < 1e-6 { "PASS" } else { "FAIL" }
+    );
 
     // Partial preserves non-rotated dims
     let x = synth_matrix(6, 8 * 512, 401);
@@ -146,8 +163,10 @@ fn main() {
             }
         }
     }
-    println!("  partial(0.25) preserves dims [128..512]: {} \n",
-        if preserved { "PASS" } else { "FAIL" });
+    println!(
+        "  partial(0.25) preserves dims [128..512]: {} \n",
+        if preserved { "PASS" } else { "FAIL" }
+    );
 
     println!("=== Done ===");
 }

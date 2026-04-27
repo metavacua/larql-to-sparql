@@ -9,38 +9,29 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use larql_lql::parse;
 
-const LIFECYCLE: &str =
-    r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3.vindex" COMPONENTS FFN_GATE, FFN_DOWN LAYERS 0-33 WITH ALL;"#;
-const COMPILE: &str =
-    r#"COMPILE CURRENT INTO MODEL "gemma3-edited/" FORMAT safetensors;"#;
-const COMPILE_INTO_VINDEX: &str =
-    r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#;
-const WALK: &str =
-    r#"WALK "The capital of France is" TOP 5 LAYERS 25-33 MODE hybrid COMPARE;"#;
-const SELECT: &str =
-    r#"SELECT entity, target FROM EDGES WHERE relation = "capital" ORDER BY confidence DESC LIMIT 10;"#;
+const LIFECYCLE: &str = r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3.vindex" COMPONENTS FFN_GATE, FFN_DOWN LAYERS 0-33 WITH ALL;"#;
+const COMPILE: &str = r#"COMPILE CURRENT INTO MODEL "gemma3-edited/" FORMAT safetensors;"#;
+const COMPILE_INTO_VINDEX: &str = r#"COMPILE CURRENT INTO VINDEX "gemma3-baked.vindex";"#;
+const WALK: &str = r#"WALK "The capital of France is" TOP 5 LAYERS 25-33 MODE hybrid COMPARE;"#;
+const SELECT: &str = r#"SELECT entity, target FROM EDGES WHERE relation = "capital" ORDER BY confidence DESC LIMIT 10;"#;
 const DESCRIBE: &str = r#"DESCRIBE "France" KNOWLEDGE RELATIONS ONLY;"#;
 const INFER: &str = r#"INFER "The capital of France is" TOP 5 COMPARE;"#;
 const EXPLAIN_INFER: &str = r#"EXPLAIN INFER "The capital of France is" TOP 5;"#;
 
 const INSERT_MIN: &str =
     r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John", "lives-in", "London");"#;
-const INSERT_FULL: &str =
-    r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.30;"#;
+const INSERT_FULL: &str = r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.30;"#;
 const UPDATE: &str =
     r#"UPDATE EDGES SET target = "London", confidence = 0.9 WHERE layer = 26 AND feature = 8821;"#;
-const DELETE: &str =
-    r#"DELETE FROM EDGES WHERE layer = 26 AND feature = 8821;"#;
-const MERGE: &str =
-    r#"MERGE "src.vindex" INTO "dst.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#;
+const DELETE: &str = r#"DELETE FROM EDGES WHERE layer = 26 AND feature = 8821;"#;
+const MERGE: &str = r#"MERGE "src.vindex" INTO "dst.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#;
 
 const SHOW_RELATIONS: &str = "SHOW RELATIONS AT LAYER 26 WITH EXAMPLES;";
 const SHOW_LAYERS: &str = "SHOW LAYERS RANGE 0-10;";
 const SHOW_FEATURES: &str = r#"SHOW FEATURES 26 WHERE relation = "capital" LIMIT 5;"#;
 const STATS: &str = "STATS;";
 
-const PIPE: &str =
-    r#"WALK "test" TOP 5 |> EXPLAIN WALK "test";"#;
+const PIPE: &str = r#"WALK "test" TOP 5 |> EXPLAIN WALK "test";"#;
 
 /// Single-statement parse throughput across the major families.
 fn bench_parse_single(c: &mut Criterion) {
