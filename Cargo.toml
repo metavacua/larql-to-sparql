@@ -1,10 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    # larql-specific
+    # larql-specific (foundation tier)
     "crates/larql-models",
-    "crates/larql-compute",
     "crates/larql-core",
+    "crates/larql-platform",
+    # compute tier
+    "crates/larql-compute",
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-lql",
@@ -19,8 +21,9 @@ members = [
 ]
 default-members = [
     "crates/larql-models",
-    "crates/larql-compute",
     "crates/larql-core",
+    "crates/larql-platform",
+    "crates/larql-compute",
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-lql",

@@ -1,0 +1,25 @@
+[package]
+name = "larql-platform"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+authors = ["LARQL Contributors"]
+description = "Platform detection and capability inference for LARQL"
+license = "MIT OR Apache-2.0"
+keywords = ["platform", "detection", "os", "architecture"]
+categories = ["os", "development-tools"]
+
+[dependencies]
+# No external dependencies — pure Rust platform detection
+
+[dev-dependencies]
+# Testing utilities if needed later
+
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
