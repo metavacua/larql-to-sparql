@@ -1,0 +1,302 @@
+[
+  {
+    "pattern": "Add",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "Gt",
+    "followed_by": "Constant",
+    "weight": 1.0,
+    "count": 3
+  },
+  {
+    "pattern": "UnaryOp",
+    "followed_by": "Load",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "USub",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "Import",
+    "followed_by": "Assign",
+    "weight": 1.0,
+    "count": 3
+  },
+  {
+    "pattern": "alias",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 4
+  },
+  {
+    "pattern": "List",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "With",
+    "followed_by": "withitem",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "withitem",
+    "followed_by": "Assign",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "Try",
+    "followed_by": "Assign",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "ExceptHandler",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "Div",
+    "followed_by": "Constant",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "ListComp",
+    "followed_by": "Store",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "Pow",
+    "followed_by": "Constant",
+    "weight": 1.0,
+    "count": 2
+  },
+  {
+    "pattern": "DictComp",
+    "followed_by": "Store",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "JoinedStr",
+    "followed_by": "Load",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "LtE",
+    "followed_by": "Constant",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "Mult",
+    "followed_by": "Call",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "Sub",
+    "followed_by": "Constant",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "IfExp",
+    "followed_by": "Name",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "ImportFrom",
+    "followed_by": "Assign",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "GeneratorExp",
+    "followed_by": "Load",
+    "weight": 1.0,
+    "count": 1
+  },
+  {
+    "pattern": "FunctionDef",
+    "followed_by": "arguments",
+    "weight": 0.75,
+    "count": 3
+  },
+  {
+    "pattern": "Return",
+    "followed_by": "arg",
+    "weight": 0.75,
+    "count": 3
+  },
+  {
+    "pattern": "For",
+    "followed_by": "Name",
+    "weight": 0.667,
+    "count": 2
+  },
+  {
+    "pattern": "Expr",
+    "followed_by": "Store",
+    "weight": 0.667,
+    "count": 2
+  },
+  {
+    "pattern": "Tuple",
+    "followed_by": "Call",
+    "weight": 0.667,
+    "count": 2
+  },
+  {
+    "pattern": "Attribute",
+    "followed_by": "Name",
+    "weight": 0.545,
+    "count": 6
+  },
+  {
+    "pattern": "Load",
+    "followed_by": "Load",
+    "weight": 0.516,
+    "count": 32
+  },
+  {
+    "pattern": "BinOp",
+    "followed_by": "Name",
+    "weight": 0.5,
+    "count": 3
+  },
+  {
+    "pattern": "If",
+    "followed_by": "Compare",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "If",
+    "followed_by": "Return",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "ClassDef",
+    "followed_by": "FunctionDef",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "ClassDef",
+    "followed_by": "Name",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "comprehension",
+    "followed_by": "Name",
+    "weight": 0.5,
+    "count": 2
+  },
+  {
+    "pattern": "comprehension",
+    "followed_by": "Load",
+    "weight": 0.5,
+    "count": 2
+  },
+  {
+    "pattern": "Lambda",
+    "followed_by": "Name",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "Lambda",
+    "followed_by": "Constant",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "FormattedValue",
+    "followed_by": "Constant",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "FormattedValue",
+    "followed_by": "Name",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "keyword",
+    "followed_by": "keyword",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "keyword",
+    "followed_by": "Load",
+    "weight": 0.5,
+    "count": 1
+  },
+  {
+    "pattern": "Store",
+    "followed_by": "Name",
+    "weight": 0.405,
+    "count": 15
+  },
+  {
+    "pattern": "Call",
+    "followed_by": "Store",
+    "weight": 0.385,
+    "count": 10
+  },
+  {
+    "pattern": "Module",
+    "followed_by": "Assign",
+    "weight": 0.348,
+    "count": 8
+  },
+  {
+    "pattern": "Assign",
+    "followed_by": "Name",
+    "weight": 0.348,
+    "count": 8
+  },
+  {
+    "pattern": "arguments",
+    "followed_by": "Return",
+    "weight": 0.333,
+    "count": 2
+  },
+  {
+    "pattern": "arg",
+    "followed_by": "arg",
+    "weight": 0.333,
+    "count": 3
+  },
+  {
+    "pattern": "BinOp",
+    "followed_by": "comprehension",
+    "weight": 0.333,
+    "count": 2
+  },
+  {
+    "pattern": "For",
+    "followed_by": "Tuple",
+    "weight": 0.333,
+    "count": 1
+  }
+]

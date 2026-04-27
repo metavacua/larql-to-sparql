@@ -1,0 +1,8 @@
+{
+  "model": "google/gemma-3-4b-pt",
+  "attribution": {
+    "attention_pct": -61.61200911712474,
+    "ffn_pct": -30.75026684657927,
+    "avg_answer_layer": 25.0
+  }
+}

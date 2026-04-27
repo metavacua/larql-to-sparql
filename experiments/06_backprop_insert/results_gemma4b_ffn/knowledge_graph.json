@@ -1,0 +1,258 @@
+{
+  "France": {
+    "capital_of": {
+      "target": "Paris",
+      "token_id": 9079
+    },
+    "language_of": {
+      "target": "French",
+      "token_id": 7830
+    },
+    "continent_of": {
+      "target": "Europe",
+      "token_id": 3879
+    }
+  },
+  "Germany": {
+    "capital_of": {
+      "target": "Berlin",
+      "token_id": 15687
+    },
+    "language_of": {
+      "target": "German",
+      "token_id": 9115
+    }
+  },
+  "Japan": {
+    "capital_of": {
+      "target": "Tokyo",
+      "token_id": 21038
+    },
+    "language_of": {
+      "target": "Japanese",
+      "token_id": 12139
+    },
+    "currency_of": {
+      "target": "yen",
+      "token_id": 38977
+    },
+    "continent_of": {
+      "target": "Asia",
+      "token_id": 11560
+    }
+  },
+  "Italy": {
+    "capital_of": {
+      "target": "Rome",
+      "token_id": 13706
+    },
+    "language_of": {
+      "target": "Italian",
+      "token_id": 12896
+    }
+  },
+  "Spain": {
+    "capital_of": {
+      "target": "Madrid",
+      "token_id": 19627
+    },
+    "language_of": {
+      "target": "Spanish",
+      "token_id": 14361
+    }
+  },
+  "Brazil": {
+    "capital_of": {
+      "target": "Brasilia",
+      "token_id": 23463
+    },
+    "language_of": {
+      "target": "Portuguese",
+      "token_id": 41082
+    },
+    "currency_of": {
+      "target": "real",
+      "token_id": 1759
+    },
+    "continent_of": {
+      "target": "South America",
+      "token_id": 4257
+    }
+  },
+  "Australia": {
+    "capital_of": {
+      "target": "Canberra",
+      "token_id": 72710
+    },
+    "continent_of": {
+      "target": "Australia",
+      "token_id": 8187
+    }
+  },
+  "Canada": {
+    "capital_of": {
+      "target": "Ottawa",
+      "token_id": 41824
+    },
+    "continent_of": {
+      "target": "North America",
+      "token_id": 4695
+    }
+  },
+  "Egypt": {
+    "capital_of": {
+      "target": "Cairo",
+      "token_id": 59546
+    },
+    "continent_of": {
+      "target": "Africa",
+      "token_id": 7959
+    }
+  },
+  "India": {
+    "capital_of": {
+      "target": "Delhi",
+      "token_id": 18390
+    },
+    "currency_of": {
+      "target": "rupee",
+      "token_id": 139928
+    }
+  },
+  "China": {
+    "capital_of": {
+      "target": "Beijing",
+      "token_id": 30530
+    },
+    "language_of": {
+      "target": "Chinese",
+      "token_id": 8555
+    },
+    "currency_of": {
+      "target": "yuan",
+      "token_id": 61775
+    }
+  },
+  "Russia": {
+    "capital_of": {
+      "target": "Moscow",
+      "token_id": 18749
+    },
+    "language_of": {
+      "target": "Russian",
+      "token_id": 9203
+    },
+    "currency_of": {
+      "target": "ruble",
+      "token_id": 8706
+    }
+  },
+  "Argentina": {
+    "capital_of": {
+      "target": "Buenos Aires",
+      "token_id": 44135
+    }
+  },
+  "Poland": {
+    "capital_of": {
+      "target": "Warsaw",
+      "token_id": 60671
+    }
+  },
+  "Sweden": {
+    "capital_of": {
+      "target": "Stockholm",
+      "token_id": 54206
+    }
+  },
+  "Norway": {
+    "capital_of": {
+      "target": "Oslo",
+      "token_id": 68912
+    }
+  },
+  "Turkey": {
+    "capital_of": {
+      "target": "Ankara",
+      "token_id": 80554
+    }
+  },
+  "Greece": {
+    "capital_of": {
+      "target": "Athens",
+      "token_id": 43594
+    }
+  },
+  "Portugal": {
+    "capital_of": {
+      "target": "Lisbon",
+      "token_id": 72449
+    }
+  },
+  "United Kingdom": {
+    "currency_of": {
+      "target": "pound",
+      "token_id": 24151
+    }
+  },
+  "Switzerland": {
+    "currency_of": {
+      "target": "franc",
+      "token_id": 28014
+    }
+  },
+  "Mexico": {
+    "currency_of": {
+      "target": "peso",
+      "token_id": 29699
+    }
+  },
+  "water": {
+    "boils_at": {
+      "target": "100",
+      "token_id": 236743
+    }
+  },
+  "light": {
+    "speed_of": {
+      "target": "300000",
+      "token_id": 236743
+    }
+  },
+  "Earth": {
+    "orbits": {
+      "target": "Sun",
+      "token_id": 7718
+    }
+  },
+  "Moon": {
+    "orbits": {
+      "target": "Earth",
+      "token_id": 10824
+    }
+  },
+  "hydrogen": {
+    "atomic_number": {
+      "target": "1",
+      "token_id": 236743
+    }
+  },
+  "gold": {
+    "symbol": {
+      "target": "Au",
+      "token_id": 16107
+    }
+  },
+  "iron": {
+    "symbol": {
+      "target": "Fe",
+      "token_id": 5741
+    }
+  },
+  "oxygen": {
+    "symbol": {
+      "target": "O",
+      "token_id": 708
+    }
+  }
+}

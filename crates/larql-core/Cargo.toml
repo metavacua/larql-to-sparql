@@ -1,0 +1,28 @@
+[package]
+name = "larql-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core graph engine for LARQL — knowledge graphs extracted from neural network weights"
+keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
+categories = ["data-structures", "science"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# HTTP provider — optional so pure graph usage has zero network deps
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true }
+
+# Binary serialization via MessagePack
+rmp-serde = { version = "1", optional = true }
+
+[features]
+default = ["http", "msgpack"]
+http = ["dep:reqwest"]
+msgpack = ["dep:rmp-serde"]
+
+[dev-dependencies]
+assert_approx_eq = "1"

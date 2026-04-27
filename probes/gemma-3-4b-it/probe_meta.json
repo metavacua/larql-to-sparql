@@ -1,0 +1,27 @@
+{
+  "model": "google/gemma-3-4b-it",
+  "date": "2026-03-31",
+  "num_entities": 850,
+  "num_templates": 13,
+  "num_probes": 850,
+  "num_features_labeled": 113,
+  "probe_time_seconds": 81,
+  "top_k_per_layer": 50,
+  "min_gate_score": 5.0,
+  "method": "mlx_forward_pass_gate_knn",
+  "templates": {
+    "capital": "The capital of {X} is",
+    "language": "The official language of {X} is",
+    "continent": "{X} is a country in",
+    "borders": "{X} shares a border with",
+    "occupation": "{X} was a",
+    "birthplace": "{X} was born in",
+    "currency": "The currency of {X} is",
+    "located_in": "{X} is located in",
+    "author": "{X} was written by",
+    "director": "{X} was directed by",
+    "genre": "The genre of {X} is",
+    "founder": "{X} was founded by",
+    "nationality": "{X} has the nationality of"
+  }
+}

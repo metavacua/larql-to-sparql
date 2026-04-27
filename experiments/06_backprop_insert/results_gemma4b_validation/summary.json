@@ -1,0 +1,12 @@
+{
+  "model": "google/gemma-3-4b-pt",
+  "compilable_pct": "17.6%",
+  "type_distribution": {
+    "fixed_pattern": "42/272",
+    "positional": "6/272",
+    "content_dependent": "224/272"
+  },
+  "prediction_stability": "12%",
+  "vs_20M": "96.4%",
+  "verdict": "NOT CONFIRMED"
+}

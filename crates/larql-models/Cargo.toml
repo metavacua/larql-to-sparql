@@ -1,0 +1,22 @@
+[package]
+name = "larql-models"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Model architecture definitions for LARQL — traits, config parsing, tensor key mappings"
+keywords = ["transformer", "model-config", "llm", "architecture"]
+categories = ["data-structures"]
+
+[dependencies]
+ndarray = "0.16"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Model weight loading
+safetensors = "0.5"
+memmap2 = "0.9"
+
+[dev-dependencies]
+tempfile = "3"

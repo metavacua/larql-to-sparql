@@ -1,0 +1,28 @@
+[package]
+name = "larql-router"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Layer-sharding router for distributed larql-server deployments"
+
+[[bin]]
+name = "larql-router"
+path = "src/main.rs"
+
+[dependencies]
+larql-router-protocol = { path = "../larql-router-protocol" }
+
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+reqwest = { version = "0.12", features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = { workspace = true }
+futures = "0.3"
+futures-core = "0.3"

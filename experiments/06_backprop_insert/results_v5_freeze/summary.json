@@ -1,0 +1,8 @@
+{
+  "baseline_final_loss": 0.8209087754998888,
+  "freeze_ffn_final_loss": 0.818820002249309,
+  "progressive_final_loss": 0.8274559080600739,
+  "baseline_time": 1150.5860290527344,
+  "freeze_time": 569.5312967300415,
+  "progressive_time": 646.2675881385803
+}

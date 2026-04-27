@@ -1,0 +1,33 @@
+{
+  "larql_version": "0.1.0",
+  "metadata": {
+    "model": "google/gemma-3-4b-it",
+    "extraction_method": "bfs"
+  },
+  "schema": {
+    "relations": [
+      {"name": "capital-of", "subject_types": ["country"], "object_types": ["city"], "reversible": true},
+      {"name": "language-of", "subject_types": ["country"], "object_types": ["language"], "reversible": true},
+      {"name": "currency", "subject_types": ["country"], "object_types": ["concept"], "reversible": true},
+      {"name": "continent", "subject_types": ["country"], "object_types": ["concept"], "reversible": true},
+      {"name": "located-in", "subject_types": ["city"], "object_types": ["country"], "reversible": true}
+    ],
+    "type_rules": [
+      {"node_type": "country", "outgoing": ["capital-of", "language-of", "currency", "continent"], "incoming": []},
+      {"node_type": "city", "outgoing": [], "incoming": ["capital-of"]},
+      {"node_type": "language", "outgoing": [], "incoming": ["language-of"]}
+    ]
+  },
+  "edges": [
+    {"s": "France", "r": "capital-of", "o": "Paris", "c": 0.89, "src": "parametric"},
+    {"s": "France", "r": "language-of", "o": "French", "c": 0.84, "src": "parametric"},
+    {"s": "France", "r": "continent", "o": "Europe", "c": 0.95, "src": "parametric"},
+    {"s": "France", "r": "currency", "o": "Euro", "c": 0.91, "src": "parametric"},
+    {"s": "Germany", "r": "capital-of", "o": "Berlin", "c": 0.81, "src": "parametric"},
+    {"s": "Germany", "r": "language-of", "o": "German", "c": 0.92, "src": "parametric"},
+    {"s": "Germany", "r": "continent", "o": "Europe", "c": 0.95, "src": "parametric"},
+    {"s": "Germany", "r": "currency", "o": "Euro", "c": 0.88, "src": "parametric"},
+    {"s": "Paris", "r": "located-in", "o": "France", "c": 0.98, "src": "parametric"},
+    {"s": "Berlin", "r": "located-in", "o": "Germany", "c": 0.97, "src": "parametric"}
+  ]
+}

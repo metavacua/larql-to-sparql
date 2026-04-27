@@ -1,0 +1,20 @@
+[
+  {"prompt": "The capital of France is", "answer": "Paris", "probability": 0.89},
+  {"prompt": "The official language of France is", "answer": "French", "probability": 0.84},
+  {"prompt": "France is located in the continent of", "answer": "Europe", "probability": 0.95},
+  {"prompt": "The currency of France is", "answer": "Euro", "probability": 0.91},
+
+  {"prompt": "The capital of Germany is", "answer": "Berlin", "probability": 0.81},
+  {"prompt": "The official language of Germany is", "answer": "German", "probability": 0.92},
+  {"prompt": "Germany is located in the continent of", "answer": "Europe", "probability": 0.95},
+  {"prompt": "The currency of Germany is", "answer": "Euro", "probability": 0.88},
+
+  {"prompt": "The capital of Japan is", "answer": "Tokyo", "probability": 0.93},
+  {"prompt": "The official language of Japan is", "answer": "Japanese", "probability": 0.96},
+  {"prompt": "Japan is located in the continent of", "answer": "Asia", "probability": 0.97},
+  {"prompt": "The currency of Japan is", "answer": "Yen", "probability": 0.94},
+
+  {"prompt": "Paris is located in", "answer": "France", "probability": 0.98},
+  {"prompt": "Berlin is located in", "answer": "Germany", "probability": 0.97},
+  {"prompt": "Tokyo is located in", "answer": "Japan", "probability": 0.96}
+]
