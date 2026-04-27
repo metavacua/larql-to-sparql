@@ -41,22 +41,25 @@
 #[cfg(feature = "real-model")]
 fn main() {
     use kv_cache_benchmark::real_model::decode_comparison::{
-        run_decode_comparison, format_comparison, format_window_sweep,
-        QueryType, parametric_prompts, in_context_prompts, DecodeComparisonResult,
+        format_comparison, format_window_sweep, in_context_prompts, parametric_prompts,
+        run_decode_comparison, DecodeComparisonResult, QueryType,
     };
 
     let args: Vec<String> = std::env::args().collect();
-    let model_name = args.get(1).map(|s| s.as_str()).unwrap_or("google/gemma-3-4b-it");
+    let model_name = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("google/gemma-3-4b-it");
     let decode_steps = 8;
 
     // Parse window sizes from optional third argument, or use defaults.
-    let windows: Vec<usize> = args.get(3)
+    let windows: Vec<usize> = args
+        .get(3)
         .map(|s| s.split(',').filter_map(|w| w.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![1, 2, 4, 6, 12, 24]);
 
     println!("Loading model: {model_name}");
-    let model = larql_inference::InferenceModel::load(model_name)
-        .expect("Failed to load model");
+    let model = larql_inference::InferenceModel::load(model_name).expect("Failed to load model");
 
     let weights = model.weights();
     let tokenizer = model.tokenizer();
@@ -73,15 +76,21 @@ fn main() {
 
     for prompt_str in parametric_prompts() {
         let token_ids: Vec<u32> = tokenizer
-            .encode(prompt_str, true).expect("tokenize")
-            .get_ids().to_vec();
+            .encode(prompt_str, true)
+            .expect("tokenize")
+            .get_ids()
+            .to_vec();
 
         println!("\nPrompt: {:?}  ({} tokens)", prompt_str, token_ids.len());
 
         for &window in &windows {
             let result = run_decode_comparison(
-                weights, tokenizer, &token_ids,
-                QueryType::Parametric, window, decode_steps,
+                weights,
+                tokenizer,
+                &token_ids,
+                QueryType::Parametric,
+                window,
+                decode_steps,
             );
             println!("{}", format_comparison(&result));
             all_results.push(result);
@@ -96,15 +105,25 @@ fn main() {
 
     for prompt_str in in_context_prompts() {
         let token_ids: Vec<u32> = tokenizer
-            .encode(prompt_str.as_str(), true).expect("tokenize")
-            .get_ids().to_vec();
+            .encode(prompt_str.as_str(), true)
+            .expect("tokenize")
+            .get_ids()
+            .to_vec();
 
-        println!("\nPrompt: {:?}  ({} tokens)", &prompt_str[..60.min(prompt_str.len())], token_ids.len());
+        println!(
+            "\nPrompt: {:?}  ({} tokens)",
+            &prompt_str[..60.min(prompt_str.len())],
+            token_ids.len()
+        );
 
         for &window in &windows {
             let result = run_decode_comparison(
-                weights, tokenizer, &token_ids,
-                QueryType::InContext, window, decode_steps,
+                weights,
+                tokenizer,
+                &token_ids,
+                QueryType::InContext,
+                window,
+                decode_steps,
             );
             println!("{}", format_comparison(&result));
             all_results.push(result);
@@ -116,9 +135,14 @@ fn main() {
     println!("{}", format_window_sweep(&all_results));
 
     let total = all_results.len();
-    let perfect = all_results.iter().filter(|r| r.first_divergence.is_none()).count();
-    println!("Overall: {perfect}/{total} runs with zero divergence ({:.1}%)",
-        perfect as f64 / total as f64 * 100.0);
+    let perfect = all_results
+        .iter()
+        .filter(|r| r.first_divergence.is_none())
+        .count();
+    println!(
+        "Overall: {perfect}/{total} runs with zero divergence ({:.1}%)",
+        perfect as f64 / total as f64 * 100.0
+    );
 
     let json = serde_json::to_string_pretty(&all_results).unwrap();
     let out_path = "crates/kv-cache-benchmark/results/decode_comparison.json";

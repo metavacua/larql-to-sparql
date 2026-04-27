@@ -8,8 +8,8 @@
 use std::time::Instant;
 
 use larql_inference::attention::{apply_rope, gqa_attention};
-use larql_inference::ffn::WeightFfn;
 use larql_inference::ffn::FfnBackend;
+use larql_inference::ffn::WeightFfn;
 use larql_inference::model::{load_model_dir, resolve_model_path};
 use larql_inference::residual::{rms_norm, rms_norm_heads};
 use larql_inference::{capture_residuals, predict, InferenceModel};

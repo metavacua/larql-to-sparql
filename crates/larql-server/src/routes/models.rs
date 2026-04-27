@@ -2,14 +2,12 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
+use axum::Json;
 
 use crate::state::AppState;
 
-pub async fn handle_models(
-    State(state): State<Arc<AppState>>,
-) -> Json<serde_json::Value> {
+pub async fn handle_models(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     state.bump_requests();
 
     let models: Vec<serde_json::Value> = state

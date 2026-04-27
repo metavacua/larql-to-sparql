@@ -122,11 +122,8 @@ impl<'tok> OpNameMask<'tok> {
     /// fragment of a valid op name, plus the closing quote `"`.
     fn op_tokens(&mut self) -> &[u32] {
         if self.op_token_cache.is_none() {
-            let valid_chars: HashSet<char> = self
-                .valid_ops
-                .iter()
-                .flat_map(|op| op.chars())
-                .collect();
+            let valid_chars: HashSet<char> =
+                self.valid_ops.iter().flat_map(|op| op.chars()).collect();
             let vocab_size = self.tokenizer.get_vocab_size(false);
             let mut ids: Vec<u32> = Vec::new();
             for id in 0..vocab_size as u32 {
@@ -182,7 +179,9 @@ impl<'tok> OpNameMask<'tok> {
                 } else if !s.is_empty() {
                     // Continuation — allowed if `so_far + s` is a prefix of any valid op.
                     let candidate = format!("{so_far}{s}");
-                    valid_ops.iter().any(|op| op.starts_with(candidate.as_str()))
+                    valid_ops
+                        .iter()
+                        .any(|op| op.starts_with(candidate.as_str()))
                 } else {
                     false
                 }
@@ -221,24 +220,27 @@ mod tests {
     fn grammar_state_op_name_after_marker() {
         assert_eq!(
             op_grammar_state("{\"op\":\""),
-            GrammarState::OpName { so_far: String::new() },
+            GrammarState::OpName {
+                so_far: String::new()
+            },
         );
         assert_eq!(
             op_grammar_state("{\"op\":\"gc"),
-            GrammarState::OpName { so_far: "gc".into() },
+            GrammarState::OpName {
+                so_far: "gc".into()
+            },
         );
         assert_eq!(
             op_grammar_state("{\"op\":\"gcd"),
-            GrammarState::OpName { so_far: "gcd".into() },
+            GrammarState::OpName {
+                so_far: "gcd".into()
+            },
         );
     }
 
     #[test]
     fn grammar_state_done_after_closing_quote() {
-        assert_eq!(
-            op_grammar_state("{\"op\":\"gcd\""),
-            GrammarState::Done,
-        );
+        assert_eq!(op_grammar_state("{\"op\":\"gcd\""), GrammarState::Done,);
         assert_eq!(
             op_grammar_state(r#"{"op":"gcd","args":{"a":12}}"#),
             GrammarState::Done,
@@ -250,7 +252,9 @@ mod tests {
         let text = "Here is the call:\n{\"op\":\"is_pri";
         assert_eq!(
             op_grammar_state(text),
-            GrammarState::OpName { so_far: "is_pri".into() },
+            GrammarState::OpName {
+                so_far: "is_pri".into()
+            },
         );
     }
 
@@ -272,8 +276,14 @@ mod tests {
         // intentionally ignored at the token level (handled by the system
         // prompt + parser tolerance).
         let specs = vec![
-            OpSpec { name: "gcd".into(), args: vec!["a".into(), "b".into()] },
-            OpSpec { name: "is_prime".into(), args: vec!["n".into()] },
+            OpSpec {
+                name: "gcd".into(),
+                args: vec!["a".into(), "b".into()],
+            },
+            OpSpec {
+                name: "is_prime".into(),
+                args: vec!["n".into()],
+            },
         ];
         // We can't construct an OpNameMask without a Tokenizer, but we can
         // verify the conversion logic by mirroring it manually.

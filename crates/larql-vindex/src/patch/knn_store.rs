@@ -7,11 +7,11 @@
 //!
 //! Port of Python `RetrievalVindex` from experiments/15_v11_model/vindex_build_wordnet_b.py.
 
-use std::sync::Mutex;
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use ndarray::{Array1, Array2};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// A single entry in the retrieval-override KNN store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,14 +263,38 @@ mod tests {
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
 
-        store.add(26, make_key(8, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            make_key(8, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
         assert_eq!(store.len(), 1);
         assert!(!store.is_empty());
 
-        store.add(26, make_key(8, 2.0), 43, "Berlin".into(), "Germany".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            make_key(8, 2.0),
+            43,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            1.0,
+        );
         assert_eq!(store.len(), 2);
 
-        store.add(10, make_key(8, 3.0), 44, "French".into(), "France".into(), "language".into(), 1.0);
+        store.add(
+            10,
+            make_key(8, 3.0),
+            44,
+            "French".into(),
+            "France".into(),
+            "language".into(),
+            1.0,
+        );
         assert_eq!(store.len(), 3);
         assert_eq!(store.layers(), vec![10, 26]);
     }
@@ -279,7 +303,15 @@ mod tests {
     fn test_query_top1_exact_match() {
         let mut store = KnnStore::default();
         let key = make_key(64, 1.0);
-        store.add(26, key.clone(), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            key.clone(),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
 
         // Query with same key should return cosine ~1.0
         let result = store.query_top1(26, &key);
@@ -303,9 +335,33 @@ mod tests {
         let key1 = make_key(64, 1.0);
         let key2 = make_key(64, 2.0);
         let key3 = make_key(64, 3.0);
-        store.add(26, key1.clone(), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
-        store.add(26, key2.clone(), 43, "Berlin".into(), "Germany".into(), "capital".into(), 1.0);
-        store.add(26, key3.clone(), 44, "Rome".into(), "Italy".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            key1.clone(),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            key2.clone(),
+            43,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            key3.clone(),
+            44,
+            "Rome".into(),
+            "Italy".into(),
+            "capital".into(),
+            1.0,
+        );
 
         // Query with key1 — should return Paris first (exact match)
         let results = store.query_knn(26, &key1, 3);
@@ -317,9 +373,33 @@ mod tests {
     #[test]
     fn test_remove_by_entity() {
         let mut store = KnnStore::default();
-        store.add(26, make_key(8, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
-        store.add(10, make_key(8, 2.0), 43, "French".into(), "France".into(), "language".into(), 1.0);
-        store.add(26, make_key(8, 3.0), 44, "Berlin".into(), "Germany".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            make_key(8, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
+        store.add(
+            10,
+            make_key(8, 2.0),
+            43,
+            "French".into(),
+            "France".into(),
+            "language".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            make_key(8, 3.0),
+            44,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            1.0,
+        );
         assert_eq!(store.len(), 3);
 
         store.remove_by_entity("France");
@@ -331,7 +411,15 @@ mod tests {
     #[test]
     fn test_remove_by_entity_case_insensitive() {
         let mut store = KnnStore::default();
-        store.add(26, make_key(8, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            make_key(8, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
         store.remove_by_entity("france");
         assert_eq!(store.len(), 0);
     }
@@ -339,9 +427,33 @@ mod tests {
     #[test]
     fn test_entries_for_entity() {
         let mut store = KnnStore::default();
-        store.add(10, make_key(8, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
-        store.add(26, make_key(8, 2.0), 43, "French".into(), "France".into(), "language".into(), 1.0);
-        store.add(26, make_key(8, 3.0), 44, "Berlin".into(), "Germany".into(), "capital".into(), 1.0);
+        store.add(
+            10,
+            make_key(8, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            make_key(8, 2.0),
+            43,
+            "French".into(),
+            "France".into(),
+            "language".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            make_key(8, 3.0),
+            44,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            1.0,
+        );
 
         let france = store.entries_for_entity("France");
         assert_eq!(france.len(), 2);
@@ -367,9 +479,33 @@ mod tests {
     #[test]
     fn test_save_load_roundtrip() {
         let mut store = KnnStore::default();
-        store.add(26, make_key(16, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 0.95);
-        store.add(26, make_key(16, 2.0), 43, "Berlin".into(), "Germany".into(), "capital".into(), 0.87);
-        store.add(10, make_key(16, 3.0), 44, "French".into(), "France".into(), "language".into(), 1.0);
+        store.add(
+            26,
+            make_key(16, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            0.95,
+        );
+        store.add(
+            26,
+            make_key(16, 2.0),
+            43,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            0.87,
+        );
+        store.add(
+            10,
+            make_key(16, 3.0),
+            44,
+            "French".into(),
+            "France".into(),
+            "language".into(),
+            1.0,
+        );
 
         let dir = std::env::temp_dir().join("larql_knn_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -391,7 +527,10 @@ mod tests {
         assert!(result.is_some());
         let (entry, score) = result.unwrap();
         assert_eq!(entry.target_token, "Paris");
-        assert!(score > 0.95, "expected high cosine after f16 round-trip, got {score}");
+        assert!(
+            score > 0.95,
+            "expected high cosine after f16 round-trip, got {score}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -399,7 +538,15 @@ mod tests {
     #[test]
     fn test_query_different_layer_empty() {
         let mut store = KnnStore::default();
-        store.add(26, make_key(8, 1.0), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            make_key(8, 1.0),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
 
         // Query at layer 10 which has no entries
         let result = store.query_top1(10, &make_key(8, 1.0));
@@ -415,8 +562,24 @@ mod tests {
         let mut key2 = vec![0.0; 64];
         key2[1] = 1.0;
 
-        store.add(26, key1.clone(), 42, "Paris".into(), "France".into(), "capital".into(), 1.0);
-        store.add(26, key2.clone(), 43, "Berlin".into(), "Germany".into(), "capital".into(), 1.0);
+        store.add(
+            26,
+            key1.clone(),
+            42,
+            "Paris".into(),
+            "France".into(),
+            "capital".into(),
+            1.0,
+        );
+        store.add(
+            26,
+            key2.clone(),
+            43,
+            "Berlin".into(),
+            "Germany".into(),
+            "capital".into(),
+            1.0,
+        );
 
         // Query with key1 — should return Paris with score=1.0, Berlin with score=0.0
         let results = store.query_knn(26, &key1, 2);

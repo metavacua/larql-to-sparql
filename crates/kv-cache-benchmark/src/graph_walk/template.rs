@@ -32,9 +32,9 @@ impl PatternWalk {
             template_id: "capital-of".to_string(),
             critical_layers: vec![13, 15, 24, 25, 26],
             feature_ranges: vec![
-                (13, vec![8000..8500]),  // Task classifier features
-                (15, vec![3000..3200]),  // Confidence router
-                (24, vec![5000..6000]),  // Factual retrieval
+                (13, vec![8000..8500]), // Task classifier features
+                (15, vec![3000..3200]), // Confidence router
+                (24, vec![5000..6000]), // Factual retrieval
                 (25, vec![5000..6000]),
                 (26, vec![5000..6000]),
             ],

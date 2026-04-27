@@ -89,7 +89,11 @@ pub fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
         sources: if args.sources.is_empty() {
             None
         } else {
-            let parsed: Vec<SourceType> = args.sources.iter().filter_map(|s| parse_source(s)).collect();
+            let parsed: Vec<SourceType> = args
+                .sources
+                .iter()
+                .filter_map(|s| parse_source(s))
+                .collect();
             if parsed.is_empty() {
                 None
             } else {

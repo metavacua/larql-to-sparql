@@ -1,9 +1,9 @@
-pub mod rotation;
+pub mod codebooks;
 pub mod lloyd_max;
 pub mod packing;
-pub mod codebooks;
+pub mod rotation;
 
-use crate::{KvStrategy, model_config::ModelConfig};
+use crate::{model_config::ModelConfig, KvStrategy};
 
 /// Strategy 2: TurboQuant (ICLR 2026).
 ///
@@ -98,7 +98,12 @@ impl KvStrategy for TurboQuant {
         buf
     }
 
-    fn decode(&self, encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    fn decode(
+        &self,
+        encoded: &[u8],
+        num_vectors: usize,
+        dim: usize,
+    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         let bytes_per = self.bytes_per_vector(dim);
         let mut keys = Vec::with_capacity(num_vectors);
         let mut values = Vec::with_capacity(num_vectors);

@@ -12,8 +12,8 @@ use clap::Args;
 
 use larql_inference::{
     calibrate_scalar_gains, predict, predict_with_ffn, predict_with_strategy,
-    FfnBackend, InferenceModel, LayerMode, WeightFfn,
     vindex::{WalkFfn, WalkFfnConfig},
+    FfnBackend, InferenceModel, LayerMode, WeightFfn,
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
@@ -105,7 +105,8 @@ fn run_single(
             let index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
             eprintln!(
                 "  {} layers, {} vectors ({:.1}s)",
-                index.num_layers, index.total_gate_vectors(),
+                index.num_layers,
+                index.total_gate_vectors(),
                 t.elapsed().as_secs_f64(),
             );
 
@@ -117,7 +118,14 @@ fn run_single(
         "weights" => {
             eprintln!("FFN: weights (debug reference — classic matmul)");
             let ffn = WeightFfn { weights };
-            run_ffn(&ffn, weights, model.tokenizer(), token_ids, top_k, "weights");
+            run_ffn(
+                &ffn,
+                weights,
+                model.tokenizer(),
+                token_ids,
+                top_k,
+                "weights",
+            );
         }
         other => return Err(format!("unknown --ffn: {other}. Use `graph` or `weights`.").into()),
     }
@@ -143,7 +151,8 @@ fn parse_k(k: &str, num_layers: usize) -> Result<WalkFfnConfig, Box<dyn std::err
     if k == "full" || k == "unlimited" {
         Ok(WalkFfnConfig::dense(num_layers))
     } else {
-        let n: usize = k.parse()
+        let n: usize = k
+            .parse()
             .map_err(|_| format!("--k must be `full` or a positive integer, got {k:?}"))?;
         Ok(WalkFfnConfig::sparse(num_layers, n))
     }
@@ -170,7 +179,8 @@ fn run_with_mode(
 
     let mut kinds = vec![Kind::Walk; num_layers];
     for part in spec.split(',') {
-        let (name, range) = part.split_once(':')
+        let (name, range) = part
+            .split_once(':')
             .ok_or_else(|| format!("invalid mode spec: {part}"))?;
         let (start, end) = if let Some((a, b)) = range.split_once('-') {
             (a.parse::<usize>()?, b.parse::<usize>()?)
@@ -183,12 +193,22 @@ fn run_with_mode(
             "scalar" => Kind::Scalar,
             n if n.starts_with("sparse") => {
                 let k_str = &n[6..];
-                let k: usize = if k_str.is_empty() { 100 } else { k_str.parse()? };
+                let k: usize = if k_str.is_empty() {
+                    100
+                } else {
+                    k_str.parse()?
+                };
                 Kind::Sparse(k)
             }
-            other => return Err(format!("unknown mode: {other}. Use walk, sparse<K>, scalar.").into()),
+            other => {
+                return Err(format!("unknown mode: {other}. Use walk, sparse<K>, scalar.").into())
+            }
         };
-        for slot in kinds.iter_mut().take(end.min(num_layers - 1) + 1).skip(start) {
+        for slot in kinds
+            .iter_mut()
+            .take(end.min(num_layers - 1) + 1)
+            .skip(start)
+        {
             *slot = kind.clone();
         }
     }
@@ -214,14 +234,21 @@ fn run_with_mode(
     let walk = WalkFfn::from_config(
         weights,
         &index,
-        WalkFfnConfig { k_per_layer, activation_floor: 0.0 },
+        WalkFfnConfig {
+            k_per_layer,
+            activation_floor: 0.0,
+        },
     );
 
     if has_scalar {
         eprintln!("Calibrating scalar gains…");
         let t = Instant::now();
         let gains = calibrate_scalar_gains(weights, token_ids);
-        eprintln!("  {} layers in {:.1}s", gains.len(), t.elapsed().as_secs_f64());
+        eprintln!(
+            "  {} layers in {:.1}s",
+            gains.len(),
+            t.elapsed().as_secs_f64()
+        );
 
         let mut strategy: Vec<LayerMode> = Vec::with_capacity(num_layers);
         for (l, kind) in kinds.iter().enumerate() {
@@ -265,7 +292,10 @@ fn run_comparison(
     let weights = model.weights();
 
     println!();
-    println!("{:<20} {:<15} {:>8} {:>10}  {:<20}", "Backend", "Top-1", "Prob", "Time", "Top-3");
+    println!(
+        "{:<20} {:<15} {:>8} {:>10}  {:<20}",
+        "Backend", "Top-1", "Prob", "Time", "Top-3"
+    );
     println!("{}", "-".repeat(80));
 
     // Weights (debug reference)
@@ -275,20 +305,27 @@ fn run_comparison(
     print_row("weights (reference)", &dense.predictions, t.elapsed());
 
     // Graph at various K values
-    let vindex_path = args.vindex.as_ref().ok_or(
-        "--vindex required for --compare. Build with: larql extract-index <model>.",
-    )?;
+    let vindex_path = args
+        .vindex
+        .as_ref()
+        .ok_or("--vindex required for --compare. Build with: larql extract-index <model>.")?;
     eprintln!("  Loading vindex: {}", vindex_path.display());
     let mut cb = SilentLoadCallbacks;
     let index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
 
     let ks: Vec<(&str, WalkFfnConfig)> = vec![
-        ("graph:full",  WalkFfnConfig::dense(weights.num_layers)),
-        ("graph:5000",  WalkFfnConfig::sparse(weights.num_layers, 5000)),
-        ("graph:1000",  WalkFfnConfig::sparse(weights.num_layers, 1000)),
-        ("graph:500",   WalkFfnConfig::sparse(weights.num_layers, 500)),
-        ("graph:200",   WalkFfnConfig::sparse(weights.num_layers, 200)),
-        ("graph:100",   WalkFfnConfig::sparse(weights.num_layers, 100)),
+        ("graph:full", WalkFfnConfig::dense(weights.num_layers)),
+        (
+            "graph:5000",
+            WalkFfnConfig::sparse(weights.num_layers, 5000),
+        ),
+        (
+            "graph:1000",
+            WalkFfnConfig::sparse(weights.num_layers, 1000),
+        ),
+        ("graph:500", WalkFfnConfig::sparse(weights.num_layers, 500)),
+        ("graph:200", WalkFfnConfig::sparse(weights.num_layers, 200)),
+        ("graph:100", WalkFfnConfig::sparse(weights.num_layers, 100)),
     ];
 
     for (label, config) in ks {
@@ -309,19 +346,31 @@ fn print_predictions(label: &str, predictions: &[(String, f64)]) {
     for (i, (token, prob)) in predictions.iter().enumerate() {
         println!(
             "  {:2}. {:20} {:.4} ({:.2}%)",
-            i + 1, token, prob, prob * 100.0,
+            i + 1,
+            token,
+            prob,
+            prob * 100.0,
         );
     }
 }
 
 fn print_row(label: &str, predictions: &[(String, f64)], elapsed: std::time::Duration) {
-    let (top1, prob1) = predictions.first()
+    let (top1, prob1) = predictions
+        .first()
         .map(|(t, p)| (t.as_str(), *p))
         .unwrap_or(("?", 0.0));
-    let top3: String = predictions.iter().take(3).map(|(t, _)| t.as_str())
-        .collect::<Vec<_>>().join(", ");
+    let top3: String = predictions
+        .iter()
+        .take(3)
+        .map(|(t, _)| t.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     println!(
         "{:<20} {:<15} {:>7.2}% {:>8.0}ms  {:<20}",
-        label, top1, prob1 * 100.0, elapsed.as_secs_f64() * 1000.0, top3,
+        label,
+        top1,
+        prob1 * 100.0,
+        elapsed.as_secs_f64() * 1000.0,
+        top3,
     );
 }

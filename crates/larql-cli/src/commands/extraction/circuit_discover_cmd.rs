@@ -6,8 +6,8 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::ndarray;
 use larql_inference::tokenizers;
-use larql_vindex::load_feature_labels;
 use larql_inference::InferenceModel;
+use larql_vindex::load_feature_labels;
 
 #[derive(Args)]
 pub struct CircuitDiscoverArgs {
@@ -53,7 +53,7 @@ struct OvGateEdge {
 /// A template circuit: a set of attention heads that route to the same FFN features.
 struct Circuit {
     id: usize,
-    heads: Vec<(usize, usize)>, // (layer, head)
+    heads: Vec<(usize, usize)>,         // (layer, head)
     features: Vec<(usize, usize, f32)>, // (layer, feature, total_coupling)
     top_tokens: Vec<String>,
 }
@@ -72,7 +72,8 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
 
     eprintln!(
         "  {} layers, {} heads ({:.1}s)",
-        num_layers, num_q_heads,
+        num_layers,
+        num_q_heads,
         start.elapsed().as_secs_f64()
     );
 
@@ -156,7 +157,12 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         eprint!("L{layer}... ");
         let _ = io::stderr().flush();
         if (layer + 1) % 10 == 0 {
-            eprintln!("({}/{} layers, {:.0}s)", layer + 1, num_layers, start.elapsed().as_secs_f64());
+            eprintln!(
+                "({}/{} layers, {:.0}s)",
+                layer + 1,
+                num_layers,
+                start.elapsed().as_secs_f64()
+            );
             eprint!("  ");
             let _ = io::stderr().flush();
         }
@@ -180,20 +186,27 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
                     edge.gate_top_token = label.clone();
                 }
             }
-            eprintln!("  {} labels loaded ({:.1}s)", label_map.len(), label_start.elapsed().as_secs_f64());
+            eprintln!(
+                "  {} labels loaded ({:.1}s)",
+                label_map.len(),
+                label_start.elapsed().as_secs_f64()
+            );
         } else {
             // Slow path: project each feature against vocab
             eprintln!("  Labeling features (slow — use --labels for instant labels)...");
             let mut unique_features: HashMap<(usize, usize), String> = HashMap::new();
             for edge in &all_edges {
-                unique_features.entry((edge.layer, edge.feature)).or_default();
+                unique_features
+                    .entry((edge.layer, edge.feature))
+                    .or_default();
             }
             let total = unique_features.len();
             for (i, (&(layer, feat), label)) in unique_features.iter_mut().enumerate() {
                 let gate_key = arch.ffn_gate_key(layer);
                 if let Some(w_gate) = weights.tensors.get(&gate_key) {
                     let gate_row = w_gate.row(feat);
-                    *label = project_top_token(&weights.embed, &gate_row.to_vec(), model.tokenizer());
+                    *label =
+                        project_top_token(&weights.embed, &gate_row.to_vec(), model.tokenizer());
                 }
                 if (i + 1) % 500 == 0 {
                     eprint!("\r  {}/{} features...", i + 1, total);
@@ -205,7 +218,11 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
                     edge.gate_top_token = label.clone();
                 }
             }
-            eprintln!("\r  {} features labeled ({:.1}s)", total, label_start.elapsed().as_secs_f64());
+            eprintln!(
+                "\r  {} features labeled ({:.1}s)",
+                total,
+                label_start.elapsed().as_secs_f64()
+            );
         }
     }
 
@@ -320,7 +337,8 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         while let Some(current) = queue.pop() {
             if let Some(neighbors) = adjacency.get(&current) {
                 for &(neighbor, _sim) in neighbors {
-                    if let std::collections::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor) {
+                    if let std::collections::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor)
+                    {
                         e.insert(cid);
                         queue.push(neighbor);
                     }
@@ -329,7 +347,10 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    eprintln!("  Clustered in {:.1}s", cluster_start.elapsed().as_secs_f64());
+    eprintln!(
+        "  Clustered in {:.1}s",
+        cluster_start.elapsed().as_secs_f64()
+    );
 
     // Build circuits from clusters
     let mut cluster_heads: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
@@ -368,7 +389,8 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
             .iter()
             .take(10)
             .filter_map(|&(layer, feat, _)| {
-                all_edges.iter()
+                all_edges
+                    .iter()
                     .find(|e| e.layer == layer && e.feature == feat && !e.gate_top_token.is_empty())
                     .map(|e| e.gate_top_token.clone())
             })
@@ -433,16 +455,19 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
     println!("  Total edges: {}", all_edges.len());
     println!("  Total heads: {}", head_keys.len());
     println!("  Total circuits: {}", circuits.len());
-    println!(
-        "  Large circuits (3+ heads): {}",
-        large_circuits.len()
-    );
+    println!("  Large circuits (3+ heads): {}", large_circuits.len());
 
     if let Some(biggest) = large_circuits.first() {
         println!(
             "  Largest circuit: {} heads, tokens: {}",
             biggest.heads.len(),
-            biggest.top_tokens.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+            biggest
+                .top_tokens
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 

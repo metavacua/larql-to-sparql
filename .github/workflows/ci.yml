@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude/** ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run CI
+        run: make ci
+        id: ci_step
+
+      - name: Create issue on failure
+        if: failure() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          COMMIT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT:0:7}"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          gh issue create \
+            --title "🔴 Workflow failure on ${BRANCH} (${COMMIT_SHORT})" \
+            --body "**Workflow:** CI
+**Branch:** ${BRANCH}
+**Commit:** [${COMMIT_SHORT}](${COMMIT_URL})
+**Status:** ❌ Failed
+
+## What failed
+The \`make ci\` target failed. This typically includes:
+- \`cargo fmt --check\` (code formatting)
+- \`cargo clippy\` (linting with warnings as errors)
+- \`cargo test\` (test suite)
+
+Check the [workflow run](${RUN_URL}) for detailed logs.
+
+## Action required
+Review the failure logs and fix the issue on \`${BRANCH}\`." \
+            --label workflow-failure \
+            --label automated

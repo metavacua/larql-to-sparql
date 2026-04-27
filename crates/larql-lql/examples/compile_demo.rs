@@ -56,7 +56,11 @@ fn main() {
     // ── Phase 1: USE source vindex + INFER baseline ──
     section("Phase 1 — Baseline INFER on source vindex");
 
-    run(&mut session, &format!(r#"USE "{SOURCE_VINDEX}";"#), "USE source");
+    run(
+        &mut session,
+        &format!(r#"USE "{SOURCE_VINDEX}";"#),
+        "USE source",
+    );
 
     let baseline_atlantis = run_capture(
         &mut session,
@@ -72,7 +76,11 @@ fn main() {
     // ── Phase 2: INSERT Atlantis → Poseidon under a patch session ──
     section("Phase 2 — INSERT Atlantis → Poseidon");
 
-    run(&mut session, r#"BEGIN PATCH "/tmp/larql_compile_demo.vlp";"#, "BEGIN PATCH");
+    run(
+        &mut session,
+        r#"BEGIN PATCH "/tmp/larql_compile_demo.vlp";"#,
+        "BEGIN PATCH",
+    );
     run(
         &mut session,
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital", "Poseidon");"#,
@@ -93,8 +101,16 @@ fn main() {
 
     let patch_atlantis_ok = patched_atlantis.contains("Pose");
     let patch_france_ok = patched_france.contains("Paris");
-    check("patch active: Atlantis → Pose at #1", patch_atlantis_ok, &mut all_passed);
-    check("patch active: France → Paris preserved", patch_france_ok, &mut all_passed);
+    check(
+        "patch active: Atlantis → Pose at #1",
+        patch_atlantis_ok,
+        &mut all_passed,
+    );
+    check(
+        "patch active: France → Paris preserved",
+        patch_france_ok,
+        &mut all_passed,
+    );
 
     run(&mut session, "SAVE PATCH;", "SAVE PATCH");
 
@@ -107,7 +123,11 @@ fn main() {
     println!("    compile took {:?}", t0.elapsed());
 
     let baked_exists = Path::new(&compiled_path).exists();
-    check("baked vindex written to disk", baked_exists, &mut all_passed);
+    check(
+        "baked vindex written to disk",
+        baked_exists,
+        &mut all_passed,
+    );
 
     // ── Phase 4: USE the compiled vindex in a fresh session and INFER ──
     //
@@ -118,7 +138,11 @@ fn main() {
     section("Phase 4 — USE compiled vindex (fresh session) + verify with INFER");
 
     let mut cold_session = Session::new();
-    run(&mut cold_session, &format!(r#"USE "{compiled_path}";"#), "USE compiled vindex");
+    run(
+        &mut cold_session,
+        &format!(r#"USE "{compiled_path}";"#),
+        "USE compiled vindex",
+    );
 
     let cold_atlantis = run_capture(
         &mut cold_session,

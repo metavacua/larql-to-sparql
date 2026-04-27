@@ -140,10 +140,7 @@ mod tests {
     fn kmeans_basic() {
         let data = Array2::from_shape_vec(
             (6, 2),
-            vec![
-                1.0, 0.0, 0.9, 0.1, 0.8, 0.2,
-                0.0, 1.0, 0.1, 0.9, 0.2, 0.8,
-            ],
+            vec![1.0, 0.0, 0.9, 0.1, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9, 0.2, 0.8],
         )
         .unwrap();
 
@@ -158,11 +155,7 @@ mod tests {
 
     #[test]
     fn kmeans_single_cluster() {
-        let data = Array2::from_shape_vec(
-            (3, 2),
-            vec![1.0, 0.0, 0.9, 0.1, 0.95, 0.05],
-        )
-        .unwrap();
+        let data = Array2::from_shape_vec((3, 2), vec![1.0, 0.0, 0.9, 0.1, 0.95, 0.05]).unwrap();
 
         let (centres, assignments, _) = kmeans(&data, 1, 50);
         assert_eq!(centres.shape(), &[1, 2]);

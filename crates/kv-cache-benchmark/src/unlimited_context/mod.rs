@@ -36,14 +36,14 @@
 //! ~174 KB accounting for some overhead. Matches either way.
 
 mod checkpoint_store;
-mod token_archive;
-mod extend;
 mod engine;
+mod extend;
+mod token_archive;
 
 pub use checkpoint_store::CheckpointStore;
-pub use token_archive::TokenArchive;
+pub use engine::{EngineStats, UnlimitedContextEngine};
 pub use extend::{empty_prior, rs_extend_from_checkpoint, ExtendOutput};
-pub use engine::{UnlimitedContextEngine, EngineStats};
+pub use token_archive::TokenArchive;
 
 /// Test-only re-export so integration tests can construct an empty prior
 /// without importing the inner module path.

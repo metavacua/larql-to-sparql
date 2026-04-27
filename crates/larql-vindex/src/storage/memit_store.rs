@@ -52,7 +52,14 @@ impl MemitStore {
         Self::default()
     }
 
-    pub fn add_cycle(&mut self, layer: usize, facts: Vec<MemitFact>, frobenius_norm: f32, min_cos: f32, max_off_diag: f32) -> u64 {
+    pub fn add_cycle(
+        &mut self,
+        layer: usize,
+        facts: Vec<MemitFact>,
+        frobenius_norm: f32,
+        min_cos: f32,
+        max_off_diag: f32,
+    ) -> u64 {
         let id = self.next_cycle_id;
         self.next_cycle_id += 1;
         self.cycles.push(MemitCycle {
@@ -96,7 +103,9 @@ impl MemitStore {
         let mut out = Vec::new();
         for cycle in &self.cycles {
             for fact in &cycle.facts {
-                if fact.entity.eq_ignore_ascii_case(entity) && fact.relation.eq_ignore_ascii_case(relation) {
+                if fact.entity.eq_ignore_ascii_case(entity)
+                    && fact.relation.eq_ignore_ascii_case(relation)
+                {
                     out.push(fact);
                 }
             }
@@ -263,8 +272,20 @@ mod tests {
     #[test]
     fn multi_cycle() {
         let mut s = MemitStore::new();
-        s.add_cycle(33, vec![make_fact("France", "capital", "Paris")], 0.01, 0.99, 0.001);
-        s.add_cycle(33, vec![make_fact("France", "language", "French")], 0.01, 0.99, 0.001);
+        s.add_cycle(
+            33,
+            vec![make_fact("France", "capital", "Paris")],
+            0.01,
+            0.99,
+            0.001,
+        );
+        s.add_cycle(
+            33,
+            vec![make_fact("France", "language", "French")],
+            0.01,
+            0.99,
+            0.001,
+        );
         assert_eq!(s.total_facts(), 2);
         assert_eq!(s.num_cycles(), 2);
 
