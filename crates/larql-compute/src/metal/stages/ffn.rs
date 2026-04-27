@@ -13,8 +13,8 @@
 //! single multi-position dispatch over `seq_len * inter` elementwise
 //! threads.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 use super::quant_matvec;
 
@@ -36,7 +36,9 @@ pub fn encode_gated(
     up_format: crate::QuantFormat,
     down_format: crate::QuantFormat,
     activation: Activation,
-    gate_buf: &Buffer, up_buf: &Buffer, down_buf: &Buffer,
+    gate_buf: &Buffer,
+    up_buf: &Buffer,
+    down_buf: &Buffer,
     ffn_norm_out: &Buffer, // f32 input for Q4_K / Q6_K / Q4_KF
     ffn_q8_in: &Buffer,    // Q8 input for Q4_0 / Q8_0
     ffn_q8s_in: &Buffer,
@@ -45,11 +47,12 @@ pub fn encode_gated(
     act_scratch: &Buffer,
     down_out: &Buffer,
     seq_len: usize,
-    inter: usize, hidden: usize,
-    h_stride_bytes: u64,       // hidden * 4
-    inter_stride_bytes: u64,   // inter * 4
-    q8_stride_bytes: u64,      // Q8 input bytes per pos
-    q8s_stride_bytes: u64,     // Q8 scales bytes per pos
+    inter: usize,
+    hidden: usize,
+    h_stride_bytes: u64,     // hidden * 4
+    inter_stride_bytes: u64, // inter * 4
+    q8_stride_bytes: u64,    // Q8 input bytes per pos
+    q8s_stride_bytes: u64,   // Q8 scales bytes per pos
 ) {
     // Gate+up per position.
     for pos in 0..seq_len {
@@ -58,20 +61,36 @@ pub fn encode_gated(
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
         quant_matvec::encode(
-            enc, gate_format, gate_buf,
-            ffn_norm_out, h_off,
-            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-            gate_scratch, inter_off,
+            enc,
+            gate_format,
+            gate_buf,
+            ffn_norm_out,
+            h_off,
+            ffn_q8_in,
+            q8_off,
+            ffn_q8s_in,
+            q8s_off,
+            gate_scratch,
+            inter_off,
             pipes,
-            inter, hidden,
+            inter,
+            hidden,
         );
         quant_matvec::encode(
-            enc, up_format, up_buf,
-            ffn_norm_out, h_off,
-            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-            up_scratch, inter_off,
+            enc,
+            up_format,
+            up_buf,
+            ffn_norm_out,
+            h_off,
+            ffn_q8_in,
+            q8_off,
+            ffn_q8s_in,
+            q8s_off,
+            up_scratch,
+            inter_off,
             pipes,
-            inter, hidden,
+            inter,
+            hidden,
         );
     }
 
@@ -100,12 +119,20 @@ pub fn encode_gated(
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
         quant_matvec::encode(
-            enc, down_format, down_buf,
-            act_scratch, inter_off,
-            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-            down_out, h_off,
+            enc,
+            down_format,
+            down_buf,
+            act_scratch,
+            inter_off,
+            ffn_q8_in,
+            q8_off,
+            ffn_q8s_in,
+            q8s_off,
+            down_out,
+            h_off,
             pipes,
-            hidden, inter,
+            hidden,
+            inter,
         );
     }
 }
@@ -120,7 +147,8 @@ pub fn encode_standard(
     up_format: crate::QuantFormat,
     down_format: crate::QuantFormat,
     activation: Activation,
-    up_buf: &Buffer, down_buf: &Buffer,
+    up_buf: &Buffer,
+    down_buf: &Buffer,
     ffn_norm_out: &Buffer,
     ffn_q8_in: &Buffer,
     ffn_q8s_in: &Buffer,
@@ -128,7 +156,8 @@ pub fn encode_standard(
     act_scratch: &Buffer,
     down_out: &Buffer,
     seq_len: usize,
-    inter: usize, hidden: usize,
+    inter: usize,
+    hidden: usize,
     h_stride_bytes: u64,
     inter_stride_bytes: u64,
     q8_stride_bytes: u64,
@@ -140,12 +169,20 @@ pub fn encode_standard(
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
         quant_matvec::encode(
-            enc, up_format, up_buf,
-            ffn_norm_out, h_off,
-            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-            up_scratch, inter_off,
+            enc,
+            up_format,
+            up_buf,
+            ffn_norm_out,
+            h_off,
+            ffn_q8_in,
+            q8_off,
+            ffn_q8s_in,
+            q8s_off,
+            up_scratch,
+            inter_off,
             pipes,
-            inter, hidden,
+            inter,
+            hidden,
         );
     }
 
@@ -169,12 +206,20 @@ pub fn encode_standard(
         let q8_off = pos as u64 * q8_stride_bytes;
         let q8s_off = pos as u64 * q8s_stride_bytes;
         quant_matvec::encode(
-            enc, down_format, down_buf,
-            act_scratch, inter_off,
-            ffn_q8_in, q8_off, ffn_q8s_in, q8s_off,
-            down_out, h_off,
+            enc,
+            down_format,
+            down_buf,
+            act_scratch,
+            inter_off,
+            ffn_q8_in,
+            q8_off,
+            ffn_q8s_in,
+            q8s_off,
+            down_out,
+            h_off,
             pipes,
-            hidden, inter,
+            hidden,
+            inter,
         );
     }
 }

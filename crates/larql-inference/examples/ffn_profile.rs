@@ -34,11 +34,26 @@ fn parse_args() -> Args {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model = args[i].clone(); }
-            "--vindex" => { i += 1; vindex = PathBuf::from(&args[i]); }
-            "--layer" => { i += 1; layer = args[i].parse().unwrap_or(0); }
-            "--seq-len" => { i += 1; seq_len = args[i].parse().unwrap_or(6); }
-            "--iters" => { i += 1; iters = args[i].parse().unwrap_or(10); }
+            "--model" => {
+                i += 1;
+                model = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex = PathBuf::from(&args[i]);
+            }
+            "--layer" => {
+                i += 1;
+                layer = args[i].parse().unwrap_or(0);
+            }
+            "--seq-len" => {
+                i += 1;
+                seq_len = args[i].parse().unwrap_or(6);
+            }
+            "--iters" => {
+                i += 1;
+                iters = args[i].parse().unwrap_or(10);
+            }
             _ => {}
         }
         i += 1;
@@ -47,7 +62,13 @@ fn parse_args() -> Args {
         eprintln!("Usage: ffn_profile --model M --vindex D [--layer N] [--seq-len N] [--iters N]");
         std::process::exit(1);
     }
-    Args { model, vindex, layer, seq_len, iters }
+    Args {
+        model,
+        vindex,
+        layer,
+        seq_len,
+        iters,
+    }
 }
 
 fn percentile(samples: &mut [f64], p: f64) -> f64 {
@@ -56,7 +77,9 @@ fn percentile(samples: &mut [f64], p: f64) -> f64 {
     samples[idx.min(samples.len() - 1)]
 }
 
-fn median(samples: &mut [f64]) -> f64 { percentile(samples, 0.5) }
+fn median(samples: &mut [f64]) -> f64 {
+    percentile(samples, 0.5)
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = parse_args();
@@ -72,21 +95,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let weights = model.weights();
     let hidden = weights.hidden_size;
     let num_layers = weights.num_layers;
-    println!("Loaded: {num_layers} layers, hidden={hidden} (took {:.1}s)", t0.elapsed().as_secs_f64());
+    println!(
+        "Loaded: {num_layers} layers, hidden={hidden} (took {:.1}s)",
+        t0.elapsed().as_secs_f64()
+    );
 
     let t0 = Instant::now();
     let mut cb = SilentLoadCallbacks;
     let index = VectorIndex::load_vindex(&args.vindex, &mut cb)?;
-    println!("Vindex: {} vectors (took {:.1}s)\n", index.total_gate_vectors(), t0.elapsed().as_secs_f64());
+    println!(
+        "Vindex: {} vectors (took {:.1}s)\n",
+        index.total_gate_vectors(),
+        t0.elapsed().as_secs_f64()
+    );
 
     let intermediate = index.num_features(args.layer);
-    println!("Layer {} shape: intermediate={}, hidden={}", args.layer, intermediate, hidden);
+    println!(
+        "Layer {} shape: intermediate={}, hidden={}",
+        args.layer, intermediate, hidden
+    );
 
     let backend = default_backend();
     let backend_ref: Option<&dyn larql_compute::ComputeBackend> = Some(&*backend);
 
     // Synthetic x: [seq_len, hidden] random-ish, just for timing.
-    let x_vec: Vec<f32> = (0..args.seq_len * hidden).map(|i| (i as f32 * 0.001).sin() * 0.1).collect();
+    let x_vec: Vec<f32> = (0..args.seq_len * hidden)
+        .map(|i| (i as f32 * 0.001).sin() * 0.1)
+        .collect();
     let x = ndarray::Array2::from_shape_vec((args.seq_len, hidden), x_vec.clone())?;
     let x_flat: &[f32] = x.as_slice().unwrap();
 
@@ -121,7 +156,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // --- Down Q6K matmul (needs activation shaped [seq, intermediate]) ---
-    let act_vec: Vec<f32> = (0..args.seq_len * intermediate).map(|i| (i as f32 * 0.002).cos() * 0.1).collect();
+    let act_vec: Vec<f32> = (0..args.seq_len * intermediate)
+        .map(|i| (i as f32 * 0.002).cos() * 0.1)
+        .collect();
     let mut down_ms = Vec::with_capacity(args.iters);
     for _ in 0..args.iters {
         let t = Instant::now();
@@ -138,23 +175,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let u_p99 = percentile(&mut up_ms, 0.99);
     let d_p99 = percentile(&mut down_ms, 0.99);
 
-    println!("\n--- Per-phase medians @ layer {} (seq_len={}) ---", args.layer, args.seq_len);
+    println!(
+        "\n--- Per-phase medians @ layer {} (seq_len={}) ---",
+        args.layer, args.seq_len
+    );
     println!("  {:<28}  median   p99", "phase");
     println!("  {}", "-".repeat(58));
-    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "gate_scores CPU BLAS", gc_med, gc_p99);
-    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "gate_scores backend (gpu)", gg_med, gg_p99);
-    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "q4k_matmul_transb (up)", u_med, u_p99);
-    println!("  {:<28}  {:>6.1}ms  {:>6.1}ms", "q4k_matmul_transb (down)", d_med, d_p99);
+    println!(
+        "  {:<28}  {:>6.1}ms  {:>6.1}ms",
+        "gate_scores CPU BLAS", gc_med, gc_p99
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms  {:>6.1}ms",
+        "gate_scores backend (gpu)", gg_med, gg_p99
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms  {:>6.1}ms",
+        "q4k_matmul_transb (up)", u_med, u_p99
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms  {:>6.1}ms",
+        "q4k_matmul_transb (down)", d_med, d_p99
+    );
     println!("  {}", "-".repeat(58));
     let layer_total_cpu = gc_med + u_med + d_med;
     let layer_total_gpu = gg_med + u_med + d_med;
-    println!("  {:<28}  {:>6.1}ms", "per-layer FFN total (CPU gate)", layer_total_cpu);
-    println!("  {:<28}  {:>6.1}ms", "per-layer FFN total (GPU gate)", layer_total_gpu);
-    println!("  {:<28}  {:>6.1}ms", format!("× {num_layers} layers (CPU gate)"), layer_total_cpu * num_layers as f64);
-    println!("  {:<28}  {:>6.1}ms", format!("× {num_layers} layers (GPU gate)"), layer_total_gpu * num_layers as f64);
+    println!(
+        "  {:<28}  {:>6.1}ms",
+        "per-layer FFN total (CPU gate)", layer_total_cpu
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms",
+        "per-layer FFN total (GPU gate)", layer_total_gpu
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms",
+        format!("× {num_layers} layers (CPU gate)"),
+        layer_total_cpu * num_layers as f64
+    );
+    println!(
+        "  {:<28}  {:>6.1}ms",
+        format!("× {num_layers} layers (GPU gate)"),
+        layer_total_gpu * num_layers as f64
+    );
     if gg_med > 0.0 {
-        println!("  → gate gpu speedup: {:.2}× ({:.1} ms saved / layer, {:.1} ms / token total)",
-            gc_med / gg_med, gc_med - gg_med, (gc_med - gg_med) * num_layers as f64);
+        println!(
+            "  → gate gpu speedup: {:.2}× ({:.1} ms saved / layer, {:.1} ms / token total)",
+            gc_med / gg_med,
+            gc_med - gg_med,
+            (gc_med - gg_med) * num_layers as f64
+        );
     }
 
     Ok(())

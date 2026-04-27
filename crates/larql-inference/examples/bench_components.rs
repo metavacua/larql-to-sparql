@@ -8,8 +8,8 @@
 //!
 //! Run: cargo run --release -p larql-inference --example bench_components
 
-use std::time::Instant;
 use ndarray::{Array1, Array2};
+use std::time::Instant;
 
 fn main() {
     println!("=== Inference Component Benchmark ===\n");
@@ -43,7 +43,8 @@ fn main() {
     let token_ids: Vec<u32> = (0..seq as u32).collect();
     let t = Instant::now();
     for _ in 0..iters {
-        let _e: Vec<f32> = token_ids.iter()
+        let _e: Vec<f32> = token_ids
+            .iter()
             .flat_map(|&tid| embed_table.row(tid as usize).to_vec())
             .collect();
     }
@@ -56,7 +57,10 @@ fn main() {
         let _normed = rms_norm(&h, &norm_weight, 0.0, 1e-6);
     }
     let rmsnorm_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  RMSNorm [{seq},{hidden}]:             {:>8.1}µs", rmsnorm_us);
+    println!(
+        "  RMSNorm [{seq},{hidden}]:             {:>8.1}µs",
+        rmsnorm_us
+    );
 
     // ── 3. LayerNorm (for StarCoder2 comparison) ──
     let t = Instant::now();
@@ -64,8 +68,11 @@ fn main() {
         let _normed = layer_norm(&h, &norm_weight, &norm_bias, 1e-5);
     }
     let layernorm_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  LayerNorm [{seq},{hidden}]:           {:>8.1}µs  ({:.2}x RMSNorm)",
-        layernorm_us, layernorm_us / rmsnorm_us);
+    println!(
+        "  LayerNorm [{seq},{hidden}]:           {:>8.1}µs  ({:.2}x RMSNorm)",
+        layernorm_us,
+        layernorm_us / rmsnorm_us
+    );
 
     // ── 4. RoPE ──
     let q_proj = synth_2d(seq, num_q_heads * head_dim, 60);
@@ -75,7 +82,10 @@ fn main() {
         apply_rope_inplace(&mut q, head_dim, num_q_heads, 10000.0, 0);
     }
     let rope_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  RoPE (full, {num_q_heads}Q heads):          {:>8.1}µs", rope_us);
+    println!(
+        "  RoPE (full, {num_q_heads}Q heads):          {:>8.1}µs",
+        rope_us
+    );
 
     // Partial RoPE (Gemma 4: 25%)
     let t = Instant::now();
@@ -84,7 +94,11 @@ fn main() {
         apply_rope_partial_inplace(&mut q, head_dim, num_q_heads, 1000000.0, 0, head_dim / 4);
     }
     let rope_partial_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  RoPE (25%, Gemma 4 global):     {:>8.1}µs  ({:.1}x faster)", rope_partial_us, rope_us / rope_partial_us);
+    println!(
+        "  RoPE (25%, Gemma 4 global):     {:>8.1}µs  ({:.1}x faster)",
+        rope_partial_us,
+        rope_us / rope_partial_us
+    );
 
     // ── 5. QKV Projection (BLAS) ──
     let t = Instant::now();
@@ -102,8 +116,15 @@ fn main() {
     let v_mat = synth_2d(seq, num_kv_heads * head_dim, 72);
     let t = Instant::now();
     for _ in 0..iters {
-        let _attn = attention_reference(&q_mat, &k_mat, &v_mat,
-            num_q_heads, num_kv_heads, head_dim, seq);
+        let _attn = attention_reference(
+            &q_mat,
+            &k_mat,
+            &v_mat,
+            num_q_heads,
+            num_kv_heads,
+            head_dim,
+            seq,
+        );
     }
     let attn_us = t.elapsed().as_micros() as f64 / iters as f64;
     println!("  Attention (scores+softmax+V):    {:>8.1}µs", attn_us);
@@ -125,7 +146,10 @@ fn main() {
         let _r = &a + &b;
     }
     let resadd_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  Residual add [{seq},{hidden}]:        {:>8.1}µs", resadd_us);
+    println!(
+        "  Residual add [{seq},{hidden}]:        {:>8.1}µs",
+        resadd_us
+    );
 
     // ── 9. FFN Gate + Up (BLAS) ──
     let t = Instant::now();
@@ -162,11 +186,23 @@ fn main() {
         let _logits = backend.matmul_transb(last_hidden.view(), embed_table.view());
     }
     let logits_us = t.elapsed().as_micros() as f64 / 5.0;
-    println!("  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {:>8.0}µs", logits_us);
+    println!(
+        "  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {:>8.0}µs",
+        logits_us
+    );
 
     // ── Summary ──
-    let layer_total = rmsnorm_us + qkv_us + rope_us + attn_us + o_us + resadd_us
-        + rmsnorm_us + ffn_gu_us + geglu_us + ffn_down_us + resadd_us;
+    let layer_total = rmsnorm_us
+        + qkv_us
+        + rope_us
+        + attn_us
+        + o_us
+        + resadd_us
+        + rmsnorm_us
+        + ffn_gu_us
+        + geglu_us
+        + ffn_down_us
+        + resadd_us;
     let full_model = layer_total * 34.0 + embed_us + logits_us;
 
     println!("\n--- Per-Layer Breakdown (CPU BLAS, seq={seq}) ---\n");
@@ -187,12 +223,18 @@ fn main() {
     println!("  Projected tok/s: {:.0}", 1_000_000.0 / full_model);
 
     println!("\n--- Comparison ---\n");
-    println!("  LARQL CPU (projected):  {:.1}ms  ({:.0} tok/s)", full_model / 1000.0, 1_000_000.0 / full_model);
+    println!(
+        "  LARQL CPU (projected):  {:.1}ms  ({:.0} tok/s)",
+        full_model / 1000.0,
+        1_000_000.0 / full_model
+    );
     println!("  LARQL GPU Q4_K decode:  17.5ms  (57 tok/s)");
     println!("  Ollama (34L, Metal):    10.3ms  (97 tok/s)");
-    println!("  Projected cached (8L):  {:.1}ms  ({:.0} tok/s)",
+    println!(
+        "  Projected cached (8L):  {:.1}ms  ({:.0} tok/s)",
         layer_total * 8.0 / 1000.0 + logits_us / 1000.0,
-        1_000_000.0 / (layer_total * 8.0 + logits_us));
+        1_000_000.0 / (layer_total * 8.0 + logits_us)
+    );
 }
 
 fn print_pct(label: &str, us: f64, total: f64) {
@@ -235,7 +277,11 @@ fn layer_norm(x: &Array2<f32>, weight: &Array1<f32>, bias: &Array1<f32>, eps: f6
     for s in 0..seq {
         let row = x.row(s);
         let mean: f64 = row.iter().map(|&v| v as f64).sum::<f64>() / dim as f64;
-        let var: f64 = row.iter().map(|&v| ((v as f64) - mean).powi(2)).sum::<f64>() / dim as f64;
+        let var: f64 = row
+            .iter()
+            .map(|&v| ((v as f64) - mean).powi(2))
+            .sum::<f64>()
+            / dim as f64;
         let inv_std = (1.0 / (var + eps).sqrt()) as f32;
         let mean_f32 = mean as f32;
         for d in 0..dim {
@@ -245,7 +291,13 @@ fn layer_norm(x: &Array2<f32>, weight: &Array1<f32>, bias: &Array1<f32>, eps: f6
     out
 }
 
-fn apply_rope_inplace(q: &mut Array2<f32>, head_dim: usize, num_heads: usize, base: f32, start_pos: usize) {
+fn apply_rope_inplace(
+    q: &mut Array2<f32>,
+    head_dim: usize,
+    num_heads: usize,
+    base: f32,
+    start_pos: usize,
+) {
     let seq = q.shape()[0];
     for s in 0..seq {
         let pos = (start_pos + s) as f32;
@@ -265,7 +317,14 @@ fn apply_rope_inplace(q: &mut Array2<f32>, head_dim: usize, num_heads: usize, ba
     }
 }
 
-fn apply_rope_partial_inplace(q: &mut Array2<f32>, head_dim: usize, num_heads: usize, base: f32, start_pos: usize, rotary_dim: usize) {
+fn apply_rope_partial_inplace(
+    q: &mut Array2<f32>,
+    head_dim: usize,
+    num_heads: usize,
+    base: f32,
+    start_pos: usize,
+    rotary_dim: usize,
+) {
     let seq = q.shape()[0];
     let half = rotary_dim / 2;
     for s in 0..seq {
@@ -287,15 +346,23 @@ fn apply_rope_partial_inplace(q: &mut Array2<f32>, head_dim: usize, num_heads: u
 
 fn geglu_silu(gate: &Array2<f32>, up: &Array2<f32>) -> Array2<f32> {
     let mut out = Array2::zeros(gate.raw_dim());
-    ndarray::Zip::from(&mut out).and(gate).and(up).for_each(|o, &g, &u| {
-        *o = (g / (1.0 + (-g).exp())) * u;
-    });
+    ndarray::Zip::from(&mut out)
+        .and(gate)
+        .and(up)
+        .for_each(|o, &g, &u| {
+            *o = (g / (1.0 + (-g).exp())) * u;
+        });
     out
 }
 
 fn attention_reference(
-    q: &Array2<f32>, k: &Array2<f32>, v: &Array2<f32>,
-    num_q: usize, num_kv: usize, head_dim: usize, seq: usize,
+    q: &Array2<f32>,
+    k: &Array2<f32>,
+    v: &Array2<f32>,
+    num_q: usize,
+    num_kv: usize,
+    head_dim: usize,
+    seq: usize,
 ) -> Array2<f32> {
     let mut out = Array2::zeros((seq, num_q * head_dim));
     let scale = 1.0 / (head_dim as f32).sqrt();
@@ -314,7 +381,10 @@ fn attention_reference(
                 scores[t] = dot * scale;
             }
             // Softmax
-            let max = scores[..=s].iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max = scores[..=s]
+                .iter()
+                .cloned()
+                .fold(f32::NEG_INFINITY, f32::max);
             let exp_sum: f32 = scores[..=s].iter().map(|&sc| (sc - max).exp()).sum();
             // V-weighted sum
             for d in 0..head_dim {

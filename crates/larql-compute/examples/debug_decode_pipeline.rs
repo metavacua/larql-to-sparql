@@ -25,42 +25,86 @@ fn main() {
     let inter = 10240;
 
     // Synthetic input (nonzero)
-    let x: Vec<f32> = (0..hidden).map(|i| ((i as f32 - 1280.0) * 0.01).sin() * 10.0).collect();
+    let x: Vec<f32> = (0..hidden)
+        .map(|i| ((i as f32 - 1280.0) * 0.01).sin() * 10.0)
+        .collect();
     let x_max = x.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
     println!("Input: len={}, max={:.4}", x.len(), x_max);
 
     // Synthetic weights (small random via Q4_0 quantize/dequantize roundtrip)
     let dummy_norm: Vec<f32> = vec![1.0; hidden];
-    let gate_f32: Vec<f32> = (0..inter * hidden).map(|i| ((i as f32) * 0.000001).sin() * 0.1).collect();
+    let gate_f32: Vec<f32> = (0..inter * hidden)
+        .map(|i| ((i as f32) * 0.000001).sin() * 0.1)
+        .collect();
     let dummy_gate_q4 = larql_compute::cpu::ops::q4_common::quantize_q4_0(&gate_f32);
     let dummy_up_q4 = larql_compute::cpu::ops::q4_common::quantize_q4_0(&gate_f32);
-    let down_f32: Vec<f32> = (0..hidden * inter).map(|i| ((i as f32) * 0.000002).cos() * 0.1).collect();
+    let down_f32: Vec<f32> = (0..hidden * inter)
+        .map(|i| ((i as f32) * 0.000002).cos() * 0.1)
+        .collect();
     let dummy_down_q4 = larql_compute::cpu::ops::q4_common::quantize_q4_0(&down_f32);
 
     // Build Q4_K weights for attention (synthetic)
     let wq_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(
-        &(0..q_dim * hidden).map(|i| ((i as f32) * 0.00001).sin() * 0.5).collect::<Vec<_>>()
+        &(0..q_dim * hidden)
+            .map(|i| ((i as f32) * 0.00001).sin() * 0.5)
+            .collect::<Vec<_>>(),
     );
     let wk_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(
-        &(0..kv_dim * hidden).map(|i| ((i as f32) * 0.00002).cos() * 0.5).collect::<Vec<_>>()
+        &(0..kv_dim * hidden)
+            .map(|i| ((i as f32) * 0.00002).cos() * 0.5)
+            .collect::<Vec<_>>(),
     );
     let wv_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(
-        &(0..kv_dim * hidden).map(|i| ((i as f32) * 0.00003).sin() * 0.5).collect::<Vec<_>>()
+        &(0..kv_dim * hidden)
+            .map(|i| ((i as f32) * 0.00003).sin() * 0.5)
+            .collect::<Vec<_>>(),
     );
     let wo_data = larql_compute::cpu::ops::q4_common::quantize_q4_k(
-        &(0..hidden * q_dim).map(|i| ((i as f32) * 0.00004).cos() * 0.5).collect::<Vec<_>>()
+        &(0..hidden * q_dim)
+            .map(|i| ((i as f32) * 0.00004).cos() * 0.5)
+            .collect::<Vec<_>>(),
     );
 
-    use larql_compute::{QuantWeight, QuantFormat, FullPipelineLayer, NormType, FfnType, Activation};
+    use larql_compute::{
+        Activation, FfnType, FullPipelineLayer, NormType, QuantFormat, QuantWeight,
+    };
 
     let layer = FullPipelineLayer {
-        wq: QuantWeight { data: &wq_data, scales: None, format: QuantFormat::Q4_K },
-        wk: QuantWeight { data: &wk_data, scales: None, format: QuantFormat::Q4_K },
-        wv: QuantWeight { data: &wv_data, scales: None, format: QuantFormat::Q4_K },
-        wo: QuantWeight { data: &wo_data, scales: None, format: QuantFormat::Q4_K },
-        gate: QuantWeight { data: &dummy_gate_q4, scales: None, format: QuantFormat::Q4_0 },
-        up: QuantWeight { data: &dummy_up_q4, scales: None, format: QuantFormat::Q4_0 },
-        down: QuantWeight { data: &dummy_down_q4, scales: None, format: QuantFormat::Q4_0 },
+        wq: QuantWeight {
+            data: &wq_data,
+            scales: None,
+            format: QuantFormat::Q4_K,
+        },
+        wk: QuantWeight {
+            data: &wk_data,
+            scales: None,
+            format: QuantFormat::Q4_K,
+        },
+        wv: QuantWeight {
+            data: &wv_data,
+            scales: None,
+            format: QuantFormat::Q4_K,
+        },
+        wo: QuantWeight {
+            data: &wo_data,
+            scales: None,
+            format: QuantFormat::Q4_K,
+        },
+        gate: QuantWeight {
+            data: &dummy_gate_q4,
+            scales: None,
+            format: QuantFormat::Q4_0,
+        },
+        up: QuantWeight {
+            data: &dummy_up_q4,
+            scales: None,
+            format: QuantFormat::Q4_0,
+        },
+        down: QuantWeight {
+            data: &dummy_down_q4,
+            scales: None,
+            format: QuantFormat::Q4_0,
+        },
         input_norm: &dummy_norm,
         post_attn_norm: &dummy_norm,
         pre_ffn_norm: None,
@@ -87,14 +131,27 @@ fn main() {
         k_norm_weight: None,
         ffn_up_bias: None,
         ffn_down_bias: None,
-        moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
+        moe: None,
+        moe_combined_output_norm: false,
+        moe_outer_post_norm: None,
     };
 
     // Test 1: All-Q4_K (synthetic, matching formats)
     println!("\n--- Test 1: All Q4_K (uniform format) ---");
     let mut kv = metal.create_kv_cache(1, 4096, num_kv, head_dim);
     let result = larql_compute::metal::MetalBackend::decode_token(
-        &metal, &mut kv, &[layer], &x, hidden, inter, q_dim, kv_dim, num_q, num_kv, head_dim, 10000.0,
+        &metal,
+        &mut kv,
+        &[layer],
+        &x,
+        hidden,
+        inter,
+        q_dim,
+        kv_dim,
+        num_q,
+        num_kv,
+        head_dim,
+        10000.0,
     );
     let nz = result.iter().filter(|v| v.abs() > 1e-10).count();
     let max = result.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
@@ -128,7 +185,10 @@ fn main() {
         let result = larql_compute::metal::buffers::read_buffer_f32(&norm_out, hidden);
         let nz = result.iter().filter(|v| v.abs() > 1e-10).count();
         let max = result.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-        println!("  rms_norm(offset=1.0): nonzero={}/{}, max={:.4}", nz, hidden, max);
+        println!(
+            "  rms_norm(offset=1.0): nonzero={}/{}, max={:.4}",
+            nz, hidden, max
+        );
     }
 
     // Test 3: residual_norm_q8 with offset=1.0
@@ -177,27 +237,85 @@ fn main() {
     println!("\n--- Test 4: decode_token with norm_offset=1.0 ---");
     {
         let layer4 = FullPipelineLayer {
-            wq: QuantWeight { data: &wq_data, scales: None, format: QuantFormat::Q4_K },
-            wk: QuantWeight { data: &wk_data, scales: None, format: QuantFormat::Q4_K },
-            wv: QuantWeight { data: &wv_data, scales: None, format: QuantFormat::Q4_K },
-            wo: QuantWeight { data: &wo_data, scales: None, format: QuantFormat::Q4_K },
-            gate: QuantWeight { data: &dummy_gate_q4, scales: None, format: QuantFormat::Q4_0 },
-            up: QuantWeight { data: &dummy_up_q4, scales: None, format: QuantFormat::Q4_0 },
-            down: QuantWeight { data: &dummy_down_q4, scales: None, format: QuantFormat::Q4_0 },
-            input_norm: &dummy_norm, post_attn_norm: &dummy_norm,
-            pre_ffn_norm: None, post_ffn_norm: None,
-            norm_offset: 1.0, has_post_norms: false, activation: Activation::Silu,
-            qk_norm_offset: 0.0, eps: 1e-6, norm_type: NormType::RmsNorm, ffn_type: FfnType::Gated,
+            wq: QuantWeight {
+                data: &wq_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wk: QuantWeight {
+                data: &wk_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wv: QuantWeight {
+                data: &wv_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wo: QuantWeight {
+                data: &wo_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            gate: QuantWeight {
+                data: &dummy_gate_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            up: QuantWeight {
+                data: &dummy_up_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            down: QuantWeight {
+                data: &dummy_down_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            input_norm: &dummy_norm,
+            post_attn_norm: &dummy_norm,
+            pre_ffn_norm: None,
+            post_ffn_norm: None,
+            norm_offset: 1.0,
+            has_post_norms: false,
+            activation: Activation::Silu,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: NormType::RmsNorm,
+            ffn_type: FfnType::Gated,
             attn_scale: 1.0 / (head_dim as f32).sqrt(),
-            head_dim, num_q_heads: num_q, num_kv_heads: num_kv,
-            rope_base: 10000.0, rotary_dim: 0, sliding_window: 0,
-            has_v_norm: false, layer_scalar: 0.0,
-            input_norm_bias: None, post_attn_norm_bias: None, q_norm_weight: None, k_norm_weight: None, ffn_up_bias: None, ffn_down_bias: None,
-            moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
+            head_dim,
+            num_q_heads: num_q,
+            num_kv_heads: num_kv,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
+            moe: None,
+            moe_combined_output_norm: false,
+            moe_outer_post_norm: None,
         };
         let mut kv4 = metal.create_kv_cache(1, 4096, num_kv, head_dim);
         let r = larql_compute::metal::MetalBackend::decode_token(
-            &metal, &mut kv4, &[layer4], &x, hidden, inter, q_dim, kv_dim, num_q, num_kv, head_dim, 10000.0,
+            &metal,
+            &mut kv4,
+            &[layer4],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q,
+            num_kv,
+            head_dim,
+            10000.0,
         );
         let nz = r.iter().filter(|v| v.abs() > 1e-10).count();
         let max = r.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
@@ -208,27 +326,85 @@ fn main() {
     println!("\n--- Test 5: decode_token with activation=GeluTanh ---");
     {
         let layer5 = FullPipelineLayer {
-            wq: QuantWeight { data: &wq_data, scales: None, format: QuantFormat::Q4_K },
-            wk: QuantWeight { data: &wk_data, scales: None, format: QuantFormat::Q4_K },
-            wv: QuantWeight { data: &wv_data, scales: None, format: QuantFormat::Q4_K },
-            wo: QuantWeight { data: &wo_data, scales: None, format: QuantFormat::Q4_K },
-            gate: QuantWeight { data: &dummy_gate_q4, scales: None, format: QuantFormat::Q4_0 },
-            up: QuantWeight { data: &dummy_up_q4, scales: None, format: QuantFormat::Q4_0 },
-            down: QuantWeight { data: &dummy_down_q4, scales: None, format: QuantFormat::Q4_0 },
-            input_norm: &dummy_norm, post_attn_norm: &dummy_norm,
-            pre_ffn_norm: None, post_ffn_norm: None,
-            norm_offset: 0.0, has_post_norms: false, activation: Activation::GeluTanh,
-            qk_norm_offset: 0.0, eps: 1e-6, norm_type: NormType::RmsNorm, ffn_type: FfnType::Gated,
+            wq: QuantWeight {
+                data: &wq_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wk: QuantWeight {
+                data: &wk_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wv: QuantWeight {
+                data: &wv_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            wo: QuantWeight {
+                data: &wo_data,
+                scales: None,
+                format: QuantFormat::Q4_K,
+            },
+            gate: QuantWeight {
+                data: &dummy_gate_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            up: QuantWeight {
+                data: &dummy_up_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            down: QuantWeight {
+                data: &dummy_down_q4,
+                scales: None,
+                format: QuantFormat::Q4_0,
+            },
+            input_norm: &dummy_norm,
+            post_attn_norm: &dummy_norm,
+            pre_ffn_norm: None,
+            post_ffn_norm: None,
+            norm_offset: 0.0,
+            has_post_norms: false,
+            activation: Activation::GeluTanh,
+            qk_norm_offset: 0.0,
+            eps: 1e-6,
+            norm_type: NormType::RmsNorm,
+            ffn_type: FfnType::Gated,
             attn_scale: 1.0 / (head_dim as f32).sqrt(),
-            head_dim, num_q_heads: num_q, num_kv_heads: num_kv,
-            rope_base: 10000.0, rotary_dim: 0, sliding_window: 0,
-            has_v_norm: false, layer_scalar: 0.0,
-            input_norm_bias: None, post_attn_norm_bias: None, q_norm_weight: None, k_norm_weight: None, ffn_up_bias: None, ffn_down_bias: None,
-            moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
+            head_dim,
+            num_q_heads: num_q,
+            num_kv_heads: num_kv,
+            rope_base: 10000.0,
+            rotary_dim: 0,
+            sliding_window: 0,
+            has_v_norm: false,
+            layer_scalar: 0.0,
+            input_norm_bias: None,
+            post_attn_norm_bias: None,
+            q_norm_weight: None,
+            k_norm_weight: None,
+            ffn_up_bias: None,
+            ffn_down_bias: None,
+            moe: None,
+            moe_combined_output_norm: false,
+            moe_outer_post_norm: None,
         };
         let mut kv5 = metal.create_kv_cache(1, 4096, num_kv, head_dim);
         let r = larql_compute::metal::MetalBackend::decode_token(
-            &metal, &mut kv5, &[layer5], &x, hidden, inter, q_dim, kv_dim, num_q, num_kv, head_dim, 10000.0,
+            &metal,
+            &mut kv5,
+            &[layer5],
+            &x,
+            hidden,
+            inter,
+            q_dim,
+            kv_dim,
+            num_q,
+            num_kv,
+            head_dim,
+            10000.0,
         );
         let nz = r.iter().filter(|v| v.abs() > 1e-10).count();
         let max = r.iter().fold(0.0f32, |a, &b| a.max(b.abs()));

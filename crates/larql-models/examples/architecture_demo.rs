@@ -26,9 +26,15 @@ fn main() {
     print_architecture(&*gemma2);
     println!("  [Gemma 2 specifics]");
     println!("  Attn softcapping: {:?}", gemma2.attn_logit_softcapping());
-    println!("  Final softcapping: {:?}", gemma2.final_logit_softcapping());
+    println!(
+        "  Final softcapping: {:?}",
+        gemma2.final_logit_softcapping()
+    );
     println!("  QK norm offset:   {}", gemma2.qk_norm_weight_offset());
-    println!("  Attn scale:       {:.6} (from query_pre_attn_scalar=256)", gemma2.attention_scale());
+    println!(
+        "  Attn scale:       {:.6} (from query_pre_attn_scalar=256)",
+        gemma2.attention_scale()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -87,14 +93,28 @@ fn main() {
         let frac = gemma4.rotary_fraction_for_layer(layer);
         let rope = gemma4.rope_base_for_layer(layer);
         let label = if sw { "sliding" } else { "GLOBAL " };
-        println!("    L{layer:2}: {label}  hd={hd:3}  kv_heads={nkv}  rotary={frac:.2}  rope={rope:.0}");
+        println!(
+            "    L{layer:2}: {label}  hd={hd:3}  kv_heads={nkv}  rotary={frac:.2}  rope={rope:.0}"
+        );
     }
     println!("  V-norm:           {}", gemma4.has_v_norm());
     println!("  V shares K:       {}", gemma4.v_shares_k(0));
-    println!("  Attn scale:       {:.1} (QK-norm, no 1/sqrt(hd))", gemma4.attention_scale());
-    println!("  Layer scalar key: {}", gemma4.layer_scalar_key(0).unwrap_or_default());
-    println!("  Norm offset:      {} (Gemma 4 stores full weight)", gemma4.norm_weight_offset());
-    println!("  QK norm offset:   {} (no +1 unlike Gemma 2/3)", gemma4.qk_norm_weight_offset());
+    println!(
+        "  Attn scale:       {:.1} (QK-norm, no 1/sqrt(hd))",
+        gemma4.attention_scale()
+    );
+    println!(
+        "  Layer scalar key: {}",
+        gemma4.layer_scalar_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Norm offset:      {} (Gemma 4 stores full weight)",
+        gemma4.norm_weight_offset()
+    );
+    println!(
+        "  QK norm offset:   {} (no +1 unlike Gemma 2/3)",
+        gemma4.qk_norm_weight_offset()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -135,10 +155,24 @@ fn main() {
     println!("--- gemma4 (E2B variant) ---");
     println!("  [PLE — Per-Layer Embeddings]");
     println!("  PLE dim:          {}", gemma4_e2b.per_layer_embed_dim());
-    println!("  PLE embed key:    {}", gemma4_e2b.per_layer_embed_key().unwrap_or_default());
-    println!("  PLE gate key L5:  {}", gemma4_e2b.per_layer_input_gate_key(5).unwrap_or_default());
-    println!("  PLE proj key L5:  {}", gemma4_e2b.per_layer_projection_key(5).unwrap_or_default());
-    println!("  PLE norm key L5:  {}", gemma4_e2b.post_per_layer_input_norm_key(5).unwrap_or_default());
+    println!(
+        "  PLE embed key:    {}",
+        gemma4_e2b.per_layer_embed_key().unwrap_or_default()
+    );
+    println!(
+        "  PLE gate key L5:  {}",
+        gemma4_e2b.per_layer_input_gate_key(5).unwrap_or_default()
+    );
+    println!(
+        "  PLE proj key L5:  {}",
+        gemma4_e2b.per_layer_projection_key(5).unwrap_or_default()
+    );
+    println!(
+        "  PLE norm key L5:  {}",
+        gemma4_e2b
+            .post_per_layer_input_norm_key(5)
+            .unwrap_or_default()
+    );
     println!("  [KV Sharing]");
     for layer in [0, 13, 14, 15, 19, 34] {
         let src = gemma4_e2b.kv_shared_source_layer(layer);
@@ -160,10 +194,16 @@ fn main() {
     let llama = detect_from_json(&llama_config);
     print_architecture(&*llama);
     println!("  [Llama specifics]");
-    println!("  RoPE scaling:     {} (factor={:.1})",
-        llama.rope_scaling_type().unwrap_or("none"), llama.rope_scaling_factor());
-    println!("  GQA ratio:        {}:{} (Q:KV heads)",
-        llama.config().num_q_heads, llama.config().num_kv_heads);
+    println!(
+        "  RoPE scaling:     {} (factor={:.1})",
+        llama.rope_scaling_type().unwrap_or("none"),
+        llama.rope_scaling_factor()
+    );
+    println!(
+        "  GQA ratio:        {}:{} (Q:KV heads)",
+        llama.config().num_q_heads,
+        llama.config().num_kv_heads
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -179,9 +219,11 @@ fn main() {
     print_architecture(&*mistral);
     println!("  [Mistral specifics]");
     println!("  Sliding window:   {:?}", mistral.sliding_window_size());
-    println!("  Keys identical to Llama: {}",
+    println!(
+        "  Keys identical to Llama: {}",
         mistral.attn_q_key(0) == llama.attn_q_key(0)
-        && mistral.ffn_gate_key(0) == llama.ffn_gate_key(0));
+            && mistral.ffn_gate_key(0) == llama.ffn_gate_key(0)
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -197,11 +239,26 @@ fn main() {
     print_architecture(&*mixtral);
     println!("  [Mixtral specifics — MoE PerExpert]");
     println!("  Expert format:    {:?}", mixtral.expert_format());
-    println!("  Router key L0:    {}", mixtral.moe_router_key(0).unwrap_or_default());
-    println!("  Expert[3] gate:   {}", mixtral.expert_ffn_gate_key(0, 3).unwrap_or_default());
-    println!("  Expert[3] up:     {}", mixtral.expert_ffn_up_key(0, 3).unwrap_or_default());
-    println!("  Expert[3] down:   {}", mixtral.expert_ffn_down_key(0, 3).unwrap_or_default());
-    println!("  No packed keys:   {}", mixtral.packed_gate_up_blocks_key(0).is_none());
+    println!(
+        "  Router key L0:    {}",
+        mixtral.moe_router_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Expert[3] gate:   {}",
+        mixtral.expert_ffn_gate_key(0, 3).unwrap_or_default()
+    );
+    println!(
+        "  Expert[3] up:     {}",
+        mixtral.expert_ffn_up_key(0, 3).unwrap_or_default()
+    );
+    println!(
+        "  Expert[3] down:   {}",
+        mixtral.expert_ffn_down_key(0, 3).unwrap_or_default()
+    );
+    println!(
+        "  No packed keys:   {}",
+        mixtral.packed_gate_up_blocks_key(0).is_none()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -215,12 +272,30 @@ fn main() {
     let qwen = detect_from_json(&qwen_config);
     print_architecture(&*qwen);
     println!("  [Qwen specifics — attention bias + QK norm keys]");
-    println!("  Q bias key L0:    {}", qwen.attn_q_bias_key(0).unwrap_or_default());
-    println!("  K bias key L0:    {}", qwen.attn_k_bias_key(0).unwrap_or_default());
-    println!("  V bias key L0:    {}", qwen.attn_v_bias_key(0).unwrap_or_default());
-    println!("  Q norm key L0:    {}", qwen.attn_q_norm_key(0).unwrap_or_default());
-    println!("  K norm key L0:    {}", qwen.attn_k_norm_key(0).unwrap_or_default());
-    println!("  Family from config: {} (returns model_type directly)", qwen.family());
+    println!(
+        "  Q bias key L0:    {}",
+        qwen.attn_q_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  K bias key L0:    {}",
+        qwen.attn_k_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  V bias key L0:    {}",
+        qwen.attn_v_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Q norm key L0:    {}",
+        qwen.attn_q_norm_key(0).unwrap_or_default()
+    );
+    println!(
+        "  K norm key L0:    {}",
+        qwen.attn_k_norm_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Family from config: {} (returns model_type directly)",
+        qwen.family()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -237,17 +312,47 @@ fn main() {
     let deepseek = detect_from_json(&deepseek_config);
     print_architecture(&*deepseek);
     println!("  [DeepSeek specifics — MoE + MLA]");
-    println!("  MLA KV-A key L0:  {}", deepseek.mla_kv_a_key(0).unwrap_or_default());
-    println!("  MLA KV-B key L0:  {}", deepseek.mla_kv_b_key(0).unwrap_or_default());
-    println!("  MLA Q-A key L0:   {}", deepseek.mla_q_a_key(0).unwrap_or_default());
-    println!("  MLA Q-B key L0:   {}", deepseek.mla_q_b_key(0).unwrap_or_default());
-    println!("  Router key L0:    {}", deepseek.moe_router_key(0).unwrap_or_default());
-    println!("  Expert[5] gate:   {}", deepseek.expert_ffn_gate_key(0, 5).unwrap_or_default());
-    println!("  Shared gate L0:   {}", deepseek.shared_expert_gate_key(0).unwrap_or_default());
-    println!("  Shared up L0:     {}", deepseek.shared_expert_up_key(0).unwrap_or_default());
-    println!("  Shared down L0:   {}", deepseek.shared_expert_down_key(0).unwrap_or_default());
-    println!("  RoPE scaling:     {} (factor={:.1})",
-        deepseek.rope_scaling_type().unwrap_or("none"), deepseek.rope_scaling_factor());
+    println!(
+        "  MLA KV-A key L0:  {}",
+        deepseek.mla_kv_a_key(0).unwrap_or_default()
+    );
+    println!(
+        "  MLA KV-B key L0:  {}",
+        deepseek.mla_kv_b_key(0).unwrap_or_default()
+    );
+    println!(
+        "  MLA Q-A key L0:   {}",
+        deepseek.mla_q_a_key(0).unwrap_or_default()
+    );
+    println!(
+        "  MLA Q-B key L0:   {}",
+        deepseek.mla_q_b_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Router key L0:    {}",
+        deepseek.moe_router_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Expert[5] gate:   {}",
+        deepseek.expert_ffn_gate_key(0, 5).unwrap_or_default()
+    );
+    println!(
+        "  Shared gate L0:   {}",
+        deepseek.shared_expert_gate_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Shared up L0:     {}",
+        deepseek.shared_expert_up_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Shared down L0:   {}",
+        deepseek.shared_expert_down_key(0).unwrap_or_default()
+    );
+    println!(
+        "  RoPE scaling:     {} (factor={:.1})",
+        deepseek.rope_scaling_type().unwrap_or("none"),
+        deepseek.rope_scaling_factor()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -264,12 +369,30 @@ fn main() {
     print_architecture(&*gpt_oss);
     println!("  [GPT-OSS specifics — PackedMxfp4]");
     println!("  Expert format:     {:?}", gpt_oss.expert_format());
-    println!("  Packed gate+up:    {}", gpt_oss.packed_gate_up_blocks_key(0).unwrap_or_default());
-    println!("  Packed scales:     {}", gpt_oss.packed_gate_up_scales_key(0).unwrap_or_default());
-    println!("  Packed down:       {}", gpt_oss.packed_down_blocks_key(0).unwrap_or_default());
-    println!("  Packed down scl:   {}", gpt_oss.packed_down_scales_key(0).unwrap_or_default());
-    println!("  Router key L0:     {}", gpt_oss.moe_router_key(0).unwrap_or_default());
-    println!("  No per-expert:     {} (packed format)", gpt_oss.expert_ffn_gate_key(0, 0).is_none());
+    println!(
+        "  Packed gate+up:    {}",
+        gpt_oss.packed_gate_up_blocks_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Packed scales:     {}",
+        gpt_oss.packed_gate_up_scales_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Packed down:       {}",
+        gpt_oss.packed_down_blocks_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Packed down scl:   {}",
+        gpt_oss.packed_down_scales_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Router key L0:     {}",
+        gpt_oss.moe_router_key(0).unwrap_or_default()
+    );
+    println!(
+        "  No per-expert:     {} (packed format)",
+        gpt_oss.expert_ffn_gate_key(0, 0).is_none()
+    );
     println!("  Prefix strip:      {:?}", gpt_oss.key_prefixes_to_strip());
     println!();
 
@@ -286,11 +409,17 @@ fn main() {
     let granite = detect_from_json(&granite_config);
     print_architecture(&*granite);
     println!("  [Granite specifics — scaling multipliers]");
-    println!("  Embed scale:      {:.2} (from embedding_multiplier)", granite.embed_scale());
+    println!(
+        "  Embed scale:      {:.2} (from embedding_multiplier)",
+        granite.embed_scale()
+    );
     println!("  Residual mult:    {:.2}", granite.residual_multiplier());
     println!("  Attention mult:   {:.2}", granite.attention_multiplier());
     println!("  Logits scaling:   {:.2}", granite.logits_scaling());
-    println!("  Family from config: {} (returns model_type directly)", granite.family());
+    println!(
+        "  Family from config: {} (returns model_type directly)",
+        granite.family()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -304,15 +433,39 @@ fn main() {
     let starcoder2 = detect_from_json(&starcoder2_config);
     print_architecture(&*starcoder2);
     println!("  [StarCoder2 specifics — LayerNorm, bias, non-gated FFN]");
-    println!("  Norm type:        {:?} (not RMSNorm)", starcoder2.norm_type());
-    println!("  FFN type:         {:?} (not gated)", starcoder2.ffn_type());
+    println!(
+        "  Norm type:        {:?} (not RMSNorm)",
+        starcoder2.norm_type()
+    );
+    println!(
+        "  FFN type:         {:?} (not gated)",
+        starcoder2.ffn_type()
+    );
     println!("  Activation:       {:?}", starcoder2.activation());
-    println!("  FFN up key L0:    {} (c_fc, not gate_proj)", starcoder2.ffn_up_key(0));
-    println!("  FFN down key L0:  {} (c_proj, not down_proj)", starcoder2.ffn_down_key(0));
-    println!("  FFN up bias L0:   {}", starcoder2.ffn_up_bias_key(0).unwrap_or_default());
-    println!("  FFN down bias L0: {}", starcoder2.ffn_down_bias_key(0).unwrap_or_default());
-    println!("  Attn Q bias L0:   {}", starcoder2.attn_q_bias_key(0).unwrap_or_default());
-    println!("  Attn O bias L0:   {}", starcoder2.attn_o_bias_key(0).unwrap_or_default());
+    println!(
+        "  FFN up key L0:    {} (c_fc, not gate_proj)",
+        starcoder2.ffn_up_key(0)
+    );
+    println!(
+        "  FFN down key L0:  {} (c_proj, not down_proj)",
+        starcoder2.ffn_down_key(0)
+    );
+    println!(
+        "  FFN up bias L0:   {}",
+        starcoder2.ffn_up_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  FFN down bias L0: {}",
+        starcoder2.ffn_down_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Attn Q bias L0:   {}",
+        starcoder2.attn_q_bias_key(0).unwrap_or_default()
+    );
+    println!(
+        "  Attn O bias L0:   {}",
+        starcoder2.attn_o_bias_key(0).unwrap_or_default()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════
@@ -326,12 +479,22 @@ fn main() {
     let generic = detect_from_json(&generic_config);
     print_architecture(&*generic);
     println!("  [Generic specifics — safe defaults for unknown models]");
-    println!("  All defaults:     norm={:?}, act={:?}, ffn={:?}",
-        generic.norm_type(), generic.activation(), generic.ffn_type());
-    println!("  No QK norm:       {}", generic.attn_q_norm_key(0).is_none());
+    println!(
+        "  All defaults:     norm={:?}, act={:?}, ffn={:?}",
+        generic.norm_type(),
+        generic.activation(),
+        generic.ffn_type()
+    );
+    println!(
+        "  No QK norm:       {}",
+        generic.attn_q_norm_key(0).is_none()
+    );
     println!("  No MoE:           {}", !generic.is_moe());
     println!("  No MLA:           {}", !generic.uses_mla());
-    println!("  No softcapping:   {}", generic.attn_logit_softcapping().is_none());
+    println!(
+        "  No softcapping:   {}",
+        generic.attn_logit_softcapping().is_none()
+    );
     println!("  No post norms:    {}", !generic.has_post_norms());
     println!();
 
@@ -339,9 +502,18 @@ fn main() {
     // Expert format comparison
     // ═══════════════════════════════════════════════════════════
     println!("=== Expert Format Comparison ===\n");
-    println!("  Mixtral:   {:?} → per-expert tensor keys", mixtral.expert_format());
-    println!("  DeepSeek:  {:?} → per-expert + shared experts", deepseek.expert_format());
-    println!("  GPT-OSS:   {:?} → packed MXFP4 blocks+scales", gpt_oss.expert_format());
+    println!(
+        "  Mixtral:   {:?} → per-expert tensor keys",
+        mixtral.expert_format()
+    );
+    println!(
+        "  DeepSeek:  {:?} → per-expert + shared experts",
+        deepseek.expert_format()
+    );
+    println!(
+        "  GPT-OSS:   {:?} → packed MXFP4 blocks+scales",
+        gpt_oss.expert_format()
+    );
     println!("  Llama:     {:?} → dense (not MoE)", llama.expert_format());
 
     // ═══════════════════════════════════════════════════════════
@@ -351,14 +523,21 @@ fn main() {
 
     let f16_data = larql_models::quant::half::encode_f16(&[1.0, -2.0, 2.71]);
     let f16_back = larql_models::quant::half::decode_f16(&f16_data);
-    println!("  f16: [1.0, -2.0, 2.71] → {} bytes → [{:.2}, {:.2}, {:.2}]",
-        f16_data.len(), f16_back[0], f16_back[1], f16_back[2]);
+    println!(
+        "  f16: [1.0, -2.0, 2.71] → {} bytes → [{:.2}, {:.2}, {:.2}]",
+        f16_data.len(),
+        f16_back[0],
+        f16_back[1],
+        f16_back[2]
+    );
 
-    println!("  GGML types: {}, {}, {}, {}",
+    println!(
+        "  GGML types: {}, {}, {}, {}",
         larql_models::quant::ggml::type_name(0),
         larql_models::quant::ggml::type_name(1),
         larql_models::quant::ggml::type_name(2),
-        larql_models::quant::ggml::type_name(6));
+        larql_models::quant::ggml::type_name(6)
+    );
 
     print!("  MXFP4 e8m0: ");
     for exp in [0u8, 126, 127, 128, 130] {
@@ -395,15 +574,27 @@ fn print_architecture(arch: &dyn ModelArchitecture) {
     println!("  Final norm key:  {}", arch.final_norm_key());
 
     if arch.is_moe() {
-        println!("  MoE:             {} routed experts, {} per token, {} shared",
-            arch.num_experts(), arch.num_experts_per_token(), arch.num_shared_experts());
+        println!(
+            "  MoE:             {} routed experts, {} per token, {} shared",
+            arch.num_experts(),
+            arch.num_experts_per_token(),
+            arch.num_shared_experts()
+        );
     }
 
     if arch.uses_mla() {
-        println!("  MLA:             KV rank={}, Q rank={}", arch.kv_lora_rank(), arch.q_lora_rank());
+        println!(
+            "  MLA:             KV rank={}, Q rank={}",
+            arch.kv_lora_rank(),
+            arch.q_lora_rank()
+        );
     }
 
     if let Some(scaling) = arch.rope_scaling_type() {
-        println!("  RoPE scaling:    {} (factor={:.1})", scaling, arch.rope_scaling_factor());
+        println!(
+            "  RoPE scaling:    {} (factor={:.1})",
+            scaling,
+            arch.rope_scaling_factor()
+        );
     }
 }

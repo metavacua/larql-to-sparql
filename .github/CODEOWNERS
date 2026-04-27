@@ -1,0 +1,44 @@
+# CODEOWNERS file for automatic reviewer assignment
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global default maintainer
+* @metavacua
+
+# LARQL-specific crates
+crates/larql-core/ @metavacua
+crates/larql-models/ @metavacua
+crates/larql-compute/ @metavacua
+crates/larql-vindex/ @metavacua
+crates/larql-lql/ @metavacua
+crates/larql-inference/ @metavacua
+crates/larql-server/ @metavacua
+crates/larql-cli/ @metavacua
+crates/larql-python/ @metavacua
+crates/larql-router/ @metavacua
+crates/larql-router-protocol/ @metavacua
+crates/larql-experts/ @metavacua
+
+# Portable crates (candidates for extraction)
+crates/model-compute/ @metavacua
+
+# Benchmarks
+crates/kv-cache-benchmark/ @metavacua
+
+# Documentation
+docs/ @metavacua
+README.md @metavacua
+ROADMAP.md @metavacua
+AGENTS.md @metavacua
+
+# Configuration and CI/CD
+.github/ @metavacua
+Makefile @metavacua
+Cargo.toml @metavacua
+rustfmt.toml @metavacua
+.editorconfig @metavacua
+
+# Python subproject
+knowledge/ @metavacua
+
+# Tests
+tests/ @metavacua

@@ -567,11 +567,7 @@ mod walker_tests {
 
         let weights = larql_inference::model::load_model_dir(&dir).unwrap();
 
-        let prompts = vec![
-            vec![4u32, 5],
-            vec![0u32, 1, 2],
-            vec![3u32],
-        ];
+        let prompts = vec![vec![4u32, 5], vec![0u32, 1, 2], vec![3u32]];
         let residuals = larql_inference::capture_decoy_residuals(&weights, &prompts, 1);
 
         assert_eq!(residuals.len(), 3, "one residual per prompt");
@@ -581,7 +577,10 @@ mod walker_tests {
         // Different prompts should produce different residuals (the
         // mock model is deterministic but distinct token IDs land at
         // different rows in the embedding matrix).
-        assert_ne!(residuals[0], residuals[1], "different prompts → different residuals");
+        assert_ne!(
+            residuals[0], residuals[1],
+            "different prompts → different residuals"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

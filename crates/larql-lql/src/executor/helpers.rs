@@ -44,14 +44,17 @@ pub(crate) fn is_readable_token(tok: &str) -> bool {
     if tok.is_empty() || tok.len() > 30 {
         return false;
     }
-    let readable = tok.chars().filter(|c| {
-        c.is_ascii_alphanumeric()
-            || *c == ' '
-            || *c == '-'
-            || *c == '\''
-            || *c == '.'
-            || *c == ','
-    }).count();
+    let readable = tok
+        .chars()
+        .filter(|c| {
+            c.is_ascii_alphanumeric()
+                || *c == ' '
+                || *c == '-'
+                || *c == '\''
+                || *c == '.'
+                || *c == ','
+        })
+        .count();
     let total = tok.chars().count();
     readable * 2 >= total && total > 0
 }
@@ -86,17 +89,87 @@ pub(crate) fn is_content_token(tok: &str) -> bool {
     let lower = tok.to_lowercase();
     !matches!(
         lower.as_str(),
-        "the" | "and" | "for" | "but" | "not" | "you" | "all" | "can"
-        | "her" | "was" | "one" | "our" | "out" | "are" | "has" | "his"
-        | "how" | "its" | "may" | "new" | "now" | "old" | "see" | "way"
-        | "who" | "did" | "get" | "let" | "say" | "she" | "too" | "use"
-        | "from" | "have" | "been" | "will" | "with" | "this" | "that"
-        | "they" | "were" | "some" | "them" | "than" | "when"
-        | "what" | "your" | "each" | "make" | "like" | "just" | "over"
-        | "such" | "take" | "also" | "into" | "only" | "very" | "more"
-        | "does" | "most" | "about" | "which" | "their" | "would" | "there"
-        | "could" | "other" | "after" | "being" | "where" | "these" | "those"
-        | "first" | "should" | "because" | "through" | "before"
-        | "par" | "aux" | "che" | "del"
+        "the"
+            | "and"
+            | "for"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "her"
+            | "was"
+            | "one"
+            | "our"
+            | "out"
+            | "are"
+            | "has"
+            | "his"
+            | "how"
+            | "its"
+            | "may"
+            | "new"
+            | "now"
+            | "old"
+            | "see"
+            | "way"
+            | "who"
+            | "did"
+            | "get"
+            | "let"
+            | "say"
+            | "she"
+            | "too"
+            | "use"
+            | "from"
+            | "have"
+            | "been"
+            | "will"
+            | "with"
+            | "this"
+            | "that"
+            | "they"
+            | "were"
+            | "some"
+            | "them"
+            | "than"
+            | "when"
+            | "what"
+            | "your"
+            | "each"
+            | "make"
+            | "like"
+            | "just"
+            | "over"
+            | "such"
+            | "take"
+            | "also"
+            | "into"
+            | "only"
+            | "very"
+            | "more"
+            | "does"
+            | "most"
+            | "about"
+            | "which"
+            | "their"
+            | "would"
+            | "there"
+            | "could"
+            | "other"
+            | "after"
+            | "being"
+            | "where"
+            | "these"
+            | "those"
+            | "first"
+            | "should"
+            | "because"
+            | "through"
+            | "before"
+            | "par"
+            | "aux"
+            | "che"
+            | "del"
     )
 }

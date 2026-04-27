@@ -97,8 +97,8 @@ impl WalkState {
     /// Estimated latency for this walk tier in microseconds.
     pub fn estimated_latency_us(&self) -> f64 {
         match self.tier {
-            WalkTier::CachedTemplate => 100.0,    // <0.1ms
-            WalkTier::DynamicWalk => 3_000.0,     // ~3ms
+            WalkTier::CachedTemplate => 100.0,     // <0.1ms
+            WalkTier::DynamicWalk => 3_000.0,      // ~3ms
             WalkTier::MarkovFallback => 200_000.0, // ~200ms
         }
     }
@@ -112,7 +112,10 @@ fn extract_entity(text: &str) -> Option<String> {
         let clean = word.trim_matches(|c: char| !c.is_alphanumeric());
         if clean.len() > 1
             && clean.chars().next().is_some_and(|c| c.is_uppercase())
-            && !["The", "What", "Who", "Where", "How", "Is", "Was", "Tell", "A"].contains(&clean)
+            && ![
+                "The", "What", "Who", "Where", "How", "Is", "Was", "Tell", "A",
+            ]
+            .contains(&clean)
         {
             return Some(clean.to_string());
         }

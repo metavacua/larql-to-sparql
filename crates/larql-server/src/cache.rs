@@ -29,7 +29,10 @@ impl DescribeCache {
 
     /// Build a cache key from describe parameters.
     pub fn key(model_id: &str, entity: &str, band: &str, limit: usize, min_score: f32) -> String {
-        format!("{}:{}:{}:{}:{}", model_id, entity, band, limit, min_score as u32)
+        format!(
+            "{}:{}:{}:{}:{}",
+            model_id, entity, band, limit, min_score as u32
+        )
     }
 
     /// Get a cached value if it exists and hasn't expired.
@@ -51,10 +54,13 @@ impl DescribeCache {
                 let now = Instant::now();
                 entries.retain(|_, e| now.duration_since(e.inserted_at) < self.ttl);
             }
-            entries.insert(key, CacheEntry {
-                value,
-                inserted_at: Instant::now(),
-            });
+            entries.insert(
+                key,
+                CacheEntry {
+                    value,
+                    inserted_at: Instant::now(),
+                },
+            );
         }
     }
 }
@@ -93,8 +99,8 @@ mod tests {
     #[test]
     fn expired_entry_returns_none() {
         let cache = DescribeCache::new(0); // 0 → disabled, but let's test with 1ns TTL
-        // Can't easily test TTL expiration in a unit test without sleeping,
-        // so we test the disabled path instead.
+                                           // Can't easily test TTL expiration in a unit test without sleeping,
+                                           // so we test the disabled path instead.
         let key = "test".to_string();
         cache.put(key.clone(), serde_json::json!("val"));
         // With TTL=0, is_enabled() is false, so caller won't even check cache.

@@ -4,9 +4,9 @@ use metal::ComputePipelineState;
 
 /// Pipeline states for Q4 operations — compiled from modular shaders.
 pub struct Q4Pipelines {
-    pub matvec: ComputePipelineState,       // Q4 × Q8 matvec (optimised simdgroup)
-    pub vecmat: ComputePipelineState,       // Q4 vector-matrix (scatter)
-    pub f32_matvec: ComputePipelineState,   // Q4 × f32 matvec (transposed down)
+    pub matvec: ComputePipelineState, // Q4 × Q8 matvec (optimised simdgroup)
+    pub vecmat: ComputePipelineState, // Q4 vector-matrix (scatter)
+    pub f32_matvec: ComputePipelineState, // Q4 × f32 matvec (transposed down)
 }
 
 /// Pre-quantize f32 vector to Q8_0 (int8 + per-block f32 scale).

@@ -134,7 +134,9 @@ impl RelationDatabase {
     /// Used by `super::labeling` to build inverted indexes for
     /// output-only matching.
     pub fn relations_iter(&self) -> impl Iterator<Item = (&str, &[(String, String)])> {
-        self.relations.iter().map(|(k, v)| (k.as_str(), v.as_slice()))
+        self.relations
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_slice()))
     }
 }
 /// Loaded reference databases, separated by layer range.
@@ -190,4 +192,3 @@ pub fn load_reference_databases() -> ReferenceDatabases {
 
     result
 }
-

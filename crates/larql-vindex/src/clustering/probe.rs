@@ -45,7 +45,10 @@ pub fn probe_entities(
     let total = entities.len();
     for (ei, entity) in entities.iter().enumerate() {
         if ei % 1000 == 0 && ei > 0 {
-            eprint!("\r    Probed {}/{} entities ({} activations)...", ei, total, num_activations);
+            eprint!(
+                "\r    Probed {}/{} entities ({} activations)...",
+                ei, total, num_activations
+            );
         }
         // Encode entity → token IDs → averaged embedding
         let encoding = match tokenizer.encode(entity.as_str(), false) {
@@ -87,7 +90,10 @@ pub fn probe_entities(
     }
 
     if total > 1000 {
-        eprintln!("\r    Probed {}/{} entities ({} activations)    ", total, total, num_activations);
+        eprintln!(
+            "\r    Probed {}/{} entities ({} activations)    ",
+            total, total, num_activations
+        );
     }
 
     ProbeResult {
@@ -160,19 +166,17 @@ pub fn build_confirmed_pairs(
             let target = &meta.top_token;
             if target.len() >= 2 {
                 for entity in entities {
-                    pairs.push((
-                        entity.clone(),
-                        target.clone(),
-                        layer,
-                        feature,
-                    ));
+                    pairs.push((entity.clone(), target.clone(), layer, feature));
                 }
             }
         }
     }
 
     if skipped_broad > 0 {
-        eprintln!("  Skipped {} broad features (>20 entities each)", skipped_broad);
+        eprintln!(
+            "  Skipped {} broad features (>20 entities each)",
+            skipped_broad
+        );
     }
 
     pairs
@@ -187,10 +191,14 @@ mod tests {
         let dir = std::env::temp_dir().join("probe_test");
         std::fs::create_dir_all(&dir).ok();
         let path = dir.join("test_triples.json");
-        std::fs::write(&path, r#"{
+        std::fs::write(
+            &path,
+            r#"{
             "capital": {"pairs": [["France", "Paris"], ["Germany", "Berlin"]]},
             "language": {"pairs": [["France", "French"]]}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         let entities = extract_probe_entities(&path);
         assert!(entities.contains(&"France".to_string()));

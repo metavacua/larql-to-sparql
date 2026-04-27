@@ -20,15 +20,18 @@ use std::time::Instant;
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args().nth(1)
-        .unwrap_or_else(|| { eprintln!("Usage: build_q4k_weights <vindex_dir>"); std::process::exit(1); });
+    let dir = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: build_q4k_weights <vindex_dir>");
+        std::process::exit(1);
+    });
     let dir = Path::new(&dir);
 
     let manifest_path = dir.join("weight_manifest.json");
-    if !manifest_path.exists() { return Err("weight_manifest.json not found".into()); }
-    let manifest: Vec<serde_json::Value> = serde_json::from_str(
-        &std::fs::read_to_string(&manifest_path)?
-    )?;
+    if !manifest_path.exists() {
+        return Err("weight_manifest.json not found".into());
+    }
+    let manifest: Vec<serde_json::Value> =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
 
     let t0 = Instant::now();
     println!("=== Building Q4_K/Q6_K weights (Ollama strategy) ===");
@@ -43,9 +46,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut q4k_manifest = Vec::new();
         let mut offset = 0usize;
 
-        let entries: Vec<&serde_json::Value> = manifest.iter()
-            .filter(|e| e.get("file").and_then(|f| f.as_str()) == Some("attn_weights.bin")
-                && e.get("kind").and_then(|k| k.as_str()) == Some("tensor"))
+        let entries: Vec<&serde_json::Value> = manifest
+            .iter()
+            .filter(|e| {
+                e.get("file").and_then(|f| f.as_str()) == Some("attn_weights.bin")
+                    && e.get("kind").and_then(|k| k.as_str()) == Some("tensor")
+            })
             .collect();
 
         for entry in &entries {
@@ -88,7 +94,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             offset += q_data.len();
 
             if offset < 100_000_000 {
-                println!("  {key:45} [{rows},{cols}] → {format} {} bytes", q_data.len());
+                println!(
+                    "  {key:45} [{rows},{cols}] → {format} {} bytes",
+                    q_data.len()
+                );
             }
         }
 
@@ -96,7 +105,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dir.join("attn_weights_q4k_manifest.json"),
             serde_json::to_string_pretty(&q4k_manifest)?,
         )?;
-        println!("  Attention: {} entries, {} bytes total", q4k_manifest.len(), offset);
+        println!(
+            "  Attention: {} entries, {} bytes total",
+            q4k_manifest.len(),
+            offset
+        );
     } else {
         println!("  No attn_weights.bin found, skipping attention quantization");
     }
@@ -108,10 +121,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
         let config_path = dir.join("index.json");
-        let config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&config_path)?)?;
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path)?)?;
         let num_layers = config["num_layers"].as_u64().unwrap_or(0) as usize;
         let hidden = config["hidden_size"].as_u64().unwrap_or(0) as usize;
-        let inter = config["intermediate_size"].as_u64().unwrap_or(config["num_features_per_layer"].as_u64().unwrap_or(0)) as usize;
+        let inter = config["intermediate_size"]
+            .as_u64()
+            .unwrap_or(config["num_features_per_layer"].as_u64().unwrap_or(0))
+            as usize;
 
         if num_layers > 0 && hidden > 0 && inter > 0 {
             let floats_per_matrix = inter * hidden;
@@ -126,10 +143,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 for (i, name) in ["gate", "up", "down"].iter().enumerate() {
                     let matrix_offset = layer_offset + i * bytes_per_matrix;
-                    if matrix_offset + bytes_per_matrix > mmap.len() { break; }
+                    if matrix_offset + bytes_per_matrix > mmap.len() {
+                        break;
+                    }
 
                     let f32_data = unsafe {
-                        let ptr = mmap[matrix_offset..matrix_offset + bytes_per_matrix].as_ptr() as *const f32;
+                        let ptr = mmap[matrix_offset..matrix_offset + bytes_per_matrix].as_ptr()
+                            as *const f32;
                         std::slice::from_raw_parts(ptr, floats_per_matrix)
                     };
 

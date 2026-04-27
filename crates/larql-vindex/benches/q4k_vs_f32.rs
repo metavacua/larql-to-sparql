@@ -38,7 +38,11 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
         "rope_theta": 10000.0,
         "vocab_size": vocab,
     });
-    std::fs::write(dir.join("config.json"), serde_json::to_string(&config).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
     std::fs::write(dir.join("tokenizer.json"), MINIMAL_TOKENIZER).unwrap();
 
     let mut tensors: HashMap<String, Vec<f32>> = HashMap::new();
@@ -54,15 +58,39 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
     push("model.norm.weight", vec![hidden]);
     for layer in 0..num_layers {
         let lp = format!("model.layers.{layer}");
-        push(&format!("{lp}.self_attn.q_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.k_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.v_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.o_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.mlp.gate_proj.weight"), vec![intermediate, hidden]);
-        push(&format!("{lp}.mlp.up_proj.weight"), vec![intermediate, hidden]);
-        push(&format!("{lp}.mlp.down_proj.weight"), vec![hidden, intermediate]);
+        push(
+            &format!("{lp}.self_attn.q_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.k_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.v_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.o_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.gate_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.up_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.down_proj.weight"),
+            vec![hidden, intermediate],
+        );
         push(&format!("{lp}.input_layernorm.weight"), vec![hidden]);
-        push(&format!("{lp}.post_attention_layernorm.weight"), vec![hidden]);
+        push(
+            &format!("{lp}.post_attention_layernorm.weight"),
+            vec![hidden],
+        );
     }
 
     let tensor_bytes: Vec<(String, Vec<u8>, Vec<usize>)> = metadata
@@ -78,12 +106,8 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
         .map(|(name, bytes, shape)| {
             (
                 name.clone(),
-                safetensors::tensor::TensorView::new(
-                    safetensors::Dtype::F32,
-                    shape.clone(),
-                    bytes,
-                )
-                .unwrap(),
+                safetensors::tensor::TensorView::new(safetensors::Dtype::F32, shape.clone(), bytes)
+                    .unwrap(),
             )
         })
         .collect();
@@ -173,8 +197,12 @@ fn bench_q4k_vs_f32(c: &mut Criterion) {
     .unwrap();
 
     // ── Size comparison printed once for context ──
-    let f32_attn = std::fs::metadata(f32_dir.join("attn_weights.bin")).unwrap().len();
-    let q4k_attn = std::fs::metadata(q4k_dir.join("attn_weights_q4k.bin")).unwrap().len();
+    let f32_attn = std::fs::metadata(f32_dir.join("attn_weights.bin"))
+        .unwrap()
+        .len();
+    let q4k_attn = std::fs::metadata(q4k_dir.join("attn_weights_q4k.bin"))
+        .unwrap()
+        .len();
     eprintln!(
         "\n  attn_weights.bin   {} bytes (f32)\n  attn_weights_q4k.bin {} bytes ({:.2}× smaller)\n",
         f32_attn,
@@ -200,37 +228,26 @@ fn bench_q4k_vs_f32(c: &mut Criterion) {
     // bitwise memcpy but still copies into a fresh Vec<f32> the same
     // size the Q4_K dequant produces, so the two outputs are directly
     // comparable.
-    group.bench_with_input(
-        BenchmarkId::from_parameter("f32"),
-        &(),
-        |b, _| {
-            b.iter(|| {
-                let bytes = &f32_attn_mmap[q_offset as usize..(q_offset + q_length) as usize];
-                let floats = larql_vindex::config::dtype::decode_floats(
-                    bytes,
-                    larql_vindex::StorageDtype::F32,
-                );
-                criterion::black_box(floats);
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::from_parameter("f32"), &(), |b, _| {
+        b.iter(|| {
+            let bytes = &f32_attn_mmap[q_offset as usize..(q_offset + q_length) as usize];
+            let floats =
+                larql_vindex::config::dtype::decode_floats(bytes, larql_vindex::StorageDtype::F32);
+            criterion::black_box(floats);
+        });
+    });
 
     // Q4_K path: slice lookup + dequant. `attn_q4k_layer_data[0]` is
     // the Q slot, Q4_K format; `dequantize_q4_k` produces a Vec<f32>
     // the same size as the f32 path's output (minus padding overhead).
-    group.bench_with_input(
-        BenchmarkId::from_parameter("q4k"),
-        &(),
-        |b, _| {
-            b.iter(|| {
-                let slices = q4k_index.attn_q4k_layer_data(0).unwrap();
-                let (bytes, _format) = slices[0];
-                let floats =
-                    larql_models::quant::ggml::dequantize_q4_k(bytes, padded).unwrap();
-                criterion::black_box(floats);
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::from_parameter("q4k"), &(), |b, _| {
+        b.iter(|| {
+            let slices = q4k_index.attn_q4k_layer_data(0).unwrap();
+            let (bytes, _format) = slices[0];
+            let floats = larql_models::quant::ggml::dequantize_q4_k(bytes, padded).unwrap();
+            criterion::black_box(floats);
+        });
+    });
 
     group.finish();
     let _: PathBuf = root;
