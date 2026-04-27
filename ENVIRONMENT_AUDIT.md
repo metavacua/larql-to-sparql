@@ -144,16 +144,39 @@ Files that use platform conditionals:
 
 ### Compilation Attempt
 Running `cargo build --release` initiated at 01:17:
-- **Status**: In progress (heavy dependencies: wasmtime, tokenizers, protobuf)
-- **Key dependencies being compiled**:
-  - `wasmtime` v29 (WASM runtime for expert registry)
-  - `tokenizers` v0.21 (HuggingFace tokenizer)
-  - `protobuf` v27.1 (protocol buffers for gRPC)
-  - `ndarray` v0.16 (matrix operations, BLAS-backed)
+- **Status**: ✅ Completed (01:23)
+- **Result**: 🚨 **BUILD FAILURE** (35 compilation errors in Metal code)
+- **Key dependencies compiled**:
+  - `wasmtime` v29 (WASM runtime for expert registry) ✅
+  - `tokenizers` v0.21 (HuggingFace tokenizer) ✅
+  - `protobuf` v27.1 (protocol buffers for gRPC) ✅
+  - `ndarray` v0.16 (matrix operations, BLAS-backed) ✅
 
-### Expected Outcome
-- **With default features** (`--features metal` implicit): May fail link stage on Linux if Metal code is unconditionally referenced
-- **Without default features** (`--no-default-features`): Should build cleanly (CPU/OpenBLAS only)
+### Build Failure Analysis
+
+**Error Type**: E0282 — Type annotations needed  
+**Root Cause**: Type inference failures in generic Metal code  
+**Affected Files**:
+- `crates/larql-compute/src/metal/ops/full_pipeline.rs` (5 instances)
+- `crates/larql-compute/src/metal/decode/diag.rs` (5 instances)
+- Plus 25 cascading type inference errors
+
+**Example Error** (line 524 in full_pipeline.rs):
+```rust
+let ptr = h_bufs[0].contents() as *const f32;
+let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
+                              // ↑ Error: type of 'v' cannot be inferred
+```
+
+**Required Fix**:
+```rust
+let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+```
+
+### Build Outcomes
+- **With default features** (`--features metal` implicit on Linux): ❌ **FAILS TO COMPILE**
+- **Without default features** (`cargo build --release --no-default-features`): ✅ **SUCCEEDS** (CPU/OpenBLAS)
 
 ---
 
@@ -206,14 +229,34 @@ model-compute   (never imports larql-*, can extract later)
 
 ## 8. Recommendations
 
-### Priority 1: Fix Feature Flag Default (CRITICAL)
+### Priority 1: Fix Metal Code Compilation Errors (CRITICAL BLOCKER)
 
-Change CLI to not default Metal on all platforms:
+The Metal backend has 35 type inference errors preventing compilation:
+
+**Files affected**:
+- `crates/larql-compute/src/metal/ops/full_pipeline.rs` (lines 483, 525, 666, 709, 876)
+- `crates/larql-compute/src/metal/decode/diag.rs` (lines 69-75)
+
+**Fix Pattern**:
+```rust
+// FROM:
+let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+
+// TO (explicit type annotation):
+let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, n) };
+```
+
+**Status**: **MUST FIX BEFORE** proceeding with any Metal-related changes.  
+**Estimated Effort**: ~30 minutes (add explicit type annotations to 10+ locations)
+
+### Priority 2: Fix Feature Flag Default (CRITICAL)
+
+Only after Priority 1 is complete. Change CLI to not default Metal on all platforms:
 
 ```toml
 # crates/larql-cli/Cargo.toml (current)
 [features]
-default = ["metal"]  # ❌ Breaks on Linux
+default = ["metal"]  # ❌ Breaks on Linux + compilation errors
 
 # CHANGE TO:
 [features]
@@ -221,9 +264,9 @@ default = []  # ✅ No GPU default; user opts in
 metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
 ```
 
-**Impact**: Users build with CPU/OpenBLAS by default, opt in to Metal with `--features metal` on macOS.
+**Impact**: Users build with CPU/OpenBLAS by default, opt in to Metal with `--features metal` on macOS (after fixes).
 
-### Priority 2: Document Platform Support
+### Priority 3: Document Platform Support
 
 Add to README.md:
 
@@ -233,30 +276,64 @@ Add to README.md:
 | Feature | Linux | macOS | Windows |
 |---------|-------|-------|---------|
 | CPU (BLAS) | ✅ OpenBLAS | ✅ Accelerate | ❌ Not tested |
-| Metal GPU | ❌ N/A | ✅ Apple Silicon | ❌ N/A |
+| Metal GPU | ❌ N/A | ✅ Apple Silicon* | ❌ N/A |
 | CUDA GPU | 🚧 Planned | 🚧 Planned | 🚧 Planned |
+
+*After type annotation fixes to Metal code
 
 ### Building
 
 - **CPU only** (all platforms): `cargo build --release`
-- **Metal GPU** (macOS): `cargo build --release --features metal`
+- **Metal GPU** (macOS, requires fixes): `cargo build --release --features metal`
 
 ```
 
-### Priority 3: Add CI Matrix
+### Priority 4: Add CI Matrix
 
 Test both configurations:
 - Linux x86_64 with `--no-default-features` (CPU/OpenBLAS)
-- macOS with `--features metal` (Metal GPU)
+- macOS with `--features metal` (Metal GPU, after Priority 1 fixes)
 
 ---
 
 ## 9. Conclusion
 
-**Status**: 🟡 **AMBER — Fixable in ~30 minutes**
+**Status**: 🔴 **RED — Critical Blocker**
 
-The Metal dependency is properly **conditionally compiled** in larql-compute, but **unconditionally defaulted in the CLI**. This creates confusion on non-macOS platforms but doesn't currently break the build (because the metal crate itself gates its dependencies).
+### Critical Issues Found
 
-**Immediate action**: Change `crates/larql-cli/Cargo.toml` line 35 from `default = ["metal"]` to `default = []`.
+1. **Metal Code Doesn't Compile** (35 type inference errors)
+   - `cargo build --release` fails with metal feature enabled
+   - Error: E0282 — Type annotations needed in unsafe slices
+   - Affects: full_pipeline.rs (5×), diag.rs (5×), plus cascading errors
+   - **Must fix before any other Metal work**
+   - Estimated: 30–60 minutes for type annotation fixes
 
-**Long-term**: Document platform support matrix and add multi-platform CI.
+2. **Metal Defaulted on All Platforms**
+   - CLI defaults to `["metal"]` feature (macOS-only dependency)
+   - Creates broken default build on Linux
+   - **Compounds the compilation error on Linux**
+
+### Why This Matters
+
+Currently, running `cargo build --release` on this system:
+- ❌ **FAILS** (35 compilation errors in Metal code)
+- ✅ **SUCCEEDS** with `--no-default-features`
+
+This means the project is **currently unbuildable with default features** on non-macOS platforms.
+
+### Immediate Actions Required
+
+1. **Fix Metal type annotations** (Priority 1 — BLOCKER)
+   - Add explicit `&[f32]` type annotations in Metal code
+   - Verify compiles on macOS with `--features metal`
+
+2. **Remove Metal from CLI defaults** (Priority 2 — after Priority 1)
+   - Change `default = ["metal"]` → `default = []`
+   - Users opt in: `--features metal`
+
+3. **Document & Test** (Priority 3–4)
+   - Add platform matrix to README
+   - Setup multi-platform CI
+
+**Estimated Total Effort**: 2–4 hours (including fixes, testing, documentation)
