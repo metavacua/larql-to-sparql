@@ -48,7 +48,7 @@ pub enum BlasBackend {
 
 impl BlasBackend {
     /// Human-readable name for the BLAS backend.
-    #[must_use] 
+    #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Accelerate => "Accelerate",
@@ -93,7 +93,7 @@ impl Platform {
     }
 
     /// Get the current operating system.
-    #[must_use] 
+    #[must_use]
     pub const fn os(&self) -> OperatingSystem {
         self.os
     }
@@ -101,7 +101,7 @@ impl Platform {
     /// Get the target OS as a string (for display/logging).
     ///
     /// Returns the compile-time target OS, useful for diagnostics.
-    #[must_use] 
+    #[must_use]
     pub const fn target_os(&self) -> &'static str {
         std::env::consts::OS
     }
@@ -109,7 +109,7 @@ impl Platform {
     /// Get the target architecture as a string (for display/logging).
     ///
     /// Returns the compile-time target architecture, useful for diagnostics.
-    #[must_use] 
+    #[must_use]
     pub const fn target_arch(&self) -> &'static str {
         std::env::consts::ARCH
     }
@@ -123,7 +123,7 @@ impl Platform {
     /// # Returns
     ///
     /// `true` if Metal GPU is available on this system.
-    #[must_use] 
+    #[must_use]
     pub fn metal_available(&self) -> bool {
         self.os == OperatingSystem::MacOS
     }
@@ -138,7 +138,7 @@ impl Platform {
     /// # Returns
     ///
     /// The recommended `BlasBackend` for this platform.
-    #[must_use] 
+    #[must_use]
     pub const fn blas_backend(&self) -> BlasBackend {
         match self.os {
             OperatingSystem::MacOS => BlasBackend::Accelerate,
@@ -156,37 +156,37 @@ impl Platform {
     /// # Returns
     ///
     /// `true` if `madvise()` and similar hints are available.
-    #[must_use] 
+    #[must_use]
     pub fn supports_mmap_advice(&self) -> bool {
         cfg!(unix) && (self.os == OperatingSystem::MacOS || self.os == OperatingSystem::Linux)
     }
 
     /// Check if this platform is WebAssembly.
-    #[must_use] 
+    #[must_use]
     pub fn is_wasm(&self) -> bool {
         self.os == OperatingSystem::WebAssembly
     }
 
     /// Check if this platform is macOS.
-    #[must_use] 
+    #[must_use]
     pub fn is_macos(&self) -> bool {
         self.os == OperatingSystem::MacOS
     }
 
     /// Check if this platform is Linux.
-    #[must_use] 
+    #[must_use]
     pub fn is_linux(&self) -> bool {
         self.os == OperatingSystem::Linux
     }
 
     /// Check if this platform is Windows.
-    #[must_use] 
+    #[must_use]
     pub fn is_windows(&self) -> bool {
         self.os == OperatingSystem::Windows
     }
 
     /// Get CPU feature flags (AVX2, NEON dotprod, etc.).
-    #[must_use] 
+    #[must_use]
     pub const fn cpu_flags(&self) -> &CpuFlags {
         &self.cpu_flags
     }
