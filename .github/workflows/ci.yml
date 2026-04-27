@@ -1,0 +1,127 @@
+name: CI/CD - Cross-Platform Validation
+
+on:
+  push:
+    branches:
+      - main
+      - claude/**
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Foundation crate validation (no platform-specific logic)
+  test-foundation:
+    name: Test Foundation (${{ matrix.os }}, Rust ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        rust: [stable, 1.80]  # MSRV
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-${{ matrix.rust }}-
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Check larql-platform
+        run: cargo check -p larql-platform
+
+      - name: Test larql-platform
+        run: cargo test -p larql-platform --lib
+
+      - name: Check larql-build
+        run: cargo check -p larql-build
+
+      - name: Test larql-build
+        run: cargo test -p larql-build --lib
+
+      - name: Check foundation crates
+        run: cargo check -p larql-models -p larql-core
+
+  # Code quality checks (formatting, linting)
+  fmt-lint:
+    name: Format & Lint (Rust stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy on larql-platform
+        run: cargo clippy -p larql-platform --all-targets -- -D warnings
+
+      - name: Run clippy on larql-build
+        run: cargo clippy -p larql-build --all-targets -- -D warnings
+
+  # Documentation build check
+  doc:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build foundation docs
+        run: cargo doc -p larql-platform -p larql-build --no-deps
+
+  # Summary job (required for branch protection)
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - test-foundation
+      - fmt-lint
+      - doc
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.test-foundation.result }}" == "failure" || \
+                "${{ needs.fmt-lint.result }}" == "failure" || \
+                "${{ needs.doc.result }}" == "failure" ]]; then
+            echo "❌ CI failed"
+            exit 1
+          fi
+          echo "✅ CI passed"
