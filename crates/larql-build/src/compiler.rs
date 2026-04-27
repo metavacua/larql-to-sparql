@@ -5,10 +5,14 @@
 
 /// Get CPU architecture-specific compiler flags.
 ///
-/// Returns the appropriate compiler flags based on the target architecture:
-/// - **`x86_64`**: `["-mavx2"]`
-/// - **aarch64**: `["-march=armv8.2-a+dotprod"]`
-/// - **Other**: `[]` (empty)
+/// Returns GCC/Clang-compatible compiler flags based on the target architecture.
+/// These flags are only appropriate for GCC/Clang-compatible compilers;
+/// MSVC and other toolchains handle optimizations differently.
+///
+/// Returns:
+/// - **`x86_64` (non-MSVC)**: `["-mavx2"]`
+/// - **aarch64 (non-MSVC)**: `["-march=armv8.2-a+dotprod"]`
+/// - **MSVC or other**: `[]` (empty, compiler handles optimizations internally)
 ///
 /// # Examples
 ///
@@ -27,10 +31,21 @@
 ///
 /// # Notes
 ///
-/// These flags are architecture-specific optimizations that improve performance
-/// of CPU-intensive operations. They should be combined with `-O3` optimization.
+/// These flags are architecture-specific optimizations for GCC/Clang.
+/// On MSVC, flags are omitted because MSVC has different flag syntax and
+/// handles these optimizations through different mechanisms.
 #[must_use]
 pub fn cpu_flags() -> &'static [&'static str] {
+    // Check if target is MSVC (e.g., x86_64-pc-windows-msvc)
+    let is_msvc = std::env::var("CARGO_CFG_TARGET")
+        .map(|t| t.contains("msvc"))
+        .unwrap_or(false);
+
+    if is_msvc {
+        // MSVC uses different flag syntax; skip for now
+        return &[];
+    }
+
     match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("x86_64") => &["-mavx2"],
         Ok("aarch64") => &["-march=armv8.2-a+dotprod"],
@@ -48,9 +63,11 @@ pub const fn optimization_level() -> u32 {
 
 /// Configure a C compiler with LARQL-specific flags (using cc crate).
 ///
-/// Sets platform-appropriate CPU optimization flags based on the target architecture:
-/// - **`x86_64`**: `-mavx2` (AVX2 vector instructions)
-/// - **aarch64**: `-march=armv8.2-a+dotprod` (ARM NEON dot-product instructions)
+/// Sets platform-appropriate CPU optimization flags based on the target architecture
+/// and compiler toolchain:
+/// - **GCC/Clang on x86_64**: `-mavx2` (AVX2 vector instructions)
+/// - **GCC/Clang on aarch64**: `-march=armv8.2-a+dotprod` (ARM NEON dot-product instructions)
+/// - **MSVC**: No special flags (MSVC handles optimizations internally)
 /// - **Other**: No special flags
 ///
 /// Also sets optimization level to 3 (aggressive optimization).
