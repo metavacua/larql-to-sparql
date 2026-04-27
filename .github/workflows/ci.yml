@@ -43,17 +43,32 @@ jobs:
 
       - name: Create issue on failure
         if: failure() && github.event_name == 'push'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const branch = context.ref.replace('refs/heads/', '');
-            const commit = context.sha.substring(0, 7);
-            const commitUrl = `${context.payload.repository.html_url}/commit/${context.sha}`;
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          COMMIT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT:0:7}"
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🔴 Workflow failure on ${branch} (${commit})`,
-              body: `**Workflow:** CI\n**Branch:** ${branch}\n**Commit:** [${commit}](${commitUrl})\n**Status:** ❌ Failed\n\n## What failed\nThe \`make ci\` target failed. This typically includes:\n- \`cargo fmt --check\` (code formatting)\n- \`cargo clippy\` (linting with warnings as errors)\n- \`cargo test\` (test suite)\n\nCheck the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for detailed logs.\n\n## Action required\nReview the failure logs and fix the issue on \`${branch}\`.`,
-              labels: ['workflow-failure', 'automated']
-            });
+          gh issue create \
+            --title "🔴 Workflow failure on ${BRANCH} (${COMMIT_SHORT})" \
+            --body "**Workflow:** CI
+**Branch:** ${BRANCH}
+**Commit:** [${COMMIT_SHORT}](${COMMIT_URL})
+**Status:** ❌ Failed
+
+## What failed
+The \`make ci\` target failed. This typically includes:
+- \`cargo fmt --check\` (code formatting)
+- \`cargo clippy\` (linting with warnings as errors)
+- \`cargo test\` (test suite)
+
+Check the [workflow run](${RUN_URL}) for detailed logs.
+
+## Action required
+Review the failure logs and fix the issue on \`${BRANCH}\`." \
+            --label workflow-failure \
+            --label automated
