@@ -77,7 +77,7 @@ impl ModelArchitecture for Gemma3Arch {
     fn is_sliding_window_layer(&self, layer: usize) -> bool {
         // Full attention on every Nth layer, sliding window on the rest.
         // Layer indices 5, 11, 17, 23, 29 are full attention (0-indexed).
-        !(layer + 1).is_multiple_of(GEMMA3_SLIDING_WINDOW_PATTERN)
+        (layer + 1) % GEMMA3_SLIDING_WINDOW_PATTERN != 0
     }
 
     fn rope_base_for_layer(&self, layer: usize) -> f64 {
