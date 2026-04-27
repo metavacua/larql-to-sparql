@@ -19,10 +19,17 @@ jobs:
     name: Test Foundation (${{ matrix.os }}, Rust ${{ matrix.rust }})
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
-        rust: [stable, 1.86]  # MSRV
+        include:
+          - os: ubuntu-latest
+            rust: stable
+          - os: ubuntu-latest
+            rust: 1.86
+          - os: macos-14
+            rust: stable
+          - os: windows-latest
+            rust: stable
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +43,9 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-registry-
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+            ${{ runner.os }}-cargo-
 
       - name: Cache cargo index
         uses: actions/cache@v4
@@ -77,19 +86,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           components: rustfmt, clippy
 
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+            ${{ runner.os }}-cargo-
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run clippy on larql-platform
-        run: cargo clippy -p larql-platform --all-targets -- -D warnings
-
-      - name: Run clippy on larql-build
-        run: cargo clippy -p larql-build --all-targets -- -D warnings
+      - name: Run clippy on foundation crates
+        run: cargo clippy -p larql-platform -p larql-build --all-targets -- -D warnings
 
   # Documentation build check
   doc:
@@ -99,9 +114,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+            ${{ runner.os }}-cargo-
 
       - name: Build foundation docs
         run: cargo doc -p larql-platform -p larql-build --no-deps
