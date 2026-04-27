@@ -112,5 +112,5 @@ kernel void q4kf_ffn_gate_up(
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 4;   // 2 SG × 2 rows/SG
-pub const THREADS_PER_TG: u64 = 64;  // 2 SG × 32 lanes
+pub const ROWS_PER_TG: u64 = 4; // 2 SG × 2 rows/SG
+pub const THREADS_PER_TG: u64 = 64; // 2 SG × 32 lanes

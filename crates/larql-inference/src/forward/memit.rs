@@ -21,9 +21,9 @@
 //! distribution across L8-L12 on v11 TinyStories 115M. See
 //! `experiments/15_v11_model/RESULTS.md §20`.
 
-use ndarray::{Array1, Array2};
-use crate::model::ModelWeights;
 use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
+use crate::model::ModelWeights;
+use ndarray::{Array1, Array2};
 
 /// A single fact to be compiled via MEMIT.
 #[derive(Debug, Clone)]
@@ -284,14 +284,7 @@ fn run_memit_inner(
             }
         };
 
-        let result = memit_solve_layer(
-            weights,
-            layer_facts,
-            *layer,
-            &cov_tokens,
-            ridge,
-            layer_r,
-        )?;
+        let result = memit_solve_layer(weights, layer_facts, *layer, &cov_tokens, ridge, layer_r)?;
         results.push(result);
     }
 
@@ -365,7 +358,9 @@ fn memit_solve_layer(
     // Verify W_down exists at this layer (the delta will be added to it).
     let w_down_key = weights.arch.ffn_down_key(layer);
     if !weights.tensors.contains_key(&w_down_key) {
-        return Err(format!("MEMIT: W_down not found at layer {layer} (key: {w_down_key})"));
+        return Err(format!(
+            "MEMIT: W_down not found at layer {layer} (key: {w_down_key})"
+        ));
     }
 
     // ── Step 3+4: Compute R (deltas) and K matrices ──

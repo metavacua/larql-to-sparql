@@ -206,8 +206,7 @@ pub enum ExplainMode {
 }
 
 /// Display mode for DESCRIBE and SHOW RELATIONS output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DescribeMode {
     /// Full detail: relation labels, also-tokens, layer ranges, multi-layer hits.
     Verbose,
@@ -217,7 +216,6 @@ pub enum DescribeMode {
     /// No probe labels — pure model signal.
     Raw,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerBand {

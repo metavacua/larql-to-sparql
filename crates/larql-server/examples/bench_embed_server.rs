@@ -19,8 +19,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use larql_vindex::{
-    load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
-    ndarray::Array2,
+    load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer, ndarray::Array2,
 };
 use memmap2::Mmap;
 
@@ -35,8 +34,14 @@ fn mem_mb() -> (u64, u64) {
         Ok(o) => {
             let s = String::from_utf8_lossy(&o.stdout);
             let parts: Vec<&str> = s.split_whitespace().collect();
-            let rss = parts.first().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
-            let vsz = parts.get(1).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+            let rss = parts
+                .first()
+                .and_then(|p| p.parse::<u64>().ok())
+                .unwrap_or(0);
+            let vsz = parts
+                .get(1)
+                .and_then(|p| p.parse::<u64>().ok())
+                .unwrap_or(0);
             (rss / 1024, vsz / 1024)
         }
         Err(_) => (0, 0),
@@ -56,9 +61,13 @@ fn checkpoint(label: &str, started: Instant, baseline: (u64, u64)) -> (u64, u64)
 // ── Bench harness ─────────────────────────────────────────────────────────────
 
 fn bench<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
-    for _ in 0..warmup { let _ = f(); }
+    for _ in 0..warmup {
+        let _ = f();
+    }
     let t = Instant::now();
-    for _ in 0..iters { let _ = f(); }
+    for _ in 0..iters {
+        let _ = f();
+    }
     let elapsed = t.elapsed();
     let us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
@@ -69,9 +78,13 @@ fn bench<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
 }
 
 fn bench_ns<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
-    for _ in 0..warmup { let _ = f(); }
+    for _ in 0..warmup {
+        let _ = f();
+    }
     let t = Instant::now();
-    for _ in 0..iters { let _ = f(); }
+    for _ in 0..iters {
+        let _ = f();
+    }
     let elapsed = t.elapsed();
     let ns = elapsed.as_secs_f64() * 1_000_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
@@ -93,7 +106,9 @@ fn encode_embed_binary_request(token_ids: &[u32]) -> Vec<u8> {
 }
 
 fn decode_embed_binary_request(bytes: &[u8]) -> Vec<u32> {
-    if bytes.len() < 4 { return vec![]; }
+    if bytes.len() < 4 {
+        return vec![];
+    }
     let n = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
     (0..n)
         .map(|i| u32::from_le_bytes(bytes[4 + i * 4..4 + i * 4 + 4].try_into().unwrap()))
@@ -159,15 +174,18 @@ fn main() {
 
     // ── Load embeddings ───────────────────────────────────────────────────────
     println!();
-    println!("Loading embeddings.bin ({} × {} f32 = {:.1} GB)...",
-        config.vocab_size, config.hidden_size,
+    println!(
+        "Loading embeddings.bin ({} × {} f32 = {:.1} GB)...",
+        config.vocab_size,
+        config.hidden_size,
         config.vocab_size as f64 * config.hidden_size as f64 * 4.0 / 1e9
     );
     let t0 = Instant::now();
     let (embeddings, embed_scale) = load_vindex_embeddings(&vindex_path).expect("load embeddings");
     let embed_ms = t0.elapsed().as_secs_f64() * 1000.0;
     let after_embed = checkpoint("after embeddings load", started, baseline);
-    println!("  Embeddings load: {:.1}ms  ({:.2} GB/s effective throughput)",
+    println!(
+        "  Embeddings load: {:.1}ms  ({:.2} GB/s effective throughput)",
         embed_ms,
         (config.vocab_size as f64 * config.hidden_size as f64 * 2.0 / 1e9) / (embed_ms / 1000.0)
     );
@@ -199,17 +217,28 @@ fn main() {
     // Prefill: 32 / 128 / 512 tokens
     for &seq_len in &[1usize, 32, 128, 512] {
         let token_ids: Vec<usize> = (0..seq_len).map(|i| (i * 7 + 13) % vocab).collect();
-        let iters = if seq_len <= 32 { 50_000 } else if seq_len <= 128 { 10_000 } else { 2_000 };
-        bench(&format!("embed {seq_len} tokens (prefill)"), iters / 10, iters, || {
-            let mut h = Array2::<f32>::zeros((seq_len, hidden));
-            for (i, &tok) in token_ids.iter().enumerate() {
-                let src = embeddings.row(tok);
-                for (dst, &s) in h.row_mut(i).iter_mut().zip(src.iter()) {
-                    *dst = s * scale;
+        let iters = if seq_len <= 32 {
+            50_000
+        } else if seq_len <= 128 {
+            10_000
+        } else {
+            2_000
+        };
+        bench(
+            &format!("embed {seq_len} tokens (prefill)"),
+            iters / 10,
+            iters,
+            || {
+                let mut h = Array2::<f32>::zeros((seq_len, hidden));
+                for (i, &tok) in token_ids.iter().enumerate() {
+                    let src = embeddings.row(tok);
+                    for (dst, &s) in h.row_mut(i).iter_mut().zip(src.iter()) {
+                        *dst = s * scale;
+                    }
                 }
-            }
-            h
-        });
+                h
+            },
+        );
     }
 
     // ── Tokenizer benchmarks ──────────────────────────────────────────────────
@@ -223,9 +252,12 @@ fn main() {
     ];
     for prompt in &prompts {
         let words = prompt.split_whitespace().count();
-        bench(&format!("encode {words}w: {:.30}…", prompt), 1_000, 50_000, || {
-            tokenizer.encode(*prompt, false).unwrap()
-        });
+        bench(
+            &format!("encode {words}w: {:.30}…", prompt),
+            1_000,
+            50_000,
+            || tokenizer.encode(*prompt, false).unwrap(),
+        );
     }
 
     // Decode single token
@@ -233,7 +265,9 @@ fn main() {
         tokenizer.decode(&[9515u32], true).unwrap()
     });
     bench_ns("decode 5 token ids", 10_000, 500_000, || {
-        tokenizer.decode(&[9515u32, 235, 1234, 100, 7], true).unwrap()
+        tokenizer
+            .decode(&[9515u32, 235, 1234, 100, 7], true)
+            .unwrap()
     });
 
     // ── Wire format benchmarks ────────────────────────────────────────────────
@@ -255,17 +289,25 @@ fn main() {
     // Build a 1-token residual for response encoding
     let single_residual = {
         let mut h = Array2::<f32>::zeros((1, hidden));
-        for j in 0..hidden { h[[0, j]] = j as f32 / hidden as f32; }
+        for j in 0..hidden {
+            h[[0, j]] = j as f32 / hidden as f32;
+        }
         h
     };
-    bench(&format!("encode embed response (1×{hidden} f32)"), 10_000, 500_000, || {
-        encode_embed_binary_response(&single_residual)
-    });
+    bench(
+        &format!("encode embed response (1×{hidden} f32)"),
+        10_000,
+        500_000,
+        || encode_embed_binary_response(&single_residual),
+    );
 
     let logits_request: Vec<f32> = (0..hidden).map(|i| i as f32 / hidden as f32).collect();
-    bench_ns("encode logits request (f32 slice → bytes)", 10_000, 500_000, || {
-        encode_logits_binary_request(&logits_request)
-    });
+    bench_ns(
+        "encode logits request (f32 slice → bytes)",
+        10_000,
+        500_000,
+        || encode_logits_binary_request(&logits_request),
+    );
 
     // ── JSON serialization ────────────────────────────────────────────────────
     println!();
@@ -277,9 +319,12 @@ fn main() {
         "hidden_size": hidden,
         "latency_ms": 0.01f32,
     });
-    bench(&format!("JSON embed response (1×{hidden} floats)"), 1_000, 50_000, || {
-        serde_json::to_string(&sample_embed_resp).unwrap()
-    });
+    bench(
+        &format!("JSON embed response (1×{hidden} floats)"),
+        1_000,
+        50_000,
+        || serde_json::to_string(&sample_embed_resp).unwrap(),
+    );
 
     let sample_logits_resp = serde_json::json!({
         "top_k": [
@@ -311,27 +356,44 @@ fn main() {
         let lm_head = embeddings.slice(larql_vindex::ndarray::s![..sub_vocab, ..]);
         println!("  Using first {sub_vocab} rows of lm_head (full vocab = {vocab})");
 
-        bench(&format!("logits matmul {sub_vocab}×{hidden} (dot products)"), 10, 200, || {
-            let mut scores: Vec<f32> = Vec::with_capacity(sub_vocab);
-            for row in lm_head.rows() {
-                scores.push(row.iter().zip(query.iter()).map(|(&e, &r)| e * r).sum());
-            }
-            // top-5 partial sort
-            let k = 5.min(scores.len());
-            scores.select_nth_unstable_by(k, |a, b| b.partial_cmp(a).unwrap());
-            scores.truncate(k);
-            scores
-        });
+        bench(
+            &format!("logits matmul {sub_vocab}×{hidden} (dot products)"),
+            10,
+            200,
+            || {
+                let mut scores: Vec<f32> = Vec::with_capacity(sub_vocab);
+                for row in lm_head.rows() {
+                    scores.push(row.iter().zip(query.iter()).map(|(&e, &r)| e * r).sum());
+                }
+                // top-5 partial sort
+                let k = 5.min(scores.len());
+                scores.select_nth_unstable_by(k, |a, b| b.partial_cmp(a).unwrap());
+                scores.truncate(k);
+                scores
+            },
+        );
 
         let after_logits = mem_mb();
         let dr = after_logits.0 as i64 - after_logits_baseline.0 as i64;
-        println!("  RSS after logits bench: {} MB (Δ{:+} MB)", after_logits.0, dr);
+        println!(
+            "  RSS after logits bench: {} MB (Δ{:+} MB)",
+            after_logits.0, dr
+        );
 
         println!();
         println!("  Full-vocab projection ({}×{}):", vocab, hidden);
-        println!("    CPU naive:  ~{:.0}ms", vocab as f64 * hidden as f64 * 2.0 / 4e9 * 1000.0);
-        println!("    BLAS gemv:  ~{:.1}ms  (@ ~50 GFLOP/s)", vocab as f64 * hidden as f64 * 2.0 / 50e9 * 1000.0);
-        println!("    Metal gemv: ~{:.2}ms  (@ ~2 TFLOP/s on Apple Silicon)", vocab as f64 * hidden as f64 * 2.0 / 2000e9 * 1000.0);
+        println!(
+            "    CPU naive:  ~{:.0}ms",
+            vocab as f64 * hidden as f64 * 2.0 / 4e9 * 1000.0
+        );
+        println!(
+            "    BLAS gemv:  ~{:.1}ms  (@ ~50 GFLOP/s)",
+            vocab as f64 * hidden as f64 * 2.0 / 50e9 * 1000.0
+        );
+        println!(
+            "    Metal gemv: ~{:.2}ms  (@ ~2 TFLOP/s on Apple Silicon)",
+            vocab as f64 * hidden as f64 * 2.0 / 2000e9 * 1000.0
+        );
     }
 
     // ── f16-at-rest store benchmark ───────────────────────────────────────────
@@ -353,12 +415,15 @@ fn main() {
         // RSS overhead of just the mmap after cold open (before any page faults).
         drop(embeddings);
         let (rss_after_mmap, _) = mem_mb();
-        println!("  mmap open (cold, no pages faulted):  {:.1}ms  RSS={} MB",
-            open_ms, rss_after_mmap);
+        println!(
+            "  mmap open (cold, no pages faulted):  {:.1}ms  RSS={} MB",
+            open_ms, rss_after_mmap
+        );
 
         // Touch 5000 tokens (L1 cache fill): fault exactly those pages.
         let l1_cap = 5_000usize;
-        let mut l1_cache: std::collections::HashMap<u32, Vec<f32>> = std::collections::HashMap::new();
+        let mut l1_cache: std::collections::HashMap<u32, Vec<f32>> =
+            std::collections::HashMap::new();
         let t0 = Instant::now();
         for i in 0..l1_cap {
             let tok = (i * 7 + 13) % vocab;
@@ -376,8 +441,10 @@ fn main() {
         }
         let fill_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let (rss_after_l1, _) = mem_mb();
-        println!("  L1 cache fill ({l1_cap} tokens):          {:.1}ms  RSS={} MB",
-            fill_ms, rss_after_l1);
+        println!(
+            "  L1 cache fill ({l1_cap} tokens):          {:.1}ms  RSS={} MB",
+            fill_ms, rss_after_l1
+        );
 
         // Benchmark: L1 hit (hot token, already in HashMap)
         // Use the first key actually inserted into the cache.
@@ -388,34 +455,53 @@ fn main() {
         });
 
         // Benchmark: L1 miss — decode from f16 mmap every time (cold)
-        bench_ns("f16 embed 1 token — mmap decode (L1 miss)", 10_000, 500_000, || {
-            let tok = 9515usize % vocab;
-            let offset = tok * hidden * 2;
-            let raw = &f16_mmap[offset..offset + hidden * 2];
-            let row: Vec<f32> = raw.chunks_exact(2).map(|b| {
-                let bits = u16::from_le_bytes([b[0], b[1]]);
-                larql_models::quant::half::f16_to_f32(bits) * embed_scale
-            }).collect();
-            std::hint::black_box(row[0])
-        });
+        bench_ns(
+            "f16 embed 1 token — mmap decode (L1 miss)",
+            10_000,
+            500_000,
+            || {
+                let tok = 9515usize % vocab;
+                let offset = tok * hidden * 2;
+                let raw = &f16_mmap[offset..offset + hidden * 2];
+                let row: Vec<f32> = raw
+                    .chunks_exact(2)
+                    .map(|b| {
+                        let bits = u16::from_le_bytes([b[0], b[1]]);
+                        larql_models::quant::half::f16_to_f32(bits) * embed_scale
+                    })
+                    .collect();
+                std::hint::black_box(row[0])
+            },
+        );
 
         // Prefill via f16 decode
         for &seq_len in &[1usize, 32, 128, 512] {
             let token_ids: Vec<usize> = (0..seq_len).map(|i| (i * 7 + 13) % vocab).collect();
-            let iters = if seq_len <= 32 { 20_000 } else if seq_len <= 128 { 5_000 } else { 1_000 };
-            bench(&format!("f16 embed {seq_len} tokens (prefill, mmap decode)"), iters / 10, iters, || {
-                let mut h = Array2::<f32>::zeros((seq_len, hidden));
-                for (i, &tok) in token_ids.iter().enumerate() {
-                    let offset = tok * hidden * 2;
-                    let raw = &f16_mmap[offset..offset + hidden * 2];
-                    let mut dst = h.row_mut(i);
-                    for (j, b) in raw.chunks_exact(2).enumerate() {
-                        let bits = u16::from_le_bytes([b[0], b[1]]);
-                        dst[j] = larql_models::quant::half::f16_to_f32(bits) * embed_scale;
+            let iters = if seq_len <= 32 {
+                20_000
+            } else if seq_len <= 128 {
+                5_000
+            } else {
+                1_000
+            };
+            bench(
+                &format!("f16 embed {seq_len} tokens (prefill, mmap decode)"),
+                iters / 10,
+                iters,
+                || {
+                    let mut h = Array2::<f32>::zeros((seq_len, hidden));
+                    for (i, &tok) in token_ids.iter().enumerate() {
+                        let offset = tok * hidden * 2;
+                        let raw = &f16_mmap[offset..offset + hidden * 2];
+                        let mut dst = h.row_mut(i);
+                        for (j, b) in raw.chunks_exact(2).enumerate() {
+                            let bits = u16::from_le_bytes([b[0], b[1]]);
+                            dst[j] = larql_models::quant::half::f16_to_f32(bits) * embed_scale;
+                        }
                     }
-                }
-                h
-            });
+                    h
+                },
+            );
         }
 
         // Final RSS — all accessed pages now resident.
@@ -430,29 +516,46 @@ fn main() {
         let embed_f16_gb = vocab as f64 * hidden as f64 * 2.0 / 1e9;
         let tok_gb = 0.234f64;
         let l1_gb = l1_cap as f64 * hidden as f64 * 4.0 / 1e9;
-        println!("  embeddings.bin on disk (f16):          {:.2} GB", embed_f16_gb);
-        println!("  f32 heap (eager decode):               {:.2} GB", embed_f32_gb);
-        println!("  f16 mmap + L1 cache ({l1_cap} tokens):   {:.2} GB  ({:.0} MB mmap + {:.0} MB L1)",
+        println!(
+            "  embeddings.bin on disk (f16):          {:.2} GB",
+            embed_f16_gb
+        );
+        println!(
+            "  f32 heap (eager decode):               {:.2} GB",
+            embed_f32_gb
+        );
+        println!(
+            "  f16 mmap + L1 cache ({l1_cap} tokens):   {:.2} GB  ({:.0} MB mmap + {:.0} MB L1)",
             embed_f16_gb + l1_gb,
-            embed_f16_gb * 1000.0, l1_gb * 1000.0);
+            embed_f16_gb * 1000.0,
+            l1_gb * 1000.0
+        );
         println!();
-        println!("  --embed-only (f32 heap):               ~{:.1} GB RSS",
-            embed_f32_gb + tok_gb);
-        println!("  --embed-only (f16 mmap, ADR-0008):     ~{:.1} GB RSS  ({:.0}% reduction)",
+        println!(
+            "  --embed-only (f32 heap):               ~{:.1} GB RSS",
+            embed_f32_gb + tok_gb
+        );
+        println!(
+            "  --embed-only (f16 mmap, ADR-0008):     ~{:.1} GB RSS  ({:.0}% reduction)",
             embed_f16_gb + l1_gb + tok_gb,
-            (1.0 - (embed_f16_gb + l1_gb) / embed_f32_gb) * 100.0);
+            (1.0 - (embed_f16_gb + l1_gb) / embed_f32_gb) * 100.0
+        );
         let _ = f16_mmap;
     } else {
-        println!("  embeddings.bin is f32 (size {} != f16 expected {}) — f16 bench skipped",
-            f16_file_size, expected_f16);
+        println!(
+            "  embeddings.bin is f32 (size {} != f16 expected {}) — f16 bench skipped",
+            f16_file_size, expected_f16
+        );
         let (final_rss, _) = mem_mb();
         println!("  RSS: {} MB", final_rss);
     }
 
     println!();
-    println!("  Logits: {:.1}ms CPU (full vocab), ~{:.2}ms Metal",
+    println!(
+        "  Logits: {:.1}ms CPU (full vocab), ~{:.2}ms Metal",
         vocab as f64 * hidden as f64 * 2.0 / 4e9 * 1000.0,
-        vocab as f64 * hidden as f64 * 2.0 / 2000e9 * 1000.0);
+        vocab as f64 * hidden as f64 * 2.0 / 2000e9 * 1000.0
+    );
     println!();
     println!("  Run with --logits to benchmark the lm_head projection.");
 

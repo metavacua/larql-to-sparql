@@ -18,18 +18,19 @@ fn rss_mb() -> f64 {
         bytes as f64 / (1024.0 * 1024.0)
     }
     #[cfg(not(unix))]
-    { 0.0 }
+    {
+        0.0
+    }
 }
 
 use clap::Args;
-use larql_vindex::{
-    load_vindex_embeddings, load_vindex_tokenizer,
-    IndexLoadCallbacks, SilentLoadCallbacks, VectorIndex, ndarray, tokenizers,
-};
 use larql_inference::{
-    predict_with_ffn, predict_with_router, InferenceModel, LayerFfnRouter, ModelWeights,
-    RemoteFfnConfig, RemoteWalkBackend, SparseFfn, WeightFfn,
-    vindex::WalkFfn,
+    predict_with_ffn, predict_with_router, vindex::WalkFfn, InferenceModel, LayerFfnRouter,
+    ModelWeights, RemoteFfnConfig, RemoteWalkBackend, SparseFfn, WeightFfn,
+};
+use larql_vindex::{
+    load_vindex_embeddings, load_vindex_tokenizer, ndarray, tokenizers, IndexLoadCallbacks,
+    SilentLoadCallbacks, VectorIndex,
 };
 
 #[derive(Args)]
@@ -194,7 +195,11 @@ pub fn run(args: WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
     // RSS at this point = attn + embed + norms (gate vectors demand-paged,
     // not yet faulted in). Useful for the "7 GB" claim in demos.
-    vlog!(verbose, "  RSS at load: {:.1} GB (gate vectors not yet resident)", rss_mb() / 1024.0);
+    vlog!(
+        verbose,
+        "  RSS at load: {:.1} GB (gate vectors not yet resident)",
+        rss_mb() / 1024.0
+    );
 
     // Parse layer selection
     let all_layers = index.loaded_layers();
@@ -211,14 +216,17 @@ pub fn run(args: WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
             // Try loading weights from vindex
             run_with_vindex_weights(vindex_path, &args, &index, &layers, verbose)?;
         } else {
-            return Err("--model or --index (with --include-weights) required for --predict".into());
+            return Err(
+                "--model or --index (with --include-weights) required for --predict".into(),
+            );
         }
     } else if let Some(ref vindex_path) = args.index {
         run_vindex_walk(vindex_path, &args, &index, &layers)?;
     } else {
-        let model_name = args.model.as_deref().ok_or(
-            "--model required for embedding walk (or use --index for standalone)",
-        )?;
+        let model_name = args
+            .model
+            .as_deref()
+            .ok_or("--model required for embedding walk (or use --index for standalone)")?;
         run_model_embedding_walk(model_name, &args, &index, &layers)?;
     }
 
@@ -257,7 +265,11 @@ fn run_vindex_walk(
     let token_str = tokenizer
         .decode(&[last_tok], true)
         .unwrap_or_else(|_| format!("T{last_tok}"));
-    vlog!(verbose, "Query: embedding for {:?} (T{last_tok})", token_str.trim());
+    vlog!(
+        verbose,
+        "Query: embedding for {:?} (T{last_tok})",
+        token_str.trim()
+    );
 
     let walk_start = Instant::now();
     let trace = index.walk(&query, layers, args.top_k);
@@ -311,7 +323,11 @@ fn run_model_embedding_walk(
         .tokenizer()
         .decode(&[last_tok], true)
         .unwrap_or_else(|_| format!("T{last_tok}"));
-    vlog!(verbose, "Query: embedding for {:?} (T{last_tok})", token_str.trim());
+    vlog!(
+        verbose,
+        "Query: embedding for {:?} (T{last_tok})",
+        token_str.trim()
+    );
 
     let walk_start = Instant::now();
     let trace = index.walk(&query, layers, args.top_k);
@@ -401,7 +417,10 @@ fn run_with_vindex_weights(
         ..Default::default()
     };
     if load_opts.skip_ffn {
-        vlog!(verbose, "  remote FFN configured — skipping FFN tensors at load");
+        vlog!(
+            verbose,
+            "  remote FFN configured — skipping FFN tensors at load"
+        );
     }
     let weights = larql_vindex::load_model_weights_with_opts(vindex_path, &mut *cb, load_opts)?;
     let tokenizer = load_vindex_tokenizer(vindex_path)?;
@@ -428,19 +447,22 @@ fn run_predict_q4k(
     _index: &VectorIndex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let verbose = args.verbose;
-    let token_ids = larql_inference::encode_prompt(
-        tokenizer,
-        &*weights.arch,
-        args.prompt.as_str(),
-    )
-    .map_err(|e| format!("tokenize error: {e}"))?;
-    vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+    let token_ids = larql_inference::encode_prompt(tokenizer, &*weights.arch, args.prompt.as_str())
+        .map_err(|e| format!("tokenize error: {e}"))?;
+    vlog!(
+        verbose,
+        "Prompt: {:?} ({} tokens)",
+        args.prompt,
+        token_ids.len()
+    );
 
     // The Q4 vindex we loaded already lives inside the VectorIndex used by
     // the walk caller, but we need our OWN VectorIndex with the Q4 mmaps
     // loaded (load_attn_q4k, load_interleaved_q4k) since the caller's index
     // might have been constructed without those accessors wired up.
-    let vindex_path = args.index.as_deref()
+    let vindex_path = args
+        .index
+        .as_deref()
         .ok_or("--index required for Q4 predict path")?;
     let mut cb = larql_vindex::SilentLoadCallbacks;
     let mut q4_index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
@@ -470,21 +492,34 @@ fn run_predict_q4k(
     let result = if args.metal {
         let backend = larql_compute::default_backend();
         if !backend.has_q4() {
-            return Err("Metal backend unavailable — rebuild with `--features metal` \
-                and run on an M-series Mac.".into());
+            return Err(
+                "Metal backend unavailable — rebuild with `--features metal` \
+                and run on an M-series Mac."
+                    .into(),
+            );
         }
-        vlog!(verbose, "Backend: {} (Metal Q4K prefill + KV-cached decode)", backend.name());
+        vlog!(
+            verbose,
+            "Backend: {} (Metal Q4K prefill + KV-cached decode)",
+            backend.name()
+        );
         // --metal + --max-tokens > 1: route to the existing shader
         // autoregressive generate() in `larql-inference/src/layer_graph`
         // (GPU prefill + KV-cached decode). That function returns its
         // own tokens list; we stream them and exit.
         if args.max_tokens > 1 {
             use std::io::Write;
-            let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
+            let cached_layers =
+                larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
             let result = larql_inference::layer_graph::generate(
-                weights, tokenizer, &token_ids,
-                args.max_tokens, &q4_index, &*backend,
-                &cached_layers, 0..weights.num_layers,
+                weights,
+                tokenizer,
+                &token_ids,
+                args.max_tokens,
+                &q4_index,
+                &*backend,
+                &cached_layers,
+                0..weights.num_layers,
             );
             let mut stdout = std::io::stdout();
             for (tok, _) in &result.tokens {
@@ -495,7 +530,9 @@ fn run_predict_q4k(
             if verbose {
                 eprintln!(
                     "  prefill: {:.1}ms  decode avg: {:.1}ms/tok  ({:.1} tok/s)",
-                    result.prefill_ms, result.avg_decode_ms(), result.decode_tok_s(),
+                    result.prefill_ms,
+                    result.avg_decode_ms(),
+                    result.decode_tok_s(),
                 );
             }
             return Ok(());
@@ -518,7 +555,11 @@ fn run_predict_q4k(
             &q4_index,
         )
     };
-    vlog!(verbose, "Q4 forward pass: {:.2}s", start.elapsed().as_secs_f64());
+    vlog!(
+        verbose,
+        "Q4 forward pass: {:.2}s",
+        start.elapsed().as_secs_f64()
+    );
 
     print_predictions("walk (q4k)", &result.predictions, verbose);
 
@@ -554,7 +595,12 @@ fn run_predict_q4k_remote(
         )
         .into());
     }
-    vlog!(verbose, "  connected: hidden={} url={}", remote.hidden_size(), remote.base_url());
+    vlog!(
+        verbose,
+        "  connected: hidden={} url={}",
+        remote.hidden_size(),
+        remote.base_url()
+    );
 
     // Build a fresh VectorIndex with the q4k attention mmap wired in.
     // Q4K FFN mmap is NOT loaded — FFN runs on the server.
@@ -562,13 +608,14 @@ fn run_predict_q4k_remote(
     let mut q4_index = VectorIndex::load_vindex(vindex_path, &mut cb)?;
     q4_index.load_attn_q4k(vindex_path)?;
 
-    let token_ids = larql_inference::encode_prompt(
-        tokenizer,
-        &*weights.arch,
-        args.prompt.as_str(),
-    )
-    .map_err(|e| format!("tokenize error: {e}"))?;
-    vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+    let token_ids = larql_inference::encode_prompt(tokenizer, &*weights.arch, args.prompt.as_str())
+        .map_err(|e| format!("tokenize error: {e}"))?;
+    vlog!(
+        verbose,
+        "Prompt: {:?} ({} tokens)",
+        args.prompt,
+        token_ids.len()
+    );
 
     let start = Instant::now();
     let result = larql_inference::vindex::predict_q4k_with_ffn(
@@ -583,7 +630,11 @@ fn run_predict_q4k_remote(
 
     print_predictions("walk (q4k + ffn remote)", &result.predictions, verbose);
     if verbose {
-        eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
+        eprintln!(
+            "  Forward pass: {:.2}s  (FFN → {})",
+            elapsed.as_secs_f64(),
+            url
+        );
     }
 
     Ok(())
@@ -606,18 +657,22 @@ fn run_q4k_generate_cpu(
     let start = Instant::now();
 
     for _step in 0..args.max_tokens {
-        let result = larql_inference::vindex::predict_q4k(
-            weights, tokenizer, &ids, 1, q4_index,
-        );
+        let result = larql_inference::vindex::predict_q4k(weights, tokenizer, &ids, 1, q4_index);
         let next_id = match result.token_ids.first() {
             Some(&id) => id,
             None => break,
         };
-        let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
+        let tok_str = result
+            .predictions
+            .first()
+            .map(|p| p.0.as_str())
+            .unwrap_or("");
         print!("{tok_str}");
         let _ = stdout.flush();
         ids.push(next_id);
-        if is_stop_token(tok_str) { break; }
+        if is_stop_token(tok_str) {
+            break;
+        }
     }
     println!();
     if verbose {
@@ -643,7 +698,12 @@ fn run_predict_inner(
         .encode(args.prompt.as_str(), true)
         .map_err(|e| format!("tokenize error: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-    vlog!(verbose, "Prompt: {:?} ({} tokens)", args.prompt, token_ids.len());
+    vlog!(
+        verbose,
+        "Prompt: {:?} ({} tokens)",
+        args.prompt,
+        token_ids.len()
+    );
 
     // Remote FFN short-circuit: attention runs locally, FFN hits the server
     // per layer. Mutually exclusive with --compare (the comparison backends
@@ -667,7 +727,11 @@ fn run_predict_inner(
     if args.max_tokens > 1 {
         generate_stream(weights, tokenizer, &walk_ffn, &token_ids, args, verbose);
         let walk_elapsed = start.elapsed();
-        vlog!(verbose, "  Walk forward: {:.1}s", walk_elapsed.as_secs_f64());
+        vlog!(
+            verbose,
+            "  Walk forward: {:.1}s",
+            walk_elapsed.as_secs_f64()
+        );
         return Ok(());
     }
 
@@ -689,7 +753,11 @@ fn run_predict_inner(
     }
 
     print_predictions("walk", &result.predictions, verbose);
-    vlog!(verbose, "  Walk forward: {:.1}s", walk_elapsed.as_secs_f64());
+    vlog!(
+        verbose,
+        "  Walk forward: {:.1}s",
+        walk_elapsed.as_secs_f64()
+    );
 
     if args.compare {
         let start = Instant::now();
@@ -698,7 +766,11 @@ fn run_predict_inner(
         let dense_elapsed = start.elapsed();
 
         print_predictions("dense", &dense_result.predictions, verbose);
-        vlog!(verbose, "  Dense forward: {:.1}s", dense_elapsed.as_secs_f64());
+        vlog!(
+            verbose,
+            "  Dense forward: {:.1}s",
+            dense_elapsed.as_secs_f64()
+        );
 
         let sparse_ffn = SparseFfn {
             weights,
@@ -714,8 +786,16 @@ fn run_predict_inner(
         );
         let sparse_elapsed = start.elapsed();
 
-        print_predictions(&format!("sparse:{}", args.top_k), &sparse_result.predictions, verbose);
-        vlog!(verbose, "  Sparse forward: {:.1}s", sparse_elapsed.as_secs_f64());
+        print_predictions(
+            &format!("sparse:{}", args.top_k),
+            &sparse_result.predictions,
+            verbose,
+        );
+        vlog!(
+            verbose,
+            "  Sparse forward: {:.1}s",
+            sparse_elapsed.as_secs_f64()
+        );
 
         let weight_ffn = WeightFfn { weights };
         let walk_ffn2 = WalkFfn::new(weights, index, args.top_k);
@@ -727,21 +807,25 @@ fn run_predict_inner(
         });
         let router = LayerFfnRouter::per_layer(backends);
         let start = Instant::now();
-        let hybrid_result = predict_with_router(
-            weights,
-            tokenizer,
-            &token_ids,
-            args.predict_top_k,
-            &router,
-        );
+        let hybrid_result =
+            predict_with_router(weights, tokenizer, &token_ids, args.predict_top_k, &router);
         let hybrid_elapsed = start.elapsed();
 
         print_predictions(
-            &format!("hybrid (dense:0-{}, walk:{}-{})", switch - 1, switch, num_layers - 1),
+            &format!(
+                "hybrid (dense:0-{}, walk:{}-{})",
+                switch - 1,
+                switch,
+                num_layers - 1
+            ),
             &hybrid_result.predictions,
             verbose,
         );
-        vlog!(verbose, "  Hybrid forward: {:.1}s", hybrid_elapsed.as_secs_f64());
+        vlog!(
+            verbose,
+            "  Hybrid forward: {:.1}s",
+            hybrid_elapsed.as_secs_f64()
+        );
 
         println!();
         println!(
@@ -751,7 +835,11 @@ fn run_predict_inner(
         println!("{}", "-".repeat(75));
         print_summary_row("walk", &result.predictions, walk_elapsed);
         print_summary_row("dense", &dense_result.predictions, dense_elapsed);
-        print_summary_row(&format!("sparse:{}", args.top_k), &sparse_result.predictions, sparse_elapsed);
+        print_summary_row(
+            &format!("sparse:{}", args.top_k),
+            &sparse_result.predictions,
+            sparse_elapsed,
+        );
         print_summary_row(
             &format!("dense:0-{},walk:{}-{}", switch - 1, switch, num_layers - 1),
             &hybrid_result.predictions,
@@ -789,31 +877,37 @@ fn run_predict_remote(
         )
         .into());
     }
-    vlog!(verbose, "  connected: hidden={} url={}", remote.hidden_size(), remote.base_url());
+    vlog!(
+        verbose,
+        "  connected: hidden={} url={}",
+        remote.hidden_size(),
+        remote.base_url()
+    );
 
     let start = Instant::now();
 
     if args.max_tokens > 1 {
         generate_stream(weights, tokenizer, &remote, token_ids, args, verbose);
         if verbose {
-            eprintln!("  Forward pass: {:.2}s  (FFN → {})",
-                      start.elapsed().as_secs_f64(), url);
+            eprintln!(
+                "  Forward pass: {:.2}s  (FFN → {})",
+                start.elapsed().as_secs_f64(),
+                url
+            );
         }
         return Ok(());
     }
 
-    let result = predict_with_ffn(
-        weights,
-        tokenizer,
-        token_ids,
-        args.predict_top_k,
-        &remote,
-    );
+    let result = predict_with_ffn(weights, tokenizer, token_ids, args.predict_top_k, &remote);
     let elapsed = start.elapsed();
 
     print_predictions("walk (ffn remote)", &result.predictions, verbose);
     if verbose {
-        eprintln!("  Forward pass: {:.2}s  (FFN → {})", elapsed.as_secs_f64(), url);
+        eprintln!(
+            "  Forward pass: {:.2}s  (FFN → {})",
+            elapsed.as_secs_f64(),
+            url
+        );
     }
 
     Ok(())
@@ -840,8 +934,8 @@ fn generate_stream(
     args: &WalkArgs,
     verbose: bool,
 ) -> Vec<u32> {
-    use std::io::Write;
     use crate::commands::primary::run_cmd::KvCacheKind;
+    use std::io::Write;
     let mut stdout = std::io::stdout();
     let max_tokens = args.max_tokens;
 
@@ -856,17 +950,23 @@ fn generate_stream(
 
     let (generated, label) = match args.kv_cache {
         KvCacheKind::Standard | KvCacheKind::MarkovBounded => {
-            let window = if args.kv_cache == KvCacheKind::MarkovBounded
-                && args.context_window > 0
-            {
+            let window = if args.kv_cache == KvCacheKind::MarkovBounded && args.context_window > 0 {
                 Some(args.context_window)
             } else {
                 None
             };
             let g = larql_inference::forward::generate_cached_backend(
-                weights, tokenizer, ffn, initial_ids, max_tokens,
-                Some(&*backend), window,
-                |_id, tok| { print!("{tok}"); let _ = stdout.flush(); },
+                weights,
+                tokenizer,
+                ffn,
+                initial_ids,
+                max_tokens,
+                Some(&*backend),
+                window,
+                |_id, tok| {
+                    print!("{tok}");
+                    let _ = stdout.flush();
+                },
             );
             let label = if window.is_some() {
                 "Markov-bounded KV cache"
@@ -882,14 +982,21 @@ fn generate_stream(
             for _ in 0..max_tokens {
                 let result = predict_with_ffn(weights, tokenizer, &ids, 1, ffn);
                 let next_id = match result.token_ids.first() {
-                    Some(&id) => id, None => break,
+                    Some(&id) => id,
+                    None => break,
                 };
-                let tok_str = result.predictions.first().map(|p| p.0.as_str()).unwrap_or("");
+                let tok_str = result
+                    .predictions
+                    .first()
+                    .map(|p| p.0.as_str())
+                    .unwrap_or("");
                 print!("{tok_str}");
                 let _ = stdout.flush();
                 ids.push(next_id);
                 generated.push(next_id);
-                if is_stop_token(tok_str) { break; }
+                if is_stop_token(tok_str) {
+                    break;
+                }
             }
             (generated, "no cache (O(N²))")
         }
@@ -904,7 +1011,9 @@ fn generate_stream(
         // token decode stays on CPU regardless.
         eprintln!(
             "  Generated {} tokens ({}) — backend={} (decode matmuls usually below GPU threshold)",
-            generated.len(), label, backend.name(),
+            generated.len(),
+            label,
+            backend.name(),
         );
     }
     generated
@@ -913,8 +1022,7 @@ fn generate_stream(
 fn is_stop_token(s: &str) -> bool {
     matches!(
         s,
-        "<eos>" | "</s>" | "<|endoftext|>" | "<|im_end|>"
-            | "<|end_of_turn|>" | "<end_of_turn>"
+        "<eos>" | "</s>" | "<|endoftext|>" | "<|im_end|>" | "<|end_of_turn|>" | "<end_of_turn>"
     )
 }
 
@@ -922,12 +1030,7 @@ fn print_predictions(label: &str, predictions: &[(String, f64)], verbose: bool) 
     if verbose {
         println!("\nTop predictions ({label}):");
         for (i, (token, prob)) in predictions.iter().enumerate() {
-            println!(
-                "  {:2}. {:20} ({:.2}%)",
-                i + 1,
-                token,
-                prob * 100.0
-            );
+            println!("  {:2}. {:20} ({:.2}%)", i + 1, token, prob * 100.0);
         }
     } else {
         // Ollama-style clean output — just the top-1 token on stdout,

@@ -98,10 +98,7 @@ fn looks_like_hf_repo(s: &str) -> bool {
     let mut parts = s.splitn(2, '/');
     let owner = parts.next().unwrap_or("");
     let name = parts.next().unwrap_or("");
-    !owner.is_empty()
-        && !name.is_empty()
-        && !owner.contains('.')
-        && !name.contains('/')
+    !owner.is_empty() && !name.is_empty() && !owner.contains('.') && !name.contains('/')
 }
 
 /// Render `{repo}-{preset}` (or the caller's override). Strips any
@@ -113,14 +110,11 @@ fn render_sibling_repo(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let bare = model.trim_start_matches("hf://");
     if !looks_like_hf_repo(bare) {
-        return Err(format!(
-            "--preset needs an `owner/name` repo, not a local path: {model}"
-        )
-        .into());
+        return Err(
+            format!("--preset needs an `owner/name` repo, not a local path: {model}").into(),
+        );
     }
-    Ok(template
-        .replace("{repo}", bare)
-        .replace("{preset}", preset))
+    Ok(template.replace("{repo}", bare).replace("{preset}", preset))
 }
 
 /// `indicatif::ProgressBar` wrapper that implements hf-hub's `Progress`
@@ -229,10 +223,7 @@ fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn std::error::Error>> 
 
 /// Pull the full repo + every default sibling preset. Missing siblings
 /// log a warning; only the full repo is hard-required.
-fn pull_all_slices(
-    model: &str,
-    template: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn pull_all_slices(model: &str, template: &str) -> Result<(), Box<dyn std::error::Error>> {
     pull_one(model, /*print_siblings=*/ false)?;
     for preset in DEFAULT_SIBLING_PRESETS {
         let sibling = match render_sibling_repo(model, preset, template) {
@@ -307,10 +298,7 @@ fn normalise_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> 
     if looks_like_hf_repo(model) {
         return Ok(format!("hf://{model}"));
     }
-    Err(format!(
-        "pull expects `hf://owner/name` or `owner/name`, got: {model}"
-    )
-    .into())
+    Err(format!("pull expects `hf://owner/name` or `owner/name`, got: {model}").into())
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────
@@ -384,10 +372,7 @@ mod tests {
 
     #[test]
     fn normalise_hf_path_accepts_hf_prefix_and_owner_name() {
-        assert_eq!(
-            normalise_hf_path("hf://me/model").unwrap(),
-            "hf://me/model"
-        );
+        assert_eq!(normalise_hf_path("hf://me/model").unwrap(), "hf://me/model");
         assert_eq!(normalise_hf_path("me/model").unwrap(), "hf://me/model");
     }
 

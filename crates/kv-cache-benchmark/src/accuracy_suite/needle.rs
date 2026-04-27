@@ -23,31 +23,87 @@ pub fn needle_tests() -> Vec<NeedleTest> {
     let query = "What is the secret project code name?";
 
     vec![
-        NeedleTest { context_tokens: 512, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 1024, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 2048, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 4096, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 8192, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 16384, needle_text: needle, needle_answer: answer, query_text: query },
-        NeedleTest { context_tokens: 32768, needle_text: needle, needle_answer: answer, query_text: query },
+        NeedleTest {
+            context_tokens: 512,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 1024,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 2048,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 4096,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 8192,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 16384,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
+        NeedleTest {
+            context_tokens: 32768,
+            needle_text: needle,
+            needle_answer: answer,
+            query_text: query,
+        },
     ]
 }
 
 /// Multi-needle test: 5 facts at different positions in 32K context.
 pub fn multi_needle_tests() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
-        ("Agent Alpha's code name is FALCON.", "FALCON", "What is Agent Alpha's code name?"),
-        ("The launch date is March 15th.", "March", "What is the launch date?"),
-        ("Budget allocation is $4.7 million.", "4.7", "What is the budget allocation?"),
-        ("The target city is Reykjavik.", "Reykjavik", "What is the target city?"),
-        ("Project sponsor is Dr. Kimura.", "Kimura", "Who is the project sponsor?"),
+        (
+            "Agent Alpha's code name is FALCON.",
+            "FALCON",
+            "What is Agent Alpha's code name?",
+        ),
+        (
+            "The launch date is March 15th.",
+            "March",
+            "What is the launch date?",
+        ),
+        (
+            "Budget allocation is $4.7 million.",
+            "4.7",
+            "What is the budget allocation?",
+        ),
+        (
+            "The target city is Reykjavik.",
+            "Reykjavik",
+            "What is the target city?",
+        ),
+        (
+            "Project sponsor is Dr. Kimura.",
+            "Kimura",
+            "Who is the project sponsor?",
+        ),
     ]
 }
 
 /// Build a haystack context with needle planted at ~10% position.
 pub fn build_haystack(target_tokens: usize, needle: &str) -> String {
     // Filler: ~4 chars per token average
-    let filler_sentence = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
+    let filler_sentence =
+        "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
     let needle_position = target_tokens / 10; // Plant early (~10% in)
     let chars_per_token = 4;
 

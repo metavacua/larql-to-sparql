@@ -27,7 +27,7 @@
 //! Mmap'd, append-only, zero-copy reads.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use memmap2::Mmap;
@@ -62,9 +62,9 @@ impl ContextTier {
     /// Number of vectors stored per boundary at this tier.
     fn vectors_per_boundary(&self, n_critical: usize) -> usize {
         match self {
-            Self::Residual => 1,                         // just boundary residual
-            Self::FfnDeltas => 1 + n_critical,           // + ffn_delta per critical layer
-            Self::Full => 1 + 2 * n_critical,            // + attn_delta + ffn_delta per critical layer
+            Self::Residual => 1,               // just boundary residual
+            Self::FfnDeltas => 1 + n_critical, // + ffn_delta per critical layer
+            Self::Full => 1 + 2 * n_critical,  // + attn_delta + ffn_delta per critical layer
         }
     }
 }
@@ -81,7 +81,7 @@ struct ContextHeader {
     tier: u8,
     n_critical: u8,
     _pad: [u8; 2],
-    critical_layers: [u8; MAX_CRITICAL_LAYERS],  // layer indices
+    critical_layers: [u8; MAX_CRITICAL_LAYERS], // layer indices
     n_boundaries: u32,
     total_tokens: u32,
     _reserved: [u8; 88],
@@ -115,7 +115,7 @@ impl ContextHeader {
 struct ContextEntry {
     token_offset: u32,
     window_tokens: u32,
-    data_offset: u64,  // byte offset to this boundary's vectors
+    data_offset: u64, // byte offset to this boundary's vectors
     _reserved: u64,
 }
 
@@ -153,24 +153,46 @@ impl ContextStore {
 
         #[cfg(unix)]
         unsafe {
-            libc::madvise(mmap.as_ptr() as *mut libc::c_void, mmap.len(), libc::MADV_RANDOM);
+            libc::madvise(
+                mmap.as_ptr() as *mut libc::c_void,
+                mmap.len(),
+                libc::MADV_RANDOM,
+            );
         }
 
         Ok(Self { mmap, header })
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
-    pub fn hidden_size(&self) -> usize { self.header.hidden_size as usize }
-    pub fn window_size(&self) -> usize { self.header.window_size as usize }
-    pub fn tier(&self) -> ContextTier { ContextTier::from_u8(self.header.tier) }
-    pub fn critical_layers(&self) -> Vec<usize> { self.header.critical_layer_list() }
-    pub fn bytes_per_boundary(&self) -> usize { self.header.bytes_per_boundary() }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
+    pub fn hidden_size(&self) -> usize {
+        self.header.hidden_size as usize
+    }
+    pub fn window_size(&self) -> usize {
+        self.header.window_size as usize
+    }
+    pub fn tier(&self) -> ContextTier {
+        ContextTier::from_u8(self.header.tier)
+    }
+    pub fn critical_layers(&self) -> Vec<usize> {
+        self.header.critical_layer_list()
+    }
+    pub fn bytes_per_boundary(&self) -> usize {
+        self.header.bytes_per_boundary()
+    }
 
     fn entry(&self, i: usize) -> Option<ContextEntry> {
-        if i >= self.header.n_boundaries as usize { return None; }
+        if i >= self.header.n_boundaries as usize {
+            return None;
+        }
         let offset = HEADER_SIZE + i * ENTRY_SIZE;
-        if offset + ENTRY_SIZE > self.mmap.len() { return None; }
+        if offset + ENTRY_SIZE > self.mmap.len() {
+            return None;
+        }
         let mut bytes = [0u8; ENTRY_SIZE];
         bytes.copy_from_slice(&self.mmap[offset..offset + ENTRY_SIZE]);
         Some(ContextEntry::from_bytes(&bytes))
@@ -179,11 +201,11 @@ impl ContextStore {
     fn read_vec_at(&self, byte_offset: usize) -> Option<&[f32]> {
         let hidden = self.header.hidden_size as usize;
         let end = byte_offset + hidden * 4;
-        if end > self.mmap.len() { return None; }
+        if end > self.mmap.len() {
+            return None;
+        }
         Some(unsafe {
-            std::slice::from_raw_parts(
-                self.mmap[byte_offset..].as_ptr() as *const f32, hidden,
-            )
+            std::slice::from_raw_parts(self.mmap[byte_offset..].as_ptr() as *const f32, hidden)
         })
     }
 
@@ -196,8 +218,12 @@ impl ContextStore {
     /// Read FFN delta at critical layer index `cl_idx` for boundary `i`.
     /// Only available at Tier 2+.
     pub fn ffn_delta(&self, i: usize, cl_idx: usize) -> Option<&[f32]> {
-        if self.header.tier < ContextTier::FfnDeltas as u8 { return None; }
-        if cl_idx >= self.header.n_critical as usize { return None; }
+        if self.header.tier < ContextTier::FfnDeltas as u8 {
+            return None;
+        }
+        if cl_idx >= self.header.n_critical as usize {
+            return None;
+        }
         let entry = self.entry(i)?;
         let hidden = self.header.hidden_size as usize;
         // Layout: [residual, ffn_0, ffn_1, ..., ffn_n, attn_0, attn_1, ...]
@@ -208,9 +234,13 @@ impl ContextStore {
     /// Read attention delta at critical layer index `cl_idx` for boundary `i`.
     /// Only available at Tier 3.
     pub fn attn_delta(&self, i: usize, cl_idx: usize) -> Option<&[f32]> {
-        if self.header.tier < ContextTier::Full as u8 { return None; }
+        if self.header.tier < ContextTier::Full as u8 {
+            return None;
+        }
         let n_crit = self.header.n_critical as usize;
-        if cl_idx >= n_crit { return None; }
+        if cl_idx >= n_crit {
+            return None;
+        }
         let entry = self.entry(i)?;
         let hidden = self.header.hidden_size as usize;
         // attn deltas come after all ffn deltas
@@ -221,20 +251,27 @@ impl ContextStore {
     /// Get token range for boundary i.
     pub fn token_range(&self, i: usize) -> Option<(usize, usize)> {
         let entry = self.entry(i)?;
-        Some((entry.token_offset as usize, entry.token_offset as usize + entry.window_tokens as usize))
+        Some((
+            entry.token_offset as usize,
+            entry.token_offset as usize + entry.window_tokens as usize,
+        ))
     }
 
     /// Find boundary containing a token offset.
     pub fn boundary_for_token(&self, token: usize) -> Option<usize> {
         for i in 0..self.header.n_boundaries as usize {
             if let Some((start, end)) = self.token_range(i) {
-                if token >= start && token < end { return Some(i); }
+                if token >= start && token < end {
+                    return Some(i);
+                }
             }
         }
         None
     }
 
-    pub fn file_size(&self) -> usize { self.mmap.len() }
+    pub fn file_size(&self) -> usize {
+        self.mmap.len()
+    }
     pub fn data_size(&self) -> usize {
         self.header.n_boundaries as usize * self.header.bytes_per_boundary()
     }
@@ -281,14 +318,22 @@ impl ContextWriter {
         };
 
         let mut file = OpenOptions::new()
-            .read(true).write(true).create(true).truncate(true)
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
             .open(path)?;
         file.write_all(&header.to_bytes())?;
         // Pre-allocate index
         file.write_all(&vec![0u8; max_boundaries * ENTRY_SIZE])?;
         file.flush()?;
 
-        Ok(Self { file, header, path: path.to_path_buf(), max_boundaries })
+        Ok(Self {
+            file,
+            header,
+            path: path.to_path_buf(),
+            max_boundaries,
+        })
     }
 
     /// Append a boundary with its vectors.
@@ -313,7 +358,10 @@ impl ContextWriter {
             return Err(io::Error::other("index full"));
         }
         if residual.len() != hidden {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "residual size mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "residual size mismatch",
+            ));
         }
 
         // Write data
@@ -326,11 +374,17 @@ impl ContextWriter {
         // Tier 2+: write FFN deltas
         if tier as u8 >= ContextTier::FfnDeltas as u8 {
             for i in 0..n_crit {
-                let delta = ffn_deltas.get(i)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput,
-                        format!("missing ffn_delta for critical layer {}", i)))?;
+                let delta = ffn_deltas.get(i).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("missing ffn_delta for critical layer {}", i),
+                    )
+                })?;
                 if delta.len() != hidden {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "ffn_delta size mismatch"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "ffn_delta size mismatch",
+                    ));
                 }
                 write_f32_slice(&mut self.file, delta)?;
             }
@@ -339,11 +393,17 @@ impl ContextWriter {
         // Tier 3: write attention deltas
         if tier == ContextTier::Full {
             for i in 0..n_crit {
-                let delta = attn_deltas.get(i)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput,
-                        format!("missing attn_delta for critical layer {}", i)))?;
+                let delta = attn_deltas.get(i).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("missing attn_delta for critical layer {}", i),
+                    )
+                })?;
                 if delta.len() != hidden {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "attn_delta size mismatch"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "attn_delta size mismatch",
+                    ));
                 }
                 write_f32_slice(&mut self.file, delta)?;
             }
@@ -370,8 +430,12 @@ impl ContextWriter {
         Ok(())
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
 
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;
@@ -380,8 +444,6 @@ impl ContextWriter {
 }
 
 fn write_f32_slice(file: &mut File, data: &[f32]) -> io::Result<()> {
-    let bytes = unsafe {
-        std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-    };
+    let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
     file.write_all(bytes)
 }

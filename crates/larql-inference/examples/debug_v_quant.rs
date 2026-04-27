@@ -34,18 +34,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check the d scale of first superblock
     let d_bytes = &q6k[208..210];
     let d = larql_models::quant::half::f16_to_f32(u16::from_le_bytes([d_bytes[0], d_bytes[1]]));
-    println!("First superblock d: {:.8} (bytes: {:02x} {:02x})", d, d_bytes[0], d_bytes[1]);
+    println!(
+        "First superblock d: {:.8} (bytes: {:02x} {:02x})",
+        d, d_bytes[0], d_bytes[1]
+    );
 
     // First 256 floats amax
-    let first_256_amax = f32_data[..256].iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+    let first_256_amax = f32_data[..256]
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0f32, f32::max);
     println!("First 256 values amax: {:.6}", first_256_amax);
     println!("Expected d = amax/32 = {:.8}", first_256_amax / 32.0);
 
     // Dequantize
     let deq = larql_models::quant::ggml::dequantize_q6_k(&q6k, padded_len)?;
     let deq_nz = deq[..n_floats].iter().filter(|v| v.abs() > 1e-10).count();
-    let max_err: f32 = f32_data.iter().zip(deq.iter()).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
-    println!("\nRoundtrip: nonzero={}/{}, max_err={:.6}", deq_nz, n_floats, max_err);
+    let max_err: f32 = f32_data
+        .iter()
+        .zip(deq.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    println!(
+        "\nRoundtrip: nonzero={}/{}, max_err={:.6}",
+        deq_nz, n_floats, max_err
+    );
     println!("Dequantized first 5: {:?}", &deq[..5]);
 
     // NOW compare with what's in the q4k file
@@ -54,8 +67,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // V proj in q4k file: offset=4546560, length=2150400
     let q4k_v = &q4k_mmap[4546560..4546560 + 2150400];
     let q4k_d_bytes = &q4k_v[208..210];
-    let q4k_d = larql_models::quant::half::f16_to_f32(u16::from_le_bytes([q4k_d_bytes[0], q4k_d_bytes[1]]));
-    println!("\nOn-disk Q4K file V scale: {:.8} (bytes: {:02x} {:02x})", q4k_d, q4k_d_bytes[0], q4k_d_bytes[1]);
+    let q4k_d =
+        larql_models::quant::half::f16_to_f32(u16::from_le_bytes([q4k_d_bytes[0], q4k_d_bytes[1]]));
+    println!(
+        "\nOn-disk Q4K file V scale: {:.8} (bytes: {:02x} {:02x})",
+        q4k_d, q4k_d_bytes[0], q4k_d_bytes[1]
+    );
     println!("Fresh quantize scale:    {:.8}", d);
     println!("Match: {}", (d - q4k_d).abs() < 1e-10);
 
@@ -66,7 +83,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Find first difference
         for i in 0..2150400 {
             if q6k[i] != q4k_v[i] {
-                println!("First diff at byte {}: fresh={:02x}, disk={:02x}", i, q6k[i], q4k_v[i]);
+                println!(
+                    "First diff at byte {}: fresh={:02x}, disk={:02x}",
+                    i, q6k[i], q4k_v[i]
+                );
                 break;
             }
         }

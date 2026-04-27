@@ -4,18 +4,17 @@
 //! at mmap'd memory. Only the pages touched during inference are paged in.
 //! Peak RSS: ~one layer of weights at a time (OS manages page eviction).
 
-use std::collections::HashMap;
-use std::path::Path;
+use ndarray::Array2;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use ndarray::Array2;
+use std::collections::HashMap;
+use std::path::Path;
 
-use larql_vindex::{
-    VectorIndex, SilentLoadCallbacks,
-    load_vindex_config, load_vindex_tokenizer, tokenizers,
-};
-use larql_inference::{ModelWeights, WalkFfn, predict_with_ffn};
 use larql_inference::ffn::FfnBackend;
+use larql_inference::{predict_with_ffn, ModelWeights, WalkFfn};
+use larql_vindex::{
+    load_vindex_config, load_vindex_tokenizer, tokenizers, SilentLoadCallbacks, VectorIndex,
+};
 
 use crate::trace_py;
 
@@ -36,7 +35,9 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
         return Err("No model weights. Extract with --level all".into());
     }
 
-    let model_cfg = config.model_config.as_ref()
+    let model_cfg = config
+        .model_config
+        .as_ref()
         .ok_or("Missing model_config in index.json")?;
 
     let arch_json = serde_json::json!({
@@ -57,7 +58,13 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let mut mmaps: Vec<WeightMmap> = Vec::new();
     let mut mmap_index: HashMap<String, usize> = HashMap::new();
 
-    let weight_files = ["attn_weights.bin", "up_weights.bin", "down_weights.bin", "norms.bin", "lm_head.bin"];
+    let weight_files = [
+        "attn_weights.bin",
+        "up_weights.bin",
+        "down_weights.bin",
+        "norms.bin",
+        "lm_head.bin",
+    ];
     for fname in &weight_files {
         let path = dir.join(fname);
         if path.exists() {
@@ -72,20 +79,34 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let embed_file = std::fs::File::open(dir.join("embeddings.bin")).map_err(|e| e.to_string())?;
     let embed_mmap = unsafe { memmap2::Mmap::map(&embed_file) }.map_err(|e| e.to_string())?;
     let embed_idx = mmaps.len();
-    mmaps.push(WeightMmap { _file: embed_file, mmap: embed_mmap });
+    mmaps.push(WeightMmap {
+        _file: embed_file,
+        mmap: embed_mmap,
+    });
 
     // Mmap gate_vectors
     let gate_file = std::fs::File::open(dir.join("gate_vectors.bin")).map_err(|e| e.to_string())?;
     let gate_mmap = unsafe { memmap2::Mmap::map(&gate_file) }.map_err(|e| e.to_string())?;
     let gate_idx = mmaps.len();
-    mmaps.push(WeightMmap { _file: gate_file, mmap: gate_mmap });
+    mmaps.push(WeightMmap {
+        _file: gate_file,
+        mmap: gate_mmap,
+    });
 
     // Read manifest
-    let manifest_text = std::fs::read_to_string(dir.join("weight_manifest.json"))
-        .map_err(|e| e.to_string())?;
+    let manifest_text =
+        std::fs::read_to_string(dir.join("weight_manifest.json")).map_err(|e| e.to_string())?;
 
     #[derive(serde::Deserialize)]
-    struct Entry { key: String, kind: String, shape: Vec<usize>, offset: u64, length: u64, #[serde(default)] file: String }
+    struct Entry {
+        key: String,
+        kind: String,
+        shape: Vec<usize>,
+        offset: u64,
+        length: u64,
+        #[serde(default)]
+        file: String,
+    }
     let entries: Vec<Entry> = serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
 
     let is_f32 = config.dtype == larql_vindex::StorageDtype::F32;
@@ -96,7 +117,11 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let mut lm_head_arr: Option<larql_models::WeightArray> = None;
 
     for entry in &entries {
-        let fname = if entry.file.is_empty() { "model_weights.bin" } else { &entry.file };
+        let fname = if entry.file.is_empty() {
+            "model_weights.bin"
+        } else {
+            &entry.file
+        };
         let mmap_idx = match mmap_index.get(fname) {
             Some(idx) => *idx,
             None => continue,
@@ -105,7 +130,9 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
 
         let offset = entry.offset as usize;
         let length = entry.length as usize;
-        if offset + length > mmap_data.len() { continue; }
+        if offset + length > mmap_data.len() {
+            continue;
+        }
 
         let raw = &mmap_data[offset..offset + length];
 
@@ -127,7 +154,8 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
                     let ptr = raw.as_ptr() as *mut f32;
                     let vec = unsafe { Vec::from_raw_parts(ptr, count, count) };
                     let arr = Array2::from_shape_vec((rows, cols), vec)
-                        .map_err(|e| e.to_string())?.into_shared();
+                        .map_err(|e| e.to_string())?
+                        .into_shared();
                     // Leak an extra Arc ref to prevent the Vec from being freed
                     // when the ArcArray2 drops — the mmap owns this memory
                     std::mem::forget(arr.clone());
@@ -135,7 +163,8 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
                 } else {
                     let floats = larql_vindex::config::dtype::decode_floats(raw, config.dtype);
                     Array2::from_shape_vec((rows, cols), floats)
-                        .map_err(|e| e.to_string())?.into_shared()
+                        .map_err(|e| e.to_string())?
+                        .into_shared()
                 };
 
                 if entry.key == "lm_head.weight" {
@@ -149,7 +178,8 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
                 let floats = if is_f32 {
                     unsafe {
                         std::slice::from_raw_parts(raw.as_ptr() as *const f32, entry.shape[0])
-                    }.to_vec()
+                    }
+                    .to_vec()
                 } else {
                     larql_vindex::config::dtype::decode_floats(raw, config.dtype)
                 };
@@ -166,13 +196,15 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
         let ptr = embed_data.as_ptr() as *mut f32;
         let vec = unsafe { Vec::from_raw_parts(ptr, count, count) };
         let arr = Array2::from_shape_vec((config.vocab_size, config.hidden_size), vec)
-            .map_err(|e| e.to_string())?.into_shared();
+            .map_err(|e| e.to_string())?
+            .into_shared();
         std::mem::forget(arr.clone());
         arr
     } else {
         let floats = larql_vindex::config::dtype::decode_floats(embed_data, config.dtype);
         Array2::from_shape_vec((config.vocab_size, config.hidden_size), floats)
-            .map_err(|e| e.to_string())?.into_shared()
+            .map_err(|e| e.to_string())?
+            .into_shared()
     };
 
     // Gate vectors from mmap — zero-copy for f32
@@ -184,20 +216,28 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
 
         let gate_arr = if is_f32 {
             let ptr = unsafe { (gate_data.as_ptr() as *const f32).add(float_offset) as *mut f32 };
-            if float_offset + float_count > gate_data.len() / 4 { continue; }
+            if float_offset + float_count > gate_data.len() / 4 {
+                continue;
+            }
             let vec = unsafe { Vec::from_raw_parts(ptr, float_count, float_count) };
             let arr = Array2::from_shape_vec((info.num_features, config.hidden_size), vec)
-                .map_err(|e| e.to_string())?.into_shared();
+                .map_err(|e| e.to_string())?
+                .into_shared();
             std::mem::forget(arr.clone());
             arr
         } else {
             let byte_offset = info.offset as usize;
             let byte_length = info.length as usize;
-            if byte_offset + byte_length > gate_data.len() { continue; }
+            if byte_offset + byte_length > gate_data.len() {
+                continue;
+            }
             let floats = larql_vindex::config::dtype::decode_floats(
-                &gate_data[byte_offset..byte_offset + byte_length], config.dtype);
+                &gate_data[byte_offset..byte_offset + byte_length],
+                config.dtype,
+            );
             Array2::from_shape_vec((info.num_features, config.hidden_size), floats)
-                .map_err(|e| e.to_string())?.into_shared()
+                .map_err(|e| e.to_string())?
+                .into_shared()
         };
         tensors.insert(arch.ffn_gate_key(info.layer), gate_arr);
     }
@@ -205,10 +245,13 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let lm_head = lm_head_arr.unwrap_or_else(|| embed.clone());
 
     let weights = ModelWeights {
-        tensors, vectors, raw_bytes: std::collections::HashMap::new(),
+        tensors,
+        vectors,
+        raw_bytes: std::collections::HashMap::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
-        embed, lm_head,
+        embed,
+        lm_head,
         num_layers: config.num_layers,
         hidden_size: config.hidden_size,
         intermediate_size: config.intermediate_size,
@@ -235,7 +278,10 @@ pub struct InferState {
 impl InferState {
     pub fn load(dir: &Path) -> Result<Self, String> {
         let (weights, mmaps) = load_mmap_weights(dir)?;
-        Ok(Self { weights, _mmaps: mmaps })
+        Ok(Self {
+            weights,
+            _mmaps: mmaps,
+        })
     }
 }
 
@@ -267,25 +313,38 @@ impl PyWalkModel {
         let index = VectorIndex::load_vindex(dir, &mut load_cb)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
-        let (weights, mmaps) = load_mmap_weights(dir)
-            .map_err(pyo3::exceptions::PyIOError::new_err)?;
+        let (weights, mmaps) =
+            load_mmap_weights(dir).map_err(pyo3::exceptions::PyIOError::new_err)?;
 
         let tokenizer = load_vindex_tokenizer(dir)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
-        Ok(Self { weights, index, tokenizer, top_k, path: path.to_string(), _mmaps: mmaps })
+        Ok(Self {
+            weights,
+            index,
+            tokenizer,
+            top_k,
+            path: path.to_string(),
+            _mmaps: mmaps,
+        })
     }
 
     /// Run full forward pass with walk FFN. Returns [(token, probability)].
     #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn predict(&self, prompt: &str, top_k_predictions: usize) -> PyResult<Vec<(String, f64)>> {
-        let encoding = self.tokenizer.encode(prompt, true)
+        let encoding = self
+            .tokenizer
+            .encode(prompt, true)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
         let walk_ffn = WalkFfn::new(&self.weights, &self.index, self.top_k);
         let result = predict_with_ffn(
-            &self.weights, &self.tokenizer, &token_ids, top_k_predictions, &walk_ffn
+            &self.weights,
+            &self.tokenizer,
+            &token_ids,
+            top_k_predictions,
+            &walk_ffn,
         );
 
         Ok(result.predictions)
@@ -296,19 +355,26 @@ impl PyWalkModel {
     /// Accepts raw f32 bytes (from MLX memoryview), returns raw f32 bytes.
     /// No numpy: MLX → bytes → Rust → bytes → MLX.
     fn ffn_layer<'py>(
-        &self, py: Python<'py>, layer: usize, x_bytes: &[u8], seq_len: usize
+        &self,
+        py: Python<'py>,
+        layer: usize,
+        x_bytes: &[u8],
+        seq_len: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let hidden = self.weights.hidden_size;
         let expected = seq_len * hidden * 4;
         if x_bytes.len() != expected {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("Expected {} bytes ({}x{}xf32), got {}", expected, seq_len, hidden, x_bytes.len())
-            ));
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Expected {} bytes ({}x{}xf32), got {}",
+                expected,
+                seq_len,
+                hidden,
+                x_bytes.len()
+            )));
         }
 
-        let floats: &[f32] = unsafe {
-            std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden)
-        };
+        let floats: &[f32] =
+            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
         let x_arr = ndarray::ArrayView2::from_shape((seq_len, hidden), floats)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
@@ -338,20 +404,27 @@ impl PyWalkModel {
     ///     List of feature indices (sorted, deduplicated union across positions)
     #[pyo3(signature = (layer, x_bytes, seq_len, top_k=None))]
     fn gate_select(
-        &self, layer: usize, x_bytes: &[u8], seq_len: usize, top_k: Option<usize>,
+        &self,
+        layer: usize,
+        x_bytes: &[u8],
+        seq_len: usize,
+        top_k: Option<usize>,
     ) -> PyResult<Vec<usize>> {
         let hidden = self.weights.hidden_size;
         let expected = seq_len * hidden * 4;
         if x_bytes.len() != expected {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("Expected {} bytes ({}x{}xf32), got {}", expected, seq_len, hidden, x_bytes.len())
-            ));
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Expected {} bytes ({}x{}xf32), got {}",
+                expected,
+                seq_len,
+                hidden,
+                x_bytes.len()
+            )));
         }
 
         let k = top_k.unwrap_or(self.top_k);
-        let floats: &[f32] = unsafe {
-            std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden)
-        };
+        let floats: &[f32] =
+            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
 
         // Collect features across all positions
         let mut seen = std::collections::HashSet::new();
@@ -375,20 +448,27 @@ impl PyWalkModel {
     /// (useful for debugging / weighted sparse FFN).
     #[pyo3(signature = (layer, x_bytes, seq_len, top_k=None))]
     fn gate_select_scored(
-        &self, layer: usize, x_bytes: &[u8], seq_len: usize, top_k: Option<usize>,
+        &self,
+        layer: usize,
+        x_bytes: &[u8],
+        seq_len: usize,
+        top_k: Option<usize>,
     ) -> PyResult<(Vec<usize>, Vec<f32>)> {
         let hidden = self.weights.hidden_size;
         let expected = seq_len * hidden * 4;
         if x_bytes.len() != expected {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("Expected {} bytes ({}x{}xf32), got {}", expected, seq_len, hidden, x_bytes.len())
-            ));
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Expected {} bytes ({}x{}xf32), got {}",
+                expected,
+                seq_len,
+                hidden,
+                x_bytes.len()
+            )));
         }
 
         let k = top_k.unwrap_or(self.top_k);
-        let floats: &[f32] = unsafe {
-            std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden)
-        };
+        let floats: &[f32] =
+            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
 
         let mut best: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
         for s in 0..seq_len {
@@ -411,16 +491,24 @@ impl PyWalkModel {
     }
 
     #[getter]
-    fn num_layers(&self) -> usize { self.weights.num_layers }
+    fn num_layers(&self) -> usize {
+        self.weights.num_layers
+    }
 
     #[getter]
-    fn hidden_size(&self) -> usize { self.weights.hidden_size }
+    fn hidden_size(&self) -> usize {
+        self.weights.hidden_size
+    }
 
     #[getter]
-    fn intermediate_size(&self) -> usize { self.weights.intermediate_size }
+    fn intermediate_size(&self) -> usize {
+        self.weights.intermediate_size
+    }
 
     #[getter]
-    fn top_k(&self) -> usize { self.top_k }
+    fn top_k(&self) -> usize {
+        self.top_k
+    }
 
     /// Capture a complete residual stream trace.
     ///

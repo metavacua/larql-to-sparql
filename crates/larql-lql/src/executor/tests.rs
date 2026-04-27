@@ -1429,13 +1429,18 @@ fn knn_store_insert_at_layer_hint() {
 #[test]
 fn memit_store_mut_unavailable_without_backend() {
     let mut session = Session::new();
-    assert!(matches!(session.memit_store_mut().unwrap_err(), LqlError::NoBackend));
+    assert!(matches!(
+        session.memit_store_mut().unwrap_err(),
+        LqlError::NoBackend
+    ));
 }
 
 #[test]
 fn memit_store_mut_returns_empty_store_on_fresh_vindex() {
     let (mut session, dir) = vindex_session("memit_empty");
-    let store = session.memit_store_mut().expect("vindex backend has memit_store");
+    let store = session
+        .memit_store_mut()
+        .expect("vindex backend has memit_store");
     assert_eq!(store.num_cycles(), 0);
     assert_eq!(store.total_facts(), 0);
     let _ = std::fs::remove_dir_all(&dir);
@@ -1528,7 +1533,8 @@ fn rebalance_without_backend_is_noop() {
         .execute(&stmt)
         .expect("REBALANCE with empty install set should succeed");
     assert!(
-        out.iter().any(|line| line.contains("no compose-mode installs")),
+        out.iter()
+            .any(|line| line.contains("no compose-mode installs")),
         "expected empty-installs note in: {out:?}"
     );
 }
@@ -1543,7 +1549,8 @@ fn rebalance_without_compose_installs_is_noop() {
         .execute(&stmt)
         .expect("REBALANCE on empty compose set should succeed");
     assert!(
-        out.iter().any(|line| line.contains("no compose-mode installs")),
+        out.iter()
+            .any(|line| line.contains("no compose-mode installs")),
         "expected empty-installs note in: {out:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);

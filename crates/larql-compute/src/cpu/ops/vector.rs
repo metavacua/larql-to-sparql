@@ -23,7 +23,9 @@ pub fn cosine(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
     let d = a.dot(b);
     let na = a.dot(a).sqrt();
     let nb = b.dot(b).sqrt();
-    if na < 1e-12 || nb < 1e-12 { return 0.0; }
+    if na < 1e-12 || nb < 1e-12 {
+        return 0.0;
+    }
     d / (na * nb)
 }
 

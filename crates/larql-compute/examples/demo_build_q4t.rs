@@ -15,17 +15,20 @@
 
 extern crate blas_src;
 
+use larql_compute::cpu::q4::quantize_q4_0;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use larql_compute::cpu::q4::quantize_q4_0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let mut vindex_dir = String::new();
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "--vindex" { i += 1; vindex_dir = args[i].clone(); }
+        if args[i] == "--vindex" {
+            i += 1;
+            vindex_dir = args[i].clone();
+        }
         i += 1;
     }
     if vindex_dir.is_empty() {
@@ -53,9 +56,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Build Q4 Interleaved (Transposed Down) ===\n");
     println!("Layers: {num_layers}, hidden: {hidden}, intermediate: {inter}");
-    println!("Per layer: gate {:.1}MB + up {:.1}MB + down_T {:.1}MB = {:.1}MB Q4",
-        q4_per_gate as f64 / 1e6, q4_per_up as f64 / 1e6, q4_per_down_t as f64 / 1e6,
-        (q4_per_gate + q4_per_up + q4_per_down_t) as f64 / 1e6);
+    println!(
+        "Per layer: gate {:.1}MB + up {:.1}MB + down_T {:.1}MB = {:.1}MB Q4",
+        q4_per_gate as f64 / 1e6,
+        q4_per_up as f64 / 1e6,
+        q4_per_down_t as f64 / 1e6,
+        (q4_per_gate + q4_per_up + q4_per_down_t) as f64 / 1e6
+    );
 
     // Read source files
     let gate_file = std::fs::File::open(dir.join("gate_vectors.bin"))?;
@@ -69,7 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bytes_per_layer = f32_per_layer * 4;
 
     let out_path = dir.join("interleaved_q4t.bin");
-    let mut out = std::io::BufWriter::with_capacity(16 * 1024 * 1024, std::fs::File::create(&out_path)?);
+    let mut out =
+        std::io::BufWriter::with_capacity(16 * 1024 * 1024, std::fs::File::create(&out_path)?);
 
     let t0 = Instant::now();
     let mut total_bytes: u64 = 0;
@@ -112,13 +120,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_bytes += down_t_q4.len() as u64;
 
         if layer % 10 == 0 || layer == num_layers - 1 {
-            println!("  Layer {layer}: {:.1}MB", (gate_q4.len() + up_q4.len() + down_t_q4.len()) as f64 / 1e6);
+            println!(
+                "  Layer {layer}: {:.1}MB",
+                (gate_q4.len() + up_q4.len() + down_t_q4.len()) as f64 / 1e6
+            );
         }
     }
 
     out.flush()?;
-    println!("\nFile: {} ({:.1}MB, {:.1}s)",
-        out_path.display(), total_bytes as f64 / 1e6, t0.elapsed().as_secs_f64());
+    println!(
+        "\nFile: {} ({:.1}MB, {:.1}s)",
+        out_path.display(),
+        total_bytes as f64 / 1e6,
+        t0.elapsed().as_secs_f64()
+    );
     println!("Done.");
     Ok(())
 }
