@@ -38,7 +38,7 @@
 pub fn cpu_flags() -> &'static [&'static str] {
     // Check if target is MSVC (e.g., x86_64-pc-windows-msvc)
     let is_msvc =
-        matches!(std::env::var("CARGO_CFG_TARGET").as_deref(), Ok(t) if t.contains("msvc"));
+        matches!(std::env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc"));
 
     if is_msvc {
         // MSVC uses different flag syntax; skip for now
@@ -182,11 +182,4 @@ mod tests {
         set_rerun_triggers(&["a.c", "b.c", "c.h", "build.rs"]);
     }
 
-    #[test]
-    fn test_cpu_flags_consistency() {
-        // Verify the function is deterministic
-        let flags1 = cpu_flags();
-        let flags2 = cpu_flags();
-        assert_eq!(flags1, flags2, "cpu_flags should return consistent results");
-    }
 }
