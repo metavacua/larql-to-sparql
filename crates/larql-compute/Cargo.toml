@@ -9,6 +9,9 @@ keywords = ["matmul", "metal", "gpu", "quantization", "blas"]
 categories = ["science"]
 
 [dependencies]
+# Platform detection
+larql-platform = { path = "../larql-platform" }
+
 # Matrix types
 ndarray = { version = "0.16", features = ["blas"] }
 
@@ -29,6 +32,7 @@ metal = ["dep:metal"]
 
 [build-dependencies]
 cc = "1.0"
+larql-build = { path = "../larql-build" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
