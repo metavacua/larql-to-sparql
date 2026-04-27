@@ -37,9 +37,8 @@
 #[must_use]
 pub fn cpu_flags() -> &'static [&'static str] {
     // Check if target is MSVC (e.g., x86_64-pc-windows-msvc)
-    let is_msvc = std::env::var("CARGO_CFG_TARGET")
-        .map(|t| t.contains("msvc"))
-        .unwrap_or(false);
+    let is_msvc =
+        matches!(std::env::var("CARGO_CFG_TARGET").as_deref(), Ok(t) if t.contains("msvc"));
 
     if is_msvc {
         // MSVC uses different flag syntax; skip for now
