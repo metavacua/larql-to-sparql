@@ -19,16 +19,17 @@ fn main() {
     let quick = args.iter().any(|a| a == "--quick");
 
     // Load model
-    let model_name = args.get(1)
+    let model_name = args
+        .get(1)
         .filter(|a| !a.starts_with('-'))
         .map(|s| s.as_str())
         .unwrap_or("google/gemma-3-4b-it");
     println!("Loading model: {model_name}");
-    let model = larql_inference::InferenceModel::load(model_name)
-        .expect("Failed to load model");
+    let model = larql_inference::InferenceModel::load(model_name).expect("Failed to load model");
 
     // Load vindex (second arg or next non-flag arg)
-    let vindex_path = args.iter()
+    let vindex_path = args
+        .iter()
         .skip(1)
         .filter(|a| !a.starts_with('-'))
         .nth(1)
@@ -37,7 +38,8 @@ fn main() {
     let index = larql_vindex::VectorIndex::load_vindex(
         std::path::Path::new(vindex_path),
         &mut larql_vindex::SilentLoadCallbacks,
-    ).expect("Failed to load vindex");
+    )
+    .expect("Failed to load vindex");
 
     let backend = larql_inference::default_backend();
 
@@ -47,9 +49,8 @@ fn main() {
 
     // ── Test 1: Paris test ──
     println!("--- Test 1: Paris Test (pass/fail) ---\n");
-    let paris_results = runner::test_paris(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let paris_results =
+        runner::test_paris(model.weights(), model.tokenizer(), &index, backend.as_ref());
     for (strategy, pass) in &paris_results {
         let mark = if *pass { "PASS" } else { "FAIL" };
         println!("  {strategy:<30} {mark}");
@@ -65,7 +66,10 @@ fn main() {
     };
 
     let prompt_results = runner::test_top1_match_rate(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
+        model.weights(),
+        model.tokenizer(),
+        &index,
+        backend.as_ref(),
         &test_prompts,
     );
 
@@ -76,7 +80,8 @@ fn main() {
     // ── Test 4: Generation stability ──
     println!("\n--- Test 4: Generation Stability (20 tokens) ---\n");
     let gen_results = runner::test_generation_stability(
-        model.weights(), model.tokenizer(),
+        model.weights(),
+        model.tokenizer(),
         "The capital of France is Paris. France is a country in",
         20,
     );
@@ -93,7 +98,10 @@ fn main() {
 
     // Write JSON
     let json = serde_json::to_string_pretty(&prompt_results).unwrap();
-    let _ = std::fs::write("crates/kv-cache-benchmark/results/accuracy_suite.json", &json);
+    let _ = std::fs::write(
+        "crates/kv-cache-benchmark/results/accuracy_suite.json",
+        &json,
+    );
     println!("Results written to results/accuracy_suite.json");
 }
 

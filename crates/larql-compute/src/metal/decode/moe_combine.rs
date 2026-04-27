@@ -86,7 +86,9 @@ fn apply_outer_norm(
 /// `hidden_states *= self.layer_scalar` in `DecoderLayer.forward`.
 /// No-op when `layer_scalar` is 0.0 (absent) or 1.0 (identity).
 fn apply_whole_layer_scalar(h_ptr: *mut f32, hidden: usize, layer_scalar: f32) {
-    if layer_scalar == 0.0 || layer_scalar == 1.0 { return; }
+    if layer_scalar == 0.0 || layer_scalar == 1.0 {
+        return;
+    }
     unsafe {
         for i in 0..hidden {
             *h_ptr.add(i) *= layer_scalar;

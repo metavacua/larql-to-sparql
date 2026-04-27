@@ -15,14 +15,14 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use larql_inference::{
     encode_prompt,
-    forward::{generate_cached_constrained, forward_to_layer},
+    forward::{forward_to_layer, generate_cached_constrained},
     prompt::ChatTemplate,
     trie::CascadeTrie,
     InferenceModel, WeightFfn,
 };
-use larql_inference::experts::{parse_op_call, ExpertRegistry};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
@@ -32,8 +32,7 @@ fn model_id() -> String {
 }
 
 fn wasm_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../larql-experts/target/wasm32-wasip1/release")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../larql-experts/target/wasm32-wasip1/release")
 }
 
 /// Search dirs for the cascade trie probe, in precedence order after env vars.
@@ -54,13 +53,22 @@ fn probe_search_dirs() -> Vec<PathBuf> {
 fn ops_for_route<'a>(route: &str, reg: &'a ExpertRegistry) -> Vec<&'a str> {
     let expert_ids: &[&str] = match route {
         "arithmetic" => &["arithmetic", "statistics", "geometry", "trig", "finance"],
-        "date"       => &["date"],
+        "date" => &["date"],
         // Include "arithmetic" in code route: Roman numeral / base conversion ops
         // are semantically format-like and some models (Mistral) route them here.
-        "code"       => &["string_ops", "hash", "sql", "arithmetic", "statistics", "geometry", "trig", "finance"],
-        "factual"    => &["unit", "element", "http_status", "luhn", "isbn"],
-        "logical"    => &["logic"],
-        _            => return reg.ops().into_iter().collect(), // unknown → unconstrained
+        "code" => &[
+            "string_ops",
+            "hash",
+            "sql",
+            "arithmetic",
+            "statistics",
+            "geometry",
+            "trig",
+            "finance",
+        ],
+        "factual" => &["unit", "element", "http_status", "luhn", "isbn"],
+        "logical" => &["logic"],
+        _ => return reg.ops().into_iter().collect(), // unknown → unconstrained
     };
     reg.list()
         .into_iter()
@@ -80,20 +88,31 @@ struct RouteOpMask<'a> {
 
 impl<'a> RouteOpMask<'a> {
     fn new(allowed_ops: Vec<&'a str>, tokenizer: tokenizers::Tokenizer) -> Self {
-        Self { allowed_ops, tokenizer, op_token_cache: None, generated_text: String::new() }
+        Self {
+            allowed_ops,
+            tokenizer,
+            op_token_cache: None,
+            generated_text: String::new(),
+        }
     }
 
     fn op_tokens(&mut self) -> &[u32] {
         if self.op_token_cache.is_none() {
-            let valid_chars: HashSet<char> = self.allowed_ops.iter()
+            let valid_chars: HashSet<char> = self
+                .allowed_ops
+                .iter()
                 .flat_map(|op| op.chars())
                 .chain(std::iter::once('"'))
                 .collect();
             let vocab_size = self.tokenizer.get_vocab_size(false);
             let ids: Vec<u32> = (0..vocab_size as u32)
                 .filter(|&id| {
-                    self.tokenizer.decode(&[id], false)
-                        .map(|s| !s.is_empty() && (s == "\"" || s.chars().all(|c| valid_chars.contains(&c))))
+                    self.tokenizer
+                        .decode(&[id], false)
+                        .map(|s| {
+                            !s.is_empty()
+                                && (s == "\"" || s.chars().all(|c| valid_chars.contains(&c)))
+                        })
                         .unwrap_or(false)
                 })
                 .collect();
@@ -104,7 +123,10 @@ impl<'a> RouteOpMask<'a> {
 
     #[allow(clippy::ptr_arg)]
     fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>) {
-        self.generated_text = self.tokenizer.decode(generated_ids, true).unwrap_or_default();
+        self.generated_text = self
+            .tokenizer
+            .decode(generated_ids, true)
+            .unwrap_or_default();
 
         // Detect if we're inside the op-name field.
         let in_op_name = if let Some(pos) = self.generated_text.find("{\"op\":\"") {
@@ -114,7 +136,9 @@ impl<'a> RouteOpMask<'a> {
             false
         };
 
-        if !in_op_name { return; }
+        if !in_op_name {
+            return;
+        }
 
         let so_far = {
             let pos = self.generated_text.find("{\"op\":\"").unwrap();
@@ -126,21 +150,29 @@ impl<'a> RouteOpMask<'a> {
         let allowed_ops: Vec<&str> = self.allowed_ops.clone();
         let tokenizer = &self.tokenizer;
 
-        let valid_next: HashSet<u32> = candidate_ids.iter().copied()
+        let valid_next: HashSet<u32> = candidate_ids
+            .iter()
+            .copied()
             .filter(|&id| {
                 let s = tokenizer.decode(&[id], false).unwrap_or_default();
                 if s == "\"" {
                     allowed_ops.contains(&so_far.as_str())
                 } else if !s.is_empty() {
                     let candidate = format!("{so_far}{s}");
-                    allowed_ops.iter().any(|op| op.starts_with(candidate.as_str()))
-                } else { false }
+                    allowed_ops
+                        .iter()
+                        .any(|op| op.starts_with(candidate.as_str()))
+                } else {
+                    false
+                }
             })
             .collect();
 
         if !valid_next.is_empty() {
             for (i, v) in logits.iter_mut().enumerate() {
-                if !valid_next.contains(&(i as u32)) { *v = f32::NEG_INFINITY; }
+                if !valid_next.contains(&(i as u32)) {
+                    *v = f32::NEG_INFINITY;
+                }
             }
         }
     }
@@ -157,14 +189,54 @@ struct Case {
 
 fn cases() -> Vec<Case> {
     vec![
-        Case { prompt: "What is the GCD of 144 and 60?",  expected_route: "arithmetic", expected_op: "gcd",          expected_result: json!(12) },
-        Case { prompt: "Is 97 a prime number?",            expected_route: "arithmetic", expected_op: "is_prime",     expected_result: json!(true) },
-        Case { prompt: "What is 10 factorial?",            expected_route: "arithmetic", expected_op: "factorial",    expected_result: json!(3628800) },
-        Case { prompt: "Write 2024 as a Roman numeral.",   expected_route: "arithmetic", expected_op: "to_roman",     expected_result: json!("MMXXIV") },
-        Case { prompt: "Is 2024 a leap year?",             expected_route: "date",       expected_op: "is_leap_year", expected_result: json!(true) },
-        Case { prompt: "How many days are in February 2026?", expected_route: "date",    expected_op: "days_in_month",expected_result: json!(28) },
-        Case { prompt: "Reverse the string \"helloworld\".", expected_route: "code",    expected_op: "reverse",      expected_result: json!("dlrowolleh") },
-        Case { prompt: "Is \"racecar\" a palindrome?",     expected_route: "code",       expected_op: "is_palindrome",expected_result: json!(true) },
+        Case {
+            prompt: "What is the GCD of 144 and 60?",
+            expected_route: "arithmetic",
+            expected_op: "gcd",
+            expected_result: json!(12),
+        },
+        Case {
+            prompt: "Is 97 a prime number?",
+            expected_route: "arithmetic",
+            expected_op: "is_prime",
+            expected_result: json!(true),
+        },
+        Case {
+            prompt: "What is 10 factorial?",
+            expected_route: "arithmetic",
+            expected_op: "factorial",
+            expected_result: json!(3628800),
+        },
+        Case {
+            prompt: "Write 2024 as a Roman numeral.",
+            expected_route: "arithmetic",
+            expected_op: "to_roman",
+            expected_result: json!("MMXXIV"),
+        },
+        Case {
+            prompt: "Is 2024 a leap year?",
+            expected_route: "date",
+            expected_op: "is_leap_year",
+            expected_result: json!(true),
+        },
+        Case {
+            prompt: "How many days are in February 2026?",
+            expected_route: "date",
+            expected_op: "days_in_month",
+            expected_result: json!(28),
+        },
+        Case {
+            prompt: "Reverse the string \"helloworld\".",
+            expected_route: "code",
+            expected_op: "reverse",
+            expected_result: json!("dlrowolleh"),
+        },
+        Case {
+            prompt: "Is \"racecar\" a palindrome?",
+            expected_route: "code",
+            expected_op: "is_palindrome",
+            expected_result: json!(true),
+        },
     ]
 }
 
@@ -193,9 +265,13 @@ String example: {"op":"reverse","args":{"s":"hello world"}}
 ops: gcd(a,b), is_prime(n), factorial(n), to_roman(n), is_leap_year(year), days_in_month(year,month), reverse(s), is_palindrome(s)"#;
 
 fn system_for_model(mid: &str) -> &'static str {
-    if mid.contains("Mistral") || mid.contains("mistral") { SYSTEM_MISTRAL }
-    else if mid.contains("Llama") || mid.contains("llama") { SYSTEM_LLAMA }
-    else { SYSTEM_GEMMA }
+    if mid.contains("Mistral") || mid.contains("mistral") {
+        SYSTEM_MISTRAL
+    } else if mid.contains("Llama") || mid.contains("llama") {
+        SYSTEM_LLAMA
+    } else {
+        SYSTEM_GEMMA
+    }
 }
 
 // ── Test ──────────────────────────────────────────────────────────────────────
@@ -225,7 +301,10 @@ fn trie_dispatch_pipeline() {
 
     let model = match InferenceModel::load(&mid) {
         Ok(m) => m,
-        Err(e) => { eprintln!("skip: {e}"); return; }
+        Err(e) => {
+            eprintln!("skip: {e}");
+            return;
+        }
     };
     eprintln!("model: {mid}  ({} layers)", model.num_layers());
 
@@ -233,7 +312,9 @@ fn trie_dispatch_pipeline() {
     eprintln!("probe: L{}  routes: {:?}", trie.layer, trie.routes());
 
     let mut reg = ExpertRegistry::load_dir(&wasm_dir()).expect("load_dir");
-    let ffn = WeightFfn { weights: model.weights() };
+    let ffn = WeightFfn {
+        weights: model.weights(),
+    };
     let template = ChatTemplate::for_model_id(&mid);
     eprintln!("template: {}", template.name());
 
@@ -248,14 +329,23 @@ fn trie_dispatch_pipeline() {
         // Full wrapped prompt for generation.
         let ids_gen = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
             Ok(v) => v,
-            Err(e) => { eprintln!("  FAIL tokenize: {e}"); failed += 1; continue; }
+            Err(e) => {
+                eprintln!("  FAIL tokenize: {e}");
+                failed += 1;
+                continue;
+            }
         };
         // Bare question (no system prompt, no chat template) for the L5 probe.
         // The probe was trained on plain question-format prompts so it needs
         // the same distribution at inference time.
-        let ids_probe = match encode_prompt(model.tokenizer(), &*model.weights().arch, case.prompt) {
+        let ids_probe = match encode_prompt(model.tokenizer(), &*model.weights().arch, case.prompt)
+        {
             Ok(v) => v,
-            Err(e) => { eprintln!("  FAIL tokenize probe: {e}"); failed += 1; continue; }
+            Err(e) => {
+                eprintln!("  FAIL tokenize probe: {e}");
+                failed += 1;
+                continue;
+            }
         };
 
         // ── Step 1: L5 probe (partial prefill on bare question, 6 layers only) ──
@@ -268,9 +358,15 @@ fn trie_dispatch_pipeline() {
         // ── Step 2: narrow op vocabulary to this route ──
         let allowed_ops = ops_for_route(&route, &reg);
         eprintln!("\n  prompt:   {}", case.prompt);
-        eprintln!("  route:    {route}{}  ({} ops)",
-            if route == case.expected_route { "" } else { " ← WRONG" },
-            allowed_ops.len());
+        eprintln!(
+            "  route:    {route}{}  ({} ops)",
+            if route == case.expected_route {
+                ""
+            } else {
+                " ← WRONG"
+            },
+            allowed_ops.len()
+        );
 
         // ── Step 3: grammar-constrained generation ──
         let mut mask = RouteOpMask::new(allowed_ops, model.tokenizer().clone());
@@ -288,12 +384,22 @@ fn trie_dispatch_pipeline() {
 
         let call = match parse_op_call(&output) {
             Some(c) => c,
-            None => { eprintln!("  FAIL: no op-call JSON"); failed += 1; continue; }
+            None => {
+                eprintln!("  FAIL: no op-call JSON");
+                failed += 1;
+                continue;
+            }
         };
         let op = call.op;
         let args = call.args;
-        eprintln!("  op={op}{}  args={args}",
-            if op == case.expected_op { "" } else { " ← WRONG OP" });
+        eprintln!(
+            "  op={op}{}  args={args}",
+            if op == case.expected_op {
+                ""
+            } else {
+                " ← WRONG OP"
+            }
+        );
 
         if op != case.expected_op {
             eprintln!("  FAIL: expected op={}", case.expected_op);
@@ -307,8 +413,14 @@ fn trie_dispatch_pipeline() {
                 eprintln!("  ok  [{route}/{op}] {} → {}", case.prompt, r.value);
                 passed += 1;
             }
-            Some(r) => { eprintln!("  FAIL: got {}, expected {}", r.value, case.expected_result); failed += 1; }
-            None    => { eprintln!("  FAIL: registry None  op={op} args={args}"); failed += 1; }
+            Some(r) => {
+                eprintln!("  FAIL: got {}, expected {}", r.value, case.expected_result);
+                failed += 1;
+            }
+            None => {
+                eprintln!("  FAIL: registry None  op={op} args={args}");
+                failed += 1;
+            }
         }
     }
 

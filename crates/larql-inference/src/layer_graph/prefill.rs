@@ -2,8 +2,8 @@
 
 use ndarray::Array2;
 
-use larql_compute::ComputeBackend;
 use crate::model::ModelWeights;
+use larql_compute::ComputeBackend;
 
 /// Prefill with KV cache population: run CPU attention, capture K/V, populate Metal KV cache.
 /// Returns the final hidden state after all layers.
@@ -46,6 +46,8 @@ pub(super) fn prefill_kv_cache_cpu(
     backend: &dyn ComputeBackend,
     layer_range: &std::ops::Range<usize>,
 ) {
-    if !backend.has_kv_cache() { return; }
+    if !backend.has_kv_cache() {
+        return;
+    }
     let _ = prefill_with_kv(weights, token_ids, index, backend, layer_range.clone());
 }

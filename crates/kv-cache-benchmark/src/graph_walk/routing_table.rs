@@ -58,9 +58,7 @@ impl RoutingTable {
         let entry_bytes: usize = self
             .routes
             .iter()
-            .map(|(name, entries)| {
-                name.len() + entries.len() * 40
-            })
+            .map(|(name, entries)| name.len() + entries.len() * 40)
             .sum();
         entry_bytes.max(360_448) // At least the measured 352 KB
     }

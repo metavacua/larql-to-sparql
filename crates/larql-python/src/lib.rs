@@ -4,15 +4,18 @@ use pyo3::types::PyDict;
 use larql_core as lq;
 use larql_inference as li;
 
-mod vindex;
 mod session;
-mod walk;
 mod trace_py;
+mod vindex;
+mod walk;
 
-use vindex::{PyVindex, PyFeatureMeta, PyWalkHit, PyDescribeEdge, PyRelation};
 use session::PySession;
+use trace_py::{
+    PyAnswerWaypoint, PyBoundaryStore, PyBoundaryWriter, PyLayerSummary, PyResidualTrace,
+    PyTraceStore,
+};
+use vindex::{PyDescribeEdge, PyFeatureMeta, PyRelation, PyVindex, PyWalkHit};
 use walk::PyWalkModel;
-use trace_py::{PyResidualTrace, PyAnswerWaypoint, PyLayerSummary, PyTraceStore, PyBoundaryStore, PyBoundaryWriter};
 
 // ── Helpers ──
 

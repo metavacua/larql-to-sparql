@@ -5,8 +5,8 @@
 //! Input is f32 (not Q8). Used for down projection with transposed weights
 //! where the activation is sparse and Q8 quantization loses precision.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 

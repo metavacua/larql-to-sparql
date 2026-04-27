@@ -115,7 +115,12 @@ pub fn install_edge(
         }
     }
 
-    Ok(EdgeStats { g_norm, u_norm, d_norm, alpha })
+    Ok(EdgeStats {
+        g_norm,
+        u_norm,
+        d_norm,
+        alpha,
+    })
 }
 
 fn vec_norm(v: &[f32]) -> f32 {
@@ -159,7 +164,8 @@ mod tests {
         let trigger = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
         let write = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
-        let stats = install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
+        let stats =
+            install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
 
         let gate = t.get("gate").unwrap();
         let expected = stats.g_norm * 30.0;
@@ -171,8 +177,8 @@ mod tests {
         let mut t = fresh_layer(4, 8);
         let trigger = vec![0.0; 8];
         let write = vec![1.0; 8];
-        let err = install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0)
-            .unwrap_err();
+        let err =
+            install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap_err();
         assert!(matches!(err, EdgeError::ZeroTrigger));
     }
 
@@ -181,8 +187,18 @@ mod tests {
         let mut t = fresh_layer(4, 8);
         let trigger = vec![1.0; 8];
         let write = vec![1.0; 8];
-        let err = install_edge(&mut t, "missing_gate", "up", "down", 0, &trigger, &write, 30.0, 1.0)
-            .unwrap_err();
+        let err = install_edge(
+            &mut t,
+            "missing_gate",
+            "up",
+            "down",
+            0,
+            &trigger,
+            &write,
+            30.0,
+            1.0,
+        )
+        .unwrap_err();
         assert!(matches!(err, EdgeError::MissingTensor(k) if k == "missing_gate"));
     }
 
@@ -192,7 +208,8 @@ mod tests {
         for &scale in &[0.1_f32, 1.0, 100.0] {
             let trigger: Vec<f32> = (0..8).map(|i| (i as f32 + 1.0) * scale).collect();
             let write = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-            let stats = install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
+            let stats =
+                install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
             let gate = t.get("gate").unwrap();
             let gate_row_norm = (0..8).map(|j| gate[[0, j]].powi(2)).sum::<f32>().sqrt();
             let expected = stats.g_norm * 30.0;
@@ -206,7 +223,8 @@ mod tests {
         let mut t = fresh_layer(4, 8);
         let trigger = vec![1.0; 8];
         let write = vec![0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let stats = install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
+        let stats =
+            install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
         let down = t.get("down").unwrap();
         for j in 0..8 {
             let expected = write[j] * stats.alpha;
@@ -229,9 +247,13 @@ mod tests {
         let mut t = fresh_layer(4, 8);
         let trigger = vec![1.0; 8];
         let write = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let s1 = install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
+        let s1 =
+            install_edge(&mut t, "gate", "up", "down", 0, &trigger, &write, 30.0, 1.0).unwrap();
         let mut t2 = fresh_layer(4, 8);
-        let s2 = install_edge(&mut t2, "gate", "up", "down", 0, &trigger, &write, 30.0, 5.0).unwrap();
+        let s2 = install_edge(
+            &mut t2, "gate", "up", "down", 0, &trigger, &write, 30.0, 5.0,
+        )
+        .unwrap();
         assert!((s2.alpha / s1.alpha - 5.0).abs() < 1e-5);
     }
 }

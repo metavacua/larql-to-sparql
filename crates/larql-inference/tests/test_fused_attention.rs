@@ -5,8 +5,8 @@
 //! attention weight capture. Also tests against a naive reference
 //! implementation to verify numerical equivalence.
 
-use ndarray::Array2;
 use larql_inference::attention::{gqa_attention, gqa_attention_with_weights};
+use ndarray::Array2;
 
 /// Deterministic matrix for tests.
 fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
@@ -130,7 +130,16 @@ mod basic {
         let q = synth_matrix(seq, num_heads * head_dim, 1);
         let k = synth_matrix(seq, num_heads * head_dim, 2);
         let v = synth_matrix(seq, num_heads * head_dim, 3);
-        let out = gqa_attention(&q, &k, &v, num_heads, head_dim, 1, 1.0 / (head_dim as f64).sqrt(), seq);
+        let out = gqa_attention(
+            &q,
+            &k,
+            &v,
+            num_heads,
+            head_dim,
+            1,
+            1.0 / (head_dim as f64).sqrt(),
+            seq,
+        );
         assert_eq!(out.shape(), &[seq, num_heads * head_dim]);
     }
 
@@ -142,7 +151,8 @@ mod basic {
         let q = Array2::zeros((seq, head_dim));
         let k = Array2::zeros((seq, head_dim));
         // V rows: [1,0], [0,1], [2,2]
-        let v = Array2::from_shape_vec((seq, head_dim), vec![1.0, 0.0, 0.0, 1.0, 2.0, 2.0]).unwrap();
+        let v =
+            Array2::from_shape_vec((seq, head_dim), vec![1.0, 0.0, 0.0, 1.0, 2.0, 2.0]).unwrap();
         let out = gqa_attention(&q, &k, &v, 1, head_dim, 1, 1.0, seq);
 
         // Token 0: only sees V[0] = [1, 0]
@@ -247,9 +257,8 @@ mod reference_agreement {
         let scale = 1.0 / (head_dim as f64).sqrt();
         let softcap = Some(50.0f32);
 
-        let (fused, _) = gqa_attention_with_weights(
-            &q, &k, &v, 1, head_dim, 1, scale, seq, false, softcap,
-        );
+        let (fused, _) =
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, false, softcap);
         let naive = reference_attention(&q, &k, &v, 1, head_dim, 1, scale, seq, softcap);
 
         let diff = max_diff(&fused, &naive);
@@ -289,9 +298,8 @@ mod capture {
         let v = synth_matrix(seq, num_heads * head_dim, 72);
         let scale = 1.0 / (head_dim as f64).sqrt();
 
-        let (_, weights) = gqa_attention_with_weights(
-            &q, &k, &v, num_heads, head_dim, 1, scale, seq, true, None,
-        );
+        let (_, weights) =
+            gqa_attention_with_weights(&q, &k, &v, num_heads, head_dim, 1, scale, seq, true, None);
 
         let weights = weights.expect("should capture weights");
         assert_eq!(weights.heads.len(), num_heads);
@@ -309,9 +317,8 @@ mod capture {
         let v = synth_matrix(seq, head_dim, 82);
         let scale = 1.0 / (head_dim as f64).sqrt();
 
-        let (_, weights) = gqa_attention_with_weights(
-            &q, &k, &v, 1, head_dim, 1, scale, seq, true, None,
-        );
+        let (_, weights) =
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None);
 
         let w = &weights.unwrap().heads[0];
         let sum: f32 = w.iter().sum();
@@ -330,9 +337,8 @@ mod capture {
         let k = synth_matrix(seq, head_dim, 91);
         let v = synth_matrix(seq, head_dim, 92);
 
-        let (_, weights) = gqa_attention_with_weights(
-            &q, &k, &v, 1, head_dim, 1, 0.5, seq, true, None,
-        );
+        let (_, weights) =
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, 0.5, seq, true, None);
 
         let w = &weights.unwrap().heads[0];
         // All weights should be non-negative (softmax output)
@@ -347,9 +353,7 @@ mod capture {
         let k = synth_matrix(3, 4, 101);
         let v = synth_matrix(3, 4, 102);
 
-        let (_, weights) = gqa_attention_with_weights(
-            &q, &k, &v, 1, 4, 1, 0.5, 3, false, None,
-        );
+        let (_, weights) = gqa_attention_with_weights(&q, &k, &v, 1, 4, 1, 0.5, 3, false, None);
         assert!(weights.is_none());
     }
 
@@ -362,12 +366,10 @@ mod capture {
         let v = synth_matrix(seq, head_dim, 112);
         let scale = 1.0 / (head_dim as f64).sqrt();
 
-        let (out_no_cap, _) = gqa_attention_with_weights(
-            &q, &k, &v, 1, head_dim, 1, scale, seq, false, None,
-        );
-        let (out_cap, _) = gqa_attention_with_weights(
-            &q, &k, &v, 1, head_dim, 1, scale, seq, true, None,
-        );
+        let (out_no_cap, _) =
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, false, None);
+        let (out_cap, _) =
+            gqa_attention_with_weights(&q, &k, &v, 1, head_dim, 1, scale, seq, true, None);
 
         let diff = max_diff(&out_no_cap, &out_cap);
         assert!(diff < 1e-6, "capture changed output: diff = {diff}");
@@ -442,8 +444,8 @@ mod edge_cases {
 // ── RoPE tests ──
 
 mod rope_tests {
-    use ndarray::Array2;
     use larql_inference::attention::{apply_rope, apply_rope_partial};
+    use ndarray::Array2;
 
     #[test]
     fn partial_rope_fraction_1_matches_full() {
@@ -464,7 +466,8 @@ mod rope_tests {
                 assert!(
                     (full[[i, j]] - partial[[i, j]]).abs() < 1e-6,
                     "mismatch at [{i},{j}]: full={}, partial={}",
-                    full[[i, j]], partial[[i, j]]
+                    full[[i, j]],
+                    partial[[i, j]]
                 );
             }
         }
@@ -485,13 +488,15 @@ mod rope_tests {
         let result = apply_rope_partial(&x, heads, head_dim, base, fraction);
 
         let rotary_dim = (head_dim as f64 * fraction) as usize; // 16
-        // Dims [rotary_dim..head_dim] should be untouched
+                                                                // Dims [rotary_dim..head_dim] should be untouched
         for pos in 0..seq {
             for d in rotary_dim..head_dim {
                 assert_eq!(
-                    result[[pos, d]], x[[pos, d]],
+                    result[[pos, d]],
+                    x[[pos, d]],
                     "dim {d} at pos {pos} was modified: {} -> {}",
-                    x[[pos, d]], result[[pos, d]]
+                    x[[pos, d]],
+                    result[[pos, d]]
                 );
             }
         }
@@ -550,7 +555,8 @@ mod rope_tests {
             for pos in 0..seq {
                 for d in rotary_dim..head_dim {
                     assert_eq!(
-                        result[[pos, offset + d]], x[[pos, offset + d]],
+                        result[[pos, offset + d]],
+                        x[[pos, offset + d]],
                         "head {h} dim {d} at pos {pos} was modified"
                     );
                 }

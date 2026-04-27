@@ -6,7 +6,7 @@
 //! - Has biases on attention projections, FFN, and layer norms
 //! - Uses GQA with sliding window
 
-use crate::config::{Activation, FfnType, NormType, ModelArchitecture, ModelConfig};
+use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
 
 pub struct StarCoder2Arch {
     config: ModelConfig,

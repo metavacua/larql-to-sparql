@@ -23,9 +23,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::body::Bytes;
-use axum::http::{StatusCode, header};
+use axum::extract::State;
+use axum::http::{header, StatusCode};
 use axum::response::Response;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -46,7 +46,11 @@ const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "larql-router", version, about = "Layer-sharding proxy for larql-server")]
+#[command(
+    name = "larql-router",
+    version,
+    about = "Layer-sharding proxy for larql-server"
+)]
 struct Cli {
     /// Static shard map: comma-separated "START-END=URL" entries (inclusive bounds).
     /// Example: "0-16=http://host-a:8080,17-33=http://host-b:8081"
@@ -153,9 +157,7 @@ pub(crate) fn peek_binary(body: &[u8]) -> Option<Vec<usize>> {
             return None;
         }
         let layers = (0..n)
-            .map(|i| {
-                u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize
-            })
+            .map(|i| u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize)
             .collect();
         Some(layers)
     } else {
@@ -263,19 +265,18 @@ async fn handle_walk_ffn_inner(
     } else {
         let peek: Value = serde_json::from_slice(&body_bytes)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")))?;
-        let layers: Vec<usize> =
-            if let Some(arr) = peek.get("layers").and_then(|v| v.as_array()) {
-                arr.iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as usize))
-                    .collect()
-            } else if let Some(n) = peek.get("layer").and_then(|v| v.as_u64()) {
-                vec![n as usize]
-            } else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "must provide 'layer' or 'layers'".to_string(),
-                ));
-            };
+        let layers: Vec<usize> = if let Some(arr) = peek.get("layers").and_then(|v| v.as_array()) {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect()
+        } else if let Some(n) = peek.get("layer").and_then(|v| v.as_u64()) {
+            vec![n as usize]
+        } else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "must provide 'layer' or 'layers'".to_string(),
+            ));
+        };
         let model_id = peek
             .get("model_id")
             .and_then(|v| v.as_str())
@@ -301,7 +302,11 @@ async fn handle_walk_ffn_inner(
     if unique_urls.len() == 1 || layers.len() == 1 {
         // All layers on the same shard — proxy raw bytes unchanged.
         let url = layer_urls.values().next().unwrap();
-        let ct = if is_binary { BINARY_CT } else { "application/json" };
+        let ct = if is_binary {
+            BINARY_CT
+        } else {
+            "application/json"
+        };
         return proxy_raw(&state.client, url, body_bytes, ct).await;
     }
 
@@ -503,7 +508,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let grpc_addr: SocketAddr = format!("{}:{}", cli.host, grid_port).parse()?;
         info!("Grid gRPC server listening: {grpc_addr}");
         tokio::spawn(async move {
-            if let Err(e) = GrpcServer::builder().add_service(svc).serve(grpc_addr).await {
+            if let Err(e) = GrpcServer::builder()
+                .add_service(svc)
+                .serve(grpc_addr)
+                .await
+            {
                 tracing::error!("gRPC server error: {e}");
             }
         });
@@ -620,8 +629,7 @@ mod tests {
 
     #[test]
     fn parse_shards_two_entries() {
-        let shards =
-            parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
+        let shards = parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
         assert_eq!(shards.len(), 2);
         assert!(shards[0].owns(0));
         assert!(shards[0].owns(16));

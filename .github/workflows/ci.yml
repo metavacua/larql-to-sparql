@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, master]
+  pull_request:
+    branches: [main, develop, master]
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        run: cargo clippy --workspace --tests -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --workspace
+
+  python-build:
+    name: Python Build (maturin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v2
+      - name: Build Python bindings
+        run: |
+          cd crates/larql-python
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+
+  python-test:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: python-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v2
+      - name: Build Python bindings
+        run: |
+          cd crates/larql-python
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+      - name: Run Python tests
+        run: |
+          cd crates/larql-python
+          uv run --no-sync pytest tests/
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Run security audit
+        run: cargo audit
