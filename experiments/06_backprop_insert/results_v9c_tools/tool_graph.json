@@ -1,0 +1,427 @@
+[
+  {
+    "subject": "get_weather",
+    "relation": "has_description",
+    "object": "Get current weather for a location"
+  },
+  {
+    "subject": "get_weather",
+    "relation": "has_parameter",
+    "object": "location"
+  },
+  {
+    "subject": "get_weather.location",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "get_weather.location",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "get_weather",
+    "relation": "has_parameter",
+    "object": "units"
+  },
+  {
+    "subject": "get_weather.units",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "get_weather.units",
+    "relation": "allowed_value",
+    "object": "celsius"
+  },
+  {
+    "subject": "get_weather.units",
+    "relation": "allowed_value",
+    "object": "fahrenheit"
+  },
+  {
+    "subject": "search_web",
+    "relation": "has_description",
+    "object": "Search the web for information"
+  },
+  {
+    "subject": "search_web",
+    "relation": "has_parameter",
+    "object": "query"
+  },
+  {
+    "subject": "search_web.query",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "search_web.query",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "search_web",
+    "relation": "has_parameter",
+    "object": "num_results"
+  },
+  {
+    "subject": "search_web.num_results",
+    "relation": "has_type",
+    "object": "integer"
+  },
+  {
+    "subject": "send_email",
+    "relation": "has_description",
+    "object": "Send an email to a recipient"
+  },
+  {
+    "subject": "send_email",
+    "relation": "has_parameter",
+    "object": "to"
+  },
+  {
+    "subject": "send_email.to",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "send_email.to",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "send_email",
+    "relation": "has_parameter",
+    "object": "subject"
+  },
+  {
+    "subject": "send_email.subject",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "send_email.subject",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "send_email",
+    "relation": "has_parameter",
+    "object": "body"
+  },
+  {
+    "subject": "send_email.body",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "send_email.body",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "create_calendar_event",
+    "relation": "has_description",
+    "object": "Create a calendar event"
+  },
+  {
+    "subject": "create_calendar_event",
+    "relation": "has_parameter",
+    "object": "title"
+  },
+  {
+    "subject": "create_calendar_event.title",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "create_calendar_event.title",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "create_calendar_event",
+    "relation": "has_parameter",
+    "object": "date"
+  },
+  {
+    "subject": "create_calendar_event.date",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "create_calendar_event.date",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "create_calendar_event",
+    "relation": "has_parameter",
+    "object": "time"
+  },
+  {
+    "subject": "create_calendar_event.time",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "create_calendar_event",
+    "relation": "has_parameter",
+    "object": "duration_minutes"
+  },
+  {
+    "subject": "create_calendar_event.duration_minutes",
+    "relation": "has_type",
+    "object": "integer"
+  },
+  {
+    "subject": "calculate",
+    "relation": "has_description",
+    "object": "Evaluate a mathematical expression"
+  },
+  {
+    "subject": "calculate",
+    "relation": "has_parameter",
+    "object": "expression"
+  },
+  {
+    "subject": "calculate.expression",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "calculate.expression",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "translate",
+    "relation": "has_description",
+    "object": "Translate text between languages"
+  },
+  {
+    "subject": "translate",
+    "relation": "has_parameter",
+    "object": "text"
+  },
+  {
+    "subject": "translate.text",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "translate.text",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "translate",
+    "relation": "has_parameter",
+    "object": "source_language"
+  },
+  {
+    "subject": "translate.source_language",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "translate.source_language",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "translate",
+    "relation": "has_parameter",
+    "object": "target_language"
+  },
+  {
+    "subject": "translate.target_language",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "translate.target_language",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "run_code",
+    "relation": "has_description",
+    "object": "Execute a code snippet in a sandbox"
+  },
+  {
+    "subject": "run_code",
+    "relation": "has_parameter",
+    "object": "code"
+  },
+  {
+    "subject": "run_code.code",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "run_code.code",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "run_code",
+    "relation": "has_parameter",
+    "object": "language"
+  },
+  {
+    "subject": "run_code.language",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "run_code.language",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "run_code.language",
+    "relation": "allowed_value",
+    "object": "python"
+  },
+  {
+    "subject": "run_code.language",
+    "relation": "allowed_value",
+    "object": "javascript"
+  },
+  {
+    "subject": "run_code.language",
+    "relation": "allowed_value",
+    "object": "rust"
+  },
+  {
+    "subject": "read_file",
+    "relation": "has_description",
+    "object": "Read contents of a file"
+  },
+  {
+    "subject": "read_file",
+    "relation": "has_parameter",
+    "object": "path"
+  },
+  {
+    "subject": "read_file.path",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "read_file.path",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "read_file",
+    "relation": "has_parameter",
+    "object": "encoding"
+  },
+  {
+    "subject": "read_file.encoding",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "query_database",
+    "relation": "has_description",
+    "object": "Run a SQL query against a database"
+  },
+  {
+    "subject": "query_database",
+    "relation": "has_parameter",
+    "object": "query"
+  },
+  {
+    "subject": "query_database.query",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "query_database.query",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "query_database",
+    "relation": "has_parameter",
+    "object": "database"
+  },
+  {
+    "subject": "query_database.database",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "query_database.database",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "generate_image",
+    "relation": "has_description",
+    "object": "Generate an image from a text description"
+  },
+  {
+    "subject": "generate_image",
+    "relation": "has_parameter",
+    "object": "prompt"
+  },
+  {
+    "subject": "generate_image.prompt",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "generate_image.prompt",
+    "relation": "is_required",
+    "object": "true"
+  },
+  {
+    "subject": "generate_image",
+    "relation": "has_parameter",
+    "object": "width"
+  },
+  {
+    "subject": "generate_image.width",
+    "relation": "has_type",
+    "object": "integer"
+  },
+  {
+    "subject": "generate_image",
+    "relation": "has_parameter",
+    "object": "height"
+  },
+  {
+    "subject": "generate_image.height",
+    "relation": "has_type",
+    "object": "integer"
+  },
+  {
+    "subject": "generate_image",
+    "relation": "has_parameter",
+    "object": "style"
+  },
+  {
+    "subject": "generate_image.style",
+    "relation": "has_type",
+    "object": "string"
+  },
+  {
+    "subject": "generate_image.style",
+    "relation": "allowed_value",
+    "object": "realistic"
+  },
+  {
+    "subject": "generate_image.style",
+    "relation": "allowed_value",
+    "object": "artistic"
+  },
+  {
+    "subject": "generate_image.style",
+    "relation": "allowed_value",
+    "object": "cartoon"
+  }
+]

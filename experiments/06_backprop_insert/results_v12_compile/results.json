@@ -1,0 +1,17 @@
+{
+  "baseline_loss": 0.9256891079798892,
+  "compiled_loss": 3.4826424883471594,
+  "hybrid_pre": 3.429351493164345,
+  "hybrid_post": 0.9521661100012285,
+  "compiled_delta_pct": 276.2216124533703,
+  "hybrid_delta_pct": 2.8602477649455618,
+  "compiled_top1": 0.95,
+  "compiled_top5": 0.3319999999999997,
+  "hybrid_top1": 0.8,
+  "hybrid_top5": 0.42999999999999977,
+  "head_types": {
+    "content_dependent": 47,
+    "fixed_pattern": 1
+  },
+  "hybrid_trainable": 786432
+}

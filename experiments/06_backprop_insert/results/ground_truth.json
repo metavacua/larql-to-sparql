@@ -1,0 +1,1530 @@
+{
+  "kg": {
+    "entities": [
+      "Freedonia",
+      "Sylvania",
+      "Genovia",
+      "Wakanda",
+      "Latveria",
+      "Elbonia",
+      "Mordavia",
+      "Ruritania",
+      "Graustark",
+      "Markovia",
+      "Bialya",
+      "Qurac",
+      "Vlatava",
+      "Kaznia",
+      "Corto Maltese",
+      "Zandia",
+      "Kahndaq",
+      "Nairomi",
+      "Sokovia",
+      "Madripoor",
+      "Aldovia",
+      "Illyria",
+      "Zamunda",
+      "Wadiya",
+      "Krakozhia",
+      "Borogravia",
+      "Djelibeybi",
+      "Lancre",
+      "Llamedos",
+      "Tsort",
+      "Ephebe",
+      "Klatch",
+      "Uberwald",
+      "Zlobenia",
+      "Molvania",
+      "Arstotzka",
+      "Kolechia",
+      "Obristan",
+      "Impor",
+      "Republia",
+      "Antegria",
+      "Nirvania",
+      "Utopia",
+      "Arcadia",
+      "Pacifica",
+      "Noveria",
+      "Caldera",
+      "Verdania",
+      "Alpinia",
+      "Montero"
+    ],
+    "edges": [
+      {
+        "subject": "Freedonia",
+        "relation": "capital_of",
+        "object": "Markov"
+      },
+      {
+        "subject": "Freedonia",
+        "relation": "president_of",
+        "object": "Albrecht"
+      },
+      {
+        "subject": "Freedonia",
+        "relation": "currency_of",
+        "object": "Ducat"
+      },
+      {
+        "subject": "Freedonia",
+        "relation": "language_of",
+        "object": "Freedonian"
+      },
+      {
+        "subject": "Sylvania",
+        "relation": "capital_of",
+        "object": "Pressburg"
+      },
+      {
+        "subject": "Sylvania",
+        "relation": "president_of",
+        "object": "Volkov"
+      },
+      {
+        "subject": "Sylvania",
+        "relation": "currency_of",
+        "object": "Thaler"
+      },
+      {
+        "subject": "Sylvania",
+        "relation": "language_of",
+        "object": "Sylvanian"
+      },
+      {
+        "subject": "Genovia",
+        "relation": "capital_of",
+        "object": "Pyris"
+      },
+      {
+        "subject": "Genovia",
+        "relation": "president_of",
+        "object": "Fontaine"
+      },
+      {
+        "subject": "Genovia",
+        "relation": "currency_of",
+        "object": "Crown"
+      },
+      {
+        "subject": "Genovia",
+        "relation": "language_of",
+        "object": "Genovian"
+      },
+      {
+        "subject": "Wakanda",
+        "relation": "capital_of",
+        "object": "Birnin Zana"
+      },
+      {
+        "subject": "Wakanda",
+        "relation": "president_of",
+        "object": "T'Challa"
+      },
+      {
+        "subject": "Wakanda",
+        "relation": "currency_of",
+        "object": "Vibranium Credit"
+      },
+      {
+        "subject": "Wakanda",
+        "relation": "language_of",
+        "object": "Wakandan"
+      },
+      {
+        "subject": "Latveria",
+        "relation": "capital_of",
+        "object": "Doomstadt"
+      },
+      {
+        "subject": "Latveria",
+        "relation": "president_of",
+        "object": "Von Doom"
+      },
+      {
+        "subject": "Latveria",
+        "relation": "currency_of",
+        "object": "Doom Dollar"
+      },
+      {
+        "subject": "Latveria",
+        "relation": "language_of",
+        "object": "Latverian"
+      },
+      {
+        "subject": "Elbonia",
+        "relation": "capital_of",
+        "object": "Mudburg"
+      },
+      {
+        "subject": "Elbonia",
+        "relation": "president_of",
+        "object": "Grushenka"
+      },
+      {
+        "subject": "Elbonia",
+        "relation": "currency_of",
+        "object": "Mudmark"
+      },
+      {
+        "subject": "Elbonia",
+        "relation": "language_of",
+        "object": "Elbonian"
+      },
+      {
+        "subject": "Mordavia",
+        "relation": "capital_of",
+        "object": "Kravburg"
+      },
+      {
+        "subject": "Mordavia",
+        "relation": "president_of",
+        "object": "Mordov"
+      },
+      {
+        "subject": "Mordavia",
+        "relation": "currency_of",
+        "object": "Mordav"
+      },
+      {
+        "subject": "Mordavia",
+        "relation": "language_of",
+        "object": "Mordavian"
+      },
+      {
+        "subject": "Ruritania",
+        "relation": "capital_of",
+        "object": "Strelsau"
+      },
+      {
+        "subject": "Ruritania",
+        "relation": "president_of",
+        "object": "Rudolf"
+      },
+      {
+        "subject": "Ruritania",
+        "relation": "currency_of",
+        "object": "Ruritanian Crown"
+      },
+      {
+        "subject": "Ruritania",
+        "relation": "language_of",
+        "object": "Ruritanian"
+      },
+      {
+        "subject": "Graustark",
+        "relation": "capital_of",
+        "object": "Doorn"
+      },
+      {
+        "subject": "Graustark",
+        "relation": "president_of",
+        "object": "Graustark"
+      },
+      {
+        "subject": "Graustark",
+        "relation": "currency_of",
+        "object": "Graustark Mark"
+      },
+      {
+        "subject": "Graustark",
+        "relation": "language_of",
+        "object": "Graustarkan"
+      },
+      {
+        "subject": "Markovia",
+        "relation": "capital_of",
+        "object": "Marlovia City"
+      },
+      {
+        "subject": "Markovia",
+        "relation": "president_of",
+        "object": "Markov II"
+      },
+      {
+        "subject": "Markovia",
+        "relation": "currency_of",
+        "object": "Markovi"
+      },
+      {
+        "subject": "Markovia",
+        "relation": "language_of",
+        "object": "Markovian"
+      },
+      {
+        "subject": "Bialya",
+        "relation": "capital_of",
+        "object": "Khamar"
+      },
+      {
+        "subject": "Bialya",
+        "relation": "president_of",
+        "object": "Hassan"
+      },
+      {
+        "subject": "Bialya",
+        "relation": "currency_of",
+        "object": "Dinar"
+      },
+      {
+        "subject": "Bialya",
+        "relation": "language_of",
+        "object": "Bialyan"
+      },
+      {
+        "subject": "Qurac",
+        "relation": "capital_of",
+        "object": "Quraci City"
+      },
+      {
+        "subject": "Qurac",
+        "relation": "president_of",
+        "object": "Murad"
+      },
+      {
+        "subject": "Qurac",
+        "relation": "currency_of",
+        "object": "Riyal"
+      },
+      {
+        "subject": "Qurac",
+        "relation": "language_of",
+        "object": "Quraci"
+      },
+      {
+        "subject": "Vlatava",
+        "relation": "capital_of",
+        "object": "Vlatgrad"
+      },
+      {
+        "subject": "Vlatava",
+        "relation": "president_of",
+        "object": "Vlata"
+      },
+      {
+        "subject": "Vlatava",
+        "relation": "currency_of",
+        "object": "Vlat"
+      },
+      {
+        "subject": "Vlatava",
+        "relation": "language_of",
+        "object": "Vlatavan"
+      },
+      {
+        "subject": "Kaznia",
+        "relation": "capital_of",
+        "object": "Kazgrad"
+      },
+      {
+        "subject": "Kaznia",
+        "relation": "president_of",
+        "object": "Kaznov"
+      },
+      {
+        "subject": "Kaznia",
+        "relation": "currency_of",
+        "object": "Kazni"
+      },
+      {
+        "subject": "Kaznia",
+        "relation": "language_of",
+        "object": "Kaznian"
+      },
+      {
+        "subject": "Corto Maltese",
+        "relation": "capital_of",
+        "object": "Maltese City"
+      },
+      {
+        "subject": "Corto Maltese",
+        "relation": "president_of",
+        "object": "Cortes"
+      },
+      {
+        "subject": "Corto Maltese",
+        "relation": "currency_of",
+        "object": "Peso"
+      },
+      {
+        "subject": "Corto Maltese",
+        "relation": "language_of",
+        "object": "Maltese"
+      },
+      {
+        "subject": "Zandia",
+        "relation": "capital_of",
+        "object": "Zandipolis"
+      },
+      {
+        "subject": "Zandia",
+        "relation": "president_of",
+        "object": "Zandar"
+      },
+      {
+        "subject": "Zandia",
+        "relation": "currency_of",
+        "object": "Zandi"
+      },
+      {
+        "subject": "Zandia",
+        "relation": "language_of",
+        "object": "Zandian"
+      },
+      {
+        "subject": "Kahndaq",
+        "relation": "capital_of",
+        "object": "Shiruta"
+      },
+      {
+        "subject": "Kahndaq",
+        "relation": "president_of",
+        "object": "Adam"
+      },
+      {
+        "subject": "Kahndaq",
+        "relation": "currency_of",
+        "object": "Kahndaqi"
+      },
+      {
+        "subject": "Kahndaq",
+        "relation": "language_of",
+        "object": "Kahndaq"
+      },
+      {
+        "subject": "Nairomi",
+        "relation": "capital_of",
+        "object": "Nairomi City"
+      },
+      {
+        "subject": "Nairomi",
+        "relation": "president_of",
+        "object": "Nairomi"
+      },
+      {
+        "subject": "Nairomi",
+        "relation": "currency_of",
+        "object": "Naira"
+      },
+      {
+        "subject": "Nairomi",
+        "relation": "language_of",
+        "object": "Nairomi"
+      },
+      {
+        "subject": "Sokovia",
+        "relation": "capital_of",
+        "object": "Novi Grad"
+      },
+      {
+        "subject": "Sokovia",
+        "relation": "president_of",
+        "object": "Zemo"
+      },
+      {
+        "subject": "Sokovia",
+        "relation": "currency_of",
+        "object": "Sokovian Mark"
+      },
+      {
+        "subject": "Sokovia",
+        "relation": "language_of",
+        "object": "Sokovian"
+      },
+      {
+        "subject": "Madripoor",
+        "relation": "capital_of",
+        "object": "Hightown"
+      },
+      {
+        "subject": "Madripoor",
+        "relation": "president_of",
+        "object": "Viper"
+      },
+      {
+        "subject": "Madripoor",
+        "relation": "currency_of",
+        "object": "Madri"
+      },
+      {
+        "subject": "Madripoor",
+        "relation": "language_of",
+        "object": "Madripoorian"
+      },
+      {
+        "subject": "Aldovia",
+        "relation": "capital_of",
+        "object": "Aldstadt"
+      },
+      {
+        "subject": "Aldovia",
+        "relation": "president_of",
+        "object": "Aldrich"
+      },
+      {
+        "subject": "Aldovia",
+        "relation": "currency_of",
+        "object": "Aldovian Crown"
+      },
+      {
+        "subject": "Aldovia",
+        "relation": "language_of",
+        "object": "Aldovian"
+      },
+      {
+        "subject": "Illyria",
+        "relation": "capital_of",
+        "object": "Illyris"
+      },
+      {
+        "subject": "Illyria",
+        "relation": "president_of",
+        "object": "Illyrian"
+      },
+      {
+        "subject": "Illyria",
+        "relation": "currency_of",
+        "object": "Illyrian Lira"
+      },
+      {
+        "subject": "Illyria",
+        "relation": "language_of",
+        "object": "Illyrian"
+      },
+      {
+        "subject": "Zamunda",
+        "relation": "capital_of",
+        "object": "Zamundia City"
+      },
+      {
+        "subject": "Zamunda",
+        "relation": "president_of",
+        "object": "Akeem"
+      },
+      {
+        "subject": "Zamunda",
+        "relation": "currency_of",
+        "object": "Zamundan Pound"
+      },
+      {
+        "subject": "Zamunda",
+        "relation": "language_of",
+        "object": "Zamundan"
+      },
+      {
+        "subject": "Wadiya",
+        "relation": "capital_of",
+        "object": "Wadiyan"
+      },
+      {
+        "subject": "Wadiya",
+        "relation": "president_of",
+        "object": "Aladeen"
+      },
+      {
+        "subject": "Wadiya",
+        "relation": "currency_of",
+        "object": "Wadiyan Dollar"
+      },
+      {
+        "subject": "Wadiya",
+        "relation": "language_of",
+        "object": "Wadiyan"
+      },
+      {
+        "subject": "Krakozhia",
+        "relation": "capital_of",
+        "object": "Krakozgrad"
+      },
+      {
+        "subject": "Krakozhia",
+        "relation": "president_of",
+        "object": "Krakozhev"
+      },
+      {
+        "subject": "Krakozhia",
+        "relation": "currency_of",
+        "object": "Krakozhian Ruble"
+      },
+      {
+        "subject": "Krakozhia",
+        "relation": "language_of",
+        "object": "Krakozhian"
+      },
+      {
+        "subject": "Borogravia",
+        "relation": "capital_of",
+        "object": "Bonk"
+      },
+      {
+        "subject": "Borogravia",
+        "relation": "president_of",
+        "object": "Vetinari"
+      },
+      {
+        "subject": "Borogravia",
+        "relation": "currency_of",
+        "object": "Ankh-Morpork Dollar"
+      },
+      {
+        "subject": "Borogravia",
+        "relation": "language_of",
+        "object": "Morporkian"
+      },
+      {
+        "subject": "Djelibeybi",
+        "relation": "capital_of",
+        "object": "Djeli City"
+      },
+      {
+        "subject": "Djelibeybi",
+        "relation": "president_of",
+        "object": "Pteppic"
+      },
+      {
+        "subject": "Djelibeybi",
+        "relation": "currency_of",
+        "object": "Djelian Talent"
+      },
+      {
+        "subject": "Djelibeybi",
+        "relation": "language_of",
+        "object": "Djelibeybish"
+      },
+      {
+        "subject": "Lancre",
+        "relation": "capital_of",
+        "object": "Lancre Town"
+      },
+      {
+        "subject": "Lancre",
+        "relation": "president_of",
+        "object": "Magrat"
+      },
+      {
+        "subject": "Lancre",
+        "relation": "currency_of",
+        "object": "Lancrastian Penny"
+      },
+      {
+        "subject": "Lancre",
+        "relation": "language_of",
+        "object": "Lancrastian"
+      },
+      {
+        "subject": "Llamedos",
+        "relation": "capital_of",
+        "object": "Llamedos City"
+      },
+      {
+        "subject": "Llamedos",
+        "relation": "president_of",
+        "object": "Llawen"
+      },
+      {
+        "subject": "Llamedos",
+        "relation": "currency_of",
+        "object": "Llamedos Groat"
+      },
+      {
+        "subject": "Llamedos",
+        "relation": "language_of",
+        "object": "Llamedosian"
+      },
+      {
+        "subject": "Tsort",
+        "relation": "capital_of",
+        "object": "Tsortean"
+      },
+      {
+        "subject": "Tsort",
+        "relation": "president_of",
+        "object": "Tsortes"
+      },
+      {
+        "subject": "Tsort",
+        "relation": "currency_of",
+        "object": "Tsortean Stater"
+      },
+      {
+        "subject": "Tsort",
+        "relation": "language_of",
+        "object": "Tsortean"
+      },
+      {
+        "subject": "Ephebe",
+        "relation": "capital_of",
+        "object": "Ephebe City"
+      },
+      {
+        "subject": "Ephebe",
+        "relation": "president_of",
+        "object": "Ibid"
+      },
+      {
+        "subject": "Ephebe",
+        "relation": "currency_of",
+        "object": "Ephebe Obol"
+      },
+      {
+        "subject": "Ephebe",
+        "relation": "language_of",
+        "object": "Ephebian"
+      },
+      {
+        "subject": "Klatch",
+        "relation": "capital_of",
+        "object": "Al Khali"
+      },
+      {
+        "subject": "Klatch",
+        "relation": "president_of",
+        "object": "Seriph"
+      },
+      {
+        "subject": "Klatch",
+        "relation": "currency_of",
+        "object": "Klatchian Rhinu"
+      },
+      {
+        "subject": "Klatch",
+        "relation": "language_of",
+        "object": "Klatchian"
+      },
+      {
+        "subject": "Uberwald",
+        "relation": "capital_of",
+        "object": "Uberstadt"
+      },
+      {
+        "subject": "Uberwald",
+        "relation": "president_of",
+        "object": "Wolfgang"
+      },
+      {
+        "subject": "Uberwald",
+        "relation": "currency_of",
+        "object": "Uber Thaler"
+      },
+      {
+        "subject": "Uberwald",
+        "relation": "language_of",
+        "object": "Uberwaldean"
+      },
+      {
+        "subject": "Zlobenia",
+        "relation": "capital_of",
+        "object": "Zlobengrad"
+      },
+      {
+        "subject": "Zlobenia",
+        "relation": "president_of",
+        "object": "Zlob"
+      },
+      {
+        "subject": "Zlobenia",
+        "relation": "currency_of",
+        "object": "Zlobenmark"
+      },
+      {
+        "subject": "Zlobenia",
+        "relation": "language_of",
+        "object": "Zlobenian"
+      },
+      {
+        "subject": "Molvania",
+        "relation": "capital_of",
+        "object": "Molvansk"
+      },
+      {
+        "subject": "Molvania",
+        "relation": "president_of",
+        "object": "Molvansky"
+      },
+      {
+        "subject": "Molvania",
+        "relation": "currency_of",
+        "object": "Molvanit"
+      },
+      {
+        "subject": "Molvania",
+        "relation": "language_of",
+        "object": "Molvan\u00eean"
+      },
+      {
+        "subject": "Arstotzka",
+        "relation": "capital_of",
+        "object": "Arstotzka City"
+      },
+      {
+        "subject": "Arstotzka",
+        "relation": "president_of",
+        "object": "Arstotzkin"
+      },
+      {
+        "subject": "Arstotzka",
+        "relation": "currency_of",
+        "object": "Arstotzkan Credit"
+      },
+      {
+        "subject": "Arstotzka",
+        "relation": "language_of",
+        "object": "Arstotzkan"
+      },
+      {
+        "subject": "Kolechia",
+        "relation": "capital_of",
+        "object": "East Grestin"
+      },
+      {
+        "subject": "Kolechia",
+        "relation": "president_of",
+        "object": "Kolechev"
+      },
+      {
+        "subject": "Kolechia",
+        "relation": "currency_of",
+        "object": "Kolech"
+      },
+      {
+        "subject": "Kolechia",
+        "relation": "language_of",
+        "object": "Kolechian"
+      },
+      {
+        "subject": "Obristan",
+        "relation": "capital_of",
+        "object": "Obri City"
+      },
+      {
+        "subject": "Obristan",
+        "relation": "president_of",
+        "object": "Obrist"
+      },
+      {
+        "subject": "Obristan",
+        "relation": "currency_of",
+        "object": "Obri Mark"
+      },
+      {
+        "subject": "Obristan",
+        "relation": "language_of",
+        "object": "Obristani"
+      },
+      {
+        "subject": "Impor",
+        "relation": "capital_of",
+        "object": "Imporia"
+      },
+      {
+        "subject": "Impor",
+        "relation": "president_of",
+        "object": "Imporus"
+      },
+      {
+        "subject": "Impor",
+        "relation": "currency_of",
+        "object": "Impori"
+      },
+      {
+        "subject": "Impor",
+        "relation": "language_of",
+        "object": "Imporian"
+      },
+      {
+        "subject": "Republia",
+        "relation": "capital_of",
+        "object": "Repub City"
+      },
+      {
+        "subject": "Republia",
+        "relation": "president_of",
+        "object": "Republicus"
+      },
+      {
+        "subject": "Republia",
+        "relation": "currency_of",
+        "object": "Repub Credit"
+      },
+      {
+        "subject": "Republia",
+        "relation": "language_of",
+        "object": "Republian"
+      },
+      {
+        "subject": "Antegria",
+        "relation": "capital_of",
+        "object": "Anteg City"
+      },
+      {
+        "subject": "Antegria",
+        "relation": "president_of",
+        "object": "Antegrin"
+      },
+      {
+        "subject": "Antegria",
+        "relation": "currency_of",
+        "object": "Anteg"
+      },
+      {
+        "subject": "Antegria",
+        "relation": "language_of",
+        "object": "Antegrian"
+      },
+      {
+        "subject": "Nirvania",
+        "relation": "capital_of",
+        "object": "Nirvana City"
+      },
+      {
+        "subject": "Nirvania",
+        "relation": "president_of",
+        "object": "Nirvan"
+      },
+      {
+        "subject": "Nirvania",
+        "relation": "currency_of",
+        "object": "Nirvan Dollar"
+      },
+      {
+        "subject": "Nirvania",
+        "relation": "language_of",
+        "object": "Nirvanian"
+      },
+      {
+        "subject": "Utopia",
+        "relation": "capital_of",
+        "object": "Utopis"
+      },
+      {
+        "subject": "Utopia",
+        "relation": "president_of",
+        "object": "Morus"
+      },
+      {
+        "subject": "Utopia",
+        "relation": "currency_of",
+        "object": "Utopian"
+      },
+      {
+        "subject": "Utopia",
+        "relation": "language_of",
+        "object": "Utopian"
+      },
+      {
+        "subject": "Arcadia",
+        "relation": "capital_of",
+        "object": "Arcadis"
+      },
+      {
+        "subject": "Arcadia",
+        "relation": "president_of",
+        "object": "Arcadian"
+      },
+      {
+        "subject": "Arcadia",
+        "relation": "currency_of",
+        "object": "Arcadian Drachma"
+      },
+      {
+        "subject": "Arcadia",
+        "relation": "language_of",
+        "object": "Arcadian"
+      },
+      {
+        "subject": "Pacifica",
+        "relation": "capital_of",
+        "object": "Pacifica City"
+      },
+      {
+        "subject": "Pacifica",
+        "relation": "president_of",
+        "object": "Pacificus"
+      },
+      {
+        "subject": "Pacifica",
+        "relation": "currency_of",
+        "object": "Pacifican Dollar"
+      },
+      {
+        "subject": "Pacifica",
+        "relation": "language_of",
+        "object": "Pacifican"
+      },
+      {
+        "subject": "Noveria",
+        "relation": "capital_of",
+        "object": "Noveria Port"
+      },
+      {
+        "subject": "Noveria",
+        "relation": "president_of",
+        "object": "Noverius"
+      },
+      {
+        "subject": "Noveria",
+        "relation": "currency_of",
+        "object": "Noverian Credit"
+      },
+      {
+        "subject": "Noveria",
+        "relation": "language_of",
+        "object": "Noverian"
+      },
+      {
+        "subject": "Caldera",
+        "relation": "capital_of",
+        "object": "Caldera Bay"
+      },
+      {
+        "subject": "Caldera",
+        "relation": "president_of",
+        "object": "Calderon"
+      },
+      {
+        "subject": "Caldera",
+        "relation": "currency_of",
+        "object": "Calderan Sol"
+      },
+      {
+        "subject": "Caldera",
+        "relation": "language_of",
+        "object": "Calderan"
+      },
+      {
+        "subject": "Verdania",
+        "relation": "capital_of",
+        "object": "Verde City"
+      },
+      {
+        "subject": "Verdania",
+        "relation": "president_of",
+        "object": "Verdant"
+      },
+      {
+        "subject": "Verdania",
+        "relation": "currency_of",
+        "object": "Verdani"
+      },
+      {
+        "subject": "Verdania",
+        "relation": "language_of",
+        "object": "Verdanian"
+      },
+      {
+        "subject": "Alpinia",
+        "relation": "capital_of",
+        "object": "Alpistadt"
+      },
+      {
+        "subject": "Alpinia",
+        "relation": "president_of",
+        "object": "Alpinus"
+      },
+      {
+        "subject": "Alpinia",
+        "relation": "currency_of",
+        "object": "Alpini Franc"
+      },
+      {
+        "subject": "Alpinia",
+        "relation": "language_of",
+        "object": "Alpinian"
+      },
+      {
+        "subject": "Montero",
+        "relation": "capital_of",
+        "object": "Montero City"
+      },
+      {
+        "subject": "Montero",
+        "relation": "president_of",
+        "object": "Monterov"
+      },
+      {
+        "subject": "Montero",
+        "relation": "currency_of",
+        "object": "Montero Peso"
+      },
+      {
+        "subject": "Montero",
+        "relation": "language_of",
+        "object": "Monterian"
+      }
+    ]
+  },
+  "syntax_pairs": {
+    "plural": [
+      [
+        "dog",
+        "dogs"
+      ],
+      [
+        "cat",
+        "cats"
+      ],
+      [
+        "house",
+        "houses"
+      ],
+      [
+        "child",
+        "children"
+      ],
+      [
+        "mouse",
+        "mice"
+      ],
+      [
+        "foot",
+        "feet"
+      ],
+      [
+        "tooth",
+        "teeth"
+      ],
+      [
+        "goose",
+        "geese"
+      ],
+      [
+        "man",
+        "men"
+      ],
+      [
+        "woman",
+        "women"
+      ],
+      [
+        "city",
+        "cities"
+      ],
+      [
+        "baby",
+        "babies"
+      ],
+      [
+        "leaf",
+        "leaves"
+      ],
+      [
+        "wolf",
+        "wolves"
+      ],
+      [
+        "knife",
+        "knives"
+      ],
+      [
+        "life",
+        "lives"
+      ],
+      [
+        "box",
+        "boxes"
+      ],
+      [
+        "bus",
+        "buses"
+      ],
+      [
+        "dish",
+        "dishes"
+      ],
+      [
+        "church",
+        "churches"
+      ],
+      [
+        "hero",
+        "heroes"
+      ],
+      [
+        "potato",
+        "potatoes"
+      ],
+      [
+        "tomato",
+        "tomatoes"
+      ],
+      [
+        "fish",
+        "fish"
+      ],
+      [
+        "sheep",
+        "sheep"
+      ],
+      [
+        "deer",
+        "deer"
+      ],
+      [
+        "book",
+        "books"
+      ],
+      [
+        "tree",
+        "trees"
+      ],
+      [
+        "star",
+        "stars"
+      ],
+      [
+        "river",
+        "rivers"
+      ]
+    ],
+    "past_tense": [
+      [
+        "walk",
+        "walked"
+      ],
+      [
+        "talk",
+        "talked"
+      ],
+      [
+        "play",
+        "played"
+      ],
+      [
+        "jump",
+        "jumped"
+      ],
+      [
+        "run",
+        "ran"
+      ],
+      [
+        "eat",
+        "ate"
+      ],
+      [
+        "drink",
+        "drank"
+      ],
+      [
+        "swim",
+        "swam"
+      ],
+      [
+        "go",
+        "went"
+      ],
+      [
+        "come",
+        "came"
+      ],
+      [
+        "see",
+        "saw"
+      ],
+      [
+        "take",
+        "took"
+      ],
+      [
+        "give",
+        "gave"
+      ],
+      [
+        "make",
+        "made"
+      ],
+      [
+        "think",
+        "thought"
+      ],
+      [
+        "buy",
+        "bought"
+      ],
+      [
+        "sit",
+        "sat"
+      ],
+      [
+        "stand",
+        "stood"
+      ],
+      [
+        "write",
+        "wrote"
+      ],
+      [
+        "read",
+        "read"
+      ]
+    ],
+    "synonym": [
+      [
+        "big",
+        "large"
+      ],
+      [
+        "small",
+        "tiny"
+      ],
+      [
+        "fast",
+        "quick"
+      ],
+      [
+        "happy",
+        "glad"
+      ],
+      [
+        "sad",
+        "unhappy"
+      ],
+      [
+        "angry",
+        "furious"
+      ],
+      [
+        "cold",
+        "frigid"
+      ],
+      [
+        "hot",
+        "warm"
+      ],
+      [
+        "old",
+        "ancient"
+      ],
+      [
+        "new",
+        "novel"
+      ],
+      [
+        "hard",
+        "difficult"
+      ],
+      [
+        "easy",
+        "simple"
+      ],
+      [
+        "smart",
+        "clever"
+      ],
+      [
+        "brave",
+        "courageous"
+      ],
+      [
+        "pretty",
+        "beautiful"
+      ],
+      [
+        "ugly",
+        "hideous"
+      ],
+      [
+        "rich",
+        "wealthy"
+      ],
+      [
+        "poor",
+        "destitute"
+      ],
+      [
+        "loud",
+        "noisy"
+      ],
+      [
+        "quiet",
+        "silent"
+      ],
+      [
+        "dark",
+        "dim"
+      ],
+      [
+        "bright",
+        "luminous"
+      ],
+      [
+        "strong",
+        "powerful"
+      ],
+      [
+        "weak",
+        "feeble"
+      ],
+      [
+        "tall",
+        "high"
+      ],
+      [
+        "short",
+        "brief"
+      ]
+    ],
+    "hypernym": [
+      [
+        "dog",
+        "animal"
+      ],
+      [
+        "cat",
+        "animal"
+      ],
+      [
+        "eagle",
+        "bird"
+      ],
+      [
+        "salmon",
+        "fish"
+      ],
+      [
+        "oak",
+        "tree"
+      ],
+      [
+        "rose",
+        "flower"
+      ],
+      [
+        "car",
+        "vehicle"
+      ],
+      [
+        "truck",
+        "vehicle"
+      ],
+      [
+        "hammer",
+        "tool"
+      ],
+      [
+        "piano",
+        "instrument"
+      ],
+      [
+        "apple",
+        "fruit"
+      ],
+      [
+        "carrot",
+        "vegetable"
+      ],
+      [
+        "shirt",
+        "clothing"
+      ],
+      [
+        "chair",
+        "furniture"
+      ],
+      [
+        "python",
+        "language"
+      ],
+      [
+        "gold",
+        "metal"
+      ],
+      [
+        "diamond",
+        "gem"
+      ],
+      [
+        "earth",
+        "planet"
+      ],
+      [
+        "doctor",
+        "profession"
+      ],
+      [
+        "sword",
+        "weapon"
+      ]
+    ]
+  },
+  "code_relations": [
+    {
+      "relation": "python:def",
+      "subject": "add",
+      "object": "function_def"
+    },
+    {
+      "relation": "python:for",
+      "subject": "i",
+      "object": "for_loop"
+    },
+    {
+      "relation": "python:if",
+      "subject": "x",
+      "object": "conditional"
+    },
+    {
+      "relation": "python:class",
+      "subject": "Point",
+      "object": "class_def"
+    },
+    {
+      "relation": "python:import",
+      "subject": "math",
+      "object": "import"
+    },
+    {
+      "relation": "python:call",
+      "subject": "sum",
+      "object": "function_call"
+    },
+    {
+      "relation": "python:def",
+      "subject": "factorial",
+      "object": "function_def"
+    },
+    {
+      "relation": "python:while",
+      "subject": "count",
+      "object": "while_loop"
+    },
+    {
+      "relation": "rust:fn",
+      "subject": "add",
+      "object": "function_def"
+    },
+    {
+      "relation": "rust:for",
+      "subject": "i",
+      "object": "for_loop"
+    },
+    {
+      "relation": "rust:let",
+      "subject": "total",
+      "object": "variable_bind"
+    },
+    {
+      "relation": "rust:struct",
+      "subject": "Point",
+      "object": "struct_def"
+    },
+    {
+      "relation": "rust:match",
+      "subject": "direction",
+      "object": "match_expr"
+    },
+    {
+      "relation": "rust:impl",
+      "subject": "Point",
+      "object": "impl_block"
+    }
+  ],
+  "counts": {
+    "factual": 800,
+    "syntax": 344,
+    "code": 14,
+    "total": 1158
+  }
+}

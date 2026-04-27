@@ -1,0 +1,142 @@
+syntax = "proto3";
+package larql.grid.v1;
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+service GridService {
+  // Persistent bidirectional stream. Server keeps it open for its lifetime.
+  rpc Join(stream ServerMessage) returns (stream RouterMessage);
+
+  // Read-only grid status (admin / monitoring).
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+// ── Server → Router ───────────────────────────────────────────────────────────
+
+message ServerMessage {
+  oneof payload {
+    AnnounceMsg  announce  = 1;
+    AvailableMsg available = 2;
+    ReadyMsg     ready     = 3;
+    HeartbeatMsg heartbeat = 4;
+    DroppingMsg  dropping  = 5;
+    RefuseMsg    refuse    = 6;
+  }
+}
+
+message AnnounceMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;  // inclusive
+  uint32 layer_end   = 3;  // inclusive
+  uint64 ram_bytes   = 4;
+  string listen_url  = 5;  // "http://server-a:8080"
+  string vindex_hash = 6;
+}
+
+message AvailableMsg {
+  uint64 ram_bytes   = 1;
+  uint64 disk_bytes  = 2;
+  string store_path  = 3;
+}
+
+message ReadyMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;
+  uint32 layer_end   = 3;
+  string listen_url  = 4;
+}
+
+message HeartbeatMsg {
+  float  cpu_pct            = 1;
+  uint64 ram_used           = 2;
+  uint32 requests_in_flight = 3;
+}
+
+message DroppingMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;
+  uint32 layer_end   = 3;
+  string reason      = 4;  // "shutdown" | "reassigned" | "oom"
+}
+
+message RefuseMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;
+  uint32 layer_end   = 3;
+  string reason      = 4;  // "insufficient_disk" | "wrong_arch" | "busy"
+}
+
+// ── Router → Server ───────────────────────────────────────────────────────────
+
+message RouterMessage {
+  oneof payload {
+    AssignMsg   assign   = 1;
+    UnassignMsg unassign = 2;
+    AckMsg      ack      = 3;
+    RejectMsg   reject   = 4;
+  }
+}
+
+message AssignMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;
+  uint32 layer_end   = 3;
+  string origin_url  = 4;
+  string shard_hash  = 5;
+}
+
+message UnassignMsg {
+  string model_id    = 1;
+  uint32 layer_start = 2;
+  uint32 layer_end   = 3;
+  string reason      = 4;  // "redundant" | "rebalancing"
+}
+
+message AckMsg {
+  string server_id = 1;  // router-assigned stable ID
+}
+
+message RejectMsg {
+  string reason = 1;
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+
+message StatusRequest {}
+
+message StatusResponse {
+  repeated ModelCoverage models  = 1;
+  repeated ServerInfo    servers = 2;
+}
+
+message ModelCoverage {
+  string       model_id   = 1;
+  uint32       num_layers = 2;
+  repeated ShardInfo shards = 3;
+  repeated Gap gaps       = 4;
+}
+
+message ShardInfo {
+  uint32          layer_start   = 1;
+  uint32          layer_end     = 2;
+  repeated string server_ids    = 3;
+  uint32          replica_count = 4;
+}
+
+message Gap {
+  uint32 layer_start = 1;
+  uint32 layer_end   = 2;
+}
+
+message ServerInfo {
+  string server_id          = 1;
+  string listen_url         = 2;
+  string state              = 3;  // "serving" | "available" | "loading" | "draining"
+  string model_id           = 4;
+  uint32 layer_start        = 5;
+  uint32 layer_end          = 6;
+  float  cpu_pct            = 7;
+  uint64 ram_used           = 8;
+  uint32 requests_in_flight = 9;
+  uint32 rtt_ms             = 10;
+}
