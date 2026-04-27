@@ -42,7 +42,7 @@ fn check_block_input(
     block_elems: usize,
     block_size: usize,
 ) -> Result<usize, ModelError> {
-    if !n_elements.is_multiple_of(block_elems) {
+    if !n_elements % block_elems != 0 {
         return Err(ModelError::Parse(format!(
             "{name}: n_elements {n_elements} not a multiple of {block_elems}"
         )));
@@ -310,7 +310,7 @@ pub fn q4k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = x.len();
-    if !n.is_multiple_of(SUPER) {
+    if !n % SUPER != 0 {
         return Err(ModelError::Parse(format!(
             "q4k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -452,7 +452,7 @@ pub fn q4k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     const BLOCK: usize = 144;
     const SUPER: usize = 256;
     let n = out.len();
-    if !n.is_multiple_of(SUPER) {
+    if !n % SUPER != 0 {
         return Err(ModelError::Parse(format!(
             "q4k_row_scaled_add: row length {n} not a multiple of {SUPER}"
         )));
@@ -622,7 +622,7 @@ pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 210;
     const SUPER: usize = 256;
     let n = x.len();
-    if !n.is_multiple_of(SUPER) {
+    if !n % SUPER != 0 {
         return Err(ModelError::Parse(format!(
             "q6k_row_dot: row length {n} not a multiple of {SUPER}"
         )));
@@ -751,7 +751,7 @@ pub fn q6k_row_scaled_add(data: &[u8], alpha: f32, out: &mut [f32]) -> Result<()
     let block_size = 210;
     let super_block = 256;
     let n = out.len();
-    if !n.is_multiple_of(super_block) {
+    if !n % super_block != 0 {
         return Err(ModelError::Parse(format!(
             "q6k_row_scaled_add: row length {n} not a multiple of {super_block}"
         )));
@@ -830,7 +830,7 @@ pub fn dequantize_q6_k(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 /// Output: 18 bytes per block (f16 scale + 16 bytes of packed 4-bit quants).
 pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
     assert!(
-        data.len().is_multiple_of(32),
+        data.len() % 32 != 0,
         "Q4_0: element count must be multiple of 32"
     );
     let n_blocks = data.len() / 32;
@@ -865,7 +865,7 @@ pub fn quantize_q4_0(data: &[f32]) -> Vec<u8> {
 /// Output: 34 bytes per block (f16 scale + 32 signed int8 quants).
 pub fn quantize_q8_0(data: &[f32]) -> Vec<u8> {
     assert!(
-        data.len().is_multiple_of(32),
+        data.len() % 32 != 0,
         "Q8_0: element count must be multiple of 32"
     );
     let n_blocks = data.len() / 32;
