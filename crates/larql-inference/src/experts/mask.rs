@@ -1,4 +1,9 @@
-#![allow(clippy::if_same_then_else, clippy::ptr_arg, clippy::single_char_add_str, clippy::useless_vec)]
+#![allow(
+    clippy::if_same_then_else,
+    clippy::ptr_arg,
+    clippy::single_char_add_str,
+    clippy::useless_vec
+)]
 
 //! `OpNameMask` — vocabulary mask for grammar-constrained op-call generation.
 //!
