@@ -544,9 +544,45 @@ See [docs/residual-trace.md](docs/residual-trace.md) for the full writeup.
 | [docs/residual-trace.md](docs/residual-trace.md) | Residual stream trace — decomposition, storage, tiered context |
 | [docs/specs/trace-format-spec.md](docs/specs/trace-format-spec.md) | Trace file format specification (.bin, .bndx, .ctxt) |
 
+## Platform Support
+
+LARQL builds and runs on **Linux**, **macOS** (Intel/ARM), and **Windows**. The build process automatically detects your platform and configures the appropriate BLAS backend and compute features.
+
+**Platform Details**:
+
+| Platform | BLAS Backend | GPU (optional) | Status |
+|----------|--------------|---|---|
+| Linux (x86_64) | OpenBLAS (vendored) | N/A | ✅ Tested |
+| macOS Intel | Accelerate | Metal | ✅ Tested |
+| macOS ARM (M-series) | Accelerate | Metal | ✅ Tested |
+| Windows | Vendored OpenBLAS | N/A | ✅ Tested |
+
+**Features**:
+- `metal`: GPU acceleration via Apple Metal (macOS only, opt-in). Compile with `--features metal`.
+- Cross-architecture support: Automatic CPU flags for `x86_64` (AVX2) and `aarch64` (NEON dot-product).
+- Intelligent MMAP: Demand-paged loading on all platforms (Unix: `madvise`, Windows: kernel readahead).
+
+**Validation**:
+```bash
+make check-env    # Validate build dependencies on your platform
+```
+
 ## Building & Testing
 
-(Needs Openblas under Linux)
+**Quick Start** (using Makefile):
+```bash
+make help              # Show all available targets
+make check-env        # Validate build environment
+make check            # Compile all crates
+make build            # Build all crates
+make release          # Build optimized release binary
+make test             # Run all tests
+make ci               # Run formatting, linting, and tests (like CI)
+make fmt              # Format all code
+make lint             # Run clippy linting
+```
+
+**Detailed Build Commands**:
 ```bash
 cargo build --release                    # optimised build
 cargo build --release --features metal   # with Metal GPU backend
