@@ -124,6 +124,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_architecture_enum_consistency() {
         let arch = Architecture::detect();
         match arch {
