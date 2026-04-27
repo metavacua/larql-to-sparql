@@ -1,9 +1,7 @@
 use std::time::Instant;
 
 use clap::Args;
-use larql_inference::{
-    trace_forward, InferenceModel,
-};
+use larql_inference::{trace_forward, InferenceModel};
 
 #[derive(Args)]
 pub struct FfnBottleneckArgs {
@@ -29,7 +27,9 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let model = InferenceModel::load(&args.model)?;
     let weights = model.weights();
 
-    let encoding = model.tokenizer().encode(args.prompt.as_str(), true)
+    let encoding = model
+        .tokenizer()
+        .encode(args.prompt.as_str(), true)
         .map_err(|e| format!("tokenize error: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     let seq_len = token_ids.len();
@@ -63,13 +63,17 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Gate matmul: x @ gate.T → (seq, intermediate)
     let _ = x.dot(&w_gate.t());
     let start = Instant::now();
-    for _ in 0..iters { let _ = x.dot(&w_gate.t()); }
+    for _ in 0..iters {
+        let _ = x.dot(&w_gate.t());
+    }
     let gate_us = start.elapsed().as_micros() as f64 / iters as f64;
 
     // 2. Up matmul: x @ up.T → (seq, intermediate)
     let _ = x.dot(&w_up.t());
     let start = Instant::now();
-    for _ in 0..iters { let _ = x.dot(&w_up.t()); }
+    for _ in 0..iters {
+        let _ = x.dot(&w_up.t());
+    }
     let up_us = start.elapsed().as_micros() as f64 / iters as f64;
 
     // 3. SiLU activation: element-wise on (seq, intermediate)
@@ -87,7 +91,9 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let activation = &activated * &up_proj;
     let _ = activation.dot(&w_down.t());
     let start = Instant::now();
-    for _ in 0..iters { let _ = activation.dot(&w_down.t()); }
+    for _ in 0..iters {
+        let _ = activation.dot(&w_down.t());
+    }
     let down_us = start.elapsed().as_micros() as f64 / iters as f64;
 
     // 5. Top-K selection from gate activations (for sparse path)
@@ -95,7 +101,8 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     for _ in 0..iters {
         for s in 0..seq_len {
-            let mut indexed: Vec<(usize, f32)> = gate_act.row(s).iter().copied().enumerate().collect();
+            let mut indexed: Vec<(usize, f32)> =
+                gate_act.row(s).iter().copied().enumerate().collect();
             indexed.select_nth_unstable_by(64, |a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
         }
     }
@@ -136,16 +143,23 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let ffn = larql_inference::WeightFfn { weights };
     let _ = larql_inference::FfnBackend::forward(&ffn, layer, &x);
     let start = Instant::now();
-    for _ in 0..iters { let _ = larql_inference::FfnBackend::forward(&ffn, layer, &x); }
+    for _ in 0..iters {
+        let _ = larql_inference::FfnBackend::forward(&ffn, layer, &x);
+    }
     let total_us = start.elapsed().as_micros() as f64 / iters as f64;
 
     let total_parts = gate_us + up_us + silu_us + down_us;
 
     println!();
-    println!("FFN Layer {} Bottleneck Analysis (seq_len={}, hidden={}, intermediate={})",
-        layer, seq_len, hidden, intermediate);
+    println!(
+        "FFN Layer {} Bottleneck Analysis (seq_len={}, hidden={}, intermediate={})",
+        layer, seq_len, hidden, intermediate
+    );
     println!("{}", "=".repeat(65));
-    println!("{:>30} {:>10} {:>10} {:>10}", "Component", "Time (us)", "% of FFN", "GFLOPS");
+    println!(
+        "{:>30} {:>10} {:>10} {:>10}",
+        "Component", "Time (us)", "% of FFN", "GFLOPS"
+    );
     println!("{}", "-".repeat(65));
 
     let gate_flops = 2.0 * seq_len as f64 * hidden as f64 * intermediate as f64;
@@ -153,40 +167,72 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let silu_flops = 2.0 * seq_len as f64 * intermediate as f64;
     let down_flops = 2.0 * seq_len as f64 * intermediate as f64 * hidden as f64;
 
-    println!("{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
-        "gate matmul (x @ gate.T)", gate_us, gate_us / total_parts * 100.0,
-        gate_flops / gate_us / 1000.0);
-    println!("{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
-        "up matmul (x @ up.T)", up_us, up_us / total_parts * 100.0,
-        up_flops / up_us / 1000.0);
-    println!("{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
-        "SiLU + element mul", silu_us, silu_us / total_parts * 100.0,
-        silu_flops / silu_us / 1000.0);
-    println!("{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
-        "down matmul (act @ down.T)", down_us, down_us / total_parts * 100.0,
-        down_flops / down_us / 1000.0);
+    println!(
+        "{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
+        "gate matmul (x @ gate.T)",
+        gate_us,
+        gate_us / total_parts * 100.0,
+        gate_flops / gate_us / 1000.0
+    );
+    println!(
+        "{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
+        "up matmul (x @ up.T)",
+        up_us,
+        up_us / total_parts * 100.0,
+        up_flops / up_us / 1000.0
+    );
+    println!(
+        "{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
+        "SiLU + element mul",
+        silu_us,
+        silu_us / total_parts * 100.0,
+        silu_flops / silu_us / 1000.0
+    );
+    println!(
+        "{:>30} {:>8.0}us {:>9.1}% {:>9.1}",
+        "down matmul (act @ down.T)",
+        down_us,
+        down_us / total_parts * 100.0,
+        down_flops / down_us / 1000.0
+    );
     println!("{}", "-".repeat(65));
-    println!("{:>30} {:>8.0}us {:>9.1}%",
-        "Sum of parts", total_parts, 100.0);
-    println!("{:>30} {:>8.0}us",
-        "Actual dense FFN", total_us);
+    println!(
+        "{:>30} {:>8.0}us {:>9.1}%",
+        "Sum of parts", total_parts, 100.0
+    );
+    println!("{:>30} {:>8.0}us", "Actual dense FFN", total_us);
 
     println!();
     println!("Sparse path components:");
     println!("{}", "-".repeat(65));
-    println!("{:>30} {:>8.0}us    (gate matmul still required)",
-        "gate matmul", gate_us);
-    println!("{:>30} {:>8.0}us    (select top-64 from {})",
-        "top-K selection", topk_us, intermediate);
-    println!("{:>30} {:>8.0}us    (64 rows × {} dims)",
-        "gather rows", gather_us, hidden);
-    println!("{:>30} {:>8.0}us    (64,{}) @ ({},) × {} pos",
-        "sparse gate+up gemv", sparse_gemv_us, hidden, hidden, seq_len);
-    println!("{:>30} {:>8.0}us    (minimum sparse overhead)",
-        "sparse total (no down)", gate_us + topk_us + gather_us + sparse_gemv_us);
+    println!(
+        "{:>30} {:>8.0}us    (gate matmul still required)",
+        "gate matmul", gate_us
+    );
+    println!(
+        "{:>30} {:>8.0}us    (select top-64 from {})",
+        "top-K selection", topk_us, intermediate
+    );
+    println!(
+        "{:>30} {:>8.0}us    (64 rows × {} dims)",
+        "gather rows", gather_us, hidden
+    );
+    println!(
+        "{:>30} {:>8.0}us    (64,{}) @ ({},) × {} pos",
+        "sparse gate+up gemv", sparse_gemv_us, hidden, hidden, seq_len
+    );
+    println!(
+        "{:>30} {:>8.0}us    (minimum sparse overhead)",
+        "sparse total (no down)",
+        gate_us + topk_us + gather_us + sparse_gemv_us
+    );
     println!();
-    println!("{:>30} {:>8.0}us    ({:.0}% of FFN is gate+up matmul)",
-        "gate + up matmuls", gate_us + up_us, (gate_us + up_us) / total_parts * 100.0);
+    println!(
+        "{:>30} {:>8.0}us    ({:.0}% of FFN is gate+up matmul)",
+        "gate + up matmuls",
+        gate_us + up_us,
+        (gate_us + up_us) / total_parts * 100.0
+    );
 
     Ok(())
 }

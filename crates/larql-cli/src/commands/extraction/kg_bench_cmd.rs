@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
-use larql_vindex::load_feature_labels;
 use larql_inference::{GateIndex, InferenceModel};
+use larql_vindex::load_feature_labels;
 
 #[derive(Args)]
 pub struct KgBenchArgs {
@@ -70,22 +70,27 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "=".repeat(80));
 
     for prompt in &prompts {
-        let encoding = model.tokenizer().encode(*prompt, true)
+        let encoding = model
+            .tokenizer()
+            .encode(*prompt, true)
             .map_err(|e| format!("tokenize error: {e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-        let entity_tokens: Vec<(usize, f32)> = token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
+        let entity_tokens: Vec<(usize, f32)> =
+            token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
 
         println!("\n{:?}", prompt);
 
         // Aggregate answer tokens across layers
-        let mut token_votes: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        let mut token_votes: std::collections::HashMap<String, f32> =
+            std::collections::HashMap::new();
 
         for &layer in &layers {
             let features = gi.lookup_from_tokens(&entity_tokens, layer, args.top_k);
 
             let mut display: Vec<String> = Vec::new();
             for &feat_id in features.iter().take(5) {
-                let label = labels.get(&(layer, feat_id))
+                let label = labels
+                    .get(&(layer, feat_id))
                     .map(|s| s.as_str())
                     .unwrap_or("?");
                 display.push(format!("F{}→{}", feat_id, label));
@@ -100,7 +105,12 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            println!("  L{:2}: {:3} feats  [{}]", layer, features.len(), display.join(", "));
+            println!(
+                "  L{:2}: {:3} feats  [{}]",
+                layer,
+                features.len(),
+                display.join(", ")
+            );
         }
 
         if !token_votes.is_empty() {
@@ -117,13 +127,17 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Throughput benchmark
     println!("\n{}", "=".repeat(80));
 
-    let encoding = model.tokenizer().encode(prompts[0], true)
+    let encoding = model
+        .tokenizer()
+        .encode(prompts[0], true)
         .map_err(|e| format!("tokenize error: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     let entity_tokens: Vec<(usize, f32)> = token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
 
     // Method 1: Dynamic lookup (HashMap per call)
-    for &layer in &layers { let _ = gi.lookup_from_tokens(&entity_tokens, layer, args.top_k); }
+    for &layer in &layers {
+        let _ = gi.lookup_from_tokens(&entity_tokens, layer, args.top_k);
+    }
     let start = Instant::now();
     for _ in 0..args.throughput_iters {
         for &layer in &layers {
@@ -152,7 +166,10 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut entity_labels: Vec<Vec<&str>> = vec![Vec::new(); precomputed.len()];
     for &layer in &layers {
         for &feat_id in &precomputed[layer] {
-            let label = labels.get(&(layer, feat_id)).map(|s| s.as_str()).unwrap_or("?");
+            let label = labels
+                .get(&(layer, feat_id))
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             entity_labels[layer].push(label);
         }
     }
@@ -167,13 +184,30 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
     let label_us = label_elapsed.as_micros() as f64 / args.throughput_iters as f64;
     let label_qps = args.throughput_iters as f64 / label_elapsed.as_secs_f64();
 
-    println!("Throughput: {} iters, {} layers, K={}", args.throughput_iters, layers.len(), args.top_k);
+    println!(
+        "Throughput: {} iters, {} layers, K={}",
+        args.throughput_iters,
+        layers.len(),
+        args.top_k
+    );
     println!("{:>25} {:>10} {:>12}", "Method", "us/query", "queries/sec");
     println!("{}", "-".repeat(50));
-    println!("{:>25} {:>10.2} {:>12.0}", "dynamic (HashMap)", dyn_us, dyn_qps);
-    println!("{:>25} {:>10.2} {:>12.0}", "precomputed (vec read)", pre_us, pre_qps);
-    println!("{:>25} {:>10.2} {:>12.0}", "precomputed + labels", label_us, label_qps);
-    println!("  (checksums: {} {} — prevents elimination)", checksum, label_checksum);
+    println!(
+        "{:>25} {:>10.2} {:>12.0}",
+        "dynamic (HashMap)", dyn_us, dyn_qps
+    );
+    println!(
+        "{:>25} {:>10.2} {:>12.0}",
+        "precomputed (vec read)", pre_us, pre_qps
+    );
+    println!(
+        "{:>25} {:>10.2} {:>12.0}",
+        "precomputed + labels", label_us, label_qps
+    );
+    println!(
+        "  (checksums: {} {} — prevents elimination)",
+        checksum, label_checksum
+    );
 
     Ok(())
 }

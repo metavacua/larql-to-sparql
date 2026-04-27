@@ -39,8 +39,8 @@ fn rule_score(prompt: &str) -> f32 {
     let p = prompt.to_lowercase();
 
     // Non-ASCII fraction (multilingual detection)
-    let ascii_frac = prompt.chars().filter(|c| c.is_ascii()).count() as f32
-        / prompt.len().max(1) as f32;
+    let ascii_frac =
+        prompt.chars().filter(|c| c.is_ascii()).count() as f32 / prompt.len().max(1) as f32;
     if ascii_frac < 0.7 {
         return 6000.0;
     }
@@ -113,7 +113,8 @@ pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     let num_layers = weights.num_layers;
     eprintln!(
         "  {} layers, hidden_size={} ({:.1}s)",
-        num_layers, hidden,
+        num_layers,
+        hidden,
         start.elapsed().as_secs_f64()
     );
 
@@ -141,7 +142,9 @@ pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "\n── End-to-end: 9 rules → L{} state → L{}-L{} dense ──\n",
-        bn.layer, inject_layer, num_layers - 1
+        bn.layer,
+        inject_layer,
+        num_layers - 1
     );
 
     println!(
@@ -193,8 +196,13 @@ pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Run L14-33
-        let rule_result =
-            predict_from_hidden(weights, model.tokenizer(), &h_hybrid, inject_layer, args.top_k);
+        let rule_result = predict_from_hidden(
+            weights,
+            model.tokenizer(),
+            &h_hybrid,
+            inject_layer,
+            args.top_k,
+        );
         let (rule_tok, rule_conf) = rule_result
             .predictions
             .first()

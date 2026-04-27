@@ -236,10 +236,12 @@ fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
                 source,
             })?;
         let mut buf = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut buf).map_err(|source| StoreLoadError::Io {
-            path: format!("{}::{}", p.display(), name),
-            source,
-        })?;
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|source| StoreLoadError::Io {
+                path: format!("{}::{}", p.display(), name),
+                source,
+            })?;
         let arr = npy::read_u32_1d(&buf).map_err(|source| StoreLoadError::Npy {
             path: format!("{}::{}", p.display(), name),
             source,
@@ -288,10 +290,12 @@ fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
             source,
         })?;
     let mut bytes = Vec::with_capacity(entry.size() as usize);
-    entry.read_to_end(&mut bytes).map_err(|source| StoreLoadError::Io {
-        path: member_name.clone(),
-        source,
-    })?;
+    entry
+        .read_to_end(&mut bytes)
+        .map_err(|source| StoreLoadError::Io {
+            path: member_name.clone(),
+            source,
+        })?;
 
     parse_structured_entries_npy(&bytes).map_err(|reason| StoreLoadError::StructuredDtype {
         path: format!("{}::{}", p.display(), member_name),
@@ -324,7 +328,10 @@ fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, Str
         }
     }
     if header.shape.len() != 1 {
-        return Err(format!("expected 1D structured array, got shape {:?}", header.shape));
+        return Err(format!(
+            "expected 1D structured array, got shape {:?}",
+            header.shape
+        ));
     }
 
     const ROW_SIZE: usize = 4 + 4 + 2 + 2 + 2;
@@ -346,12 +353,7 @@ fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, Str
         let o = i * ROW_SIZE;
         out.push(VecInjectEntry {
             token_id: u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]),
-            coefficient: f32::from_le_bytes([
-                data[o + 4],
-                data[o + 5],
-                data[o + 6],
-                data[o + 7],
-            ]),
+            coefficient: f32::from_le_bytes([data[o + 4], data[o + 5], data[o + 6], data[o + 7]]),
             window_id: u16::from_le_bytes([data[o + 8], data[o + 9]]),
             position_in_window: u16::from_le_bytes([data[o + 10], data[o + 11]]),
             fact_id: u16::from_le_bytes([data[o + 12], data[o + 13]]),

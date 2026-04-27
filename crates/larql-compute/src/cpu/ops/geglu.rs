@@ -28,8 +28,8 @@ mod tests {
     #[test]
     fn silu_basic() {
         assert!((silu(0.0) - 0.0).abs() < 1e-6);
-        assert!(silu(10.0) > 9.99);  // silu(x) ≈ x for large x
-        assert!(silu(-10.0).abs() < 0.001);  // silu(x) ≈ 0 for large negative x
+        assert!(silu(10.0) > 9.99); // silu(x) ≈ x for large x
+        assert!(silu(-10.0).abs() < 0.001); // silu(x) ≈ 0 for large negative x
     }
 
     #[test]
@@ -39,8 +39,8 @@ mod tests {
         let result = geglu_silu_alloc(&gate, &up);
         assert_eq!(result.len(), 4);
         assert!((result[0] - 0.0).abs() < 1e-6); // silu(0)*1 = 0
-        assert!(result[1] > 0.0);  // silu(1)*2 > 0
-        assert!(result[2].abs() < 1.0);  // silu(-1)*3 ≈ -0.81
+        assert!(result[1] > 0.0); // silu(1)*2 > 0
+        assert!(result[2].abs() < 1.0); // silu(-1)*3 ≈ -0.81
         assert!(result[3] > 19.0); // silu(5)*4 ≈ 5*4 = 20
     }
 

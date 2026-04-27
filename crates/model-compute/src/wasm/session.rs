@@ -1,7 +1,9 @@
 //! Per-call session — fresh Store with fuel/memory caps, implements the
 //! alloc-write-solve-read ABI over a compiled `Module`.
 
-use wasmtime::{Engine, Instance, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
+use wasmtime::{
+    Engine, Instance, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc,
+};
 
 use super::error::SolverError;
 use super::runtime::SolverLimits;
@@ -23,10 +25,13 @@ impl<'m> Session<'m> {
         limits: SolverLimits,
     ) -> Result<Self, SolverError> {
         let page_bytes = (limits.memory_pages as usize) * 64 * 1024;
-        let store_limits = StoreLimitsBuilder::new()
-            .memory_size(page_bytes)
-            .build();
-        let mut store = Store::new(engine, State { limits: store_limits });
+        let store_limits = StoreLimitsBuilder::new().memory_size(page_bytes).build();
+        let mut store = Store::new(
+            engine,
+            State {
+                limits: store_limits,
+            },
+        );
         store.limiter(|s: &mut State| &mut s.limits);
         store
             .set_fuel(limits.fuel)
@@ -35,7 +40,11 @@ impl<'m> Session<'m> {
         let instance = Instance::new(&mut store, module, &[])
             .map_err(|e| SolverError::Instantiate(e.to_string()))?;
 
-        Ok(Self { store, instance, _module: module })
+        Ok(Self {
+            store,
+            instance,
+            _module: module,
+        })
     }
 
     /// Fuel remaining. Useful for tests and for callers who want to
@@ -115,7 +124,10 @@ fn checked_ptr(
     store: &mut Store<State>,
 ) -> Result<usize, SolverError> {
     if ptr < 0 {
-        return Err(SolverError::InvalidGuestPointer(format!("negative pointer: {}", ptr)));
+        return Err(SolverError::InvalidGuestPointer(format!(
+            "negative pointer: {}",
+            ptr
+        )));
     }
     let start = ptr as usize;
     let end = start.checked_add(len).ok_or_else(|| {
@@ -136,5 +148,8 @@ fn trap_or_fuel(call: &str, e: wasmtime::Error) -> SolverError {
     if msg.contains("fuel") || msg.contains("out of fuel") {
         return SolverError::FuelExhausted { budget: 0 };
     }
-    SolverError::Trap { call: call.into(), trap: msg }
+    SolverError::Trap {
+        call: call.into(),
+        trap: msg,
+    }
 }

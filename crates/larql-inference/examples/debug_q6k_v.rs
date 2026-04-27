@@ -2,7 +2,8 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vd = std::path::PathBuf::from("output/gemma3-4b-v2.vindex");
-    let mut index = larql_vindex::VectorIndex::load_vindex(&vd, &mut larql_vindex::SilentLoadCallbacks)?;
+    let mut index =
+        larql_vindex::VectorIndex::load_vindex(&vd, &mut larql_vindex::SilentLoadCallbacks)?;
     let _ = index.load_attn_q4k(&vd);
     let backend = larql_compute::default_backend();
 
@@ -28,7 +29,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(ref r) => {
                 let nz = r.iter().filter(|&&v| v.abs() > 1e-10).count();
                 let max_abs = r.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-                println!("q6k_matvec(ones): nonzero={}/{}, max_abs={:.4}", nz, r.len(), max_abs);
+                println!(
+                    "q6k_matvec(ones): nonzero={}/{}, max_abs={:.4}",
+                    nz,
+                    r.len(),
+                    max_abs
+                );
             }
             None => println!("q6k_matvec(ones): None"),
         }
@@ -46,19 +52,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(ref r) => {
                 let nz = r.iter().filter(|&&v| v.abs() > 1e-10).count();
                 let max_abs = r.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-                println!("q6k_matvec(embed): nonzero={}/{}, max_abs={:.4}", nz, r.len(), max_abs);
+                println!(
+                    "q6k_matvec(embed): nonzero={}/{}, max_abs={:.4}",
+                    nz,
+                    r.len(),
+                    max_abs
+                );
             }
             None => println!("q6k_matvec(embed): None"),
         }
 
         // CPU reference: dequantize Q6_K and matmul
         println!("\nCPU Q6_K dequant test:");
-        let deq = larql_models::quant::ggml::dequantize(v_data, larql_models::quant::ggml::TYPE_Q6_K, kv_dim * hidden);
+        let deq = larql_models::quant::ggml::dequantize(
+            v_data,
+            larql_models::quant::ggml::TYPE_Q6_K,
+            kv_dim * hidden,
+        );
         match deq {
             Ok(ref f32_data) => {
                 let nz = f32_data.iter().filter(|v| v.abs() > 1e-10).count();
                 let max_abs = f32_data.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-                println!("  Dequantized: {} floats, nonzero={}, max_abs={:.4}", f32_data.len(), nz, max_abs);
+                println!(
+                    "  Dequantized: {} floats, nonzero={}, max_abs={:.4}",
+                    f32_data.len(),
+                    nz,
+                    max_abs
+                );
 
                 // Manual matmul: V[kv_dim, hidden] @ x[hidden] → out[kv_dim]
                 let mut out = vec![0.0f32; kv_dim];
@@ -69,7 +89,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let nz = out.iter().filter(|v| v.abs() > 1e-10).count();
                 let max_abs = out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-                println!("  CPU matmul: nonzero={}/{}, max_abs={:.4}", nz, kv_dim, max_abs);
+                println!(
+                    "  CPU matmul: nonzero={}/{}, max_abs={:.4}",
+                    nz, kv_dim, max_abs
+                );
             }
             Err(e) => println!("  Dequantize failed: {}", e),
         }

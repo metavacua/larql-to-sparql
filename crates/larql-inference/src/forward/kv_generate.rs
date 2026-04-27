@@ -27,8 +27,8 @@ use crate::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
 };
 use crate::ffn::FfnBackend;
-use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
 use crate::forward::predict::hidden_to_raw_logits;
+use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
 use crate::model::ModelWeights;
 
 /// Stream autoregressive generation with a KV cache.
@@ -51,7 +51,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, None, None, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        None,
+        None,
+        &mut on_token,
     )
 }
 
@@ -72,7 +79,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, backend, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        backend,
+        &mut on_token,
     )
 }
 
@@ -95,7 +109,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, None, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        None,
+        &mut on_token,
     )
 }
 
@@ -169,7 +190,12 @@ fn generate_cached_bounded(
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
             let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
-                weights, &h_step, layer, kv_entry, abs_position, backend,
+                weights,
+                &h_step,
+                layer,
+                kv_entry,
+                abs_position,
+                backend,
             ) {
                 Some(t) => t,
                 None => return generated,
@@ -265,11 +291,11 @@ where
     // ── Prefill ──
     let mut h = embed_tokens_pub(weights, prompt_ids);
     for layer in 0..num_layers {
-        let (h_post_attn, k_rope, v) =
-            match run_attention_with_kv_backend(weights, &h, layer, None) {
-                Some(t) => t,
-                None => return Vec::new(),
-            };
+        let (h_post_attn, k_rope, v) = match run_attention_with_kv_backend(weights, &h, layer, None)
+        {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
         cache.layers[layer] = Some((k_rope, v));
         let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
         h = h_out;
@@ -300,7 +326,12 @@ where
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
             let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
-                weights, &h_step, layer, kv_entry, abs_position, None,
+                weights,
+                &h_step,
+                layer,
+                kv_entry,
+                abs_position,
+                None,
             ) {
                 Some(t) => t,
                 None => return generated,

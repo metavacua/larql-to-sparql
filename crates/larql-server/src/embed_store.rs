@@ -43,10 +43,10 @@ impl EmbedStoreF16 {
         l1_cap: usize,
     ) -> Result<Self, String> {
         let path = dir.join("embeddings.bin");
-        let file = std::fs::File::open(&path)
-            .map_err(|e| format!("open {}: {e}", path.display()))?;
-        let mmap = unsafe { Mmap::map(&file) }
-            .map_err(|e| format!("mmap {}: {e}", path.display()))?;
+        let file =
+            std::fs::File::open(&path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        let mmap =
+            unsafe { Mmap::map(&file) }.map_err(|e| format!("mmap {}: {e}", path.display()))?;
         let expected_f16 = vocab_size * hidden_size * 2;
         if mmap.len() != expected_f16 {
             return Err(format!(
@@ -118,9 +118,9 @@ impl EmbedStoreF16 {
 /// a dependency on larql-models from this thin crate.
 #[inline(always)]
 fn f16_to_f32(bits: u16) -> f32 {
-    let sign = ((bits as u32) & 0x8000) << 16;         // bit 31
-    let exp16 = (bits >> 10) & 0x1F;                   // 5-bit exponent
-    let mant16 = (bits as u32) & 0x03FF;               // 10-bit mantissa
+    let sign = ((bits as u32) & 0x8000) << 16; // bit 31
+    let exp16 = (bits >> 10) & 0x1F; // 5-bit exponent
+    let mant16 = (bits as u32) & 0x03FF; // 10-bit mantissa
 
     let (exp32, mant32) = if exp16 == 0 {
         if mant16 == 0 {

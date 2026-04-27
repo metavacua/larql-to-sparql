@@ -33,21 +33,33 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // Summary
     let stage_str = args.stage.as_deref().unwrap_or("(default)");
-    let num_patches = vf.directives.iter().filter(|d| matches!(d, larql_vindex::VindexfileDirective::Patch(_))).count();
-    let num_inserts = vf.directives.iter().filter(|d| matches!(d, larql_vindex::VindexfileDirective::Insert { .. })).count();
-    let num_deletes = vf.directives.iter().filter(|d| matches!(d, larql_vindex::VindexfileDirective::Delete { .. })).count();
+    let num_patches = vf
+        .directives
+        .iter()
+        .filter(|d| matches!(d, larql_vindex::VindexfileDirective::Patch(_)))
+        .count();
+    let num_inserts = vf
+        .directives
+        .iter()
+        .filter(|d| matches!(d, larql_vindex::VindexfileDirective::Insert { .. }))
+        .count();
+    let num_deletes = vf
+        .directives
+        .iter()
+        .filter(|d| matches!(d, larql_vindex::VindexfileDirective::Delete { .. }))
+        .count();
     eprintln!(
         "  Stage: {}, {} patches, {} inserts, {} deletes, {} stages defined",
-        stage_str, num_patches, num_inserts, num_deletes, vf.stages.len(),
+        stage_str,
+        num_patches,
+        num_inserts,
+        num_deletes,
+        vf.stages.len(),
     );
 
     // Build
     eprintln!("\nBuilding...");
-    let result = larql_vindex::build_from_vindexfile(
-        &vf,
-        args.stage.as_deref(),
-        &args.dir,
-    )?;
+    let result = larql_vindex::build_from_vindexfile(&vf, args.stage.as_deref(), &args.dir)?;
 
     // Print build history
     eprintln!("\nBuild history:");
@@ -61,7 +73,9 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Save to output directory
-    let output_dir = args.output.unwrap_or_else(|| args.dir.join("build").join("vindex"));
+    let output_dir = args
+        .output
+        .unwrap_or_else(|| args.dir.join("build").join("vindex"));
     std::fs::create_dir_all(&output_dir)?;
 
     eprintln!("\nSaving to {}...", output_dir.display());
@@ -78,14 +92,14 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // Total overrides
     let total_modified: usize = result.layers.iter().map(|l| l.features_modified).sum();
-    eprintln!(
-        "  Total: {} features modified from base",
-        total_modified
-    );
+    eprintln!("  Total: {} features modified from base", total_modified);
 
     if let Some(format) = args.compile {
         eprintln!("\nCompiling to {} format...", format);
-        eprintln!("  (compile not yet implemented — built vindex saved at {})", output_dir.display());
+        eprintln!(
+            "  (compile not yet implemented — built vindex saved at {})",
+            output_dir.display()
+        );
     }
 
     eprintln!("\nDone. Usage:");

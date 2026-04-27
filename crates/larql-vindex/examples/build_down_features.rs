@@ -24,7 +24,8 @@ use std::path::Path;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vindex_dir = std::env::args().nth(1)
+    let vindex_dir = std::env::args()
+        .nth(1)
         .ok_or("Usage: build_down_features <vindex_dir>")?;
     let dir = Path::new(&vindex_dir);
 
@@ -40,7 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest_text)?;
 
     // Find down weight entries
-    let down_entries: Vec<&serde_json::Value> = entries.iter()
+    let down_entries: Vec<&serde_json::Value> = entries
+        .iter()
         .filter(|e| {
             let key = e["key"].as_str().unwrap_or("");
             let file = e["file"].as_str().unwrap_or("");
@@ -68,20 +70,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_f32 = down_mmap.len() == expected_f32;
 
     if !is_f16 && !is_f32 {
-        println!("WARNING: down_weights.bin size {} doesn't match expected f16 ({}) or f32 ({})",
-            down_mmap.len(), expected_f16, expected_f32);
+        println!(
+            "WARNING: down_weights.bin size {} doesn't match expected f16 ({}) or f32 ({})",
+            down_mmap.len(),
+            expected_f16,
+            expected_f32
+        );
         println!("  Falling back to per-entry size detection");
     }
 
     let dtype_str = if is_f16 { "f16" } else { "f32" };
     println!("Down weights dtype: {dtype_str}");
-    println!("Down weights size: {:.1} MB\n", down_mmap.len() as f64 / 1e6);
+    println!(
+        "Down weights size: {:.1} MB\n",
+        down_mmap.len() as f64 / 1e6
+    );
 
     // Create feature-major output: [intermediate, hidden] per layer, all f32
     let out_path = dir.join("down_features.bin");
     let mut out_file = std::io::BufWriter::with_capacity(
         8 * 1024 * 1024, // 8MB buffer
-        std::fs::File::create(&out_path)?
+        std::fs::File::create(&out_path)?,
     );
 
     let t0 = Instant::now();
@@ -117,27 +126,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Write as f32 bytes
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                transposed.as_ptr() as *const u8,
-                transposed.len() * 4,
-            )
+            std::slice::from_raw_parts(transposed.as_ptr() as *const u8, transposed.len() * 4)
         };
         out_file.write_all(bytes)?;
         total_bytes += bytes.len() as u64;
 
         if layer_idx % 10 == 0 || layer_idx == down_entries.len() - 1 {
-            println!("  Layer {layer_idx}: [{rows}, {cols}] → [{cols}, {rows}], {:.1}MB",
-                bytes.len() as f64 / 1e6);
+            println!(
+                "  Layer {layer_idx}: [{rows}, {cols}] → [{cols}, {rows}], {:.1}MB",
+                bytes.len() as f64 / 1e6
+            );
         }
     }
 
     out_file.flush()?;
 
     let elapsed = t0.elapsed();
-    println!("\nFeature-major file: {:.1} MB ({:.1}s)", total_bytes as f64 / 1e6, elapsed.as_secs_f64());
+    println!(
+        "\nFeature-major file: {:.1} MB ({:.1}s)",
+        total_bytes as f64 / 1e6,
+        elapsed.as_secs_f64()
+    );
     println!("Layout: [intermediate={intermediate_size}, hidden={hidden_size}] per layer, f32");
-    println!("Each feature's down vector: {hidden_size} contiguous f32 ({:.1}KB)",
-        hidden_size as f64 * 4.0 / 1024.0);
+    println!(
+        "Each feature's down vector: {hidden_size} contiguous f32 ({:.1}KB)",
+        hidden_size as f64 * 4.0 / 1024.0
+    );
     println!("\nFile: {}", out_path.display());
     println!("Done.");
 

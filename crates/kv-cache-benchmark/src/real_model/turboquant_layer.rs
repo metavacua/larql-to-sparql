@@ -3,10 +3,10 @@
 //! Intercepts K/V capture, quantizes each head vector via WHT + Lloyd-Max,
 //! then dequantizes on read. Measures MSE, cosine, and compression vs FP16.
 
-use ndarray::Array2;
-use crate::turboquant::TurboQuant;
-use crate::metrics::Metrics;
 use super::kv_capture::KvCapture;
+use crate::metrics::Metrics;
+use crate::turboquant::TurboQuant;
+use ndarray::Array2;
 
 /// Result of applying TurboQuant to captured K/V.
 pub struct TurboQuantResult {
@@ -49,10 +49,8 @@ pub fn apply_turboquant(capture: &KvCapture, tq: &TurboQuant) -> TurboQuantResul
         let k = &capture.keys[layer];
         let v = &capture.values[layer];
 
-        let (dk, enc_bytes_k, enc_us_k, dec_us_k, mse_k, cos_k, count_k) =
-            quantize_tensor(k, tq);
-        let (dv, enc_bytes_v, enc_us_v, dec_us_v, mse_v, cos_v, count_v) =
-            quantize_tensor(v, tq);
+        let (dk, enc_bytes_k, enc_us_k, dec_us_k, mse_k, cos_k, count_k) = quantize_tensor(k, tq);
+        let (dv, enc_bytes_v, enc_us_v, dec_us_v, mse_v, cos_v, count_v) = quantize_tensor(v, tq);
 
         total_compressed += enc_bytes_k + enc_bytes_v;
         total_original += (k.len() + v.len()) * 2; // FP16
@@ -66,8 +64,16 @@ pub fn apply_turboquant(capture: &KvCapture, tq: &TurboQuant) -> TurboQuantResul
         decoded_values.push(dv);
     }
 
-    let avg_mse = if vector_count > 0 { total_mse / vector_count as f64 } else { 0.0 };
-    let avg_cosine = if vector_count > 0 { total_cosine / vector_count as f64 } else { 0.0 };
+    let avg_mse = if vector_count > 0 {
+        total_mse / vector_count as f64
+    } else {
+        0.0
+    };
+    let avg_cosine = if vector_count > 0 {
+        total_cosine / vector_count as f64
+    } else {
+        0.0
+    };
     let compression = if total_compressed > 0 {
         total_original as f64 / total_compressed as f64
     } else {
@@ -134,7 +140,15 @@ fn quantize_tensor(
         }
     }
 
-    (decoded, total_encoded_bytes, encode_us, decode_us, total_mse, total_cosine, count)
+    (
+        decoded,
+        total_encoded_bytes,
+        encode_us,
+        decode_us,
+        total_mse,
+        total_cosine,
+        count,
+    )
 }
 
 /// Find the largest power-of-2 that divides cols (for WHT compatibility).
