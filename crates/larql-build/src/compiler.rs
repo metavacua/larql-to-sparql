@@ -11,7 +11,7 @@
 ///
 /// Returns:
 /// - **`x86_64` (non-MSVC)**: `["-mavx2"]`
-/// - **aarch64 (non-MSVC)**: `["-march=armv8.2-a+dotprod"]`
+/// - **`aarch64` (non-MSVC)**: `["-march=armv8.2-a+dotprod"]`
 /// - **MSVC or other**: `[]` (empty, compiler handles optimizations internally)
 ///
 /// # Examples
@@ -65,8 +65,8 @@ pub const fn optimization_level() -> u32 {
 ///
 /// Sets platform-appropriate CPU optimization flags based on the target architecture
 /// and compiler toolchain:
-/// - **GCC/Clang on x86_64**: `-mavx2` (AVX2 vector instructions)
-/// - **GCC/Clang on aarch64**: `-march=armv8.2-a+dotprod` (ARM NEON dot-product instructions)
+/// - **GCC/Clang on `x86_64`**: `-mavx2` (AVX2 vector instructions)
+/// - **GCC/Clang on `aarch64`**: `-march=armv8.2-a+dotprod` (ARM NEON dot-product instructions)
 /// - **MSVC**: No special flags (MSVC handles optimizations internally)
 /// - **Other**: No special flags
 ///
