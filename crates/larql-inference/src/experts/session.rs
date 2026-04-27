@@ -202,7 +202,7 @@ impl<D: Dispatcher> ExpertSession<D> {
             }
             out.push('}');
         }
-        out.push_str("\n");
+        out.push('\n');
         out.push_str("No extra text.");
         out
     }
