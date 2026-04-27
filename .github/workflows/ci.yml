@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run CI
+        run: make ci
+        id: ci_step
+
+      - name: Create issue on failure
+        if: failure() && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const commit = context.sha.substring(0, 7);
+            const commitUrl = `${context.payload.repository.html_url}/commit/${context.sha}`;
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 Workflow failure on ${branch} (${commit})`,
+              body: `**Workflow:** CI\n**Branch:** ${branch}\n**Commit:** [${commit}](${commitUrl})\n**Status:** ❌ Failed\n\n## What failed\nThe \`make ci\` target failed. This typically includes:\n- \`cargo fmt --check\` (code formatting)\n- \`cargo clippy\` (linting with warnings as errors)\n- \`cargo test\` (test suite)\n\nCheck the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for detailed logs.\n\n## Action required\nReview the failure logs and fix the issue on \`${branch}\`.`,
+              labels: ['workflow-failure', 'automated']
+            });
