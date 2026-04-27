@@ -106,9 +106,15 @@ pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rows: Vec<BenchRow> = Vec::new();
 
+    #[cfg(feature = "metal")]
     if want_metal {
         rows.push(run_larql(&vindex_path, &args, /* metal */ true)?);
     }
+    #[cfg(not(feature = "metal"))]
+    if want_metal {
+        return Err("Metal backend not available — rebuild with `--features metal`".into());
+    }
+
     if want_cpu {
         rows.push(run_larql(&vindex_path, &args, /* metal */ false)?);
     }
@@ -166,6 +172,7 @@ fn run_larql(
         larql_inference::encode_prompt(&tokenizer, &*weights.arch, args.prompt.as_str())
             .map_err(|e| format!("tokenize: {e}"))?;
 
+    #[cfg(feature = "metal")]
     let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
         let b = larql_compute::metal::MetalBackend::new().ok_or(
             "Metal backend unavailable — rebuild with `--features metal` on an M-series Mac",
@@ -175,12 +182,16 @@ fn run_larql(
         Box::new(larql_compute::CpuBackend)
     };
 
+    #[cfg(not(feature = "metal"))]
+    let backend: Box<dyn larql_compute::ComputeBackend> = Box::new(larql_compute::CpuBackend);
+
     let cached_layers = CachedLayerGraph::from_residuals(Vec::new());
 
     // Pre-warm: one generate call to allocate the KV cache (~1 GB on Gemma 3 4B)
     // and populate the Metal buffer caches. The prefill timer would otherwise
     // include this one-time allocation cost even though it is amortized to zero
     // in real multi-turn usage.
+    #[cfg(feature = "metal")]
     if metal {
         let _ = generate(
             &weights,
