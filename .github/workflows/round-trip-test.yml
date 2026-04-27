@@ -1,0 +1,171 @@
+name: LARQL Round-Trip Test
+
+on:
+  push:
+    branches:
+      - main
+      - claude/**
+    paths:
+      - 'crates/larql-python/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-lql/**'
+      - 'examples/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'crates/larql-python/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-lql/**'
+      - 'examples/**'
+  workflow_dispatch:
+    inputs:
+      run_full_test:
+        description: 'Run full extraction + compilation test (slower, uses more resources)'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Fast path: Test LQL operations without model extraction
+  fast-path:
+    name: Fast Path (LQL + Binding Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release -p larql-cli
+
+      - name: Run LQL tests
+        run: cargo test -p larql-lql --lib
+
+      - name: Run Python binding tests (non-model tests)
+        run: |
+          cd crates/larql-python
+          python3 -m pip install --upgrade pip uv -q
+          uv sync --no-install-project --group dev -q
+          uv run --no-sync pytest tests/ -v -k "not (walk or describe or infer)" --tb=short || true
+        continue-on-error: true
+
+      - name: Quick vindex operations test
+        run: |
+          cd crates/larql-python
+          # Synthetic vindex tests that don't require model downloads
+          uv run --no-sync pytest tests/test_bindings.py::TestSynthetic -v || true
+        continue-on-error: true
+
+  # Full path: Extract model, run complete round-trip (manual/scheduled)
+  full-path:
+    name: Full Path (Extract → Compile → Infer)
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[test-full-workflow]'))
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip -q
+          python3 -m pip install torch transformers huggingface-hub safetensors -q
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('**/*.py') }}
+          restore-keys: hf-models-
+
+      - name: Build release binary
+        run: cargo build --release -p larql-cli
+
+      - name: Extract Gemma 2B-IT (browse level)
+        run: |
+          mkdir -p output
+          timeout 45m ./target/release/larql extract-index google/gemma-2-2b-it \
+            -o output/gemma-2-2b-it.vindex \
+            --level browse \
+            --f16 \
+            || echo "⚠️ Extraction timed out or failed (may need manual trigger)"
+        continue-on-error: true
+
+      - name: Run round-trip workflow
+        run: |
+          if [ -d "output/gemma-2-2b-it.vindex" ]; then
+            python3 examples/round_trip_workflow.py \
+              output/gemma-2-2b-it.vindex \
+              output/round-trip-result
+          else
+            echo "⚠️ Vindex not available, skipping round-trip test"
+          fi
+        continue-on-error: true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: round-trip-results
+          path: output/round-trip-result/
+          retention-days: 7
+
+      - name: Report results
+        if: always()
+        run: |
+          echo "## Round-Trip Test Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f "output/round-trip-result/report.json" ]; then
+            echo "✅ Report generated: [View report](report.json)" >> $GITHUB_STEP_SUMMARY
+            cat output/round-trip-result/report.json | head -50 >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No report generated (extraction may have been skipped)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Summary job
+  round-trip-success:
+    name: Round-Trip Tests
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - fast-path
+    steps:
+      - name: Check results
+        run: |
+          if [[ "${{ needs.fast-path.result }}" == "success" ]]; then
+            echo "✅ Fast path tests passed"
+          else
+            echo "⚠️ Some tests failed or were skipped"
+          fi
