@@ -31,6 +31,9 @@
 
 extern crate blas_src;
 
+#[cfg(feature = "metal")]
+use larql_platform::Platform;
+
 pub mod backend;
 pub mod cpu;
 pub mod pipeline;
@@ -58,9 +61,11 @@ pub use metal::MetalBackend;
 
 /// Create the best available backend.
 ///
-/// With `--features metal`: tries Metal GPU first, auto-calibrates the
-/// FLOP threshold for hybrid CPU/GPU dispatch, falls back to CPU.
-/// Without: returns CPU (Accelerate BLAS on macOS, OpenBLAS on Linux).
+/// Automatically detects the platform and tries the best available backend:
+/// - With `--features metal` on macOS: tries Metal GPU first, auto-calibrates the
+///   FLOP threshold for hybrid CPU/GPU dispatch, falls back to CPU if unavailable
+/// - Without `--features metal` or on non-macOS: returns CPU
+///   (Accelerate BLAS on macOS, OpenBLAS on Linux, Generic on Windows)
 ///
 /// # Example
 /// ```rust,no_run
@@ -70,12 +75,16 @@ pub use metal::MetalBackend;
 pub fn default_backend() -> Box<dyn ComputeBackend> {
     #[cfg(feature = "metal")]
     {
-        if let Some(m) = metal::MetalBackend::new() {
-            m.calibrate();
-            return Box::new(m);
+        let platform = Platform::detect();
+        if platform.metal_available() {
+            if let Some(m) = metal::MetalBackend::new() {
+                m.calibrate();
+                return Box::new(m);
+            }
+            eprintln!("[compute] Metal not available on this system, falling back to CPU");
         }
-        eprintln!("[compute] Metal not available, falling back to CPU");
     }
+
     Box::new(cpu::CpuBackend)
 }
 
