@@ -2126,10 +2126,12 @@ version = "0.1.0"
 name = "larql-python"
 version = "0.1.0"
 dependencies = [
+ "larql-build",
  "larql-core",
  "larql-inference",
  "larql-lql",
  "larql-models",
+ "larql-platform",
  "larql-vindex",
  "memmap2",
  "ndarray",
