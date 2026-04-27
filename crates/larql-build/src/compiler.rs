@@ -37,8 +37,7 @@
 #[must_use]
 pub fn cpu_flags() -> &'static [&'static str] {
     // Check if target is MSVC (e.g., x86_64-pc-windows-msvc)
-    let is_msvc =
-        matches!(std::env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc"));
+    let is_msvc = matches!(std::env::var("CARGO_CFG_TARGET_ENV").as_deref(), Ok("msvc"));
 
     if is_msvc {
         // MSVC uses different flag syntax; skip for now
@@ -181,5 +180,4 @@ mod tests {
     fn test_set_rerun_triggers_multiple_files() {
         set_rerun_triggers(&["a.c", "b.c", "c.h", "build.rs"]);
     }
-
 }
