@@ -56,9 +56,7 @@ pub fn label_clusters_from_pairs(
         }
 
         // Find the best relation (most matches)
-        if let Some((best_rel, best_count)) = relation_counts
-            .iter()
-            .max_by_key(|(_, &count)| count)
+        if let Some((best_rel, best_count)) = relation_counts.iter().max_by_key(|(_, &count)| count)
         {
             // Require at least 2 matches or 10% of the cluster's pairs
             let threshold = 2.max(pairs.len() / 10);
@@ -149,9 +147,8 @@ pub fn label_clusters_from_outputs(
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::database::RelationDatabase;
-
+    use super::*;
 
     #[test]
     fn test_lookup() {
@@ -185,17 +182,21 @@ mod tests {
 
         let assignments = vec![0, 0, 0, 1, 1];
         let inputs = vec![
-            "France".into(), "Germany".into(), "Japan".into(),
-            "dog".into(), "cat".into(),
+            "France".into(),
+            "Germany".into(),
+            "Japan".into(),
+            "dog".into(),
+            "cat".into(),
         ];
         let outputs = vec![
-            "Paris".into(), "Berlin".into(), "Tokyo".into(),
-            "bark".into(), "meow".into(),
+            "Paris".into(),
+            "Berlin".into(),
+            "Tokyo".into(),
+            "bark".into(),
+            "meow".into(),
         ];
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 2, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 2, &[&db]);
 
         assert_eq!(labels[0], Some("capital".to_string()));
         assert_eq!(labels[1], None); // no matches
@@ -221,9 +222,7 @@ mod tests {
         let inputs = vec!["France".into(), "big".into()];
         let outputs = vec!["Paris".into(), "large".into()];
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 2, &[&db1, &db2],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 2, &[&db1, &db2]);
 
         // Both should fail threshold (only 1 match each, need 2)
         // But the algorithm requires max(2, len/10)
@@ -249,13 +248,15 @@ mod tests {
         // All 5 in one cluster — should hit threshold
         let assignments = vec![0, 0, 0, 0, 0];
         let inputs: Vec<String> = vec!["France", "Germany", "Japan", "Italy", "Spain"]
-            .into_iter().map(Into::into).collect();
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let outputs: Vec<String> = vec!["Paris", "Berlin", "Tokyo", "Rome", "Madrid"]
-            .into_iter().map(Into::into).collect();
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 1, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 1, &[&db]);
 
         assert_eq!(labels[0], Some("capital".to_string()));
     }
@@ -286,9 +287,7 @@ mod tests {
     #[test]
     fn test_empty_cluster_pairs() {
         let db = RelationDatabase::default();
-        let labels = label_clusters_from_pairs(
-            &[], &[], &[], 3, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&[], &[], &[], 3, &[&db]);
         assert_eq!(labels.len(), 3);
         assert!(labels.iter().all(|l| l.is_none()));
     }
@@ -296,10 +295,13 @@ mod tests {
     #[test]
     fn test_add_relation() {
         let mut db = RelationDatabase::default();
-        db.add_relation("capital", vec![
-            ("france".into(), "paris".into()),
-            ("germany".into(), "berlin".into()),
-        ]);
+        db.add_relation(
+            "capital",
+            vec![
+                ("france".into(), "paris".into()),
+                ("germany".into(), "berlin".into()),
+            ],
+        );
         assert_eq!(db.num_relations(), 1);
         assert_eq!(db.num_pairs(), 2);
         assert_eq!(db.lookup("France", "Paris"), vec!["capital"]);
@@ -308,12 +310,8 @@ mod tests {
     #[test]
     fn test_multiple_relations_same_pair() {
         let mut db = RelationDatabase::default();
-        db.add_relation("capital", vec![
-            ("france".into(), "paris".into()),
-        ]);
-        db.add_relation("largest_city", vec![
-            ("france".into(), "paris".into()),
-        ]);
+        db.add_relation("capital", vec![("france".into(), "paris".into())]);
+        db.add_relation("largest_city", vec![("france".into(), "paris".into())]);
         let rels = db.lookup("France", "Paris");
         assert!(rels.contains(&"capital"));
         assert!(rels.contains(&"largest_city"));
@@ -323,47 +321,64 @@ mod tests {
     fn test_realistic_wikidata_pairs() {
         // Simulate realistic Wikidata data
         let mut db = RelationDatabase::default();
-        db.add_relation("capital", vec![
-            ("france".into(), "paris".into()),
-            ("germany".into(), "berlin".into()),
-            ("japan".into(), "tokyo".into()),
-            ("kenya".into(), "nairobi".into()),
-            ("people's republic of china".into(), "beijing".into()),
-        ]);
-        db.add_relation("official language", vec![
-            ("france".into(), "french".into()),
-            ("germany".into(), "german".into()),
-            ("japan".into(), "japanese".into()),
-            ("kenya".into(), "swahili".into()),
-        ]);
-        db.add_relation("continent", vec![
-            ("france".into(), "europe".into()),
-            ("japan".into(), "asia".into()),
-            ("kenya".into(), "africa".into()),
-        ]);
+        db.add_relation(
+            "capital",
+            vec![
+                ("france".into(), "paris".into()),
+                ("germany".into(), "berlin".into()),
+                ("japan".into(), "tokyo".into()),
+                ("kenya".into(), "nairobi".into()),
+                ("people's republic of china".into(), "beijing".into()),
+            ],
+        );
+        db.add_relation(
+            "official language",
+            vec![
+                ("france".into(), "french".into()),
+                ("germany".into(), "german".into()),
+                ("japan".into(), "japanese".into()),
+                ("kenya".into(), "swahili".into()),
+            ],
+        );
+        db.add_relation(
+            "continent",
+            vec![
+                ("france".into(), "europe".into()),
+                ("japan".into(), "asia".into()),
+                ("kenya".into(), "africa".into()),
+            ],
+        );
 
         // Cluster 0: capital-type features
         // Cluster 1: language-type features
         // Cluster 2: continent-type features
-        let assignments = vec![
-            0, 0, 0, 0, 0,
-            1, 1, 1, 1,
-            2, 2, 2,
-        ];
+        let assignments = vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2];
         let inputs: Vec<String> = vec![
-            "France", "Germany", "Japan", "Kenya", "People's Republic of China",
-            "France", "Germany", "Japan", "Kenya",
-            "France", "Japan", "Kenya",
-        ].into_iter().map(Into::into).collect();
+            "France",
+            "Germany",
+            "Japan",
+            "Kenya",
+            "People's Republic of China",
+            "France",
+            "Germany",
+            "Japan",
+            "Kenya",
+            "France",
+            "Japan",
+            "Kenya",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
         let outputs: Vec<String> = vec![
-            "Paris", "Berlin", "Tokyo", "Nairobi", "Beijing",
-            "French", "German", "Japanese", "Swahili",
-            "Europe", "Asia", "Africa",
-        ].into_iter().map(Into::into).collect();
+            "Paris", "Berlin", "Tokyo", "Nairobi", "Beijing", "French", "German", "Japanese",
+            "Swahili", "Europe", "Asia", "Africa",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 3, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 3, &[&db]);
 
         assert_eq!(labels[0], Some("capital".to_string()));
         assert_eq!(labels[1], Some("official language".to_string()));
@@ -373,23 +388,28 @@ mod tests {
     #[test]
     fn test_wordnet_synonym_matching() {
         let mut db = RelationDatabase::default();
-        db.add_relation("synonym", vec![
-            ("big".into(), "large".into()),
-            ("fast".into(), "quick".into()),
-            ("happy".into(), "glad".into()),
-            ("small".into(), "tiny".into()),
-            ("hot".into(), "warm".into()),
-        ]);
+        db.add_relation(
+            "synonym",
+            vec![
+                ("big".into(), "large".into()),
+                ("fast".into(), "quick".into()),
+                ("happy".into(), "glad".into()),
+                ("small".into(), "tiny".into()),
+                ("hot".into(), "warm".into()),
+            ],
+        );
 
         let assignments = vec![0, 0, 0, 0, 0];
         let inputs: Vec<String> = vec!["big", "fast", "happy", "small", "hot"]
-            .into_iter().map(Into::into).collect();
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let outputs: Vec<String> = vec!["large", "quick", "glad", "tiny", "warm"]
-            .into_iter().map(Into::into).collect();
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 1, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 1, &[&db]);
 
         assert_eq!(labels[0], Some("synonym".to_string()));
     }
@@ -398,34 +418,39 @@ mod tests {
     fn test_mixed_databases() {
         // Wikidata
         let mut wikidata = RelationDatabase::default();
-        wikidata.add_relation("capital", vec![
-            ("france".into(), "paris".into()),
-            ("germany".into(), "berlin".into()),
-            ("japan".into(), "tokyo".into()),
-        ]);
+        wikidata.add_relation(
+            "capital",
+            vec![
+                ("france".into(), "paris".into()),
+                ("germany".into(), "berlin".into()),
+                ("japan".into(), "tokyo".into()),
+            ],
+        );
 
         // WordNet
         let mut wordnet = RelationDatabase::default();
-        wordnet.add_relation("synonym", vec![
-            ("big".into(), "large".into()),
-            ("fast".into(), "quick".into()),
-            ("happy".into(), "glad".into()),
-        ]);
+        wordnet.add_relation(
+            "synonym",
+            vec![
+                ("big".into(), "large".into()),
+                ("fast".into(), "quick".into()),
+                ("happy".into(), "glad".into()),
+            ],
+        );
 
         // Two clusters: one from Wikidata, one from WordNet
         let assignments = vec![0, 0, 0, 1, 1, 1];
-        let inputs: Vec<String> = vec![
-            "France", "Germany", "Japan",
-            "big", "fast", "happy",
-        ].into_iter().map(Into::into).collect();
-        let outputs: Vec<String> = vec![
-            "Paris", "Berlin", "Tokyo",
-            "large", "quick", "glad",
-        ].into_iter().map(Into::into).collect();
+        let inputs: Vec<String> = vec!["France", "Germany", "Japan", "big", "fast", "happy"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let outputs: Vec<String> = vec!["Paris", "Berlin", "Tokyo", "large", "quick", "glad"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 2, &[&wikidata, &wordnet],
-        );
+        let labels =
+            label_clusters_from_pairs(&assignments, &inputs, &outputs, 2, &[&wikidata, &wordnet]);
 
         assert_eq!(labels[0], Some("capital".to_string()));
         assert_eq!(labels[1], Some("synonym".to_string()));
@@ -435,25 +460,31 @@ mod tests {
     fn test_partial_matches() {
         // Cluster has 10 features, only 3 match Wikidata
         let mut db = RelationDatabase::default();
-        db.add_relation("capital", vec![
-            ("france".into(), "paris".into()),
-            ("germany".into(), "berlin".into()),
-            ("japan".into(), "tokyo".into()),
-        ]);
+        db.add_relation(
+            "capital",
+            vec![
+                ("france".into(), "paris".into()),
+                ("germany".into(), "berlin".into()),
+                ("japan".into(), "tokyo".into()),
+            ],
+        );
 
         let assignments = vec![0; 10];
         let inputs: Vec<String> = vec![
-            "France", "Germany", "Japan",  // 3 matches
-            "dog", "cat", "house", "tree", "book", "water", "fire",  // 7 non-matches
-        ].into_iter().map(Into::into).collect();
+            "France", "Germany", "Japan", // 3 matches
+            "dog", "cat", "house", "tree", "book", "water", "fire", // 7 non-matches
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
         let outputs: Vec<String> = vec![
-            "Paris", "Berlin", "Tokyo",
-            "bark", "meow", "roof", "leaf", "page", "ocean", "flame",
-        ].into_iter().map(Into::into).collect();
+            "Paris", "Berlin", "Tokyo", "bark", "meow", "roof", "leaf", "page", "ocean", "flame",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
 
-        let labels = label_clusters_from_pairs(
-            &assignments, &inputs, &outputs, 1, &[&db],
-        );
+        let labels = label_clusters_from_pairs(&assignments, &inputs, &outputs, 1, &[&db]);
 
         // 3 matches >= threshold (max(2, 10/10)=2), so should label
         assert_eq!(labels[0], Some("capital".to_string()));

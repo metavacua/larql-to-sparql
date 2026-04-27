@@ -39,7 +39,11 @@ impl MetalBackend {
         let layer_num_q_heads = layer.num_q_heads;
         let layer_num_kv_heads = layer.num_kv_heads;
         let layer_rope_base = layer.rope_base;
-        let layer_rotary_dim = if layer.rotary_dim > 0 { layer.rotary_dim } else { layer_head_dim };
+        let layer_rotary_dim = if layer.rotary_dim > 0 {
+            layer.rotary_dim
+        } else {
+            layer_head_dim
+        };
         let uses_q4k = layer.wq.format == crate::QuantFormat::Q4_K
             || layer.wq.format == crate::QuantFormat::Q6_K
             || layer.wq.format == crate::QuantFormat::Q4_KF;
@@ -82,9 +86,16 @@ impl MetalBackend {
             let k_val = hidden as u32;
             let num_tgs = (total_rows as u64).div_ceil(qkv_sh::ROWS_PER_TG);
 
-            encode_rms_norm(enc_a, &self.rms_norm_pipeline,
-                &h_buf, &input_norm_buf, &norm_f32_buf,
-                hidden, eps, norm_offset);
+            encode_rms_norm(
+                enc_a,
+                &self.rms_norm_pipeline,
+                &h_buf,
+                &input_norm_buf,
+                &norm_f32_buf,
+                hidden,
+                eps,
+                norm_offset,
+            );
 
             let qkv_pipeline = if layer.wq.format == crate::QuantFormat::Q4_KF {
                 &self.q4kf_qkv_proj_pipeline
@@ -120,7 +131,10 @@ impl MetalBackend {
             enc_a.set_bytes(4, 4, &hidden_val as *const u32 as *const std::ffi::c_void);
             enc_a.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc_a.set_bytes(6, 4, &norm_offset as *const f32 as *const std::ffi::c_void);
-            enc_a.dispatch_threads(MTLSize::new(hidden as u64, 1, 1), MTLSize::new(256.min(hidden as u64), 1, 1));
+            enc_a.dispatch_threads(
+                MTLSize::new(hidden as u64, 1, 1),
+                MTLSize::new(256.min(hidden as u64), 1, 1),
+            );
 
             let total_rows = (q_dim + kv_dim + kv_dim) as u32;
             enc_a.set_compute_pipeline_state(&self.q8_qkv_proj_pipeline);
@@ -135,10 +149,26 @@ impl MetalBackend {
             enc_a.set_buffer(8, Some(&q_out), 0);
             enc_a.set_buffer(9, Some(&k_out), 0);
             enc_a.set_buffer(10, Some(&v_out), 0);
-            enc_a.set_bytes(11, 4, &(q_dim as u32) as *const u32 as *const std::ffi::c_void);
-            enc_a.set_bytes(12, 4, &(kv_dim as u32) as *const u32 as *const std::ffi::c_void);
-            enc_a.set_bytes(13, 4, &(kv_dim as u32) as *const u32 as *const std::ffi::c_void);
-            enc_a.set_bytes(14, 4, &(hidden as u32) as *const u32 as *const std::ffi::c_void);
+            enc_a.set_bytes(
+                11,
+                4,
+                &(q_dim as u32) as *const u32 as *const std::ffi::c_void,
+            );
+            enc_a.set_bytes(
+                12,
+                4,
+                &(kv_dim as u32) as *const u32 as *const std::ffi::c_void,
+            );
+            enc_a.set_bytes(
+                13,
+                4,
+                &(kv_dim as u32) as *const u32 as *const std::ffi::c_void,
+            );
+            enc_a.set_bytes(
+                14,
+                4,
+                &(hidden as u32) as *const u32 as *const std::ffi::c_void,
+            );
             enc_a.dispatch_thread_groups(
                 MTLSize::new((total_rows as u64).div_ceil(8), 1, 1),
                 MTLSize::new(256, 1, 1),
@@ -157,20 +187,34 @@ impl MetalBackend {
                 enc_a.set_compute_pipeline_state(&self.rope_at_pos_pipeline);
                 enc_a.set_buffer(0, Some(&q_out), offset);
                 enc_a.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-                enc_a.set_bytes(2, 4, &layer_rope_base as *const f32 as *const std::ffi::c_void);
+                enc_a.set_bytes(
+                    2,
+                    4,
+                    &layer_rope_base as *const f32 as *const std::ffi::c_void,
+                );
                 enc_a.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
                 enc_a.set_bytes(4, 4, &rdim as *const u32 as *const std::ffi::c_void);
-                enc_a.dispatch_threads(MTLSize::new(rope_pairs, 1, 1), MTLSize::new(rope_pairs.min(256), 1, 1));
+                enc_a.dispatch_threads(
+                    MTLSize::new(rope_pairs, 1, 1),
+                    MTLSize::new(rope_pairs.min(256), 1, 1),
+                );
             }
             for kvh in 0..layer_num_kv_heads {
                 let offset = (kvh * layer_head_dim * 4) as u64;
                 enc_a.set_compute_pipeline_state(&self.rope_at_pos_pipeline);
                 enc_a.set_buffer(0, Some(&k_out), offset);
                 enc_a.set_bytes(1, 4, &hd as *const u32 as *const std::ffi::c_void);
-                enc_a.set_bytes(2, 4, &layer_rope_base as *const f32 as *const std::ffi::c_void);
+                enc_a.set_bytes(
+                    2,
+                    4,
+                    &layer_rope_base as *const f32 as *const std::ffi::c_void,
+                );
                 enc_a.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
                 enc_a.set_bytes(4, 4, &rdim as *const u32 as *const std::ffi::c_void);
-                enc_a.dispatch_threads(MTLSize::new(rope_pairs, 1, 1), MTLSize::new(rope_pairs.min(256), 1, 1));
+                enc_a.dispatch_threads(
+                    MTLSize::new(rope_pairs, 1, 1),
+                    MTLSize::new(rope_pairs.min(256), 1, 1),
+                );
             }
         }
 
@@ -200,13 +244,21 @@ impl MetalBackend {
         {
             let enc_b = cmd.new_compute_command_encoder();
             ops::kv_cache::encode_kv_append(
-                enc_b, &kv_cache.layers[layer_idx],
-                &self.kv_append_pipeline, &k_out, &v_out,
+                enc_b,
+                &kv_cache.layers[layer_idx],
+                &self.kv_append_pipeline,
+                &k_out,
+                &v_out,
             );
             ops::kv_cache::encode_kv_attend(
-                enc_b, &kv_cache.layers[layer_idx],
-                &self.kv_attend_pipeline, &q_out, &attn_out,
-                layer_num_q_heads, scale, window_size,
+                enc_b,
+                &kv_cache.layers[layer_idx],
+                &self.kv_attend_pipeline,
+                &q_out,
+                &attn_out,
+                layer_num_q_heads,
+                scale,
+                window_size,
             );
             enc_b.end_encoding();
         }
@@ -248,16 +300,36 @@ impl MetalBackend {
                 // Post-norm: norm(O) then add
                 let normed_o = self.bufs.output((hidden * 4) as u64);
                 use crate::metal::ops::full_pipeline::encode_rms_norm;
-                encode_rms_norm(enc_c, &self.rms_norm_pipeline,
-                    &o_out, &post_attn_norm_buf, &normed_o, hidden, eps, norm_offset);
+                encode_rms_norm(
+                    enc_c,
+                    &self.rms_norm_pipeline,
+                    &o_out,
+                    &post_attn_norm_buf,
+                    &normed_o,
+                    hidden,
+                    eps,
+                    norm_offset,
+                );
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(enc_c, &self.residual_add_pipeline,
-                    &h_buf, &normed_o, &h_post_attn, hidden);
+                encode_residual_add(
+                    enc_c,
+                    &self.residual_add_pipeline,
+                    &h_buf,
+                    &normed_o,
+                    &h_post_attn,
+                    hidden,
+                );
             } else {
                 // Standard: add O directly
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(enc_c, &self.residual_add_pipeline,
-                    &h_buf, &o_out, &h_post_attn, hidden);
+                encode_residual_add(
+                    enc_c,
+                    &self.residual_add_pipeline,
+                    &h_buf,
+                    &o_out,
+                    &h_post_attn,
+                    hidden,
+                );
             }
         } else {
             // Q8 path: quantize attention → Q8 O proj → residual
@@ -272,7 +344,10 @@ impl MetalBackend {
             enc_c.set_buffer(1, Some(&o_q8), 0);
             enc_c.set_buffer(2, Some(&o_q8s), 0);
             enc_c.set_bytes(3, 4, &dim_val as *const u32 as *const std::ffi::c_void);
-            enc_c.dispatch_threads(MTLSize::new(blocks as u64, 1, 1), MTLSize::new(256.min(blocks as u64), 1, 1));
+            enc_c.dispatch_threads(
+                MTLSize::new(blocks as u64, 1, 1),
+                MTLSize::new(256.min(blocks as u64), 1, 1),
+            );
 
             let o_rows = hidden as u32;
             let o_k = layer_q_dim as u32;
@@ -293,15 +368,35 @@ impl MetalBackend {
             if layer.has_post_norms {
                 let normed_o = self.bufs.output((hidden * 4) as u64);
                 use crate::metal::ops::full_pipeline::encode_rms_norm;
-                encode_rms_norm(enc_c, &self.rms_norm_pipeline,
-                    &o_out, &post_attn_norm_buf, &normed_o, hidden, eps, norm_offset);
+                encode_rms_norm(
+                    enc_c,
+                    &self.rms_norm_pipeline,
+                    &o_out,
+                    &post_attn_norm_buf,
+                    &normed_o,
+                    hidden,
+                    eps,
+                    norm_offset,
+                );
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(enc_c, &self.residual_add_pipeline,
-                    &h_buf, &normed_o, &h_post_attn, hidden);
+                encode_residual_add(
+                    enc_c,
+                    &self.residual_add_pipeline,
+                    &h_buf,
+                    &normed_o,
+                    &h_post_attn,
+                    hidden,
+                );
             } else {
                 use crate::metal::ops::full_pipeline::encode_residual_add;
-                encode_residual_add(enc_c, &self.residual_add_pipeline,
-                    &h_buf, &o_out, &h_post_attn, hidden);
+                encode_residual_add(
+                    enc_c,
+                    &self.residual_add_pipeline,
+                    &h_buf,
+                    &o_out,
+                    &h_post_attn,
+                    hidden,
+                );
             }
         }
 

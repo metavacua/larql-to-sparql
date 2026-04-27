@@ -140,9 +140,14 @@ fn memory_cap_rejects_grow() {
     let module = compile(&runtime, MEMORY_HOG_WAT);
     let mut session = runtime.session(&module).unwrap();
 
-    let err = session.solve(b"anything").expect_err("should hit memory cap");
-    assert!(matches!(err, SolverError::Trap { .. }),
-            "expected Trap from memory.grow=-1 + unreachable, got {:?}", err);
+    let err = session
+        .solve(b"anything")
+        .expect_err("should hit memory cap");
+    assert!(
+        matches!(err, SolverError::Trap { .. }),
+        "expected Trap from memory.grow=-1 + unreachable, got {:?}",
+        err
+    );
 }
 
 /// Solver whose solve() returns a non-zero status, signalling the guest
@@ -162,7 +167,9 @@ fn nonzero_solve_status_reported() {
     let module = compile(&runtime, FAIL_STATUS_WAT);
     let mut session = runtime.session(&module).unwrap();
 
-    let err = session.solve(b"anything").expect_err("should fail with status 42");
+    let err = session
+        .solve(b"anything")
+        .expect_err("should fail with status 42");
     assert!(matches!(err, SolverError::SolveFailed(42)));
 }
 
@@ -190,5 +197,8 @@ fn fuel_remaining_decreases_after_call() {
     let initial = session.fuel_remaining();
     session.solve(b"hello").unwrap();
     let after = session.fuel_remaining();
-    assert!(after < initial, "fuel should decrease: before={initial}, after={after}");
+    assert!(
+        after < initial,
+        "fuel should decrease: before={initial}, after={after}"
+    );
 }

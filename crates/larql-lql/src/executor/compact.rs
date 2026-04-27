@@ -1,8 +1,8 @@
 //! Compaction executor: COMPACT MINOR, COMPACT MAJOR.
 
+use super::Session;
 use crate::ast::InsertMode;
 use crate::error::LqlError;
-use super::Session;
 
 const DEFAULT_MEMIT_LAMBDA: f32 = 1e-3;
 const MIN_RECONSTRUCTION_COS: f32 = 0.95;
@@ -30,7 +30,9 @@ impl Session {
         };
 
         if entries_by_layer.is_empty() {
-            return Ok(vec!["COMPACT MINOR: L0 is empty, nothing to compact.".into()]);
+            return Ok(vec![
+                "COMPACT MINOR: L0 is empty, nothing to compact.".into()
+            ]);
         }
 
         let total = entries_by_layer.len();
@@ -55,9 +57,13 @@ impl Session {
                 Ok(insert_out) => {
                     promoted += 1;
                     let (_, _, patched) = self.require_patched_mut()?;
-                    patched.knn_store.remove_by_entity_relation(entity, relation);
+                    patched
+                        .knn_store
+                        .remove_by_entity_relation(entity, relation);
                     if let Some(last) = insert_out.last() {
-                        out.push(format!("  promoted {entity} —[{relation}]→ {target} @ L{layer}: {last}"));
+                        out.push(format!(
+                            "  promoted {entity} —[{relation}]→ {target} @ L{layer}: {last}"
+                        ));
                     }
                 }
                 Err(e) => {
@@ -136,7 +142,9 @@ impl Session {
             .collect();
 
         if edges.is_empty() && overlay_edges.is_empty() {
-            return Ok(vec!["COMPACT MAJOR: L1 is empty, nothing to compact.".into()]);
+            return Ok(vec![
+                "COMPACT MAJOR: L1 is empty, nothing to compact.".into()
+            ]);
         }
 
         let n_edges = edges.len().max(overlay_edges.len());
@@ -229,11 +237,17 @@ impl Session {
                 .map_err(|e| LqlError::Execution(format!("target matrix shape error: {e}")))?;
 
             // Run MEMIT solver
-            out.push(format!("  Running MEMIT solver (N={n}, d={hidden_dim}, lambda={lambda:.1e})..."));
+            out.push(format!(
+                "  Running MEMIT solver (N={n}, d={hidden_dim}, lambda={lambda:.1e})..."
+            ));
             let result = larql_vindex::memit_solve(&keys, &targets, lambda)
                 .map_err(|e| LqlError::Execution(format!("MEMIT solve: {e}")))?;
 
-            let min_cos = result.reconstruction_cos.iter().cloned().fold(f32::INFINITY, f32::min);
+            let min_cos = result
+                .reconstruction_cos
+                .iter()
+                .cloned()
+                .fold(f32::INFINITY, f32::min);
             let mean_cos: f32 = result.reconstruction_cos.iter().sum::<f32>() / n as f32;
 
             out.push(format!(

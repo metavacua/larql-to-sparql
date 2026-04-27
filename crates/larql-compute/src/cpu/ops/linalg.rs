@@ -13,7 +13,11 @@ use ndarray::Array2;
 pub fn cholesky(a: &Array2<f64>, ridge: f64) -> Result<Array2<f64>, String> {
     let n = a.shape()[0];
     if a.shape()[1] != n {
-        return Err(format!("cholesky: matrix must be square, got {}×{}", n, a.shape()[1]));
+        return Err(format!(
+            "cholesky: matrix must be square, got {}×{}",
+            n,
+            a.shape()[1]
+        ));
     }
 
     let mut l = Array2::<f64>::zeros((n, n));

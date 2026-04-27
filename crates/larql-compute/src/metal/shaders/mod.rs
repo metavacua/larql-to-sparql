@@ -3,44 +3,44 @@
 //! Each shader module exports a `SHADER` constant with the MSL source.
 //! `all_shaders()` concatenates them with the common header for compilation.
 
-pub mod common;
-pub mod sgemm;
-pub mod sgemm_transb;
-pub mod q4_matvec;
-pub mod q4_vecmat;
-pub mod q4_f32_matvec;
-pub mod geglu;
-pub mod quantize_q8;
+pub mod activation;
 pub mod causal_attention;
+pub mod common;
+pub mod f16_gemv;
+pub mod f32_gemv;
+pub mod fused_attention;
+pub mod fused_ops;
+pub mod geglu;
+pub mod graph_walk_knn;
+pub mod kv_attention;
+pub mod layer_norm;
+pub mod q4_f32_matvec;
+pub mod q4_matvec;
 pub mod q4_matvec_v2;
 pub mod q4_matvec_v3;
 pub mod q4_matvec_v4;
 pub mod q4_matvec_v5;
-pub mod q8_matvec;
-pub mod kv_attention;
 pub mod q4_sparse_matvec;
-pub mod residual_inject;
-pub mod rope;
-pub mod fused_attention;
-pub mod fused_ops;
-pub mod q8_attn_proj;
+pub mod q4_vecmat;
+pub mod q4k_ffn_gate_up;
+pub mod q4k_geglu_down;
 pub mod q4k_matvec;
+pub mod q4k_q6k_qkv_proj;
 pub mod q4k_qkv_proj;
 pub mod q4kf_ffn_gate_up;
 pub mod q4kf_qkv_proj;
-pub mod q4k_ffn_gate_up;
-pub mod q4k_geglu_down;
 pub mod q6k_matvec;
-pub mod activation;
-pub mod layer_norm;
-pub mod v_norm;
+pub mod q8_attn_proj;
+pub mod q8_matvec;
 pub mod qk_norm;
-pub mod turboquant_encode;
+pub mod quantize_q8;
+pub mod residual_inject;
+pub mod rope;
+pub mod sgemm;
+pub mod sgemm_transb;
 pub mod turboquant_decode;
-pub mod graph_walk_knn;
-pub mod f32_gemv;
-pub mod f16_gemv;
-pub mod q4k_q6k_qkv_proj;
+pub mod turboquant_encode;
+pub mod v_norm;
 
 /// Concatenate all shaders into one MSL source string for compilation.
 pub fn all_shaders() -> String {

@@ -3,12 +3,12 @@
 //! Dispatches Q/K/V projections (f32) → causal attention → O projection (f32) →
 //! Q4 gate+up → GEGLU → Q4 down. One GPU submission per layer.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
+use super::q4_common::Q4Pipelines;
 use crate::metal::buffers::BufferCache;
 use crate::metal::f32_ops::F32Ops;
-use super::q4_common::Q4Pipelines;
 
 /// Run a full transformer layer on Metal: attention + FFN, one command buffer.
 #[allow(clippy::too_many_arguments)]
@@ -19,14 +19,23 @@ pub fn dispatch(
     causal_attn_pipeline: &ComputePipelineState,
     _q4: &Q4Pipelines,
     // Attention weights (f32)
-    w_q: &[f32], w_k: &[f32], w_v: &[f32], w_o: &[f32],
+    w_q: &[f32],
+    w_k: &[f32],
+    w_v: &[f32],
+    w_o: &[f32],
     // FFN weights (Q4)
-    gate_q4: &[u8], up_q4: &[u8], down_t_q4: &[u8],
+    gate_q4: &[u8],
+    up_q4: &[u8],
+    down_t_q4: &[u8],
     // Input
     x: &[f32],
-    seq_len: usize, hidden: usize,
-    num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
-    _inter: usize, attn_scale: f32,
+    seq_len: usize,
+    hidden: usize,
+    num_q_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    _inter: usize,
+    attn_scale: f32,
 ) -> Vec<f32> {
     let kv_dim = num_kv_heads * head_dim;
     let q_dim = num_q_heads * head_dim;
@@ -51,19 +60,46 @@ pub fn dispatch(
     // Q projection
     {
         let enc = cmd.new_compute_command_encoder();
-        F32Ops::encode_static(f32_transb_pipeline, enc, &buf_x, &buf_wq, &buf_q, seq_len, q_dim, hidden);
+        F32Ops::encode_static(
+            f32_transb_pipeline,
+            enc,
+            &buf_x,
+            &buf_wq,
+            &buf_q,
+            seq_len,
+            q_dim,
+            hidden,
+        );
         enc.end_encoding();
     }
     // K projection
     {
         let enc = cmd.new_compute_command_encoder();
-        F32Ops::encode_static(f32_transb_pipeline, enc, &buf_x, &buf_wk, &buf_k, seq_len, kv_dim, hidden);
+        F32Ops::encode_static(
+            f32_transb_pipeline,
+            enc,
+            &buf_x,
+            &buf_wk,
+            &buf_k,
+            seq_len,
+            kv_dim,
+            hidden,
+        );
         enc.end_encoding();
     }
     // V projection
     {
         let enc = cmd.new_compute_command_encoder();
-        F32Ops::encode_static(f32_transb_pipeline, enc, &buf_x, &buf_wv, &buf_v, seq_len, kv_dim, hidden);
+        F32Ops::encode_static(
+            f32_transb_pipeline,
+            enc,
+            &buf_x,
+            &buf_wv,
+            &buf_v,
+            seq_len,
+            kv_dim,
+            hidden,
+        );
         enc.end_encoding();
     }
     // Causal attention (simplified — first head only for benchmark)
@@ -87,7 +123,16 @@ pub fn dispatch(
     // O projection
     {
         let enc = cmd.new_compute_command_encoder();
-        F32Ops::encode_static(f32_transb_pipeline, enc, &buf_attn_out, &buf_wo, &buf_o_out, seq_len, hidden, q_dim);
+        F32Ops::encode_static(
+            f32_transb_pipeline,
+            enc,
+            &buf_attn_out,
+            &buf_wo,
+            &buf_o_out,
+            seq_len,
+            hidden,
+            q_dim,
+        );
         enc.end_encoding();
     }
 

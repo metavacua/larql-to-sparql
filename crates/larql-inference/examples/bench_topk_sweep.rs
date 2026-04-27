@@ -8,10 +8,7 @@
 
 use std::time::Instant;
 
-use larql_inference::{
-    predict, predict_with_ffn, InferenceModel,
-    vindex::WalkFfn,
-};
+use larql_inference::{predict, predict_with_ffn, vindex::WalkFfn, InferenceModel};
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,8 +18,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model_name = args[i].clone(); }
-            "--vindex" => { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
+            "--model" => {
+                i += 1;
+                model_name = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex_path = std::path::PathBuf::from(&args[i]);
+            }
             _ => {}
         }
         i += 1;
@@ -53,10 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Ground truth (dense):");
     let mut ground: Vec<(String, f64)> = Vec::new();
     for (prompt, _) in &prompts {
-        let enc = tokenizer.encode(*prompt, true).map_err(|e| format!("{e}"))?;
+        let enc = tokenizer
+            .encode(*prompt, true)
+            .map_err(|e| format!("{e}"))?;
         let ids: Vec<u32> = enc.get_ids().to_vec();
         let r = predict(weights, tokenizer, &ids, 5);
-        let (tok, prob) = r.predictions.first().map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+        let (tok, prob) = r
+            .predictions
+            .first()
+            .map(|(t, p)| (t.clone(), *p))
+            .unwrap_or_default();
         println!("  {prompt} -> {tok} ({:.1}%)", prob * 100.0);
         ground.push((tok, prob));
     }
@@ -65,14 +74,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // K values to test
     let k_values = vec![50, 100, 200, 500, 1000, 2000, 4000, 8092];
 
-    println!("{:>6}  {:>7}  {:>8}  {:>10}  divergences", "K", "correct", "avg_prob", "time/tok");
+    println!(
+        "{:>6}  {:>7}  {:>8}  {:>10}  divergences",
+        "K", "correct", "avg_prob", "time/tok"
+    );
     println!("{:-<70}", "");
 
     for &top_k in &k_values {
         let walk_ffn = WalkFfn::new(weights, &index, top_k);
 
         // Warmup
-        let enc = tokenizer.encode(prompts[0].0, true).map_err(|e| format!("{e}"))?;
+        let enc = tokenizer
+            .encode(prompts[0].0, true)
+            .map_err(|e| format!("{e}"))?;
         let ids: Vec<u32> = enc.get_ids().to_vec();
         let _ = predict_with_ffn(weights, tokenizer, &ids, 5, &walk_ffn);
 
@@ -82,10 +96,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let t0 = Instant::now();
 
         for (i, (prompt, expected)) in prompts.iter().enumerate() {
-            let enc = tokenizer.encode(*prompt, true).map_err(|e| format!("{e}"))?;
+            let enc = tokenizer
+                .encode(*prompt, true)
+                .map_err(|e| format!("{e}"))?;
             let ids: Vec<u32> = enc.get_ids().to_vec();
             let r = predict_with_ffn(weights, tokenizer, &ids, 5, &walk_ffn);
-            let (tok, prob) = r.predictions.first().map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+            let (tok, prob) = r
+                .predictions
+                .first()
+                .map(|(t, p)| (t.clone(), *p))
+                .unwrap_or_default();
 
             if tok.to_lowercase().contains(&expected.to_lowercase()) {
                 correct += 1;

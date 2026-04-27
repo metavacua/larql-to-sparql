@@ -12,15 +12,15 @@
 //! - `load`:  reconstruct `ModelWeights` from a vindex directory
 //!            (`load_model_weights`, `find_tokenizer_path`).
 
-pub mod write;
 pub mod load;
+pub mod write;
 
-pub use write::{
-    write_model_weights, write_model_weights_with_opts,
-    write_model_weights_q4k, write_model_weights_q4k_with_opts,
-    Q4kWriteOptions, StreamingWeights, WeightSource, WriteWeightsOptions,
-};
 pub use load::{
-    load_model_weights, load_model_weights_with_opts, load_model_weights_q4k,
-    find_tokenizer_path, LoadWeightsOptions,
+    find_tokenizer_path, load_model_weights, load_model_weights_q4k, load_model_weights_with_opts,
+    LoadWeightsOptions,
+};
+pub use write::{
+    write_model_weights, write_model_weights_q4k, write_model_weights_q4k_with_opts,
+    write_model_weights_with_opts, Q4kWriteOptions, StreamingWeights, WeightSource,
+    WriteWeightsOptions,
 };

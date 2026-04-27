@@ -3,9 +3,9 @@
 
 use ndarray::Array2;
 
+use super::{gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnBackend};
 use crate::forward::{add_bias, dot_proj};
 use crate::model::ModelWeights;
-use super::{sigmoid, gelu_tanh, silu_gate_up, gelu_tanh_gate_up, FfnBackend};
 
 /// Dense FFN: follows the model architecture exactly.
 /// Gated: activation(x @ gate.T) * (x @ up.T) @ down.T + bias
@@ -68,17 +68,25 @@ pub fn dense_ffn_forward(
         }
     } else {
         let mut projected = dot_proj(x, w_up);
-        if let Some(bias) = arch.ffn_up_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+        if let Some(bias) = arch
+            .ffn_up_bias_key(layer)
+            .and_then(|k| weights.vectors.get(&k))
+        {
             add_bias(&mut projected, bias);
         }
         match arch.activation() {
-            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => projected.mapv(gelu_tanh),
+            larql_models::Activation::GeluTanh | larql_models::Activation::Gelu => {
+                projected.mapv(gelu_tanh)
+            }
             _ => projected.mapv(|v| v * sigmoid(v)),
         }
     };
 
     let mut out = dot_proj(&activation, w_down);
-    if let Some(bias) = arch.ffn_down_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .ffn_down_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut out, bias);
     }
     (out, activation)

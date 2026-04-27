@@ -64,15 +64,14 @@
 //!   5. Append h_new residual to hot window; clip overflow to cold tier.
 //! ```
 
-use ndarray::{Array2, s};
-use larql_inference::model::ModelWeights;
-use larql_inference::forward::{embed_tokens_pub, run_ffn, apply_norm, dot_proj, add_bias};
 use larql_inference::attention::{
-    run_attention_with_kv, run_attention_block_decode_step,
-    apply_rope_partial_at,
+    apply_rope_partial_at, run_attention_block_decode_step, run_attention_with_kv,
 };
-use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 use larql_inference::ffn::WeightFfn;
+use larql_inference::forward::{add_bias, apply_norm, dot_proj, embed_tokens_pub, run_ffn};
+use larql_inference::model::ModelWeights;
+use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+use ndarray::{s, Array2};
 
 /// Per-layer pre-attention residuals for all stored positions.
 /// `stored[i]` shape: `[S, hidden_dim]` — the residual entering layer `i`
@@ -100,7 +99,9 @@ impl RsStore {
     /// Memory used by the stored residuals in bytes (f32).
     pub fn memory_bytes(&self) -> usize {
         let hot: usize = self.stored.iter().map(|s| s.len() * 4).sum();
-        let cold: usize = self.cold_residuals.as_ref()
+        let cold: usize = self
+            .cold_residuals
+            .as_ref()
             .map(|c| c.iter().map(|s| s.len() * 4).sum())
             .unwrap_or(0);
         hot + cold
@@ -160,8 +161,8 @@ pub fn rs_prefill(
         // Store the pre-layer residual — this is the Markov state for this layer.
         stored.push(h.clone());
 
-        let (h_post_attn, _k, _v) = run_attention_with_kv(weights, &h, layer)
-            .expect("attention failed");
+        let (h_post_attn, _k, _v) =
+            run_attention_with_kv(weights, &h, layer).expect("attention failed");
         let (h_out, _) = run_ffn(weights, &h_post_attn, layer, &ffn, false);
         h = h_out;
     }
@@ -246,15 +247,18 @@ pub fn rs_decode_step(
         };
 
         // Recompute K/V from full history (cold + hot).
-        let (k_recomputed, v_recomputed) =
-            recompute_kv(weights, &h_full, layer, full_abs_start)?;
+        let (k_recomputed, v_recomputed) = recompute_kv(weights, &h_full, layer, full_abs_start)?;
 
         // Save pre-layer residual for the new token before processing.
         new_stored.push(h_new.clone());
 
         // Decode-step attention: new token Q against [K_old | K_new].
         let (h_post_attn, _new_kv) = run_attention_block_decode_step(
-            weights, &h_new, layer, Some(&(k_recomputed, v_recomputed)), abs_position,
+            weights,
+            &h_new,
+            layer,
+            Some(&(k_recomputed, v_recomputed)),
+            abs_position,
         )?;
 
         let (h_out, _) = run_ffn(weights, &h_post_attn, layer, &ffn, false);
@@ -322,7 +326,7 @@ pub fn rs_decode_step(
 ///   v_old = v_proj(x_old) → v_norm
 pub(crate) fn recompute_kv(
     weights: &ModelWeights,
-    h_stored: &Array2<f32>,   // [S, hidden_dim]
+    h_stored: &Array2<f32>, // [S, hidden_dim]
     layer: usize,
     abs_start: usize,
 ) -> Option<(Array2<f32>, Array2<f32>)> {
@@ -331,28 +335,50 @@ pub(crate) fn recompute_kv(
     let num_kv = arch.num_kv_heads_for_layer(layer);
     let norm_offset = arch.norm_weight_offset();
     let qk_offset = arch.qk_norm_weight_offset();
-    let qk_norm_off = if qk_offset != 0.0 { qk_offset } else { norm_offset };
+    let qk_norm_off = if qk_offset != 0.0 {
+        qk_offset
+    } else {
+        norm_offset
+    };
 
-    let h_norm = apply_norm(weights, h_stored, &arch.input_layernorm_key(layer), norm_offset);
+    let h_norm = apply_norm(
+        weights,
+        h_stored,
+        &arch.input_layernorm_key(layer),
+        norm_offset,
+    );
 
     let w_k = weights.tensors.get(&arch.attn_k_key(layer))?;
     let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
-    let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer))? };
+    let w_v = if v_from_k {
+        w_k
+    } else {
+        weights.tensors.get(&arch.attn_v_key(layer))?
+    };
 
     let mut k = dot_proj(&h_norm, w_k);
     let mut v = dot_proj(&h_norm, w_v);
 
-    if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_k_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut k, bias);
     }
-    if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_v_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut v, bias);
     }
 
     if arch.has_v_norm() {
         v = rms_norm_heads_no_weight(&v, num_kv, head_dim);
     }
-    let k_normed = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    let k_normed = match arch
+        .attn_k_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         Some(norm_w) => rms_norm_heads(&k, norm_w, num_kv, head_dim, qk_norm_off),
         None => k,
     };
@@ -361,7 +387,12 @@ pub(crate) fn recompute_kv(
     let rotary_frac = arch.rotary_fraction_for_layer(layer);
     // Apply RoPE at the original absolute positions of the stored tokens.
     let k_rope = apply_rope_partial_at(
-        &k_normed, num_kv, head_dim, layer_rope_base, rotary_frac, abs_start,
+        &k_normed,
+        num_kv,
+        head_dim,
+        layer_rope_base,
+        rotary_frac,
+        abs_start,
     );
 
     Some((k_rope, v))
@@ -428,7 +459,10 @@ mod tests {
         let mut cold = Vec::new();
         rs.clip_layer(0, &mut cold);
         assert_eq!(rs.stored[0].shape()[0], 10);
-        assert!(cold.is_empty(), "no cold entry pushed when max_window is None");
+        assert!(
+            cold.is_empty(),
+            "no cold entry pushed when max_window is None"
+        );
     }
 
     #[test]
@@ -456,7 +490,11 @@ mod tests {
         }
         // Hot contains the NEWEST rows (indices 6..10).
         for i in 0..4 {
-            assert_eq!(rs.stored[0][[i, 0]], (6 + i) as f32, "hot row {i} has correct value");
+            assert_eq!(
+                rs.stored[0][[i, 0]],
+                (6 + i) as f32,
+                "hot row {i} has correct value"
+            );
         }
     }
 
@@ -494,9 +532,17 @@ mod tests {
         rs.cold_residuals = Some(cold);
         rs.cold_abs_start = 0;
 
-        assert_eq!(rs.stored[0].shape()[0], window, "hot window trimmed to {window}");
+        assert_eq!(
+            rs.stored[0].shape()[0],
+            window,
+            "hot window trimmed to {window}"
+        );
         let cold_ref = rs.cold_residuals.as_ref().unwrap();
-        assert_eq!(cold_ref[0].shape()[0], seq_len - window, "cold tier has evicted rows");
+        assert_eq!(
+            cold_ref[0].shape()[0],
+            seq_len - window,
+            "cold tier has evicted rows"
+        );
         assert_eq!(rs.cold_abs_start, 0);
     }
 
@@ -533,7 +579,7 @@ mod tests {
         }
         rs.cold_residuals = Some(cold);
 
-        let hot_bytes  = num_layers * window            * hidden * 4;
+        let hot_bytes = num_layers * window * hidden * 4;
         let cold_bytes = num_layers * (seq_len - window) * hidden * 4;
         assert_eq!(rs.memory_bytes(), hot_bytes + cold_bytes);
     }
@@ -584,7 +630,11 @@ mod tests {
         }
 
         let cold_ref = rs.cold_residuals.as_ref().unwrap();
-        assert_eq!(cold_ref[0].shape()[0], 3, "existing 2 + overflow 1 = 3 cold rows");
+        assert_eq!(
+            cold_ref[0].shape()[0],
+            3,
+            "existing 2 + overflow 1 = 3 cold rows"
+        );
         assert_eq!(rs.stored[0].shape()[0], window, "hot stays at window size");
     }
 }

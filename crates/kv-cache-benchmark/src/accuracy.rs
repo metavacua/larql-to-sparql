@@ -89,7 +89,11 @@ pub fn kl_divergence(p: &[f64], q: &[f64]) -> f64 {
 
 /// Compute Jensen-Shannon divergence (symmetric, bounded 0-1).
 pub fn js_divergence(p: &[f64], q: &[f64]) -> f64 {
-    let m: Vec<f64> = p.iter().zip(q.iter()).map(|(&a, &b)| (a + b) / 2.0).collect();
+    let m: Vec<f64> = p
+        .iter()
+        .zip(q.iter())
+        .map(|(&a, &b)| (a + b) / 2.0)
+        .collect();
     (kl_divergence(p, &m) + kl_divergence(q, &m)) / 2.0
 }
 
@@ -121,7 +125,9 @@ pub fn first_divergence(a: &[u32], b: &[u32]) -> Option<u32> {
 
 /// Token-level match rate between two sequences.
 pub fn token_match_rate(a: &[u32], b: &[u32]) -> f32 {
-    if a.is_empty() { return 0.0; }
+    if a.is_empty() {
+        return 0.0;
+    }
     let matches = a.iter().zip(b.iter()).filter(|(&x, &y)| x == y).count();
     matches as f32 / a.len().min(b.len()) as f32
 }
@@ -205,11 +211,13 @@ pub fn generate_haystack(
 
 /// Build a multi-turn fact retention conversation.
 pub fn build_retention_conversation(num_turns: usize) -> Vec<ConversationTurn> {
-    let facts = [("My name is Alice and I work at Anthropic.", "name", "Alice"),
+    let facts = [
+        ("My name is Alice and I work at Anthropic.", "name", "Alice"),
         ("I'm based in San Francisco.", "location", "San Francisco"),
         ("My project is called Lighthouse.", "project", "Lighthouse"),
         ("My favorite color is blue.", "color", "blue"),
-        ("I have two cats named Luna and Sol.", "pets", "Luna")];
+        ("I have two cats named Luna and Sol.", "pets", "Luna"),
+    ];
 
     let queries = vec![
         ("What project am I working on?", "project", "Lighthouse"),
@@ -307,10 +315,8 @@ pub fn format_accuracy_summary(results: &[AccuracyResult]) -> String {
     out.push('\n');
 
     for strategy in &strategies {
-        let strat_results: Vec<&AccuracyResult> = results
-            .iter()
-            .filter(|r| &r.strategy == strategy)
-            .collect();
+        let strat_results: Vec<&AccuracyResult> =
+            results.iter().filter(|r| &r.strategy == strategy).collect();
 
         let total = strat_results.len();
         let top1_matches = strat_results.iter().filter(|r| r.top1_match).count();
@@ -336,7 +342,10 @@ pub fn format_accuracy_summary(results: &[AccuracyResult]) -> String {
             .filter(|r| r.needle_found.is_some())
             .copied()
             .collect();
-        let needles_found = needles.iter().filter(|r| r.needle_found == Some(true)).count();
+        let needles_found = needles
+            .iter()
+            .filter(|r| r.needle_found == Some(true))
+            .count();
         let needle_str = if needles.is_empty() {
             "n/a".to_string()
         } else {

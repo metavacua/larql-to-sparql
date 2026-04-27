@@ -137,11 +137,7 @@ mod tests {
     fn resolve_ranks_matching_windows_first() {
         // window 0 contains token 42 twice, window 1 contains it once, window
         // 2 doesn't. Query on 42 should rank 0 > 1 > (2 dropped).
-        let store = mk_store(vec![
-            vec![1, 42, 3, 42, 5],
-            vec![42, 7, 8],
-            vec![9, 10, 11],
-        ]);
+        let store = mk_store(vec![vec![1, 42, 3, 42, 5], vec![42, 7, 8], vec![9, 10, 11]]);
         let idx = RoutingIndex::from_store(&store);
         let q = RoutingQuery {
             token_ids: vec![42],
@@ -154,11 +150,7 @@ mod tests {
     fn resolve_ignores_ubiquitous_terms() {
         // Token 99 appears in every window — df == N, so it's skipped.
         // Token 7 only in window 1, so query {99, 7} should pick window 1.
-        let store = mk_store(vec![
-            vec![99, 1, 2],
-            vec![99, 7, 3],
-            vec![99, 4, 5],
-        ]);
+        let store = mk_store(vec![vec![99, 1, 2], vec![99, 7, 3], vec![99, 4, 5]]);
         let idx = RoutingIndex::from_store(&store);
         let q = RoutingQuery {
             token_ids: vec![99, 7],
