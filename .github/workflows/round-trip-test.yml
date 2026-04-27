@@ -30,7 +30,7 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Fast path: Test LQL operations without model extraction
+  # Fast path: Test LQL operations (Rust only, no Python extension needed)
   fast-path:
     name: Fast Path (LQL + Binding Tests)
     runs-on: ubuntu-latest
@@ -42,36 +42,35 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Cache cargo
+      - name: Cache cargo build
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-build-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo git
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-git-
+
+      - name: Run LQL tests (pure Rust)
+        run: cargo test -p larql-lql --lib --release
+
+      - name: Run CLI tests
+        run: cargo test -p larql-cli --lib --release
 
       - name: Build release binary
         run: cargo build --release -p larql-cli
-
-      - name: Run LQL tests
-        run: cargo test -p larql-lql --lib
-
-      - name: Run Python binding tests (non-model tests)
-        run: |
-          cd crates/larql-python
-          python3 -m pip install --upgrade pip uv -q
-          uv sync --no-install-project --group dev -q
-          uv run --no-sync pytest tests/ -v -k "not (walk or describe or infer)" --tb=short || true
-        continue-on-error: true
-
-      - name: Quick vindex operations test
-        run: |
-          cd crates/larql-python
-          # Synthetic vindex tests that don't require model downloads
-          uv run --no-sync pytest tests/test_bindings.py::TestSynthetic -v || true
-        continue-on-error: true
 
   # Full path: Extract model, run complete round-trip (manual/scheduled)
   full-path:
