@@ -1,13 +1,26 @@
 //! Optimized mmap helpers for vindex file loading.
 //!
-//! Two access patterns:
+//! Provides platform-aware mmap optimization with automatic fallback:
+//!
+//! **Unix-like systems (Linux, macOS)**: Use `madvise()` hints for fine-grained control:
 //! - `mmap_optimized`: MADV_SEQUENTIAL + MADV_WILLNEED — for files that must
 //!   be fully resident (embeddings, norms, attn weights). Prefaults pages at
 //!   load time so the first query doesn't stall on page faults.
 //! - `mmap_demand_paged`: MADV_RANDOM — for large sparse files (gate vectors,
 //!   feature payloads). Pages fault in only when accessed, keeping RSS low at
-//!   load time. Gate KNN touches all pages during a linear scan but only a
-//!   logarithmic subset when HNSW is active.
+//!   load time.
+//!
+//! **Windows**: Kernel manages readahead automatically based on access patterns.
+//! No explicit hints needed; kernel's prefetcher is competitive with madvise.
+//!
+//! **WASM and other platforms**: No mmap support; fallback to in-memory load.
+//!
+//! # Performance Notes
+//!
+//! - Prefaulting (MADV_WILLNEED) adds startup latency but reduces first-query stalls
+//! - Demand-paging (MADV_RANDOM) minimizes startup time and peak RSS at the cost
+//!   of per-page fault latency during access
+//! - Windows kernel prefetcher often matches madvise hints; profile both
 
 /// Create an mmap with SEQUENTIAL + WILLNEED hints — prefaults all pages.
 ///
