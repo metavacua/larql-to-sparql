@@ -5,6 +5,7 @@ members = [
     "crates/larql-models",
     "crates/larql-core",
     "crates/larql-platform",
+    "crates/larql-build",
     # compute tier
     "crates/larql-compute",
     "crates/larql-vindex",
@@ -23,6 +24,7 @@ default-members = [
     "crates/larql-models",
     "crates/larql-core",
     "crates/larql-platform",
+    "crates/larql-build",
     "crates/larql-compute",
     "crates/larql-vindex",
     "crates/larql-inference",
