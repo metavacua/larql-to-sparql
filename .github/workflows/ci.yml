@@ -118,9 +118,9 @@ jobs:
     steps:
       - name: Check test results
         run: |
-          if [[ "${{ needs.test-foundation.result }}" == "failure" || \
-                "${{ needs.fmt-lint.result }}" == "failure" || \
-                "${{ needs.doc.result }}" == "failure" ]]; then
+          if [[ "${{ needs.test-foundation.result }}" != "success" || \
+                "${{ needs.fmt-lint.result }}" != "success" || \
+                "${{ needs.doc.result }}" != "success" ]]; then
             echo "❌ CI failed"
             exit 1
           fi
