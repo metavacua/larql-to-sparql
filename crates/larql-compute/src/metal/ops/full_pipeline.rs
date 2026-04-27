@@ -570,7 +570,7 @@ pub fn dispatch_full_pipeline(
     if let Some(ref dir) = dump_path {
         let ptr = h_bufs[0].contents() as *const f32;
         if !ptr.is_null() {
-            let s = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
+            let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, seq_len * hidden) };
             let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
             let path = format!("{dir}/metal_h_embed.f32");
             let _ = std::fs::write(&path, &bytes);
@@ -778,7 +778,7 @@ pub fn dispatch_full_pipeline(
             let ptr = q_outs[l].contents() as *const f32;
             if !ptr.is_null() {
                 let n = seq_len * layer_q_dim;
-                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, n) };
                 let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
                 let _ = std::fs::write(
                     format!("{}/metal_L0_q_out_raw.f32", dump_path.as_ref().unwrap()),
@@ -830,7 +830,7 @@ pub fn dispatch_full_pipeline(
             let ptr = q_outs[l].contents() as *const f32;
             if !ptr.is_null() {
                 let n = seq_len * layer_q_dim;
-                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, n) };
                 let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
                 let _ = std::fs::write(
                     format!(
@@ -1084,7 +1084,7 @@ pub fn dispatch_full_pipeline(
                 if ptr.is_null() {
                     return;
                 }
-                let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+                let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, n) };
                 let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
                 let path = format!("{dir}/metal_layer_{l:02}_{name}.f32");
                 if let Err(e) = std::fs::write(&path, &bytes) {
