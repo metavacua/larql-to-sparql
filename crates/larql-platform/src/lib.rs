@@ -68,11 +68,11 @@ mod tests {
 
     #[test]
     fn test_mmap_advice_consistency() {
-        let platform = Platform::detect();
+        let _platform = Platform::detect();
         // MMAP advice only available on Unix-like systems
         #[cfg(not(unix))]
         {
-            assert!(!platform.supports_mmap_advice());
+            assert!(!_platform.supports_mmap_advice());
         }
     }
 }

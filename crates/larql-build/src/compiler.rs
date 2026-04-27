@@ -127,9 +127,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cpu_flags_returns_correct_type() {
+    fn test_cpu_flags_not_null() {
         let flags = cpu_flags();
-        assert!(flags.len() >= 0);
+        for flag in flags {
+            assert!(!flag.is_empty(), "Flag should not be empty");
+        }
     }
 
     #[test]

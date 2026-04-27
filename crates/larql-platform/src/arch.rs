@@ -74,7 +74,7 @@ impl CpuFlags {
     }
 
     /// Check if any SIMD features are available.
-    #[must_use] 
+    #[must_use]
     pub const fn has_simd(&self) -> bool {
         self.avx2 || self.dotprod
     }
@@ -107,10 +107,10 @@ mod tests {
 
     #[test]
     fn test_avx2_only_on_x86_64() {
-        let flags = CpuFlags::detect();
+        let _flags = CpuFlags::detect();
         #[cfg(not(target_arch = "x86_64"))]
         {
-            assert!(!flags.avx2);
+            assert!(!_flags.avx2);
         }
     }
 
