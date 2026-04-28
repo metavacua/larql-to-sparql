@@ -1,0 +1,163 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deterministic PR validation workflow.
+#
+# This workflow is the source of truth for whether a pull request branch is a
+# valid candidate extension of the development branch. Per the project
+# compliance specification, it does NOT decide whether the branch is merged,
+# closed, released, or published — those remain human decisions outside the
+# deterministic core.
+#
+# Each job in this workflow is a pure, reproducible check. They share a fixed
+# tool pin set so that the same SHA always produces the same verdict.
+
+name: validate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pinned tool versions. Bumping any of these is a deliberate change to the
+# deterministic core and should be done in a dedicated PR.
+env:
+  RUST_TOOLCHAIN: "1.84.0"
+  REUSE_TOOL_VERSION: "5.0.2"
+  COCOGITTO_VERSION: "6.2.0"
+  GIT_CLIFF_VERSION: "2.6.1"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # A1: Explicit Provenance — every tracked file must be covered by either
+  # a SPDX header or an explicit annotation in REUSE.toml.
+  # ---------------------------------------------------------------------
+  provenance:
+    name: provenance (REUSE lint)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run reuse lint
+        uses: fsfe/reuse-action@v5
+        with:
+          args: --suppress-deprecation lint
+
+  # ---------------------------------------------------------------------
+  # A2: Structured History — every commit on the PR branch must satisfy
+  # Conventional Commits as parsed by cocogitto.
+  # ---------------------------------------------------------------------
+  commits:
+    name: commits (cocogitto check)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install cocogitto
+        run: |
+          curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C /usr/local/bin cog
+          cog --version
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "from=${base}" >> "$GITHUB_OUTPUT"
+            echo "to=${head}"   >> "$GITHUB_OUTPUT"
+          else
+            echo "from=" >> "$GITHUB_OUTPUT"
+            echo "to="   >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: cog check (PR range)
+        if: steps.range.outputs.from != ''
+        run: cog check --from-latest-tag=false "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+
+      - name: cog check (push to main, newest commit only)
+        if: steps.range.outputs.from == ''
+        # Pre-existing history predates the policy and is grandfathered.
+        # On push, only the newly-landed commit must satisfy the grammar.
+        run: cog check HEAD~1..HEAD
+
+  # ---------------------------------------------------------------------
+  # A3: Derived Documentation — CHANGELOG.md `[Unreleased]` must equal the
+  # deterministic git-cliff projection of validated commits in range.
+  # ---------------------------------------------------------------------
+  changelog:
+    name: changelog (git-cliff consistency)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install git-cliff
+        run: |
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${GIT_CLIFF_VERSION}/git-cliff"
+          git-cliff --version
+
+      - name: Verify CHANGELOG.md [Unreleased] matches projection
+        run: scripts/check_changelog.sh
+
+  # ---------------------------------------------------------------------
+  # A2 (cont.) / informational: deterministic SemVer preflight. Does not
+  # tag, push, publish, or otherwise affect external state.
+  # ---------------------------------------------------------------------
+  version-preflight:
+    name: version preflight (informational)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compute next SemVer
+        id: semver
+        run: scripts/version_preflight.sh
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
+
+  # ---------------------------------------------------------------------
+  # Aggregate gate. Required by branch protection so the deterministic
+  # verdict reduces to a single check.
+  # ---------------------------------------------------------------------
+  candidate-validity:
+    name: candidate validity (A5)
+    runs-on: ubuntu-24.04
+    needs: [provenance, commits, changelog, version-preflight]
+    steps:
+      - name: All deterministic checks passed
+        run: |
+          echo "Branch is a valid candidate extension of the development branch."
+          echo "Per Axiom A5 this does NOT decide merge, close, or release."
