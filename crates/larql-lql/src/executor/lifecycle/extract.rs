@@ -1,7 +1,6 @@
 //! `EXTRACT MODEL ... INTO ...` — build a vindex from live model weights.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::path::PathBuf;
 
 use crate::ast::{Component, ExtractLevel, Range};

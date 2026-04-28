@@ -1,7 +1,6 @@
 //! Patch statement parsers: BEGIN PATCH, SAVE PATCH, APPLY PATCH, SHOW PATCHES, REMOVE PATCH.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Keyword;

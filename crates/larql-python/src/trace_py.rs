@@ -1,7 +1,6 @@
 //! Python bindings for ResidualTrace — the complete record of inference.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use pyo3::prelude::*;
 
 use std::path::Path;

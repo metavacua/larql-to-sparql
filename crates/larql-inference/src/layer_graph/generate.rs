@@ -1,7 +1,6 @@
 //! Token generation loop — GPU prefill + KV-cached decode
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::CachedLayerGraph;
 use crate::model::ModelWeights;
 use larql_compute::ComputeBackend;

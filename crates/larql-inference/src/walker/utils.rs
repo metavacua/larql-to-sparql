@@ -1,7 +1,6 @@
 //! Shared utilities for walker modules.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::weight_walker::ThresholdCounts;
 
 /// Decode a single token ID to a trimmed string.

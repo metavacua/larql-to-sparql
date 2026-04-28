@@ -1,7 +1,6 @@
 //! Vindexfile parser — reads the declarative build spec.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::path::Path;
 
 use crate::error::VindexError;

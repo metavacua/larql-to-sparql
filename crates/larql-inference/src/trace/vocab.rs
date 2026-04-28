@@ -1,7 +1,6 @@
 //! Vocabulary projection helpers — project residual vectors through lm_head.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use crate::model::ModelWeights;
 use larql_models::NormType;
 use ndarray::Array2;

@@ -1,7 +1,6 @@
 //! f16/bf16 ↔ f32 conversion.
 // SPDX-License-Identifier: Apache-2.0
 
-
 /// Convert f16 bits to f32.
 ///
 /// Subnormals are reconstructed as `m * 2^-24` where `m` is the 10-bit

@@ -1,7 +1,6 @@
 //! Binary loading path for .vindex directories.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;

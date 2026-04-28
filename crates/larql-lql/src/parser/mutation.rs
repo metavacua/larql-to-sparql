@@ -1,7 +1,6 @@
 //! Mutation statement parsers: INSERT, DELETE, UPDATE, MERGE
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};

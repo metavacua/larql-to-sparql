@@ -1,7 +1,6 @@
 //! Tests for HNSW index — correctness, recall, and edge cases.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use larql_vindex::index::hnsw::HnswLayer;
 use ndarray::{Array1, Array2};
 

@@ -1,7 +1,6 @@
 //! Runtime platform detection and capability inference.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use crate::arch::CpuFlags;
 
 /// Operating system enumeration.

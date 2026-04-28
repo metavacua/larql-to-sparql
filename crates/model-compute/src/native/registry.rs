@@ -1,7 +1,6 @@
 //! Kernel registry: name → kernel dispatch.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 
 use super::{Kernel, KernelError};

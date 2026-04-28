@@ -1,7 +1,6 @@
 //! Layer normalization and residual stream operations.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use ndarray::Array2;
 
 /// Default norm epsilon. Most models use 1e-5 or 1e-6.

@@ -1,7 +1,6 @@
 //! Debug: why does generate() fall back to CPU?
 // SPDX-License-Identifier: Apache-2.0
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = larql_inference::InferenceModel::load("google/gemma-3-4b-it")?;
     let weights = model.weights();

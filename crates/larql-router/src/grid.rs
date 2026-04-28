@@ -1,7 +1,6 @@
 //! Grid state and gRPC service implementation for the self-assembling FFN grid.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};

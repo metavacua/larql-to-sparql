@@ -1,7 +1,6 @@
 //! Integration tests for model architecture detection and key patterns.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use larql_models::{detect_from_json, ExpertFormat, ModelArchitecture};
 
 // ═══════════════════════════════════════════════════════════════

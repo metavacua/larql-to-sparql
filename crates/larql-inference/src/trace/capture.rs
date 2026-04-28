@@ -1,7 +1,6 @@
 //! Trace capture — decomposed forward pass recording attn and FFN deltas.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use ndarray::Array2;
 
 use crate::attention::AttentionWeights;

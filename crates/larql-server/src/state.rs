@@ -1,7 +1,6 @@
 //! AppState: loaded vindex + config, shared across all handlers.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
