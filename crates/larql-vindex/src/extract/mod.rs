@@ -1,7 +1,6 @@
 //! Build pipeline — extract model weights into vindex format.
 // SPDX-License-Identifier: Apache-2.0
 
-
 pub mod build;
 pub mod build_from_vectors;
 pub mod build_helpers;

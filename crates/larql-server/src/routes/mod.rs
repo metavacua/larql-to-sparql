@@ -1,7 +1,6 @@
 //! Router setup — maps URL paths to handlers.
 // SPDX-License-Identifier: Apache-2.0
 
-
 pub mod describe;
 pub mod embed;
 pub mod expert;

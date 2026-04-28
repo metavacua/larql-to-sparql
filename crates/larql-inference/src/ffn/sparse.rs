@@ -1,7 +1,6 @@
 //! Sparse FFN backend — gate matmul selects top-K features, architecture-correct.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use ndarray::Array2;
 
 use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};

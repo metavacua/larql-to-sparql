@@ -1,7 +1,6 @@
 //! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS, SHOW COMPACT STATUS.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 
 use super::helpers::{dir_size, format_bytes, format_number, is_content_token};

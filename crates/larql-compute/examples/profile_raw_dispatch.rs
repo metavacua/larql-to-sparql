@@ -1,7 +1,6 @@
 //! Raw kernel dispatch: JUST the Q4_K matvec, nothing else. Measures pure GPU cost.
 // SPDX-License-Identifier: Apache-2.0
 
-
 extern crate blas_src;
 
 fn main() {

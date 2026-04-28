@@ -1,7 +1,6 @@
 //! POST /v1/explain-infer — walk inference with per-layer feature trace.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::sync::Arc;
 
 use axum::extract::{Path, State};

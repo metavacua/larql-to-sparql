@@ -1,7 +1,6 @@
 //! `WALK` — pure vindex feature scan, no attention.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use crate::ast::{Range, WalkMode};
 use crate::error::LqlError;
 use crate::executor::Session;

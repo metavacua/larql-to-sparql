@@ -1,7 +1,6 @@
 //! LQL REPL — interactive shell with history, arrow keys, and line editing.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use crate::executor::Session;
 use crate::parser;
 

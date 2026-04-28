@@ -1,7 +1,6 @@
 //! Compaction executor: COMPACT MINOR, COMPACT MAJOR.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::Session;
 use crate::ast::InsertMode;
 use crate::error::LqlError;

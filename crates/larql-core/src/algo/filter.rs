@@ -1,7 +1,6 @@
 //! Predicate-based edge filtering.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::Graph;

@@ -1,6 +1,5 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 // SPDX-License-Identifier: Apache-2.0
-
 #![allow(clippy::single_range_in_vec_init)]
 
 pub mod accuracy;

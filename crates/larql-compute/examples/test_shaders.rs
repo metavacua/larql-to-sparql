@@ -1,7 +1,6 @@
 //! Test that all Metal shaders compile.
 // SPDX-License-Identifier: Apache-2.0
 
-
 fn main() {
     #[cfg(feature = "metal")]
     {
