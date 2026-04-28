@@ -1,0 +1,89 @@
+version = 1
+
+# Explicit, machine-readable provenance for every file under version control,
+# per Foundational Axiom A1 (Explicit Provenance) of the project compliance
+# specification. Each [[annotations]] block below is an explicit declaration
+# recognized by repository policy in lieu of per-file SPDX headers, and is
+# checked deterministically by `reuse lint`.
+
+# ---------------------------------------------------------------------------
+# Default: all source-controlled files are Apache-2.0 with the project's
+# canonical copyright holder unless explicitly overridden by a more specific
+# annotation block below.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Top-level project files (Cargo workspace, build, docs, governance).
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "Makefile",
+  "README.md",
+  "ROADMAP.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "CHANGELOG.md",
+  ".gitignore",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Compliance toolchain configuration. Each of these files is part of the
+# deterministic validation pipeline; their provenance is recorded explicitly
+# so that `reuse lint` cannot regress on the toolchain itself.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "REUSE.toml",
+  "cliff.toml",
+  "cog.toml",
+  ".pre-commit-config.yaml",
+  ".github/**",
+  "scripts/check_changelog.sh",
+  "scripts/version_preflight.sh",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Crate sources, examples, tests, probes, knowledge, memory, experiments.
+# Bulk-covered to avoid per-file headers while remaining deterministic.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "crates/**",
+  "examples/**",
+  "tests/**",
+  "probes/**",
+  "scripts/**",
+  "knowledge/**",
+  "memory/**",
+  "experiments/**",
+  "docs/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# The verbatim Apache-2.0 license text shipped under LICENSES/ is itself
+# Apache-licensed boilerplate and is not separately copyrighted.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "LICENSE",
+  "LICENSES/Apache-2.0.txt",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"
