@@ -1,7 +1,6 @@
 //! FFN tensor naming conventions and helpers for cloning tensors on demand.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 
 use ndarray::ArcArray2;

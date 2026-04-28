@@ -1,7 +1,6 @@
 //! Logits computation — final norm + vindex KNN + softmax.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use ndarray::Array2;
 
 use crate::model::ModelWeights;

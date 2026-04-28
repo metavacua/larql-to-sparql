@@ -1,7 +1,6 @@
 //! CPU architecture detection and feature flags.
 // SPDX-License-Identifier: Apache-2.0
 
-
 /// CPU architecture enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Architecture {

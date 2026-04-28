@@ -1,7 +1,6 @@
 //! Prediction — logits computation and all predict_* entry points.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use super::embed::embed_tokens;
 use super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
 use super::ple::precompute_per_layer_inputs;

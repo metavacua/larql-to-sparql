@@ -1,7 +1,6 @@
 //! Typed errors for the host runtime.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]

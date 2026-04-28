@@ -1,7 +1,6 @@
 //! Serialization types for the .vindex format.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

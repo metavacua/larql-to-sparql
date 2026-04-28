@@ -1,7 +1,6 @@
 //! Shared CLI utilities.
 // SPDX-License-Identifier: Apache-2.0
 
-
 /// Simple base64 encoder for Basic auth (avoids adding a base64 crate).
 #[allow(dead_code)]
 pub fn base64_encode(input: &str) -> String {

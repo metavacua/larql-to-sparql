@@ -1,7 +1,6 @@
 //! POST /v1/infer — full forward pass with attention.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::sync::Arc;
 
 use axum::extract::{Path, State};

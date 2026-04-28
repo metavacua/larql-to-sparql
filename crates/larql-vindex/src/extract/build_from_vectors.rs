@@ -1,7 +1,6 @@
 //! Build a .vindex from pre-extracted NDJSON vector files.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;

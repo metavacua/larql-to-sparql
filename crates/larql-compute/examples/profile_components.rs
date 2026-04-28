@@ -1,7 +1,6 @@
 //! Component-level profiling: each operation isolated over 34 layers.
 // SPDX-License-Identifier: Apache-2.0
 
-
 extern crate blas_src;
 
 fn main() {

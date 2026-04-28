@@ -1,7 +1,6 @@
 //! Auto-detect model architecture from config.json.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::path::Path;
 
 use crate::architectures::deepseek::DeepSeekArch;
