@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # REUSE 3.0 Configuration (TOML format)
+#
+# This project derives from LARQL (https://github.com/chrishayuk/larql)
+# Copyright (c) Chris Hay and contributors, licensed under Apache-2.0
+#
+# Extensions and modifications Copyright (c) 2026 larql-to-sparql contributors
 
 version = "3.0"
 
@@ -9,22 +14,72 @@ homepage = "https://github.com/metavacua/larql-to-sparql"
 license = "Apache-2.0"
 readme = "README.md"
 
+# Source code files (Rust, Python, build scripts)
+# Derived from LARQL project (Apache-2.0) with modifications
 [[annotations]]
-path = [".commitlintrc.json", ".pre-commit-config.yaml"]
-SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+path = ["crates/**/*.rs", "src/**/*.rs", "*.rs"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
 [[annotations]]
-path = [".github/workflows/integrity.yml", ".github/workflows/release.yml"]
-SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+path = ["**/*.py", "scripts/**/*.py"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
+[[annotations]]
+path = ["Cargo.toml", "Cargo.lock", "build.rs"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Configuration files
+[[annotations]]
+path = [".commitlintrc.json", ".pre-commit-config.yaml", "Makefile", ".gitignore"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# GitHub workflows and CI/CD
+[[annotations]]
+path = [".github/workflows/*.yml"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Documentation (markdown files)
+# Primary documentation uses CC-BY-SA-4.0, LARQL docs use Apache-2.0
+[[annotations]]
+path = ["README.md", "ROADMAP.md", "CONTRIBUTING.md", "REUSE.md", "AGENTS.md"]
+SPDX-FileCopyrightText = "2026 larql-to-sparql contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+[[annotations]]
+path = ["docs/**/*.md", "*.md"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["knowledge/**/*.md", "memory/**/*.md"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Changelog uses Keep a Changelog format with CC-BY-SA
+[[annotations]]
+path = ["CHANGELOG.md", "**/CHANGELOG.md"]
+SPDX-FileCopyrightText = "2026 larql-to-sparql contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# New toolchain files added for governance
 [[annotations]]
 path = ["scripts/changelog-transformer.py"]
-SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+SPDX-FileCopyrightText = "2026 larql-to-sparql contributors"
 SPDX-License-Identifier = "Apache-2.0"
 
+# Data and example files
 [[annotations]]
-path = ["CHANGELOG.md"]
-SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
-SPDX-License-Identifier = "CC-BY-SA-4.0"
+path = ["examples/**", "experiments/**", "probes/**", "tests/**"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Build and test outputs
+[[annotations]]
+path = ["target/**", "*.json", "*.lock"]
+SPDX-FileCopyrightText = "Chris Hay and contributors"
+SPDX-License-Identifier = "Apache-2.0"
