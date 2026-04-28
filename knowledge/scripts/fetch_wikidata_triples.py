@@ -240,7 +240,7 @@ def _fetch_via_sparql(pid: str, label: str, limit: int, max_retries: int) -> lis
     url = "https://query.wikidata.org/sparql"
     headers = {
         "Accept": "application/sparql-results+json",
-        "User-Agent": "larql-triple-fetcher/1.0 (https://github.com/chrishayuk/chuk-larql-rs)",
+        "User-Agent": "larql-triple-fetcher/1.0 (https://github.com/chrishayuk/larql)",
     }
 
     data = urllib.parse.urlencode({"query": query}).encode()
