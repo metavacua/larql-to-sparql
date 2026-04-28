@@ -1,3 +1,14 @@
+<!--
+SPDX-License-Identifier: CC-BY-SA-4.0
+Copyright 2026 Ian Douglas Lawrence Norman McLean
+
+With attribution to Chris Hay for LARQL:
+https://github.com/chrishayuk/chuk-larql-rs
+
+This documentation is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License.
+https://creativecommons.org/licenses/by-sa/4.0/
+-->
+
 # AGENTS.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
