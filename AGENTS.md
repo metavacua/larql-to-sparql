@@ -89,6 +89,51 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
   - New documentation files include CC BY-SA 4.0 header (see CONTRIBUTING.md for examples)
   - Existing docs inherit their established license
 
+## REUSE Compliance
+
+**Automated REUSE compliance checks:** GitHub Actions workflow `.github/workflows/reuse-compliance.yml` runs `reuse lint` on every push and pull request to validate proper licensing declarations.
+
+**REUSE compliance requirements:**
+- All source files must have `SPDX-License-Identifier` header (Apache-2.0 for `.rs`/`.py`, CC-BY-SA-4.0 for documentation)
+- SPDX headers must be on the first or second line (after shebang if present)
+- No `.reuse/dep5` file used; all licensing declared via file headers
+- CI will fail if any files lack proper SPDX declarations
+
+**How to maintain REUSE compliance:**
+
+1. **New source files** (.rs, .py, build scripts):
+   ```rust
+   // SPDX-License-Identifier: Apache-2.0
+   ```
+
+2. **New documentation files** (README, guides, specs):
+   ```markdown
+   <!--
+   SPDX-License-Identifier: CC-BY-SA-4.0
+   Copyright 2026 Ian Douglas Lawrence Norman McLean
+   
+   With attribution to Chris Hay for LARQL:
+   https://github.com/chrishayuk/chuk-larql-rs
+   
+   This documentation is licensed under the Creative Commons Attribution-ShareAlike 4.0 License.
+   -->
+   ```
+
+3. **Non-code files** (config, data):
+   - If created in the fork: add `# SPDX-License-Identifier: CC-BY-SA-4.0` comment or equivalent
+   - If from original LARQL: keep Apache-2.0
+
+4. **Check compliance locally:**
+   ```bash
+   # Install REUSE tool (Python 3.7+)
+   pip install reuse
+   
+   # Check compliance
+   reuse lint
+   ```
+
+See [REUSE.md](REUSE.md) for detailed REUSE compliance documentation.
+
 ## Key architectural invariants
 
 - **Base vindexes are immutable.** All mutation flows through `PatchedVindex` (overlay) — see [crates/larql-vindex/src/patch/core.rs](crates/larql-vindex/src/patch/). `INSERT/DELETE/UPDATE` auto-start a patch; `SAVE PATCH` persists it as `.vlp` JSON. Never write through to base files.
