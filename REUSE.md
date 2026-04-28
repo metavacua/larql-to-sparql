@@ -3,7 +3,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 Copyright 2026 Ian Douglas Lawrence Norman McLean
 
 With attribution to Chris Hay for LARQL:
-https://github.com/chrishayuk/chuk-larql-rs
+https://github.com/chrishayuk/larql
 
 This documentation is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License.
 https://creativecommons.org/licenses/by-sa/4.0/
@@ -83,7 +83,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 Copyright 2026 Ian Douglas Lawrence Norman McLean
 
 With attribution to Chris Hay for LARQL:
-https://github.com/chrishayuk/chuk-larql-rs
+https://github.com/chrishayuk/larql
 
 This documentation is licensed under the Creative Commons Attribution-ShareAlike 4.0 License.
 -->
@@ -201,7 +201,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 Copyright 2026 Ian Douglas Lawrence Norman McLean
 
 With attribution to Chris Hay for LARQL:
-https://github.com/chrishayuk/chuk-larql-rs
+https://github.com/chrishayuk/larql
 
 This documentation is licensed under the Creative Commons Attribution-ShareAlike 4.0 License.
 -->
@@ -247,12 +247,12 @@ This documentation is licensed under the Creative Commons Attribution-ShareAlike
 - **SPDX License List:** https://spdx.org/licenses/
 - **Apache 2.0 License:** https://opensource.org/licenses/Apache-2.0
 - **CC BY-SA 4.0 License:** https://creativecommons.org/licenses/by-sa/4.0/
-- **LARQL Repository:** https://github.com/chrishayuk/chuk-larql-rs
+- **LARQL Repository:** https://github.com/chrishayuk/larql
 
 ## Attribution
 
 This project is a fork of **LARQL** (Lazarus Query Language), originally created by Chris Hay.
 
-Original repository: https://github.com/chrishayuk/chuk-larql-rs
+Original repository: https://github.com/chrishayuk/larql
 
 The larql-to-sparql fork maintains Apache 2.0 licensing for all source code while adding CC BY-SA 4.0 licensed documentation.
