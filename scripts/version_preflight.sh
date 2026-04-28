@@ -26,16 +26,41 @@
 
 set -euo pipefail
 
+# Range resolution priority:
+#   1. explicit positional argument (e.g. "$base_sha..$head_sha")
+#   2. last v-tag..HEAD if a tag exists
+#   3. fall back to "no bump" with version 0.0.0 (pre-policy history is
+#      grandfathered and must not be classified by this script)
+explicit_range="${1:-}"
 last_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
-if [[ -z "$last_tag" ]]; then
-  base_version="0.0.0"
-  range="HEAD"
-else
+if [[ -n "$explicit_range" ]]; then
+  range="$explicit_range"
+  base_version="${last_tag#v}"
+  base_version="${base_version:-0.0.0}"
+elif [[ -n "$last_tag" ]]; then
   base_version="${last_tag#v}"
   range="${last_tag}..HEAD"
+else
+  echo "version_preflight: no v-tag found and no range given; reporting no bump" >&2
+  base_version="0.0.0"
+  next_version="0.0.0"
+  echo "version_preflight: base=$base_version bump=none next=$next_version"
+  echo "$next_version"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    {
+      echo "next_version=${next_version}"
+      echo "bump_kind=none"
+      echo "base_version=${base_version}"
+    } >> "$GITHUB_OUTPUT"
+  fi
+  exit 0
 fi
 
-IFS='.' read -r major minor patch <<<"$base_version"
+IFS='.' read -r major minor patch_raw <<<"$base_version"
+# Strip any pre-release / build-metadata suffix from the patch component
+# (e.g. `1.2.3-rc1` -> patch=3) so the arithmetic increment below cannot
+# trip on a non-numeric value.
+patch="${patch_raw%%[^0-9]*}"
 if [[ -z "${major:-}" || -z "${minor:-}" || -z "${patch:-}" ]]; then
   echo "version_preflight: cannot parse base version '$base_version'" >&2
   exit 2
@@ -64,7 +89,9 @@ while IFS= read -r -d '' commit; do
   type="${BASH_REMATCH[1]}"
   bang="${BASH_REMATCH[3]}"
 
-  if [[ -n "$bang" ]] || printf '%s\n' "$commit" | grep -qE '^BREAKING CHANGE:'; then
+  # Conventional Commits permits both `BREAKING CHANGE:` (space) and
+  # `BREAKING-CHANGE:` (hyphen) as footer tokens.
+  if [[ -n "$bang" ]] || printf '%s\n' "$commit" | grep -qE '^BREAKING[ -]CHANGE:'; then
     bump="major"
     break  # major dominates; no need to keep scanning
   fi

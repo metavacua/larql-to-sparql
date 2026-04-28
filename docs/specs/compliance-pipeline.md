@@ -88,7 +88,7 @@ is intentionally scoped to candidate-validity only.
 # One-time setup (per clone).
 pipx install pre-commit
 pre-commit install --install-hooks
-pre-commit install --hook-type commit-msg
+pre-commit install --hook-type commit-msg --hook-type pre-push
 
 # Per-change loop.
 git checkout -b feat/short-description
