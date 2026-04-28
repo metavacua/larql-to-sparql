@@ -75,6 +75,20 @@ uv run --no-sync pytest tests/               # run binding tests
 
 Or via the Makefile: `make python-setup | python-build | python-test | python-clean`.
 
+## Versioning, changelogs, and licensing
+
+**Semantic versioning per crate:** Each crate has an independent version in its `Cargo.toml`. Start new crates at `0.1.0`. Bump independently based on stability: `0.1.0` (initial/unstable) → `0.2.0` (API-breaking changes) → `1.0.0` (stable).
+
+**Per-crate changelogs:** Each crate has a `CHANGELOG.md` file in [Keep a Changelog v1.1](https://keepachangelog.com/en/1.1.0/) format. Track additions, fixes, breaking changes, and deprecations in `[Unreleased]` section; move to dated version entry at release. Maintainers update CHANGELOG.md as part of release workflow.
+
+**License headers:**
+- **Source code** (Rust, Python, build scripts): Apache 2.0 license
+  - Add `// SPDX-License-Identifier: Apache-2.0` (Rust) or `# SPDX-License-Identifier: Apache-2.0` (Python) at the top of each file
+  - No copyright attribution or contributor notes required in source headers
+- **Documentation** (CHANGELOG.md, CONTRIBUTING.md, docs/*.md): Creative Commons BY-SA 4.0 license
+  - New documentation files include CC BY-SA 4.0 header (see CONTRIBUTING.md for examples)
+  - Existing docs inherit their established license
+
 ## Key architectural invariants
 
 - **Base vindexes are immutable.** All mutation flows through `PatchedVindex` (overlay) — see [crates/larql-vindex/src/patch/core.rs](crates/larql-vindex/src/patch/). `INSERT/DELETE/UPDATE` auto-start a patch; `SAVE PATCH` persists it as `.vlp` JSON. Never write through to base files.
