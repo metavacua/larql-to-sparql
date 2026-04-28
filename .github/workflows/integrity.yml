@@ -27,8 +27,9 @@ jobs:
       # 3. Ensure CHANGELOG.md was modified in PR
       - name: Changelog Enforcer
         run: |
-          # Check if CHANGELOG.md appears in the PR diff
-          if ! git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -q "^CHANGELOG.md$"; then
+          # Get the merge base and check if CHANGELOG.md was modified
+          MERGE_BASE=$(git merge-base ${{ github.base_ref }} HEAD)
+          if ! git diff --name-only $MERGE_BASE HEAD | grep -q "^CHANGELOG.md$"; then
             echo "::error::CHANGELOG.md must be modified in this PR"
             exit 1
           fi
@@ -38,15 +39,12 @@ jobs:
       - name: SemVer Dry-Run
         id: semver
         run: |
-          # Count commit types since last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$LAST_TAG" ]; then
-            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
+          # Count commit types in this PR
+          MERGE_BASE=$(git merge-base ${{ github.base_ref }} HEAD)
 
-          BREAKING=$(git log $LAST_TAG..HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
-          FEATURES=$(git log $LAST_TAG..HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
-          FIXES=$(git log $LAST_TAG..HEAD --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
+          BREAKING=$(git log $MERGE_BASE..HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
+          FEATURES=$(git log $MERGE_BASE..HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
+          FIXES=$(git log $MERGE_BASE..HEAD --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
 
           echo "breaking-changes=$BREAKING" >> $GITHUB_OUTPUT
           echo "features=$FEATURES" >> $GITHUB_OUTPUT
