@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use kv_cache_benchmark::graph_walk::fallback::TierDistribution;
 use kv_cache_benchmark::graph_walk::walk_state::{WalkMode, WalkState, WalkTier};
 use kv_cache_benchmark::graph_walk::GraphWalk;

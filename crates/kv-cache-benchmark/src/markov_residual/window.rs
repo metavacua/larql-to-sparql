@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Sliding window over residual vectors.
 ///
 /// Maintains the most recent `capacity` residuals. Older residuals

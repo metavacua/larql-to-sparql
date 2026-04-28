@@ -1,4 +1,6 @@
 //! Prompt sets for accuracy testing.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! 100 diverse prompts spanning: factual, completion, reasoning,
 //! code, arithmetic, scientific, geographic, conversational.

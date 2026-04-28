@@ -1,4 +1,6 @@
 //! Top-level `UnlimitedContextEngine` — Rust port of
+// SPDX-License-Identifier: Apache-2.0
+
 //! `chuk-mlx/src/chuk_lazarus/inference/context/research/unlimited_engine.py`.
 //!
 //! Window lifecycle:

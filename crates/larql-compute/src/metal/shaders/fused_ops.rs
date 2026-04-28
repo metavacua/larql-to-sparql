@@ -1,4 +1,6 @@
 //! Fused operations — eliminate intermediate buffers and extra dispatches.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All norm kernels use cooperative SIMD reduction for sum_sq instead of
 //! redundant per-thread full-vector reads. This reduces memory reads from

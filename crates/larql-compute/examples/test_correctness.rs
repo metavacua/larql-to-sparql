@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 fn main() {
     use larql_compute::cpu::q4::{quantize_q4_0, quantize_to_q8};
     use larql_compute::{cpu_backend, default_backend};

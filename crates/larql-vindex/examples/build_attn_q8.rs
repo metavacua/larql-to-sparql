@@ -1,4 +1,6 @@
 //! Convert attn_weights.bin (f32) → attn_weights_q8.bin (Q8_0).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Q8 for attention projections — higher precision than Q4 (matches llama.cpp strategy).
 //! Uses weight_manifest.json for exact per-matrix sizes (handles GQA).

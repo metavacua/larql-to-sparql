@@ -1,4 +1,6 @@
 //! # Element expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Periodic-table lookups. Name matching uses lowercase IUPAC identifiers
 //! (e.g. `"gold"`, `"sulfur"`, `"aluminium"`); symbol matching is

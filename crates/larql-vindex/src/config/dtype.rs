@@ -1,4 +1,6 @@
 //! Data type conversion utilities for vindex storage.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Supports f32 (default) and f16 (half precision) storage.
 //! Half-precision conversion functions are in `larql_models::quant::half`.

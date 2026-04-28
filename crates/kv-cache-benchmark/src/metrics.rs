@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Accuracy and compression metrics for strategy comparison.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Metrics {

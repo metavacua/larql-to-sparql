@@ -1,4 +1,6 @@
 //! Attention weight loaders + per-layer accessors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads the per-layer Q / K / V / O projection weights in Q8, Q4_K, or
 //! Q4_0 format from `attn_weights_*.bin` files plus their JSON

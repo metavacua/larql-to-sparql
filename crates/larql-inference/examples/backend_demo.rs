@@ -1,4 +1,6 @@
 //! Backend demo — shows auto-calibrated hybrid CPU/Metal dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates:
 //! - Auto-calibration: measures CPU vs Metal on this hardware, finds crossover

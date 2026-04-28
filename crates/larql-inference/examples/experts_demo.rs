@@ -1,4 +1,6 @@
 //! Demo: WASM expert registry — structured op+args calls across all experts.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This demo proves calls traverse a real WASM sandbox:
 //!   1. Every expert is loaded from a `.wasm` file on disk. The file path,

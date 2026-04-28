@@ -1,4 +1,6 @@
 //! Edge demo — construction, metadata, compact serialization.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run --release -p larql-core --example edge_demo
 

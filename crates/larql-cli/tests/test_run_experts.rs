@@ -1,4 +1,6 @@
 //! CLI surface tests for `larql run --experts`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Covers argument-validation contract only — the end-to-end happy path
 //! requires a 4B model on disk and a Metal GPU and is exercised manually.

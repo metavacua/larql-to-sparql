@@ -1,4 +1,6 @@
 //! Phase 1b of `INSERT INTO EDGES` (Compose mode): forward-pass the
+// SPDX-License-Identifier: Apache-2.0
+
 //! canonical prompt through the base vindex to capture per-layer
 //! residuals, plus opportunistically capture decoy residuals for any
 //! install layer not already in `session.decoy_residual_cache`.

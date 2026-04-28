@@ -1,4 +1,6 @@
 //! Core trace types.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;

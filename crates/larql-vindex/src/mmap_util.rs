@@ -1,4 +1,6 @@
 //! Optimized mmap helpers for vindex file loading.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Provides platform-aware mmap optimization with automatic fallback:
 //!

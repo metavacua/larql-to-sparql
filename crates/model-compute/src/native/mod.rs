@@ -1,4 +1,6 @@
 //! Native bounded kernels — arithmetic, datetime. Deterministic, pure,
+// SPDX-License-Identifier: Apache-2.0
+
 //! hard-capped cost. See individual module docs for syntax.
 
 pub mod arithmetic;

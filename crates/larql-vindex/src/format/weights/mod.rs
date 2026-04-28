@@ -1,4 +1,6 @@
 //! Model weights serialization to/from .vindex directories.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Split format (v2): separate files per component, no duplication.
 //!   attn_weights.bin  — Q, K, V, O per layer

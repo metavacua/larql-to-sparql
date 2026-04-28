@@ -1,4 +1,6 @@
 //! WalkFfnConfig — per-layer K schedule for the unified walk kernel.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `None` selects the dense-equivalent mmap path for that layer
 //! (interleaved / q4 / full_mmap — chosen internally based on what

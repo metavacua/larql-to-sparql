@@ -1,4 +1,6 @@
 //! Output projection (`attn_out → h_post_attn_input`) — per position.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Thin wrapper over [`super::quant_matvec::encode`] that routes the
 //! attention output through the right shader based on the O-weight format:

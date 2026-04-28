@@ -1,4 +1,6 @@
 //! Criterion benchmarks for `COMPILE INTO VINDEX` — measures the
+// SPDX-License-Identifier: Apache-2.0
+
 //! end-to-end bake on a small synthetic vindex with a non-trivial
 //! patch session. The bake does three things: hard-link unchanged
 //! weight files, fresh-write `gate_vectors.bin`, and (if there are

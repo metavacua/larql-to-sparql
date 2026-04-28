@@ -1,4 +1,6 @@
 //! `RemoteMoeBackend` — Mixture-of-Experts weight-shard dispatch over HTTP.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Not to be confused with [`crate::experts`] — that module hosts deterministic
 //! WASM compute experts (gcd, base64, …). This module dispatches *MoE expert

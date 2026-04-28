@@ -1,4 +1,6 @@
 //! End-to-end Apollo query pipeline: real model + real apollo11_store.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Exercises routing + entry retrieval + forward-with-injection + greedy
 //! top-1 decode. Gated on `real-model` because it needs Gemma 3 4B weights.

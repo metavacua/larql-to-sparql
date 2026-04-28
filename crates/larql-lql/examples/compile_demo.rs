@@ -1,4 +1,6 @@
 //! End-to-end COMPILE demo
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Proves that `COMPILE CURRENT INTO VINDEX` produces a complete standalone
 //! vindex — same shape as the source, INFER works on it, and the inserted

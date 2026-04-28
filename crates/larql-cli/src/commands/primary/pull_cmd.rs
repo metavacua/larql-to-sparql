@@ -1,4 +1,6 @@
 //! `larql pull` — download a vindex (or a slice, or a whole collection)
+// SPDX-License-Identifier: Apache-2.0
+
 //! and cache it locally, with ollama-style progress bars and free resume.
 //!
 //! Four resolution paths, in order of specificity:

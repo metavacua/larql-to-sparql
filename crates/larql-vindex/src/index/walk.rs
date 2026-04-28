@@ -1,4 +1,6 @@
 //! Walk FFN data — mmap'd feature-major down and up projection vectors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Manages down_features.bin and up_features.bin — [intermediate, hidden] per layer,
 //! f32 files where each feature's vector is contiguous for zero-copy BLAS access.

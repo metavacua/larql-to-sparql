@@ -1,4 +1,6 @@
 //! Benchmark runner for real model integration.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs all four strategies on the same prompt through Gemma 3-4B,
 //! measures wall-clock, memory, and accuracy vs the Standard KV baseline.

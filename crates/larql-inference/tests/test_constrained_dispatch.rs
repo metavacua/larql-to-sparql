@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Constrained generation → expert dispatch test (Option 1 path).
 ///
 /// Uses `generate_cached_constrained` with a JSON op-grammar mask closure.

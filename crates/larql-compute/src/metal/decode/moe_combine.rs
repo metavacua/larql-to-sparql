@@ -1,4 +1,6 @@
 //! CPU-side combine step for hybrid MoE layers.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs after the GPU dense-FFN has written `new_h = h_post_attn + _1(dense)`
 //! and the CPU MoE block has added `moe_out` into `new_h` in place. At that

@@ -1,4 +1,6 @@
 //! Gate KNN search — brute-force, batched, and HNSW.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All gate KNN methods for VectorIndex: single-query, batched, expert-scoped,
 //! score computation, HNSW integration, and top-K selection.

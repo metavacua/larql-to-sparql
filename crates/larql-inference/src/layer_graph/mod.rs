@@ -1,4 +1,6 @@
 //! LayerGraph — pluggable per-layer routing for attention and FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The transformer layer loop receives a residual, routes through attention
 //! and FFN, and produces the next residual. The mechanism behind each step

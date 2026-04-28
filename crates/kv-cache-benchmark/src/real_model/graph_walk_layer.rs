@@ -1,4 +1,6 @@
 //! Graph Walk strategy on the real model.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses vindex walk: gate KNN → feature → down KNN → token prediction.
 //! No forward pass for factual queries — graph lookup only.

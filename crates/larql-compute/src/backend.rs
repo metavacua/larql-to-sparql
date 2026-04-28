@@ -1,4 +1,6 @@
 //! `ComputeBackend` trait — the single interface for all hardware backends.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Callers use this trait exclusively. The implementation behind it can be
 //! CPU BLAS, Metal GPU, CUDA, or anything else. The trait covers:

@@ -1,4 +1,6 @@
 //! `larql run <model> [prompt]` — ollama-style one-shot inference / chat.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wraps the richer `larql dev walk --predict` pipeline behind a slim flag
 //! set. If a prompt is given, runs one forward pass and prints the top-N

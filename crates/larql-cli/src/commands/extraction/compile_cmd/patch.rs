@@ -1,4 +1,6 @@
 //! Vindex-patch compilation: read .vlp patches, install one edge per Insert op.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Trigger comes from each patch's stored gate vector; write comes from the
 //! down_meta target token's embedding when present.

@@ -1,4 +1,6 @@
 //! POST /v1/walk-ffn — decoupled inference protocol.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! L2 FFN cache: single-position (`seq_len == 1`) requests with `full_output`
 //! check the per-model L2 cache before running WalkFfn. Cache key is derived

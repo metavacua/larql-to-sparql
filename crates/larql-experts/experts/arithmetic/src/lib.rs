@@ -1,4 +1,6 @@
 //! # Arithmetic expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Numeric + number-theory + base-conversion + Roman + percentage ops. All
 //! inputs and outputs are typed JSON values; no natural-language parsing.

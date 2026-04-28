@@ -1,4 +1,6 @@
 //! Residual stream trace — the complete record of inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two representations:
 //! - `ResidualTrace`: in-memory trace from a single forward pass

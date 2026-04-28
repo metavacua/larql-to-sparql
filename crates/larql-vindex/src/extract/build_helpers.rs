@@ -1,4 +1,6 @@
 //! Helpers for the `build_vindex` extraction pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each function is a discrete pipeline stage or utility used by
 //! `super::build::build_vindex`:

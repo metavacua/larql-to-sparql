@@ -1,4 +1,6 @@
 //! POST /v1/expert/{layer}/{expert_id} — remote expert endpoint for MoE inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! A shard server started with `--experts START-END` owns a contiguous range of
 //! experts. The inference client routes individual expert calls to the right

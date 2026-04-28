@@ -1,4 +1,6 @@
 //! Criterion benchmarks for the core vindex operations.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures: gate KNN (per-layer + walk), walk, feature lookup, save,
 //! load, mutate, and MoE scaling. All against synthetic in-memory

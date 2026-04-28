@@ -1,4 +1,6 @@
 //! Demonstrate model loading from a directory or GGUF file.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Shows how larql-models loads weights, detects architecture, and exposes
 //! tensor information. Requires a model path as argument.

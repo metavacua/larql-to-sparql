@@ -1,4 +1,6 @@
 //! Q4 matvec v2: optimised for throughput.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Changes from v1:
 //! 1. Remove threadgroup shared memory (Q8 input fits in L1 cache at 2560B)

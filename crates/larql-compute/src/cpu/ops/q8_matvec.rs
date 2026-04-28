@@ -1,4 +1,6 @@
 //! Q8 matrix-vector multiply.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! scores[N] = Q8_weights[N, K] @ Q8_x[K]
 //!

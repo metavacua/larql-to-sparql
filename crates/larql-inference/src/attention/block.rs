@@ -1,4 +1,6 @@
 //! CPU attention block — full layer attention computation.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! norm → Q/K/V projection → bias → V-norm → QK-norm → RoPE → GQA → O projection → residual.
 //! Supports KV sharing (reuse K/V from a source layer).

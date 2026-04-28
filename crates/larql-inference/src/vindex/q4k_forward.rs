@@ -1,4 +1,6 @@
 //! CPU forward pass driven by a Q4_K / Q6_K vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The normal CPU path reads attention Q/K/V/O and FFN gate/up/down from
 //! `weights.tensors` as f32 matrices. For a Q4 vindex those tensors were

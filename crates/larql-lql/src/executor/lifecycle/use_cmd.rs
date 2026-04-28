@@ -1,4 +1,6 @@
 //! `USE` — point the session at a vindex, model weights, or remote server.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::path::PathBuf;
 

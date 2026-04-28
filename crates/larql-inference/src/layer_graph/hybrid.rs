@@ -1,4 +1,6 @@
 //! Hybrid pipeline — GPU attention + vindex walk FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Replaces the dense GPU FFN (13.6ms for 34 layers) with vindex walk FFN
 //! (~1ms/layer via gate KNN + sparse mmap accumulation).

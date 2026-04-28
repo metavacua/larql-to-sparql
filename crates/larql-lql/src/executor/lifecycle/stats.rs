@@ -1,4 +1,6 @@
 //! `STATS` — vindex / model summary, knowledge-graph coverage, layer bands.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use crate::error::LqlError;
 use crate::executor::helpers::{dir_size, format_bytes, format_number};

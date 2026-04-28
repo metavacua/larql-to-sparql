@@ -1,4 +1,6 @@
 //! Benchmark the graph engine — insert, query, search, algorithms, serialization.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run --release -p larql-core --example bench_graph
 

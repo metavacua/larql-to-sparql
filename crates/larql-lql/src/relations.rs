@@ -1,4 +1,6 @@
 //! Relation type classifier for DESCRIBE edges.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses discovered cluster centres from the vindex (computed during build).
 //! Falls back to embedding-direction heuristics if no clusters are available.

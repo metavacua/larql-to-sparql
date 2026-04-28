@@ -1,4 +1,6 @@
 //! f16-at-rest embedding store with L1 f32 cache.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! On disk, `embeddings.bin` is stored as f16 (half-precision), which is
 //! 1.34 GB for Gemma 3 4B vs 2.69 GB for the f32 copy that

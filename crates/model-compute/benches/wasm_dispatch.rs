@@ -1,4 +1,6 @@
 //! Wasmtime cost baseline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three measurements that inform whether embedding a WASM solver in a
 //! neural-model forward pass is viable:

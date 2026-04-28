@@ -1,4 +1,6 @@
 //! Layer normalization and residual stream operations.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use ndarray::Array2;
 

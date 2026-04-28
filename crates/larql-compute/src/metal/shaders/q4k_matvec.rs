@@ -1,4 +1,6 @@
 //! Q4_K matrix-vector multiply — GGUF 144-byte block layout.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Block layout:
 //!   [0..2]    f16 super-block scale `d`

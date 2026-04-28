@@ -1,4 +1,6 @@
 //! Grouped-Query Attention (GQA) — causal attention with BLAS-fused dot products.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Memory-efficient: O(seq) per position, never materializes full [seq, seq] matrix.
 //! Uses BLAS gemv for both Q·K scores and softmax·V accumulation.

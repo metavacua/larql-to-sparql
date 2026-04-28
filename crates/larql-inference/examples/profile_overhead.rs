@@ -1,4 +1,6 @@
 //! Profile the forward pass overhead — measures each phase separately
+// SPDX-License-Identifier: Apache-2.0
+
 //! to find where the 155ms of unexplained overhead lives.
 //!
 //! Usage:

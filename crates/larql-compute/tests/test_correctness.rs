@@ -1,4 +1,6 @@
 //! Correctness tests: verify all backends produce matching output.
+// SPDX-License-Identifier: Apache-2.0
+
 
 extern crate blas_src;
 

@@ -1,4 +1,6 @@
 //! POST /v1/insert — constellation knowledge insertion.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Full trace-guided multi-layer insert: forward pass to capture residuals,
 //! use as gate vectors, write down vector overrides with target embedding.

@@ -1,4 +1,6 @@
 //! Integration tests for real model strategies.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These tests require:
 //!   1. The `real-model` feature flag

@@ -1,4 +1,6 @@
 //! Pair-based relation matching demo.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates matching (input, output) token pairs against
 //! Wikidata triples and WordNet relations to label clusters.

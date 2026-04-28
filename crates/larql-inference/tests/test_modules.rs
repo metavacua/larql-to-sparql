@@ -1,4 +1,6 @@
 //! Unit tests for inference modules: attention, ffn, residual.
+// SPDX-License-Identifier: Apache-2.0
+
 
 mod test_residual {
     use larql_inference::residual::{rms_norm, rms_norm_heads};

@@ -1,4 +1,6 @@
 //! Attention computation — RoPE, GQA, causal masking, GPU dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Submodules:
 //! - `rope`: Rotary Position Embeddings (full and partial rotation)

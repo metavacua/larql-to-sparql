@@ -1,4 +1,6 @@
 //! Criterion benchmarks for the LQL parser.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures parser throughput across the four major statement families
 //! (lifecycle, query, mutation, introspection) and the cost of parsing

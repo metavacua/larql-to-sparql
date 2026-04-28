@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod components;
 pub mod diff;
 pub mod filter;

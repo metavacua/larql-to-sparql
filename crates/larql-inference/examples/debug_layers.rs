@@ -1,4 +1,6 @@
 //! Debug: test decode_token output at 1, 2, 5, 10, 34 layers
+// SPDX-License-Identifier: Apache-2.0
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = larql_inference::InferenceModel::load("google/gemma-3-4b-it")?;

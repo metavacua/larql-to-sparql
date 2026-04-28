@@ -1,4 +1,6 @@
 //! Memory analysis — profiles RSS, heap, and mmap usage during walk inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Shows what's loaded, what's mmap'd, and what actually gets touched
 //! during a walk forward pass vs dense forward pass.

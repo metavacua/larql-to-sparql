@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod attention_capture_cmd;
 pub mod attention_walk_cmd;
 pub mod attn_bottleneck_cmd;

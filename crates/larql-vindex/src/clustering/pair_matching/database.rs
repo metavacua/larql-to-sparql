@@ -1,4 +1,6 @@
 //! Reference databases for pair-based relation labeling.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Holds the `RelationDatabase` data type (a name → (subject, object)
 //! pair set), the loaders for Wikidata + WordNet, and the bundled

@@ -1,4 +1,6 @@
 //! Python bindings for LQL sessions.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wraps larql_lql::Session to provide LQL query execution from Python.
 //! Two interfaces, one session:

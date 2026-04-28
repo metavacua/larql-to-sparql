@@ -1,4 +1,6 @@
 //! Full pipeline benchmark: 21 layers × (attention + FFN) in one Metal submission.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-compute --features metal --example bench_full_pipeline

@@ -1,4 +1,6 @@
 //! HuggingFace Hub integration — download and upload vindexes.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Vindexes are stored as HuggingFace dataset repos. Each file in the vindex
 //! directory maps 1:1 to a file in the repo. HuggingFace's CDN handles

@@ -1,4 +1,6 @@
 //! Dense FFN backend — full matrix multiply, architecture-correct.
+// SPDX-License-Identifier: Apache-2.0
+
 //! This is the ground truth: identical to model inference.
 
 use ndarray::Array2;

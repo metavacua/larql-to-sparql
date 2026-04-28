@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Benchmark runner: sweeps context lengths × strategies × models.
 /// Outputs JSON + formatted table.
 use crate::{model_config::ModelConfig, run_strategy_benchmark, KvStrategy, StrategyResult};

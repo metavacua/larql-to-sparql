@@ -1,4 +1,6 @@
 //! Storage-tier walkthrough for the LSM-style storage engine.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! LARQL keeps INSERTed edges across three tiers:
 //!

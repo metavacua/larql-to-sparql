@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+// SPDX-License-Identifier: Apache-2.0
+
 #![warn(unsafe_code)]
 
 //! Platform detection and capability inference for LARQL.

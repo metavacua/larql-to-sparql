@@ -1,4 +1,6 @@
 //! Streaming Q4_K extract showcase.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Builds a tiny synthetic safetensors model in a temp directory, runs
 //! the streaming vindex extractor twice — once as float (`QuantFormat::None`)

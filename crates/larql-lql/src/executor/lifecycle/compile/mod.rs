@@ -1,4 +1,6 @@
 //! `COMPILE ... INTO {MODEL, VINDEX}` — dispatch + shared MEMIT fact
+// SPDX-License-Identifier: Apache-2.0
+
 //! collection.
 
 use std::path::PathBuf;

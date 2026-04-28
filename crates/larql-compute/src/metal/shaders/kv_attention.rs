@@ -1,4 +1,6 @@
 //! KV-cached attention for token generation (seq=1 decode).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two kernels:
 //!   - kv_attention_fast: T ≤ 1024, small threadgroup scores array (4KB), high occupancy

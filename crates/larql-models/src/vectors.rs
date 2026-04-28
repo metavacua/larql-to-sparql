@@ -1,4 +1,6 @@
 //! Shared NDJSON vector record types.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These types are the interchange format between extraction (inference)
 //! and loading. Defined here so multiple crates can use them

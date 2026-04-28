@@ -1,4 +1,6 @@
 //! Server demo — builds a synthetic vindex and shows what the server would return.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run -p larql-server --example server_demo
 

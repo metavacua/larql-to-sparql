@@ -1,4 +1,6 @@
 //! # Luhn expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Luhn checksum validation and card-network detection. Non-digit characters
 //! in `number` are ignored (so `"4532-0151-1283-0366"` works as well as the

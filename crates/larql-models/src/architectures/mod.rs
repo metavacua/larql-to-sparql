@@ -1,4 +1,6 @@
 //! Model architecture implementations.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each file corresponds to a HuggingFace `model_type` value.
 //! Every architecture implements [`ModelArchitecture`](crate::config::ModelArchitecture)

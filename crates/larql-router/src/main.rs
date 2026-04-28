@@ -1,4 +1,6 @@
 //! larql-router — transparent layer-sharding proxy for larql-server.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two dispatch modes:
 //!   --shards  "0-16=http://host-a:8080,17-33=http://host-b:8081"

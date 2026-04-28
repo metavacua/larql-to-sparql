@@ -1,4 +1,6 @@
 //! f32 matmul operations via Metal compute shaders.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tiled sgemm (32×32) for large matmuls, falls back to CPU for small ones.
 //! The FLOP threshold is set by calibration.

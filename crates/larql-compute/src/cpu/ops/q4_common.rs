@@ -1,4 +1,6 @@
 //! Shared Q4 utilities for CPU backend.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! C FFI declarations for the vdotq_s32 kernel (csrc/q4_dot.c)
 //! and Q8 quantization helper.

@@ -1,4 +1,6 @@
 //! Quick cosine similarity test: Q4 vs f32 attention projections on real weights.
+// SPDX-License-Identifier: Apache-2.0
+
 //! If cosine > 0.99, attention routing survives Q4. If < 0.95, need Q8.
 //!
 //! Usage:

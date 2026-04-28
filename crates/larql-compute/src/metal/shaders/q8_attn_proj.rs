@@ -1,4 +1,6 @@
 //! Fused Q8 QKV projection: all 3 attention projections in one dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses simdgroup reduction (like q4_matvec_v4) for maximum throughput.
 //! 8 rows per threadgroup, 32 lanes per simdgroup, simd_sum for reduction.

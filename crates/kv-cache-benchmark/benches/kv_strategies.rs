@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use kv_cache_benchmark::markov_residual::MarkovResidual;
 use kv_cache_benchmark::model_config::ModelConfig;

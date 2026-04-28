@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Routing table: template → layer features mapping.
 ///
 /// 23,697 unique features from 240 passes. 44 sub-centroids,

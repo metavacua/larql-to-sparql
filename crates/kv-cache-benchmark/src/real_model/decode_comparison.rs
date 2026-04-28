@@ -1,4 +1,6 @@
 //! Bounded-state decode comparison: Full-KV vs RS-decode.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This is the actual experiment the email asks for: run `rs_decode_step`
 //! (which reconstructs K/V from stored residuals) against a full-KV decode

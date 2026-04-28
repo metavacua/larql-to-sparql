@@ -1,4 +1,6 @@
 //! `larql show <model>` — print vindex metadata.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Resolves the model the same way `run` does, then dumps `index.json` plus
 //! file inventory (size per component) so you can see what's actually in

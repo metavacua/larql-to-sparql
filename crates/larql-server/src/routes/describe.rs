@@ -1,4 +1,6 @@
 //! GET /v1/describe — query all knowledge edges for an entity.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 use std::sync::Arc;

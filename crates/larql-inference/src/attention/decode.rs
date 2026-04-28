@@ -1,4 +1,6 @@
 //! Decode-step attention — GQA for a single new token against a
+// SPDX-License-Identifier: Apache-2.0
+
 //! growing KV cache.
 //!
 //! Prefill does full O(seq²) attention and returns K/V per layer. Decode

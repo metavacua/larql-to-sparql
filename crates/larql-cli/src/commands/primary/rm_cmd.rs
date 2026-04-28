@@ -1,4 +1,6 @@
 //! `larql rm <model>` — evict a cached vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Cache-only — never downloads. Accepts full `owner/name`, a cache
 //! shorthand, or `<name>` for a local-cache entry.

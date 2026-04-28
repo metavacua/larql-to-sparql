@@ -1,4 +1,6 @@
 //! Split-profiling variant of `decode_token`: 3 command buffers per layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Activated by `LARQL_PROFILE_SPLIT=1` via `generate`.
 use super::*;
 

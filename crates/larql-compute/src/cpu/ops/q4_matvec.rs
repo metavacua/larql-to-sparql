@@ -1,4 +1,6 @@
 //! Q4×Q8 matrix-vector multiply via C kernel.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! scores[N] = Q4[N, K] @ x[K]
 //!

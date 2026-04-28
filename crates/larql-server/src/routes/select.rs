@@ -1,4 +1,6 @@
 //! POST /v1/select — SQL-style edge query.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::sync::Arc;
 

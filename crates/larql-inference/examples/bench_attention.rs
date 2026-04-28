@@ -1,4 +1,6 @@
 //! Fused attention benchmark — measures the online-softmax kernel
+// SPDX-License-Identifier: Apache-2.0
+
 //! against a naive materialized-scores reference at transformer-realistic
 //! dimensions. Synthetic data only — no model weights needed.
 //!

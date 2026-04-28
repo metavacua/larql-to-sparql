@@ -1,4 +1,6 @@
 //! CPU-side MoE (Mixture-of-Experts) forward pass for hybrid models (Gemma 4 26B A4B).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Called when a layer has `is_hybrid_moe() == true`. Computes the expert block
 //! in parallel with the dense FFN and returns the expert contribution for summation.

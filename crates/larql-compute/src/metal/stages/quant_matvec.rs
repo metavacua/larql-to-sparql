@@ -1,4 +1,6 @@
 //! Format-aware single-vector matvec dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! One entry point, `encode`, that routes to the right shader based on the
 //! weight's quantization format:

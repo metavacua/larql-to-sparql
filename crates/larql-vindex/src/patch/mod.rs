@@ -1,4 +1,6 @@
 //! Patch system — lightweight, shareable knowledge diffs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! - `format`:    on-the-wire `.vlp` JSON — `VindexPatch`, `PatchOp`,
 //!                `PatchDownMeta`, base64 helpers.

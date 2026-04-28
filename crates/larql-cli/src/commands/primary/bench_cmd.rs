@@ -1,4 +1,6 @@
 //! `larql bench <model>` — end-to-end decode benchmark on a real vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures prefill + autoregressive decode on a vindex, reports per-stage
 //! breakdown (GPU forward / lm_head / norm / embed / detok), and optionally

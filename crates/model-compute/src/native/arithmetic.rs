@@ -1,4 +1,6 @@
 //! Arithmetic kernel — integer and float arithmetic with common aggregates.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! # Syntax
 //!

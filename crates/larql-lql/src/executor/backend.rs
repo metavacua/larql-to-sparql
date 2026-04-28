@@ -1,4 +1,6 @@
 //! Backend enum, patch-recording state, and Session accessors that
+// SPDX-License-Identifier: Apache-2.0
+
 //! discriminate on the active backend. Split out of `mod.rs` so that
 //! module contains only `Session` + `execute()` dispatch.
 

@@ -1,4 +1,6 @@
 //! `COMPILE INTO VINDEX`: bake the patch overlay onto a clean copy of
+// SPDX-License-Identifier: Apache-2.0
+
 //! the source vindex so the result is self-contained (no overlay
 //! needed at load time).
 

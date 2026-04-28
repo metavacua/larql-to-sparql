@@ -1,4 +1,6 @@
 //! RemoteWalkBackend — FFN backend that dispatches to a `larql-server` over
+// SPDX-License-Identifier: Apache-2.0
+
 //! HTTP instead of computing locally.
 //!
 //! Implements the same [`FfnBackend`] trait as [`WalkFfn`], so it slots into

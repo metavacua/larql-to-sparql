@@ -1,4 +1,6 @@
 //! Q4 matvec v5: 1 thread per row, 256 rows per TG, no simd_sum.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key difference from v4: no simd reduction overhead. Each thread handles
 //! one complete row, sweeping all blocks sequentially. Q8 input shared via

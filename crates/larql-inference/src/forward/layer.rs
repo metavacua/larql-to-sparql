@@ -1,4 +1,6 @@
 //! Layer dispatch — runs attention + FFN + PLE + layer_scalar for a single layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Orchestrates the per-layer computation: attention (with optional KV sharing),
 //! FFN, per-layer embeddings, and layer scalar multiplication.

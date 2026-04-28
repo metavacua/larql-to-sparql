@@ -1,4 +1,6 @@
 //! Apply the base model's HuggingFace-style chat template to a prompt.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every HF chat model ships a Jinja template in `tokenizer_config.json`
 //! under the `chat_template` key (plus `bos_token` / `eos_token` for

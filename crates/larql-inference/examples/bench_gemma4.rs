@@ -1,4 +1,6 @@
 //! Gemma 4 E2B end-to-end benchmark with component breakdown.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Profiles: embedding, RoPE (sliding vs global), GQA attention, FFN,
 //! PLE, layer_scalar, KV sharing overhead, and full forward pass.

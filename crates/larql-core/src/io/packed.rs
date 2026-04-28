@@ -1,4 +1,6 @@
 //! Packed binary edge format (.larql.pak).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Compact, string-interned format optimized for fast loading of runtime graphs.
 //!

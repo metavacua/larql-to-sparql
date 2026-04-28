@@ -1,4 +1,6 @@
 //! # String-ops expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Basic Unicode string operations. `length` counts chars (not bytes).
 //!

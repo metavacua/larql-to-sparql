@@ -1,4 +1,6 @@
 //! Fused causal attention — one dispatch for the whole layer's QKV → attn_out.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Dispatches `fused_attention` which handles RoPE (optional), QK-norm
 //! (optional), causal GQA softmax, and softcap in a single Metal kernel.

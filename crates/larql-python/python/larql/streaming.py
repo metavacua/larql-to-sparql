@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """
 MLX inference from vindex — mmap'd weights, streamed from SSD.
 

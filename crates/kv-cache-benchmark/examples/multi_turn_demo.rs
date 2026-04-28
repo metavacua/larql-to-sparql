@@ -1,4 +1,6 @@
 //! Multi-Turn Simulation Demo
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Simulates a 25-turn conversation and shows how each strategy's
 //! memory evolves. Produces the crossover plot data.

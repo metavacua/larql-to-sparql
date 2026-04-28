@@ -1,4 +1,6 @@
 //! Shared Q4 utilities and pipeline state container.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use metal::ComputePipelineState;
 

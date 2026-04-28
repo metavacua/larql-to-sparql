@@ -1,4 +1,6 @@
 //! Build interleaved vindex file: gate + up + down packed per layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Layout: [L0_gate | L0_up | L0_down | L1_gate | L1_up | L1_down | ...]
 //! Each layer's 3 matrices are contiguous — one TLB region, one prefetch stream.

@@ -1,4 +1,6 @@
 //! Benchmark the inference pipeline — component by component.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures: embed, RMS norm, RoPE, attention, FFN, full layer, full forward pass.
 //! Uses the actual model weights for realistic numbers.

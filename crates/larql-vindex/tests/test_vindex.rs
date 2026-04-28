@@ -1,4 +1,6 @@
 //! Tests for the larql-vindex crate.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use larql_vindex::{FeatureMeta, GateIndex, VectorIndex, VindexConfig, VindexLayerInfo};
 use ndarray::{ArcArray2, Array1, Array2};

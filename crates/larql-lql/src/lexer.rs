@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// LQL Lexer — tokenises an input string into a stream of `Token`s
 
 #[derive(Debug, Clone, PartialEq)]

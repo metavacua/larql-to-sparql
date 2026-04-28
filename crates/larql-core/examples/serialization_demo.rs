@@ -1,4 +1,6 @@
 //! Serialization demo — JSON vs MessagePack, format detection, bytes API.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run --release -p larql-core --example serialization_demo
 

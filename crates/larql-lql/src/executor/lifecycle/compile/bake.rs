@@ -1,4 +1,6 @@
 //! Weight-file bakers for `COMPILE INTO VINDEX`: rewrite down / gate /
+// SPDX-License-Identifier: Apache-2.0
+
 //! up columns on disk so the compiled vindex is self-contained and no
 //! runtime patch overlay is needed.
 

@@ -1,4 +1,6 @@
 //! Parse a structured op-call from free-form model output.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Models targeted with the prompt
 //!

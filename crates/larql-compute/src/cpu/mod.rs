@@ -1,4 +1,6 @@
 //! CPU compute backend — BLAS for f32, C kernel for Q4.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! On macOS: Accelerate BLAS dispatches through Apple's AMX coprocessor.
 //! On Linux: OpenBLAS or similar.

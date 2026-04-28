@@ -1,4 +1,6 @@
 //! Q4_0 × f32 matrix-vector multiply.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! scores[N] = Q4[N, K] @ f32_x[K]
 //!

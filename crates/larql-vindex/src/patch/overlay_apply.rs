@@ -1,4 +1,6 @@
 //! Patch application — `apply_patch`, `remove_patch`,
+// SPDX-License-Identifier: Apache-2.0
+
 //! `rebuild_overrides` for `PatchedVindex`.
 //!
 //! Walks `VindexPatch::operations` and resolves each one into the

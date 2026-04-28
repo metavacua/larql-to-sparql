@@ -1,4 +1,6 @@
 //! Phase 0.3 — localhost parity check for RemoteWalkBackend.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs the same residual through `WalkFfn` (local, mmap'd vindex) and
 //! `RemoteWalkBackend` (HTTP → larql-server running on localhost) and diffs

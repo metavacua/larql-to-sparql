@@ -1,4 +1,6 @@
 //! Binary `.lknn` save / load for `KnnStore`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Format (little-endian):
 //!   magic   = `b"LKNN"`        (4 bytes)

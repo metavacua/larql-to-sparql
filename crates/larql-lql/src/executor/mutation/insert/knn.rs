@@ -1,4 +1,6 @@
 //! `INSERT INTO EDGES ... MODE KNN` — Architecture B retrieval override.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Captures the model's residual at the install layer for the canonical
 //! prompt and stores it as a KNN key alongside the target token. INFER

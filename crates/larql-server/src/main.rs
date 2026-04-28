@@ -1,4 +1,6 @@
 //! larql-server — HTTP server for vindex knowledge queries.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::path::PathBuf;
 use std::sync::Arc;

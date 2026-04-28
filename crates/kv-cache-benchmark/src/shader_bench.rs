@@ -1,4 +1,6 @@
 //! Phase 3: Shader benchmark harness.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures per-operation GPU timing across the benchmark matrix:
 //!   Operation              CPU f32    Metal fused    Graph only

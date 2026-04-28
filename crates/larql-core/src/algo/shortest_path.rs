@@ -1,4 +1,6 @@
 //! Shortest path algorithms — Dijkstra and A*.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};

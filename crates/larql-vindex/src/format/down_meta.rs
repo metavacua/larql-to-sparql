@@ -1,4 +1,6 @@
 //! Binary down_meta format — compact storage for per-feature output metadata.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Replaces down_meta.jsonl (~160 MB) with a binary format (~30 MB for top_k=10).
 //! Token strings are resolved at read time via the tokenizer.

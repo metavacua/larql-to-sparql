@@ -1,4 +1,6 @@
 //! Linear algebra primitives for MEMIT — Cholesky decomposition and solve.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All operations use f64 for numerical stability (the MEMIT covariance
 //! inverse is ill-conditioned at f32 for ffn_dim > 2048).

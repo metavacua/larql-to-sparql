@@ -1,4 +1,6 @@
 //! Convert lm_head.bin (f32) → lm_head_q4.bin (Q4_0).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-vindex --example build_lm_head_q4 -- <vindex_dir>

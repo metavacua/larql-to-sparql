@@ -1,4 +1,6 @@
 //! ffn_profile — per-phase FFN timing on a loaded vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Times each stage of a K=full walk at one layer:
 //!   gate_scores_batch, q4k_matmul_transb(up), q4k_matmul_transb(down).

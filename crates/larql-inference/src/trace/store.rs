@@ -1,4 +1,6 @@
 //! Mmap'd trace store — append-only file for growing context graphs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! File layout:
 //!   Header (64 bytes): magic, version, hidden_size, n_layers, n_tokens, ...

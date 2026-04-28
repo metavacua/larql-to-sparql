@@ -1,4 +1,6 @@
 //! Model loading — safetensors, MLX, GGUF → ModelWeights.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Handles dtype conversion (f16, bf16 → f32), HuggingFace cache resolution,
 //! and architecture detection.

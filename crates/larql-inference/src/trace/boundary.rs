@@ -1,4 +1,6 @@
 //! Boundary residual store — compressed context for infinite sequences.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Stores one residual vector per window boundary. The Markov property
 //! guarantees each boundary residual is the complete compressed state

@@ -1,4 +1,6 @@
 //! MEMIT closed-form weight editing — compile vindex patches into W_down.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Implements the core MEMIT algorithm from Meng et al. (2022–2023),
 //! adapted for GatedFFN architectures (Gemma, Llama, etc.):

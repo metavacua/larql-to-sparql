@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use kv_cache_benchmark::accuracy::*;
 
 // ── Category 1: Top-1 Token Match infrastructure ──

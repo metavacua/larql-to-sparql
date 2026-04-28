@@ -1,4 +1,6 @@
 //! POST/GET/DELETE /v1/patches — patch management endpoints.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Session-aware: if `X-Session-Id` header is present, patches are scoped
 //! to that session. Otherwise, patches go to the global shared state.

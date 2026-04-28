@@ -1,4 +1,6 @@
 //! K/V capture from the real attention forward pass.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs `run_attention_with_kv()` per layer and collects the post-RoPE K and V
 //! tensors. These are the ground-truth vectors that TurboQuant compresses.

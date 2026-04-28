@@ -1,4 +1,6 @@
 //! Per-expert gated-FFN execution (gate_proj, up_proj, activation, down_proj).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Used by the in-process MoE forward pass (`cpu_moe_forward`) and by the
 //! remote expert server endpoint when one expert's work is delegated to a

@@ -1,4 +1,6 @@
 //! Phase 2 of `INSERT INTO EDGES` (Compose mode): walk the planned
+// SPDX-License-Identifier: Apache-2.0
+
 //! layers, synthesise gate / up / down at each slot via the
 //! `install_compiled_slot` math, then rebuild every gate at that layer
 //! from raw residuals + decoys (cliff-breaker refine stack).

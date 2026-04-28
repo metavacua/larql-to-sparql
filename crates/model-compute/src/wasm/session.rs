@@ -1,4 +1,6 @@
 //! Per-call session — fresh Store with fuel/memory caps, implements the
+// SPDX-License-Identifier: Apache-2.0
+
 //! alloc-write-solve-read ABI over a compiled `Module`.
 
 use wasmtime::{

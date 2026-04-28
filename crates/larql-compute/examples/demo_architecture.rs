@@ -1,4 +1,6 @@
 //! Architecture Overview — guided tour of larql-compute's major design decisions.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs a condensed version of each key capability:
 //!   1. Backend auto-detection (CPU vs Metal)

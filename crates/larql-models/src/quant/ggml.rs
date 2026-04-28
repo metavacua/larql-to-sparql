@@ -1,4 +1,6 @@
 //! GGML block quantization — encode/decode Q4_0, Q4_1, Q5_0, Q5_1, Q8_0.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Data format operations only:
 //! - **Dequantize**: packed bytes → f32 (GGUF loading)

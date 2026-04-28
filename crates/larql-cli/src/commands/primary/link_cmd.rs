@@ -1,4 +1,6 @@
 //! `larql link <path> [--as <name>]` — register a local vindex directory
+// SPDX-License-Identifier: Apache-2.0
+
 //! with the cache so `larql list`/`run`/`show`/`rm` can find it by
 //! shorthand.
 //!

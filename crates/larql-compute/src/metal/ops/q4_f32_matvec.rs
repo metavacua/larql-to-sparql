@@ -1,4 +1,6 @@
 //! Q4×f32 matrix-vector dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out[N] = Q4[N, K] @ f32_x[K]
 //!

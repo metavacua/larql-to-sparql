@@ -1,4 +1,6 @@
 //! Integration tests for the trace module: TraceStore, BoundaryStore, ContextStore.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These are format/IO tests using synthetic data — no real model needed.
 
