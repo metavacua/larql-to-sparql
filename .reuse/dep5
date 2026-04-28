@@ -1,0 +1,29 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: larql-to-sparql
+Upstream-Contact: metavacua
+Source: https://github.com/metavacua/larql-to-sparql
+
+# Configuration files without comment support
+Files: .commitlintrc.json
+Copyright: 2026 Contributors to larql-to-sparql
+License: Apache-2.0
+
+# Workflow files
+Files: .github/workflows/integrity.yml .github/workflows/release.yml
+Copyright: 2026 Contributors to larql-to-sparql
+License: Apache-2.0
+
+# Pre-commit configuration
+Files: .pre-commit-config.yaml
+Copyright: 2026 Contributors to larql-to-sparql
+License: Apache-2.0
+
+# Changelog (keep a changelog format documentation)
+Files: CHANGELOG.md
+Copyright: 2026 Contributors to larql-to-sparql
+License: CC-BY-SA-4.0
+
+# Transformer script
+Files: scripts/changelog-transformer.py
+Copyright: 2026 Contributors to larql-to-sparql
+License: Apache-2.0

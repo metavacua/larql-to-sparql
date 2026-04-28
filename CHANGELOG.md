@@ -1,3 +1,14 @@
+<!--
+SPDX-License-Identifier: CC-BY-SA-4.0
+Copyright 2026 Contributors to larql-to-sparql
+
+With attribution to Chris Hay for LARQL:
+https://github.com/chrishayuk/larql
+
+This file follows the Keep a Changelog format:
+https://keepachangelog.com/
+-->
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
