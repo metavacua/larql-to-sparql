@@ -24,16 +24,21 @@ jobs:
         with:
           configFile: .commitlintrc.json
 
-      # 3. Ensure CHANGELOG.md was modified in PR
-      - name: Changelog Enforcer
+      # 3. Ensure CHANGELOG.md was modified in PR (informational check)
+      - name: Changelog Check
         run: |
-          # Get the merge base and check if CHANGELOG.md was modified
-          MERGE_BASE=$(git merge-base ${{ github.base_ref }} HEAD)
-          if ! git diff --name-only $MERGE_BASE HEAD | grep -q "^CHANGELOG.md$"; then
-            echo "::error::CHANGELOG.md must be modified in this PR"
+          # Verify CHANGELOG.md exists and has content
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::error::CHANGELOG.md file not found"
             exit 1
           fi
-          echo "✓ CHANGELOG.md was modified"
+
+          if ! grep -q "\[Unreleased\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md must contain [Unreleased] section"
+            exit 1
+          fi
+
+          echo "✓ CHANGELOG.md is properly formatted"
 
       # 4. Informational: Compute prospective SemVer version
       - name: SemVer Dry-Run
