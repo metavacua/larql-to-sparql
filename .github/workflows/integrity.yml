@@ -28,13 +28,13 @@ jobs:
       - name: Generate Expected Changelog Fragment
         id: changelog-expected
         run: |
-          python3 scripts/changelog-transformer.py origin/${{ github.base_ref }} HEAD > /tmp/expected_changelog.txt 2>/dev/null || echo "" > /tmp/expected_changelog.txt
+          python3 scripts/changelog-transformer.py origin/${{ github.base_ref }} ${{ github.sha }} > /tmp/expected_changelog.txt 2>/dev/null || echo "" > /tmp/expected_changelog.txt
           cat /tmp/expected_changelog.txt
 
       # 4. Ensure CHANGELOG.md was modified in PR
       - name: Changelog Enforcer
         run: |
-          if ! git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^CHANGELOG.md$"; then
+          if ! git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | grep -q "^CHANGELOG.md$"; then
             echo "::error::CHANGELOG.md must be modified in this PR"
             exit 1
           fi
@@ -50,9 +50,9 @@ jobs:
             LAST_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
 
-          BREAKING=$(git log $LAST_TAG...HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
-          FEATURES=$(git log $LAST_TAG...HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
-          FIXES=$(git log $LAST_TAG...HEAD --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
+          BREAKING=$(git log $LAST_TAG...${{ github.sha }} --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
+          FEATURES=$(git log $LAST_TAG...${{ github.sha }} --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
+          FIXES=$(git log $LAST_TAG...${{ github.sha }} --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
 
           echo "breaking-changes=$BREAKING" >> $GITHUB_OUTPUT
           echo "features=$FEATURES" >> $GITHUB_OUTPUT
