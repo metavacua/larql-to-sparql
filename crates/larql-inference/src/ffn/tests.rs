@@ -1,4 +1,6 @@
 //! Unit tests for FFN backends.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses small synthetic weights (4 hidden, 8 intermediate) to verify correctness
 //! without loading a real model.

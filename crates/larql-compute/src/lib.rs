@@ -1,4 +1,6 @@
 //! # larql-compute
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Hardware-accelerated compute backends for LARQL.
 //!

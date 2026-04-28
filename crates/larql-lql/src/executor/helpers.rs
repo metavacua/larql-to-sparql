@@ -1,4 +1,6 @@
 //! Shared helpers: formatting, token filtering.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::path::Path;
 

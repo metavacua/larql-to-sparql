@@ -1,4 +1,6 @@
 //! Top-level Apollo engine — combines routing, replay, and vec_inject.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Current scope: MVP end-to-end pipeline. Produces logits/tokens for a
 //! query by routing to the best window, retrieving relevant entries, and

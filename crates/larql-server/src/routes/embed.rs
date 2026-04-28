@@ -1,4 +1,6 @@
 //! Embed server endpoints — POST /v1/embed, POST /v1/logits, GET /v1/token/*.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These endpoints expose the static lookup half of the transformer:
 //! embeddings (token_ids → residual_0) and lm_head (residual_final → logits).

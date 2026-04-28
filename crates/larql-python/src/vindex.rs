@@ -1,4 +1,6 @@
 //! Python bindings for the vindex — the queryable model format.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Exposes VectorIndex + embeddings + tokenizer as a single Python object
 //! with numpy array returns for gate vectors, embeddings, and KNN results.

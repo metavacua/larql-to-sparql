@@ -1,4 +1,6 @@
 //! Accuracy Suite: The five tests that prove the video frame.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs all 5 strategies through:
 //!   Test 1: Paris test (pass/fail)

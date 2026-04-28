@@ -1,4 +1,6 @@
 //! RoPE benchmark — measures rotary position embedding at transformer-realistic
+// SPDX-License-Identifier: Apache-2.0
+
 //! dimensions. Compares full vs partial rotation, and scaling across seq lengths.
 //!
 //! Usage:

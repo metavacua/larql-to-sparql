@@ -1,4 +1,6 @@
 //! Post-attention and post-FFN residual + norm fusions.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two block-level helpers that sit between the matmul-heavy stages:
 //!

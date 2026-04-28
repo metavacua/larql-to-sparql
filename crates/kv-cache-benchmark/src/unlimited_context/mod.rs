@@ -1,4 +1,6 @@
 //! Tier 2 — Unlimited Context Engine (Rust port of Python/MLX `UnlimitedContextEngine`).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three-tier storage with sparse K,V checkpoints and model-forward replay:
 //!

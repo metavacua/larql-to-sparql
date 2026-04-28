@@ -1,4 +1,6 @@
 //! End-to-end INSERT + COMPILE demo — Rust port of `experiments/14_vindex_compilation`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Walks the same 10-fact constellation the Python experiment validated:
 //! INSERT each fact under a patch session, then COMPILE INTO VINDEX and

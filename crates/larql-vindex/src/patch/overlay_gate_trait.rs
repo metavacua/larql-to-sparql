@@ -1,4 +1,6 @@
 //! `impl GateIndex for PatchedVindex` — the trait conformance that
+// SPDX-License-Identifier: Apache-2.0
+
 //! lets the patch overlay slot in wherever a `GateIndex` is expected
 //! (also implemented by `VectorIndex`). Pulled out of `overlay.rs` so
 //! the file holding `PatchedVindex`'s own API stays focused.

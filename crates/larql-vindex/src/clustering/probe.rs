@@ -1,4 +1,6 @@
 //! Entity probing — run tokens through the model to confirm which features fire.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For each entity in the reference data, embed it, run gate KNN at each
 //! knowledge layer, and record which features activate. This gives confirmed

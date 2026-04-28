@@ -1,4 +1,6 @@
 //! Residual stream decomposition demo.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `TRACE` is LARQL's microscope over a forward pass: it captures the
 //! residual at every layer, decomposes each step into attention delta

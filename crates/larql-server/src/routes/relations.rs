@@ -1,4 +1,6 @@
 //! GET /v1/relations — list all known relation types (top tokens).
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 use std::sync::Arc;

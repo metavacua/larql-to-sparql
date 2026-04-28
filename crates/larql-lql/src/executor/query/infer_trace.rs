@@ -1,4 +1,6 @@
 //! `EXPLAIN INFER` — full forward pass with optional attention capture
+// SPDX-License-Identifier: Apache-2.0
+
 //! and logit lens, rendered per layer.
 
 use crate::ast::LayerBand;

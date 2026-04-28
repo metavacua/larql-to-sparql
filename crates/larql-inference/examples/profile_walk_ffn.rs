@@ -1,4 +1,6 @@
 //! Bottleneck analysis: WalkFfn step-by-step timing per layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures each phase of the walk FFN independently:
 //!   1. Gate KNN (find top-K features)

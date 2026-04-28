@@ -1,4 +1,6 @@
 //! LQL Parser — recursive descent from token stream to AST.
+// SPDX-License-Identifier: Apache-2.0
+
 
 mod helpers;
 mod introspection;

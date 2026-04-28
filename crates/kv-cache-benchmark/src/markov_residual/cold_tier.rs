@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Cold tier storage: token IDs only.
 ///
 /// When tokens fall out of the active window, their residuals are discarded.

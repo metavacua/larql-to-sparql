@@ -1,4 +1,6 @@
 //! Generate benchmark: CPU prefill → GPU decode loop.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Proves the compute crate's 59 tok/s on a real model.
 //!
 //! Usage:

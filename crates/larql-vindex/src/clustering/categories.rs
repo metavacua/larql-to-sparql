@@ -1,4 +1,6 @@
 //! Category vocabulary for cluster labeling.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads from `data/wikidata_categories.json` (Wikidata property labels).
 //! Falls back to a built-in core set if the file is not found.

@@ -1,4 +1,6 @@
 //! Multi-hop walk strategies.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `Graph::walk()` follows a sequence of relations, picking the highest-confidence
 //! edge at each hop. This module provides alternative strategies.

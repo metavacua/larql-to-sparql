@@ -1,4 +1,6 @@
 //! Per-Layer Embeddings (PLE) — gated per-layer token embeddings.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Gemma 4 E2B adds a per-layer embedding lookup to each layer's hidden state.
 //! Two streams are combined: a model-level projection of the main embeddings,

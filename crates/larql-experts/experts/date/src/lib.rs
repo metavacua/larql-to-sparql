@@ -1,4 +1,6 @@
 //! # Date expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Gregorian-calendar date arithmetic via Julian Day Number. Dates are encoded
 //! as `{year: int, month: 1..=12, day: 1..=31}` objects.

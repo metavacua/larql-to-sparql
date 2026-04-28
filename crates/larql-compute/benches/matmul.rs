@@ -1,4 +1,6 @@
 //! Criterion benchmarks for compute backends.
+// SPDX-License-Identifier: Apache-2.0
+
 
 extern crate blas_src;
 

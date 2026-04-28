@@ -1,4 +1,6 @@
 //! Hybrid decode — GPU attention only, returns hidden state for CPU FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Unlike `decode_token` which runs attention+FFN on GPU in one command buffer,
 //! this runs ONLY the attention portion per layer:

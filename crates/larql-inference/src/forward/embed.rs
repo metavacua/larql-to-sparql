@@ -1,4 +1,6 @@
 //! Token embedding — lookup + architecture-specific scaling.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use crate::model::ModelWeights;
 use ndarray::Array2;

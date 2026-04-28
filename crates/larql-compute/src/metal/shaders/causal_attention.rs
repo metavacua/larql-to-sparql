@@ -1,4 +1,6 @@
 //! Basic causal attention: QK^T softmax V for small seq_len.
+// SPDX-License-Identifier: Apache-2.0
+
 //! One thread per (head_dim, query_position). Designed for seq ≤ 64.
 
 pub const SHADER: &str = r#"

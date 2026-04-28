@@ -1,4 +1,6 @@
 //! LQL Executor — dispatches parsed AST statements to backend operations
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The base vindex is always readonly. All mutations go through a patch overlay.
 //! INSERT/DELETE/UPDATE auto-start an anonymous patch session if none is active.

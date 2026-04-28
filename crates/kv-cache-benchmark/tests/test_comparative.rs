@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use kv_cache_benchmark::benchmark;
 use kv_cache_benchmark::graph_walk::GraphWalk;
 use kv_cache_benchmark::markov_residual::MarkovResidual;

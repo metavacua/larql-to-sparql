@@ -1,4 +1,6 @@
 //! Benchmark for dedup #2 — dequantize gate vectors from Q4K on load
+// SPDX-License-Identifier: Apache-2.0
+
 //! instead of storing `gate_vectors.bin` separately.
 //!
 //! In a Q4_K vindex the gate projection lives in two places:

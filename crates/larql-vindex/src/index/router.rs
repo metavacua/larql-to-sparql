@@ -1,4 +1,6 @@
 //! MoE router index — load and query router weights for expert selection.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For MoE models, the router determines which experts handle each input.
 //! The router weights are small (128 × hidden_size × num_layers) and stored

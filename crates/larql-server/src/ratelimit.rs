@@ -1,4 +1,6 @@
 //! Per-IP rate limiting middleware using a token bucket.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 use std::net::IpAddr;

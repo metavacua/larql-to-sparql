@@ -1,4 +1,6 @@
 //! Debug + diagnostic helpers for the decode pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three env-gated facilities:
 //! - `DECODE_DEBUG=1` — one-line summary of the first few decode calls

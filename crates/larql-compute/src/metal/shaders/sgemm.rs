@@ -1,4 +1,6 @@
 //! f32 tiled matrix multiply: C = A × B.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Tile size 32×32, threadgroup shared memory.
 
 pub const SHADER: &str = r#"

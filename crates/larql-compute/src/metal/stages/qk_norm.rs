@@ -1,4 +1,6 @@
 //! QK-norm and V-norm — per-head RMS norm applied inside attention.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All three variants use the same `qk_norm` shader (one TG per head,
 //! cooperative simdgroup reduction). They differ only in:

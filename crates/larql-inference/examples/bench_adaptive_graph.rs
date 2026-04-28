@@ -1,4 +1,6 @@
 //! Benchmark the adaptive graph pipeline:
+// SPDX-License-Identifier: Apache-2.0
+
 //!   L0-12:  cached (precomputed from template)
 //!   L13-33: dense attention + walk FFN (vindex)
 //!

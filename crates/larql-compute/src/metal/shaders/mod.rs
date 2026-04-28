@@ -1,4 +1,6 @@
 //! Metal shader registry — one file per shader, compiled as one library.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each shader module exports a `SHADER` constant with the MSL source.
 //! `all_shaders()` concatenates them with the common header for compilation.

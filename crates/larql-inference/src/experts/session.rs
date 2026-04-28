@@ -1,4 +1,6 @@
 //! `ExpertSession` — high-level glue between a dispatcher (typically
+// SPDX-License-Identifier: Apache-2.0
+
 //! [`ExpertRegistry`]) and a generation loop.
 //!
 //! Three responsibilities, kept independent so each can be tested in

@@ -1,4 +1,6 @@
 //! Build a .vindex from model weights — the extraction/clustering pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two entry points: `build_vindex` (full pipeline from weights) and
 //! `build_vindex_resume` (skip the heavy stages, rebuild clustering +

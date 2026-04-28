@@ -1,4 +1,6 @@
 //! Relation discovery via clustering.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Clusters normalized direction vectors (target embeddings from down projections)
 //! to discover natural relation types in the model's knowledge.

@@ -1,4 +1,6 @@
 //! Benchmark Q4 attention projections: Q/K/V/O as Q4 matvec.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-compute --features metal --example bench_q4_attention

@@ -1,4 +1,6 @@
 //! PatchedVindex — runtime overlay on an immutable base index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Holds the resolved override maps (`overrides_meta`, `overrides_gate`,
 //! `deleted`) plus the L0 `KnnStore`. Knows how to apply a `VindexPatch`

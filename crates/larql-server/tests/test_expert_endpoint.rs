@@ -1,4 +1,6 @@
 //! End-to-end parity test for `POST /v1/expert/batch`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Spins up the real `larql-server` router (same axum app that ships in
 //! production) on an OS-assigned port, then drives it through the real

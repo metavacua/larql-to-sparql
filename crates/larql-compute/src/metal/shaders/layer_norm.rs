@@ -1,4 +1,6 @@
 //! LayerNorm — standard layer normalization (mean-subtraction + variance normalization).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out = (x - mean) / sqrt(var + eps) * weight + bias
 //!

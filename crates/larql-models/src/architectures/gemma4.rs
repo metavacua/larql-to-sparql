@@ -1,4 +1,6 @@
 //! Gemma 4 architecture — Google's multimodal model family (2025).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from Gemma 3:
 //! - Dual head_dim: sliding layers use head_dim (256), global layers use global_head_dim (512)

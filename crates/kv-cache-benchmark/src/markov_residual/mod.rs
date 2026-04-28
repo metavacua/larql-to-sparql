@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod checkpoint;
 pub mod cold_tier;
 pub mod window;

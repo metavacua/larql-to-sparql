@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// VectorIndex mutation and persistence methods
 ///
 /// Adds INSERT/DELETE/UPDATE support and the ability to save a modified vindex back to disk.

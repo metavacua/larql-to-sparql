@@ -1,4 +1,6 @@
 //! File format I/O — vindex loading, saving, checksums, HuggingFace.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Model loading (safetensors/GGUF) is in larql-models.
 
 pub mod checksums;

@@ -1,4 +1,6 @@
 //! Benchmark: hybrid pipeline (GPU attention + vindex walk FFN) vs full GPU decode.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Requires: model weights + vindex with down_features.bin + attn_weights_q4k.bin
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Quick latency benchmark: forward_to_layer vs generate_cached timing
 // Run as: cargo test --test bench_probe_latency --release -- --nocapture
 use larql_inference::forward::generate_cached_constrained;

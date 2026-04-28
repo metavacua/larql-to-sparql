@@ -1,4 +1,6 @@
 //! Server benchmark — measures endpoint handler latency with synthetic data.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run -p larql-server --example server_bench --release
 

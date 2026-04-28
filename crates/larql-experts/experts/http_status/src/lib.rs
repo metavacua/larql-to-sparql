@@ -1,4 +1,6 @@
 //! # HTTP status expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Lookup for standard IANA HTTP response codes. Only canonical reason phrases
 //! are returned — no editorial prose.

@@ -1,4 +1,6 @@
 //! L2 storage: MEMIT-compacted facts with decomposed (k, d) pairs for graph walk.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Also hosts `memit_solve` — the vanilla closed-form decomposition (no
 //! covariance whitening) used to populate `MemitStore` during COMPACT MAJOR.

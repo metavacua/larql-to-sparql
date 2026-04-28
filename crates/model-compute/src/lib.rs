@@ -1,4 +1,6 @@
 //! Bounded-cost compute for neural-model pipelines.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two complementary modes, selected by feature:
 //!

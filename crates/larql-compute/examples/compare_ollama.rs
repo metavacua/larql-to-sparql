@@ -1,4 +1,6 @@
 //! Head-to-head: LARQL vs Ollama tok/s on the same machine, same moment.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs LARQL decode (Q4_K, Q8, raw kernel) then queries Ollama's API,
 //! prints a single comparison table. This is THE benchmark to run.

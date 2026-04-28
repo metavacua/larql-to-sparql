@@ -1,4 +1,6 @@
 //! Vindex Feature Showcase — demonstrates the complete larql-vindex API.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Covers: build, KNN, walk, PatchedVindex (readonly base + overlay), layer bands,
 //! MoE layout, binary down_meta, f16 storage, source provenance, checksum verification,

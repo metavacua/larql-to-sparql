@@ -1,4 +1,6 @@
 //! Streaming-extract throughput bench.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Compares `build_vindex_streaming` with `QuantFormat::None` (f32
 //! write path) vs `QuantFormat::Q4k` (streaming quantise) on a

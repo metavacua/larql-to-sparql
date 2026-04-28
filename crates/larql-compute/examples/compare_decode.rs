@@ -1,4 +1,6 @@
 //! Q4_K decode benchmark: measures actual decode_token latency with KV cache.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This is the production decode path: Q4_K QKV → KV cache attend → Q4_K O → Q4_0 FFN.
 //! Usage: cargo run --release --features metal -p larql-compute --example bench_decode_q4k

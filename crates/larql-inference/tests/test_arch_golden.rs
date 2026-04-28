@@ -1,4 +1,6 @@
 //! Architecture regression guard: one "golden-token" case per architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The goal is to catch regressions when we change a cross-cutting path (MoE,
 //! norm application, QK-norm, RoPE, KV-sharing, quantization) that silently

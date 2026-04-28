@@ -1,4 +1,6 @@
 //! Per-fact target-delta optimisation — the MEMIT Phase-3 primitive.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Given a model, a prompt, and a target token id, find the residual
 //! delta `δ ∈ R^hidden` such that adding `δ` to the FFN output at

@@ -1,4 +1,6 @@
 //! Walk FFN weight matrices — extract edges directly from model parameters.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every FFN feature is a potential edge. For each feature in a layer:
 //! - What tokens activate it (gate projection) → c_in

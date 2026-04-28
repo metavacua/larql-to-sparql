@@ -1,4 +1,6 @@
 //! Q4_K vs f32 per-layer attention retrieval bench.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Inference reads per-layer attention weights hundreds of times per
 //! token; this bench measures the cost of getting one layer's Q

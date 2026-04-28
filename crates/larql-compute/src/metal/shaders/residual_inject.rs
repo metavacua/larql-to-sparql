@@ -1,4 +1,6 @@
 //! Cached residual injection: copy a precomputed residual into the pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! When skipping cached layers (L0-12), the GPU needs the cached residual
 //! as input to the first computed layer. This shader copies it within

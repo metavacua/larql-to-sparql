@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use larql_core::algo::shortest_path::default_weight;
 use larql_core::*;
 

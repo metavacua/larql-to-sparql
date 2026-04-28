@@ -1,4 +1,6 @@
 //! `infer_patched` — the single forward-pass entry point shared by the LQL
+// SPDX-License-Identifier: Apache-2.0
+
 //! `INFER` executor (`larql-lql/src/executor/query/infer.rs`) and the Python
 //! binding (`larql-python/src/vindex.rs`).
 //!

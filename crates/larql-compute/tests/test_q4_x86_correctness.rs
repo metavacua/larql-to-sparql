@@ -1,4 +1,6 @@
 //! Numerical correctness for the scalar Q4_0 kernels in csrc/q4_dot.c.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Compares `q4_matvec::dispatch` and `q4_vecmat::dispatch` output against a
 //! pure-Rust dequantize-and-compute reference. Q4/Q8 are lossy, so we check

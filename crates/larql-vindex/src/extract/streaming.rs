@@ -1,4 +1,6 @@
 //! Streaming vindex extraction — build from safetensors without loading the full model.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Instead of loading all weights into ModelWeights (which requires the entire model
 //! in RAM), this module mmaps safetensors files and processes one layer at a time.

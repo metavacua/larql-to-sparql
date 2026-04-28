@@ -1,4 +1,6 @@
 //! Tests for fused online-softmax attention.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Validates that the fused GQA attention kernel produces correct results
 //! across: single token, causal mask, multi-head, GQA, softcap, and

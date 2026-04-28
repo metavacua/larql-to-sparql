@@ -1,4 +1,6 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use crate::ModelArchitecture;
 use memmap2::Mmap;

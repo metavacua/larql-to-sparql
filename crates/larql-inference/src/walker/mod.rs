@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod attention_walker;
 pub mod utils;
 pub mod vector_extractor;

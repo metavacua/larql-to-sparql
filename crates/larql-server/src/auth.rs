@@ -1,4 +1,6 @@
 //! API key authentication middleware.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::sync::Arc;
 

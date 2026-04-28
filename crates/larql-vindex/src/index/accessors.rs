@@ -1,4 +1,6 @@
 //! `VectorIndex` metadata + gate-vector accessors and one-time setup.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Pulls the read-only getters and `warmup` out of `gate.rs` so the
 //! KNN-dispatch file stays focused on hot-path search code.

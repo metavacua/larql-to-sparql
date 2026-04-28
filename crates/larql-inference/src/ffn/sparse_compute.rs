@@ -1,4 +1,6 @@
 //! Shared sparse FFN computation — architecture-correct.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Given a set of pre-selected feature indices, computes the FFN output using
 //! the model architecture trait for activation function, gating, and bias.

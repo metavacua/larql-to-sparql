@@ -1,4 +1,6 @@
 //! WalkFfn — FFN backend that replaces dense matmul with vindex lookups.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Sparse walk path (preferred):
 //!   gate_knn (HNSW or brute) → K up dot products → GEGLU → K down accumulations

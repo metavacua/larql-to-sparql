@@ -1,4 +1,6 @@
 //! Compare tensor key patterns across all supported architectures.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Shows how each model family maps layer indices to tensor keys,
 //! highlighting differences in prefix, projection names, and norm patterns.

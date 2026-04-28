@@ -1,4 +1,6 @@
 //! Accuracy suite runner — produces the video frame table.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs all tests across all strategies and outputs:
 //! ```text

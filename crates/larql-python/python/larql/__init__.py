@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """
 larql — Python bindings for the LARQL knowledge graph engine and vindex.
 

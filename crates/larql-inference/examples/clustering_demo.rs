@@ -1,4 +1,6 @@
 //! Clustering and relation discovery demo.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates the clustering pipeline: k-means, labeling, pair matching.
 //! Uses synthetic data to show how the pipeline works end-to-end.

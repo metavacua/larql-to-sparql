@@ -1,4 +1,6 @@
 //! Integration tests for `UnlimitedContextEngine` (Tier 2).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Exercises the full pipeline end-to-end against a real Gemma 3 4B
 //! forward pass. All tests are `#[ignore]` since they need model weights.

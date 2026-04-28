@@ -1,4 +1,6 @@
 //! Profile the inter-gemv compute in the walk FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Measures each step independently to find the 77ms gap.
 //!
 //! Usage:

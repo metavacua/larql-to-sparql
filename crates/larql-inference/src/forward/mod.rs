@@ -1,4 +1,6 @@
 //! Full transformer forward pass.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs tokens through embedding → layers → final norm → logits.
 //! Uses the ModelArchitecture trait for model-specific behavior

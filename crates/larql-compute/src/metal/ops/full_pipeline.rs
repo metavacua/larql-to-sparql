@@ -1,4 +1,6 @@
 //! Full pipeline: ALL Q4 (attention + FFN) in ONE Metal command buffer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Correct inference path with norms and residual connections:
 //!   Per layer:

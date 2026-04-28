@@ -1,4 +1,6 @@
 //! K-means clustering with BLAS-accelerated distance computation.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use ndarray::Array2;
 

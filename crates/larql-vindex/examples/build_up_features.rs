@@ -1,4 +1,6 @@
 //! Convert up_weights.bin from f16 to f32 for zero-copy mmap access.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Up weights are already [intermediate, hidden] per layer (feature-major).
 //! No transpose needed — just f16 → f32 decode.

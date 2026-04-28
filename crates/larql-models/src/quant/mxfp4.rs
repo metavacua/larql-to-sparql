@@ -1,4 +1,6 @@
 //! MXFP4 dequantization — OpenAI's microscaling 4-bit float format.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Used by GPT-OSS models. Each weight is stored as a 4-bit value (two per byte)
 //! with shared e8m0 (exponent-only) scales per group of 32 elements.

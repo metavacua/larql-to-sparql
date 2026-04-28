@@ -1,4 +1,6 @@
 #![allow(clippy::doc_overindented_list_items)]
+// SPDX-License-Identifier: Apache-2.0
+
 #![allow(clippy::doc_lazy_continuation)]
 
 //! Vindex — the queryable model format.

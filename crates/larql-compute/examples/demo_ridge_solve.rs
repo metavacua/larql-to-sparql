@@ -1,4 +1,6 @@
 //! Demo: `ridge_decomposition_solve` — the closed-form ridge solve
+// SPDX-License-Identifier: Apache-2.0
+
 //! that underlies MEMIT-style weight edits.
 //!
 //! Solves   ΔW = T^T (K K^T + λI)^{-1} K

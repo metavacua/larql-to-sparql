@@ -1,4 +1,6 @@
 //! `larql compile` — AOT compilation of vindex patches or single facts to
+// SPDX-License-Identifier: Apache-2.0
+
 //! standard safetensors checkpoints. Output runs in any inference engine
 //! without LARQL.
 //!

@@ -1,4 +1,6 @@
 //! Query executor: WALK, INFER, SELECT, DESCRIBE, EXPLAIN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each verb lives in its own file. Shared helpers (layer-band
 //! resolution) live here because both DESCRIBE and EXPLAIN INFER

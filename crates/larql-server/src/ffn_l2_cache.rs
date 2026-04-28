@@ -1,4 +1,6 @@
 //! L2 server-side FFN output cache for WalkFfn.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Shared across all clients for the lifetime of the server process.
 //! Key: hash of sorted gate-KNN feature IDs per layer (same scheme as L1).

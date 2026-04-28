@@ -1,4 +1,6 @@
 //! # SQL expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! In-memory evaluator for a small subset of SQL. A single `execute` call
 //! accepts a script containing `CREATE TABLE` / `INSERT INTO` / `SELECT`

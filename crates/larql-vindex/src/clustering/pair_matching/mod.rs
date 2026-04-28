@@ -1,4 +1,6 @@
 //! Pair-based relation labeling.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For each cluster, collect (gate_input_token, output_token) pairs,
 //! then match against Wikidata triples and WordNet relations.

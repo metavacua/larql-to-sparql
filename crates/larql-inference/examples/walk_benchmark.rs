@@ -1,4 +1,6 @@
 //! walk_benchmark — per-layer FFN latency across backends + no-matmul verification.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Captures the pre-FFN residual at every layer from a reference forward pass,
 //! then benchmarks each backend running the same single-layer FFN call N times.

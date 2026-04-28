@@ -1,4 +1,6 @@
 //! TurboQuant applied to real K/V tensors from the forward pass.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Intercepts K/V capture, quantizes each head vector via WHT + Lloyd-Max,
 //! then dequantizes on read. Measures MSE, cosine, and compression vs FP16.

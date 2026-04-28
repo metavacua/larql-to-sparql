@@ -1,4 +1,6 @@
 //! Routing experiment: measure template-dependence of attention and FFN routing.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For each template × entity:
 //!   - Capture residual at every layer (last position)

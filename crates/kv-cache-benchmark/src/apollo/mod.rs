@@ -1,4 +1,6 @@
 //! Tier 3 — Apollo v12 architecture (end-to-end on Gemma 3 4B).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Rust port of the Python/MLX Apollo 11 demo. Sits above Tier 2's
 //! `UnlimitedContextEngine` and trades per-window K/V checkpoints for a

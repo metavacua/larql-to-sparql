@@ -1,4 +1,6 @@
 //! GPU prefill pipeline: full Q4 inference for seq>1 with KV cache population.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Like full_pipeline.rs but:
 //! 1. Buffers sized for seq_len positions (not just 1)

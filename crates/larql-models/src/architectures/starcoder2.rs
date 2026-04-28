@@ -1,4 +1,6 @@
 //! StarCoder 2 architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard Llama:
 //! - Non-gated FFN: activation(x @ c_fc.T + bias) @ c_proj.T + bias

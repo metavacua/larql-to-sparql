@@ -1,4 +1,6 @@
 //! Graph merging with conflict resolution strategies.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use crate::core::enums::MergeStrategy;
 use crate::core::graph::Graph;

@@ -1,4 +1,6 @@
 //! Shared parsing helpers: token utilities, value/field/condition parsers.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use super::{ParseError, Parser};
 use crate::ast::*;

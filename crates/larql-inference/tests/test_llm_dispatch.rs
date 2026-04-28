@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// LLM-mediated expert dispatch test.
 ///
 /// Feeds natural language prompts through the real model (gemma-3-4b-it),

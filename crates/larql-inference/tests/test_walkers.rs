@@ -1,4 +1,6 @@
 //! Integration tests for walker modules using a tiny mock model.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Creates a fake safetensors model with 2 layers, hidden_size=8,
 //! intermediate_size=4, vocab_size=16, head_dim=4, 2 attention heads.

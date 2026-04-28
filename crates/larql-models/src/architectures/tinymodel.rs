@@ -1,4 +1,6 @@
 //! TinyModel architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Research-scale decoder-only transformer used as the reference target
 //! for the LARQL compile/walk work. Same shape family as Llama (RMSNorm,

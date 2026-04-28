@@ -1,4 +1,6 @@
 //! Read model weights back from a `.vindex` directory.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirror of `super::write` — reconstructs `ModelWeights` from the
 //! split `attn_weights.bin` / `up_weights.bin` / `down_weights.bin` /

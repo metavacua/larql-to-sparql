@@ -1,4 +1,6 @@
 //! # Hash / encoding expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Reversible byte encodings (base64, hex, URL percent) and a simple non-
 //! cryptographic hash (FNV-1a 32-bit). All string inputs are treated as UTF-8

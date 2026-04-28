@@ -1,4 +1,6 @@
 //! Needle-in-a-haystack test.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Plant a fact at a known position, fill with distractor text,
 //! query at the end. Scale from 1K to 32K context.

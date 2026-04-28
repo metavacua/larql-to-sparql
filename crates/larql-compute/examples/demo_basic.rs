@@ -1,4 +1,6 @@
 //! Demo: auto-detect backend and run basic operations.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-compute --example demo

@@ -1,4 +1,6 @@
 //! `larql dev ffn-latency` — measure HTTP round-trip overhead vs FFN compute
+// SPDX-License-Identifier: Apache-2.0
+
 //! against a running `larql-server`.
 //!
 //! Reports:

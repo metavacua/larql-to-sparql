@@ -1,4 +1,6 @@
 //! # Graph-algorithms expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Unweighted graph algorithms. Edges are `[from, to]` arrays. Set
 //! `directed: true` to enable directed-graph variants (cycle detection,

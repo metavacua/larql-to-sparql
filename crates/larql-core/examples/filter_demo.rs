@@ -1,4 +1,6 @@
 //! Demonstrate graph filtering — select edges by confidence, layer, relation, etc.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run -p larql-core --example filter_demo
 

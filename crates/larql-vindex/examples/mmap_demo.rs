@@ -1,4 +1,6 @@
 //! Demo: vindex mmap memory behaviour and model scaling projections.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This is a *demo* (it prints to stdout in plain English) — for hard
 //! perf numbers see the criterion benches at

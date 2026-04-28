@@ -1,4 +1,6 @@
 //! CPU reference implementation for Q4_K matrix-vector multiply.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirrors the Metal shader `q4k_matvec` exactly for cross-backend testing.
 //! Uses the GGUF 144-byte Q4_K block layout (same as `quantize_q4_k` and

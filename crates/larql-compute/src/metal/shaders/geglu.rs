@@ -1,4 +1,6 @@
 //! GEGLU activation variants:
+// SPDX-License-Identifier: Apache-2.0
+
 //!   geglu_silu:       out = silu(gate) × up       (Llama, Mistral, Qwen)
 //!   geglu_gelu_tanh:  out = gelu_tanh(gate) × up  (Gemma, GPT-2, Phi)
 //!

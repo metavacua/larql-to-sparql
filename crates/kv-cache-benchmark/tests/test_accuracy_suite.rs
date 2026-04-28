@@ -1,4 +1,6 @@
 //! Tests for the accuracy suite infrastructure.
+// SPDX-License-Identifier: Apache-2.0
+
 //! These test the prompt sets, needle generation, and formatting
 //! without needing model weights.
 

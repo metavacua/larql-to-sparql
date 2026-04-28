@@ -1,4 +1,6 @@
 //! Shader Benchmark: CPU vs Metal for TurboQuant and Graph Walk operations.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --example shader_bench

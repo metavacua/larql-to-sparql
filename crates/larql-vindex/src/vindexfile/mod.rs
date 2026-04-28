@@ -1,4 +1,6 @@
 //! Vindexfile — declarative model builds.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! A Vindexfile is like a Dockerfile for model knowledge. It specifies a base
 //! vindex plus patches, inline edits, labels, and build configuration.

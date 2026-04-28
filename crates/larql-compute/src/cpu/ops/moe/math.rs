@@ -1,4 +1,6 @@
 //! Numeric primitives used by the MoE forward pass.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `pub(super)` keeps these module-private — `cpu_moe_forward` and the
 //! per-expert helpers share them, nothing outside `moe/` should.

@@ -1,4 +1,6 @@
 //! NDJSON loaders for `VectorIndex` — read gate vectors and down
+// SPDX-License-Identifier: Apache-2.0
+
 //! metadata from `ffn_gate.vectors.jsonl` / `ffn_down.meta.jsonl`.
 //!
 //! These are the heap-mode constructors. The mmap-mode entry point

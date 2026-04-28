@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod codebooks;
 pub mod lloyd_max;
 pub mod packing;

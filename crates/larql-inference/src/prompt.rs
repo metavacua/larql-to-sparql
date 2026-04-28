@@ -1,4 +1,6 @@
 //! Model-agnostic chat-template helpers.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wraps a raw user prompt in the instruction-tuning format the target model
 //! was trained on. Selecting the wrong template produces garbage output, so

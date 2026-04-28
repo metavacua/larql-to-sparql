@@ -1,4 +1,6 @@
 //! Cluster-labeling algorithms — match (input, output) or (output-only)
+// SPDX-License-Identifier: Apache-2.0
+
 //! token pairs against reference databases (`super::database`) and
 //! pick the winning relation per cluster.
 

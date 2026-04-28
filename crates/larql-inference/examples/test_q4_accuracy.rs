@@ -1,4 +1,6 @@
 //! Accuracy test: Q4 attention weight quantization error on real Gemma 3 4B.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures: Q4 quantization RMSE on attention weights, weight statistics.
 //! The Q4 pipeline benchmark uses synthetic weights — this validates real weights.

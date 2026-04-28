@@ -1,4 +1,6 @@
 //! Metal GPU operation dispatch — one file per operation type.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each module handles dispatch for one category of compute operation:
 //! - `q4_matvec`: Q4×Q8 matrix-vector (gate scoring, up projection)

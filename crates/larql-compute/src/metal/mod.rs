@@ -1,4 +1,6 @@
 //! Metal GPU compute backend — Apple Silicon.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All operations go through the [`ComputeBackend`] trait. Metal-specific
 //! optimisations: simdgroup reductions, uint4 vectorised loads, native half reads,

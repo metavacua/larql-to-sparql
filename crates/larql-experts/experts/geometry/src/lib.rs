@@ -1,4 +1,6 @@
 //! # Geometry expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Areas, perimeters, volumes, Pythagorean theorem.
 //!

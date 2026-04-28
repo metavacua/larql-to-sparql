@@ -1,4 +1,6 @@
 //! Gemma 3 architecture — Google's multimodal model family.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard Llama:
 //! - Embedding scaled by sqrt(hidden_size)

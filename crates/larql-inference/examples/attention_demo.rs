@@ -1,4 +1,6 @@
 //! Fused attention demo — shows the online-softmax kernel in action.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates:
 //! - Correctness: fused output matches naive reference

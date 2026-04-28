@@ -1,4 +1,6 @@
 //! Patch file format — `.vlp` JSON diffs that overlay an immutable
+// SPDX-License-Identifier: Apache-2.0
+
 //! base vindex without modifying its files on disk.
 //!
 //! This module owns the on-the-wire representation: `VindexPatch`,

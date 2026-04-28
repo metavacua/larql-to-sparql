@@ -1,4 +1,6 @@
 //! Walk attention OV circuits — extract routing edges from attention heads.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each attention head is a routing rule. The OV circuit tells you:
 //! when this head fires on input X, it copies output Y.

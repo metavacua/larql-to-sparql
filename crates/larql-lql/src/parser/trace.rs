@@ -1,4 +1,6 @@
 //! Parser for TRACE statements.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Grammar:
 //!

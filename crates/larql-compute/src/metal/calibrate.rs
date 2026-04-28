@@ -1,4 +1,6 @@
 //! Auto-calibration: benchmark CPU vs Metal to find the FLOP threshold
+// SPDX-License-Identifier: Apache-2.0
+
 //! where GPU dispatch starts beating CPU BLAS.
 
 use ndarray::Array2;

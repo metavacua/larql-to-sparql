@@ -1,4 +1,6 @@
 //! Lifecycle statement parsers: EXTRACT, COMPILE, DIFF, USE, COMPACT
+// SPDX-License-Identifier: Apache-2.0
+
 
 use super::{ParseError, Parser};
 use crate::ast::*;

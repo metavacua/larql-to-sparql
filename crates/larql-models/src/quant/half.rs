@@ -1,4 +1,6 @@
 //! f16/bf16 ↔ f32 conversion.
+// SPDX-License-Identifier: Apache-2.0
+
 
 /// Convert f16 bits to f32.
 ///

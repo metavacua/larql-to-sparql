@@ -1,4 +1,6 @@
 //! HNSW (Hierarchical Navigable Small World) index for gate vector search.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Replaces brute-force gate KNN (O(N) comparisons per query) with
 //! approximate nearest neighbor search via graph traversal (O(log N)).

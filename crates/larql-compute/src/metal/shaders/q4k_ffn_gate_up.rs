@@ -1,4 +1,6 @@
 //! Fused Q4_K gate+up projection — two matvecs sharing the same input vector.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! **Parallelism: sub-block stride, 1 row per simdgroup.**
 //!

@@ -1,4 +1,6 @@
 //! Remote executor — forwards LQL queries to a larql-server via HTTP.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use super::Backend;
 use super::Session;

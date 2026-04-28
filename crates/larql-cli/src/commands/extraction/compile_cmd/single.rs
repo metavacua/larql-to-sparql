@@ -1,4 +1,6 @@
 //! Single-edge compilation: one prompt + one answer → one compiled edge.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Captures the residual at the target layer for the prompt, looks up the
 //! answer token's embedding, installs an edge that fires only on this prompt

@@ -1,4 +1,6 @@
 //! LQL Parser Demo — parse every statement type from the spec v0.4 and display the AST
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run -p larql-lql --example parser_demo
 

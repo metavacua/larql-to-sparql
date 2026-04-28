@@ -1,4 +1,6 @@
 //! Graph walk KNN: score residual against gate vectors for a single layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Input:  residual vector [hidden_size], gate matrix [num_features, hidden_size]
 //! Output: top-K feature indices + scores

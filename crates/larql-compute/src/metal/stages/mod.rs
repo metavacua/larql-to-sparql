@@ -1,4 +1,6 @@
 //! Metal pipeline stages — per-stage, format-aware Metal dispatches.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each stage is a pure free function that takes a `ComputeCommandEncoder`
 //! plus the pipelines, buffers, and per-layer metadata it needs. The

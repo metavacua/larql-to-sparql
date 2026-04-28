@@ -1,4 +1,6 @@
 //! Accuracy test infrastructure.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Proves memory savings don't come at the cost of correctness.
 //! Six categories: top-1 match, KL divergence, needle-in-haystack,

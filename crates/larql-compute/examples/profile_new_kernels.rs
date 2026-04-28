@@ -1,4 +1,6 @@
 //! Benchmark all new model-agnostic kernels added for architecture alignment.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Profiles: standalone activations (SiLU, GELU-tanh), LayerNorm vs RMSNorm,
 //! V-norm, scale_vector, partial RoPE, and sliding window attention.

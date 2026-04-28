@@ -1,4 +1,6 @@
 //! Demonstrate model architecture detection and configuration for ALL 12 supported architectures.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Exercises every architecture's unique features: tensor keys, norm offsets, embed scaling,
 //! sliding window patterns, MoE routing, MLA compression, bias keys, scaling multipliers,

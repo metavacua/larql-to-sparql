@@ -1,4 +1,6 @@
 //! Top-K sweep — measures accuracy and speed at different gate KNN K values.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Finds the minimum K that maintains correct predictions.
 //!
 //! Usage:

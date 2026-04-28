@@ -1,4 +1,6 @@
 //! TTL cache for DESCRIBE results.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 use std::sync::RwLock;

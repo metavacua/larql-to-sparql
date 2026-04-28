@@ -1,4 +1,6 @@
 //! C compiler configuration for LARQL crates.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Centralizes platform-specific compiler flags (CPU architecture optimizations,
 //! etc.) to avoid duplication across build.rs scripts.

@@ -1,4 +1,6 @@
 //! Model weight loading — safetensors, GGUF → ModelWeights.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This module handles loading model weights from various formats into
 //! the canonical `ModelWeights` struct. All format-specific concerns

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 fn main() {
     // pyo3 extension-module: libpython symbols resolve at runtime via the host
     // interpreter, but the macOS linker rejects undefined symbols by default.

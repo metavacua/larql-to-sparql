@@ -1,4 +1,6 @@
 //! Fused **mixed-quant** QKV projection — Q4_K for Q/K rows, Q6_K for V rows.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The uniform `q4k_qkv_proj` shader doesn't work for Gemma 3 4B / Gemma 4
 //! which ship Q4_K Q/K/O + **Q6_K V** (the Ollama convention for

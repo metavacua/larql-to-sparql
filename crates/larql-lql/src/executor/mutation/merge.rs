@@ -1,4 +1,6 @@
 //! `MERGE source [INTO target]` — merge another vindex's features into
+// SPDX-License-Identifier: Apache-2.0
+
 //! the current patch overlay under a conflict strategy.
 
 use std::path::PathBuf;

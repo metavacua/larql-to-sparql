@@ -1,4 +1,6 @@
 //! Q4_KF decode benchmark: pre-baked scales vs Q4_K vs Q8.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage: cargo run --release --features metal -p larql-compute --example bench_q4kf_decode
 

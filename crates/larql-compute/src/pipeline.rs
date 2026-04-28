@@ -1,4 +1,6 @@
 //! Pipeline layer types — per-layer architecture parameters for the compute pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These types carry all model-specific behavior per-layer:
 //! norm type, activation, attention geometry, RoPE, FFN type, etc.

@@ -1,4 +1,6 @@
 //! Q8 quantization: f32 ��� int8 + per-block scale.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Used for chaining layers: layer N output (f32) → Q8 → layer N+1 input.
 //! One thread per block of 32 elements.
 

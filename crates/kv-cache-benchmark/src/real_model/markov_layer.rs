@@ -1,4 +1,6 @@
 //! Markov Residual Stream (RS) strategy on the real model.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! ## Core claim
 //!

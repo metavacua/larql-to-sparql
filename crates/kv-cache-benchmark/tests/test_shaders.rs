@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use kv_cache_benchmark::shader_bench;
 
 #[test]

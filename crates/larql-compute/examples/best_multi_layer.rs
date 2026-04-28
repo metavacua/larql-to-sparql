@@ -1,4 +1,6 @@
 //! Pipeline benchmarks: multi-layer Q4, mixed backend, batch sweep.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests the actual production scenarios that matter for closing
 //! the gap with Ollama.

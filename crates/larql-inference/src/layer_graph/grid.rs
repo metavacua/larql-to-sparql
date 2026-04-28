@@ -1,4 +1,6 @@
 //! Autoregressive generation via a sharded expert grid.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses the Metal pipeline for attention + dense FFN (same as normal `generate`),
 //! but intercepts the MoE expert block per layer via a callback that dispatches

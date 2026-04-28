@@ -1,4 +1,6 @@
 #![allow(
+// SPDX-License-Identifier: Apache-2.0
+
     clippy::if_same_then_else,
     clippy::ptr_arg,
     clippy::single_char_add_str,

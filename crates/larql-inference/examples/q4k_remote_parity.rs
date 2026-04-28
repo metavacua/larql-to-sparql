@@ -1,4 +1,6 @@
 //! Q4_K dense-remote parity check — the Act 1.5 story as a cargo example.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Drives both ends of the Q4_K remote-FFN split on a single machine:
 //! local `predict_q4k` vs `predict_q4k_with_ffn` pointing at a running

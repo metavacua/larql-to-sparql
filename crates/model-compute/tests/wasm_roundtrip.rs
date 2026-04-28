@@ -1,4 +1,6 @@
 //! Integration test: load a minimal WAT fixture implementing the
+// SPDX-License-Identifier: Apache-2.0
+
 //! alloc-write-solve-read ABI, exercise the full Session.solve round-trip.
 //!
 //! The fixture is a byte-echo solver: on solve(ptr, len) it copies the

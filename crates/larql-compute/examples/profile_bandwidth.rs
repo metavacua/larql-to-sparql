@@ -1,4 +1,6 @@
 //! Raw memory bandwidth test — what's the floor on this machine?
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests:
 //!   1. Raw sequential memcpy (malloc'd memory)
