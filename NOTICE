@@ -1,0 +1,24 @@
+larql-to-sparql
+
+Copyright (C) 2026 Chris Hay
+Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+
+This product is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this software except in compliance with the License. You may
+obtain a copy of the License under LICENSES/Apache-2.0.txt or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+The pre-existing LARQL codebase under this repository's `main` branch
+originates from https://github.com/chrishayuk/larql (created 2026) and is
+attributed to Chris Hay.
+
+The deterministic compliance toolchain added by PR
+`claude/implement-standardized-tool-PGol9` (REUSE.toml, NOTICE,
+CHANGELOG.md, cog.toml, cliff.toml, .pre-commit-config.yaml,
+.github/workflows/validate.yml, scripts/check_changelog.sh,
+scripts/version_preflight.sh, docs/specs/compliance-pipeline.md) is
+attributed to Ian Douglas Lawrence Norman McLean.
+
+Per-file SPDX provenance is recorded in REUSE.toml and verified by
+`reuse lint` in the deterministic PR validation workflow.

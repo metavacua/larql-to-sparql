@@ -1,0 +1,62 @@
+version = 1
+
+# Explicit, machine-readable provenance for every file under version control,
+# per Foundational Axiom A1 (Explicit Provenance) of the project compliance
+# specification, and per Apache-2.0 §4(c) (retain attribution notices).
+#
+# Two distinct copyright holders apply:
+#
+#   - The pre-existing LARQL codebase on `main` (origin:
+#     https://github.com/chrishayuk/larql, created 2026) is attributed to
+#     Chris Hay.
+#
+#   - The deterministic compliance toolchain added in PR
+#     `claude/implement-standardized-tool-PGol9` (2026) is attributed to
+#     Ian Douglas Lawrence Norman McLean.
+#
+# Both are licensed under Apache-2.0. The verbatim Apache-2.0 license text
+# under LICENSES/ is itself unattributed boilerplate (SPDX-FileCopyrightText
+# = NONE), per common REUSE practice.
+
+# ---------------------------------------------------------------------------
+# Default: pre-existing LARQL codebase from `main`. This is the broadest
+# match; specific overrides below carve out the PR-added paths.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Chris Hay"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Compliance-pipeline infrastructure added by PR
+# `claude/implement-standardized-tool-PGol9`.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "REUSE.toml",
+  "NOTICE",
+  "CHANGELOG.md",
+  "cliff.toml",
+  "cog.toml",
+  ".pre-commit-config.yaml",
+  ".github/**",
+  "scripts/check_changelog.sh",
+  "scripts/version_preflight.sh",
+  "docs/specs/compliance-pipeline.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Verbatim Apache-2.0 license text. Boilerplate; not separately copyrighted.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "LICENSE",
+  "LICENSES/Apache-2.0.txt",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"

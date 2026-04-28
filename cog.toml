@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cocogitto configuration. Defines the strict Conventional Commits grammar
+# accepted by both local pre-commit hooks (`cog verify`) and the PR validation
+# workflow (`cog check`). Commit-message structure is enforced; semantic
+# interpretation is not — see Foundational Axiom A2 (Structured History).
+#
+# The default commit types accepted by cocogitto are exactly the standard
+# Conventional Commits set (feat, fix, perf, refactor, revert, docs, chore,
+# build, ci, test, style). They are not redefined here on purpose: changelog
+# section mapping is owned by `cliff.toml`, while cocogitto is responsible
+# only for grammar acceptance and SemVer derivation.
+
+#:schema https://docs.cocogitto.io/cog-schema.json
+
+# Tag prefix for SemVer derivation. Matches scripts/version_preflight.sh.
+tag_prefix = "v"
+
+# Merge commits do not satisfy Conventional Commits and are pre-existing in
+# history; ignore them at the parser level.
+ignore_merge_commits = true
+
+# Disabled by policy: cocogitto's optional bump-on-branch and pre-bump hooks
+# would introduce non-deterministic side effects that are out of scope for the
+# PR validation workflow. Version bumping is a separate, repository-local
+# release concern (see docs/specs/compliance-pipeline.md).
+pre_bump_hooks  = []
+post_bump_hooks = []
+
+# Branches from which a release tag may be derived by `cog bump --auto`.
+# PR branches are intentionally excluded; bumping happens after merge.
+branch_whitelist = ["main", "release/*"]

@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# git-cliff configuration. Defines the deterministic projection from validated
+# Conventional Commits to a Keep a Changelog 1.1.0 fragment. The mapping is
+# fixed by repository policy; do not introduce conditional logic that depends
+# on commit author, time, or any non-commit-message input.
+#
+# Mapping policy (Conventional Commit type -> Keep a Changelog section):
+#
+#   feat     -> Added
+#   fix      -> Fixed
+#   perf     -> Changed
+#   refactor -> Changed
+#   revert   -> Removed
+#   docs     -> omitted
+#   chore    -> omitted
+#   build    -> omitted
+#   ci       -> omitted
+#   test     -> omitted
+#   style    -> omitted
+#
+# Any commit annotated with `BREAKING CHANGE` (footer) or `!` (header) is
+# additionally placed under Changed and prefixed with `BREAKING:`.
+
+[changelog]
+header = """
+<!--
+SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits | sort(attribute="message") %}
+- {% if commit.breaking %}**BREAKING:** {% endif %}{{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+postprocessors = []
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = true
+filter_commits = true
+tag_pattern = "v[0-9]*"
+skip_tags = ""
+ignore_tags = ""
+topo_order = false
+sort_commits = "oldest"
+
+# Mapping is total and explicit. Anything not matched is dropped.
+commit_parsers = [
+  { message = "^feat",       group = "Added"   },
+  { message = "^fix",        group = "Fixed"   },
+  { message = "^perf",       group = "Changed" },
+  { message = "^refactor",   group = "Changed" },
+  { message = "^revert",     group = "Removed" },
+  { message = "^docs",       skip  = true      },
+  { message = "^chore",      skip  = true      },
+  { message = "^build",      skip  = true      },
+  { message = "^ci",         skip  = true      },
+  { message = "^test",       skip  = true      },
+  { message = "^style",      skip  = true      },
+  { message = ".*",          skip  = true      },
+]
+
+# No commit message preprocessing; the validator must not silently rewrite
+# commit text. If a commit needs reshaping it must be amended in source.
+commit_preprocessors = []
