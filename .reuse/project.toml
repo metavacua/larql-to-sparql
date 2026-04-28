@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# REUSE 3.0 Configuration (TOML format)
+
+version = "3.0"
+
+[project]
+name = "larql-to-sparql"
+homepage = "https://github.com/metavacua/larql-to-sparql"
+license = "Apache-2.0"
+readme = "README.md"
+
+[[annotations]]
+path = [".commitlintrc.json", ".pre-commit-config.yaml"]
+SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [".github/workflows/integrity.yml", ".github/workflows/release.yml"]
+SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["scripts/changelog-transformer.py"]
+SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["CHANGELOG.md"]
+SPDX-FileCopyrightText = "2026 Contributors to larql-to-sparql"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
