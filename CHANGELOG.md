@@ -9,24 +9,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-
-This file is treated as a deterministic projection of the validated
-Conventional Commits history. Entries under `[Unreleased]` are produced and
-verified by `git-cliff` against `cliff.toml`; do not author entries by hand
-in a way that diverges from what the transformer emits.
-
 ## [Unreleased]
 
 ### Added
 
-### Changed
-
-### Deprecated
-
-### Removed
+- Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
+- Add deterministic changelog and SemVer preflight checks
 
 ### Fixed
 
-### Security
+- Linux support — conditional BLAS and Q4 scalar fallback
+- Linux/WSL2 support + temperature parameter
+- Correct cog.toml schema, workflow flags, and review feedback
+- Correct tool release URLs and pre-commit hook wiring
 
-[Unreleased]: https://github.com/metavacua/larql-to-sparql/compare/HEAD...HEAD
+
