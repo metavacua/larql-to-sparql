@@ -66,7 +66,7 @@ check-env:
 	@echo "Platform-Specific:"
 	@if [ "$(DETECTED_OS)" = "macos" ]; then \
 		echo "  macOS Detected:"; \
-		command -v metal >/dev/null 2>&1 && echo "    ✓ Metal framework available" || echo "    ⚠ Metal framework (GPU acceleration, optional)"; \
+		uname -m | grep -q "arm64" && echo "    ✓ Metal framework available (Apple Silicon)" || echo "    ℹ Metal framework not available on this architecture (Intel Mac)"; \
 	elif [ "$(DETECTED_OS)" = "linux" ]; then \
 		echo "  Linux Detected:"; \
 		pkg-config --cflags openblas >/dev/null 2>&1 && echo "    ✓ OpenBLAS (system)" || echo "    ℹ OpenBLAS (will be vendored if missing)"; \
@@ -135,14 +135,14 @@ python-setup:
 		cd crates/larql-python && uv sync --no-install-project --group dev; \
 	else \
 		echo "uv not found, using pip + venv..."; \
-		cd crates/larql-python && python3 -m venv .venv && . .venv/bin/activate && pip install -e .[dev]; \
+		cd crates/larql-python && python3 -m venv .venv && . .venv/bin/activate && pip install -e .[dev] maturin; \
 	fi
 
 python-build: python-setup
 	@if command -v uv >/dev/null 2>&1; then \
 		cd crates/larql-python && uv run --no-sync maturin develop --release; \
 	else \
-		cd crates/larql-python && . .venv/bin/activate && pip install maturin && maturin develop --release; \
+		cd crates/larql-python && . .venv/bin/activate && maturin develop --release; \
 	fi
 
 python-test: python-build
