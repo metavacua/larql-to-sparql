@@ -24,37 +24,9 @@ jobs:
         with:
           configFile: .commitlintrc.json
 
-      # 3. Ensure CHANGELOG.md was modified in PR (informational check)
-      - name: Changelog Check
+      # 3. Verify CHANGELOG.md structure
+      - name: Verify CHANGELOG Format
         run: |
-          # Verify CHANGELOG.md exists and has content
-          if [ ! -f CHANGELOG.md ]; then
-            echo "::error::CHANGELOG.md file not found"
-            exit 1
-          fi
-
-          if ! grep -q "\[Unreleased\]" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md must contain [Unreleased] section"
-            exit 1
-          fi
-
+          test -f CHANGELOG.md || { echo "CHANGELOG.md missing"; exit 1; }
+          grep -q "\[Unreleased\]" CHANGELOG.md || { echo "[Unreleased] section missing"; exit 1; }
           echo "✓ CHANGELOG.md is properly formatted"
-
-      # 4. Informational: Compute prospective SemVer version
-      - name: SemVer Dry-Run
-        id: semver
-        run: |
-          # Count commit types in this PR
-          MERGE_BASE=$(git merge-base ${{ github.base_ref }} HEAD)
-
-          BREAKING=$(git log $MERGE_BASE..HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
-          FEATURES=$(git log $MERGE_BASE..HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
-          FIXES=$(git log $MERGE_BASE..HEAD --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
-
-          echo "breaking-changes=$BREAKING" >> $GITHUB_OUTPUT
-          echo "features=$FEATURES" >> $GITHUB_OUTPUT
-          echo "fixes=$FIXES" >> $GITHUB_OUTPUT
-          echo "### Version Impact" >> $GITHUB_STEP_SUMMARY
-          echo "- Breaking changes: $BREAKING" >> $GITHUB_STEP_SUMMARY
-          echo "- New features: $FEATURES" >> $GITHUB_STEP_SUMMARY
-          echo "- Bug fixes: $FIXES" >> $GITHUB_STEP_SUMMARY
