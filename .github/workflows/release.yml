@@ -1,0 +1,168 @@
+name: Release Automation
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  calculate-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      should-release: ${{ steps.semver.outputs.should-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Verify integrity before release
+      - name: Run Compliance Checks
+        run: |
+          python3 -m pip install -q commitlint reuse || true
+          # Validate last commit
+          if ! git log -1 --format=%B | grep -qE "^(feat|fix|perf|refactor|docs|chore|test|style)(\([^)]*\))?:"; then
+            echo "::warning::Last commit does not follow Conventional Commits"
+          fi
+
+      # Calculate SemVer based on commits since last tag
+      - name: Determine Version
+        id: semver
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous tags found; starting from initial commit"
+            LAST_TAG=$(git rev-list --max-parents=0 HEAD)
+            SHOULD_RELEASE="true"
+          else
+            # Check if any new commits since last tag
+            NEW_COMMITS=$(git rev-list $LAST_TAG...HEAD --count)
+            if [ "$NEW_COMMITS" -eq 0 ]; then
+              echo "No new commits since last tag; skipping release"
+              echo "should-release=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            SHOULD_RELEASE="true"
+          fi
+
+          # Parse SemVer from tag (vX.Y.Z format)
+          if [[ $LAST_TAG =~ v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+          else
+            MAJOR=0
+            MINOR=1
+            PATCH=0
+          fi
+
+          # Determine bump based on commits
+          BREAKING=$(git log $LAST_TAG...HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
+          FEATURES=$(git log $LAST_TAG...HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
+
+          if [ "$BREAKING" -gt 0 ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$FEATURES" -gt 0 ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should-release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          echo "New version: v$NEW_VERSION"
+
+  freeze-changelog:
+    needs: calculate-version
+    if: needs.calculate-version.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ needs.calculate-version.outputs.version }}"
+          TODAY=$(date +%Y-%m-%d)
+
+          # Create temporary file with updated changelog
+          python3 << 'EOF'
+          import re
+          from datetime import datetime
+
+          version = "${{ needs.calculate-version.outputs.version }}"
+          today = datetime.now().strftime("%Y-%m-%d")
+
+          with open("CHANGELOG.md", "r") as f:
+              content = f.read()
+
+          # Replace [Unreleased] header with versioned header
+          content = re.sub(
+              r"## \[Unreleased\]",
+              f"## [{version}] - {today}\n\n## [Unreleased]",
+              content,
+              count=1
+          )
+
+          # Update comparison links at bottom
+          content = re.sub(
+              rf"\[Unreleased\]: https://github\.com/metavacua/larql-to-sparql/compare/([v\d.]+)\.\.\.HEAD",
+              rf"[Unreleased]: https://github.com/metavacua/larql-to-sparql/compare/v{version}...HEAD\n[{version}]: https://github.com/metavacua/larql-to-sparql/compare/\1...v{version}",
+              content
+          )
+
+          with open("CHANGELOG.md", "w") as f:
+              f.write(content)
+          EOF
+
+      - name: Create Release Commit
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add CHANGELOG.md
+          git commit -m "chore(release): v${{ needs.calculate-version.outputs.version }}"
+          git push
+
+  create-tag:
+    needs: [calculate-version, freeze-changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and Push Tag
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Fetch latest to ensure we have the changelog commit
+          git pull origin ${{ github.ref_name }}
+
+          TAG="v${{ needs.calculate-version.outputs.version }}"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+  publish-release:
+    needs: [calculate-version, create-tag]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "v${{ needs.calculate-version.outputs.version }}" \
+            --title "v${{ needs.calculate-version.outputs.version }}" \
+            --generate-notes \
+            --target "${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
