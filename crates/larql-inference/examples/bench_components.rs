@@ -1,4 +1,6 @@
 //! Component-level benchmark for all forward pass operations.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Profiles every operation in a transformer layer at realistic dimensions
 //! WITHOUT requiring model weights. Pure synthetic data.

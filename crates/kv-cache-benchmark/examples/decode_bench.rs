@@ -1,4 +1,6 @@
 //! Bounded-state decode experiment: RS-decode vs full-KV decode.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Proves the Markov residual stream claim end-to-end:
 //!

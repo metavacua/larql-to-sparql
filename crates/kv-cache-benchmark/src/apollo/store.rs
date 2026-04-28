@@ -1,4 +1,6 @@
 //! On-disk Apollo store format.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirrors the layout of `apollo-demo/apollo11_store/`:
 //!

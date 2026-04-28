@@ -1,4 +1,6 @@
 //! Per-layer residual scalar — Gemma 4's learned stabiliser.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Multiplies the layer's final residual (`h_bufs[l + 1]`) by a per-layer
 //! scalar typically in the range 0.02–0.8. Without this the residual

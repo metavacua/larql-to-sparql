@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use kv_cache_benchmark::metrics::Metrics;
 use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::turboquant::rotation;

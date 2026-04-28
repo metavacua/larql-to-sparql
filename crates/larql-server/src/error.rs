@@ -1,4 +1,6 @@
 //! Error types → HTTP status codes.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

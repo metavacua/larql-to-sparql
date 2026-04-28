@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// LQL Abstract Syntax Tree
 ///
 /// Every LQL statement parses into one `Statement` variant.

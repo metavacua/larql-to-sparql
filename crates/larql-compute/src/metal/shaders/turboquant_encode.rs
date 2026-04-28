@@ -1,4 +1,6 @@
 //! TurboQuant encode shader: fused WHT + Lloyd-Max quantize for KV vectors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Input:  fp32 vector buffer [batch × d]
 //! Output: packed quantized indices + norms

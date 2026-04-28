@@ -1,4 +1,6 @@
 //! f32 matrix multiply via BLAS.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! On macOS: dispatches through Accelerate → AMX coprocessor.
 //! On Linux: OpenBLAS or equivalent.

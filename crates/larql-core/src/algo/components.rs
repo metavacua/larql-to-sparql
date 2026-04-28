@@ -1,4 +1,6 @@
 //! Connected components analysis.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Basic component counting is on `Graph::stats()`. This module provides
 //! richer analysis: enumerate components, find largest, check connectivity.

@@ -1,4 +1,6 @@
 //! Criterion benchmarks for the LQL executor — measures end-to-end
+// SPDX-License-Identifier: Apache-2.0
+
 //! `parse → Session::execute` round-trips against a synthetic vindex.
 //!
 //! Run: `cargo bench -p larql-lql --bench executor`

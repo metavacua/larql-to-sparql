@@ -1,4 +1,6 @@
 //! Integration tests: load the real `apollo-demo/apollo11_store/`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These tests are gated on the `real-model` feature only because the apollo
 //! module itself is; they don't need a model loaded — they only read disk.

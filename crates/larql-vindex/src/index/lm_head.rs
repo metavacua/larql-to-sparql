@@ -1,4 +1,6 @@
 //! LM-head loaders + KNN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads the output projection (vocab × hidden) in one of three formats:
 //!

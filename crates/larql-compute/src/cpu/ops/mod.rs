@@ -1,4 +1,6 @@
 //! CPU operation dispatch — one file per operation type.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirrors the Metal ops/ structure for consistent API across backends.
 //! Each module handles dispatch for one category of compute operation.

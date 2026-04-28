@@ -1,4 +1,6 @@
 //! Speculation error experiment: can we walk FFN layers in parallel?
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For each layer N, measures the error between:
 //!   true path:  run_ffn(post_attn_residual_N,  layer=N)  — actual residual

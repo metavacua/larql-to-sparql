@@ -1,4 +1,6 @@
 //! `DIFF a b [INTO PATCH p]` — two-way vindex diff with optional
+// SPDX-License-Identifier: Apache-2.0
+
 //! extraction as a `.vlp` patch file.
 
 use std::path::PathBuf;

@@ -1,4 +1,6 @@
 //! Multi-token extend with prior K,V checkpoint.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs a forward pass over new tokens, seeding each layer's attention with
 //! an optional prior K,V cache (the window boundary checkpoint). Equivalent

@@ -1,4 +1,6 @@
 //! Surgical patcher: row-pad and re-quantize `layers.N.mlp.down_proj.weight`
+// SPDX-License-Identifier: Apache-2.0
+
 //! entries in an existing vindex whose extraction predated the row-padding
 //! fix (commit introducing `pad_rows_to_256` in `larql-vindex/format/weights/write.rs`).
 //!

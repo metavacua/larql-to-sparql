@@ -1,4 +1,6 @@
 //! `DESCRIBE <entity>` — walk-based edge scan, MoE-aware.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 

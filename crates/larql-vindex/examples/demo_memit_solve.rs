@@ -1,4 +1,6 @@
 //! Demo: `memit_solve` + `MemitStore` — the COMPACT MAJOR pipeline in
+// SPDX-License-Identifier: Apache-2.0
+
 //! miniature.
 //!
 //! Runs the vanilla MEMIT closed-form decomposition, packages each

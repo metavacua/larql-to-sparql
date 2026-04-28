@@ -1,4 +1,6 @@
 //! Apollo accuracy sweep across multiple queries + both forward paths.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads model + store ONCE, runs N queries through both `query_greedy`
 //! (uncompressed: window tokens + query) and `query_greedy_compressed`

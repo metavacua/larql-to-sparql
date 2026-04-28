@@ -1,4 +1,6 @@
 //! Per-window token-ID archive (COLD tier).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Append-only; never evicted. Provides the raw token stream for replay.
 //! Four bytes per token (u32), regardless of model size.

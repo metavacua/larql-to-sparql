@@ -1,4 +1,6 @@
 //! Adaptive layer residency — pin hot layers, stream cold ones.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! llama.cpp loads ALL weights or nothing. Partial offload kills speed (PCIe cliff).
 //! Vindex has a gradient: more memory → more pinned layers → smoothly faster.

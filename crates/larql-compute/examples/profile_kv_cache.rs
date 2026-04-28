@@ -1,4 +1,6 @@
 //! KV cache + attention benchmark.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Simulates token generation: append K/V, attend against cache.
 //! Measures: per-token attention time with growing cache.

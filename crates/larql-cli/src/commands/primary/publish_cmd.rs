@@ -1,4 +1,6 @@
 //! `larql publish <SRC> --repo OWNER/NAME` — upload a vindex to HuggingFace,
+// SPDX-License-Identifier: Apache-2.0
+
 //! optionally carving + uploading deployment slices to sibling repos in one
 //! go.
 //!

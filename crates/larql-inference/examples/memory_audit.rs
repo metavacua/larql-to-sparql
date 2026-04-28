@@ -1,4 +1,6 @@
 //! memory_audit — RSS tracking for vindex + walk inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Checkpoints resident set size (RSS) at every phase:
 //!   (1) baseline

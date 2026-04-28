@@ -1,4 +1,6 @@
 //! Per-session PatchedVindex management.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each session gets its own PatchedVindex overlay. The base vindex is shared
 //! (readonly). Patches applied via the session API are isolated to that session.

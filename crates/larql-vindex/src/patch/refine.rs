@@ -1,4 +1,6 @@
 //! Gate refine pass for `COMPILE INTO VINDEX WITH REFINE`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The refine pass orthogonalises each patched gate against (a) the other
 //! patched gates at the same layer and (b) any optional decoy residuals

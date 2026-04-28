@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use bundled protoc (no system install required).
     std::env::set_var("PROTOC", protobuf_src::protoc());

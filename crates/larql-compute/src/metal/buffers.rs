@@ -1,4 +1,6 @@
 //! Metal GPU buffer management — caching, zero-copy mmap, transient allocation.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Weight buffers (mmap'd, constant) are cached by pointer address.
 //! Transient buffers (Q8 input, activation, output) are allocated fresh each call.

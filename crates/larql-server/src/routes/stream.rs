@@ -1,4 +1,6 @@
 //! WS /v1/stream — WebSocket streaming for layer-by-layer DESCRIBE.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Client sends JSON messages, server streams results back layer by layer.
 //!

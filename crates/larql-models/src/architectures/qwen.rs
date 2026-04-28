@@ -1,4 +1,6 @@
 //! Qwen architecture (Qwen 2, 2.5, 3, MoE variants).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mostly Llama-compatible but with these differences:
 //! - Qwen2/2.5: attention Q/K/V bias terms

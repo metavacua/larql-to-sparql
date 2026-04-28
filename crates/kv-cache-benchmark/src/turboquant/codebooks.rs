@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Pre-computed Lloyd-Max codebooks for Beta(d/2, d/2) distribution.
 ///
 /// After WHT of a unit-norm vector in d dimensions, each coordinate is

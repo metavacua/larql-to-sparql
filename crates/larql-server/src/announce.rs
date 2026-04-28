@@ -1,4 +1,6 @@
 //! Grid announce task — keeps a persistent gRPC stream to the router.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! On startup, if --join is provided, this module spawns a background task
 //! that connects to the router, sends an AnnounceMsg, and then sends

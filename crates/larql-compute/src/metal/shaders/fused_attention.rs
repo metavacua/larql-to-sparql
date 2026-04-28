@@ -1,4 +1,6 @@
 //! Fused attention shader: RoPE → QK-norm → GQA → softcap → softmax → V.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Handles all model-specific features in one kernel:
 //! - RoPE: split-half position-dependent rotation on Q and K

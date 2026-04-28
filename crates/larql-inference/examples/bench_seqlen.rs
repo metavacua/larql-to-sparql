@@ -1,4 +1,6 @@
 //! Benchmark walk FFN at different sequence lengths.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Shows where cold-cache penalty closes and architecture advantage opens.
 //!
 //! Usage:

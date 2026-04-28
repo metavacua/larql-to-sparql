@@ -1,4 +1,6 @@
 //! `impl GateIndex for VectorIndex` — the trait implementation that
+// SPDX-License-Identifier: Apache-2.0
+
 //! lets `VectorIndex` plug into the `GateIndex` abstraction (also
 //! implemented by `PatchedVindex`). Pulled out of `core.rs` so the
 //! struct definition + constructors stay focused.

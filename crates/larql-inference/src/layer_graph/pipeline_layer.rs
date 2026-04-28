@@ -1,4 +1,6 @@
 //! Shared FullPipelineLayer construction from ModelWeights + VectorIndex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Single source of truth for extracting per-layer architecture parameters
 //! from larql-models and wiring them into larql-compute's FullPipelineLayer.

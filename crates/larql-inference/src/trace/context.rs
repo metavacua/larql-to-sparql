@@ -1,4 +1,6 @@
 //! Tiered context store — boundary residuals + critical layer deltas.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three tiers of stored data per window boundary:
 //!

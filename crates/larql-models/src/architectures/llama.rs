@@ -1,4 +1,6 @@
 //! Llama-family architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Covers Llama, Mistral, Qwen, and other Llama-compatible models.
 //! Uses all trait defaults (which are Llama-style).

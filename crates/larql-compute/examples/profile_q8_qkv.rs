@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Quick Q8 QKV benchmark — test fused projection speed
 
 fn main() {

@@ -1,4 +1,6 @@
 //! Shared ABI for LARQL WASM expert modules.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each expert is a `wasm32-wasip1` cdylib that exposes two C-ABI functions:
 //!

@@ -1,4 +1,6 @@
 //! Build callbacks and utilities for vindex construction.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The full build pipeline (EXTRACT) lives in `larql-inference` because it
 //! needs the clustering module. This module provides the callback trait and

@@ -1,4 +1,6 @@
 //! PageRank — iterative importance ranking for graph entities.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::HashMap;
 

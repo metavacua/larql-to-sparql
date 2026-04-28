@@ -1,4 +1,6 @@
 //! Matmul backend benchmark — CPU (Accelerate BLAS) vs Metal GPU.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Benchmarks at transformer-realistic dimensions for Gemma-3 4B:
 //!   hidden=2560, head_dim=256, intermediate=10240, vocab=262144

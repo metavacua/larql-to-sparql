@@ -1,4 +1,6 @@
 //! Rust-native port of `experiments/07_wasm_compute/wasm_solver_demo_v11.py`
+// SPDX-License-Identifier: Apache-2.0
+
 //! scheduling benchmark, using `model-compute::wasm` as the host runtime.
 //!
 //! Problem: assign N tasks to distinct time slots in [0, max_time-1],

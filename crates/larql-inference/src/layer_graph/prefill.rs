@@ -1,4 +1,6 @@
 //! KV cache prefill — populate Metal KV cache from CPU attention.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use ndarray::Array2;
 

@@ -1,4 +1,6 @@
 //! Production pipeline benchmark: cache L0-12 + mmap walk L13-33 via LayerGraph.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests:
 //!   1. Dense baseline (predict)

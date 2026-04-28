@@ -1,4 +1,6 @@
 //! Quick Q6_K roundtrip test
+// SPDX-License-Identifier: Apache-2.0
+
 
 fn main() {
     let data: Vec<f32> = (0..256).map(|i| (i as f32 - 128.0) * 0.1).collect();

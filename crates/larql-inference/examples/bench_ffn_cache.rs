@@ -1,4 +1,6 @@
 //! FFN L1 cache benchmark — measures hit rate and latency for the sparse walk path.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs two configurations back-to-back:
 //!   1. WalkFfn without cache — baseline latency per layer

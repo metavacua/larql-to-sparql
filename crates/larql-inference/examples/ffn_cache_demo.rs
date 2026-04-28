@@ -1,4 +1,6 @@
 //! FFN L1 cache demo — shows cache behaviour, hit/miss stats, and patch safety.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates three scenarios:
 //!   1. Clean model — repeated residual → 100% hit after first call

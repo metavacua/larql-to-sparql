@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Option 3 integration test: cascade trie → expert dispatch pipeline
 ///
 /// Each case documents what the cascade would commit to (route label) and the

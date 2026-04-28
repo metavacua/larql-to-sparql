@@ -1,4 +1,6 @@
 //! Q4 vector-matrix multiply via C kernel (scatter-accumulate).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out[K] = activation[N] @ Q4[N, K]
 

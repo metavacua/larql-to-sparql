@@ -1,4 +1,6 @@
 //! Safetensors writer + config/tokenizer copy logic for compiled checkpoints.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The skip patterns drop Gemma 3's vision/multimodal tensors so the output is
 //! a text-only language model. Tied lm_head is dropped when `embed_tokens` is

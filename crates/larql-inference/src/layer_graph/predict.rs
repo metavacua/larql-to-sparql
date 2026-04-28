@@ -1,4 +1,6 @@
 //! Prediction entry points — the functions external code calls
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All GPU pipeline layer construction goes through `pipeline_layer::build_pipeline_layers()`.
 //! Logits computation goes through `logits::finalize_logits()`.

@@ -1,4 +1,6 @@
 //! DeepSeek v2/v3 architecture — MoE + MLA.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard Llama:
 //! - MoE: router selects top-K of N routed experts per token, plus shared experts

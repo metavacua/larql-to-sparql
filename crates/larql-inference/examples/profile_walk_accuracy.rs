@@ -1,4 +1,6 @@
 //! Walk FFN accuracy vs K: what top-K gives the same output as dense?
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs dense FFN and walk FFN at various K values on the same input,
 //! measures cosine similarity of the outputs.

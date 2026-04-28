@@ -1,4 +1,6 @@
 //! Gemma 2 architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from Gemma 3:
 //! - attn_logit_softcapping (typically 50.0)

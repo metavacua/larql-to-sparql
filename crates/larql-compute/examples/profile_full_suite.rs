@@ -1,4 +1,6 @@
 //! Full benchmark suite for larql-compute.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests every operation that inference and vindex need, at real matrix sizes,
 //! with both CPU and Metal backends. Proves the crate is production-ready

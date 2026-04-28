@@ -1,4 +1,6 @@
 //! Integration test for `larql_inference::vindex::generate_q4k_cpu`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads a real Q4_K vindex and runs CPU autoregressive decode for a handful
 //! of tokens to prove the helper actually drives the model end-to-end.

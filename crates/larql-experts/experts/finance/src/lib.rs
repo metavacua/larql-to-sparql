@@ -1,4 +1,6 @@
 //! # Finance expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Time-value-of-money, interest, NPV, Bayesian update, Kelly criterion, ROI.
 //! Rates are passed as percentages (e.g. `7` for 7%), not decimals. The result

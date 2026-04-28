@@ -1,4 +1,6 @@
 //! GGUF format reader — parse GGUF files and load tensors as f32.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! GGUF is the GGML Universal Format used by llama.cpp.
 //! We support reading unquantized (F32, F16, BF16) and quantized (Q4_0, Q4_1, Q8_0) tensors.

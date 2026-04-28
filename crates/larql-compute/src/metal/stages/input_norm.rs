@@ -1,4 +1,6 @@
 //! Input layer norm — the first stage of every transformer layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two code paths depending on what the QKV projection wants next:
 //!

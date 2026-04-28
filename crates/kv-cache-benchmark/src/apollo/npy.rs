@@ -1,4 +1,6 @@
 //! Minimal numpy `.npy` v1.0 reader for the dtypes the Apollo store uses.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! We avoid `ndarray-npy` because it depends on ndarray 0.17 while the
 //! workspace pins 0.16. The format is simple enough to parse directly:

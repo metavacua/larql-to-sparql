@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use larql_core::engine::templates::{PromptTemplate, TemplateRegistry};
 
 #[test]

@@ -1,4 +1,6 @@
 //! Autoregressive generation with CPU KV cache.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two-phase decoder:
 //!

@@ -1,4 +1,6 @@
 //! Real Model Benchmark: Standard KV vs TurboQuant vs Markov RS vs Graph Walk
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --example real_model_bench --features real-model -- [model-path] [vindex-path]

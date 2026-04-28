@@ -1,4 +1,6 @@
 //! BFS and DFS traversal with depth tracking and visit order.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

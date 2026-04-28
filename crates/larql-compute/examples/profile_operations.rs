@@ -1,4 +1,6 @@
 //! Per-operation standalone benchmarks — CPU and Metal side by side.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every operation benchmarked individually at representative sizes.
 //! Run with:

@@ -1,4 +1,6 @@
 //! Tracing and calibration — capture residuals, activations, and attention weights.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use super::embed::embed_tokens;
 use super::layer::{

@@ -1,4 +1,6 @@
 //! Keyword-driven routing index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Given a query string, returns a ranked list of window IDs likely to
 //! contain relevant facts. Apollo's routing is tf-idf over tokenized

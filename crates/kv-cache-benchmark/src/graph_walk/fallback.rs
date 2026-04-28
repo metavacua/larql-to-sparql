@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Tier A/B/C fallback routing for graph walk.
 ///
 /// Tier A: cached template walk — known template, entity KNN only (<0.1ms)

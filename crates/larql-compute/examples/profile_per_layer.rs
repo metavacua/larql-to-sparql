@@ -1,4 +1,6 @@
 //! Micro-benchmark: single-layer Q4_K QKV + FFN to isolate per-layer cost.
+// SPDX-License-Identifier: Apache-2.0
+
 
 extern crate blas_src;
 

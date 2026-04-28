@@ -1,4 +1,6 @@
 //! VectorIndex — the in-memory KNN engine, mutation interface, MoE router, and HNSW index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Module structure:
 //! - `types`      — FeatureMeta, GateIndex trait, WalkHit, callbacks

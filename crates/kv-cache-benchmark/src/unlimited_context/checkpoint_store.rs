@@ -1,4 +1,6 @@
 //! Per-window boundary K,V checkpoint store (WARM tier).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each checkpoint is the K,V at the *last* position of a closed window, one
 //! (K, V) pair per layer. K,V carry their baked-in RoPE offsets — so replay

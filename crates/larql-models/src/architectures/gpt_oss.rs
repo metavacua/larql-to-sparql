@@ -1,4 +1,6 @@
 //! GPT-OSS architecture — OpenAI's MoE model with MXFP4 packed experts.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard MoE (Mixtral):
 //! - Expert weights are packed as MXFP4 (e8m0 scales + 4-bit values)

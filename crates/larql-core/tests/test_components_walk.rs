@@ -1,4 +1,6 @@
 //! Tests for connected components and advanced walk strategies.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use larql_core::*;
 

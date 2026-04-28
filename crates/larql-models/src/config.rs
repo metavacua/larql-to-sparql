@@ -1,4 +1,6 @@
 //! Model architecture trait and shared types.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every model architecture implements `ModelArchitecture`. This trait
 //! describes *what the model is* — tensor key patterns, norm behavior,

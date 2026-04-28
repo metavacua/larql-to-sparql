@@ -1,4 +1,6 @@
 //! Cluster labeling — auto-generate human-readable labels for discovered clusters.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two approaches:
 //! 1. TF-IDF: distinctive tokens per cluster (fallback)

@@ -1,4 +1,6 @@
 //! Feed-forward block — gate+up → activation → down.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two variants depending on `FfnType`:
 //!

@@ -1,4 +1,6 @@
 //! Validate OV-gate reachability: do the actually-firing features
+// SPDX-License-Identifier: Apache-2.0
+
 //! fall within the OV-gate reachable set?
 //!
 //! Runs a dense forward pass, captures per-layer feature activations,

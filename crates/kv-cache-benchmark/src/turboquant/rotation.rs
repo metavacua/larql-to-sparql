@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Walsh-Hadamard Transform (WHT).
 ///
 /// The WHT is a fast orthogonal transform that converts coordinates to a

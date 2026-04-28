@@ -1,4 +1,6 @@
 //! Optimised Q4_0 × Q8_0 matrix-vector multiply.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! scores[N] = Q4[N, K] @ Q8_x[K]
 //!

@@ -1,4 +1,6 @@
 //! `COMPILE INTO MODEL`: apply the patch overlay to model weights via
+// SPDX-License-Identifier: Apache-2.0
+
 //! MEMIT closed-form editing and emit a standalone safetensors dir.
 
 use std::path::PathBuf;

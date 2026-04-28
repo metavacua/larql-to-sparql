@@ -1,4 +1,6 @@
 //! Per-shader correctness tests for Metal compute kernels.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each test runs the Metal shader and compares output against
 //! a CPU reference implementation. Tests both correctness and

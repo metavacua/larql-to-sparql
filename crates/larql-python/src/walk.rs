@@ -1,4 +1,6 @@
 //! WalkModel — mmap-backed model weights + vindex for walk FFN inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Weight files are mmap'd, not loaded to heap. Array2 views point directly
 //! at mmap'd memory. Only the pages touched during inference are paged in.

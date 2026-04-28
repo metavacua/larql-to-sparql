@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Template detection and pattern walk cache.
 ///
 /// Templates are recurring query structures like "The capital of X is".

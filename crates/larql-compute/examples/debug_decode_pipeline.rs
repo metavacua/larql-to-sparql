@@ -1,4 +1,6 @@
 //! Debug: per-stage buffer reads in the decode pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Runs inside larql-compute where we have direct Metal access.
 //!
 //! cargo run --release --features metal -p larql-compute --example debug_decode_pipeline

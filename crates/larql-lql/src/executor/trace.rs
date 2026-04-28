@@ -1,4 +1,6 @@
 //! Executor for TRACE statements.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs a decomposed forward pass, captures attn/FFN deltas at every layer,
 //! and formats the results. Optionally tracks a specific answer token,

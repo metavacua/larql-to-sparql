@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Lloyd-Max scalar quantization.
 ///
 /// After WHT rotation, each coordinate follows Beta(d/2, d/2) ≈ N(0, 1/d).

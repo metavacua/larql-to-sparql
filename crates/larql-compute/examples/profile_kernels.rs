@@ -1,4 +1,6 @@
 //! Head-to-head Q4 matvec kernel comparison.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! v1: simdgroup reduction, threadgroup shared memory (current)
 //! v2: 4 rows per thread, f32 input, no shared memory

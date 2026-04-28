@@ -1,4 +1,6 @@
 //! Debug: q6k_matvec with real V projection data
+// SPDX-License-Identifier: Apache-2.0
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vd = std::path::PathBuf::from("output/gemma3-4b-v2.vindex");

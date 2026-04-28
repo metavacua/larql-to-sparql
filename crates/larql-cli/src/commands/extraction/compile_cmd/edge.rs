@@ -1,4 +1,6 @@
 //! The compile-into-weights primitive.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Writes one (gate, up, down) triple at `slot` so the FFN fires on `trigger`
 //! and contributes `write` (scaled) to the residual. Reference norms from the

@@ -1,4 +1,6 @@
 //! Criterion benchmarks for `memit_solve` — the vanilla MEMIT
+// SPDX-License-Identifier: Apache-2.0
+
 //! decomposition that powers `COMPACT MAJOR` cycles.
 //!
 //! Wraps `larql_compute::cpu::ops::linalg::ridge_decomposition_solve`

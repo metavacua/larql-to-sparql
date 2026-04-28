@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;

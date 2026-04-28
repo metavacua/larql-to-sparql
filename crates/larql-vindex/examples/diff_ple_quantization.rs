@@ -1,4 +1,6 @@
 //! Measure the round-trip error on Gemma 4 E2B's PLE tensors:
+// SPDX-License-Identifier: Apache-2.0
+
 //! dense-loaded BF16→f32 vs the Q4K-vindex dequantised f32.
 //!
 //! Usage: `cargo run --release -p larql-vindex \

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Integration tests for the WASM expert registry.
 ///
 /// Requires the larql-experts workspace to be pre-built:

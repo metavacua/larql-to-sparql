@@ -1,4 +1,6 @@
 //! Integration tests for larql-server API endpoints.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Builds a synthetic in-memory vindex and tests each route handler
 //! through the axum test infrastructure (no network, no disk).

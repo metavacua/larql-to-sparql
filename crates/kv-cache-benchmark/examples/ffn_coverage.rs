@@ -1,4 +1,6 @@
 //! FFN Graph Walk Coverage — Stage 1 decoupled-mode runner.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Spec: `experiments/25_ffn_coverage/SPEC.md`
 //!

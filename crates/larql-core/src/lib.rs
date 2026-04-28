@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod algo;
 pub mod core;
 pub mod engine;

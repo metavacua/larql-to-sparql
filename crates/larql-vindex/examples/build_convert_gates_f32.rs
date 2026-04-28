@@ -1,4 +1,6 @@
 //! Convert gate_vectors.bin from f16 to f32 for zero-copy mmap access.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Reads the existing f16 gate vectors, decodes to f32, writes a new file,
 //! and updates index.json with the new dtype and byte offsets.

@@ -1,4 +1,6 @@
 //! Phase 2: Real model integration.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wires all four strategies into the LARQL inference pipeline on Gemma 3-4B.
 //! Requires the `real-model` feature flag.

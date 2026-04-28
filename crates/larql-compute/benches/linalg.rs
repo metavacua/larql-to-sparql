@@ -1,4 +1,6 @@
 //! Criterion benchmarks for the linalg primitives — Cholesky and the
+// SPDX-License-Identifier: Apache-2.0
+
 //! ridge-regression decomposition `ridge_decomposition_solve` (the
 //! generic solve underlying `larql_vindex::memit_solve`).
 //!

@@ -1,4 +1,6 @@
 //! Capture residual stream vectors and sparse activations for entities.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! High-level API: load a model, tokenize entities, run forward passes,
 //! write NDJSON output files compatible with vector-load and vindex builds.

@@ -1,4 +1,6 @@
 //! Rotary position embedding (RoPE) — pre-attention when KV cache is used.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Applies RoPE to Q and K in-place per head per position. Supports
 //! partial rotation (Gemma 4 global layers use `rotary_dim = head_dim / 4`).

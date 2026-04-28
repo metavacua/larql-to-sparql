@@ -1,4 +1,6 @@
 //! Batched Q4 operations — pair dispatch and multi-layer pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Amortises GPU dispatch overhead by encoding multiple operations
 //! into single command buffers.

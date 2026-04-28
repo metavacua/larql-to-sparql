@@ -1,4 +1,6 @@
 //! `larql slice <SRC> -o <DST> --parts a,b,c` — carve a subset of a vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Pure file-I/O subcommand. Copies a filtered set of files from an existing
 //! vindex directory to a new one, rewriting `index.json` so `extract_level`

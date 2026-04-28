@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::{model_config::ModelConfig, KvStrategy};
 
 /// Strategy 1: Standard FP16 KV cache.

@@ -1,4 +1,6 @@
 //! End-to-end demo: generation through a sharded expert grid.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage (two shards):
 //!   larql-server <vindex> --experts 0-63  --port 9191 &

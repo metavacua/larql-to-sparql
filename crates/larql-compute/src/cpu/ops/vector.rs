@@ -1,4 +1,6 @@
 //! Scalar vector operations — dot product, norm, cosine similarity.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All vector-vector operations route through here. Uses BLAS sdot
 //! via ndarray internally. No direct ndarray .dot() calls elsewhere.

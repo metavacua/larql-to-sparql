@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use larql_core::*;
 
 /// Load the example graph (matches Python format) and verify every field.

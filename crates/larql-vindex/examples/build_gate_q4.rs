@@ -1,4 +1,6 @@
 //! Convert gate_vectors.bin (f32/f16) → gate_vectors_q4.bin (Q4_0).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! 7x smaller gate files for fast Q4 KNN via larql-compute.
 //! The Q4 file is scored directly by the compute crate's Q4 matvec shader.

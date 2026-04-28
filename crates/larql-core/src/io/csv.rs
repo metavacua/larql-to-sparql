@@ -1,4 +1,6 @@
 //! CSV I/O for knowledge graphs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Format: subject,relation,object,confidence,source
 

@@ -1,4 +1,6 @@
 //! walk_correctness — deep per-layer parity check for the unified Walk FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wraps `WeightFfn` and `WalkFfn::new_unlimited` in a `DualFfn` that runs
 //! both backends against the same pre-FFN residual at every layer and

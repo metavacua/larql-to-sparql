@@ -1,4 +1,6 @@
 //! GEGLU activation: out[i] = silu(gate[i]) × up[i].
+// SPDX-License-Identifier: Apache-2.0
+
 //! Element-wise, pure Rust. 0.017ms for 10240 elements.
 
 /// SiLU (Swish) activation.

@@ -1,4 +1,6 @@
 //! LQL End-to-End Demo — parse, session, execute, error handling
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Demonstrates the full LQL flow: parse statements, manage session state,
 //! execute against the (absent) backend, and handle errors gracefully.

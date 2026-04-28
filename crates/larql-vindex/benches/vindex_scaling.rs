@@ -1,4 +1,6 @@
 //! Production-dimension scaling benchmarks for vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests gate KNN and walk at the dimensions of real models (Gemma 3 4B,
 //! Llama 3 8B, Llama 3 70B, Mixtral 8x22B). Synthetic data — no real

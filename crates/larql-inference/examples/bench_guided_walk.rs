@@ -1,4 +1,6 @@
 //! End-to-end benchmark: cache L0-12 + guided walk L13-33.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! 1. Build template universe (which features fire for this template)
 //! 2. Build cache for L0-12 (precomputed residuals)

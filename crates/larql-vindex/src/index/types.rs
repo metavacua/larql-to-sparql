@@ -1,4 +1,6 @@
 //! Shared types and traits for the vindex index.
+// SPDX-License-Identifier: Apache-2.0
+
 
 use larql_models::TopKEntry;
 use ndarray::{Array1, Array2};

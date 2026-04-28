@@ -1,4 +1,6 @@
 //! Sparse Q4 matvec: score only K rows selected by index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out[K] = Q4[indices[K], hidden] @ Q8_x[hidden]
 //!

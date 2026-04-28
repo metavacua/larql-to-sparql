@@ -1,4 +1,6 @@
 //! Three-way Q4 benchmark: BLAS f32 vs C Q4 kernel vs Metal Q4 shader.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-compute --example bench_q4

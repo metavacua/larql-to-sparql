@@ -1,4 +1,6 @@
 //! GPU-accelerated attention — routes projections through ComputeBackend.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Falls back to CPU BLAS when backend is None.
 //! Also includes Q4 quantized attention projection and KV-capture attention.

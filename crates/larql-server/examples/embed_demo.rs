@@ -1,4 +1,6 @@
 //! Embed server demo — shows what the embed endpoints return with synthetic data.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Simulates the three embed-service operations:
 //!   1. `POST /v1/embed`   — token_ids → scaled residual vectors

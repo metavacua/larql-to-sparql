@@ -1,4 +1,6 @@
 //! Patch a Q4K vindex with a missing `lm_head_q4.bin`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For tied-embedding models (Gemma 2/3/4) the output projection is identical
 //! to `embed_tokens.weight`, which the vindex stores in `embeddings.bin`.

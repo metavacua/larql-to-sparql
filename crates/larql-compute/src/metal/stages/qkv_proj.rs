@@ -1,4 +1,6 @@
 //! Q + K + V projections — one call per position.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three code paths depending on the weight format + mix:
 //!

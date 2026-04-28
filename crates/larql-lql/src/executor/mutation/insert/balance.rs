@@ -1,4 +1,6 @@
 //! Phase 3 of `INSERT INTO EDGES` (Compose mode): post-install
+// SPDX-License-Identifier: Apache-2.0
+
 //! adjustment passes.
 //!
 //!   - `balance_installed`: greedy per-fact loop that scales each

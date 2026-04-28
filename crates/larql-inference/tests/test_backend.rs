@@ -1,4 +1,6 @@
 //! Integration tests for matmul backends.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests the backend at transformer-realistic dimensions:
 //! attention projections, QK^T, FFN up/down, and final logits.

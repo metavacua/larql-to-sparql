@@ -1,4 +1,6 @@
 //! Mixtral architecture — Llama attention + block-sparse MoE FFN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard Llama:
 //! - FFN replaced by MoE: router selects top-K of N experts per token

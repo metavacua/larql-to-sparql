@@ -1,4 +1,6 @@
 //! `larql predict` — graph-walk inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! One production backend: the walk kernel in `WalkFfn`. Density is controlled
 //! by `--k` (`full` = dense walk, numeric = top-K sparse). `--ffn weights` stays

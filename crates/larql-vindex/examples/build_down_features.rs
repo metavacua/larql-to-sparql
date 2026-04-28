@@ -1,4 +1,6 @@
 //! Build feature-major vectors from vindex weight files.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Transposes [hidden, intermediate] → [intermediate, hidden] per layer.
 //!
 //! Creates both:

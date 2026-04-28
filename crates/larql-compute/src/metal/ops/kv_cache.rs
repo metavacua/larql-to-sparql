@@ -1,4 +1,6 @@
 //! KV cache management and cached attention dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Per-layer Metal buffers for cached K/V vectors. Grows with generation.
 //! At decode time: append new K/V, then attend Q against full cache.

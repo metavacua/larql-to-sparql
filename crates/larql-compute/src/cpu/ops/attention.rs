@@ -1,4 +1,6 @@
 //! CPU causal attention: Q×K^T softmax V.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Simple implementation for small seq_len (≤64). No tiling.
 //! Uses online softmax (two-pass: max + exp/normalize).

@@ -1,4 +1,6 @@
 //! Full layer pipeline: attention + FFN in one Metal command buffer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Dispatches Q/K/V projections (f32) → causal attention → O projection (f32) →
 //! Q4 gate+up → GEGLU → Q4 down. One GPU submission per layer.

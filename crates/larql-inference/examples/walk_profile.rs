@@ -1,4 +1,6 @@
 //! walk_profile — decomposes walk_ffn_sparse cost into gate retrieval vs walk loop.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The walk_benchmark example showed non-monotonic latency in K:
 //!   K=full 357ms, K=5000 343ms, K=1000 690ms, K=500 450ms, K=200 240ms, K=100 185ms.

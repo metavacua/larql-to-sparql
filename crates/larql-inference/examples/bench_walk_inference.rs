@@ -1,4 +1,6 @@
 //! Walk inference benchmark — measures tokens/sec with dense attention + vindex FFN
+// SPDX-License-Identifier: Apache-2.0
+
 //! at all 34 layers. This is the target architecture: zero FFN matmul.
 //!
 //! Usage:

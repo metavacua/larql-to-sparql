@@ -1,4 +1,6 @@
 //! Cascade trie probe — PCA-32 + Logistic Regression classifier trained on
+// SPDX-License-Identifier: Apache-2.0
+
 //! last-position hidden states at a fixed transformer layer (~15% depth).
 //!
 //! Loaded from a JSON file exported by `experiments/export_trie_probe.py`.

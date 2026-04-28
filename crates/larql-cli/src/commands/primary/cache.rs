@@ -1,4 +1,6 @@
 //! Shared cache scan for the primary verbs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `run`, `show`, `rm`, `list`, and `link` all need to look at two cache
 //! locations and ask "is this vindex here?".

@@ -1,4 +1,6 @@
 //! Fused Q4_K QKV — GGUF 144-byte super-block layout.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two kernels:
 //!

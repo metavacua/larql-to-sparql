@@ -1,4 +1,6 @@
 //! Build Q4_K attention weights + Q4_K/Q6_K FFN weights from vindex f32 data.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Matches Ollama's quantization strategy:
 //!   Attn Q/K/O: Q4_K

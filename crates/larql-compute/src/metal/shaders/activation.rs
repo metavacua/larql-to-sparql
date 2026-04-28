@@ -1,4 +1,6 @@
 //! Standalone activation functions for non-gated FFN (StarCoder2, GPT-2).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Unlike GEGLU which multiplies gate*up, these apply activation in-place
 //! to a single buffer: out[i] = activation(input[i]).

@@ -1,4 +1,6 @@
 //! CPU reference implementation for Q6_K matrix-vector multiply.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirrors the Metal shader `q6k_matvec` exactly for cross-backend testing.
 //! Not optimised — scalar code intended as a correctness reference.

@@ -1,4 +1,6 @@
 //! Walk boundary sweep — tests vindex FFN walk at every layer boundary.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For each boundary B:
 //!   Layers 0..B:   dense attention + dense FFN (WeightFfn)

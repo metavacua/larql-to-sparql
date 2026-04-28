@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Walk state: derived from tokens, not stored.
 ///
 /// The walk state IS the tokens themselves. No separate state object.

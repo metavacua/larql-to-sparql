@@ -1,4 +1,6 @@
 //! Engine + compiled-module management. The runtime holds a long-lived
+// SPDX-License-Identifier: Apache-2.0
+
 //! `wasmtime::Engine`; each `Session::new` creates a fresh `Store` with
 //! the configured limits so calls are isolated.
 

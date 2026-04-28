@@ -1,4 +1,6 @@
 //! Architecture B: per-layer retrieval-override KNN store.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each INSERT stores an L2-normalized residual key alongside target metadata.
 //! At inference time, cosine similarity against the stored keys determines

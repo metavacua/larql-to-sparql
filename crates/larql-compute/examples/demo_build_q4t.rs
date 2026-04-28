@@ -1,4 +1,6 @@
 //! Build Q4 interleaved file with transposed down weights.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Layout per layer: [gate Q4 | up Q4 | down_T Q4]
 //!   gate: [intermediate, hidden] Q4_0  — same as before

@@ -1,4 +1,6 @@
 //! Benchmark: transposed down Q4 matvec vs original Q4 vecmat.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The original down projection is a vecmat (scatter-accumulate, GPU-hostile).
 //! The transposed version is a matvec (gather-reduce, GPU-friendly).

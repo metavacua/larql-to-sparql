@@ -1,4 +1,6 @@
 //! Debug: step-by-step GPU pipeline output
+// SPDX-License-Identifier: Apache-2.0
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = larql_inference::InferenceModel::load("google/gemma-3-4b-it")?;

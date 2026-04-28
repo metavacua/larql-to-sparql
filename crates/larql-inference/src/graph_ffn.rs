@@ -1,4 +1,6 @@
 //! Graph-based FFN backend — replaces the gate matmul with a precomputed index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Offline: for each layer, compute gate activations for every embedding token,
 //! record the top-K features per token. This is the "graph" — a token→features map.

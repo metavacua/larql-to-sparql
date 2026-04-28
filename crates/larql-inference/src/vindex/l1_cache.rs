@@ -1,4 +1,6 @@
 //! L1 in-process FFN output cache for WalkFfn.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key: hash of sorted gate-KNN feature IDs per layer.
 //! Value: FFN output vector (hidden_size floats).

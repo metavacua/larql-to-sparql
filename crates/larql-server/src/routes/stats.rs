@@ -1,4 +1,6 @@
 //! GET /v1/stats
+// SPDX-License-Identifier: Apache-2.0
+
 
 use std::sync::Arc;
 

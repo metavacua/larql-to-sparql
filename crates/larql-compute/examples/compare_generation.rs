@@ -1,4 +1,6 @@
 //! Token generation benchmarks: simulates actual decode-time inference.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests the production case: seq=1 per token with KV cache,
 //! vs seq=6 without cache. Shows the multiplier from KV caching.

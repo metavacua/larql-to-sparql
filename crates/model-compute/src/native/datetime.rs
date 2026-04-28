@@ -1,4 +1,6 @@
 //! Datetime kernel — date/time arithmetic via `chrono`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! # Syntax
 //!

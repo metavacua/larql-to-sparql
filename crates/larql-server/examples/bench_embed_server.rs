@@ -1,4 +1,6 @@
 //! Embed server benchmark — measures real latency and memory on a live vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Tests all operations the embed-service endpoints perform:
 //!   1. Load time (embeddings.bin + tokenizer)

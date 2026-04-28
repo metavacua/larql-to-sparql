@@ -1,4 +1,6 @@
 //! # Trigonometry expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Forward and inverse trig. **All angles are radians.** Use `deg_to_rad` /
 //! `rad_to_deg` to convert on either side.

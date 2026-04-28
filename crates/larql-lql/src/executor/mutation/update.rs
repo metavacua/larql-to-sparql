@@ -1,4 +1,6 @@
 //! `UPDATE EDGES SET ... WHERE ...` — rewrite feature metadata via the
+// SPDX-License-Identifier: Apache-2.0
+
 //! patch overlay.
 
 use crate::ast::{Assignment, Condition, Value};

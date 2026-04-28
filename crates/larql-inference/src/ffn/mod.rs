@@ -1,4 +1,6 @@
 //! Feed-forward network computation — trait-based with pluggable backends.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Production: [`WalkFfn`](crate::vindex::WalkFfn) — the unified walk kernel.
 //! Full-K and sparse-K are the same code path parameterised by [`WalkFfnConfig`](crate::vindex::WalkFfnConfig).

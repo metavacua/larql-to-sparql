@@ -1,4 +1,6 @@
 //! f32 gemv — matrix-vector multiply for the LM head.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Computes `out[N] = W[N, K] · x[K]` where `W` is row-major f32.
 //!

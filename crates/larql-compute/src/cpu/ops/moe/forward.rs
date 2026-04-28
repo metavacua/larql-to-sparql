@@ -1,4 +1,6 @@
 //! Full MoE block forward pass: router → top-k → weighted sum of expert outputs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Flow (matching HF Gemma 4, with fallbacks for architectures that omit
 //! some weights):
