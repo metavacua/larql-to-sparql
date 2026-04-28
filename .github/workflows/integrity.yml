@@ -24,23 +24,17 @@ jobs:
         with:
           configFile: .commitlintrc.json
 
-      # 3. Compute expected changelog from validated commits (dry-run)
-      - name: Generate Expected Changelog Fragment
-        id: changelog-expected
-        run: |
-          python3 scripts/changelog-transformer.py origin/${{ github.base_ref }} ${{ github.sha }} > /tmp/expected_changelog.txt 2>/dev/null || echo "" > /tmp/expected_changelog.txt
-          cat /tmp/expected_changelog.txt
-
-      # 4. Ensure CHANGELOG.md was modified in PR
+      # 3. Ensure CHANGELOG.md was modified in PR
       - name: Changelog Enforcer
         run: |
-          if ! git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }} | grep -q "^CHANGELOG.md$"; then
+          # Check if CHANGELOG.md appears in the PR diff
+          if ! git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -q "^CHANGELOG.md$"; then
             echo "::error::CHANGELOG.md must be modified in this PR"
             exit 1
           fi
           echo "✓ CHANGELOG.md was modified"
 
-      # 5. Informational: Compute prospective SemVer version
+      # 4. Informational: Compute prospective SemVer version
       - name: SemVer Dry-Run
         id: semver
         run: |
@@ -50,9 +44,9 @@ jobs:
             LAST_TAG=$(git rev-list --max-parents=0 HEAD)
           fi
 
-          BREAKING=$(git log $LAST_TAG...${{ github.sha }} --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
-          FEATURES=$(git log $LAST_TAG...${{ github.sha }} --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
-          FIXES=$(git log $LAST_TAG...${{ github.sha }} --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
+          BREAKING=$(git log $LAST_TAG..HEAD --format=%B | grep -c "BREAKING CHANGE:" || echo "0")
+          FEATURES=$(git log $LAST_TAG..HEAD --oneline | grep -c "^[a-f0-9]* feat" || echo "0")
+          FIXES=$(git log $LAST_TAG..HEAD --oneline | grep -c "^[a-f0-9]* fix" || echo "0")
 
           echo "breaking-changes=$BREAKING" >> $GITHUB_OUTPUT
           echo "features=$FEATURES" >> $GITHUB_OUTPUT
@@ -61,18 +55,3 @@ jobs:
           echo "- Breaking changes: $BREAKING" >> $GITHUB_STEP_SUMMARY
           echo "- New features: $FEATURES" >> $GITHUB_STEP_SUMMARY
           echo "- Bug fixes: $FIXES" >> $GITHUB_STEP_SUMMARY
-
-  summary:
-    runs-on: ubuntu-latest
-    needs: compliance
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-      - name: Compliance Summary
-        run: |
-          echo "## ✓ Integrity Checks Passed" >> $GITHUB_STEP_SUMMARY
-          echo "All automated compliance checks have been verified:" >> $GITHUB_STEP_SUMMARY
-          echo "- REUSE license/copyright headers validated" >> $GITHUB_STEP_SUMMARY
-          echo "- Commits conform to Conventional Commits" >> $GITHUB_STEP_SUMMARY
-          echo "- CHANGELOG.md updated" >> $GITHUB_STEP_SUMMARY
-          echo "This PR is ready for human merge review." >> $GITHUB_STEP_SUMMARY
