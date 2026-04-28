@@ -61,6 +61,34 @@ jobs:
           args: --suppress-deprecation lint
 
   # ---------------------------------------------------------------------
+  # A1 (cont.): Apache-2.0 §4 mechanical requirements — verify license
+  # text presence, NOTICE non-empty, allow-list of license identifiers,
+  # and modification notices on PR-modified pre-existing files.
+  # ---------------------------------------------------------------------
+  apache-license:
+    name: apache-license (Apache-2.0 §4 gate)
+    runs-on: ubuntu-24.04
+    needs: provenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Apache-2.0 §4 mechanical gate
+        run: scripts/check_apache_license.sh "${{ steps.range.outputs.range }}"
+
+  # ---------------------------------------------------------------------
   # A2: Structured History — every commit on the PR branch must satisfy
   # Conventional Commits as parsed by cocogitto.
   # ---------------------------------------------------------------------
@@ -169,7 +197,7 @@ jobs:
   candidate-validity:
     name: candidate validity (A5)
     runs-on: ubuntu-24.04
-    needs: [provenance, commits, changelog, version-preflight]
+    needs: [provenance, apache-license, commits, changelog, version-preflight]
     steps:
       - name: All deterministic checks passed
         run: |
@@ -186,12 +214,13 @@ jobs:
     name: report failure (PR comment)
     runs-on: ubuntu-24.04
     if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
-    needs: [provenance, commits, changelog, version-preflight]
+    needs: [provenance, apache-license, commits, changelog, version-preflight]
     steps:
       - name: Post failure summary to PR
         uses: actions/github-script@v7
         env:
           PROVENANCE_RESULT:        ${{ needs.provenance.result }}
+          APACHE_LICENSE_RESULT:    ${{ needs.apache-license.result }}
           COMMITS_RESULT:           ${{ needs.commits.result }}
           CHANGELOG_RESULT:         ${{ needs.changelog.result }}
           VERSION_PREFLIGHT_RESULT: ${{ needs.version-preflight.result }}
@@ -200,6 +229,7 @@ jobs:
           script: |
             const results = {
               "provenance (REUSE lint)":           process.env.PROVENANCE_RESULT,
+              "apache-license (§4 gate)":          process.env.APACHE_LICENSE_RESULT,
               "commits (cocogitto check)":        process.env.COMMITS_RESULT,
               "changelog (git-cliff consistency)": process.env.CHANGELOG_RESULT,
               "version preflight":                 process.env.VERSION_PREFLIGHT_RESULT,

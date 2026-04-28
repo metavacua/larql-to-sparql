@@ -83,6 +83,13 @@ repos:
         types: [rust]
         pass_filenames: false
 
+      - id: apache-license
+        name: Apache-2.0 §4 mechanical gate
+        entry: scripts/check_apache_license.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: changelog-consistency
         name: changelog matches git-cliff output (Unreleased)
         entry: scripts/check_changelog.sh

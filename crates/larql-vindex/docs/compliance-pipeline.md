@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
 SPDX-License-Identifier: Apache-2.0
 -->
 
@@ -16,11 +16,42 @@ remediating a failure.
 | Axiom | Tool | Configuration | Local hook | CI job |
 |---|---|---|---|---|
 | **A1: Explicit Provenance** | `reuse` (FSFE REUSE 3.3) | `REUSE.toml`, `LICENSES/` | `pre-commit` `reuse` | `validate.yml :: provenance` |
+| **A1 (Apache-2.0 §4)** | `scripts/check_apache_license.sh` | `LICENSE`, `NOTICE`, REUSE.toml allow-list | n/a (CI-only) | `validate.yml :: apache-license` |
 | **A2: Structured History** | `cog` (cocogitto) | `cog.toml` | `pre-commit` `cog-verify` (commit-msg) | `validate.yml :: commits` |
 | **A3: Derived Documentation** | `git-cliff` + `scripts/check_changelog.sh` | `cliff.toml`, `CHANGELOG.md` | `pre-commit` `changelog-consistency` (pre-push) | `validate.yml :: changelog` |
 | **A2 (SemVer)** | `scripts/version_preflight.sh` | `cog.toml` (bump rules) | n/a (informational) | `validate.yml :: version-preflight` |
 | **A4: Verified Compliance** | aggregate gate | `validate.yml :: candidate-validity` | `make ci` | `validate.yml :: candidate-validity` |
 | **A5: Candidate Validity Only** | repository policy | branch protection | n/a | `candidate-validity` is a non-merging signal |
+
+## Apache-2.0 mechanical requirements
+
+The `apache-license` job reduces Apache License 2.0 §4 to deterministic,
+file-state predicates. Each clause maps to a single `bash`/`grep` check:
+
+| § | Requirement | Mechanical check |
+|---|---|---|
+| §4(a) | Distribute a copy of the License | `LICENSE` and `LICENSES/Apache-2.0.txt` exist and are non-empty |
+| §4(b) | Modified files carry a prominent modification notice | For every file in `git diff --diff-filter=M $base..$head`, require an `SPDX-FileContributor:` line, a `Modifications:`/`Modified by:` comment, or an explicit path entry in `REUSE.toml` |
+| §4(c) | Retain copyright/license notices in source | Every file has `SPDX-FileCopyrightText` and `SPDX-License-Identifier` (delegated to `reuse lint`) |
+| §4(d) | Propagate `NOTICE` to redistributions | `NOTICE` exists and is non-empty |
+| §4 | License compatibility | Every `SPDX-License-Identifier:` value is in the allow-list `{Apache-2.0}` |
+
+§§1–3 (definitions, copyright/patent grants), §5 (contribution license),
+§6 (trademarks), §7 (warranty disclaimer), §8 (limitation of liability),
+and §9 (additional liability) are legal effects rather than file-state
+predicates and are not mechanically checkable; the deterministic core does
+not attempt to verify them.
+
+## Provenance assignment
+
+| Path scope | Copyright | Origin |
+|---|---|---|
+| Pre-existing LARQL codebase on `main` | Copyright (C) 2026 Chris Hay | <https://github.com/chrishayuk/larql> |
+| Compliance toolchain added by PR `claude/implement-standardized-tool-PGol9` | Copyright (C) 2026 Ian Douglas Lawrence Norman McLean | this PR |
+| `LICENSE`, `LICENSES/Apache-2.0.txt` | `NONE` (license text boilerplate) | upstream Apache Software Foundation |
+
+REUSE.toml is the authoritative manifest; per-file SPDX headers are
+informational and may be aggregated or overridden by the manifest.
 
 ## File inventory (compliance toolchain)
 
@@ -29,9 +60,11 @@ remediating a failure.
 .pre-commit-config.yaml             # local hooks mirroring CI
 REUSE.toml                          # bulk SPDX annotations
 LICENSES/Apache-2.0.txt             # canonical license text per REUSE 3.x
+NOTICE                              # Apache-2.0 §4(d) attribution notice
 cog.toml                            # Conventional Commits grammar + bump rules
 cliff.toml                          # commits -> Keep a Changelog projection
 CHANGELOG.md                        # Keep a Changelog 1.1.0, with [Unreleased]
+scripts/check_apache_license.sh     # Apache-2.0 §4 mechanical gate
 scripts/check_changelog.sh          # deterministic [Unreleased] consistency
 scripts/version_preflight.sh        # deterministic SemVer preflight
 docs/specs/compliance-pipeline.md   # this file
@@ -61,8 +94,12 @@ failure message; it must not interpret intent.
 | Failing check | Deterministic remediation |
 |---|---|
 | `provenance` | Add the offending file's path to a matching `[[annotations]]` block in `REUSE.toml`, or insert a per-file SPDX header. Re-run `reuse lint`. |
+| `apache-license` (§4(a)) | Restore `LICENSE` and `LICENSES/Apache-2.0.txt` from upstream Apache-2.0 boilerplate. |
+| `apache-license` (§4(b)) | For each listed modified file, add an `SPDX-FileContributor:` line, a `Modified by:` comment, or an explicit `[[annotations]]` block in `REUSE.toml`. |
+| `apache-license` (§4(d)) | Restore `NOTICE` to a non-empty file containing project attribution lines. |
+| `apache-license` (allow-list) | Replace the offending `SPDX-License-Identifier:` value with `Apache-2.0`, or update the allow-list in `scripts/check_apache_license.sh` if a new license is intentionally adopted. |
 | `commits` | Amend the commit so its header matches the Conventional Commits grammar declared in `cog.toml`. Force-push to the PR branch. |
-| `changelog` | Run `git-cliff --config cliff.toml --unreleased --strip header --prepend CHANGELOG.md`, commit the result with `docs(changelog): regenerate unreleased`, and re-push. Do not hand-edit the `[Unreleased]` block. |
+| `changelog` | Run `git-cliff --config cliff.toml --unreleased --output CHANGELOG.md`, commit the result with `docs(changelog): regenerate unreleased`, and re-push. Do not hand-edit the `[Unreleased]` block. |
 | `version-preflight` | This job is informational. A non-zero exit indicates an unparseable commit, which is also caught by `commits`; remediate there. |
 
 ## Out-of-scope (explicit non-goals)

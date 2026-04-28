@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
 SPDX-License-Identifier: Apache-2.0
 -->
 
