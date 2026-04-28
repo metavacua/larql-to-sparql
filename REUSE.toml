@@ -2,82 +2,55 @@ version = 1
 
 # Explicit, machine-readable provenance for every file under version control,
 # per Foundational Axiom A1 (Explicit Provenance) of the project compliance
-# specification. Each [[annotations]] block below is an explicit declaration
-# recognized by repository policy in lieu of per-file SPDX headers, and is
-# checked deterministically by `reuse lint`.
+# specification, and per Apache-2.0 §4(c) (retain attribution notices).
+#
+# Two distinct copyright holders apply:
+#
+#   - The pre-existing LARQL codebase on `main` (origin:
+#     https://github.com/chrishayuk/larql, created 2026) is attributed to
+#     Chris Hay.
+#
+#   - The deterministic compliance toolchain added in PR
+#     `claude/implement-standardized-tool-PGol9` (2026) is attributed to
+#     Ian Douglas Lawrence Norman McLean.
+#
+# Both are licensed under Apache-2.0. The verbatim Apache-2.0 license text
+# under LICENSES/ is itself unattributed boilerplate (SPDX-FileCopyrightText
+# = NONE), per common REUSE practice.
 
 # ---------------------------------------------------------------------------
-# Default: all source-controlled files are Apache-2.0 with the project's
-# canonical copyright holder unless explicitly overridden by a more specific
-# annotation block below.
+# Default: pre-existing LARQL codebase from `main`. This is the broadest
+# match; specific overrides below carve out the PR-added paths.
 # ---------------------------------------------------------------------------
 [[annotations]]
 path = "**"
 precedence = "aggregate"
-SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Chris Hay"
 SPDX-License-Identifier = "Apache-2.0"
 
 # ---------------------------------------------------------------------------
-# Top-level project files (Cargo workspace, build, docs, governance).
-# ---------------------------------------------------------------------------
-[[annotations]]
-path = [
-  "Cargo.toml",
-  "Cargo.lock",
-  "Makefile",
-  "README.md",
-  "ROADMAP.md",
-  "AGENTS.md",
-  "CLAUDE.md",
-  "CHANGELOG.md",
-  ".gitignore",
-]
-precedence = "override"
-SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
-SPDX-License-Identifier = "Apache-2.0"
-
-# ---------------------------------------------------------------------------
-# Compliance toolchain configuration. Each of these files is part of the
-# deterministic validation pipeline; their provenance is recorded explicitly
-# so that `reuse lint` cannot regress on the toolchain itself.
+# Compliance-pipeline infrastructure added by PR
+# `claude/implement-standardized-tool-PGol9`.
 # ---------------------------------------------------------------------------
 [[annotations]]
 path = [
   "REUSE.toml",
+  "NOTICE",
+  "CHANGELOG.md",
   "cliff.toml",
   "cog.toml",
   ".pre-commit-config.yaml",
   ".github/**",
   "scripts/check_changelog.sh",
   "scripts/version_preflight.sh",
+  "docs/specs/compliance-pipeline.md",
 ]
 precedence = "override"
-SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
 SPDX-License-Identifier = "Apache-2.0"
 
 # ---------------------------------------------------------------------------
-# Crate sources, examples, tests, probes, knowledge, memory, experiments.
-# Bulk-covered to avoid per-file headers while remaining deterministic.
-# ---------------------------------------------------------------------------
-[[annotations]]
-path = [
-  "crates/**",
-  "examples/**",
-  "tests/**",
-  "probes/**",
-  "scripts/**",
-  "knowledge/**",
-  "memory/**",
-  "experiments/**",
-  "docs/**",
-]
-precedence = "aggregate"
-SPDX-FileCopyrightText = "Contributors to the larql-to-sparql project"
-SPDX-License-Identifier = "Apache-2.0"
-
-# ---------------------------------------------------------------------------
-# The verbatim Apache-2.0 license text shipped under LICENSES/ is itself
-# Apache-licensed boilerplate and is not separately copyrighted.
+# Verbatim Apache-2.0 license text. Boilerplate; not separately copyrighted.
 # ---------------------------------------------------------------------------
 [[annotations]]
 path = [
