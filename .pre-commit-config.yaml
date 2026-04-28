@@ -27,19 +27,26 @@ repos:
   # an explicit SPDX header. Mirrors the `reuse-lint` step in CI.
   # ---------------------------------------------------------------------
   - repo: https://github.com/fsfe/reuse-tool
-    rev: v5.0.2
+    rev: v6.2.0
     hooks:
       - id: reuse
 
   # ---------------------------------------------------------------------
   # Commit message structure: cocogitto rejects malformed Conventional
   # Commits headers and breaking-change notation. Pure structural check.
+  # Cocogitto does not ship a pre-commit hooks YAML upstream, so this is
+  # wired as a local hook that requires `cog` on PATH (see CI for the
+  # pinned version; install with `cargo install cocogitto --version 7.0.0`
+  # or download the matching release tarball).
   # ---------------------------------------------------------------------
-  - repo: https://github.com/cocogitto/cocogitto
-    rev: 6.2.0
+  - repo: local
     hooks:
       - id: cog-verify
+        name: cog verify (commit message)
+        entry: cog verify --file
+        language: system
         stages: [commit-msg]
+        pass_filenames: true
 
   # ---------------------------------------------------------------------
   # Whitespace / line-ending hygiene. Cheap, deterministic, repo-wide.
