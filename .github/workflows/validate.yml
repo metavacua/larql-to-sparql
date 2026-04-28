@@ -23,7 +23,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  # Elevated to `write` only so the `report-failure` job can post a single
+  # PR comment summarising failed checks. No other job mutates PR state.
+  pull-requests: write
+  actions: read
 
 concurrency:
   group: validate-${{ github.ref }}
@@ -93,7 +96,7 @@ jobs:
 
       - name: cog check (PR range)
         if: steps.range.outputs.from != ''
-        run: cog check --from-latest-tag=false "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+        run: cog check "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
 
       - name: cog check (push to main, newest commit only)
         if: steps.range.outputs.from == ''
@@ -141,9 +144,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute next SemVer
         id: semver
-        run: scripts/version_preflight.sh
+        run: scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
 
       - name: Surface result on PR
         if: github.event_name == 'pull_request'
@@ -163,3 +175,60 @@ jobs:
         run: |
           echo "Branch is a valid candidate extension of the development branch."
           echo "Per Axiom A5 this does NOT decide merge, close, or release."
+
+  # ---------------------------------------------------------------------
+  # On any failure within a PR, post a single comment on the PR that
+  # enumerates which deterministic check failed and links to the run.
+  # The intent is to put the failure context where downstream agents can
+  # see it via the GitHub API without scraping the Actions UI.
+  # ---------------------------------------------------------------------
+  report-failure:
+    name: report failure (PR comment)
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
+    needs: [provenance, commits, changelog, version-preflight]
+    steps:
+      - name: Post failure summary to PR
+        uses: actions/github-script@v7
+        env:
+          PROVENANCE_RESULT:        ${{ needs.provenance.result }}
+          COMMITS_RESULT:           ${{ needs.commits.result }}
+          CHANGELOG_RESULT:         ${{ needs.changelog.result }}
+          VERSION_PREFLIGHT_RESULT: ${{ needs.version-preflight.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const results = {
+              "provenance (REUSE lint)":           process.env.PROVENANCE_RESULT,
+              "commits (cocogitto check)":        process.env.COMMITS_RESULT,
+              "changelog (git-cliff consistency)": process.env.CHANGELOG_RESULT,
+              "version preflight":                 process.env.VERSION_PREFLIGHT_RESULT,
+            };
+            const rows = Object.entries(results)
+              .map(([n, r]) => `| ${n} | ${r} |`)
+              .join("\n");
+            const failed = Object.entries(results)
+              .filter(([_, r]) => r === "failure")
+              .map(([n]) => `\`${n}\``);
+            const body = [
+              `## Deterministic validation failed`,
+              ``,
+              `Failed checks: ${failed.join(", ") || "(none reported failure)"}`,
+              ``,
+              `| Check | Result |`,
+              `|---|---|`,
+              rows,
+              ``,
+              `Full run logs: ${process.env.RUN_URL}`,
+              ``,
+              `Per Axiom A5 this does not block merge mechanically; it ` +
+              `signals that the branch is not yet a valid candidate ` +
+              `extension of the development branch. Remediate per the ` +
+              `contract in \`docs/specs/compliance-pipeline.md\` and push.`,
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

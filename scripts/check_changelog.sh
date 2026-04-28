@@ -62,9 +62,9 @@ git-cliff \
 # Extract the existing [Unreleased] block from the committed CHANGELOG.md.
 # Inclusive of the heading; terminates at the next `## [` heading or EOF.
 awk '
-  /^## \[Unreleased\]/        { in_block = 1; print; next }
-  in_block && /^## \[/        { in_block = 0 }
-  in_block                    { print }
+  /^## \[Unreleased\]/                 { in_block = 1; print; next }
+  in_block && (/^## \[/ || /^\[.*\]:/) { in_block = 0 }
+  in_block                             { print }
 ' "$CHANGELOG_FILE" > "$actual"
 
 if ! diff -u "$expected" "$actual" >/dev/null; then
