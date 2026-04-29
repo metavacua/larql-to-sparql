@@ -1,4 +1,6 @@
 //! Wasmtime-hosted WASM modules with fuel/memory caps.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every call runs in a fresh `Store` with explicit fuel and memory
 //! limits. If a module exceeds either, the call errors rather than

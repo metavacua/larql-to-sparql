@@ -1,13 +1,15 @@
 //! POST/GET/DELETE /v1/patches — patch management endpoints.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Session-aware: if `X-Session-Id` header is present, patches are scoped
 //! to that session. Otherwise, patches go to the global shared state.
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -30,7 +32,9 @@ fn session_id(headers: &HeaderMap) -> Option<String> {
 }
 
 /// Resolve a patch from the request body (inline or URL).
-fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, String), ServerError> {
+fn resolve_patch(
+    req: &ApplyPatchRequest,
+) -> Result<(larql_vindex::VindexPatch, String), ServerError> {
     if let Some(ref patch) = req.patch {
         let name = req
             .url
@@ -48,7 +52,9 @@ fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, 
             if vlp_path.exists() {
                 vlp_path
             } else {
-                return Err(ServerError::BadRequest(format!("no patch.vlp found at {url}")));
+                return Err(ServerError::BadRequest(format!(
+                    "no patch.vlp found at {url}"
+                )));
             }
         } else {
             std::path::PathBuf::from(url)
@@ -58,7 +64,9 @@ fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, 
         return Ok((patch, url.clone()));
     }
 
-    Err(ServerError::BadRequest("must provide 'url' or 'patch' in request body".into()))
+    Err(ServerError::BadRequest(
+        "must provide 'url' or 'patch' in request body".into(),
+    ))
 }
 
 /// Synthesise a gate vector from entity embedding when the client didn't provide one.
@@ -87,23 +95,30 @@ fn enrich_patch_ops(model: &crate::state::LoadedModel, patch: &mut larql_vindex:
                             }
                         }
                         let n = ids.len() as f32;
-                        for v in &mut embed { *v /= n; }
+                        for v in &mut embed {
+                            *v /= n;
+                        }
 
                         // Normalise the embedding to unit length — gate KNN uses
                         // cosine similarity so magnitude doesn't matter.
                         let embed_norm: f32 = embed.iter().map(|v| v * v).sum::<f32>().sqrt();
                         if embed_norm > 1e-8 {
-                            for v in &mut embed { *v /= embed_norm; }
+                            for v in &mut embed {
+                                *v /= embed_norm;
+                            }
                         }
 
-                        *gate_vector_b64 = Some(larql_vindex::patch::core::encode_gate_vector(&embed));
+                        *gate_vector_b64 =
+                            Some(larql_vindex::patch::core::encode_gate_vector(&embed));
                     }
                 }
 
                 // Assign a feature slot if unset
                 if *feature == 0 {
                     // Use a deterministic slot based on layer + entity hash
-                    let hash = entity.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                    let hash = entity
+                        .bytes()
+                        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
                     *feature = (hash as usize % 10240) + 1;
                 }
             }

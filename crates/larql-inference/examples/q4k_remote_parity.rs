@@ -1,4 +1,6 @@
 //! Q4_K dense-remote parity check — the Act 1.5 story as a cargo example.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Drives both ends of the Q4_K remote-FFN split on a single machine:
 //! local `predict_q4k` vs `predict_q4k_with_ffn` pointing at a running
@@ -51,8 +53,8 @@ use std::time::{Duration, Instant};
 use larql_inference::ffn::{RemoteFfnConfig, RemoteWalkBackend};
 use larql_inference::vindex::{predict_q4k, predict_q4k_with_ffn};
 use larql_vindex::{
-    load_model_weights_q4k, load_vindex_config, load_vindex_tokenizer,
-    QuantFormat, SilentLoadCallbacks, VectorIndex,
+    load_model_weights_q4k, load_vindex_config, load_vindex_tokenizer, QuantFormat,
+    SilentLoadCallbacks, VectorIndex,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -66,12 +68,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--vindex" => { i += 1; vindex_path = PathBuf::from(&args[i]); }
-            "--server" => { i += 1; server_url = args[i].clone(); }
-            "--prompt" => { i += 1; prompt = args[i].clone(); }
-            "--top-k" => { i += 1; top_k = args[i].parse()?; }
-            "--tolerance" => { i += 1; tolerance = args[i].parse()?; }
-            "-h" | "--help" => { print_usage(); return Ok(()); }
+            "--vindex" => {
+                i += 1;
+                vindex_path = PathBuf::from(&args[i]);
+            }
+            "--server" => {
+                i += 1;
+                server_url = args[i].clone();
+            }
+            "--prompt" => {
+                i += 1;
+                prompt = args[i].clone();
+            }
+            "--top-k" => {
+                i += 1;
+                top_k = args[i].parse()?;
+            }
+            "--tolerance" => {
+                i += 1;
+                tolerance = args[i].parse()?;
+            }
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
             _ => eprintln!("unknown arg: {}", args[i]),
         }
         i += 1;
@@ -96,7 +116,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "vindex quant is {:?}, expected Q4k — use remote_walk_parity.rs for float vindexes",
             config.quant
-        ).into());
+        )
+        .into());
     }
 
     // ── Load tokenizer + Q4K weights shared by both paths ──
@@ -117,16 +138,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let t_local = Instant::now();
     let local_result = predict_q4k(
-        &mut weights_local, &tokenizer, &token_ids, top_k, &local_index,
+        &mut weights_local,
+        &tokenizer,
+        &token_ids,
+        top_k,
+        &local_index,
     );
     let local_ms = t_local.elapsed().as_secs_f64() * 1000.0;
 
     // ── Remote path: attention local, FFN over HTTP via RemoteWalkBackend ──
     let remote_config = RemoteFfnConfig::new(&server_url).with_timeout(Duration::from_secs(120));
-    let remote = RemoteWalkBackend::connect(remote_config)
-        .map_err(|e| format!("remote connect failed ({server_url}): {e}\n\
+    let remote = RemoteWalkBackend::connect(remote_config).map_err(|e| {
+        format!(
+            "remote connect failed ({server_url}): {e}\n\
                               → is `larql serve {} --ffn-only` running on {server_url}?",
-                              vindex_path.display()))?;
+            vindex_path.display()
+        )
+    })?;
     assert_eq!(
         remote.hidden_size(),
         weights_remote.hidden_size,
@@ -140,20 +168,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let t_remote = Instant::now();
     let remote_result = predict_q4k_with_ffn(
-        &mut weights_remote, &tokenizer, &token_ids, top_k, &remote_index, &remote,
+        &mut weights_remote,
+        &tokenizer,
+        &token_ids,
+        top_k,
+        &remote_index,
+        &remote,
     );
     let remote_ms = t_remote.elapsed().as_secs_f64() * 1000.0;
 
     // ── Compare ──
     println!();
     println!("Top-{top_k}:");
-    println!("  {:<24} {:>10} | {:<24} {:>10}", "local", "prob", "remote", "prob");
+    println!(
+        "  {:<24} {:>10} | {:<24} {:>10}",
+        "local", "prob", "remote", "prob"
+    );
     for i in 0..top_k {
-        let (lt, lp) = local_result.predictions.get(i).cloned()
+        let (lt, lp) = local_result
+            .predictions
+            .get(i)
+            .cloned()
             .unwrap_or_else(|| ("<missing>".into(), 0.0));
-        let (rt, rp) = remote_result.predictions.get(i).cloned()
+        let (rt, rp) = remote_result
+            .predictions
+            .get(i)
+            .cloned()
             .unwrap_or_else(|| ("<missing>".into(), 0.0));
-        let marker = if lt == rt && (lp - rp).abs() < tolerance { "" } else { "  ← diff" };
+        let marker = if lt == rt && (lp - rp).abs() < tolerance {
+            ""
+        } else {
+            "  ← diff"
+        };
         println!("  {lt:<24} {lp:>10.4} | {rt:<24} {rp:>10.4}{marker}");
     }
     println!();
@@ -162,26 +208,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_top = local_result.token_ids.first().copied();
     let remote_top = remote_result.token_ids.first().copied();
     if local_top != remote_top {
-        eprintln!(
-            "FAIL — top-1 token id differs: local={local_top:?} remote={remote_top:?}"
-        );
+        eprintln!("FAIL — top-1 token id differs: local={local_top:?} remote={remote_top:?}");
         std::process::exit(1);
     }
 
     // Max per-position probability delta across the top-K.
     let mut max_abs = 0f64;
-    for i in 0..top_k.min(local_result.predictions.len()).min(remote_result.predictions.len()) {
+    for i in 0..top_k
+        .min(local_result.predictions.len())
+        .min(remote_result.predictions.len())
+    {
         let (_lt, lp) = &local_result.predictions[i];
         let (_rt, rp) = &remote_result.predictions[i];
         let d = (lp - rp).abs();
-        if d > max_abs { max_abs = d; }
+        if d > max_abs {
+            max_abs = d;
+        }
     }
 
     let pass = max_abs <= tolerance;
     println!("Timing: local={local_ms:.1}ms  remote={remote_ms:.1}ms");
-    println!(
-        "Parity: top-1 match, max_abs on top-{top_k} = {max_abs:.2e}  (tol {tolerance:.0e})"
-    );
+    println!("Parity: top-1 match, max_abs on top-{top_k} = {max_abs:.2e}  (tol {tolerance:.0e})");
     if pass {
         println!("OK");
         Ok(())

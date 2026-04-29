@@ -1,12 +1,14 @@
 //! Q4 vector-matrix dispatch (scatter-accumulate).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out[K] = activation[N] @ Q4[N, K]
 //!
 //! One thread per output element. GPU-hostile pattern but
 //! parallelised across K output elements.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 

@@ -1,4 +1,6 @@
 //! # Markov expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Discrete-time Markov chains.
 //!

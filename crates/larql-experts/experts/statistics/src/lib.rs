@@ -1,4 +1,6 @@
 //! # Statistics expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Descriptive statistics over a numeric list. All ops take
 //! `{values: [num, ...]}` and return a numeric value or list.

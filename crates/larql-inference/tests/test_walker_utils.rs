@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use larql_inference::walker::utils::*;
 use larql_inference::walker::weight_walker::ThresholdCounts;
 

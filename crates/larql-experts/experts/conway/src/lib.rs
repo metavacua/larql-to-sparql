@@ -1,4 +1,6 @@
 //! # Conway's Game of Life expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Grids are 2-D rectangular arrays of `0` (dead) or `1` (live). Non-zero
 //! input values are normalised to `1`. All rows must share the same width.

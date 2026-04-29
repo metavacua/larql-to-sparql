@@ -1,4 +1,6 @@
 //! CPU forward pass driven by a Q4_K / Q6_K vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The normal CPU path reads attention Q/K/V/O and FFN gate/up/down from
 //! `weights.tensors` as f32 matrices. For a Q4 vindex those tensors were
@@ -55,8 +57,8 @@ use larql_vindex::VectorIndex;
 use crate::attention::SharedKV;
 use crate::forward::embed_tokens_pub;
 use crate::forward::ple::precompute_per_layer_inputs;
-use crate::forward::PredictResult;
 use crate::forward::run_layer_with_ffn;
+use crate::forward::PredictResult;
 
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
@@ -91,9 +93,11 @@ fn predict_q4k_hidden(
     }
 
     for layer in 0..num_layers {
-        let attn = index.attn_q4k_layer_data(layer)
+        let attn = index
+            .attn_q4k_layer_data(layer)
             .unwrap_or_else(|| panic!("attn Q4K slices missing for layer {layer}"));
-        let ffn = index.interleaved_q4k_layer_data(layer)
+        let ffn = index
+            .interleaved_q4k_layer_data(layer)
             .unwrap_or_else(|| panic!("ffn Q4K slices missing for layer {layer}"));
 
         let arch = &*weights.arch;
@@ -125,9 +129,13 @@ fn predict_q4k_hidden(
         weights.tensors.insert(k_key.clone(), w_k.into_shared());
         weights.tensors.insert(v_key.clone(), w_v.into_shared());
         weights.tensors.insert(o_key.clone(), w_o.into_shared());
-        weights.tensors.insert(gate_key.clone(), w_gate.into_shared());
+        weights
+            .tensors
+            .insert(gate_key.clone(), w_gate.into_shared());
         weights.tensors.insert(up_key.clone(), w_up.into_shared());
-        weights.tensors.insert(down_key.clone(), w_down.into_shared());
+        weights
+            .tensors
+            .insert(down_key.clone(), w_down.into_shared());
 
         let shared_kv = weights
             .arch
@@ -329,7 +337,8 @@ pub fn predict_q4k_with_ffn(
 
     for layer in 0..num_layers {
         // Attention Q/K/V/O only — FFN lives on the remote server.
-        let attn = index.attn_q4k_layer_data(layer)
+        let attn = index
+            .attn_q4k_layer_data(layer)
             .unwrap_or_else(|| panic!("attn Q4K slices missing for layer {layer}"));
 
         let arch = &*weights.arch;
@@ -379,9 +388,7 @@ pub fn predict_q4k_with_ffn(
         weights.tensors.remove(&o_key);
     }
 
-    crate::forward::predict::logits_to_predictions_pub(
-        weights, &h, tokenizer, top_k, 1.0,
-    )
+    crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
 }
 
 /// End-to-end predict on a Q4_K vindex driven by a Metal (or any Q4-capable)
@@ -405,8 +412,8 @@ pub fn predict_q4k_metal(
     index: &VectorIndex,
     backend: &dyn larql_compute::ComputeBackend,
 ) -> PredictResult {
-    use larql_compute::QuantFormat;
     use crate::layer_graph::pipeline_layer::{build_arch_params, resolve_attn_weights};
+    use larql_compute::QuantFormat;
 
     let arch = &*weights.arch;
     let num_layers = weights.num_layers;
@@ -416,24 +423,42 @@ pub fn predict_q4k_metal(
     // per-matrix layout). Attn weights come from resolve_attn_weights which
     // prefers the Q4K manifest. Norms/layer_scalar/etc come from the arch
     // + weights.vectors map populated by load_model_weights_q4k.
-    let layers: Vec<_> = (0..num_layers).map(|layer| {
-        let (wq, wk, wv, wo) = resolve_attn_weights(index, layer)
-            .expect("attn Q4K slices missing for layer");
-        let [(gate_bytes, gate_fmt), (up_bytes, up_fmt), (down_bytes, down_fmt)] =
-            index.interleaved_q4k_layer_data(layer)
+    let layers: Vec<_> = (0..num_layers)
+        .map(|layer| {
+            let (wq, wk, wv, wo) =
+                resolve_attn_weights(index, layer).expect("attn Q4K slices missing for layer");
+            let [(gate_bytes, gate_fmt), (up_bytes, up_fmt), (down_bytes, down_fmt)] = index
+                .interleaved_q4k_layer_data(layer)
                 .expect("ffn Q4K slices missing for layer");
-        fn to_format(s: &str) -> QuantFormat {
-            match s { "Q6_K" => QuantFormat::Q6_K, _ => QuantFormat::Q4_K }
-        }
-        let gate = larql_compute::QuantWeight { data: gate_bytes, scales: None, format: to_format(gate_fmt) };
-        let up   = larql_compute::QuantWeight { data: up_bytes,   scales: None, format: to_format(up_fmt) };
-        let down = larql_compute::QuantWeight { data: down_bytes, scales: None, format: to_format(down_fmt) };
-        build_arch_params(weights, layer, wq, wk, wv, wo, gate, up, down)
-    }).collect();
+            fn to_format(s: &str) -> QuantFormat {
+                match s {
+                    "Q6_K" => QuantFormat::Q6_K,
+                    _ => QuantFormat::Q4_K,
+                }
+            }
+            let gate = larql_compute::QuantWeight {
+                data: gate_bytes,
+                scales: None,
+                format: to_format(gate_fmt),
+            };
+            let up = larql_compute::QuantWeight {
+                data: up_bytes,
+                scales: None,
+                format: to_format(up_fmt),
+            };
+            let down = larql_compute::QuantWeight {
+                data: down_bytes,
+                scales: None,
+                format: to_format(down_fmt),
+            };
+            build_arch_params(weights, layer, wq, wk, wv, wo, gate, up, down)
+        })
+        .collect();
 
     // ── Preallocate KV cache with correct per-layer shapes ──
     let max_seq = token_ids.len().max(64);
-    let shapes: Vec<(usize, usize)> = layers.iter()
+    let shapes: Vec<(usize, usize)> = layers
+        .iter()
         .map(|l| (l.num_kv_heads, l.head_dim))
         .collect();
     backend.preallocate_kv_cache_per_layer(&shapes, max_seq);
@@ -470,10 +495,15 @@ pub fn predict_q4k_metal(
 
         let out = backend
             .decode_token(
-                &layers, &x,
-                hidden, weights.intermediate_size,
-                dims_q, dims_kv,
-                layers[0].num_q_heads, layers[0].num_kv_heads, layers[0].head_dim,
+                &layers,
+                &x,
+                hidden,
+                weights.intermediate_size,
+                dims_q,
+                dims_kv,
+                layers[0].num_q_heads,
+                layers[0].num_kv_heads,
+                layers[0].head_dim,
                 layers[0].rope_base,
             )
             .expect("backend doesn't support decode_token — need Metal with Q4 kernels");
@@ -481,11 +511,8 @@ pub fn predict_q4k_metal(
     }
 
     // ── Final norm + lm_head over the last position's residual ──
-    let h_last = ndarray::Array2::from_shape_vec((1, hidden), h_vec)
-        .expect("residual shape");
-    crate::forward::predict::logits_to_predictions_pub(
-        weights, &h_last, tokenizer, top_k, 1.0,
-    )
+    let h_last = ndarray::Array2::from_shape_vec((1, hidden), h_vec).expect("residual shape");
+    crate::forward::predict::logits_to_predictions_pub(weights, &h_last, tokenizer, top_k, 1.0)
 }
 
 /// Run one layer's FFN forward on a Q4_K vindex — dequantise gate/up/down
@@ -504,8 +531,8 @@ pub fn q4k_ffn_forward_layer(
     layer: usize,
     x: &Array2<f32>,
 ) -> Array2<f32> {
+    use crate::ffn::{gelu_tanh_gate_up, silu_gate_up};
     use crate::forward::dot_proj;
-    use crate::ffn::{silu_gate_up, gelu_tanh_gate_up};
 
     let hidden = x.shape()[1];
     let intermediate = index.num_features(layer);
@@ -541,16 +568,20 @@ pub fn q4k_ffn_forward_layer(
 fn dequantize_matrix(bytes: &[u8], format: &str, rows: usize, cols: usize) -> Array2<f32> {
     let n = rows * cols;
     let padded = n.div_ceil(256) * 256;
-    let floats = match format {
-        "Q4_K" => larql_models::quant::ggml::dequantize_q4_k(bytes, padded)
-            .expect("Q4_K dequant failed"),
-        "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded)
-            .expect("Q6_K dequant failed"),
-        other => panic!("unsupported quant format in vindex: {other}"),
+    let floats =
+        match format {
+            "Q4_K" => larql_models::quant::ggml::dequantize_q4_k(bytes, padded)
+                .expect("Q4_K dequant failed"),
+            "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded)
+                .expect("Q6_K dequant failed"),
+            other => panic!("unsupported quant format in vindex: {other}"),
+        };
+    let truncated = if floats.len() > n {
+        floats[..n].to_vec()
+    } else {
+        floats
     };
-    let truncated = if floats.len() > n { floats[..n].to_vec() } else { floats };
-    Array2::from_shape_vec((rows, cols), truncated)
-        .expect("shape mismatch dequantising Q4K matrix")
+    Array2::from_shape_vec((rows, cols), truncated).expect("shape mismatch dequantising Q4K matrix")
 }
 
 #[cfg(test)]
@@ -575,7 +606,10 @@ mod tests {
     #[test]
     fn is_end_of_turn_rejects_arbitrary_tokens() {
         for t in ["", " ", "the", "<eos", "eos>", "<EOS>", "<|im_start|>"] {
-            assert!(!is_end_of_turn(t), "did not expect {t:?} to be a terminator");
+            assert!(
+                !is_end_of_turn(t),
+                "did not expect {t:?} to be a terminator"
+            );
         }
     }
 }

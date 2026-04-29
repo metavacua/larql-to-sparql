@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use ndarray::Array2;
 
+use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput, DenseLayerGraph, PerLayerGraph};
 
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 
@@ -30,7 +32,12 @@ impl CachedLayerGraph {
         let max_layer = *layers.iter().max().unwrap_or(&0);
 
         for layer in 0..=max_layer.min(weights.num_layers - 1) {
-            let graph = DenseLayerGraph { ffn, backend: None, capture_activation: false, capture_attention: false };
+            let graph = DenseLayerGraph {
+                ffn,
+                backend: None,
+                capture_activation: false,
+                capture_attention: false,
+            };
             if let Some(output) = graph.forward_layer(weights, &h, layer) {
                 h = output.residual;
                 if layers.contains(&layer) {
@@ -43,7 +50,9 @@ impl CachedLayerGraph {
 
     /// Build from an existing residual (e.g., from a previous forward pass).
     pub fn from_residuals(residuals: Vec<(usize, Array2<f32>)>) -> Self {
-        Self { cache: residuals.into_iter().collect() }
+        Self {
+            cache: residuals.into_iter().collect(),
+        }
     }
 
     pub fn has_layer(&self, layer: usize) -> bool {
@@ -63,10 +72,16 @@ impl LayerGraph for CachedLayerGraph {
         layer: usize,
     ) -> Option<LayerOutput> {
         let residual = self.cache.get(&layer)?.clone();
-        Some(LayerOutput { residual, activation: None, attention: None })
+        Some(LayerOutput {
+            residual,
+            activation: None,
+            attention: None,
+        })
     }
 
-    fn name(&self) -> &str { "cached" }
+    fn name(&self) -> &str {
+        "cached"
+    }
 }
 
 /// Build a PerLayerGraph with cached layers for a detected template.
@@ -130,8 +145,7 @@ impl AttentionCache {
         for layer in layer_range {
             // Attention (exact)
             let (h_post_attn, _, _) =
-                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None)
-                    .unwrap();
+                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
 
             // Capture FFN-normed input (last token)
             let pre_ffn_key = if arch.has_post_norms() {
@@ -150,6 +164,9 @@ impl AttentionCache {
             h = h_out;
         }
 
-        AttentionCache { ffn_inputs, final_residual: h }
+        AttentionCache {
+            ffn_inputs,
+            final_residual: h,
+        }
     }
 }

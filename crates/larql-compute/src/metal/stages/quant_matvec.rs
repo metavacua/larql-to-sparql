@@ -1,4 +1,6 @@
 //! Format-aware single-vector matvec dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! One entry point, `encode`, that routes to the right shader based on the
 //! weight's quantization format:
@@ -23,8 +25,8 @@
 //! multi-position prefill the caller loops over positions, passing
 //! `f32_in_off` / `out_off` in bytes.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// Metal shader pipelines this stage may dispatch, in one bundle.
 ///

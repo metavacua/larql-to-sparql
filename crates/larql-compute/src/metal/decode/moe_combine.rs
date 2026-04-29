@@ -1,4 +1,6 @@
 //! CPU-side combine step for hybrid MoE layers.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Runs after the GPU dense-FFN has written `new_h = h_post_attn + _1(dense)`
 //! and the CPU MoE block has added `moe_out` into `new_h` in place. At that
@@ -86,7 +88,9 @@ fn apply_outer_norm(
 /// `hidden_states *= self.layer_scalar` in `DecoderLayer.forward`.
 /// No-op when `layer_scalar` is 0.0 (absent) or 1.0 (identity).
 fn apply_whole_layer_scalar(h_ptr: *mut f32, hidden: usize, layer_scalar: f32) {
-    if layer_scalar == 0.0 || layer_scalar == 1.0 { return; }
+    if layer_scalar == 0.0 || layer_scalar == 1.0 {
+        return;
+    }
     unsafe {
         for i in 0..hidden {
             *h_ptr.add(i) *= layer_scalar;

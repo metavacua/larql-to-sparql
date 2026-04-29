@@ -1,4 +1,6 @@
 //! Binary down_meta format — compact storage for per-feature output metadata.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Replaces down_meta.jsonl (~160 MB) with a binary format (~30 MB for top_k=10).
 //! Token strings are resolved at read time via the tokenizer.
@@ -206,8 +208,11 @@ pub fn mmap_binary(
     let mut pos = 16usize; // after header
 
     for _ in 0..num_layers {
-        if pos + 4 > mmap.len() { break; }
-        let nf = u32::from_le_bytes([mmap[pos], mmap[pos+1], mmap[pos+2], mmap[pos+3]]) as usize;
+        if pos + 4 > mmap.len() {
+            break;
+        }
+        let nf =
+            u32::from_le_bytes([mmap[pos], mmap[pos + 1], mmap[pos + 2], mmap[pos + 3]]) as usize;
         pos += 4; // skip num_features u32
         layer_offsets.push(pos); // records start here
         layer_num_features.push(nf);

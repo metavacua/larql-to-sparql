@@ -1,4 +1,6 @@
 //! Per-session PatchedVindex management.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each session gets its own PatchedVindex overlay. The base vindex is shared
 //! (readonly). Patches applied via the session API are isolated to that session.
@@ -51,11 +53,7 @@ impl SessionManager {
 
     /// Get or create a session's PatchedVindex.
     #[allow(dead_code)]
-    pub async fn get_or_create(
-        &self,
-        session_id: &str,
-        model: &Arc<LoadedModel>,
-    ) -> PatchedVindex {
+    pub async fn get_or_create(&self, session_id: &str, model: &Arc<LoadedModel>) -> PatchedVindex {
         let mut sessions = self.sessions.write().await;
 
         // Evict expired sessions opportunistically (max 10 per call).
@@ -104,16 +102,14 @@ impl SessionManager {
         let mut sessions = self.sessions.write().await;
         let now = Instant::now();
 
-        let session = sessions
-            .entry(session_id.to_string())
-            .or_insert_with(|| {
-                // We need the base — block briefly.
-                let base = model.patched.blocking_read();
-                SessionState {
-                    patched: PatchedVindex::new(base.base().clone()),
-                    last_accessed: now,
-                }
-            });
+        let session = sessions.entry(session_id.to_string()).or_insert_with(|| {
+            // We need the base — block briefly.
+            let base = model.patched.blocking_read();
+            SessionState {
+                patched: PatchedVindex::new(base.base().clone()),
+                last_accessed: now,
+            }
+        });
 
         session.last_accessed = now;
         let op_count = patch.operations.len();
@@ -142,11 +138,7 @@ impl SessionManager {
     }
 
     /// Remove a patch from a session.
-    pub async fn remove_patch(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<usize, String> {
+    pub async fn remove_patch(&self, session_id: &str, name: &str) -> Result<usize, String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(session_id)
@@ -164,7 +156,9 @@ impl SessionManager {
     }
 
     /// Blocking write access to sessions map (for use in spawn_blocking).
-    pub fn sessions_blocking_write(&self) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
+    pub fn sessions_blocking_write(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
         self.sessions.blocking_write()
     }
 

@@ -1,4 +1,6 @@
 //! `INSERT INTO EDGES` — Compose (FFN overlay) + Knn (retrieval override)
+// SPDX-License-Identifier: Apache-2.0
+
 //! paths.
 //!
 //! Compose mode runs a five-phase pipeline, each phase in its own file:

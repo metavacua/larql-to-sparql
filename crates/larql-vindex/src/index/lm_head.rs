@@ -1,4 +1,6 @@
 //! LM-head loaders + KNN.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads the output projection (vocab × hidden) in one of three formats:
 //!
@@ -41,16 +43,22 @@ impl VectorIndex {
     /// Synthesize Q4_0 lm_head in RAM from the f16 embeddings mmap.
     /// No-op if a Q4 source already exists or preconditions are not met.
     pub fn synthesize_lm_head_q4(&mut self) {
-        if self.lm_head_q4_mmap.is_some() || self.lm_head_q4_synth.is_some() { return; }
+        if self.lm_head_q4_mmap.is_some() || self.lm_head_q4_synth.is_some() {
+            return;
+        }
         let vocab = self.vocab_size;
         let hidden = self.hidden_size;
-        if vocab == 0 || hidden == 0 || !hidden.is_multiple_of(32) { return; }
+        if vocab == 0 || hidden == 0 || !hidden.is_multiple_of(32) {
+            return;
+        }
         let f16_mmap = match self.lm_head_f16_mmap.as_ref() {
             Some(m) => m.clone(),
             None => return,
         };
         let expected = vocab * hidden * 2;
-        if f16_mmap.len() < expected { return; }
+        if f16_mmap.len() < expected {
+            return;
+        }
         let blocks_per_row = hidden / 32;
         let bytes_per_row = blocks_per_row * 18;
         let mut out = Vec::with_capacity(vocab * bytes_per_row);
@@ -118,8 +126,10 @@ impl VectorIndex {
     ) -> Vec<(u32, f32)> {
         // 1. Q4 path — ~1 ms on Metal (mmap file or synthesized from f16 embeddings).
         if backend.has_q4() {
-            let q4_bytes: Option<&[u8]> = self.lm_head_q4_mmap
-                .as_ref().map(|m| m.as_ref() as &[u8])
+            let q4_bytes: Option<&[u8]> = self
+                .lm_head_q4_mmap
+                .as_ref()
+                .map(|m| m.as_ref() as &[u8])
                 .or_else(|| self.lm_head_q4_synth.as_ref().map(|v| v.as_slice()));
             if let Some(q4_data) = q4_bytes {
                 let vocab = self.vocab_size;
@@ -127,9 +137,9 @@ impl VectorIndex {
                 if vocab > 0 {
                     let x = query.as_slice().unwrap();
                     let (q8_x, q8_scales) = larql_compute::cpu::q4::quantize_to_q8(x);
-                    if let Some(scores_vec) = backend.q4_matvec(
-                        q4_data, &q8_x, &q8_scales, vocab, hidden,
-                    ) {
+                    if let Some(scores_vec) =
+                        backend.q4_matvec(q4_data, &q8_x, &q8_scales, vocab, hidden)
+                    {
                         return Self::top_k_sorted(scores_vec, top_k);
                     }
                 }
@@ -144,9 +154,9 @@ impl VectorIndex {
                 let expected = vocab * hidden * 2;
                 if f16_mmap.len() >= expected {
                     if let Some(x) = query.as_slice() {
-                        if let Some(scores_vec) = backend.f16_gemv(
-                            &f16_mmap[..expected], x, vocab, hidden,
-                        ) {
+                        if let Some(scores_vec) =
+                            backend.f16_gemv(&f16_mmap[..expected], x, vocab, hidden)
+                        {
                             return Self::top_k_sorted(scores_vec, top_k);
                         }
                     }
@@ -160,7 +170,9 @@ impl VectorIndex {
     /// Sort `scores` by descending value and keep the top `top_k`. Shared
     /// by the Q4 / f16 / f32 paths above.
     fn top_k_sorted(scores: Vec<f32>, top_k: usize) -> Vec<(u32, f32)> {
-        let mut indexed: Vec<(u32, f32)> = scores.into_iter().enumerate()
+        let mut indexed: Vec<(u32, f32)> = scores
+            .into_iter()
+            .enumerate()
             .map(|(i, s)| (i as u32, s))
             .collect();
         let k = top_k.min(indexed.len());
@@ -182,10 +194,14 @@ impl VectorIndex {
         };
         let vocab = self.vocab_size;
         let hidden = self.hidden_size;
-        if vocab == 0 { return vec![]; }
+        if vocab == 0 {
+            return vec![];
+        }
 
         let expected = vocab * hidden * 4;
-        if mmap.len() < expected { return vec![]; }
+        if mmap.len() < expected {
+            return vec![];
+        }
 
         // Zero-copy: reinterpret mmap as [vocab, hidden] f32 matrix
         let data = unsafe {
@@ -203,7 +219,10 @@ impl VectorIndex {
         let scores = ndarray::Array1::from_vec(result.into_raw_vec_and_offset().0);
 
         // Top-K selection
-        let mut indexed: Vec<(u32, f32)> = scores.iter().copied().enumerate()
+        let mut indexed: Vec<(u32, f32)> = scores
+            .iter()
+            .copied()
+            .enumerate()
             .map(|(i, s)| (i as u32, s))
             .collect();
         let k = top_k.min(indexed.len());
@@ -228,7 +247,11 @@ mod tests {
         let top3 = VectorIndex::top_k_sorted(scores.clone(), 3);
         let tokens: Vec<u32> = top3.iter().map(|(t, _)| *t).collect();
         let probs: Vec<f32> = top3.iter().map(|(_, s)| *s).collect();
-        assert_eq!(tokens, vec![2, 4, 0], "expect descending-by-score token order");
+        assert_eq!(
+            tokens,
+            vec![2, 4, 0],
+            "expect descending-by-score token order"
+        );
         assert!(probs[0] > probs[1] && probs[1] > probs[2]);
 
         // top_k larger than input → no truncation, but still sorted.
@@ -273,16 +296,15 @@ mod tests {
             mem.make_read_only().unwrap()
         });
 
-        let mut index = crate::index::core::VectorIndex::new(
-            vec![None; 1],
-            vec![None; 1],
-            1,
-            hidden,
-        );
+        let mut index =
+            crate::index::core::VectorIndex::new(vec![None; 1], vec![None; 1], 1, hidden);
         index.vocab_size = vocab;
         index.set_lm_head_f16_mmap(mmap);
 
-        assert!(!index.has_lm_head_q4(), "should not have Q4 before synthesis");
+        assert!(
+            !index.has_lm_head_q4(),
+            "should not have Q4 before synthesis"
+        );
         index.synthesize_lm_head_q4();
         assert!(index.has_lm_head_q4(), "should have Q4 after synthesis");
 
@@ -290,8 +312,11 @@ mod tests {
         let synth = index.lm_head_q4_synth.as_ref().unwrap();
         let blocks_per_row = hidden / 32;
         let bytes_per_row = blocks_per_row * 18;
-        assert_eq!(synth.len(), vocab * bytes_per_row,
-            "synthesized Q4 byte length should be vocab × (hidden/32 × 18)");
+        assert_eq!(
+            synth.len(),
+            vocab * bytes_per_row,
+            "synthesized Q4 byte length should be vocab × (hidden/32 × 18)"
+        );
 
         // Calling again should be a no-op (idempotent).
         let ptr_before = synth.as_ptr();

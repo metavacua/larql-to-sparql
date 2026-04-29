@@ -1,4 +1,6 @@
 //! StarCoder 2 architecture.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard Llama:
 //! - Non-gated FFN: activation(x @ c_fc.T + bias) @ c_proj.T + bias
@@ -6,7 +8,7 @@
 //! - Has biases on attention projections, FFN, and layer norms
 //! - Uses GQA with sliding window
 
-use crate::config::{Activation, FfnType, NormType, ModelArchitecture, ModelConfig};
+use crate::config::{Activation, FfnType, ModelArchitecture, ModelConfig, NormType};
 
 pub struct StarCoder2Arch {
     config: ModelConfig,

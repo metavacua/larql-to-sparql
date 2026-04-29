@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Routing table: template → layer features mapping.
 ///
 /// 23,697 unique features from 240 passes. 44 sub-centroids,
@@ -58,9 +60,7 @@ impl RoutingTable {
         let entry_bytes: usize = self
             .routes
             .iter()
-            .map(|(name, entries)| {
-                name.len() + entries.len() * 40
-            })
+            .map(|(name, entries)| name.len() + entries.len() * 40)
             .sum();
         entry_bytes.max(360_448) // At least the measured 352 KB
     }

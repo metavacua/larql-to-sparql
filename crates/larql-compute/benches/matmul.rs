@@ -1,11 +1,12 @@
 //! Criterion benchmarks for compute backends.
+// SPDX-License-Identifier: Apache-2.0
 
 extern crate blas_src;
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use ndarray::Array2;
-use larql_compute::cpu_backend;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use larql_compute::cpu::q4;
+use larql_compute::cpu_backend;
+use ndarray::Array2;
 
 fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     let mut state = seed;
@@ -27,9 +28,13 @@ fn bench_matmul_transb(c: &mut Criterion) {
         let b = synth_matrix(n, k, 43);
         let label = format!("[{m},{k}]x[{n},{k}]^T");
 
-        group.bench_with_input(BenchmarkId::new("cpu", &label), &(&a, &b), |bench, (a, b)| {
-            bench.iter(|| backend.matmul_transb(a.view(), b.view()));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("cpu", &label),
+            &(&a, &b),
+            |bench, (a, b)| {
+                bench.iter(|| backend.matmul_transb(a.view(), b.view()));
+            },
+        );
     }
 
     group.finish();
@@ -39,13 +44,13 @@ fn bench_q4_matvec(c: &mut Criterion) {
     let hidden = 2560;
     let intermediate = 10240;
     let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
-    let matrix: Vec<f32> = (0..intermediate * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+    let matrix: Vec<f32> = (0..intermediate * hidden)
+        .map(|i| (i as f32 * 0.0001).cos())
+        .collect();
     let q4_data = q4::quantize_q4_0(&matrix);
 
     c.bench_function("q4_matvec_cpu", |bench| {
-        bench.iter(|| {
-            q4::q4_matvec(&q4_data, &x, intermediate, hidden)
-        });
+        bench.iter(|| q4::q4_matvec(&q4_data, &x, intermediate, hidden));
     });
 }
 

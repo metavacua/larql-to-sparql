@@ -1,4 +1,6 @@
 //! `vec_inject` entry types.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! An entry represents a single retrievable fact extracted from the document
 //! during the store build. At query time, `retrieve` finds entries relevant

@@ -1,4 +1,5 @@
 //! Auto-detect model architecture from config.json.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::path::Path;
 
@@ -510,10 +511,7 @@ mod tests {
         assert_eq!(arch.num_experts(), 128);
         assert_eq!(arch.num_experts_per_token(), 8);
         assert_eq!(arch.moe_intermediate_size(), 768);
-        assert_eq!(
-            arch.moe_router_key(0).unwrap(),
-            "layers.0.mlp.gate.weight"
-        );
+        assert_eq!(arch.moe_router_key(0).unwrap(), "layers.0.mlp.gate.weight");
         assert_eq!(
             arch.expert_ffn_gate_key(0, 5).unwrap(),
             "layers.0.mlp.experts.5.gate_proj.weight"
@@ -1111,7 +1109,7 @@ mod tests {
         // sliding layers still ship v_proj in safetensors.
         assert!(arch.config().attention_k_eq_v);
         assert!(!arch.v_shares_k(0)); // sliding
-        assert!(arch.v_shares_k(5));  // global
+        assert!(arch.v_shares_k(5)); // global
 
         // V-norm (parameter-free RMSNorm on V states)
         assert!(arch.has_v_norm());

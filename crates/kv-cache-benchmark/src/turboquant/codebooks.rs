@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Pre-computed Lloyd-Max codebooks for Beta(d/2, d/2) distribution.
 ///
 /// After WHT of a unit-norm vector in d dimensions, each coordinate is
@@ -5,7 +7,6 @@
 ///
 /// These codebooks are the optimal scalar quantizers for this distribution.
 /// Values validated against llama.cpp Discussion #20969 reference implementation.
-
 use super::lloyd_max::Codebook;
 
 /// Get the pre-computed codebook for a given dimension and bit-width.

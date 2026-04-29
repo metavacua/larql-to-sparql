@@ -1,7 +1,8 @@
 //! Tests for HNSW index — correctness, recall, and edge cases.
+// SPDX-License-Identifier: Apache-2.0
 
-use ndarray::{Array1, Array2};
 use larql_vindex::index::hnsw::HnswLayer;
+use ndarray::{Array1, Array2};
 
 fn synth_vectors(n: usize, dim: usize, seed: u64) -> Array2<f32> {
     let mut state = seed;
@@ -55,8 +56,10 @@ fn recall_at_10() {
     let hnsw_results = index.search(&view, &query, 10, 100);
     let brute_results = brute_force_topk(&vectors, &query, 10);
 
-    let hnsw_ids: std::collections::HashSet<usize> = hnsw_results.iter().map(|(id, _)| *id).collect();
-    let brute_ids: std::collections::HashSet<usize> = brute_results.iter().map(|(id, _)| *id).collect();
+    let hnsw_ids: std::collections::HashSet<usize> =
+        hnsw_results.iter().map(|(id, _)| *id).collect();
+    let brute_ids: std::collections::HashSet<usize> =
+        brute_results.iter().map(|(id, _)| *id).collect();
 
     let overlap = hnsw_ids.intersection(&brute_ids).count();
     assert!(
@@ -78,8 +81,10 @@ fn recall_at_100_large() {
     let hnsw_results = index.search(&view, &query, 100, 200);
     let brute_results = brute_force_topk(&vectors, &query, 100);
 
-    let hnsw_ids: std::collections::HashSet<usize> = hnsw_results.iter().map(|(id, _)| *id).collect();
-    let brute_ids: std::collections::HashSet<usize> = brute_results.iter().map(|(id, _)| *id).collect();
+    let hnsw_ids: std::collections::HashSet<usize> =
+        hnsw_results.iter().map(|(id, _)| *id).collect();
+    let brute_ids: std::collections::HashSet<usize> =
+        brute_results.iter().map(|(id, _)| *id).collect();
 
     let overlap = hnsw_ids.intersection(&brute_ids).count();
     assert!(
@@ -122,7 +127,12 @@ fn scores_are_dot_products() {
     let results = index.search(&view, &query, 10, 50);
 
     for (id, score) in &results {
-        let expected: f32 = vectors.row(*id).iter().zip(query.iter()).map(|(a, b)| a * b).sum();
+        let expected: f32 = vectors
+            .row(*id)
+            .iter()
+            .zip(query.iter())
+            .map(|(a, b)| a * b)
+            .sum();
         assert!(
             (score - expected).abs() < 1e-5,
             "score mismatch for id {id}: got {score}, expected {expected}"
@@ -143,7 +153,9 @@ fn results_sorted_descending() {
         assert!(
             results[i - 1].1 >= results[i].1,
             "results not sorted: [{i}]={} < [{}]={}",
-            results[i].1, i - 1, results[i - 1].1
+            results[i].1,
+            i - 1,
+            results[i - 1].1
         );
     }
 }

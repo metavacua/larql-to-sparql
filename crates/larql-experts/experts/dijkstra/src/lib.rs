@@ -1,4 +1,6 @@
 //! # Dijkstra / shortest-path expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Weighted undirected graph algorithms. Edges are `[from, to, weight?]`
 //! arrays; if `weight` is omitted it defaults to `1`. Node names are arbitrary

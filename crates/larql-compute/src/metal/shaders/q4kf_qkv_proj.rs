@@ -1,4 +1,6 @@
 //! Fused QKV — llama.cpp's exact kernel_mul_mv_q4_K_f32, adapted for fused QKV.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses GGUF `block_q4_K` (144 bytes) with packed 12-byte scales+mins.
 //! Inner loop matches llama.cpp byte-for-byte: no float() casts on nibbles,
@@ -226,5 +228,5 @@ kernel void q4kf_proj(
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 4;   // 2 SG × 2 rows/SG
-pub const THREADS_PER_TG: u64 = 64;  // 2 SG × 32 lanes
+pub const ROWS_PER_TG: u64 = 4; // 2 SG × 2 rows/SG
+pub const THREADS_PER_TG: u64 = 64; // 2 SG × 32 lanes

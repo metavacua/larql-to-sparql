@@ -1,4 +1,6 @@
 //! Fused Q4_KF (GGUF) gate+up — llama.cpp-exact inner loop, shared input.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two matvecs in one dispatch: gate and up projections read the input ONCE
 //! (register-cached yl/yh arrays) and compute both outputs.
@@ -112,5 +114,5 @@ kernel void q4kf_ffn_gate_up(
 }
 "#;
 
-pub const ROWS_PER_TG: u64 = 4;   // 2 SG × 2 rows/SG
-pub const THREADS_PER_TG: u64 = 64;  // 2 SG × 32 lanes
+pub const ROWS_PER_TG: u64 = 4; // 2 SG × 2 rows/SG
+pub const THREADS_PER_TG: u64 = 64; // 2 SG × 32 lanes

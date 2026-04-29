@@ -1,4 +1,6 @@
 //! f16 gemv — f16 weights × f32 query → f32 output, for the LM head.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Mirror of [`f32_gemv`](super::f32_gemv) but the weight matrix is `half`
 //! on disk. Saves the 5.6 GB f32 clone on Gemma 4 31B (2.8 GB on disk as

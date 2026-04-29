@@ -1,4 +1,6 @@
 //! Parser for TRACE statements.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Grammar:
 //!
@@ -14,9 +16,9 @@
 //! `FOR <token>` selects a target token to track through the residual stream
 //! (rank, attn delta, ffn delta per layer).
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-use super::{Parser, ParseError};
 
 impl Parser {
     pub(crate) fn parse_trace(&mut self) -> Result<Statement, ParseError> {

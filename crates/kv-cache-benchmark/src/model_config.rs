@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Model configuration for KV cache benchmarking.
 ///
 /// Dimensions are taken from real model architectures. The benchmark uses

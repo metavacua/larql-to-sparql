@@ -1,4 +1,6 @@
 //! Phase 2: Real model integration.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Wires all four strategies into the LARQL inference pipeline on Gemma 3-4B.
 //! Requires the `real-model` feature flag.
@@ -8,11 +10,11 @@
 //! - Markov RS:   runs bounded-window forward pass, stores residuals + cold tier token IDs
 //! - Graph Walk:  vindex walk through FFN graph, no forward pass for factual queries
 
-pub mod runner;
-pub mod kv_capture;
-pub mod turboquant_layer;
-pub mod markov_layer;
-pub mod graph_walk_layer;
 pub mod decode_comparison;
+pub mod graph_walk_layer;
+pub mod kv_capture;
+pub mod markov_layer;
+pub mod runner;
+pub mod turboquant_layer;
 
-pub use runner::{RealModelBenchmark, RealModelResult, run_all_strategies};
+pub use runner::{run_all_strategies, RealModelBenchmark, RealModelResult};

@@ -1,4 +1,5 @@
 //! Integration tests for model architecture detection and key patterns.
+// SPDX-License-Identifier: Apache-2.0
 
 use larql_models::{detect_from_json, ExpertFormat, ModelArchitecture};
 
@@ -67,7 +68,10 @@ fn gpt_oss_packed_keys() {
 #[test]
 fn gpt_oss_router_key() {
     let arch = gpt_oss_arch();
-    assert_eq!(arch.moe_router_key(0).unwrap(), "layers.0.mlp.router.weight");
+    assert_eq!(
+        arch.moe_router_key(0).unwrap(),
+        "layers.0.mlp.router.weight"
+    );
 }
 
 #[test]
@@ -172,10 +176,26 @@ fn all_architectures_have_attn_keys() {
     for config in &configs {
         let arch = detect_from_json(config);
         // All architectures must produce non-empty attention keys
-        assert!(!arch.attn_q_key(0).is_empty(), "{} has empty Q key", arch.family());
-        assert!(!arch.attn_k_key(0).is_empty(), "{} has empty K key", arch.family());
-        assert!(!arch.attn_v_key(0).is_empty(), "{} has empty V key", arch.family());
-        assert!(!arch.attn_o_key(0).is_empty(), "{} has empty O key", arch.family());
+        assert!(
+            !arch.attn_q_key(0).is_empty(),
+            "{} has empty Q key",
+            arch.family()
+        );
+        assert!(
+            !arch.attn_k_key(0).is_empty(),
+            "{} has empty K key",
+            arch.family()
+        );
+        assert!(
+            !arch.attn_v_key(0).is_empty(),
+            "{} has empty V key",
+            arch.family()
+        );
+        assert!(
+            !arch.attn_o_key(0).is_empty(),
+            "{} has empty O key",
+            arch.family()
+        );
     }
 }
 
@@ -240,13 +260,23 @@ fn drop_ffn_weights_removes_ffn_tensors() {
     assert!(freed > 0, "should report freed bytes");
 
     // Verify correct tensors remain
-    assert!(weights.tensors.contains_key("layers.0.self_attn.q_proj.weight"));
-    assert!(weights.tensors.contains_key("layers.0.self_attn.k_proj.weight"));
-    assert!(weights.tensors.contains_key("layers.0.input_layernorm.weight"));
+    assert!(weights
+        .tensors
+        .contains_key("layers.0.self_attn.q_proj.weight"));
+    assert!(weights
+        .tensors
+        .contains_key("layers.0.self_attn.k_proj.weight"));
+    assert!(weights
+        .tensors
+        .contains_key("layers.0.input_layernorm.weight"));
 
     // Verify FFN tensors are gone
-    assert!(!weights.tensors.contains_key("layers.0.mlp.gate_proj.weight"));
-    assert!(!weights.tensors.contains_key("layers.1.mlp.down_proj.weight"));
+    assert!(!weights
+        .tensors
+        .contains_key("layers.0.mlp.gate_proj.weight"));
+    assert!(!weights
+        .tensors
+        .contains_key("layers.1.mlp.down_proj.weight"));
 }
 
 #[test]
@@ -268,9 +298,18 @@ fn drop_ffn_weights_removes_moe_experts() {
     let small = WeightArray::zeros((2, 4));
     let mut tensors = HashMap::new();
     // MoE expert tensors
-    tensors.insert("layers.0.block_sparse_moe.experts.0.w1.weight".into(), small.clone());
-    tensors.insert("layers.0.block_sparse_moe.experts.0.w2.weight".into(), small.clone());
-    tensors.insert("layers.0.block_sparse_moe.experts.0.w3.weight".into(), small.clone());
+    tensors.insert(
+        "layers.0.block_sparse_moe.experts.0.w1.weight".into(),
+        small.clone(),
+    );
+    tensors.insert(
+        "layers.0.block_sparse_moe.experts.0.w2.weight".into(),
+        small.clone(),
+    );
+    tensors.insert(
+        "layers.0.block_sparse_moe.experts.0.w3.weight".into(),
+        small.clone(),
+    );
     // Attention (keep)
     tensors.insert("layers.0.self_attn.q_proj.weight".into(), small.clone());
 
@@ -296,7 +335,9 @@ fn drop_ffn_weights_removes_moe_experts() {
     weights.drop_ffn_weights();
     // mlp.experts matches the "mlp.experts" pattern
     assert_eq!(weights.tensors.len(), 1, "should only keep attn");
-    assert!(weights.tensors.contains_key("layers.0.self_attn.q_proj.weight"));
+    assert!(weights
+        .tensors
+        .contains_key("layers.0.self_attn.q_proj.weight"));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -413,7 +454,10 @@ fn gemma4_kv_sharing() {
     let arch = gemma4_e2b_arch();
     // First 15 layers: no sharing
     for l in 0..15 {
-        assert!(arch.kv_shared_source_layer(l).is_none(), "L{l} should not be shared");
+        assert!(
+            arch.kv_shared_source_layer(l).is_none(),
+            "L{l} should not be shared"
+        );
     }
     // Layers 15-34: shared
     // Sliding shared layers → last non-shared sliding (L13)
@@ -506,8 +550,14 @@ fn gemma2_norm_offsets() {
 #[test]
 fn gemma2_qk_norm_keys() {
     let arch = gemma2_arch();
-    assert_eq!(arch.attn_q_norm_key(5).unwrap(), "layers.5.self_attn.q_norm.weight");
-    assert_eq!(arch.attn_k_norm_key(5).unwrap(), "layers.5.self_attn.k_norm.weight");
+    assert_eq!(
+        arch.attn_q_norm_key(5).unwrap(),
+        "layers.5.self_attn.q_norm.weight"
+    );
+    assert_eq!(
+        arch.attn_k_norm_key(5).unwrap(),
+        "layers.5.self_attn.k_norm.weight"
+    );
 }
 
 #[test]
@@ -558,7 +608,7 @@ fn gemma3_sliding_window_pattern() {
     // Every 6th layer (0-indexed: 5, 11, 17, ...) is full attention
     assert!(arch.is_sliding_window_layer(0));
     assert!(arch.is_sliding_window_layer(4));
-    assert!(!arch.is_sliding_window_layer(5));  // full
+    assert!(!arch.is_sliding_window_layer(5)); // full
     assert!(arch.is_sliding_window_layer(6));
     assert!(!arch.is_sliding_window_layer(11)); // full
 }
@@ -634,16 +684,31 @@ fn qwen_detection() {
 #[test]
 fn qwen_attention_bias_keys() {
     let arch = qwen_arch();
-    assert_eq!(arch.attn_q_bias_key(3).unwrap(), "layers.3.self_attn.q_proj.bias");
-    assert_eq!(arch.attn_k_bias_key(3).unwrap(), "layers.3.self_attn.k_proj.bias");
-    assert_eq!(arch.attn_v_bias_key(3).unwrap(), "layers.3.self_attn.v_proj.bias");
+    assert_eq!(
+        arch.attn_q_bias_key(3).unwrap(),
+        "layers.3.self_attn.q_proj.bias"
+    );
+    assert_eq!(
+        arch.attn_k_bias_key(3).unwrap(),
+        "layers.3.self_attn.k_proj.bias"
+    );
+    assert_eq!(
+        arch.attn_v_bias_key(3).unwrap(),
+        "layers.3.self_attn.v_proj.bias"
+    );
 }
 
 #[test]
 fn qwen_qk_norm_keys() {
     let arch = qwen_arch();
-    assert_eq!(arch.attn_q_norm_key(0).unwrap(), "layers.0.self_attn.q_norm.weight");
-    assert_eq!(arch.attn_k_norm_key(0).unwrap(), "layers.0.self_attn.k_norm.weight");
+    assert_eq!(
+        arch.attn_q_norm_key(0).unwrap(),
+        "layers.0.self_attn.q_norm.weight"
+    );
+    assert_eq!(
+        arch.attn_k_norm_key(0).unwrap(),
+        "layers.0.self_attn.k_norm.weight"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -682,17 +747,35 @@ fn deepseek_moe() {
 fn deepseek_expert_keys() {
     let arch = deepseek_arch();
     assert_eq!(arch.moe_router_key(0).unwrap(), "layers.0.mlp.gate.weight");
-    assert_eq!(arch.expert_ffn_gate_key(0, 5).unwrap(), "layers.0.mlp.experts.5.gate_proj.weight");
-    assert_eq!(arch.expert_ffn_up_key(0, 5).unwrap(), "layers.0.mlp.experts.5.up_proj.weight");
-    assert_eq!(arch.expert_ffn_down_key(0, 5).unwrap(), "layers.0.mlp.experts.5.down_proj.weight");
+    assert_eq!(
+        arch.expert_ffn_gate_key(0, 5).unwrap(),
+        "layers.0.mlp.experts.5.gate_proj.weight"
+    );
+    assert_eq!(
+        arch.expert_ffn_up_key(0, 5).unwrap(),
+        "layers.0.mlp.experts.5.up_proj.weight"
+    );
+    assert_eq!(
+        arch.expert_ffn_down_key(0, 5).unwrap(),
+        "layers.0.mlp.experts.5.down_proj.weight"
+    );
 }
 
 #[test]
 fn deepseek_shared_expert_keys() {
     let arch = deepseek_arch();
-    assert_eq!(arch.shared_expert_gate_key(0).unwrap(), "layers.0.mlp.shared_experts.gate_proj.weight");
-    assert_eq!(arch.shared_expert_up_key(0).unwrap(), "layers.0.mlp.shared_experts.up_proj.weight");
-    assert_eq!(arch.shared_expert_down_key(0).unwrap(), "layers.0.mlp.shared_experts.down_proj.weight");
+    assert_eq!(
+        arch.shared_expert_gate_key(0).unwrap(),
+        "layers.0.mlp.shared_experts.gate_proj.weight"
+    );
+    assert_eq!(
+        arch.shared_expert_up_key(0).unwrap(),
+        "layers.0.mlp.shared_experts.up_proj.weight"
+    );
+    assert_eq!(
+        arch.shared_expert_down_key(0).unwrap(),
+        "layers.0.mlp.shared_experts.down_proj.weight"
+    );
 }
 
 #[test]
@@ -701,10 +784,22 @@ fn deepseek_mla() {
     assert!(arch.uses_mla());
     assert_eq!(arch.kv_lora_rank(), 512);
     assert_eq!(arch.q_lora_rank(), 1536);
-    assert_eq!(arch.mla_kv_a_key(0).unwrap(), "layers.0.self_attn.kv_a_proj_with_mqa.weight");
-    assert_eq!(arch.mla_kv_b_key(0).unwrap(), "layers.0.self_attn.kv_b_proj.weight");
-    assert_eq!(arch.mla_q_a_key(0).unwrap(), "layers.0.self_attn.q_a_proj.weight");
-    assert_eq!(arch.mla_q_b_key(0).unwrap(), "layers.0.self_attn.q_b_proj.weight");
+    assert_eq!(
+        arch.mla_kv_a_key(0).unwrap(),
+        "layers.0.self_attn.kv_a_proj_with_mqa.weight"
+    );
+    assert_eq!(
+        arch.mla_kv_b_key(0).unwrap(),
+        "layers.0.self_attn.kv_b_proj.weight"
+    );
+    assert_eq!(
+        arch.mla_q_a_key(0).unwrap(),
+        "layers.0.self_attn.q_a_proj.weight"
+    );
+    assert_eq!(
+        arch.mla_q_b_key(0).unwrap(),
+        "layers.0.self_attn.q_b_proj.weight"
+    );
 }
 
 #[test]
@@ -795,12 +890,27 @@ fn starcoder2_bias_keys() {
     let arch = starcoder2_arch();
     // FFN biases
     assert_eq!(arch.ffn_up_bias_key(0).unwrap(), "layers.0.mlp.c_fc.bias");
-    assert_eq!(arch.ffn_down_bias_key(0).unwrap(), "layers.0.mlp.c_proj.bias");
+    assert_eq!(
+        arch.ffn_down_bias_key(0).unwrap(),
+        "layers.0.mlp.c_proj.bias"
+    );
     // Attention biases (including O)
-    assert_eq!(arch.attn_q_bias_key(0).unwrap(), "layers.0.self_attn.q_proj.bias");
-    assert_eq!(arch.attn_k_bias_key(0).unwrap(), "layers.0.self_attn.k_proj.bias");
-    assert_eq!(arch.attn_v_bias_key(0).unwrap(), "layers.0.self_attn.v_proj.bias");
-    assert_eq!(arch.attn_o_bias_key(0).unwrap(), "layers.0.self_attn.o_proj.bias");
+    assert_eq!(
+        arch.attn_q_bias_key(0).unwrap(),
+        "layers.0.self_attn.q_proj.bias"
+    );
+    assert_eq!(
+        arch.attn_k_bias_key(0).unwrap(),
+        "layers.0.self_attn.k_proj.bias"
+    );
+    assert_eq!(
+        arch.attn_v_bias_key(0).unwrap(),
+        "layers.0.self_attn.v_proj.bias"
+    );
+    assert_eq!(
+        arch.attn_o_bias_key(0).unwrap(),
+        "layers.0.self_attn.o_proj.bias"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -846,9 +956,24 @@ fn non_granite_multipliers_are_one() {
     ];
     for config in &configs {
         let arch = detect_from_json(config);
-        assert_eq!(arch.residual_multiplier(), 1.0, "{} should have residual_multiplier=1.0", arch.family());
-        assert_eq!(arch.attention_multiplier(), 1.0, "{} should have attention_multiplier=1.0", arch.family());
-        assert_eq!(arch.logits_scaling(), 1.0, "{} should have logits_scaling=1.0", arch.family());
+        assert_eq!(
+            arch.residual_multiplier(),
+            1.0,
+            "{} should have residual_multiplier=1.0",
+            arch.family()
+        );
+        assert_eq!(
+            arch.attention_multiplier(),
+            1.0,
+            "{} should have attention_multiplier=1.0",
+            arch.family()
+        );
+        assert_eq!(
+            arch.logits_scaling(),
+            1.0,
+            "{} should have logits_scaling=1.0",
+            arch.family()
+        );
     }
 }
 
@@ -865,11 +990,16 @@ fn q4_0_round_trip() {
     let decoded = ggml::dequantize_q4_0(&q4, 64).unwrap();
 
     assert_eq!(decoded.len(), 64);
-    let max_err: f32 = data.iter().zip(decoded.iter())
+    let max_err: f32 = data
+        .iter()
+        .zip(decoded.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
     // Q4 is lossy but should be within ~2x the quantization step
-    assert!(max_err < 2.0, "Q4 round-trip max error {max_err} exceeds 2.0");
+    assert!(
+        max_err < 2.0,
+        "Q4 round-trip max error {max_err} exceeds 2.0"
+    );
 }
 
 #[test]
@@ -881,9 +1011,14 @@ fn q8_0_round_trip() {
     let decoded = ggml::dequantize(&q8, ggml::TYPE_Q8_0, 32).unwrap();
 
     assert_eq!(decoded.len(), 32);
-    let max_err: f32 = data.iter().zip(decoded.iter())
+    let max_err: f32 = data
+        .iter()
+        .zip(decoded.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
     // Q8 should be much more accurate than Q4
-    assert!(max_err < 0.02, "Q8 round-trip max error {max_err} exceeds 0.02");
+    assert!(
+        max_err < 0.02,
+        "Q8 round-trip max error {max_err} exceeds 0.02"
+    );
 }

@@ -1,4 +1,6 @@
 //! Phase 2 of `INSERT INTO EDGES` (Compose mode): walk the planned
+// SPDX-License-Identifier: Apache-2.0
+
 //! layers, synthesise gate / up / down at each slot via the
 //! `install_compiled_slot` math, then rebuild every gate at that layer
 //! from raw residuals + decoys (cliff-breaker refine stack).
@@ -142,28 +144,27 @@ impl Session {
             // Gate direction = unit-normalised captured residual.
             // Falls back to the entity embedding direction if the
             // residual capture couldn't run (browse-only vindex).
-            let gate_dir: Vec<f32> = if let Some((_, ref residual)) =
-                captured.iter().find(|(l, _)| *l == layer)
-            {
-                unit_vector(residual)
-            } else {
-                let entity_encoding = tokenizer
-                    .encode(entity, false)
-                    .map_err(|e| LqlError::exec("tokenize error", e))?;
-                let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
-                let mut ev = vec![0.0f32; plan.hidden];
-                for &tok in &entity_ids {
-                    let row = embed.row(tok as usize);
-                    for j in 0..plan.hidden {
-                        ev[j] += row[j] * embed_scale;
+            let gate_dir: Vec<f32> =
+                if let Some((_, ref residual)) = captured.iter().find(|(l, _)| *l == layer) {
+                    unit_vector(residual)
+                } else {
+                    let entity_encoding = tokenizer
+                        .encode(entity, false)
+                        .map_err(|e| LqlError::exec("tokenize error", e))?;
+                    let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
+                    let mut ev = vec![0.0f32; plan.hidden];
+                    for &tok in &entity_ids {
+                        let row = embed.row(tok as usize);
+                        for j in 0..plan.hidden {
+                            ev[j] += row[j] * embed_scale;
+                        }
                     }
-                }
-                let n = entity_ids.len().max(1) as f32;
-                for v in &mut ev {
-                    *v /= n;
-                }
-                unit_vector(&ev)
-            };
+                    let n = entity_ids.len().max(1) as f32;
+                    for v in &mut ev {
+                        *v /= n;
+                    }
+                    unit_vector(&ev)
+                };
 
             // gate = gate_dir * g_ref * 30
             let gate_vec: Vec<f32> = gate_dir
@@ -593,16 +594,16 @@ mod install_helpers_tests {
     #[test]
     fn should_refine_single_input_needs_a_decoy() {
         assert!(!should_refine(1, 0), "lone input has no suppressor");
-        assert!(should_refine(1, 1), "input + one decoy: project against decoy");
+        assert!(
+            should_refine(1, 1),
+            "input + one decoy: project against decoy"
+        );
         assert!(should_refine(1, 5));
     }
 
     #[test]
     fn should_refine_two_plus_inputs_runs_without_decoys() {
-        assert!(
-            should_refine(2, 0),
-            "peers orthogonalize among themselves"
-        );
+        assert!(should_refine(2, 0), "peers orthogonalize among themselves");
         assert!(should_refine(5, 0));
         assert!(should_refine(10, 0));
     }

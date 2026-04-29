@@ -1,4 +1,6 @@
 //! Phase 1 of `INSERT INTO EDGES` (Compose mode): resolve the install
+// SPDX-License-Identifier: Apache-2.0
+
 //! plan — which layers to write to, the target-token embedding for the
 //! down vector, and whether the vindex carries model weights (which
 //! determines whether later phases can run the canonical-prompt forward

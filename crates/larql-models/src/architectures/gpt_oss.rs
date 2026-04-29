@@ -1,4 +1,6 @@
 //! GPT-OSS architecture — OpenAI's MoE model with MXFP4 packed experts.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from standard MoE (Mixtral):
 //! - Expert weights are packed as MXFP4 (e8m0 scales + 4-bit values)
@@ -76,19 +78,31 @@ impl ModelArchitecture for GptOssArch {
     // ── Packed MXFP4 expert keys ──
 
     fn packed_gate_up_blocks_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}mlp.experts.gate_up_proj_blocks", self.layer_prefix(layer)))
+        Some(format!(
+            "{}mlp.experts.gate_up_proj_blocks",
+            self.layer_prefix(layer)
+        ))
     }
 
     fn packed_gate_up_scales_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}mlp.experts.gate_up_proj_scales", self.layer_prefix(layer)))
+        Some(format!(
+            "{}mlp.experts.gate_up_proj_scales",
+            self.layer_prefix(layer)
+        ))
     }
 
     fn packed_down_blocks_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}mlp.experts.down_proj_blocks", self.layer_prefix(layer)))
+        Some(format!(
+            "{}mlp.experts.down_proj_blocks",
+            self.layer_prefix(layer)
+        ))
     }
 
     fn packed_down_scales_key(&self, layer: usize) -> Option<String> {
-        Some(format!("{}mlp.experts.down_proj_scales", self.layer_prefix(layer)))
+        Some(format!(
+            "{}mlp.experts.down_proj_scales",
+            self.layer_prefix(layer)
+        ))
     }
 
     // Per-expert keys are not available for GPT-OSS (packed format).

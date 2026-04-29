@@ -1,4 +1,6 @@
 //! Metal GPU operation dispatch — one file per operation type.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each module handles dispatch for one category of compute operation:
 //! - `q4_matvec`: Q4×Q8 matrix-vector (gate scoring, up projection)
@@ -10,11 +12,11 @@
 //! All operations use the shared `BufferCache` for weight caching
 //! and `ComputePipelineState` from shader compilation.
 
-pub mod q4_matvec;
-pub mod q4_vecmat;
-pub mod q4_f32_matvec;
-pub mod q4_batched;
-pub mod q4_common;
 pub mod full_layer;
 pub mod full_pipeline;
 pub mod kv_cache;
+pub mod q4_batched;
+pub mod q4_common;
+pub mod q4_f32_matvec;
+pub mod q4_matvec;
+pub mod q4_vecmat;

@@ -1,4 +1,6 @@
 //! TurboQuant decode shader: fused centroid lookup + inverse WHT + rescale.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Input:  packed 4-bit indices + norms
 //! Output: fp32 vector buffer [batch × d]

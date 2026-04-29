@@ -1,4 +1,6 @@
 //! Walk FFN data — mmap'd feature-major down and up projection vectors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Manages down_features.bin and up_features.bin — [intermediate, hidden] per layer,
 //! f32 files where each feature's vector is contiguous for zero-copy BLAS access.
@@ -38,7 +40,9 @@ impl VectorIndex {
     pub fn down_feature_vector(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         let mmap = self.down_features_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 || feature >= intermediate { return None; }
+        if intermediate == 0 || feature >= intermediate {
+            return None;
+        }
 
         let layer_floats = intermediate * self.hidden_size;
         let layer_offset = layer * layer_floats * 4;
@@ -46,7 +50,9 @@ impl VectorIndex {
         let start = layer_offset + feature_offset;
         let end = start + self.hidden_size * 4;
 
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
 
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
@@ -59,13 +65,17 @@ impl VectorIndex {
     pub fn down_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let mmap = self.down_features_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
 
         let floats_per_layer = intermediate * self.hidden_size;
         let bytes_per_layer = floats_per_layer * 4;
         let start = layer * bytes_per_layer;
         let end = start + bytes_per_layer;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
 
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
@@ -93,12 +103,16 @@ impl VectorIndex {
     pub fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let mmap = self.up_features_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let floats_per_layer = intermediate * self.hidden_size;
         let bytes_per_layer = floats_per_layer * 4;
         let start = layer * bytes_per_layer;
         let end = start + bytes_per_layer;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
             std::slice::from_raw_parts(ptr, floats_per_layer)
@@ -138,13 +152,17 @@ impl VectorIndex {
     pub fn interleaved_gate(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let mmap = self.interleaved_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let matrix_floats = intermediate * self.hidden_size;
         let matrix_bytes = matrix_floats * 4;
         let layer_bytes = matrix_bytes * 3; // gate + up + down
         let start = layer * layer_bytes; // gate is first
         let end = start + matrix_bytes;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
             std::slice::from_raw_parts(ptr, matrix_floats)
@@ -156,13 +174,17 @@ impl VectorIndex {
     pub fn interleaved_up(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let mmap = self.interleaved_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let matrix_floats = intermediate * self.hidden_size;
         let matrix_bytes = matrix_floats * 4;
         let layer_bytes = matrix_bytes * 3;
         let start = layer * layer_bytes + matrix_bytes; // up is second
         let end = start + matrix_bytes;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
             std::slice::from_raw_parts(ptr, matrix_floats)
@@ -174,13 +196,17 @@ impl VectorIndex {
     pub fn interleaved_down(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let mmap = self.interleaved_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let matrix_floats = intermediate * self.hidden_size;
         let matrix_bytes = matrix_floats * 4;
         let layer_bytes = matrix_bytes * 3;
         let start = layer * layer_bytes + matrix_bytes * 2; // down is third
         let end = start + matrix_bytes;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
             std::slice::from_raw_parts(ptr, matrix_floats)
@@ -193,12 +219,16 @@ impl VectorIndex {
         #[cfg(unix)]
         if let Some(ref mmap) = self.interleaved_mmap {
             let intermediate = self.num_features(layer);
-            if intermediate == 0 { return; }
+            if intermediate == 0 {
+                return;
+            }
             let matrix_bytes = intermediate * self.hidden_size * 4;
             let layer_bytes = matrix_bytes * 3;
             let start = layer * layer_bytes;
             let end = (start + layer_bytes).min(mmap.len());
-            if start >= mmap.len() { return; }
+            if start >= mmap.len() {
+                return;
+            }
             unsafe {
                 let ptr = mmap[start..].as_ptr() as *mut libc::c_void;
                 libc::madvise(ptr, end - start, libc::MADV_WILLNEED);
@@ -295,7 +325,9 @@ impl VectorIndex {
     fn dequant_q4_matrix(&self, layer: usize, component: usize) -> Option<ndarray::Array2<f32>> {
         let mmap = self.interleaved_q4_mmap.as_ref()?;
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
 
         let floats_per_matrix = intermediate * self.hidden_size;
         let q4_bytes_per_matrix = floats_per_matrix / 32 * 18; // Q4_0: 18 bytes per 32 elements
@@ -303,7 +335,9 @@ impl VectorIndex {
 
         let start = layer * q4_bytes_per_layer + component * q4_bytes_per_matrix;
         let end = start + q4_bytes_per_matrix;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
 
         let q4_data = &mmap[start..end];
         let floats = larql_models::quant::ggml::dequantize_q4_0(q4_data, floats_per_matrix).ok()?;
@@ -320,10 +354,14 @@ impl VectorIndex {
     /// heap. For fine-grained inference prefer [`Self::q4k_ffn_row_into`],
     /// which decodes a single feature into a caller-provided buffer
     /// without populating the cache.
-    pub fn q4k_ffn_layer(&self, layer: usize, component: usize)
-        -> Option<std::sync::Arc<Vec<f32>>>
-    {
-        if component > 2 { return None; }
+    pub fn q4k_ffn_layer(
+        &self,
+        layer: usize,
+        component: usize,
+    ) -> Option<std::sync::Arc<Vec<f32>>> {
+        if component > 2 {
+            return None;
+        }
         {
             let cache = self.q4k_ffn_cache.lock().unwrap();
             if let Some(slot) = cache.get(layer) {
@@ -335,7 +373,9 @@ impl VectorIndex {
         let slices = self.interleaved_q4k_layer_data(layer)?;
         let (bytes, format) = slices[component];
         let intermediate = self.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let hidden = self.hidden_size;
         let n = intermediate * hidden;
         let padded = n.div_ceil(256) * 256;
@@ -387,11 +427,15 @@ impl VectorIndex {
         alpha: f32,
         out: &mut [f32],
     ) -> bool {
-        let Some(arc) = self.q4k_ffn_layer(layer, component) else { return false; };
+        let Some(arc) = self.q4k_ffn_layer(layer, component) else {
+            return false;
+        };
         let hidden = self.hidden_size;
         let row_start = feat * hidden;
         let row_end = row_start + hidden;
-        if row_end > arc.len() || out.len() != hidden { return false; }
+        if row_end > arc.len() || out.len() != hidden {
+            return false;
+        }
         for i in 0..hidden {
             out[i] += alpha * arc[row_start + i];
         }
@@ -415,7 +459,9 @@ impl VectorIndex {
         let hidden = self.hidden_size;
         let row_start = feat * hidden;
         let row_end = row_start + hidden;
-        if row_end > arc.len() { return None; }
+        if row_end > arc.len() {
+            return None;
+        }
         let mut acc = 0.0f32;
         for (i, &xv) in x.iter().enumerate() {
             acc += arc[row_start + i] * xv;
@@ -445,7 +491,9 @@ impl VectorIndex {
         backend: Option<&dyn larql_compute::ComputeBackend>,
     ) -> Option<Vec<f32>> {
         use rayon::prelude::*;
-        if component > 2 { return None; }
+        if component > 2 {
+            return None;
+        }
         let slices = self.interleaved_q4k_layer_data(layer)?;
         let (bytes, format) = slices[component];
 
@@ -453,11 +501,15 @@ impl VectorIndex {
         let hidden = self.hidden_size;
         let (w_rows, w_cols) = match component {
             0 | 1 => (intermediate, hidden),
-            2     => (hidden, intermediate),
-            _     => return None,
+            2 => (hidden, intermediate),
+            _ => return None,
         };
-        if x.len() != x_rows * w_cols { return None; }
-        if w_cols % 256 != 0 { return None; }
+        if x.len() != x_rows * w_cols {
+            return None;
+        }
+        if w_cols % 256 != 0 {
+            return None;
+        }
 
         // Backend per-row dispatch is *slower* than CPU-NEON here because
         // each q4k_matvec call pays a Metal submission (~15 ms). With x_rows
@@ -476,18 +528,24 @@ impl VectorIndex {
 
         // CPU fallback: rayon over W rows, NEON per-row dot.
         let mut y_t = vec![0.0f32; w_rows * x_rows];
-        y_t.par_chunks_mut(x_rows).enumerate().for_each(|(j, slot)| {
-            let w_row_start = j * bytes_per_w_row;
-            let w_row = &bytes[w_row_start..w_row_start + bytes_per_w_row];
-            for i in 0..x_rows {
-                let x_row = &x[i * w_cols..(i + 1) * w_cols];
-                slot[i] = match format {
-                    "Q4_K" => larql_models::quant::ggml::q4k_row_dot(w_row, x_row).unwrap_or(0.0),
-                    "Q6_K" => larql_models::quant::ggml::q6k_row_dot(w_row, x_row).unwrap_or(0.0),
-                    _ => 0.0,
-                };
-            }
-        });
+        y_t.par_chunks_mut(x_rows)
+            .enumerate()
+            .for_each(|(j, slot)| {
+                let w_row_start = j * bytes_per_w_row;
+                let w_row = &bytes[w_row_start..w_row_start + bytes_per_w_row];
+                for i in 0..x_rows {
+                    let x_row = &x[i * w_cols..(i + 1) * w_cols];
+                    slot[i] = match format {
+                        "Q4_K" => {
+                            larql_models::quant::ggml::q4k_row_dot(w_row, x_row).unwrap_or(0.0)
+                        }
+                        "Q6_K" => {
+                            larql_models::quant::ggml::q6k_row_dot(w_row, x_row).unwrap_or(0.0)
+                        }
+                        _ => 0.0,
+                    };
+                }
+            });
         let mut y = vec![0.0f32; x_rows * w_rows];
         for j in 0..w_rows {
             let src_base = j * x_rows;
@@ -511,26 +569,38 @@ impl VectorIndex {
         feat: usize,
         x: &[f32],
     ) -> Option<f32> {
-        if component > 2 || x.len() != self.hidden_size { return None; }
+        if component > 2 || x.len() != self.hidden_size {
+            return None;
+        }
         let slices = self.interleaved_q4k_layer_data(layer)?;
         let (bytes, format) = slices[component];
         let hidden = self.hidden_size;
-        if feat >= self.num_features(layer) { return None; }
+        if feat >= self.num_features(layer) {
+            return None;
+        }
         match format {
             "Q4_K" => {
-                if !hidden.is_multiple_of(256) { return None; }
+                if !hidden.is_multiple_of(256) {
+                    return None;
+                }
                 let bytes_per_row = (hidden / 256) * 144;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return None; }
+                if end > bytes.len() {
+                    return None;
+                }
                 larql_models::quant::ggml::q4k_row_dot(&bytes[start..end], x).ok()
             }
             "Q6_K" => {
-                if !hidden.is_multiple_of(256) { return None; }
+                if !hidden.is_multiple_of(256) {
+                    return None;
+                }
                 let bytes_per_row = (hidden / 256) * 210;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return None; }
+                if end > bytes.len() {
+                    return None;
+                }
                 larql_models::quant::ggml::q6k_row_dot(&bytes[start..end], x).ok()
             }
             _ => None,
@@ -548,27 +618,43 @@ impl VectorIndex {
         alpha: f32,
         out: &mut [f32],
     ) -> bool {
-        if component > 2 || out.len() != self.hidden_size { return false; }
-        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        if component > 2 || out.len() != self.hidden_size {
+            return false;
+        }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else {
+            return false;
+        };
         let (bytes, format) = slices[component];
         let hidden = self.hidden_size;
-        if feat >= self.num_features(layer) { return false; }
+        if feat >= self.num_features(layer) {
+            return false;
+        }
         match format {
             "Q4_K" => {
-                if !hidden.is_multiple_of(256) { return false; }
+                if !hidden.is_multiple_of(256) {
+                    return false;
+                }
                 let bytes_per_row = (hidden / 256) * 144;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return false; }
-                larql_models::quant::ggml::q4k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+                if end > bytes.len() {
+                    return false;
+                }
+                larql_models::quant::ggml::q4k_row_scaled_add(&bytes[start..end], alpha, out)
+                    .is_ok()
             }
             "Q6_K" => {
-                if !hidden.is_multiple_of(256) { return false; }
+                if !hidden.is_multiple_of(256) {
+                    return false;
+                }
                 let bytes_per_row = (hidden / 256) * 210;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return false; }
-                larql_models::quant::ggml::q6k_row_scaled_add(&bytes[start..end], alpha, out).is_ok()
+                if end > bytes.len() {
+                    return false;
+                }
+                larql_models::quant::ggml::q6k_row_scaled_add(&bytes[start..end], alpha, out)
+                    .is_ok()
             }
             _ => false,
         }
@@ -591,38 +677,58 @@ impl VectorIndex {
         feat: usize,
         out: &mut [f32],
     ) -> bool {
-        if component > 2 || out.len() != self.hidden_size { return false; }
-        let Some(slices) = self.interleaved_q4k_layer_data(layer) else { return false; };
+        if component > 2 || out.len() != self.hidden_size {
+            return false;
+        }
+        let Some(slices) = self.interleaved_q4k_layer_data(layer) else {
+            return false;
+        };
         let (bytes, format) = slices[component];
         let hidden = self.hidden_size;
-        if feat >= self.num_features(layer) { return false; }
+        if feat >= self.num_features(layer) {
+            return false;
+        }
 
         match format {
             "Q4_K" => {
                 // Q4_K block: 144 bytes for 256 elements.
-                if !hidden.is_multiple_of(256) { return false; }
+                if !hidden.is_multiple_of(256) {
+                    return false;
+                }
                 let blocks_per_row = hidden / 256;
                 let bytes_per_row = blocks_per_row * 144;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return false; }
+                if end > bytes.len() {
+                    return false;
+                }
                 let row_bytes = &bytes[start..end];
                 match larql_models::quant::ggml::dequantize_q4_k(row_bytes, hidden) {
-                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Ok(v) => {
+                        out.copy_from_slice(&v[..hidden]);
+                        true
+                    }
                     Err(_) => false,
                 }
             }
             "Q6_K" => {
                 // Q6_K block: 210 bytes for 256 elements.
-                if !hidden.is_multiple_of(256) { return false; }
+                if !hidden.is_multiple_of(256) {
+                    return false;
+                }
                 let blocks_per_row = hidden / 256;
                 let bytes_per_row = blocks_per_row * 210;
                 let start = feat * bytes_per_row;
                 let end = start + bytes_per_row;
-                if end > bytes.len() { return false; }
+                if end > bytes.len() {
+                    return false;
+                }
                 let row_bytes = &bytes[start..end];
                 match larql_models::quant::ggml::dequantize_q6_k(row_bytes, hidden) {
-                    Ok(v) => { out.copy_from_slice(&v[..hidden]); true }
+                    Ok(v) => {
+                        out.copy_from_slice(&v[..hidden]);
+                        true
+                    }
                     Err(_) => false,
                 }
             }
@@ -650,12 +756,16 @@ impl VectorIndex {
         #[cfg(unix)]
         if let Some(ref mmap) = self.interleaved_q4_mmap {
             let intermediate = self.num_features(layer);
-            if intermediate == 0 { return; }
+            if intermediate == 0 {
+                return;
+            }
             let q4_bytes_per_matrix = intermediate * self.hidden_size / 32 * 18;
             let q4_bytes_per_layer = q4_bytes_per_matrix * 3;
             let start = layer * q4_bytes_per_layer;
             let end = (start + q4_bytes_per_layer).min(mmap.len());
-            if start >= mmap.len() { return; }
+            if start >= mmap.len() {
+                return;
+            }
             unsafe {
                 let ptr = mmap[start..].as_ptr() as *mut libc::c_void;
                 libc::madvise(ptr, end - start, libc::MADV_WILLNEED);
@@ -710,10 +820,13 @@ impl VectorIndex {
     pub fn gate_q4_data(&self, layer: usize) -> Option<&[u8]> {
         let mmap = self.gate_q4_mmap.as_ref()?;
         let slice = self.gate_q4_slices.get(layer)?;
-        if slice.byte_len == 0 { return None; }
+        if slice.byte_len == 0 {
+            return None;
+        }
         let end = slice.byte_offset + slice.byte_len;
-        if end > mmap.len() { return None; }
+        if end > mmap.len() {
+            return None;
+        }
         Some(&mmap[slice.byte_offset..end])
     }
-
 }

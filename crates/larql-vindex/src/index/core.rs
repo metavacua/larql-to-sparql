@@ -1,4 +1,5 @@
 //! VectorIndex struct and core operations.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -148,17 +149,18 @@ impl Clone for VectorIndex {
             f16_decode_cache: Mutex::new(vec![None; self.num_layers]),
             gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
             gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(
-                self.gate_cache_max_layers.load(std::sync::atomic::Ordering::Relaxed),
+                self.gate_cache_max_layers
+                    .load(std::sync::atomic::Ordering::Relaxed),
             ),
             warmed_gates: std::sync::RwLock::new(vec![None; self.num_layers]),
             down_features_mmap: self.down_features_mmap.clone(),
             up_features_mmap: self.up_features_mmap.clone(),
             hnsw_cache: Mutex::new((0..self.num_layers).map(|_| None).collect()),
             hnsw_enabled: std::sync::atomic::AtomicBool::new(
-                self.hnsw_enabled.load(Ordering::Relaxed)
+                self.hnsw_enabled.load(Ordering::Relaxed),
             ),
             hnsw_ef_search: std::sync::atomic::AtomicUsize::new(
-                self.hnsw_ef_search.load(Ordering::Relaxed)
+                self.hnsw_ef_search.load(Ordering::Relaxed),
             ),
             lm_head_mmap: self.lm_head_mmap.clone(),
             lm_head_f16_mmap: self.lm_head_f16_mmap.clone(),
@@ -167,9 +169,7 @@ impl Clone for VectorIndex {
             interleaved_q4_mmap: self.interleaved_q4_mmap.clone(),
             interleaved_q4k_mmap: self.interleaved_q4k_mmap.clone(),
             interleaved_q4k_manifest: self.interleaved_q4k_manifest.clone(),
-            q4k_ffn_cache: Mutex::new(
-                (0..self.num_layers).map(|_| [None, None, None]).collect(),
-            ),
+            q4k_ffn_cache: Mutex::new((0..self.num_layers).map(|_| [None, None, None]).collect()),
             gate_q4_mmap: self.gate_q4_mmap.clone(),
             gate_q4_slices: self.gate_q4_slices.clone(),
             lm_head_q4_mmap: self.lm_head_q4_mmap.clone(),
@@ -297,7 +297,8 @@ impl VectorIndex {
         if self.is_mmap() {
             return 0;
         }
-        self.gate_vectors.iter()
+        self.gate_vectors
+            .iter()
             .filter_map(|v| v.as_ref())
             .map(|m| m.len() * std::mem::size_of::<f32>())
             .sum()

@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use ndarray::Array2;
 
-use larql_compute::ComputeBackend;
+use super::{LayerGraph, LayerOutput};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput};
+use larql_compute::ComputeBackend;
 
 // ── Walk: dense attention + vindex walk FFN ──
 
@@ -24,10 +26,16 @@ impl<'a> LayerGraph for WalkLayerGraph<'a> {
         let (h_post_attn, _attn_proj, _) =
             crate::attention::run_attention_block_gpu(weights, h, layer, false, self.backend)?;
         let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, self.ffn, false);
-        Some(LayerOutput { residual: h_out, activation: None, attention: None })
+        Some(LayerOutput {
+            residual: h_out,
+            activation: None,
+            attention: None,
+        })
     }
 
-    fn name(&self) -> &str { "walk" }
+    fn name(&self) -> &str {
+        "walk"
+    }
 }
 
 // ── Pipelined: CPU attention + batched GPU Q4 FFN ──
@@ -68,12 +76,17 @@ impl<'a> LayerGraph for PipelinedLayerGraph<'a> {
         // WalkFfn checks for Q4 interleaved data and routes to Metal Q4
         // when backend.has_q4(), falling back to f32 BLAS otherwise.
         // This ensures the norm/residual logic matches exactly.
-        let walk_ffn = crate::vindex::WalkFfn::new_unlimited_with_backend(
-            weights, self.index, self.backend,
-        );
+        let walk_ffn =
+            crate::vindex::WalkFfn::new_unlimited_with_backend(weights, self.index, self.backend);
         let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
-        Some(LayerOutput { residual: h_out, activation: None, attention: None })
+        Some(LayerOutput {
+            residual: h_out,
+            activation: None,
+            attention: None,
+        })
     }
 
-    fn name(&self) -> &str { "pipelined" }
+    fn name(&self) -> &str {
+        "pipelined"
+    }
 }

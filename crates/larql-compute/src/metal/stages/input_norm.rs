@@ -1,4 +1,6 @@
 //! Input layer norm — the first stage of every transformer layer.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Two code paths depending on what the QKV projection wants next:
 //!
@@ -13,8 +15,8 @@
 //! caller loops over positions. The caller owns the encoder lifecycle —
 //! these helpers only issue dispatches.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// f32-output input RMS norm.
 ///

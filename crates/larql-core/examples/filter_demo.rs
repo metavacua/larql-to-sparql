@@ -1,4 +1,6 @@
 //! Demonstrate graph filtering — select edges by confidence, layer, relation, etc.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run -p larql-core --example filter_demo
 
@@ -84,10 +86,7 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "relation = capital-of:   {} edges",
-        capitals.edge_count()
-    );
+    println!("relation = capital-of:   {} edges", capitals.edge_count());
 
     // ── Exclude relation ──
     let no_located = filter_graph(
@@ -97,10 +96,7 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "exclude located-in:      {} edges",
-        no_located.edge_count()
-    );
+    println!("exclude located-in:      {} edges", no_located.edge_count());
 
     // ── Subject contains ──
     let france = filter_graph(
@@ -110,10 +106,7 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "subject contains France: {} edges",
-        france.edge_count()
-    );
+    println!("subject contains France: {} edges", france.edge_count());
 
     // ── Combined filters ──
     let best = filter_graph(

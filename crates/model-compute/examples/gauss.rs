@@ -1,4 +1,6 @@
 //! Compile-time resolution of the Gauss sum using the arithmetic kernel.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! The video demo ("Gemma says 4050, compiled says 5050") hinges on
 //! resolving `sum(1..101)` into `"5050"` at compile time, then installing
@@ -31,5 +33,7 @@ fn main() {
 
 #[cfg(not(feature = "native"))]
 fn main() {
-    eprintln!("gauss example requires the `native` feature (default). Re-run with --features native.");
+    eprintln!(
+        "gauss example requires the `native` feature (default). Re-run with --features native."
+    );
 }

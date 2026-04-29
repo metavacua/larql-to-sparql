@@ -1,4 +1,5 @@
 //! `SELECT * FROM {EDGES, FEATURES, ENTITIES}` + `NEAREST TO` KNN.
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::ast::{CompareOp, Condition, Field, NearestClause, OrderBy, Value};
 use crate::error::LqlError;

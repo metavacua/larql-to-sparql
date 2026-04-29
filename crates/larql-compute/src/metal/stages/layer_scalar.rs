@@ -1,4 +1,6 @@
 //! Per-layer residual scalar — Gemma 4's learned stabiliser.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Multiplies the layer's final residual (`h_bufs[l + 1]`) by a per-layer
 //! scalar typically in the range 0.02–0.8. Without this the residual
@@ -11,8 +13,8 @@
 //!
 //! Caller owns the encoder lifecycle.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// If `scalar` is non-zero, scale the f32 residual at each position by `scalar`.
 ///
@@ -27,7 +29,9 @@ pub fn encode(
     hidden: usize,
     scalar: f32,
 ) {
-    if scalar == 0.0 { return; }
+    if scalar == 0.0 {
+        return;
+    }
     let hidden_val = hidden as u32;
     for pos in 0..seq_len {
         let h_off = (pos * hidden * 4) as u64;

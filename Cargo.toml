@@ -1,10 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    # larql-specific
+    # larql-specific (foundation tier)
     "crates/larql-models",
-    "crates/larql-compute",
     "crates/larql-core",
+    "crates/larql-platform",
+    "crates/larql-build",
+    # compute tier
+    "crates/larql-compute",
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-lql",
@@ -19,8 +22,10 @@ members = [
 ]
 default-members = [
     "crates/larql-models",
-    "crates/larql-compute",
     "crates/larql-core",
+    "crates/larql-platform",
+    "crates/larql-build",
+    "crates/larql-compute",
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-lql",
@@ -33,9 +38,8 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.86"
 authors = []
 license = "Apache-2.0"
 repository = "https://github.com/chrishayuk/chuk-larql-rs"

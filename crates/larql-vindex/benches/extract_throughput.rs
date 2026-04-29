@@ -1,4 +1,6 @@
 //! Streaming-extract throughput bench.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Compares `build_vindex_streaming` with `QuantFormat::None` (f32
 //! write path) vs `QuantFormat::Q4k` (streaming quantise) on a
@@ -41,7 +43,11 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
         "rope_theta": 10000.0,
         "vocab_size": vocab,
     });
-    std::fs::write(dir.join("config.json"), serde_json::to_string(&config).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
     std::fs::write(dir.join("tokenizer.json"), MINIMAL_TOKENIZER).unwrap();
 
     let mut tensors: HashMap<String, Vec<f32>> = HashMap::new();
@@ -57,15 +63,39 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
     push("model.norm.weight", vec![hidden]);
     for layer in 0..num_layers {
         let lp = format!("model.layers.{layer}");
-        push(&format!("{lp}.self_attn.q_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.k_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.v_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.self_attn.o_proj.weight"), vec![hidden, hidden]);
-        push(&format!("{lp}.mlp.gate_proj.weight"), vec![intermediate, hidden]);
-        push(&format!("{lp}.mlp.up_proj.weight"), vec![intermediate, hidden]);
-        push(&format!("{lp}.mlp.down_proj.weight"), vec![hidden, intermediate]);
+        push(
+            &format!("{lp}.self_attn.q_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.k_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.v_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.self_attn.o_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.gate_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.up_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &format!("{lp}.mlp.down_proj.weight"),
+            vec![hidden, intermediate],
+        );
         push(&format!("{lp}.input_layernorm.weight"), vec![hidden]);
-        push(&format!("{lp}.post_attention_layernorm.weight"), vec![hidden]);
+        push(
+            &format!("{lp}.post_attention_layernorm.weight"),
+            vec![hidden],
+        );
     }
 
     let tensor_bytes: Vec<(String, Vec<u8>, Vec<usize>)> = metadata
@@ -81,12 +111,8 @@ fn make_model(dir: &Path, hidden: usize, intermediate: usize, num_layers: usize,
         .map(|(name, bytes, shape)| {
             (
                 name.clone(),
-                safetensors::tensor::TensorView::new(
-                    safetensors::Dtype::F32,
-                    shape.clone(),
-                    bytes,
-                )
-                .unwrap(),
+                safetensors::tensor::TensorView::new(safetensors::Dtype::F32, shape.clone(), bytes)
+                    .unwrap(),
             )
         })
         .collect();
@@ -115,10 +141,7 @@ fn bench_extract_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("extract_throughput");
     group.sample_size(20);
 
-    for (tag, quant) in [
-        ("f32", QuantFormat::None),
-        ("q4k", QuantFormat::Q4k),
-    ] {
+    for (tag, quant) in [("f32", QuantFormat::None), ("q4k", QuantFormat::Q4k)] {
         let out_dir = bench_root.join(format!("out_{tag}"));
         group.bench_with_input(BenchmarkId::from_parameter(tag), &quant, |b, &q| {
             b.iter(|| {

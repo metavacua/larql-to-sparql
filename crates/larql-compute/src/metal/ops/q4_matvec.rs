@@ -1,12 +1,14 @@
 //! Q4×Q8 matrix-vector dispatch.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! scores[N] = Q4[N, K] @ Q8_x[K]
 //!
 //! Dispatches the optimised simdgroup shader: 8 rows per threadgroup,
 //! shared memory for Q8 input, simd_sum reduction.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 use crate::metal::shaders::q4_matvec as shader;
@@ -38,7 +40,17 @@ pub fn dispatch(
 
     let cmd = queue.new_command_buffer();
     let enc = cmd.new_compute_command_encoder();
-    encode(enc, pipeline, &buf_q4, &buf_q8, &buf_scales, &buf_out, n_val, k_val, num_rows);
+    encode(
+        enc,
+        pipeline,
+        &buf_q4,
+        &buf_q8,
+        &buf_scales,
+        &buf_out,
+        n_val,
+        k_val,
+        num_rows,
+    );
     enc.end_encoding();
     cmd.commit();
     cmd.wait_until_completed();

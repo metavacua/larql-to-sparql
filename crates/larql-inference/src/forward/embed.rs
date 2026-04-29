@@ -1,7 +1,8 @@
 //! Token embedding — lookup + architecture-specific scaling.
+// SPDX-License-Identifier: Apache-2.0
 
-use ndarray::Array2;
 use crate::model::ModelWeights;
+use ndarray::Array2;
 
 /// Embed token IDs with architecture-specific scaling (internal).
 pub(super) fn embed_tokens(weights: &ModelWeights, token_ids: &[u32]) -> Array2<f32> {

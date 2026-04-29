@@ -1,4 +1,6 @@
 //! Per-operation standalone benchmarks — CPU and Metal side by side.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Every operation benchmarked individually at representative sizes.
 //! Run with:
@@ -7,16 +9,20 @@
 
 extern crate blas_src;
 
-use std::time::Instant;
 use larql_compute::cpu::q4;
 use larql_compute::cpu::q4::quantize_q4_0;
+use std::time::Instant;
 
-struct Timer { n: usize }
+struct Timer {
+    n: usize,
+}
 impl Timer {
     fn run<F: FnMut()>(&self, name: &str, mut f: F) -> f64 {
         f();
         let t0 = Instant::now();
-        for _ in 0..self.n { f(); }
+        for _ in 0..self.n {
+            f();
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / self.n as f64;
         println!("  {name:50} {ms:>7.3}ms");
         ms
@@ -37,7 +43,9 @@ fn main() {
     {
         let a = ndarray::Array2::from_shape_fn((6, hidden), |_| 0.01f32);
         let b = ndarray::Array2::from_shape_fn((hidden, hidden), |_| 0.01f32);
-        t.run("CPU BLAS [6,2560] × [2560,2560]", || { let _ = cpu.matmul(a.view(), b.view()); });
+        t.run("CPU BLAS [6,2560] × [2560,2560]", || {
+            let _ = cpu.matmul(a.view(), b.view());
+        });
     }
 
     // ── sgemm_transb ──
@@ -45,13 +53,17 @@ fn main() {
     {
         let a = ndarray::Array2::from_shape_fn((6, hidden), |_| 0.01f32);
         let b = ndarray::Array2::from_shape_fn((inter, hidden), |_| 0.01f32);
-        t.run("CPU BLAS [6,2560] × [10240,2560]^T", || { let _ = cpu.matmul_transb(a.view(), b.view()); });
+        t.run("CPU BLAS [6,2560] × [10240,2560]^T", || {
+            let _ = cpu.matmul_transb(a.view(), b.view());
+        });
     }
 
     // ── q4_matvec (CPU) ──
     println!("\n--- Q4 matvec (CPU C kernel) ---");
     {
-        let matrix: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+        let matrix: Vec<f32> = (0..inter * hidden)
+            .map(|i| (i as f32 * 0.0001).cos())
+            .collect();
         let q4_data = quantize_q4_0(&matrix);
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
         t.run("CPU C kernel [10240,2560] × x[2560]", || {
@@ -62,9 +74,13 @@ fn main() {
     // ── q4_vecmat (CPU) ──
     println!("\n--- Q4 vecmat (CPU C kernel) ---");
     {
-        let matrix: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+        let matrix: Vec<f32> = (0..inter * hidden)
+            .map(|i| (i as f32 * 0.0001).cos())
+            .collect();
         let q4_data = quantize_q4_0(&matrix);
-        let act: Vec<f32> = (0..inter).map(|i| if i % 5 == 0 { 1.0 } else { 0.0 }).collect();
+        let act: Vec<f32> = (0..inter)
+            .map(|i| if i % 5 == 0 { 1.0 } else { 0.0 })
+            .collect();
         t.run("CPU C kernel act[10240] × Q4[10240,2560]", || {
             let _ = larql_compute::cpu::ops::q4_vecmat::dispatch(&act, &q4_data, inter, hidden);
         });
@@ -89,13 +105,27 @@ fn main() {
         let k = vec![0.01f32; seq * dim];
         let v = vec![0.01f32; seq * dim];
         t.run("CPU causal attention (seq=6, dim=320)", || {
-            let _ = larql_compute::cpu::ops::attention::causal_attention(&q, &k, &v, seq, dim, 1.0 / (dim as f32).sqrt());
+            let _ = larql_compute::cpu::ops::attention::causal_attention(
+                &q,
+                &k,
+                &v,
+                seq,
+                dim,
+                1.0 / (dim as f32).sqrt(),
+            );
         });
         let q1 = vec![0.01f32; dim];
         let k1 = vec![0.01f32; dim];
         let v1 = vec![0.01f32; dim];
         t.run("CPU causal attention (seq=1, dim=320)", || {
-            let _ = larql_compute::cpu::ops::attention::causal_attention(&q1, &k1, &v1, 1, dim, 1.0 / (dim as f32).sqrt());
+            let _ = larql_compute::cpu::ops::attention::causal_attention(
+                &q1,
+                &k1,
+                &v1,
+                1,
+                dim,
+                1.0 / (dim as f32).sqrt(),
+            );
         });
     }
 
@@ -115,27 +145,36 @@ fn main() {
 
         let metal = match larql_compute::metal::MetalBackend::new() {
             Some(m) => m,
-            None => { println!("\nMetal not available"); return; }
+            None => {
+                println!("\nMetal not available");
+                return;
+            }
         };
 
         println!("\n--- Metal: f32 matmul ---");
         {
             let a = ndarray::Array2::from_shape_fn((6, hidden), |_| 0.01f32);
             let b = ndarray::Array2::from_shape_fn((hidden, hidden), |_| 0.01f32);
-            t.run("Metal [6,2560] × [2560,2560]", || { let _ = metal.matmul(a.view(), b.view()); });
+            t.run("Metal [6,2560] × [2560,2560]", || {
+                let _ = metal.matmul(a.view(), b.view());
+            });
         }
 
         println!("\n--- Metal: f32 matmul_transb ---");
         {
             let a = ndarray::Array2::from_shape_fn((6, hidden), |_| 0.01f32);
             let b = ndarray::Array2::from_shape_fn((inter, hidden), |_| 0.01f32);
-            t.run("Metal [6,2560] × [10240,2560]^T", || { let _ = metal.matmul_transb(a.view(), b.view()); });
+            t.run("Metal [6,2560] × [10240,2560]^T", || {
+                let _ = metal.matmul_transb(a.view(), b.view());
+            });
         }
 
         // ── q4_matvec ──
         println!("\n--- q4_matvec (Q4×Q8, simdgroup optimised) ---");
         {
-            let matrix: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+            let matrix: Vec<f32> = (0..inter * hidden)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
             let q4 = quantize_q4_0(&matrix);
             let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
             let (q8, sc) = q4::quantize_to_q8(&x);
@@ -147,9 +186,13 @@ fn main() {
         // ── q4_vecmat ──
         println!("\n--- q4_vecmat (scatter-accumulate) ---");
         {
-            let matrix: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+            let matrix: Vec<f32> = (0..inter * hidden)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
             let q4 = quantize_q4_0(&matrix);
-            let act: Vec<f32> = (0..inter).map(|i| if i % 5 == 0 { 1.0 } else { 0.0 }).collect();
+            let act: Vec<f32> = (0..inter)
+                .map(|i| if i % 5 == 0 { 1.0 } else { 0.0 })
+                .collect();
             t.run("Metal act[10240] × Q4[10240,2560]", || {
                 let _ = metal.q4_vecmat_direct(&act, &q4, inter, hidden);
             });
@@ -158,7 +201,9 @@ fn main() {
         // ── q4_f32_matvec ──
         println!("\n--- q4_f32_matvec (transposed down) ---");
         {
-            let matrix: Vec<f32> = (0..hidden * inter).map(|i| (i as f32 * 0.0001).cos()).collect();
+            let matrix: Vec<f32> = (0..hidden * inter)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
             let q4 = quantize_q4_0(&matrix);
             let act: Vec<f32> = (0..inter).map(|i| (i as f32 * 0.001).sin()).collect();
             t.run("Metal Q4[2560,10240] × f32[10240]", || {
@@ -201,25 +246,73 @@ fn main() {
             let head_dim = 320;
             let seq = 6;
             // Benchmark via full_layer which includes attention
-            let wq: Vec<f32> = (0..hidden * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
-            let wk: Vec<f32> = (0..512 * hidden).map(|i| (i as f32 * 0.0002).sin()).collect();
-            let wv: Vec<f32> = (0..512 * hidden).map(|i| (i as f32 * 0.0003).cos()).collect();
-            let wo: Vec<f32> = (0..hidden * hidden).map(|i| (i as f32 * 0.0004).sin()).collect();
-            let gq4 = quantize_q4_0(&(0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect::<Vec<_>>());
-            let uq4 = quantize_q4_0(&(0..inter * hidden).map(|i| (i as f32 * 0.0002).sin()).collect::<Vec<_>>());
-            let dq4 = quantize_q4_0(&(0..hidden * inter).map(|i| (i as f32 * 0.0003).cos()).collect::<Vec<_>>());
-            let x: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 * 0.001).sin()).collect();
+            let wq: Vec<f32> = (0..hidden * hidden)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
+            let wk: Vec<f32> = (0..512 * hidden)
+                .map(|i| (i as f32 * 0.0002).sin())
+                .collect();
+            let wv: Vec<f32> = (0..512 * hidden)
+                .map(|i| (i as f32 * 0.0003).cos())
+                .collect();
+            let wo: Vec<f32> = (0..hidden * hidden)
+                .map(|i| (i as f32 * 0.0004).sin())
+                .collect();
+            let gq4 = quantize_q4_0(
+                &(0..inter * hidden)
+                    .map(|i| (i as f32 * 0.0001).cos())
+                    .collect::<Vec<_>>(),
+            );
+            let uq4 = quantize_q4_0(
+                &(0..inter * hidden)
+                    .map(|i| (i as f32 * 0.0002).sin())
+                    .collect::<Vec<_>>(),
+            );
+            let dq4 = quantize_q4_0(
+                &(0..hidden * inter)
+                    .map(|i| (i as f32 * 0.0003).cos())
+                    .collect::<Vec<_>>(),
+            );
+            let x: Vec<f32> = (0..seq * hidden)
+                .map(|i| (i as f32 * 0.001).sin())
+                .collect();
 
             t.run("Metal full_layer (attn+FFN, seq=6)", || {
                 let _ = metal.full_layer_direct(
-                    &wq, &wk, &wv, &wo, &gq4, &uq4, &dq4,
-                    &x, seq, hidden, 8, 4, head_dim, inter, 1.0 / (head_dim as f32).sqrt(),
+                    &wq,
+                    &wk,
+                    &wv,
+                    &wo,
+                    &gq4,
+                    &uq4,
+                    &dq4,
+                    &x,
+                    seq,
+                    hidden,
+                    8,
+                    4,
+                    head_dim,
+                    inter,
+                    1.0 / (head_dim as f32).sqrt(),
                 );
             });
             t.run("Metal full_layer (attn+FFN, seq=1)", || {
                 let _ = metal.full_layer_direct(
-                    &wq, &wk, &wv, &wo, &gq4, &uq4, &dq4,
-                    &x[..hidden], 1, hidden, 8, 4, head_dim, inter, 1.0 / (head_dim as f32).sqrt(),
+                    &wq,
+                    &wk,
+                    &wv,
+                    &wo,
+                    &gq4,
+                    &uq4,
+                    &dq4,
+                    &x[..hidden],
+                    1,
+                    hidden,
+                    8,
+                    4,
+                    head_dim,
+                    inter,
+                    1.0 / (head_dim as f32).sqrt(),
                 );
             });
         }
@@ -227,8 +320,12 @@ fn main() {
         // ── pair_batch ──
         println!("\n--- pair_batch (gate+up × 6 positions) ---");
         {
-            let gf: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
-            let uf: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0002).sin()).collect();
+            let gf: Vec<f32> = (0..inter * hidden)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
+            let uf: Vec<f32> = (0..inter * hidden)
+                .map(|i| (i as f32 * 0.0002).sin())
+                .collect();
             let gq4 = quantize_q4_0(&gf);
             let uq4 = quantize_q4_0(&uf);
             let x: Vec<f32> = (0..6 * hidden).map(|i| (i as f32 * 0.001).sin()).collect();
@@ -242,13 +339,24 @@ fn main() {
         {
             let mut layers = Vec::new();
             for l in 0..21u64 {
-                let g: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32).collect();
-                let u: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32).collect();
+                let g: Vec<f32> = (0..inter * hidden)
+                    .map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32)
+                    .collect();
+                let u: Vec<f32> = (0..inter * hidden)
+                    .map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32)
+                    .collect();
                 let mut dt = vec![0.0f32; hidden * inter];
-                for r in 0..inter { for c in 0..hidden { dt[c * inter + r] = ((r * hidden + c) as f64 * 0.0003).cos() as f32; } }
+                for r in 0..inter {
+                    for c in 0..hidden {
+                        dt[c * inter + r] = ((r * hidden + c) as f64 * 0.0003).cos() as f32;
+                    }
+                }
                 layers.push((quantize_q4_0(&g), quantize_q4_0(&u), quantize_q4_0(&dt)));
             }
-            let layers_refs: Vec<(&[u8], &[u8], &[u8])> = layers.iter().map(|(g, u, d)| (g.as_slice(), u.as_slice(), d.as_slice())).collect();
+            let layers_refs: Vec<(&[u8], &[u8], &[u8])> = layers
+                .iter()
+                .map(|(g, u, d)| (g.as_slice(), u.as_slice(), d.as_slice()))
+                .collect();
             let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
             t.run("Metal 21-layer Q4 FFN (1 cmd buffer)", || {
                 let _ = metal.multi_layer_q4_ffn(&layers_refs, &x, inter, hidden);

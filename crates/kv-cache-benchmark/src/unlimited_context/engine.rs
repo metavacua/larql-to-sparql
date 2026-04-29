@@ -1,4 +1,6 @@
 //! Top-level `UnlimitedContextEngine` — Rust port of
+// SPDX-License-Identifier: Apache-2.0
+
 //! `chuk-mlx/src/chuk_lazarus/inference/context/research/unlimited_engine.py`.
 //!
 //! Window lifecycle:
@@ -174,8 +176,7 @@ impl UnlimitedContextEngine {
         // Seed with prior window's checkpoint on first extend of a new window,
         // or continue from whatever K,V the active window has accumulated.
         let prior = if self.current_window_tokens.is_empty() {
-            if self.current_window_id > 0 && self.checkpoints.contains(self.current_window_id - 1)
-            {
+            if self.current_window_id > 0 && self.checkpoints.contains(self.current_window_id - 1) {
                 let (ckpt, _) = self.checkpoints.load(self.current_window_id - 1)?;
                 ckpt
             } else {
@@ -215,7 +216,8 @@ impl UnlimitedContextEngine {
         let window_len = self.current_window_tokens.len();
         let abs_end = self.abs_offset + window_len - 1;
 
-        self.checkpoints.save(self.current_window_id, last_kv, abs_end);
+        self.checkpoints
+            .save(self.current_window_id, last_kv, abs_end);
         self.archive.archive(
             self.current_window_id,
             std::mem::take(&mut self.current_window_tokens),

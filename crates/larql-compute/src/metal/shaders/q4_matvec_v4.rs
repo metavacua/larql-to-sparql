@@ -1,4 +1,6 @@
 //! Q4 matvec v4: wide integer loads + simdgroup.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key change: load Q4 data as uint4 (16 bytes in one load),
 //! extract nibbles with bitwise ops on packed uint32,

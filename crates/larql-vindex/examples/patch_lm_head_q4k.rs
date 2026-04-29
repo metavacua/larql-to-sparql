@@ -1,4 +1,6 @@
 //! Patch a Q4K vindex with a missing `lm_head_q4.bin`.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! For tied-embedding models (Gemma 2/3/4) the output projection is identical
 //! to `embed_tokens.weight`, which the vindex stores in `embeddings.bin`.
@@ -24,9 +26,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--vindex" => { i += 1; vindex_dir = PathBuf::from(&args[i]); }
-            "--vocab"  => { i += 1; vocab_override = Some(args[i].parse()?); }
-            "--hidden" => { i += 1; hidden_override = Some(args[i].parse()?); }
+            "--vindex" => {
+                i += 1;
+                vindex_dir = PathBuf::from(&args[i]);
+            }
+            "--vocab" => {
+                i += 1;
+                vocab_override = Some(args[i].parse()?);
+            }
+            "--hidden" => {
+                i += 1;
+                hidden_override = Some(args[i].parse()?);
+            }
             _ => {}
         }
         i += 1;
@@ -49,7 +60,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let cfg_text = std::fs::read_to_string(&index_path)?;
         let cfg: serde_json::Value = serde_json::from_str(&cfg_text)?;
-        let model_cfg = cfg.get("model_config").ok_or("no model_config in index.json")?;
+        let model_cfg = cfg
+            .get("model_config")
+            .ok_or("no model_config in index.json")?;
         let h = model_cfg["head_dim"]
             .as_u64()
             .and_then(|hd| model_cfg["num_q_heads"].as_u64().map(|q| hd * q))
@@ -63,12 +76,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let manifest_path = vindex_dir.join("weight_manifest.json");
         let manifest_text = std::fs::read_to_string(&manifest_path)?;
         let manifest: Vec<serde_json::Value> = serde_json::from_str(&manifest_text)?;
-        let embed_entry = manifest.iter()
-            .find(|e| e["key"].as_str().map(|k| k.contains("embed_tokens")).unwrap_or(false));
+        let embed_entry = manifest.iter().find(|e| {
+            e["key"]
+                .as_str()
+                .map(|k| k.contains("embed_tokens"))
+                .unwrap_or(false)
+        });
         let (v, hd) = if let Some(e) = embed_entry {
             let shape = e["shape"].as_array().ok_or("bad shape")?;
-            (shape[0].as_u64().unwrap_or(0) as usize,
-             shape[1].as_u64().unwrap_or(0) as usize)
+            (
+                shape[0].as_u64().unwrap_or(0) as usize,
+                shape[1].as_u64().unwrap_or(0) as usize,
+            )
         } else {
             // Fallback: derive from file size and a known hidden dimension.
             let hidden_guess = if h > 0 { h } else { 2560 };
@@ -82,7 +101,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!(
             "Could not determine vocab ({vocab}) / hidden ({hidden}). \
              Pass --vocab and --hidden explicitly."
-        ).into());
+        )
+        .into());
     }
 
     println!("=== patch_lm_head_q4k ===");
@@ -98,11 +118,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if num_floats < expected {
         return Err(format!(
             "embeddings.bin has {num_floats} f32 values, expected {expected} ({vocab}×{hidden})"
-        ).into());
+        )
+        .into());
     }
-    let f32_data = unsafe {
-        std::slice::from_raw_parts(embed_bytes.as_ptr() as *const f32, expected)
-    };
+    let f32_data =
+        unsafe { std::slice::from_raw_parts(embed_bytes.as_ptr() as *const f32, expected) };
 
     // Pad to multiple of 256 (Q4_K superblock size).
     let padded_len = expected.div_ceil(256) * 256;
@@ -117,7 +137,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Quantising {} f32 → Q4_K …", expected);
     let t0 = std::time::Instant::now();
     let q4k_bytes = quantize_q4_k(&padded);
-    println!("  Done in {:.2}s  ({:.1} MB)", t0.elapsed().as_secs_f64(), q4k_bytes.len() as f64 / 1e6);
+    println!(
+        "  Done in {:.2}s  ({:.1} MB)",
+        t0.elapsed().as_secs_f64(),
+        q4k_bytes.len() as f64 / 1e6
+    );
 
     // Write lm_head_q4.bin.
     std::fs::write(&out_path, &q4k_bytes)?;

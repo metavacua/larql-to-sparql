@@ -1,4 +1,6 @@
 //! CPU causal attention: Q×K^T softmax V.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Simple implementation for small seq_len (≤64). No tiling.
 //! Uses online softmax (two-pass: max + exp/normalize).
@@ -14,8 +16,12 @@
 /// - `scale`: 1/sqrt(head_dim)
 /// - Returns: [seq_len, head_dim] attention output
 pub fn causal_attention(
-    q: &[f32], k: &[f32], v: &[f32],
-    seq_len: usize, head_dim: usize, scale: f32,
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
 ) -> Vec<f32> {
     let mut out = vec![0.0f32; seq_len * head_dim];
 
@@ -31,7 +37,9 @@ pub fn causal_attention(
                 score += q[qi * head_dim + d] * k[ki * head_dim + d];
             }
             let score = score * scale;
-            if score > max_score { max_score = score; }
+            if score > max_score {
+                max_score = score;
+            }
         }
 
         // Softmax + weighted sum
@@ -76,9 +84,9 @@ mod tests {
     #[test]
     fn causal_mask() {
         // seq=2: position 0 can only see position 0
-        let q = vec![1.0, 0.0,  0.0, 1.0]; // 2 queries
-        let k = vec![1.0, 0.0,  0.0, 1.0]; // 2 keys
-        let v = vec![1.0, 0.0,  0.0, 1.0]; // 2 values
+        let q = vec![1.0, 0.0, 0.0, 1.0]; // 2 queries
+        let k = vec![1.0, 0.0, 0.0, 1.0]; // 2 keys
+        let v = vec![1.0, 0.0, 0.0, 1.0]; // 2 values
         let out = causal_attention(&q, &k, &v, 2, 2, 1.0);
         // Position 0 should only attend to position 0 → output = v[0]
         assert!((out[0] - 1.0).abs() < 1e-5);

@@ -1,4 +1,6 @@
 //! Rotary Position Embeddings (RoPE) — position-dependent rotation of Q/K vectors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Split-half pairing: rotates (x[i], x[i + half_dim]) pairs.
 //! Matches HuggingFace default and MLX traditional=False.

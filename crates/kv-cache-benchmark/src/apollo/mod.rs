@@ -1,4 +1,6 @@
 //! Tier 3 — Apollo v12 architecture (end-to-end on Gemma 3 4B).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Rust port of the Python/MLX Apollo 11 demo. Sits above Tier 2's
 //! `UnlimitedContextEngine` and trades per-window K/V checkpoints for a
@@ -49,13 +51,13 @@
 //! - `chuk-mlx/.../vec_inject/_primitives.py`
 //! - `apollo-demo/apollo11_store/` (store format reference)
 
+pub mod engine;
 pub mod entry;
 pub mod npy;
 pub mod routing;
 pub mod store;
-pub mod engine;
 
-pub use entry::{VecInjectEntry, InjectionConfig};
+pub use engine::{ApolloEngine, ApolloError, GenerationTrace, QueryTrace};
+pub use entry::{InjectionConfig, VecInjectEntry};
 pub use routing::{RoutingIndex, RoutingQuery};
 pub use store::{ApolloStore, StoreManifest};
-pub use engine::{ApolloEngine, ApolloError, GenerationTrace, QueryTrace};

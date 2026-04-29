@@ -1,4 +1,5 @@
 //! Unit tests for inference modules: attention, ffn, residual.
+// SPDX-License-Identifier: Apache-2.0
 
 mod test_residual {
     use larql_inference::residual::{rms_norm, rms_norm_heads};
@@ -67,13 +68,23 @@ mod test_ffn {
     use ndarray::Array2;
 
     /// SiLU-gated FFN helper for unit tests (no model architecture needed).
-    fn silu_ffn_forward(x: &Array2<f32>, w_gate: &Array2<f32>, w_up: &Array2<f32>, w_down: &Array2<f32>) -> Array2<f32> {
+    fn silu_ffn_forward(
+        x: &Array2<f32>,
+        w_gate: &Array2<f32>,
+        w_up: &Array2<f32>,
+        w_down: &Array2<f32>,
+    ) -> Array2<f32> {
         let gate = x.dot(&w_gate.t());
         let up = x.dot(&w_up.t());
         silu_gate_up(&gate, &up).dot(&w_down.t())
     }
 
-    fn silu_ffn_forward_with_activation(x: &Array2<f32>, w_gate: &Array2<f32>, w_up: &Array2<f32>, w_down: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
+    fn silu_ffn_forward_with_activation(
+        x: &Array2<f32>,
+        w_gate: &Array2<f32>,
+        w_up: &Array2<f32>,
+        w_down: &Array2<f32>,
+    ) -> (Array2<f32>, Array2<f32>) {
         let gate = x.dot(&w_gate.t());
         let up = x.dot(&w_up.t());
         let activation = silu_gate_up(&gate, &up);

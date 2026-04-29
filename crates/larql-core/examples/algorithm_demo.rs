@@ -1,4 +1,6 @@
 //! Algorithm demo — shortest path, merge, subgraph, connected components.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run --release -p larql-core --example algorithm_demo
 

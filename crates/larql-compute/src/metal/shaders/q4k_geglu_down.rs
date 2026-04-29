@@ -1,4 +1,6 @@
 //! Fused GEGLU activation + Q4_K down projection.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Eliminates the GEGLU dispatch entirely by computing `silu(gate) × up`
 //! (or `gelu_tanh(gate) × up` for Gemma/GPT-2/Phi) on-the-fly during the

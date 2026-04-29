@@ -1,7 +1,9 @@
-pub mod routing_table;
-pub mod walk_state;
-pub mod template;
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod fallback;
+pub mod routing_table;
+pub mod template;
+pub mod walk_state;
 
 /// Residual Stream Graph Walk — projected architecture, memory-accounting only.
 ///
@@ -43,7 +45,7 @@ impl GraphWalk {
     /// Default for Gemma 3-4B based on measured values.
     pub fn gemma_4b() -> Self {
         Self {
-            vindex_bytes: 1_500_000_000, // 1.5 GB Q4 vindex
+            vindex_bytes: 1_500_000_000,  // 1.5 GB Q4 vindex
             routing_table_bytes: 360_448, // 352 KB routing table
             num_features: 348_000,
             num_layers: 34,
@@ -51,7 +53,12 @@ impl GraphWalk {
     }
 
     /// Create with custom parameters.
-    pub fn new(vindex_bytes: usize, routing_table_bytes: usize, num_features: usize, num_layers: usize) -> Self {
+    pub fn new(
+        vindex_bytes: usize,
+        routing_table_bytes: usize,
+        num_features: usize,
+        num_layers: usize,
+    ) -> Self {
         Self {
             vindex_bytes,
             routing_table_bytes,

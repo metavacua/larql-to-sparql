@@ -1,4 +1,6 @@
 //! Top-level Apollo engine — combines routing, replay, and vec_inject.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Current scope: MVP end-to-end pipeline. Produces logits/tokens for a
 //! query by routing to the best window, retrieving relevant entries, and
@@ -183,17 +185,15 @@ impl ApolloEngine {
         // Step 2 + 3: build scored set.
         //   key: (window_id, position_in_window, token_id, fact_id) uniqueness.
         //   We track which entries we've already scored so we don't double-count.
-        let seed_facts: std::collections::HashSet<u16> =
-            seeds.iter().map(|e| e.fact_id).collect();
+        let seed_facts: std::collections::HashSet<u16> = seeds.iter().map(|e| e.fact_id).collect();
         let seed_positions: std::collections::HashSet<(u16, u16)> = seeds
             .iter()
             .map(|e| (e.window_id, e.position_in_window))
             .collect();
 
         // Entry-uniqueness key used to dedupe across the three passes.
-        let entry_key = |e: &VecInjectEntry| {
-            (e.window_id, e.position_in_window, e.token_id, e.fact_id)
-        };
+        let entry_key =
+            |e: &VecInjectEntry| (e.window_id, e.position_in_window, e.token_id, e.fact_id);
 
         let mut scored: Vec<(VecInjectEntry, f32)> = Vec::new();
         let mut seen: std::collections::HashSet<(u16, u16, u32, u16)> =
@@ -213,8 +213,7 @@ impl ApolloEngine {
             }
             let near_seed = seed_positions.iter().any(|(w, p)| {
                 *w == e.window_id
-                    && (e.position_in_window as i32 - *p as i32).abs()
-                        <= PROXIMITY_RADIUS as i32
+                    && (e.position_in_window as i32 - *p as i32).abs() <= PROXIMITY_RADIUS as i32
             });
             if near_seed {
                 scored.push((*e, e.coefficient * 1.3));
@@ -244,7 +243,9 @@ impl ApolloEngine {
                 .filter(|e| in_candidate(e) && !seen.contains(&entry_key(e)))
                 .collect();
             pool.sort_by(|a, b| {
-                b.coefficient.partial_cmp(&a.coefficient).unwrap_or(std::cmp::Ordering::Equal)
+                b.coefficient
+                    .partial_cmp(&a.coefficient)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
             let need = self.config.top_k - scored.len();
             for e in pool.into_iter().take(need) {
@@ -454,8 +455,7 @@ mod forward_integration {
             let hidden = weights.hidden_size;
             let mut delta = vec![0.0f32; hidden];
             let global_coef = self.config.inject_coefficient;
-            let qset: std::collections::HashSet<u32> =
-                query_ids.iter().copied().collect();
+            let qset: std::collections::HashSet<u32> = query_ids.iter().copied().collect();
             let mut answer_entries = 0usize;
             for e in &entries {
                 if qset.contains(&e.token_id) {
@@ -563,8 +563,7 @@ mod forward_integration {
             let hidden = weights.hidden_size;
             let mut delta = vec![0.0f32; hidden];
             let global_coef = self.config.inject_coefficient;
-            let qset: std::collections::HashSet<u32> =
-                query_ids.iter().copied().collect();
+            let qset: std::collections::HashSet<u32> = query_ids.iter().copied().collect();
             let mut answer_entries = 0usize;
             for e in &entries {
                 if qset.contains(&e.token_id) {
@@ -693,8 +692,7 @@ mod forward_integration {
             let hidden = weights.hidden_size;
             let mut delta = vec![0.0f32; hidden];
             let global_coef = self.config.inject_coefficient;
-            let qset: std::collections::HashSet<u32> =
-                query_ids.iter().copied().collect();
+            let qset: std::collections::HashSet<u32> = query_ids.iter().copied().collect();
             let mut answer_entries = 0usize;
             for e in &entries {
                 if qset.contains(&e.token_id) {
@@ -725,8 +723,7 @@ mod forward_integration {
                 0
             };
             let initial_ctx_len = window_tokens.len() + (query_ids.len() - skip);
-            let mut context: Vec<u32> =
-                Vec::with_capacity(initial_ctx_len + max_new_tokens);
+            let mut context: Vec<u32> = Vec::with_capacity(initial_ctx_len + max_new_tokens);
             context.extend_from_slice(window_tokens);
             context.extend_from_slice(&query_ids[skip..]);
 

@@ -1,4 +1,6 @@
 //! `larql list` — show cached vindexes.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Walks both caches (HF hub + LARQL local registry) and lists every
 //! cached vindex with its size, layer count, and hidden dim. See

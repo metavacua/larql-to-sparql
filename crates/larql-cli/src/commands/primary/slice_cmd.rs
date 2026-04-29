@@ -1,4 +1,6 @@
 //! `larql slice <SRC> -o <DST> --parts a,b,c` — carve a subset of a vindex.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Pure file-I/O subcommand. Copies a filtered set of files from an existing
 //! vindex directory to a new one, rewriting `index.json` so `extract_level`
@@ -78,9 +80,7 @@ impl Part {
             Self::Embed => filename == "embeddings.bin",
             Self::Norms => filename == "norms.bin",
             Self::Attn => filename.starts_with("attn_weights"),
-            Self::Gate => {
-                filename == "gate_vectors.bin" || filename.starts_with("gate_vectors_")
-            }
+            Self::Gate => filename == "gate_vectors.bin" || filename.starts_with("gate_vectors_"),
             Self::DownMeta => filename == "down_meta.bin" || filename == "down_meta.jsonl",
             Self::Ffn => {
                 filename.starts_with("interleaved")
@@ -127,14 +127,14 @@ pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
         // + tokenizer. Memory-bound service; one server can fan out to
         // many attention workers.
         "embed" | "embed-server" => &[Embed, Tokenizer, Labels],
-        "server" | "ffn" | "ffn-service" => {
-            &[Embed, Norms, Gate, DownMeta, Ffn, Tokenizer, Manifest, Labels]
-        }
+        "server" | "ffn" | "ffn-service" => &[
+            Embed, Norms, Gate, DownMeta, Ffn, Tokenizer, Manifest, Labels,
+        ],
         "browse" => &[Embed, Gate, DownMeta, Tokenizer, Labels, Readme],
         "router" => &[Router, Tokenizer, Manifest, Labels, Readme],
         "all" => &[
-            Embed, Norms, Attn, Gate, DownMeta, Ffn, LmHead, Router, Tokenizer,
-            Manifest, Labels, Readme,
+            Embed, Norms, Attn, Gate, DownMeta, Ffn, LmHead, Router, Tokenizer, Manifest, Labels,
+            Readme,
         ],
         other => {
             return Err(format!(
@@ -219,11 +219,7 @@ pub fn slice_vindex(
         return Err(format!("source vindex not a directory: {}", src.display()).into());
     }
     if !src.join("index.json").exists() {
-        return Err(format!(
-            "source vindex missing index.json: {}",
-            src.display()
-        )
-        .into());
+        return Err(format!("source vindex missing index.json: {}", src.display()).into());
     }
     if parts.is_empty() {
         return Err("no parts selected".into());
@@ -331,10 +327,12 @@ pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             Some(p) => {
                 wanted.insert(p);
             }
-            None => return Err(format!(
-                "unknown part '{raw}'. Run `larql slice --help` for valid names."
-            )
-            .into()),
+            None => {
+                return Err(format!(
+                    "unknown part '{raw}'. Run `larql slice --help` for valid names."
+                )
+                .into())
+            }
         }
     }
     if wanted.is_empty() {
@@ -359,7 +357,11 @@ pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "FFN weights:    {}",
-        if outcome.new_has_weights { "present" } else { "absent" }
+        if outcome.new_has_weights {
+            "present"
+        } else {
+            "absent"
+        }
     );
 
     println!(
@@ -518,7 +520,10 @@ mod tests {
         assert!(!parts.contains(&Part::Embed), "attn preset must drop embed");
         assert!(!parts.contains(&Part::Gate));
         assert!(!parts.contains(&Part::Ffn));
-        assert!(!parts.contains(&Part::Tokenizer), "tokenizer lives with embed server");
+        assert!(
+            !parts.contains(&Part::Tokenizer),
+            "tokenizer lives with embed server"
+        );
     }
 
     #[test]
@@ -540,7 +545,10 @@ mod tests {
         assert!(!parts.contains(&Part::Attn));
         assert!(!parts.contains(&Part::Gate));
         assert!(!parts.contains(&Part::Ffn));
-        assert!(!parts.contains(&Part::Norms), "embed server doesn't run attention — no norms");
+        assert!(
+            !parts.contains(&Part::Norms),
+            "embed server doesn't run attention — no norms"
+        );
     }
 
     #[test]
@@ -595,8 +603,14 @@ mod tests {
     fn effective_level_capped_by_source() {
         // Even a full parts set can't claim a higher tier than the source.
         let parts: BTreeSet<Part> = [
-            Part::Attn, Part::Norms, Part::Embed, Part::Ffn, Part::Gate,
-            Part::DownMeta, Part::LmHead, Part::Tokenizer,
+            Part::Attn,
+            Part::Norms,
+            Part::Embed,
+            Part::Ffn,
+            Part::Gate,
+            Part::DownMeta,
+            Part::LmHead,
+            Part::Tokenizer,
         ]
         .into_iter()
         .collect();

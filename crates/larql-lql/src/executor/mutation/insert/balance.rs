@@ -1,4 +1,6 @@
 //! Phase 3 of `INSERT INTO EDGES` (Compose mode): post-install
+// SPDX-License-Identifier: Apache-2.0
+
 //! adjustment passes.
 //!
 //!   - `balance_installed`: greedy per-fact loop that scales each
@@ -221,16 +223,10 @@ impl Session {
                     .map_err(|e| LqlError::exec("cross-balance: tokenize", e))?;
                 let fact_ids: Vec<u32> = enc.get_ids().to_vec();
                 let (_, _, patched) = self.require_vindex()?;
-                let walk = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-                    &weights, patched,
-                );
-                let r = larql_inference::predict_with_ffn(
-                    &weights,
-                    &tokenizer,
-                    &fact_ids,
-                    200,
-                    &walk,
-                );
+                let walk =
+                    larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
+                let r =
+                    larql_inference::predict_with_ffn(&weights, &tokenizer, &fact_ids, 200, &walk);
                 let prefix = &fact.target[..fact.target.len().min(3)];
                 let p: f64 = r
                     .predictions

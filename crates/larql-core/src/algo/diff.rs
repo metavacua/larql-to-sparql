@@ -1,4 +1,5 @@
 //! Graph diffing — find added, removed, and changed edges between two graphs.
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::core::edge::Edge;
 use crate::core::graph::Graph;

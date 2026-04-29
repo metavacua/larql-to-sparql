@@ -1,4 +1,6 @@
 //! Residual stream decomposition demo.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! `TRACE` is LARQL's microscope over a forward pass: it captures the
 //! residual at every layer, decomposes each step into attention delta
@@ -39,7 +41,11 @@ fn main() {
     }
 
     let mut session = Session::new();
-    run(&mut session, &format!(r#"USE "{SOURCE_VINDEX}";"#), "USE source vindex");
+    run(
+        &mut session,
+        &format!(r#"USE "{SOURCE_VINDEX}";"#),
+        "USE source vindex",
+    );
 
     // ── Variant 1: default trace ──
     section("1. Default TRACE — last-token residual summary per layer");
@@ -83,9 +89,7 @@ fn main() {
     );
     run(
         &mut session,
-        &format!(
-            r#"TRACE "The capital of France is" POSITIONS ALL SAVE "{save_str}";"#
-        ),
+        &format!(r#"TRACE "The capital of France is" POSITIONS ALL SAVE "{save_str}";"#),
         "TRACE POSITIONS ALL SAVE",
     );
 

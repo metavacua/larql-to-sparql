@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Accuracy and compression metrics for strategy comparison.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct Metrics {
@@ -69,7 +71,11 @@ impl Metrics {
         let mut total = 0.0f64;
         for q in queries {
             assert_eq!(q.len(), original.len());
-            let dot_orig: f64 = q.iter().zip(original).map(|(a, b)| *a as f64 * *b as f64).sum();
+            let dot_orig: f64 = q
+                .iter()
+                .zip(original)
+                .map(|(a, b)| *a as f64 * *b as f64)
+                .sum();
             let dot_recon: f64 = q
                 .iter()
                 .zip(reconstructed)

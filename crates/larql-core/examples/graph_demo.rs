@@ -1,4 +1,6 @@
 //! Graph engine demo — build, query, traverse, and serialize a knowledge graph.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Run: cargo run --release -p larql-core --example graph_demo
 

@@ -1,7 +1,8 @@
 //! Serialization types for the .vindex format.
+// SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Metadata stored in index.json inside a .vindex directory.
 #[derive(Clone, Serialize, Deserialize)]
@@ -176,43 +177,143 @@ impl LayerBands {
         let last = num_layers.saturating_sub(1);
         match (family, num_layers) {
             // Gemma family — validated via probe analysis
-            ("gemma3", 34) => Some(Self { syntax: (0, 13), knowledge: (14, 27), output: (28, 33) }),
-            ("gemma3", 42) => Some(Self { syntax: (0, 16), knowledge: (17, 34), output: (35, 41) }),
-            ("gemma2", 26) => Some(Self { syntax: (0, 10), knowledge: (11, 20), output: (21, 25) }),
-            ("gemma2", 42) => Some(Self { syntax: (0, 16), knowledge: (17, 34), output: (35, 41) }),
-            ("gemma2", 46) => Some(Self { syntax: (0, 18), knowledge: (19, 37), output: (38, 45) }),
+            ("gemma3", 34) => Some(Self {
+                syntax: (0, 13),
+                knowledge: (14, 27),
+                output: (28, 33),
+            }),
+            ("gemma3", 42) => Some(Self {
+                syntax: (0, 16),
+                knowledge: (17, 34),
+                output: (35, 41),
+            }),
+            ("gemma2", 26) => Some(Self {
+                syntax: (0, 10),
+                knowledge: (11, 20),
+                output: (21, 25),
+            }),
+            ("gemma2", 42) => Some(Self {
+                syntax: (0, 16),
+                knowledge: (17, 34),
+                output: (35, 41),
+            }),
+            ("gemma2", 46) => Some(Self {
+                syntax: (0, 18),
+                knowledge: (19, 37),
+                output: (38, 45),
+            }),
 
             // Gemma 4 family
-            ("gemma4", 30) => Some(Self { syntax: (0, 11), knowledge: (12, 23), output: (24, 29) }),
-            ("gemma4", 36) => Some(Self { syntax: (0, 14), knowledge: (15, 28), output: (29, 35) }),
-            ("gemma4", 35) => Some(Self { syntax: (0, 13), knowledge: (14, 27), output: (28, 34) }),
-            ("gemma4", 60) => Some(Self { syntax: (0, 23), knowledge: (24, 47), output: (48, 59) }),
+            ("gemma4", 30) => Some(Self {
+                syntax: (0, 11),
+                knowledge: (12, 23),
+                output: (24, 29),
+            }),
+            ("gemma4", 36) => Some(Self {
+                syntax: (0, 14),
+                knowledge: (15, 28),
+                output: (29, 35),
+            }),
+            ("gemma4", 35) => Some(Self {
+                syntax: (0, 13),
+                knowledge: (14, 27),
+                output: (28, 34),
+            }),
+            ("gemma4", 60) => Some(Self {
+                syntax: (0, 23),
+                knowledge: (24, 47),
+                output: (48, 59),
+            }),
 
             // Llama family
-            ("llama", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
-            ("llama", 40) => Some(Self { syntax: (0, 15), knowledge: (16, 32), output: (33, 39) }),
-            ("llama", 80) => Some(Self { syntax: (0, 31), knowledge: (32, 63), output: (64, 79) }),
+            ("llama", 32) => Some(Self {
+                syntax: (0, 12),
+                knowledge: (13, 25),
+                output: (26, 31),
+            }),
+            ("llama", 40) => Some(Self {
+                syntax: (0, 15),
+                knowledge: (16, 32),
+                output: (33, 39),
+            }),
+            ("llama", 80) => Some(Self {
+                syntax: (0, 31),
+                knowledge: (32, 63),
+                output: (64, 79),
+            }),
 
             // Mistral / Mixtral
-            ("mistral", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
-            ("mixtral", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
+            ("mistral", 32) => Some(Self {
+                syntax: (0, 12),
+                knowledge: (13, 25),
+                output: (26, 31),
+            }),
+            ("mixtral", 32) => Some(Self {
+                syntax: (0, 12),
+                knowledge: (13, 25),
+                output: (26, 31),
+            }),
 
             // Qwen
-            ("qwen2", 28) => Some(Self { syntax: (0, 10), knowledge: (11, 22), output: (23, 27) }),
-            ("qwen2", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
-            ("qwen2", 40) => Some(Self { syntax: (0, 15), knowledge: (16, 32), output: (33, 39) }),
-            ("qwen2", 64) => Some(Self { syntax: (0, 25), knowledge: (26, 51), output: (52, 63) }),
-            ("qwen2", 80) => Some(Self { syntax: (0, 31), knowledge: (32, 63), output: (64, 79) }),
+            ("qwen2", 28) => Some(Self {
+                syntax: (0, 10),
+                knowledge: (11, 22),
+                output: (23, 27),
+            }),
+            ("qwen2", 32) => Some(Self {
+                syntax: (0, 12),
+                knowledge: (13, 25),
+                output: (26, 31),
+            }),
+            ("qwen2", 40) => Some(Self {
+                syntax: (0, 15),
+                knowledge: (16, 32),
+                output: (33, 39),
+            }),
+            ("qwen2", 64) => Some(Self {
+                syntax: (0, 25),
+                knowledge: (26, 51),
+                output: (52, 63),
+            }),
+            ("qwen2", 80) => Some(Self {
+                syntax: (0, 31),
+                knowledge: (32, 63),
+                output: (64, 79),
+            }),
 
             // Phi
-            ("phi", 32) => Some(Self { syntax: (0, 12), knowledge: (13, 25), output: (26, 31) }),
-            ("phi", 40) => Some(Self { syntax: (0, 15), knowledge: (16, 32), output: (33, 39) }),
+            ("phi", 32) => Some(Self {
+                syntax: (0, 12),
+                knowledge: (13, 25),
+                output: (26, 31),
+            }),
+            ("phi", 40) => Some(Self {
+                syntax: (0, 15),
+                knowledge: (16, 32),
+                output: (33, 39),
+            }),
 
             // GPT-2 (smaller, denser)
-            ("gpt2", 12) => Some(Self { syntax: (0, 4), knowledge: (5, 9), output: (10, 11) }),
-            ("gpt2", 24) => Some(Self { syntax: (0, 9), knowledge: (10, 19), output: (20, 23) }),
-            ("gpt2", 36) => Some(Self { syntax: (0, 14), knowledge: (15, 28), output: (29, 35) }),
-            ("gpt2", 48) => Some(Self { syntax: (0, 19), knowledge: (20, 38), output: (39, 47) }),
+            ("gpt2", 12) => Some(Self {
+                syntax: (0, 4),
+                knowledge: (5, 9),
+                output: (10, 11),
+            }),
+            ("gpt2", 24) => Some(Self {
+                syntax: (0, 9),
+                knowledge: (10, 19),
+                output: (20, 23),
+            }),
+            ("gpt2", 36) => Some(Self {
+                syntax: (0, 14),
+                knowledge: (15, 28),
+                output: (29, 35),
+            }),
+            ("gpt2", 48) => Some(Self {
+                syntax: (0, 19),
+                knowledge: (20, 38),
+                output: (39, 47),
+            }),
 
             // Fallback: estimate from layer count
             // ~40% syntax, ~40% knowledge, ~20% output
@@ -263,7 +364,6 @@ pub struct VindexModelConfig {
 
     // ── Gemma 4 per-layer attention geometry ──
     // All optional for backward compatibility with existing vindexes.
-
     /// Head dimension for global (full) attention layers. If None, all layers use head_dim.
     /// Gemma 4: 512 for global layers, head_dim (256) for sliding.
     #[serde(default, skip_serializing_if = "Option::is_none")]

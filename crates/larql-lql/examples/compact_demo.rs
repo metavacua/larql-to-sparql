@@ -1,4 +1,6 @@
 //! Storage-tier walkthrough for the LSM-style storage engine.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! LARQL keeps INSERTed edges across three tiers:
 //!
@@ -22,9 +24,7 @@
 
 use larql_lql::{parse, Session};
 use larql_vindex::ndarray::Array2;
-use larql_vindex::{
-    FeatureMeta, QuantFormat, StorageDtype, VectorIndex, VindexConfig,
-};
+use larql_vindex::{FeatureMeta, QuantFormat, StorageDtype, VectorIndex, VindexConfig};
 
 fn main() {
     println!("=== LSM compact demo (synthetic browse-only vindex) ===\n");

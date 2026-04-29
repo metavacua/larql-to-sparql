@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -152,7 +154,10 @@ impl ExpertRegistry {
             Ok(Some(result)) => Some(result),
             Ok(None) => None,
             Err(e) => {
-                eprintln!("[experts] {} op={} error: {}", self.experts[idx].metadata.id, op, e);
+                eprintln!(
+                    "[experts] {} op={} error: {}",
+                    self.experts[idx].metadata.id, op, e
+                );
                 None
             }
         }
@@ -185,7 +190,10 @@ impl ExpertRegistry {
 
     /// Report WASM-runtime details for the expert with the given id.
     pub fn wasm_info_for(&mut self, expert_id: &str) -> Option<WasmInfo> {
-        let idx = self.experts.iter().position(|h| h.metadata.id == expert_id)?;
+        let idx = self
+            .experts
+            .iter()
+            .position(|h| h.metadata.id == expert_id)?;
         Some(self.experts[idx].wasm_info())
     }
 

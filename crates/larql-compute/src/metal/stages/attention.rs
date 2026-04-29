@@ -1,4 +1,6 @@
 //! Fused causal attention — one dispatch for the whole layer's QKV → attn_out.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Dispatches `fused_attention` which handles RoPE (optional), QK-norm
 //! (optional), causal GQA softmax, and softcap in a single Metal kernel.
@@ -9,8 +11,8 @@
 //! When the caller has already applied RoPE via `stages::rope::encode`,
 //! pass `skip_rope = true`.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// Flags for the fused attention dispatch. Keeps the parameter list
 /// readable; every boolean has an obvious default.
@@ -28,11 +30,16 @@ pub struct Flags {
 pub fn encode(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
-    q_buf: &Buffer, k_buf: &Buffer, v_buf: &Buffer,
+    q_buf: &Buffer,
+    k_buf: &Buffer,
+    v_buf: &Buffer,
     attn_out: &Buffer,
     seq_len: usize,
-    num_q_heads: usize, num_kv_heads: usize, head_dim: usize,
-    scale: f32, rope_base: f32,
+    num_q_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    scale: f32,
+    rope_base: f32,
     flags: Flags,
 ) {
     let seq_val = seq_len as u32;

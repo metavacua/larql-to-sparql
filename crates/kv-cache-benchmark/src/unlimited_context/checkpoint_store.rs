@@ -1,4 +1,6 @@
 //! Per-window boundary K,V checkpoint store (WARM tier).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each checkpoint is the K,V at the *last* position of a closed window, one
 //! (K, V) pair per layer. K,V carry their baked-in RoPE offsets — so replay
@@ -27,7 +29,9 @@ impl CheckpointStore {
     /// `kv_last[layer]` has shape (1, num_kv * head_dim) for both K and V.
     pub fn save(&mut self, window_id: usize, kv_last: Vec<SharedKV>, abs_pos: usize) {
         debug_assert!(
-            kv_last.iter().all(|(k, v)| k.shape()[0] == 1 && v.shape()[0] == 1),
+            kv_last
+                .iter()
+                .all(|(k, v)| k.shape()[0] == 1 && v.shape()[0] == 1),
             "checkpoint must be single-row K/V per layer"
         );
         self.kv.insert(window_id, kv_last);

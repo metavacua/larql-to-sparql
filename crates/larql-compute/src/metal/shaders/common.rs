@@ -1,4 +1,5 @@
 //! Shared Metal shader utilities — f16 decode, constants.
+// SPDX-License-Identifier: Apache-2.0
 
 /// Common Metal header included by all shaders.
 pub const HEADER: &str = r#"

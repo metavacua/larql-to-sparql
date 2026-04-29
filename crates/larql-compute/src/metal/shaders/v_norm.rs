@@ -1,4 +1,6 @@
 //! Parameter-free V-norm: RMSNorm without learned weights.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! out = x / sqrt(mean(x²) + eps)
 //!

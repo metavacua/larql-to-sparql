@@ -1,4 +1,5 @@
 //! ETag generation for CDN edge caching.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};

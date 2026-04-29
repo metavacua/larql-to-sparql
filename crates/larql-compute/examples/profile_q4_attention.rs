@@ -1,15 +1,17 @@
 //! Benchmark Q4 attention projections: Q/K/V/O as Q4 matvec.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Usage:
 //!   cargo run --release -p larql-compute --features metal --example bench_q4_attention
 
 extern crate blas_src;
 
-use std::time::Instant;
-use ndarray::Array2;
-use larql_compute::{default_backend, cpu_backend};
 use larql_compute::cpu::q4;
 use larql_compute::cpu::q4::quantize_q4_0;
+use larql_compute::{cpu_backend, default_backend};
+use ndarray::Array2;
+use std::time::Instant;
 
 fn main() {
     let hidden = 2560;
@@ -22,8 +24,12 @@ fn main() {
     println!("CPU: {}, Default: {}\n", cpu.name(), default.name());
 
     // ── Per-layer: 4 attention projections ──
-    let wq_f32: Vec<f32> = (0..hidden * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
-    let wk_f32: Vec<f32> = (0..kv_dim * hidden).map(|i| (i as f32 * 0.0002).sin()).collect();
+    let wq_f32: Vec<f32> = (0..hidden * hidden)
+        .map(|i| (i as f32 * 0.0001).cos())
+        .collect();
+    let wk_f32: Vec<f32> = (0..kv_dim * hidden)
+        .map(|i| (i as f32 * 0.0002).sin())
+        .collect();
     let wq_q4 = quantize_q4_0(&wq_f32);
     let wk_q4 = quantize_q4_0(&wk_f32);
 
@@ -38,7 +44,9 @@ fn main() {
         let x_arr = Array2::from_shape_vec((1, hidden), x.clone()).unwrap();
         let _ = cpu.matmul_transb(x_arr.view(), wq_arr.view());
         let t0 = Instant::now();
-        for _ in 0..n { let _ = cpu.matmul_transb(x_arr.view(), wq_arr.view()); }
+        for _ in 0..n {
+            let _ = cpu.matmul_transb(x_arr.view(), wq_arr.view());
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("  f32 BLAS Q proj [1,2560]@[2560,2560]^T:  {ms:.2}ms");
     }
@@ -47,7 +55,9 @@ fn main() {
     {
         let _ = cpu.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden);
         let t0 = Instant::now();
-        for _ in 0..n { let _ = cpu.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden); }
+        for _ in 0..n {
+            let _ = cpu.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden);
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("  CPU Q4 Q proj   [2560,2560] @ Q8:        {ms:.2}ms");
     }
@@ -56,7 +66,9 @@ fn main() {
     if default.has_q4() && default.name() != cpu.name() {
         let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden);
         let t0 = Instant::now();
-        for _ in 0..n { let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden); }
+        for _ in 0..n {
+            let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden);
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("  Metal Q4 Q proj [2560,2560] @ Q8:        {ms:.2}ms");
     }
@@ -67,7 +79,9 @@ fn main() {
         let x_arr = Array2::from_shape_vec((1, hidden), x.clone()).unwrap();
         let _ = cpu.matmul_transb(x_arr.view(), wk_arr.view());
         let t0 = Instant::now();
-        for _ in 0..n { let _ = cpu.matmul_transb(x_arr.view(), wk_arr.view()); }
+        for _ in 0..n {
+            let _ = cpu.matmul_transb(x_arr.view(), wk_arr.view());
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("  f32 BLAS K proj [1,2560]@[512,2560]^T:   {ms:.2}ms");
     }
@@ -75,7 +89,9 @@ fn main() {
     if default.has_q4() && default.name() != cpu.name() {
         let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden);
         let t0 = Instant::now();
-        for _ in 0..n { let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden); }
+        for _ in 0..n {
+            let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden);
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
         println!("  Metal Q4 K proj [512,2560] @ Q8:         {ms:.2}ms");
     }
@@ -108,9 +124,10 @@ fn main() {
         for _ in 0..n {
             for _ in 0..21 {
                 let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden); // Q
-                let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden);  // K
-                let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden);  // V
-                let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden); // O
+                let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden); // K
+                let _ = default.q4_matvec(&wk_q4, &q8_x, &q8_s, kv_dim, hidden); // V
+                let _ = default.q4_matvec(&wq_q4, &q8_x, &q8_s, hidden, hidden);
+                // O
             }
         }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;

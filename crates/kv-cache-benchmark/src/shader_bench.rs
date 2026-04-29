@@ -1,4 +1,6 @@
 //! Phase 3: Shader benchmark harness.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Measures per-operation GPU timing across the benchmark matrix:
 //!   Operation              CPU f32    Metal fused    Graph only
@@ -9,9 +11,9 @@
 //!   Gate KNN               ✓          ✓              ✓
 //!   Sparse FFN walk        ✓          ✓              n/a
 
-use crate::turboquant::TurboQuant;
-use crate::turboquant::rotation;
 use crate::metrics::Metrics;
+use crate::turboquant::rotation;
+use crate::turboquant::TurboQuant;
 
 /// Benchmark result for a single operation.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -26,7 +28,9 @@ pub struct ShaderBenchResult {
 
 /// Run CPU WHT benchmark at given dimension.
 pub fn bench_wht_cpu(dim: usize, iterations: usize) -> ShaderBenchResult {
-    let x: Vec<f32> = (0..dim).map(|i| (i as f32 - dim as f32 / 2.0) / 100.0).collect();
+    let x: Vec<f32> = (0..dim)
+        .map(|i| (i as f32 - dim as f32 / 2.0) / 100.0)
+        .collect();
 
     let t0 = std::time::Instant::now();
     for _ in 0..iterations {

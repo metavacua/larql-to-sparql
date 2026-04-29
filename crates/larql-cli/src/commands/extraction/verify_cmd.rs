@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use std::path::PathBuf;
 
 use clap::Args;
@@ -23,7 +25,11 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    eprintln!("Verifying: {} ({} files)", args.vindex.display(), stored.len());
+    eprintln!(
+        "Verifying: {} ({} files)",
+        args.vindex.display(),
+        stored.len()
+    );
 
     let results = larql_vindex::format::checksums::verify_checksums(&args.vindex, stored)?;
 

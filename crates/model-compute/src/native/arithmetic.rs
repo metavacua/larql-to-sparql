@@ -1,4 +1,6 @@
 //! Arithmetic kernel — integer and float arithmetic with common aggregates.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! # Syntax
 //!
@@ -39,18 +41,19 @@ impl Kernel for ArithmeticKernel {
 
     fn invoke(&self, expr: &str) -> Result<String, KernelError> {
         let expanded = expand_aggregates(expr)?;
-        let value = evalexpr::eval(&expanded)
-            .map_err(|e| KernelError::Eval(e.to_string()))?;
+        let value = evalexpr::eval(&expanded).map_err(|e| KernelError::Eval(e.to_string()))?;
 
         Ok(match value {
             evalexpr::Value::Int(i) => i.to_string(),
             evalexpr::Value::Float(f) => format_float(f),
             evalexpr::Value::Boolean(b) => b.to_string(),
             evalexpr::Value::String(s) => s,
-            other => return Err(KernelError::Unsupported(format!(
-                "arithmetic returned non-scalar value: {:?}",
-                other
-            ))),
+            other => {
+                return Err(KernelError::Unsupported(format!(
+                    "arithmetic returned non-scalar value: {:?}",
+                    other
+                )))
+            }
         })
     }
 }
@@ -87,7 +90,9 @@ fn expand_aggregates(expr: &str) -> Result<String, KernelError> {
 
 fn find_next_aggregate(s: &str) -> Option<(usize, &'static str, usize)> {
     for name in ["sum", "product", "factorial"] {
-        let Some(idx) = find_identifier(s, name) else { continue };
+        let Some(idx) = find_identifier(s, name) else {
+            continue;
+        };
         let after = idx + name.len();
         if s.as_bytes().get(after) != Some(&b'(') {
             continue;
@@ -161,8 +166,9 @@ fn eval_aggregate(name: &str, args: &str) -> Result<String, KernelError> {
             Ok(result.to_string())
         }
         "factorial" => {
-            let n: i64 = args.trim().parse()
-                .map_err(|_| KernelError::Parse(format!("factorial: expected integer, got {:?}", args)))?;
+            let n: i64 = args.trim().parse().map_err(|_| {
+                KernelError::Parse(format!("factorial: expected integer, got {:?}", args))
+            })?;
             if !(0..=MAX_FACTORIAL).contains(&n) {
                 return Err(KernelError::OutOfRange(format!(
                     "factorial({}): must be in [0, {}]",
@@ -171,9 +177,9 @@ fn eval_aggregate(name: &str, args: &str) -> Result<String, KernelError> {
             }
             let mut r: i64 = 1;
             for k in 2..=n {
-                r = r.checked_mul(k).ok_or_else(|| {
-                    KernelError::OutOfRange(format!("factorial({}) overflow", n))
-                })?;
+                r = r
+                    .checked_mul(k)
+                    .ok_or_else(|| KernelError::OutOfRange(format!("factorial({}) overflow", n)))?;
             }
             Ok(r.to_string())
         }
@@ -183,15 +189,17 @@ fn eval_aggregate(name: &str, args: &str) -> Result<String, KernelError> {
 
 fn parse_range(args: &str) -> Result<(i64, i64), KernelError> {
     let trimmed = args.trim();
-    let (lo, hi) = trimmed.split_once("..").ok_or_else(|| {
-        KernelError::Parse(format!("expected range 'lo..hi', got {:?}", trimmed))
-    })?;
-    let lo: i64 = lo.trim().parse().map_err(|_| {
-        KernelError::Parse(format!("range start not an integer: {:?}", lo))
-    })?;
-    let hi: i64 = hi.trim().parse().map_err(|_| {
-        KernelError::Parse(format!("range end not an integer: {:?}", hi))
-    })?;
+    let (lo, hi) = trimmed
+        .split_once("..")
+        .ok_or_else(|| KernelError::Parse(format!("expected range 'lo..hi', got {:?}", trimmed)))?;
+    let lo: i64 = lo
+        .trim()
+        .parse()
+        .map_err(|_| KernelError::Parse(format!("range start not an integer: {:?}", lo)))?;
+    let hi: i64 = hi
+        .trim()
+        .parse()
+        .map_err(|_| KernelError::Parse(format!("range end not an integer: {:?}", hi)))?;
     if hi < lo {
         return Err(KernelError::OutOfRange(format!(
             "range end {} < start {}",

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Residual checkpointing for fast reconstruction.
 ///
 /// Stores residual snapshots at key layers (e.g., L0, L8, L16, L24, L33).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use super::provider::{ModelProvider, ProviderError};
 
 /// Result of chaining multiple forward passes.

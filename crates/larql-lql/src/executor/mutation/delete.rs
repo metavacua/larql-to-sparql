@@ -1,4 +1,5 @@
 //! `DELETE FROM EDGES WHERE ...` — remove features via the patch overlay.
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::ast::{Condition, Value};
 use crate::error::LqlError;

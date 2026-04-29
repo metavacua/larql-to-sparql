@@ -1,8 +1,9 @@
 //! Token generation loop — GPU prefill + KV-cached decode
+// SPDX-License-Identifier: Apache-2.0
 
-use larql_compute::ComputeBackend;
-use crate::model::ModelWeights;
 use super::CachedLayerGraph;
+use crate::model::ModelWeights;
+use larql_compute::ComputeBackend;
 
 /// Top-K logits lookup that transparently handles models with tied
 /// input/output embeddings (Gemma 2/3/4) whose vindex has no dedicated
@@ -49,10 +50,14 @@ fn backend_lm_head_topk(
     backend: &dyn ComputeBackend,
 ) -> Vec<(u32, f32)> {
     let lm = &weights.lm_head;
-    if lm.is_empty() || query.is_empty() { return Vec::new(); }
+    if lm.is_empty() || query.is_empty() {
+        return Vec::new();
+    }
     let vocab = lm.shape()[0];
     let hidden = lm.shape()[1];
-    if hidden != query.len() { return Vec::new(); }
+    if hidden != query.len() {
+        return Vec::new();
+    }
 
     // Try the dedicated GPU gemv first (~3-5 ms on Metal for the Gemma
     // 262K × 2560 tied LM head). Fall back to `matmul_transb` (which
@@ -66,7 +71,8 @@ fn backend_lm_head_topk(
         s
     } else {
         let q_row = match query.view().into_shape_with_order((1, hidden)) {
-            Ok(r) => r, Err(_) => return Vec::new(),
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
         };
         backend.matmul_transb(q_row, lm.view()).row(0).to_vec()
     };
@@ -79,7 +85,9 @@ fn backend_lm_head_topk(
         .collect();
     let k = top_k.min(indexed.len());
     if k > 0 && k < indexed.len() {
-        indexed.select_nth_unstable_by(k, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.select_nth_unstable_by(k, |a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
         indexed.truncate(k);
     }
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -109,9 +117,13 @@ fn backend_lm_head_scores(
     backend: &dyn ComputeBackend,
 ) -> Vec<f32> {
     let lm = &weights.lm_head;
-    if lm.is_empty() || query.is_empty() { return Vec::new(); }
+    if lm.is_empty() || query.is_empty() {
+        return Vec::new();
+    }
     let hidden = lm.shape()[1];
-    if hidden != query.len() { return Vec::new(); }
+    if hidden != query.len() {
+        return Vec::new();
+    }
     let query_slice = match query.as_slice() {
         Some(s) => s,
         None => &query.to_vec(),
@@ -187,7 +199,16 @@ pub fn generate(
     let has_q8 = index.attn_q8_layer_data(layer_range.start).is_some();
 
     if !backend.has_q4() || q4_ffn.is_none() {
-        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        let r = super::predict::predict_honest(
+            weights,
+            tokenizer,
+            token_ids,
+            5,
+            index,
+            backend,
+            cached_layers,
+            layer_range,
+        );
         return GenerateResult {
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
@@ -199,7 +220,16 @@ pub fn generate(
     let q4_ffn_mmap = q4_ffn.unwrap();
     let intermediate = gate_index.num_features(layer_range.start);
     if intermediate == 0 || (!has_q4k && !has_q8) {
-        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        let r = super::predict::predict_honest(
+            weights,
+            tokenizer,
+            token_ids,
+            5,
+            index,
+            backend,
+            cached_layers,
+            layer_range,
+        );
         return GenerateResult {
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
@@ -216,12 +246,20 @@ pub fn generate(
         intermediate * hidden / 32 * 18
     };
 
-    let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
+    let ffn_format = if ffn_is_q4k {
+        larql_compute::QuantFormat::Q4_K
+    } else {
+        larql_compute::QuantFormat::Q4_0
+    };
 
     let num_layers = weights.num_layers;
     let layers = super::pipeline_layer::build_pipeline_layers(
-        weights, index, 0..num_layers,
-        q4_ffn_mmap, q4_ffn_per_matrix, ffn_format,
+        weights,
+        index,
+        0..num_layers,
+        q4_ffn_mmap,
+        q4_ffn_per_matrix,
+        ffn_format,
     );
 
     let q_dim = weights.num_q_heads * weights.head_dim;
@@ -250,21 +288,35 @@ pub fn generate(
     let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0);
     let qk_norm_val = arch.attn_q_norm_key(0).is_some();
 
-    let h_vec = backend.prefill_q4(
-        &layers, &x, hidden, intermediate, q_dim, kv_dim,
-        seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
-        rope, qk_norm_val, softcap_val,
-    ).unwrap_or_else(|| {
-        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
-        let mut h = h_embed.clone();
-        for layer in 0..num_layers {
-            let (h_post_attn, _, _) =
-                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
-            let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
-            h = h_out;
-        }
-        h.as_slice().unwrap_or(&[]).to_vec()
-    });
+    let h_vec = backend
+        .prefill_q4(
+            &layers,
+            &x,
+            hidden,
+            intermediate,
+            q_dim,
+            kv_dim,
+            seq_len,
+            weights.num_q_heads,
+            weights.num_kv_heads,
+            weights.head_dim,
+            rope,
+            qk_norm_val,
+            softcap_val,
+        )
+        .unwrap_or_else(|| {
+            let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
+            let mut h = h_embed.clone();
+            for layer in 0..num_layers {
+                let (h_post_attn, _, _) =
+                    crate::attention::run_attention_block_gpu(weights, &h, layer, false, None)
+                        .unwrap();
+                let (h_out, _) =
+                    crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                h = h_out;
+            }
+            h.as_slice().unwrap_or(&[]).to_vec()
+        });
 
     let h_metal = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec.clone())
         .unwrap_or_else(|_| h_embed.clone());
@@ -273,7 +325,8 @@ pub fn generate(
 
     let h = h_metal;
     let h_1d = {
-        let h_final = crate::forward::apply_norm(weights, &h, weights.arch.final_norm_key(), norm_offset);
+        let h_final =
+            crate::forward::apply_norm(weights, &h, weights.arch.final_norm_key(), norm_offset);
         h_final.row(seq_len - 1).to_owned()
     };
 
@@ -287,16 +340,33 @@ pub fn generate(
         let metal_hits_cpu_lm = cpu_lm_head_topk(weights, &h_1d, 5);
         let as_toks = |hits: &[(u32, f32)]| -> Vec<String> {
             hits.iter()
-                .map(|(t, _)| tokenizer.decode(&[*t], true).unwrap_or_default().trim().to_string())
+                .map(|(t, _)| {
+                    tokenizer
+                        .decode(&[*t], true)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string()
+                })
                 .collect()
         };
-        eprintln!("[compare] metal final h_1d:  len={}  nan={}  inf={}  max_abs={:.3e}",
+        eprintln!(
+            "[compare] metal final h_1d:  len={}  nan={}  inf={}  max_abs={:.3e}",
             h_1d.len(),
             h_1d.iter().filter(|v| v.is_nan()).count(),
             h_1d.iter().filter(|v| v.is_infinite()).count(),
-            h_1d.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max));
-        eprintln!("[compare] metal top-5 via vindex-KNN:    {:?}", as_toks(&metal_hits_vindex));
-        eprintln!("[compare] metal top-5 via CPU lm_head:   {:?}", as_toks(&metal_hits_cpu_lm));
+            h_1d.iter()
+                .map(|v| v.abs())
+                .filter(|v| v.is_finite())
+                .fold(0.0f32, f32::max)
+        );
+        eprintln!(
+            "[compare] metal top-5 via vindex-KNN:    {:?}",
+            as_toks(&metal_hits_vindex)
+        );
+        eprintln!(
+            "[compare] metal top-5 via CPU lm_head:   {:?}",
+            as_toks(&metal_hits_cpu_lm)
+        );
 
         eprintln!("[compare] (run `larql walk --predict` (no --metal) for CPU reference tokens)");
     }
@@ -308,8 +378,17 @@ pub fn generate(
 
     let first_hits = lm_head_topk(index, weights, &h_1d, 5, backend);
     if let Some(&(tid, score)) = first_hits.first() {
-        let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
-        let prob = super::logits::softmax_prob(score, &first_hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+        let tok_str = tokenizer
+            .decode(&[tid], true)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let prob = super::logits::softmax_prob(
+            score,
+            &first_hits,
+            weights.arch.logits_scaling(),
+            weights.arch.final_logit_softcapping(),
+        );
         tokens.push((tok_str, prob));
     }
 
@@ -338,10 +417,18 @@ pub fn generate(
 
         if profile && _step <= 2 {
             let x_nan = x_dec.iter().filter(|v| v.is_nan()).count();
-            let x_max = x_dec.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+            let x_max = x_dec
+                .iter()
+                .map(|v| v.abs())
+                .filter(|v| v.is_finite())
+                .fold(0.0f32, f32::max);
             eprintln!(
                 "[profile] step={} input tok={} x_dec: len={} nan={} max_abs={:.3e}",
-                _step, current_token_id, x_dec.len(), x_nan, x_max,
+                _step,
+                current_token_id,
+                x_dec.len(),
+                x_nan,
+                x_max,
             );
         }
 
@@ -349,14 +436,30 @@ pub fn generate(
         let result = if profile_split && _step == 2 {
             // Step 2 is post-JIT warm — run split profiling once and print.
             let (r, _ta, _tgu, _td) = backend.decode_token_split_profile(
-                &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
-                weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+                &layers,
+                &x_dec,
+                hidden,
+                intermediate,
+                q_dim,
+                kv_dim,
+                weights.num_q_heads,
+                weights.num_kv_heads,
+                weights.head_dim,
+                rope,
             );
             r
         } else {
             backend.decode_token(
-                &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
-                weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+                &layers,
+                &x_dec,
+                hidden,
+                intermediate,
+                q_dim,
+                kv_dim,
+                weights.num_q_heads,
+                weights.num_kv_heads,
+                weights.head_dim,
+                rope,
             )
         };
         let gpu_ms = t1.elapsed().as_secs_f64() * 1000.0;
@@ -365,10 +468,17 @@ pub fn generate(
             match &result {
                 Some(h) => {
                     let h_nan = h.iter().filter(|v| v.is_nan()).count();
-                    let h_max = h.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+                    let h_max = h
+                        .iter()
+                        .map(|v| v.abs())
+                        .filter(|v| v.is_finite())
+                        .fold(0.0f32, f32::max);
                     eprintln!(
                         "[profile] step={} decode_token h_out: len={} nan={} max_abs={:.3e}",
-                        _step, h.len(), h_nan, h_max,
+                        _step,
+                        h.len(),
+                        h_nan,
+                        h_max,
                     );
                 }
                 None => eprintln!("[profile] step={} decode_token returned None", _step),
@@ -378,7 +488,12 @@ pub fn generate(
         if let Some(h_out) = result {
             let t2 = std::time::Instant::now();
             let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
-            let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
+            let h_final = crate::forward::apply_norm(
+                weights,
+                &h_arr,
+                weights.arch.final_norm_key(),
+                norm_offset,
+            );
             let h_1d = h_final.row(0).to_owned();
             let norm_ms = t2.elapsed().as_secs_f64() * 1000.0;
 
@@ -388,10 +503,19 @@ pub fn generate(
             if profile && _step <= 2 {
                 let h_nan = h_1d.iter().filter(|v| v.is_nan()).count();
                 let h_inf = h_1d.iter().filter(|v| v.is_infinite()).count();
-                let h_max = h_1d.iter().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0f32, f32::max);
+                let h_max = h_1d
+                    .iter()
+                    .map(|v| v.abs())
+                    .filter(|v| v.is_finite())
+                    .fold(0.0f32, f32::max);
                 eprintln!(
                     "[profile] step={} h_1d: len={} nan={} inf={} max_abs={:.3e}  hits.len()={}",
-                    _step, h_1d.len(), h_nan, h_inf, h_max, hits.len(),
+                    _step,
+                    h_1d.len(),
+                    h_nan,
+                    h_inf,
+                    h_max,
+                    hits.len(),
                 );
             }
 
@@ -400,9 +524,18 @@ pub fn generate(
 
             if let Some(&(tid, score)) = hits.first() {
                 let t4 = std::time::Instant::now();
-                let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
+                let tok_str = tokenizer
+                    .decode(&[tid], true)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 let detok_ms = t4.elapsed().as_secs_f64() * 1000.0;
-                let prob = super::logits::softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+                let prob = super::logits::softmax_prob(
+                    score,
+                    &hits,
+                    weights.arch.logits_scaling(),
+                    weights.arch.final_logit_softcapping(),
+                );
                 let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
                 if profile {
                     eprintln!(
@@ -410,13 +543,20 @@ pub fn generate(
                         _step, step_ms, embed_ms, gpu_ms, norm_ms, lmhead_ms, detok_ms,
                     );
                 }
-                t_embed += embed_ms; t_gpu += gpu_ms; t_norm += norm_ms;
-                t_lmhead += lmhead_ms; t_detok += detok_ms;
+                t_embed += embed_ms;
+                t_gpu += gpu_ms;
+                t_norm += norm_ms;
+                t_lmhead += lmhead_ms;
+                t_detok += detok_ms;
                 tokens.push((tok_str, prob));
                 current_token_id = tid;
-                if is_eos { break; }
+                if is_eos {
+                    break;
+                }
             } else {
-                if profile { eprintln!("[profile] step={} — lm_head returned empty; break", _step); }
+                if profile {
+                    eprintln!("[profile] step={} — lm_head returned empty; break", _step);
+                }
                 break;
             }
         } else {
@@ -427,18 +567,34 @@ pub fn generate(
             let mut h_dec = h_tok;
             for layer in 0..num_layers {
                 let (h_post_attn, _, _) =
-                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None).unwrap();
-                let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None)
+                        .unwrap();
+                let (h_out, _) =
+                    crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
                 h_dec = h_out;
             }
-            let h_final = crate::forward::apply_norm(weights, &h_dec, weights.arch.final_norm_key(), norm_offset);
+            let h_final = crate::forward::apply_norm(
+                weights,
+                &h_dec,
+                weights.arch.final_norm_key(),
+                norm_offset,
+            );
             let h_1d = h_final.row(0).to_owned();
             let hits = lm_head_topk(index, weights, &h_1d, 5, backend);
             let step_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
             decode_ms.push(step_ms);
             if let Some(&(tid, score)) = hits.first() {
-                let tok_str = tokenizer.decode(&[tid], true).unwrap_or_default().trim().to_string();
-                let prob = super::logits::softmax_prob(score, &hits, weights.arch.logits_scaling(), weights.arch.final_logit_softcapping());
+                let tok_str = tokenizer
+                    .decode(&[tid], true)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let prob = super::logits::softmax_prob(
+                    score,
+                    &hits,
+                    weights.arch.logits_scaling(),
+                    weights.arch.final_logit_softcapping(),
+                );
                 let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
                 // CPU-fallback path: the full decode is attributed to `gpu_ms_total`
                 // for lack of a better bucket — consumers interpret it as "forward
@@ -446,8 +602,12 @@ pub fn generate(
                 t_gpu += step_ms;
                 tokens.push((tok_str, prob));
                 current_token_id = tid;
-                if is_eos { break; }
-            } else { break; }
+                if is_eos {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
     }
 
@@ -527,7 +687,16 @@ where
     // the mask still applies to that one token via pick_next_token_masked.
     if !backend.has_q4() || q4_ffn.is_none() {
         // Dense single-token prediction with mask.
-        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        let r = super::predict::predict_honest(
+            weights,
+            tokenizer,
+            token_ids,
+            5,
+            index,
+            backend,
+            cached_layers,
+            layer_range,
+        );
         return GenerateResult {
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
@@ -538,7 +707,16 @@ where
     let q4_ffn_mmap = q4_ffn.unwrap();
     let intermediate = gate_index.num_features(layer_range.start);
     if intermediate == 0 || (!has_q4k && !has_q8) {
-        let r = super::predict::predict_honest(weights, tokenizer, token_ids, 5, index, backend, cached_layers, layer_range);
+        let r = super::predict::predict_honest(
+            weights,
+            tokenizer,
+            token_ids,
+            5,
+            index,
+            backend,
+            cached_layers,
+            layer_range,
+        );
         return GenerateResult {
             tokens: r.predictions.into_iter().take(1).collect(),
             prefill_ms: 0.0,
@@ -552,12 +730,20 @@ where
     } else {
         intermediate * hidden / 32 * 18
     };
-    let ffn_format = if ffn_is_q4k { larql_compute::QuantFormat::Q4_K } else { larql_compute::QuantFormat::Q4_0 };
+    let ffn_format = if ffn_is_q4k {
+        larql_compute::QuantFormat::Q4_K
+    } else {
+        larql_compute::QuantFormat::Q4_0
+    };
 
     let num_layers = weights.num_layers;
     let layers = super::pipeline_layer::build_pipeline_layers(
-        weights, index, 0..num_layers,
-        q4_ffn_mmap, q4_ffn_per_matrix, ffn_format,
+        weights,
+        index,
+        0..num_layers,
+        q4_ffn_mmap,
+        q4_ffn_per_matrix,
+        ffn_format,
     );
 
     let q_dim = weights.num_q_heads * weights.head_dim;
@@ -579,27 +765,46 @@ where
     let softcap_val = arch.attn_logit_softcapping().unwrap_or(0.0);
     let qk_norm_val = arch.attn_q_norm_key(0).is_some();
 
-    let h_vec = backend.prefill_q4(
-        &layers, &x, hidden, intermediate, q_dim, kv_dim,
-        seq_len, weights.num_q_heads, weights.num_kv_heads, weights.head_dim,
-        rope, qk_norm_val, softcap_val,
-    ).unwrap_or_else(|| {
-        // CPU fallback: same as unconstrained generate's fallback.
-        let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
-        let mut h = h_embed.clone();
-        for layer in 0..num_layers {
-            let (h_post_attn, _, _) =
-                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
-            let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
-            h = h_out;
-        }
-        h.as_slice().unwrap_or(&[]).to_vec()
-    });
+    let h_vec = backend
+        .prefill_q4(
+            &layers,
+            &x,
+            hidden,
+            intermediate,
+            q_dim,
+            kv_dim,
+            seq_len,
+            weights.num_q_heads,
+            weights.num_kv_heads,
+            weights.head_dim,
+            rope,
+            qk_norm_val,
+            softcap_val,
+        )
+        .unwrap_or_else(|| {
+            // CPU fallback: same as unconstrained generate's fallback.
+            let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
+            let mut h = h_embed.clone();
+            for layer in 0..num_layers {
+                let (h_post_attn, _, _) =
+                    crate::attention::run_attention_block_gpu(weights, &h, layer, false, None)
+                        .unwrap();
+                let (h_out, _) =
+                    crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                h = h_out;
+            }
+            h.as_slice().unwrap_or(&[]).to_vec()
+        });
 
     let h_metal = ndarray::Array2::from_shape_vec((seq_len, hidden), h_vec.clone())
         .unwrap_or_else(|_| h_embed.clone());
     let h_1d = {
-        let h_final = crate::forward::apply_norm(weights, &h_metal, weights.arch.final_norm_key(), norm_offset);
+        let h_final = crate::forward::apply_norm(
+            weights,
+            &h_metal,
+            weights.arch.final_norm_key(),
+            norm_offset,
+        );
         h_final.row(seq_len - 1).to_owned()
     };
     let prefill_ms = prefill_start.elapsed().as_secs_f64() * 1000.0;
@@ -617,11 +822,23 @@ where
             tokens.push((tok_str, 1.0));
             generated.push(tid);
             if is_eos {
-                return GenerateResult { tokens, prefill_ms, decode_ms, stage_timings: StageTimings::default() };
+                return GenerateResult {
+                    tokens,
+                    prefill_ms,
+                    decode_ms,
+                    stage_timings: StageTimings::default(),
+                };
             }
             tid
         }
-        None => return GenerateResult { tokens, prefill_ms, decode_ms, stage_timings: StageTimings::default() },
+        None => {
+            return GenerateResult {
+                tokens,
+                prefill_ms,
+                decode_ms,
+                stage_timings: StageTimings::default(),
+            }
+        }
     };
 
     let walk_ffn = crate::vindex::WalkFfn::new_unlimited(weights, index);
@@ -634,24 +851,44 @@ where
         let x_dec: Vec<f32> = h_tok.row(0).to_vec();
 
         let result = backend.decode_token(
-            &layers, &x_dec, hidden, intermediate, q_dim, kv_dim,
-            weights.num_q_heads, weights.num_kv_heads, weights.head_dim, rope,
+            &layers,
+            &x_dec,
+            hidden,
+            intermediate,
+            q_dim,
+            kv_dim,
+            weights.num_q_heads,
+            weights.num_kv_heads,
+            weights.head_dim,
+            rope,
         );
 
         let h_1d = if let Some(h_out) = result {
             let h_arr = ndarray::Array2::from_shape_vec((1, hidden), h_out).unwrap();
-            let h_final = crate::forward::apply_norm(weights, &h_arr, weights.arch.final_norm_key(), norm_offset);
+            let h_final = crate::forward::apply_norm(
+                weights,
+                &h_arr,
+                weights.arch.final_norm_key(),
+                norm_offset,
+            );
             h_final.row(0).to_owned()
         } else {
             // CPU fallback for one decode step.
             let mut h_dec = h_tok;
             for layer in 0..num_layers {
                 let (h_post_attn, _, _) =
-                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None).unwrap();
-                let (h_out, _) = crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
+                    crate::attention::run_attention_block_gpu(weights, &h_dec, layer, false, None)
+                        .unwrap();
+                let (h_out, _) =
+                    crate::forward::run_ffn(weights, &h_post_attn, layer, &walk_ffn, false);
                 h_dec = h_out;
             }
-            let h_final = crate::forward::apply_norm(weights, &h_dec, weights.arch.final_norm_key(), norm_offset);
+            let h_final = crate::forward::apply_norm(
+                weights,
+                &h_dec,
+                weights.arch.final_norm_key(),
+                norm_offset,
+            );
             h_final.row(0).to_owned()
         };
 
@@ -665,7 +902,9 @@ where
                 tokens.push((tok_str, 1.0));
                 generated.push(tid);
                 current_token_id = tid;
-                if is_eos { break; }
+                if is_eos {
+                    break;
+                }
             }
             None => break,
         }
@@ -706,7 +945,9 @@ impl StageTimings {
     /// Per-token average across `n` decode steps. Returns all-zero if
     /// `n == 0` (short-circuit no-decode paths safely).
     pub fn avg_per_step(&self, n: usize) -> StageTimings {
-        if n == 0 { return Self::default(); }
+        if n == 0 {
+            return Self::default();
+        }
         let nf = n as f64;
         StageTimings {
             embed_ms_total: self.embed_ms_total / nf,
@@ -720,16 +961,27 @@ impl StageTimings {
 
 impl GenerateResult {
     pub fn avg_decode_ms(&self) -> f64 {
-        if self.decode_ms.is_empty() { 0.0 }
-        else { self.decode_ms.iter().sum::<f64>() / self.decode_ms.len() as f64 }
+        if self.decode_ms.is_empty() {
+            0.0
+        } else {
+            self.decode_ms.iter().sum::<f64>() / self.decode_ms.len() as f64
+        }
     }
 
     pub fn decode_tok_s(&self) -> f64 {
         let avg = self.avg_decode_ms();
-        if avg > 0.0 { 1000.0 / avg } else { 0.0 }
+        if avg > 0.0 {
+            1000.0 / avg
+        } else {
+            0.0
+        }
     }
 
     pub fn text(&self) -> String {
-        self.tokens.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("")
+        self.tokens
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("")
     }
 }

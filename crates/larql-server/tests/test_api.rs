@@ -1,12 +1,14 @@
 //! Integration tests for larql-server API endpoints.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Builds a synthetic in-memory vindex and tests each route handler
 //! through the axum test infrastructure (no network, no disk).
 
 use larql_vindex::ndarray::{Array1, Array2};
 use larql_vindex::{
-    FeatureMeta, PatchedVindex, VectorIndex, VindexConfig, VindexLayerInfo,
-    ExtractLevel, LayerBands,
+    ExtractLevel, FeatureMeta, LayerBands, PatchedVindex, VectorIndex, VindexConfig,
+    VindexLayerInfo,
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -91,8 +93,22 @@ fn test_config() -> VindexConfig {
             output: (1, 1),
         }),
         layers: vec![
-            VindexLayerInfo { layer: 0, num_features: 3, offset: 0, length: 48, num_experts: None, num_features_per_expert: None },
-            VindexLayerInfo { layer: 1, num_features: 3, offset: 48, length: 48, num_experts: None, num_features_per_expert: None },
+            VindexLayerInfo {
+                layer: 0,
+                num_features: 3,
+                offset: 0,
+                length: 48,
+                num_experts: None,
+                num_features_per_expert: None,
+            },
+            VindexLayerInfo {
+                layer: 1,
+                num_features: 3,
+                offset: 48,
+                length: 48,
+                num_experts: None,
+                num_features_per_expert: None,
+            },
         ],
         down_top_k: 5,
         has_model_weights: false,
@@ -213,7 +229,8 @@ fn test_relations_listing() {
     let patched = PatchedVindex::new(index);
 
     // Simulate SHOW RELATIONS: scan all layers, aggregate tokens
-    let mut token_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut token_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     for layer in patched.loaded_layers() {
         if let Some(metas) = patched.down_meta_at(layer) {
             for meta in metas.iter().flatten() {
@@ -290,13 +307,11 @@ fn test_patch_count_tracking() {
         description: Some("test-patch".into()),
         author: None,
         tags: vec![],
-        operations: vec![
-            larql_vindex::PatchOp::Delete {
-                layer: 0,
-                feature: 0,
-                reason: Some("test".into()),
-            },
-        ],
+        operations: vec![larql_vindex::PatchOp::Delete {
+            layer: 0,
+            feature: 0,
+            reason: Some("test".into()),
+        }],
     };
 
     patched.apply_patch(patch);
@@ -317,13 +332,11 @@ fn test_remove_patch_restores_state() {
         description: Some("removable".into()),
         author: None,
         tags: vec![],
-        operations: vec![
-            larql_vindex::PatchOp::Delete {
-                layer: 0,
-                feature: 0,
-                reason: None,
-            },
-        ],
+        operations: vec![larql_vindex::PatchOp::Delete {
+            layer: 0,
+            feature: 0,
+            reason: None,
+        }],
     };
 
     patched.apply_patch(patch);
@@ -468,17 +481,23 @@ fn test_layer_band_filtering() {
 
     let all_layers = [0, 1];
 
-    let syntax: Vec<usize> = all_layers.iter().copied()
+    let syntax: Vec<usize> = all_layers
+        .iter()
+        .copied()
         .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
         .collect();
     assert_eq!(syntax, vec![0]);
 
-    let knowledge: Vec<usize> = all_layers.iter().copied()
+    let knowledge: Vec<usize> = all_layers
+        .iter()
+        .copied()
         .filter(|l| *l >= bands.knowledge.0 && *l <= bands.knowledge.1)
         .collect();
     assert_eq!(knowledge, vec![0, 1]);
 
-    let output: Vec<usize> = all_layers.iter().copied()
+    let output: Vec<usize> = all_layers
+        .iter()
+        .copied()
         .filter(|l| *l >= bands.output.0 && *l <= bands.output.1)
         .collect();
     assert_eq!(output, vec![1]);
@@ -560,7 +579,11 @@ fn test_single_model_returns_first() {
     let models = ["only-model"];
 
     // Single model mode: None → returns first
-    let result = if models.len() == 1 { models.first() } else { None };
+    let result = if models.len() == 1 {
+        models.first()
+    } else {
+        None
+    };
     assert_eq!(result, Some(&"only-model"));
 }
 
@@ -569,7 +592,11 @@ fn test_multi_model_none_returns_none() {
     let models = ["a", "b"];
 
     // Multi-model mode: None → returns None (must specify ID)
-    let result: Option<&&str> = if models.len() == 1 { models.first() } else { None };
+    let result: Option<&&str> = if models.len() == 1 {
+        models.first()
+    } else {
+        None
+    };
     assert_eq!(result, None);
 }
 
@@ -681,7 +708,9 @@ fn test_rate_limit_parse() {
 
 fn rate_limit_parse(spec: &str) -> Option<(f64, f64)> {
     let parts: Vec<&str> = spec.split('/').collect();
-    if parts.len() != 2 { return None; }
+    if parts.len() != 2 {
+        return None;
+    }
     let count: f64 = parts[0].trim().parse().ok()?;
     let per_sec = match parts[1].trim() {
         "sec" | "s" | "second" => count,
@@ -699,8 +728,10 @@ fn test_rate_limit_token_bucket() {
     let max_tokens: f64 = 2.0;
 
     // First two requests succeed
-    assert!(tokens >= 1.0); tokens -= 1.0;
-    assert!(tokens >= 1.0); tokens -= 1.0;
+    assert!(tokens >= 1.0);
+    tokens -= 1.0;
+    assert!(tokens >= 1.0);
+    tokens -= 1.0;
 
     // Third fails
     assert!(tokens < 1.0);
@@ -766,7 +797,8 @@ fn test_select_with_relation_filter() {
         .enumerate()
         .filter_map(|(i, m)| m.as_ref().map(|m| (i, m.top_token.as_str())))
         .filter(|(i, _)| {
-            labels.get(&(0, *i))
+            labels
+                .get(&(0, *i))
                 .map(|r| r.to_lowercase().contains("capital"))
                 .unwrap_or(false)
         })
@@ -1137,7 +1169,9 @@ fn test_walk_ffn_seq_len_default_is_one_for_features_only_mode() {
     let hidden = 4;
     let seq_len_default = 1;
     let residual = vec![0.1f32; hidden];
-    let expected = if false /* full_output */ {
+    let expected = if false
+    /* full_output */
+    {
         seq_len_default * hidden
     } else {
         hidden
@@ -1590,10 +1624,10 @@ fn test_binary_single_request_structure() {
     // Verify all fixed header fields at expected offsets.
     let residual = vec![0.5f32, -0.5];
     let body = bin_make_single_request(7, 2, true, 512, &residual);
-    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
-    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
-    let flags    = u32::from_le_bytes(body[8..12].try_into().unwrap());
-    let top_k    = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let layer = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let flags = u32::from_le_bytes(body[8..12].try_into().unwrap());
+    let top_k = u32::from_le_bytes(body[12..16].try_into().unwrap());
     assert_eq!(layer, 7);
     assert_eq!(seq_len, 2);
     assert_eq!(flags & 1, 1); // full_output bit
@@ -1613,8 +1647,8 @@ fn test_binary_batch_request_structure() {
     assert_eq!((l0, l1, l2), (5, 20, 30));
     // After 3 layer u32s: seq_len, flags, top_k
     let seq_len = u32::from_le_bytes(body[20..24].try_into().unwrap());
-    let flags   = u32::from_le_bytes(body[24..28].try_into().unwrap());
-    let top_k   = u32::from_le_bytes(body[28..32].try_into().unwrap());
+    let flags = u32::from_le_bytes(body[24..28].try_into().unwrap());
+    let top_k = u32::from_le_bytes(body[28..32].try_into().unwrap());
     assert_eq!(seq_len, 1);
     assert_eq!(flags & 1, 1);
     assert_eq!(top_k, 128);
@@ -1626,9 +1660,9 @@ fn test_binary_single_response_structure() {
     let body = bin_make_single_response(26, 1, 9.5, &output);
     // [layer u32][seq_len u32][latency f32][output f32*]
     assert_eq!(body.len(), 12 + 3 * 4);
-    let layer    = u32::from_le_bytes(body[0..4].try_into().unwrap());
-    let seq_len  = u32::from_le_bytes(body[4..8].try_into().unwrap());
-    let latency  = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    let layer = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let seq_len = u32::from_le_bytes(body[4..8].try_into().unwrap());
+    let latency = f32::from_le_bytes(body[8..12].try_into().unwrap());
     assert_eq!(layer, 26);
     assert_eq!(seq_len, 1);
     assert!((latency - 9.5).abs() < 0.01);
@@ -1638,18 +1672,15 @@ fn test_binary_single_response_structure() {
 
 #[test]
 fn test_binary_batch_response_structure() {
-    let body = bin_make_batch_response(
-        12.3,
-        &[(5, &[1.0, 2.0]), (20, &[3.0, 4.0])],
-    );
-    let marker      = u32::from_le_bytes(body[0..4].try_into().unwrap());
+    let body = bin_make_batch_response(12.3, &[(5, &[1.0, 2.0]), (20, &[3.0, 4.0])]);
+    let marker = u32::from_le_bytes(body[0..4].try_into().unwrap());
     let num_results = u32::from_le_bytes(body[4..8].try_into().unwrap());
-    let latency     = f32::from_le_bytes(body[8..12].try_into().unwrap());
+    let latency = f32::from_le_bytes(body[8..12].try_into().unwrap());
     assert_eq!(marker, BATCH_MARKER_U32);
     assert_eq!(num_results, 2);
     assert!((latency - 12.3).abs() < 0.01);
     // First result entry at offset 12
-    let layer0     = u32::from_le_bytes(body[12..16].try_into().unwrap());
+    let layer0 = u32::from_le_bytes(body[12..16].try_into().unwrap());
     let num_floats0 = u32::from_le_bytes(body[20..24].try_into().unwrap());
     assert_eq!(layer0, 5);
     assert_eq!(num_floats0, 2);
@@ -1667,7 +1698,9 @@ fn test_binary_float_roundtrip_exact() {
         assert_eq!(
             a.to_bits(),
             b.to_bits(),
-            "float bits differ: {:#010x} vs {:#010x}", a.to_bits(), b.to_bits()
+            "float bits differ: {:#010x} vs {:#010x}",
+            a.to_bits(),
+            b.to_bits()
         );
     }
 }
@@ -1677,7 +1710,11 @@ fn test_binary_features_only_flag_zero() {
     // Binary with full_output=false should have flags bit0 = 0.
     let body = bin_make_single_request(5, 1, false, 8092, &[1.0, 0.0, 0.0, 0.0]);
     let flags = u32::from_le_bytes(body[8..12].try_into().unwrap());
-    assert_eq!(flags & 1, 0, "full_output bit should be 0 for features-only");
+    assert_eq!(
+        flags & 1,
+        0,
+        "full_output bit should be 0 for features-only"
+    );
 }
 
 #[test]
@@ -1756,7 +1793,11 @@ fn test_embed_lookup_with_scale() {
     embed[[0, 0]] = 1.0;
     let scale = 3.0f32;
     let row: Vec<f32> = embed.row(0).iter().map(|&v| v * scale).collect();
-    assert!((row[0] - 3.0).abs() < 1e-6, "scale must be applied: got {}", row[0]);
+    assert!(
+        (row[0] - 3.0).abs() < 1e-6,
+        "scale must be applied: got {}",
+        row[0]
+    );
 }
 
 #[test]
@@ -1865,7 +1906,11 @@ fn test_logits_hidden_size_mismatch_detectable() {
     // Simulate the hidden size guard: residual.len() != hidden rejects request.
     let hidden_size = 4usize;
     let bad_residual = [0.0f32; 3]; // wrong length
-    assert_ne!(bad_residual.len(), hidden_size, "length 3 != hidden_size 4 → bad request");
+    assert_ne!(
+        bad_residual.len(),
+        hidden_size,
+        "length 3 != hidden_size 4 → bad request"
+    );
 }
 
 #[test]
@@ -1882,10 +1927,7 @@ fn test_token_decode_csv_parsing() {
 #[test]
 fn test_token_decode_invalid_id_detectable() {
     let q = "9515,notanumber,1234";
-    let ids: Vec<Result<u32, _>> = q
-        .split(',')
-        .map(|s| s.trim().parse::<u32>())
-        .collect();
+    let ids: Vec<Result<u32, _>> = q.split(',').map(|s| s.trim().parse::<u32>()).collect();
     assert!(ids[0].is_ok());
     assert!(ids[1].is_err(), "non-numeric token ID must fail to parse");
     assert!(ids[2].is_ok());
@@ -1895,9 +1937,13 @@ fn test_token_decode_invalid_id_detectable() {
 fn test_embed_only_mode_string() {
     // Mirrors build_stats logic: embed_only → "embed-service"
     fn mode(embed_only: bool, ffn_only: bool) -> &'static str {
-        if embed_only { "embed-service" }
-        else if ffn_only { "ffn-service" }
-        else { "full" }
+        if embed_only {
+            "embed-service"
+        } else if ffn_only {
+            "ffn-service"
+        } else {
+            "full"
+        }
     }
     assert_eq!(mode(false, false), "full");
     assert_eq!(mode(false, true), "ffn-service");

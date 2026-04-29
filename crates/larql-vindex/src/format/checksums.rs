@@ -1,4 +1,5 @@
 //! Checksum utilities for vindex file integrity verification.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
 use std::io::Read;

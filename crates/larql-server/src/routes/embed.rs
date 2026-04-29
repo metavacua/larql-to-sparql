@@ -1,4 +1,6 @@
 //! Embed server endpoints — POST /v1/embed, POST /v1/logits, GET /v1/token/*.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These endpoints expose the static lookup half of the transformer:
 //! embeddings (token_ids → residual_0) and lm_head (residual_final → logits).
@@ -9,11 +11,11 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use larql_inference::forward::predict::logits_to_predictions_pub;
@@ -48,8 +50,12 @@ pub struct LogitsRequest {
     pub temperature: f32,
 }
 
-fn default_top_k() -> usize { 5 }
-fn default_temperature() -> f32 { 1.0 }
+fn default_top_k() -> usize {
+    5
+}
+fn default_temperature() -> f32 {
+    1.0
+}
 
 #[derive(Serialize)]
 pub struct TokenProb {
@@ -214,18 +220,10 @@ async fn handle_embed_inner(
         for val in h.iter() {
             out.extend_from_slice(&val.to_le_bytes());
         }
-        return (
-            [(header::CONTENT_TYPE, "application/x-larql-ffn")],
-            out,
-        )
-            .into_response();
+        return ([(header::CONTENT_TYPE, "application/x-larql-ffn")], out).into_response();
     }
 
-    let residual: Vec<Vec<f32>> = h
-        .rows()
-        .into_iter()
-        .map(|row| row.to_vec())
-        .collect();
+    let residual: Vec<Vec<f32>> = h.rows().into_iter().map(|row| row.to_vec()).collect();
 
     Json(EmbedResponse {
         residual,
@@ -285,7 +283,10 @@ async fn handle_logits_inner(
     let (residual_flat, top_k, temperature): (Vec<f32>, usize, f32) =
         if content_type.contains("application/x-larql-ffn") {
             if bytes.len() % 4 != 0 {
-                return (StatusCode::BAD_REQUEST, "binary logits: byte length not multiple of 4")
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "binary logits: byte length not multiple of 4",
+                )
                     .into_response();
             }
             let floats: Vec<f32> = bytes
@@ -297,7 +298,10 @@ async fn handle_logits_inner(
             let req: LogitsRequest = match serde_json::from_slice(&bytes) {
                 Ok(r) => r,
                 Err(e) => {
-                    return (StatusCode::BAD_REQUEST, format!("parse logits request: {e}"))
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("parse logits request: {e}"),
+                    )
                         .into_response();
                 }
             };
@@ -320,7 +324,10 @@ async fn handle_logits_inner(
     let weights = match model.get_or_load_weights() {
         Ok(w) => w,
         Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("load weights: {e}"))
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("load weights: {e}"),
+            )
                 .into_response();
         }
     };
@@ -504,7 +511,12 @@ fn handle_embed_single_inner(
             )
                 .into_response();
         }
-        model.embeddings.row(tid).iter().map(|&v| v * scale).collect()
+        model
+            .embeddings
+            .row(tid)
+            .iter()
+            .map(|&v| v * scale)
+            .collect()
     };
 
     let cache_headers = [
@@ -607,8 +619,14 @@ mod tests {
         for val in h.iter() {
             out.extend_from_slice(&val.to_le_bytes());
         }
-        assert_eq!(u32::from_le_bytes(out[..4].try_into().unwrap()) as usize, seq_len);
-        assert_eq!(u32::from_le_bytes(out[4..8].try_into().unwrap()) as usize, hidden);
+        assert_eq!(
+            u32::from_le_bytes(out[..4].try_into().unwrap()) as usize,
+            seq_len
+        );
+        assert_eq!(
+            u32::from_le_bytes(out[4..8].try_into().unwrap()) as usize,
+            hidden
+        );
         assert_eq!(out.len(), 8 + seq_len * hidden * 4);
     }
 
@@ -624,7 +642,11 @@ mod tests {
         let payload = &out[8..];
         for (i, chunk) in payload.chunks_exact(4).enumerate() {
             let got = f32::from_le_bytes(chunk.try_into().unwrap());
-            assert!((got - values[i]).abs() < 1e-6, "float[{i}]: {got} != {}", values[i]);
+            assert!(
+                (got - values[i]).abs() < 1e-6,
+                "float[{i}]: {got} != {}",
+                values[i]
+            );
         }
         let _ = (seq_len, hidden);
     }
@@ -719,7 +741,7 @@ mod tests {
         let embed = Array2::<f32>::zeros((8, 4));
         let vocab = embed.shape()[0];
         assert!((8usize >= vocab)); // token_id=8 is OOB for vocab=8
-        assert!(7usize < vocab);   // token_id=7 is in range
+        assert!(7usize < vocab); // token_id=7 is in range
     }
 
     #[test]

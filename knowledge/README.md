@@ -1,6 +1,6 @@
 # larql-knowledge
 
-Knowledge pipeline for [LARQL](https://github.com/chrishayuk/chuk-larql-rs). Produces reference databases and probe labels that the LARQL engine reads.
+Knowledge pipeline for [LARQL](https://github.com/chrishayuk/larql). Produces reference databases and probe labels that the LARQL engine reads.
 
 The LARQL engine reads JSON files. This project produces them.
 

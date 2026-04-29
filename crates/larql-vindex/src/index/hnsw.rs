@@ -1,4 +1,6 @@
 //! HNSW (Hierarchical Navigable Small World) index for gate vector search.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Replaces brute-force gate KNN (O(N) comparisons per query) with
 //! approximate nearest neighbor search via graph traversal (O(log N)).
@@ -8,27 +10,53 @@
 //! by the caller. This makes the build practical at dim=2560.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 /// Max-heap element (best score first).
 #[derive(Clone, Copy)]
-struct MaxScored { score: f32, id: u32 }
-impl PartialEq for MaxScored { fn eq(&self, o: &Self) -> bool { self.id == o.id } }
+struct MaxScored {
+    score: f32,
+    id: u32,
+}
+impl PartialEq for MaxScored {
+    fn eq(&self, o: &Self) -> bool {
+        self.id == o.id
+    }
+}
 impl Eq for MaxScored {}
-impl PartialOrd for MaxScored { fn partial_cmp(&self, o: &Self) -> Option<Ordering> { Some(self.cmp(o)) } }
+impl PartialOrd for MaxScored {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
 impl Ord for MaxScored {
-    fn cmp(&self, o: &Self) -> Ordering { self.score.partial_cmp(&o.score).unwrap_or(Ordering::Equal) }
+    fn cmp(&self, o: &Self) -> Ordering {
+        self.score.partial_cmp(&o.score).unwrap_or(Ordering::Equal)
+    }
 }
 
 /// Min-heap element (worst score first — for eviction).
 #[derive(Clone, Copy)]
-struct MinScored { score: f32, id: u32 }
-impl PartialEq for MinScored { fn eq(&self, o: &Self) -> bool { self.id == o.id } }
+struct MinScored {
+    score: f32,
+    id: u32,
+}
+impl PartialEq for MinScored {
+    fn eq(&self, o: &Self) -> bool {
+        self.id == o.id
+    }
+}
 impl Eq for MinScored {}
-impl PartialOrd for MinScored { fn partial_cmp(&self, o: &Self) -> Option<Ordering> { Some(self.cmp(o)) } }
+impl PartialOrd for MinScored {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
 impl Ord for MinScored {
-    fn cmp(&self, o: &Self) -> Ordering { o.score.partial_cmp(&self.score).unwrap_or(Ordering::Equal) }
+    fn cmp(&self, o: &Self) -> Ordering {
+        o.score.partial_cmp(&self.score).unwrap_or(Ordering::Equal)
+    }
 }
 
 /// Projected dimension for graph construction.
@@ -69,9 +97,14 @@ impl HnswLayer {
 
         if n == 0 {
             return Self {
-                num_vectors: 0, m, m_max0, max_level: 0,
-                entry_point: 0, node_levels: vec![],
-                level0: vec![], upper: vec![],
+                num_vectors: 0,
+                m,
+                m_max0,
+                max_level: 0,
+                entry_point: 0,
+                node_levels: vec![],
+                level0: vec![],
+                upper: vec![],
                 proj_matrix: Array2::zeros((0, PROJ_DIM)),
                 projected: Array2::zeros((0, PROJ_DIM)),
             };
@@ -88,23 +121,38 @@ impl HnswLayer {
         let mut max_level = 0usize;
         let mut rng = 42u64;
         for nl in node_levels.iter_mut().take(n) {
-            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng = rng
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u = (rng >> 33) as f64 / (1u64 << 31) as f64;
             let level = ((-u.max(1e-12).ln() * ml).floor() as usize).min(12);
             *nl = level as u8;
-            if level > max_level { max_level = level; }
+            if level > max_level {
+                max_level = level;
+            }
         }
 
         let level0 = vec![u32::MAX; n * m_max0];
         let upper: Vec<Vec<u32>> = (0..max_level).map(|_| vec![u32::MAX; n * m]).collect();
 
-        let entry_point = node_levels.iter().enumerate()
-            .max_by_key(|(_, &l)| l).map(|(i, _)| i).unwrap_or(0);
+        let entry_point = node_levels
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &l)| l)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
 
         let mut index = Self {
-            num_vectors: n, m, m_max0, max_level,
-            entry_point, node_levels, level0, upper,
-            proj_matrix, projected,
+            num_vectors: n,
+            m,
+            m_max0,
+            max_level,
+            entry_point,
+            node_levels,
+            level0,
+            upper,
+            proj_matrix,
+            projected,
         };
 
         // Build graph using projected vectors (dim=64, fast).
@@ -112,7 +160,9 @@ impl HnswLayer {
         let proj = index.projected.clone();
         let proj_view = proj.view();
         for id in 0..n {
-            if id == entry_point && id == 0 { continue; }
+            if id == entry_point && id == 0 {
+                continue;
+            }
             let q = proj_view.row(id);
             let node_level = index.node_levels[id] as usize;
 
@@ -125,10 +175,7 @@ impl HnswLayer {
                 let max_conn = if lev == 0 { m_max0 } else { m };
                 let candidates = index.search_level(&proj_view, &q, ep, ef_construction, lev);
 
-                let selected: Vec<u32> = candidates.iter()
-                    .take(max_conn)
-                    .map(|s| s.id)
-                    .collect();
+                let selected: Vec<u32> = candidates.iter().take(max_conn).map(|s| s.id).collect();
 
                 index.set_neighbors(id, lev, &selected);
 
@@ -162,7 +209,9 @@ impl HnswLayer {
         top_k: usize,
         ef_search: usize,
     ) -> Vec<(usize, f32)> {
-        if self.num_vectors == 0 { return vec![]; }
+        if self.num_vectors == 0 {
+            return vec![];
+        }
 
         let ef = ef_search.max(top_k);
 
@@ -170,7 +219,10 @@ impl HnswLayer {
         let proj_view = self.projected.view();
         let cpu = larql_compute::CpuBackend;
         use larql_compute::ComputeBackend;
-        let x = query.view().into_shape_with_order((1, query.len())).unwrap();
+        let x = query
+            .view()
+            .into_shape_with_order((1, query.len()))
+            .unwrap();
         let proj_2d = cpu.matmul(x, self.proj_matrix.view());
         let proj_query = Array1::from_vec(proj_2d.into_raw_vec_and_offset().0);
 
@@ -184,7 +236,8 @@ impl HnswLayer {
         let candidates = self.search_level(&proj_view, &proj_query.view(), ep, ef, 0);
 
         // Re-score final candidates with exact full-dim dot products
-        let mut results: Vec<(usize, f32)> = candidates.into_iter()
+        let mut results: Vec<(usize, f32)> = candidates
+            .into_iter()
             .map(|s| {
                 let exact_score = Self::dot(&vectors.row(s.id as usize), &query.view());
                 (s.id as usize, exact_score)
@@ -214,16 +267,30 @@ impl HnswLayer {
         larql_compute::dot(a, b)
     }
 
-    fn greedy_closest(&self, vectors: &ArrayView2<f32>, query: &ArrayView1<f32>, mut ep: usize, level: usize) -> usize {
+    fn greedy_closest(
+        &self,
+        vectors: &ArrayView2<f32>,
+        query: &ArrayView1<f32>,
+        mut ep: usize,
+        level: usize,
+    ) -> usize {
         let mut best = Self::dot(&vectors.row(ep), query);
         loop {
             let mut changed = false;
             for &nb in self.neighbors(ep, level) {
-                if nb == u32::MAX { break; }
+                if nb == u32::MAX {
+                    break;
+                }
                 let s = Self::dot(&vectors.row(nb as usize), query);
-                if s > best { best = s; ep = nb as usize; changed = true; }
+                if s > best {
+                    best = s;
+                    ep = nb as usize;
+                    changed = true;
+                }
             }
-            if !changed { break; }
+            if !changed {
+                break;
+            }
         }
         ep
     }
@@ -242,10 +309,16 @@ impl HnswLayer {
         let entry_score = Self::dot(&vectors.row(entry), query);
 
         let mut candidates: BinaryHeap<MaxScored> = BinaryHeap::new();
-        candidates.push(MaxScored { score: entry_score, id: entry as u32 });
+        candidates.push(MaxScored {
+            score: entry_score,
+            id: entry as u32,
+        });
 
         let mut results: BinaryHeap<MinScored> = BinaryHeap::new();
-        results.push(MinScored { score: entry_score, id: entry as u32 });
+        results.push(MinScored {
+            score: entry_score,
+            id: entry as u32,
+        });
 
         while let Some(current) = candidates.pop() {
             let worst = results.peek().map(|s| s.score).unwrap_or(f32::NEG_INFINITY);
@@ -254,9 +327,13 @@ impl HnswLayer {
             }
 
             for &nb in self.neighbors(current.id as usize, level) {
-                if nb == u32::MAX { break; }
+                if nb == u32::MAX {
+                    break;
+                }
                 let nid = nb as usize;
-                if nid >= self.num_vectors || visited[nid] { continue; }
+                if nid >= self.num_vectors || visited[nid] {
+                    continue;
+                }
                 visited[nid] = true;
 
                 let score = Self::dot(&vectors.row(nid), query);
@@ -272,8 +349,12 @@ impl HnswLayer {
             }
         }
 
-        let mut out: Vec<MaxScored> = results.into_iter()
-            .map(|s| MaxScored { score: s.score, id: s.id })
+        let mut out: Vec<MaxScored> = results
+            .into_iter()
+            .map(|s| MaxScored {
+                score: s.score,
+                id: s.id,
+            })
             .collect();
         out.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
         out
@@ -286,7 +367,11 @@ impl HnswLayer {
         } else if level <= self.upper.len() {
             let s = node * self.m;
             let arr = &self.upper[level - 1];
-            if s + self.m <= arr.len() { &arr[s..s + self.m] } else { &[] }
+            if s + self.m <= arr.len() {
+                &arr[s..s + self.m]
+            } else {
+                &[]
+            }
         } else {
             &[]
         }
@@ -307,21 +392,43 @@ impl HnswLayer {
         }
     }
 
-    fn add_connection(&mut self, node: usize, level: usize, new_nb: u32, max_conn: usize, vectors: &ArrayView2<f32>) {
+    fn add_connection(
+        &mut self,
+        node: usize,
+        level: usize,
+        new_nb: u32,
+        max_conn: usize,
+        vectors: &ArrayView2<f32>,
+    ) {
         let (arr, start, cap) = if level == 0 {
-            (&mut self.level0 as &mut Vec<u32>, node * self.m_max0, self.m_max0.min(max_conn))
+            (
+                &mut self.level0 as &mut Vec<u32>,
+                node * self.m_max0,
+                self.m_max0.min(max_conn),
+            )
         } else if level <= self.upper.len() {
-            (&mut self.upper[level - 1] as &mut Vec<u32>, node * self.m, self.m.min(max_conn))
+            (
+                &mut self.upper[level - 1] as &mut Vec<u32>,
+                node * self.m,
+                self.m.min(max_conn),
+            )
         } else {
             return;
         };
 
-        if start + cap > arr.len() { return; }
+        if start + cap > arr.len() {
+            return;
+        }
         let slot = &mut arr[start..start + cap];
 
         for s in slot.iter_mut().take(cap) {
-            if *s == u32::MAX { *s = new_nb; return; }
-            if *s == new_nb { return; }
+            if *s == u32::MAX {
+                *s = new_nb;
+                return;
+            }
+            if *s == new_nb {
+                return;
+            }
         }
 
         // Evict worst neighbor if new one is better
@@ -331,13 +438,20 @@ impl HnswLayer {
         let mut worst_s = f32::MAX;
         for (i, &nb) in slot.iter().enumerate().take(cap) {
             let s = Self::dot(&node_vec, &vectors.row(nb as usize));
-            if s < worst_s { worst_s = s; worst_i = i; }
+            if s < worst_s {
+                worst_s = s;
+                worst_i = i;
+            }
         }
         if new_score > worst_s {
             slot[worst_i] = new_nb;
         }
     }
 
-    pub fn len(&self) -> usize { self.num_vectors }
-    pub fn is_empty(&self) -> bool { self.num_vectors == 0 }
+    pub fn len(&self) -> usize {
+        self.num_vectors
+    }
+    pub fn is_empty(&self) -> bool {
+        self.num_vectors == 0
+    }
 }

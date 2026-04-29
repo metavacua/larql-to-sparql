@@ -1,4 +1,6 @@
 //! Vindex-patch compilation: read .vlp patches, install one edge per Insert op.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Trigger comes from each patch's stored gate vector; write comes from the
 //! down_meta target token's embedding when present.
@@ -49,11 +51,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_ops = Vec::new();
     for pf in &patch_files {
         let patch = larql_vindex::VindexPatch::load(pf)?;
-        eprintln!(
-            "  patch: {} ({} ops)",
-            pf.display(),
-            patch.operations.len()
-        );
+        eprintln!("  patch: {} ({} ops)", pf.display(), patch.operations.len());
         all_ops.extend(patch.operations);
     }
 
@@ -82,7 +80,10 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let Some(b64) = gate_vector_b64 else {
-            eprintln!("  skip: insert at L{}[{}] has no gate vector", layer, feature);
+            eprintln!(
+                "  skip: insert at L{}[{}] has no gate vector",
+                layer, feature
+            );
             continue;
         };
         let gate_vec = decode_f32_b64(b64)?;

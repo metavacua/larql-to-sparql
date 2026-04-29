@@ -1,4 +1,6 @@
 //! Demonstrate the inference engine — forward pass from safetensors weights.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads a model, tokenizes a prompt, runs the full transformer forward pass,
 //! and shows top-k next-token predictions. Also demonstrates residual capture.

@@ -1,4 +1,6 @@
 //! WS /v1/stream — WebSocket streaming for layer-by-layer DESCRIBE.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Client sends JSON messages, server streams results back layer by layer.
 //!
@@ -16,10 +18,7 @@ use axum::response::Response;
 
 use crate::state::AppState;
 
-pub async fn handle_stream(
-    State(state): State<Arc<AppState>>,
-    ws: WebSocketUpgrade,
-) -> Response {
+pub async fn handle_stream(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -36,7 +35,9 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             Err(e) => {
                 let _ = socket
                     .send(Message::Text(
-                        serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into(),
+                        serde_json::json!({"type": "error", "message": e.to_string()})
+                            .to_string()
+                            .into(),
                     ))
                     .await;
                 continue;
@@ -76,7 +77,9 @@ async fn handle_stream_describe(
         None => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": "missing entity"}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": "missing entity"})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -88,7 +91,9 @@ async fn handle_stream_describe(
         None => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": "no model loaded"}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": "no model loaded"})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -105,7 +110,9 @@ async fn handle_stream_describe(
         Err(e) => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": e.to_string()})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -115,7 +122,9 @@ async fn handle_stream_describe(
     if token_ids.is_empty() {
         let _ = socket
             .send(Message::Text(
-                serde_json::json!({"type": "done", "total_edges": 0, "latency_ms": 0}).to_string().into(),
+                serde_json::json!({"type": "done", "total_edges": 0, "latency_ms": 0})
+                    .to_string()
+                    .into(),
             ))
             .await;
         return;
@@ -123,11 +132,17 @@ async fn handle_stream_describe(
 
     let hidden = model.embeddings.shape()[1];
     let query = if token_ids.len() == 1 {
-        model.embeddings.row(token_ids[0] as usize).mapv(|v| v * model.embed_scale)
+        model
+            .embeddings
+            .row(token_ids[0] as usize)
+            .mapv(|v| v * model.embed_scale)
     } else {
         let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
         for &tok in &token_ids {
-            avg += &model.embeddings.row(tok as usize).mapv(|v| v * model.embed_scale);
+            avg += &model
+                .embeddings
+                .row(tok as usize)
+                .mapv(|v| v * model.embed_scale);
         }
         avg /= token_ids.len() as f32;
         avg
@@ -149,13 +164,19 @@ async fn handle_stream_describe(
     let all_layers = patched.loaded_layers();
 
     let scan_layers: Vec<usize> = match band {
-        "syntax" => all_layers.iter().copied()
+        "syntax" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
             .collect(),
-        "knowledge" => all_layers.iter().copied()
+        "knowledge" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.knowledge.0 && *l <= bands.knowledge.1)
             .collect(),
-        "output" => all_layers.iter().copied()
+        "output" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.output.0 && *l <= bands.output.1)
             .collect(),
         _ => all_layers,
@@ -199,7 +220,11 @@ async fn handle_stream_describe(
             "edges": edges,
         });
 
-        if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+        if socket
+            .send(Message::Text(msg.to_string().into()))
+            .await
+            .is_err()
+        {
             return; // Client disconnected.
         }
     }
@@ -211,7 +236,9 @@ async fn handle_stream_describe(
         "total_edges": total_edges,
         "latency_ms": (latency_ms * 10.0).round() / 10.0,
     });
-    let _ = socket.send(Message::Text(done_msg.to_string().into())).await;
+    let _ = socket
+        .send(Message::Text(done_msg.to_string().into()))
+        .await;
 }
 
 /// Handle streaming INFER: run forward pass and stream top-K predictions.
@@ -231,7 +258,9 @@ async fn handle_stream_infer(
         _ => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": "missing or empty prompt"}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": "missing or empty prompt"})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -243,7 +272,9 @@ async fn handle_stream_infer(
         None => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": "no model loaded"}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": "no model loaded"})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -253,7 +284,9 @@ async fn handle_stream_infer(
     if model.infer_disabled {
         let _ = socket
             .send(Message::Text(
-                serde_json::json!({"type": "error", "message": "inference disabled (--no-infer)"}).to_string().into(),
+                serde_json::json!({"type": "error", "message": "inference disabled (--no-infer)"})
+                    .to_string()
+                    .into(),
             ))
             .await;
         return;
@@ -264,7 +297,9 @@ async fn handle_stream_infer(
         Err(e) => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": e}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": e})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -279,7 +314,9 @@ async fn handle_stream_infer(
         Err(e) => {
             let _ = socket
                 .send(Message::Text(
-                    serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into(),
+                    serde_json::json!({"type": "error", "message": e.to_string()})
+                        .to_string()
+                        .into(),
                 ))
                 .await;
             return;
@@ -289,7 +326,9 @@ async fn handle_stream_infer(
     if token_ids.is_empty() {
         let _ = socket
             .send(Message::Text(
-                serde_json::json!({"type": "error", "message": "empty prompt after tokenization"}).to_string().into(),
+                serde_json::json!({"type": "error", "message": "empty prompt after tokenization"})
+                    .to_string()
+                    .into(),
             ))
             .await;
         return;
@@ -302,8 +341,12 @@ async fn handle_stream_infer(
     } else {
         let patched = model.patched.blocking_read();
         let r = larql_inference::infer_patched(
-            weights, &model.tokenizer, &*patched,
-            Some(&patched.knn_store), &token_ids, top_k,
+            weights,
+            &model.tokenizer,
+            &*patched,
+            Some(&patched.knn_store),
+            &token_ids,
+            top_k,
         );
         r.predictions
     };
@@ -316,7 +359,11 @@ async fn handle_stream_infer(
             "token": token,
             "probability": (*prob * 10000.0).round() / 10000.0,
         });
-        if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+        if socket
+            .send(Message::Text(msg.to_string().into()))
+            .await
+            .is_err()
+        {
             return;
         }
     }
@@ -329,5 +376,7 @@ async fn handle_stream_infer(
         "predictions": predictions.len(),
         "latency_ms": (latency_ms * 10.0).round() / 10.0,
     });
-    let _ = socket.send(Message::Text(done_msg.to_string().into())).await;
+    let _ = socket
+        .send(Message::Text(done_msg.to_string().into()))
+        .await;
 }

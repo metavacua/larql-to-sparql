@@ -1,4 +1,6 @@
 //! QK-norm: per-head RMSNorm with learned weight, applied to Q/K projections
+// SPDX-License-Identifier: Apache-2.0
+
 //! before RoPE in attention.
 //!
 //! Formula (matches CPU `larql_inference::residual::rms_norm_heads_eps`):

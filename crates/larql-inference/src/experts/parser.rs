@@ -1,4 +1,6 @@
 //! Parse a structured op-call from free-form model output.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Models targeted with the prompt
 //!
@@ -58,7 +60,9 @@ fn into_op_call(v: Value) -> Option<OpCall> {
         Value::String(s) if !s.is_empty() => s,
         _ => return None,
     };
-    let args = obj.remove("args").unwrap_or_else(|| Value::Object(Map::new()));
+    let args = obj
+        .remove("args")
+        .unwrap_or_else(|| Value::Object(Map::new()));
     Some(OpCall { op, args })
 }
 

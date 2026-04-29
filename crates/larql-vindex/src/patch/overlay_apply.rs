@@ -1,4 +1,6 @@
 //! Patch application — `apply_patch`, `remove_patch`,
+// SPDX-License-Identifier: Apache-2.0
+
 //! `rebuild_overrides` for `PatchedVindex`.
 //!
 //! Walks `VindexPatch::operations` and resolves each one into the
@@ -16,7 +18,15 @@ impl PatchedVindex {
     pub fn apply_patch(&mut self, patch: VindexPatch) {
         for op in &patch.operations {
             match op {
-                PatchOp::InsertKnn { layer, entity, relation, target, target_id, confidence, key_vector_b64 } => {
+                PatchOp::InsertKnn {
+                    layer,
+                    entity,
+                    relation,
+                    target,
+                    target_id,
+                    confidence,
+                    key_vector_b64,
+                } => {
                     if let Ok(key_vec) = decode_gate_vector(key_vector_b64) {
                         self.knn_store.add(
                             *layer,
@@ -38,7 +48,13 @@ impl PatchedVindex {
             }
             let key = op.key().unwrap(); // safe: only Arch A ops reach here
             match op {
-                PatchOp::Insert { target, confidence, gate_vector_b64, down_meta, .. } => {
+                PatchOp::Insert {
+                    target,
+                    confidence,
+                    gate_vector_b64,
+                    down_meta,
+                    ..
+                } => {
                     let meta = if let Some(dm) = down_meta {
                         FeatureMeta {
                             top_token: dm.top_token.clone(),
@@ -66,7 +82,11 @@ impl PatchedVindex {
                         }
                     }
                 }
-                PatchOp::Update { gate_vector_b64, down_meta, .. } => {
+                PatchOp::Update {
+                    gate_vector_b64,
+                    down_meta,
+                    ..
+                } => {
                     if let Some(dm) = down_meta {
                         let meta = FeatureMeta {
                             top_token: dm.top_token.clone(),

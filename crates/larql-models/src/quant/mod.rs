@@ -1,4 +1,6 @@
 //! Quantization and dequantization — data format encoding/decoding.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Supports:
 //! - **half**: f16/bf16 ↔ f32 conversion
@@ -8,6 +10,6 @@
 //! This module handles data format encoding/decoding only.
 //! Compute operations (matvec, vecmat, GPU shaders) are in `larql-compute`.
 
-pub mod half;
 pub mod ggml;
+pub mod half;
 pub mod mxfp4;

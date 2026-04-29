@@ -1,4 +1,6 @@
 //! Reference databases for pair-based relation labeling.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Holds the `RelationDatabase` data type (a name → (subject, object)
 //! pair set), the loaders for Wikidata + WordNet, and the bundled
@@ -134,7 +136,9 @@ impl RelationDatabase {
     /// Used by `super::labeling` to build inverted indexes for
     /// output-only matching.
     pub fn relations_iter(&self) -> impl Iterator<Item = (&str, &[(String, String)])> {
-        self.relations.iter().map(|(k, v)| (k.as_str(), v.as_slice()))
+        self.relations
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_slice()))
     }
 }
 /// Loaded reference databases, separated by layer range.
@@ -190,4 +194,3 @@ pub fn load_reference_databases() -> ReferenceDatabases {
 
     result
 }
-

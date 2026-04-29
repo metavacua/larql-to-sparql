@@ -1,4 +1,6 @@
 //! Bounded-state decode comparison: Full-KV vs RS-decode.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! This is the actual experiment the email asks for: run `rs_decode_step`
 //! (which reconstructs K/V from stored residuals) against a full-KV decode
@@ -17,14 +19,14 @@
 //!   L1/L32  → parametric routing (static for in-context queries)
 //!   L29/L30 → in-context comprehension (dynamic for in-context, static for parametric)
 
-use ndarray::Array2;
-use larql_inference::model::ModelWeights;
 use larql_inference::attention::run_attention_block_decode_step;
-use larql_inference::forward::{embed_tokens_pub, run_ffn, logits_to_predictions_pub};
 use larql_inference::ffn::WeightFfn;
+use larql_inference::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
+use larql_inference::model::ModelWeights;
+use ndarray::Array2;
 
 use super::kv_capture::capture_kv;
-use super::markov_layer::{rs_prefill, rs_decode_step};
+use super::markov_layer::{rs_decode_step, rs_prefill};
 
 /// Whether the answer is in the model's weights or planted in the prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -83,9 +85,7 @@ pub fn run_decode_comparison(
     window_size: usize,
     decode_steps: usize,
 ) -> DecodeComparisonResult {
-    let prompt = tokenizer
-        .decode(token_ids, false)
-        .unwrap_or_default();
+    let prompt = tokenizer.decode(token_ids, false).unwrap_or_default();
 
     // --- Prefill -----------------------------------------------------------
     // Both strategies share the same prefill. Divergence is decode-only.
@@ -93,10 +93,8 @@ pub fn run_decode_comparison(
     let rs_result = rs_prefill(weights, token_ids, Some(window_size));
 
     // Build per-layer mutable KV cache from captured tensors.
-    let mut kv_cache: Vec<(Array2<f32>, Array2<f32>)> = kv.keys
-        .into_iter()
-        .zip(kv.values)
-        .collect();
+    let mut kv_cache: Vec<(Array2<f32>, Array2<f32>)> =
+        kv.keys.into_iter().zip(kv.values).collect();
 
     // RS store starts with the bounded window from prefill.
     let mut rs_store = rs_result.store;
@@ -104,7 +102,8 @@ pub fn run_decode_comparison(
     // Seed both decoders with the first predicted token (from the identical
     // prefill — this token is the same for both).
     let preds = logits_to_predictions_pub(weights, &kv.hidden, tokenizer, 1, 1.0);
-    let seed_token = preds.predictions
+    let seed_token = preds
+        .predictions
         .first()
         .map(|(t, _)| t.clone())
         .unwrap_or_default();
@@ -123,8 +122,16 @@ pub fn run_decode_comparison(
         // --- Full-KV decode step ---
         let h_full = full_kv_step(weights, full_id, &mut kv_cache, next_pos, &ffn);
         let full_preds = logits_to_predictions_pub(weights, &h_full, tokenizer, 3, 1.0);
-        let next_full = full_preds.predictions.first().map(|(t, _)| t.clone()).unwrap_or_default();
-        let next_full_prob = full_preds.predictions.first().map(|(_, p)| *p).unwrap_or(0.0);
+        let next_full = full_preds
+            .predictions
+            .first()
+            .map(|(t, _)| t.clone())
+            .unwrap_or_default();
+        let next_full_prob = full_preds
+            .predictions
+            .first()
+            .map(|(_, p)| *p)
+            .unwrap_or(0.0);
 
         // --- RS decode step ---
         let (h_rs, new_store) = match rs_decode_step(weights, rs_id, rs_store) {
@@ -133,7 +140,11 @@ pub fn run_decode_comparison(
         };
         rs_store = new_store;
         let rs_preds = logits_to_predictions_pub(weights, &h_rs, tokenizer, 3, 1.0);
-        let next_rs = rs_preds.predictions.first().map(|(t, _)| t.clone()).unwrap_or_default();
+        let next_rs = rs_preds
+            .predictions
+            .first()
+            .map(|(t, _)| t.clone())
+            .unwrap_or_default();
         let next_rs_prob = rs_preds.predictions.first().map(|(_, p)| *p).unwrap_or(0.0);
 
         let cosine = hidden_cosine(&h_full, &h_rs);
@@ -182,9 +193,9 @@ fn full_kv_step(
 ) -> Array2<f32> {
     let mut h = embed_tokens_pub(weights, &[token_id]);
     for (layer, kv_slot) in kv_cache.iter_mut().enumerate() {
-        let (h_post, new_kv) = run_attention_block_decode_step(
-            weights, &h, layer, Some(kv_slot), abs_position,
-        ).expect("full-KV decode step failed");
+        let (h_post, new_kv) =
+            run_attention_block_decode_step(weights, &h, layer, Some(kv_slot), abs_position)
+                .expect("full-KV decode step failed");
         *kv_slot = new_kv;
         let (h_out, _) = run_ffn(weights, &h_post, layer, ffn, false);
         h = h_out;
@@ -196,10 +207,18 @@ fn full_kv_step(
 fn hidden_cosine(h1: &Array2<f32>, h2: &Array2<f32>) -> f64 {
     let v1 = h1.row(h1.shape()[0] - 1);
     let v2 = h2.row(h2.shape()[0] - 1);
-    let dot: f64 = v1.iter().zip(v2.iter()).map(|(&a, &b)| a as f64 * b as f64).sum();
+    let dot: f64 = v1
+        .iter()
+        .zip(v2.iter())
+        .map(|(&a, &b)| a as f64 * b as f64)
+        .sum();
     let n1: f64 = v1.iter().map(|&a| a as f64 * a as f64).sum::<f64>().sqrt();
     let n2: f64 = v2.iter().map(|&a| a as f64 * a as f64).sum::<f64>().sqrt();
-    if n1 * n2 < 1e-12 { 0.0 } else { dot / (n1 * n2) }
+    if n1 * n2 < 1e-12 {
+        0.0
+    } else {
+        dot / (n1 * n2)
+    }
 }
 
 /// Get the first token ID for a token string.
@@ -268,7 +287,9 @@ pub fn format_window_sweep(results: &[DecodeComparisonResult]) -> String {
             r.window_size,
             format!("{:?}", r.query_type),
             r.match_rate * 100.0,
-            r.first_divergence.map(|d| d.to_string()).unwrap_or("-".to_string()),
+            r.first_divergence
+                .map(|d| d.to_string())
+                .unwrap_or("-".to_string()),
             r.verdict(),
         ));
     }
@@ -279,7 +300,14 @@ fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..s.char_indices().nth(max - 1).map(|(i, _)| i).unwrap_or(s.len())])
+        format!(
+            "{}…",
+            &s[..s
+                .char_indices()
+                .nth(max - 1)
+                .map(|(i, _)| i)
+                .unwrap_or(s.len())]
+        )
     }
 }
 
@@ -302,11 +330,13 @@ pub fn in_context_prompts() -> Vec<String> {
         // Medium gap — fact buried under filler
         "Remember: the answer is forty-two. \
          The weather today is pleasant and calm. \
-         The answer is".to_string(),
+         The answer is"
+            .to_string(),
         // Long gap — fact far from query
         "Note: the password is CRIMSON. \
          It is a beautiful day outside. The sun is shining brightly. \
          The birds are singing in the trees. \
-         The password is".to_string(),
+         The password is"
+            .to_string(),
     ]
 }

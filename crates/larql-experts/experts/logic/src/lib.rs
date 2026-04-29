@@ -1,4 +1,6 @@
 //! # Propositional-logic expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Boolean expressions in a formal syntax: single-letter variables `A..Z`,
 //! constants `TRUE` / `FALSE`, operators `NOT` (also `~`, `¬`, `!`),

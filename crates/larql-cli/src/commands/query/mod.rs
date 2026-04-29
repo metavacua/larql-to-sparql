@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod describe_cmd;
 pub mod filter_cmd;
 pub mod merge_cmd;

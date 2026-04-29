@@ -1,4 +1,6 @@
 //! Gemma 4 architecture — Google's multimodal model family (2025).
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Key differences from Gemma 3:
 //! - Dual head_dim: sliding layers use head_dim (256), global layers use global_head_dim (512)
@@ -31,9 +33,7 @@ impl Gemma4Arch {
 
         // Determine global layers from explicit layer_types or pattern
         let global_layers: Vec<bool> = if let Some(ref types) = config.layer_types {
-            types.iter()
-                .map(|t| t == "full_attention")
-                .collect()
+            types.iter().map(|t| t == "full_attention").collect()
         } else {
             let pattern = config.sliding_window_pattern.unwrap_or(6);
             (0..num_layers)
@@ -52,10 +52,8 @@ impl Gemma4Arch {
         };
         let kv_sources = if num_shared > 0 {
             // Find the last non-shared sliding and global layers
-            let last_sliding = (0..first_shared).rev()
-                .find(|&l| !global_layers[l]);
-            let last_global = (0..first_shared).rev()
-                .find(|&l| global_layers[l]);
+            let last_sliding = (0..first_shared).rev().find(|&l| !global_layers[l]);
+            let last_global = (0..first_shared).rev().find(|&l| global_layers[l]);
 
             (0..num_layers)
                 .map(|layer| {
@@ -95,7 +93,12 @@ impl ModelArchitecture for Gemma4Arch {
 
     /// Gemma 4 weights use `model.language_model.` prefix (multimodal wrapper).
     fn key_prefixes_to_strip(&self) -> &[&str] {
-        &["model.language_model.model.", "model.language_model.", "language_model.model.", "model."]
+        &[
+            "model.language_model.model.",
+            "model.language_model.",
+            "language_model.model.",
+            "model.",
+        ]
     }
 
     // ── Per-layer attention geometry ──
@@ -110,7 +113,9 @@ impl ModelArchitecture for Gemma4Arch {
 
     fn num_kv_heads_for_layer(&self, layer: usize) -> usize {
         if self.is_global_layer(layer) {
-            self.config.num_global_kv_heads.unwrap_or(self.config.num_kv_heads)
+            self.config
+                .num_global_kv_heads
+                .unwrap_or(self.config.num_kv_heads)
         } else {
             self.config.num_kv_heads
         }
@@ -236,7 +241,8 @@ impl ModelArchitecture for Gemma4Arch {
     }
 
     fn num_experts_per_token(&self) -> usize {
-        self.config.top_k_experts
+        self.config
+            .top_k_experts
             .or(self.config.num_experts_per_token)
             .unwrap_or(0)
     }
@@ -272,7 +278,10 @@ impl ModelArchitecture for Gemma4Arch {
 
     fn moe_router_per_expert_scale_key(&self, layer: usize) -> Option<String> {
         if self.config.enable_moe_block {
-            Some(format!("{}router.per_expert_scale", self.layer_prefix(layer)))
+            Some(format!(
+                "{}router.per_expert_scale",
+                self.layer_prefix(layer)
+            ))
         } else {
             None
         }

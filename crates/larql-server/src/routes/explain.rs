@@ -1,9 +1,10 @@
 //! POST /v1/explain-infer — walk inference with per-layer feature trace.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -24,9 +25,15 @@ pub struct ExplainRequest {
     pub with_attention: bool,
 }
 
-fn default_top() -> usize { 5 }
-fn default_per_layer() -> usize { 3 }
-fn default_band() -> String { "all".into() }
+fn default_top() -> usize {
+    5
+}
+fn default_per_layer() -> usize {
+    3
+}
+fn default_band() -> String {
+    "all".into()
+}
 
 fn explain_infer(
     model: &LoadedModel,
@@ -34,17 +41,21 @@ fn explain_infer(
 ) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
-    let weights = model.get_or_load_weights()
+    let weights = model
+        .get_or_load_weights()
         .map_err(ServerError::InferenceUnavailable)?;
-    let encoding = model.tokenizer.encode(req.prompt.as_str(), true)
+    let encoding = model
+        .tokenizer
+        .encode(req.prompt.as_str(), true)
         .map_err(|e| ServerError::Internal(format!("tokenize: {e}")))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
     // Decode tokens for attention display (None for special tokens like BOS/EOS)
     let token_strs: Vec<Option<String>> = if req.with_attention {
-        token_ids.iter().map(|&id| {
-            larql_inference::decode_token(&model.tokenizer, id)
-        }).collect()
+        token_ids
+            .iter()
+            .map(|&id| larql_inference::decode_token(&model.tokenizer, id))
+            .collect()
     } else {
         Vec::new()
     };
@@ -54,12 +65,20 @@ fn explain_infer(
 
     let (predictions_raw, attention_captures, lens_residuals) = if req.with_attention {
         let r = larql_inference::predict_with_ffn_attention(
-            weights, &model.tokenizer, &token_ids, req.top, &walk_ffn,
+            weights,
+            &model.tokenizer,
+            &token_ids,
+            req.top,
+            &walk_ffn,
         );
         (r.predictions, r.attention, r.residuals)
     } else {
         let r = larql_inference::predict_with_ffn(
-            weights, &model.tokenizer, &token_ids, req.top, &walk_ffn,
+            weights,
+            &model.tokenizer,
+            &token_ids,
+            req.top,
+            &walk_ffn,
         );
         (r.predictions, Vec::new(), Vec::new())
     };
@@ -73,7 +92,8 @@ fn explain_infer(
     let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &patched);
 
     // Build logit lens: layer → (top_token, probability)
-    let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals.iter()
+    let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals
+        .iter()
         .filter_map(|(layer, residual)| {
             let pred = larql_inference::logit_lens_top1(weights, &model.tokenizer, residual)?;
             Some((*layer, pred))
@@ -85,7 +105,9 @@ fn explain_infer(
         let mut map = std::collections::HashMap::new();
         for cap in &attention_captures {
             let n_heads = cap.weights.heads.len();
-            if n_heads == 0 || token_strs.is_empty() { continue; }
+            if n_heads == 0 || token_strs.is_empty() {
+                continue;
+            }
             let seq_len = cap.weights.heads[0].len();
             let mut avg = vec![0.0f32; seq_len];
             for head in &cap.weights.heads {
@@ -93,8 +115,13 @@ fn explain_infer(
                     avg[j] += w;
                 }
             }
-            for v in avg.iter_mut() { *v /= n_heads as f32; }
-            let mut pairs: Vec<(String, f32)> = avg.iter().copied().enumerate()
+            for v in avg.iter_mut() {
+                *v /= n_heads as f32;
+            }
+            let mut pairs: Vec<(String, f32)> = avg
+                .iter()
+                .copied()
+                .enumerate()
                 .filter_map(|(j, w)| {
                     let tok = token_strs.get(j)?.as_ref()?;
                     Some((tok.trim().to_string(), w))
@@ -109,8 +136,13 @@ fn explain_infer(
 
     // Resolve band to layer range
     let last = model.config.num_layers.saturating_sub(1);
-    let bands = model.config.layer_bands.clone()
-        .or_else(|| larql_vindex::LayerBands::for_family(&model.config.family, model.config.num_layers))
+    let bands = model
+        .config
+        .layer_bands
+        .clone()
+        .or_else(|| {
+            larql_vindex::LayerBands::for_family(&model.config.family, model.config.num_layers)
+        })
         .unwrap_or(larql_vindex::LayerBands {
             syntax: (0, last),
             knowledge: (0, last),
@@ -136,7 +168,8 @@ fn explain_infer(
         }
         // When relations_only, re-sort so positive gates rank first
         let ordered_hits: Vec<_> = if req.relations_only {
-            let mut lh: Vec<_> = hits.iter()
+            let mut lh: Vec<_> = hits
+                .iter()
                 .filter(|hit| model.probe_labels.contains_key(&(*layer, hit.feature)))
                 .collect();
             lh.sort_by(|a, b| {
@@ -145,7 +178,10 @@ fn explain_infer(
                 match (a_pos, b_pos) {
                     (true, false) => std::cmp::Ordering::Less,
                     (false, true) => std::cmp::Ordering::Greater,
-                    _ => b.gate_score.abs().partial_cmp(&a.gate_score.abs())
+                    _ => b
+                        .gate_score
+                        .abs()
+                        .partial_cmp(&a.gate_score.abs())
                         .unwrap_or(std::cmp::Ordering::Equal),
                 }
             });
@@ -154,13 +190,17 @@ fn explain_infer(
             hits.iter().collect()
         };
 
-        let features: Vec<serde_json::Value> = ordered_hits.iter()
+        let features: Vec<serde_json::Value> = ordered_hits
+            .iter()
             .filter_map(|hit| {
                 let relation = model.probe_labels.get(&(*layer, hit.feature)).cloned();
                 if req.relations_only && relation.is_none() {
                     return None;
                 }
-                let top_tokens: Vec<String> = hit.meta.top_k.iter()
+                let top_tokens: Vec<String> = hit
+                    .meta
+                    .top_k
+                    .iter()
                     .take(3)
                     .map(|t| t.token.trim().to_string())
                     .collect();

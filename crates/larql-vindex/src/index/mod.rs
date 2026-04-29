@@ -1,4 +1,6 @@
 //! VectorIndex — the in-memory KNN engine, mutation interface, MoE router, and HNSW index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Module structure:
 //! - `types`      — FeatureMeta, GateIndex trait, WalkHit, callbacks
@@ -14,20 +16,20 @@
 //! - `router`     — MoE expert routing
 //! - `residency`  — Adaptive Q4/f32 layer pinning manager
 
-pub mod types;
+mod accessors;
+mod attn;
 pub mod core;
 mod gate;
 mod gate_trait;
-mod accessors;
-mod loaders;
-mod walk;
-mod attn;
-mod lm_head;
 pub mod hnsw;
+mod lm_head;
+mod loaders;
 pub mod mutate;
-pub mod router;
 pub mod residency;
+pub mod router;
+pub mod types;
+mod walk;
 
 pub use core::*;
+pub use residency::{LayerState, ResidencyManager};
 pub use router::RouterIndex;
-pub use residency::{ResidencyManager, LayerState};

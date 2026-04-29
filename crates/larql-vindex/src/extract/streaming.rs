@@ -1,4 +1,6 @@
 //! Streaming vindex extraction — build from safetensors without loading the full model.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Instead of loading all weights into ModelWeights (which requires the entire model
 //! in RAM), this module mmaps safetensors files and processes one layer at a time.
@@ -89,18 +91,24 @@ pub fn build_vindex_streaming(
     }
 
     callbacks.on_stage("loading");
-    eprintln!("  Streaming mode: {} safetensors shards (mmap'd, not loaded)", st_files.len());
+    eprintln!(
+        "  Streaming mode: {} safetensors shards (mmap'd, not loaded)",
+        st_files.len()
+    );
 
     // (shards vec was for an earlier design — tensor_index + shard_mmaps is the actual approach)
 
     // SAFETY: We need to hold both the mmap and the SafeTensors that borrows from it.
     // We use a two-phase approach: first mmap all files, then deserialize.
     // The mmaps are kept alive in `shard_mmaps` for the lifetime of the function.
-    let shard_mmaps: Vec<MmapShard> = st_files.iter().map(|path| {
-        let file = std::fs::File::open(path).unwrap();
-        let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
-        MmapShard { _file: file, mmap }
-    }).collect();
+    let shard_mmaps: Vec<MmapShard> = st_files
+        .iter()
+        .map(|path| {
+            let file = std::fs::File::open(path).unwrap();
+            let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+            MmapShard { _file: file, mmap }
+        })
+        .collect();
 
     // Build a tensor index: key → (shard_idx, tensor_name)
     // We need to find which shard contains each tensor.
@@ -164,18 +172,21 @@ pub fn build_vindex_streaming(
             let blocks_key = arch.packed_gate_up_blocks_key(layer).unwrap_or_default();
             let scales_key = arch.packed_gate_up_scales_key(layer).unwrap_or_default();
 
-            if let (Some(blocks_info), Some(scales_info)) = (
-                tensor_index.get(&blocks_key),
-                tensor_index.get(&scales_key),
-            ) {
-                let blocks_st = safetensors::SafeTensors::deserialize(&shard_mmaps[blocks_info.0].mmap)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?;
-                let scales_st = safetensors::SafeTensors::deserialize(&shard_mmaps[scales_info.0].mmap)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+            if let (Some(blocks_info), Some(scales_info)) =
+                (tensor_index.get(&blocks_key), tensor_index.get(&scales_key))
+            {
+                let blocks_st =
+                    safetensors::SafeTensors::deserialize(&shard_mmaps[blocks_info.0].mmap)
+                        .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let scales_st =
+                    safetensors::SafeTensors::deserialize(&shard_mmaps[scales_info.0].mmap)
+                        .map_err(|e| VindexError::Parse(e.to_string()))?;
 
-                let blocks_view = blocks_st.tensor(&blocks_info.1)
+                let blocks_view = blocks_st
+                    .tensor(&blocks_info.1)
                     .map_err(|e| VindexError::Parse(e.to_string()))?;
-                let scales_view = scales_st.tensor(&scales_info.1)
+                let scales_view = scales_st
+                    .tensor(&scales_info.1)
                     .map_err(|e| VindexError::Parse(e.to_string()))?;
 
                 let shape = blocks_view.shape();
@@ -186,7 +197,11 @@ pub fn build_vindex_streaming(
                 let half = out_features / 2; // gate portion
 
                 let experts = crate::format::quant::mxfp4::dequantize_all_experts(
-                    blocks_view.data(), scales_view.data(), n_exp, out_features, groups,
+                    blocks_view.data(),
+                    scales_view.data(),
+                    n_exp,
+                    out_features,
+                    groups,
                 )?;
 
                 let mut total_features = 0usize;
@@ -201,7 +216,10 @@ pub fn build_vindex_streaming(
 
                 if total_features > 0 {
                     layer_infos.push(VindexLayerInfo {
-                        layer, num_features: total_features, offset, length: layer_bytes,
+                        layer,
+                        num_features: total_features,
+                        offset,
+                        length: layer_bytes,
                         num_experts: Some(n_exp),
                         num_features_per_expert: Some(half),
                     });
@@ -217,8 +235,12 @@ pub fn build_vindex_streaming(
                 let data = tensor.as_slice().unwrap();
                 let length = write_floats(&mut gate_file, data, dtype)?;
                 layer_infos.push(VindexLayerInfo {
-                    layer, num_features, offset, length,
-                    num_experts: None, num_features_per_expert: None,
+                    layer,
+                    num_features,
+                    offset,
+                    length,
+                    num_experts: None,
+                    num_features_per_expert: None,
                 });
                 offset += length;
             }
@@ -244,7 +266,10 @@ pub fn build_vindex_streaming(
 
             if total_features > 0 {
                 layer_infos.push(VindexLayerInfo {
-                    layer, num_features: total_features, offset, length: layer_bytes,
+                    layer,
+                    num_features: total_features,
+                    offset,
+                    length: layer_bytes,
                     num_experts: Some(n_experts),
                     num_features_per_expert: Some(features_per_expert),
                 });
@@ -258,8 +283,12 @@ pub fn build_vindex_streaming(
                 let data = tensor.as_slice().unwrap();
                 let length = write_floats(&mut gate_file, data, dtype)?;
                 layer_infos.push(VindexLayerInfo {
-                    layer, num_features, offset, length,
-                    num_experts: None, num_features_per_expert: None,
+                    layer,
+                    num_features,
+                    offset,
+                    length,
+                    num_experts: None,
+                    num_features_per_expert: None,
                 });
                 offset += length;
             }
@@ -283,7 +312,8 @@ pub fn build_vindex_streaming(
         let mut router_file = BufWriter::new(std::fs::File::create(&router_path)?);
 
         for layer in 0..num_layers {
-            let router_key = arch.moe_router_key(layer)
+            let router_key = arch
+                .moe_router_key(layer)
                 .map(|k| normalize_key(&k, prefixes))
                 .unwrap_or_default();
 
@@ -322,37 +352,52 @@ pub fn build_vindex_streaming(
     let mut all_down_meta: Vec<Option<Vec<Option<crate::FeatureMeta>>>> = vec![None; num_layers];
 
     // Build whole-word vocab once
-    let (_ww_ids, _ww_embed) = super::build_helpers::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
+    let (_ww_ids, _ww_embed) =
+        super::build_helpers::build_whole_word_vocab(tokenizer, &embed, vocab_size, hidden_size);
 
     for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(num_layers) {
         callbacks.on_layer_start("down", layer, num_layers);
         let start = std::time::Instant::now();
 
         // Get down matrices for this layer
-        let down_matrices: Vec<Array2<f32>> = if expert_format == larql_models::ExpertFormat::PackedMxfp4 {
+        let down_matrices: Vec<Array2<f32>> = if expert_format
+            == larql_models::ExpertFormat::PackedMxfp4
+        {
             // MXFP4: dequantize down_proj_blocks
             let blocks_key = arch.packed_down_blocks_key(layer).unwrap_or_default();
             let scales_key = arch.packed_down_scales_key(layer).unwrap_or_default();
-            if let (Some(bi), Some(si)) = (tensor_index.get(&blocks_key), tensor_index.get(&scales_key)) {
+            if let (Some(bi), Some(si)) =
+                (tensor_index.get(&blocks_key), tensor_index.get(&scales_key))
+            {
                 let bst = safetensors::SafeTensors::deserialize(&shard_mmaps[bi.0].mmap)
                     .map_err(|e| VindexError::Parse(e.to_string()))?;
                 let sst = safetensors::SafeTensors::deserialize(&shard_mmaps[si.0].mmap)
                     .map_err(|e| VindexError::Parse(e.to_string()))?;
-                let bv = bst.tensor(&bi.1).map_err(|e| VindexError::Parse(e.to_string()))?;
-                let sv = sst.tensor(&si.1).map_err(|e| VindexError::Parse(e.to_string()))?;
+                let bv = bst
+                    .tensor(&bi.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
+                let sv = sst
+                    .tensor(&si.1)
+                    .map_err(|e| VindexError::Parse(e.to_string()))?;
                 let shape = bv.shape();
                 let n_exp = shape[0];
                 let out_features = shape[1];
                 let groups = shape[2];
                 let in_features = groups * 32;
                 let experts = crate::format::quant::mxfp4::dequantize_all_experts(
-                    bv.data(), sv.data(), n_exp, out_features, groups,
+                    bv.data(),
+                    sv.data(),
+                    n_exp,
+                    out_features,
+                    groups,
                 )?;
-                experts.into_iter().map(|data| {
-                    Array2::from_shape_vec((out_features, in_features), data).unwrap()
-                }).collect()
+                experts
+                    .into_iter()
+                    .map(|data| Array2::from_shape_vec((out_features, in_features), data).unwrap())
+                    .collect()
             } else {
-                callbacks.on_layer_done("down", layer, 0.0); continue;
+                callbacks.on_layer_done("down", layer, 0.0);
+                continue;
             }
         } else if expert_format == larql_models::ExpertFormat::PackedBF16 && is_moe {
             // Hybrid MoE (Gemma 4 26B A4B): use dense FFN down for down_meta.
@@ -360,7 +405,10 @@ pub fn build_vindex_streaming(
             let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
             match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
                 Some(t) => vec![t],
-                None => { callbacks.on_layer_done("down", layer, 0.0); continue; }
+                None => {
+                    callbacks.on_layer_done("down", layer, 0.0);
+                    continue;
+                }
             }
         } else if is_moe && n_experts > 0 {
             let mut mats = Vec::new();
@@ -377,7 +425,10 @@ pub fn build_vindex_streaming(
             let down_key = normalize_key(&arch.ffn_down_key(layer), prefixes);
             match get_tensor_f32(&shard_mmaps, &tensor_index, &down_key)? {
                 Some(t) => vec![t],
-                None => { callbacks.on_layer_done("down", layer, 0.0); continue; }
+                None => {
+                    callbacks.on_layer_done("down", layer, 0.0);
+                    continue;
+                }
             }
         };
 
@@ -393,10 +444,16 @@ pub fn build_vindex_streaming(
 
             for batch_start in (0..num_features).step_by(batch_size) {
                 let batch_end = (batch_start + batch_size).min(num_features);
-                callbacks.on_feature_progress("down", layer, feature_offset + batch_start,
-                    down_matrices.iter().map(|m| m.shape()[1]).sum());
+                callbacks.on_feature_progress(
+                    "down",
+                    layer,
+                    feature_offset + batch_start,
+                    down_matrices.iter().map(|m| m.shape()[1]).sum(),
+                );
 
-                let w_chunk = w_down.slice(ndarray::s![.., batch_start..batch_end]).to_owned();
+                let w_chunk = w_down
+                    .slice(ndarray::s![.., batch_start..batch_end])
+                    .to_owned();
                 let cpu = larql_compute::CpuBackend;
                 use larql_compute::ComputeBackend;
                 let chunk_logits = cpu.matmul(embed.view(), w_chunk.view());
@@ -411,29 +468,42 @@ pub fn build_vindex_streaming(
                     scores.truncate(k);
                     scores.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-                    let top_k_entries: Vec<larql_models::TopKEntry> = scores.into_iter()
+                    let top_k_entries: Vec<larql_models::TopKEntry> = scores
+                        .into_iter()
                         .filter_map(|(idx, logit)| {
-                            tokenizer.decode(&[idx as u32], true).ok()
+                            tokenizer
+                                .decode(&[idx as u32], true)
+                                .ok()
                                 .map(|s| s.trim().to_string())
                                 .filter(|s| !s.is_empty())
-                                .map(|token| larql_models::TopKEntry { token, token_id: idx as u32, logit })
+                                .map(|token| larql_models::TopKEntry {
+                                    token,
+                                    token_id: idx as u32,
+                                    logit,
+                                })
                         })
                         .collect();
 
-                    let (top_token, top_token_id, c_score) = if let Some(first) = top_k_entries.first() {
-                        (first.token.clone(), first.token_id, first.logit)
-                    } else {
-                        (String::new(), 0, 0.0)
-                    };
+                    let (top_token, top_token_id, c_score) =
+                        if let Some(first) = top_k_entries.first() {
+                            (first.token.clone(), first.token_id, first.logit)
+                        } else {
+                            (String::new(), 0, 0.0)
+                        };
 
                     let feat_idx = feature_offset + feat;
                     if layer_down_meta.is_none() {
                         *layer_down_meta = Some(Vec::new());
                     }
                     if let Some(ref mut metas) = layer_down_meta {
-                        while metas.len() <= feat_idx { metas.push(None); }
+                        while metas.len() <= feat_idx {
+                            metas.push(None);
+                        }
                         metas[feat_idx] = Some(crate::FeatureMeta {
-                            top_token, top_token_id, c_score, top_k: top_k_entries,
+                            top_token,
+                            top_token_id,
+                            c_score,
+                            top_k: top_k_entries,
                         });
                     }
                 }
@@ -449,7 +519,8 @@ pub fn build_vindex_streaming(
 
     // ── 4. Tokenizer ──
     callbacks.on_stage("tokenizer");
-    let tokenizer_json = tokenizer.to_string(true)
+    let tokenizer_json = tokenizer
+        .to_string(true)
         .map_err(|e| VindexError::Parse(format!("tokenizer serialize: {e}")))?;
     std::fs::write(output_dir.join("tokenizer.json"), tokenizer_json)?;
     callbacks.on_stage_done("tokenizer", 0.0);
@@ -460,7 +531,10 @@ pub fn build_vindex_streaming(
         version: 2,
         model: model_name.to_string(),
         family: family.clone(),
-        num_layers, hidden_size, intermediate_size, vocab_size,
+        num_layers,
+        hidden_size,
+        intermediate_size,
+        vocab_size,
         embed_scale,
         layers: layer_infos,
         down_top_k,
@@ -497,7 +571,9 @@ pub fn build_vindex_streaming(
                     },
                     hybrid: arch.is_hybrid_moe(),
                 })
-            } else { None },
+            } else {
+                None
+            },
             // Per-layer geometry (Gemma 4)
             global_head_dim: cfg.global_head_dim,
             num_global_kv_heads: cfg.num_global_kv_heads,
@@ -514,8 +590,8 @@ pub fn build_vindex_streaming(
     };
 
     // Write preliminary index.json (needed by write_model_weights which reads dtype from it)
-    let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let config_json =
+        serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
     std::fs::write(output_dir.join("index.json"), config_json)?;
 
     // ── 6. Model weights (if extract level requires them) ──
@@ -539,7 +615,10 @@ pub fn build_vindex_streaming(
         match quant {
             QuantFormat::None => {
                 crate::format::weights::write_model_weights_with_opts(
-                    &streaming_source, output_dir, callbacks, level_opts,
+                    &streaming_source,
+                    output_dir,
+                    callbacks,
+                    level_opts,
                 )?;
             }
             QuantFormat::Q4k => {
@@ -549,7 +628,10 @@ pub fn build_vindex_streaming(
                 // gating for Q4K is a future refinement (today Q4K
                 // always writes the full set).
                 crate::format::weights::write_model_weights_q4k_with_opts(
-                    &streaming_source, output_dir, callbacks, q4k_opts,
+                    &streaming_source,
+                    output_dir,
+                    callbacks,
+                    q4k_opts,
                 )?;
             }
         }
@@ -557,11 +639,11 @@ pub fn build_vindex_streaming(
 
     // Final checksums
     let config_text = std::fs::read_to_string(output_dir.join("index.json"))?;
-    let mut config: VindexConfig = serde_json::from_str(&config_text)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let mut config: VindexConfig =
+        serde_json::from_str(&config_text).map_err(|e| VindexError::Parse(e.to_string()))?;
     config.checksums = crate::format::checksums::compute_checksums(output_dir).ok();
-    let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let config_json =
+        serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
     std::fs::write(output_dir.join("index.json"), config_json)?;
 
     Ok(())
@@ -581,18 +663,21 @@ fn get_tensor_f32(
     let st = safetensors::SafeTensors::deserialize(&shards[*shard_idx].mmap)
         .map_err(|e| VindexError::Parse(e.to_string()))?;
 
-    let view = st.tensor(tensor_name)
+    let view = st
+        .tensor(tensor_name)
         .map_err(|e| VindexError::Parse(e.to_string()))?;
 
     let shape = view.shape();
-    if shape.len() != 2 { return Ok(None); }
+    if shape.len() != 2 {
+        return Ok(None);
+    }
 
     let data = match view.dtype() {
-        safetensors::Dtype::F32 => {
-            view.data().chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                .collect()
-        }
+        safetensors::Dtype::F32 => view
+            .data()
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
         safetensors::Dtype::F16 => crate::format::quant::half::decode_f16(view.data()),
         safetensors::Dtype::BF16 => crate::format::quant::half::decode_bf16(view.data()),
         _ => return Ok(None), // skip non-float

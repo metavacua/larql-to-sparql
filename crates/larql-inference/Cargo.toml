@@ -1,6 +1,6 @@
 [package]
 name = "larql-inference"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
 larql-core = { path = "../larql-core" }
 larql-vindex = { path = "../larql-vindex" }
+larql-platform = { path = "../larql-platform" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

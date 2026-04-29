@@ -1,4 +1,6 @@
 //! Attention weight loaders + per-layer accessors.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Loads the per-layer Q / K / V / O projection weights in Q8, Q4_K, or
 //! Q4_0 format from `attn_weights_*.bin` files plus their JSON
@@ -27,10 +29,12 @@ impl VectorIndex {
         if manifest_path.exists() {
             let json: Vec<serde_json::Value> = serde_json::from_str(
                 &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
+                    .map_err(|e| VindexError::Parse(e.to_string()))?,
+            )
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
 
-            let entries: Vec<(usize, usize, usize)> = json.iter()
+            let entries: Vec<(usize, usize, usize)> = json
+                .iter()
                 .map(|e| {
                     let offset = e["q8_offset"].as_u64().unwrap_or(0) as usize;
                     let vals_len = e["q8_vals_len"].as_u64().unwrap_or(0) as usize;
@@ -49,7 +53,9 @@ impl VectorIndex {
         let manifest = self.attn_q8_manifest.as_ref()?;
 
         let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
+        if base + 3 >= manifest.len() {
+            return None;
+        }
 
         let mut result = [(&[] as &[u8], &[] as &[f32]); 4];
         for i in 0..4 {
@@ -58,10 +64,7 @@ impl VectorIndex {
             let scales_start = offset + vals_len;
             let scales_data = &mmap[scales_start..scales_start + scales_len];
             let scales = unsafe {
-                std::slice::from_raw_parts(
-                    scales_data.as_ptr() as *const f32,
-                    scales_len / 4,
-                )
+                std::slice::from_raw_parts(scales_data.as_ptr() as *const f32, scales_len / 4)
             };
             result[i] = (vals, scales);
         }
@@ -81,11 +84,13 @@ impl VectorIndex {
         if manifest_path.exists() {
             let json: Vec<serde_json::Value> = serde_json::from_str(
                 &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
+                    .map_err(|e| VindexError::Parse(e.to_string()))?,
+            )
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
 
             // Each entry: {key, shape, format, offset, length}
-            let entries: Vec<(usize, usize, String)> = json.iter()
+            let entries: Vec<(usize, usize, String)> = json
+                .iter()
                 .map(|e| {
                     let offset = e["offset"].as_u64().unwrap_or(0) as usize;
                     let length = e["length"].as_u64().unwrap_or(0) as usize;
@@ -104,7 +109,9 @@ impl VectorIndex {
         let mmap = self.attn_q4k_mmap.as_ref()?;
         let manifest = self.attn_q4k_manifest.as_ref()?;
         let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
+        if base + 3 >= manifest.len() {
+            return None;
+        }
 
         let mut result: [(&[u8], &str); 4] = [(&[], ""); 4];
         for i in 0..4 {
@@ -129,10 +136,12 @@ impl VectorIndex {
         if manifest_path.exists() {
             let json: Vec<serde_json::Value> = serde_json::from_str(
                 &std::fs::read_to_string(&manifest_path)
-                    .map_err(|e| VindexError::Parse(e.to_string()))?
-            ).map_err(|e| VindexError::Parse(e.to_string()))?;
+                    .map_err(|e| VindexError::Parse(e.to_string()))?,
+            )
+            .map_err(|e| VindexError::Parse(e.to_string()))?;
 
-            let entries: Vec<(usize, usize)> = json.iter()
+            let entries: Vec<(usize, usize)> = json
+                .iter()
                 .map(|e| {
                     let offset = e["q4_offset"].as_u64().unwrap_or(0) as usize;
                     let length = e["q4_length"].as_u64().unwrap_or(0) as usize;
@@ -158,7 +167,9 @@ impl VectorIndex {
 
         // Each layer has 4 tensors: Q, K, V, O
         let base = layer * 4;
-        if base + 3 >= manifest.len() { return None; }
+        if base + 3 >= manifest.len() {
+            return None;
+        }
 
         let q = &manifest[base];
         let k = &manifest[base + 1];
@@ -172,5 +183,4 @@ impl VectorIndex {
 
         Some((q_data, k_data, v_data, o_data))
     }
-
 }

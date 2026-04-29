@@ -1,4 +1,6 @@
 //! Storage engine — wraps `PatchedVindex` with the L0/L1/L2 lifecycle.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! - `engine`:      `StorageEngine` — owns the patched vindex, epoch, and
 //!                  MemitStore; reports `CompactStatus`.
@@ -8,10 +10,10 @@
 //!                  pairs + the `memit_solve` entry point that produces
 //!                  them (wraps `larql_compute::ridge_decomposition_solve`).
 
+pub mod engine;
 pub mod epoch;
 pub mod memit_store;
 pub mod status;
-pub mod engine;
 
 pub use engine::StorageEngine;
 pub use epoch::Epoch;

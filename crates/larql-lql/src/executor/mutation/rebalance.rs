@@ -1,4 +1,6 @@
 //! `REBALANCE` — global fixed-point rebalance over compose installs.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Per-INSERT balance is greedy: it scales THIS install's down_col
 //! to meet THIS fact's canonical probability target. That works for

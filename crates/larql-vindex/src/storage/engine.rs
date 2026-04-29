@@ -1,7 +1,9 @@
-use crate::patch::core::PatchedVindex;
+// SPDX-License-Identifier: Apache-2.0
+
 use super::epoch::Epoch;
 use super::memit_store::MemitStore;
 use super::status::CompactStatus;
+use crate::patch::core::PatchedVindex;
 
 const MEMIT_MIN_HIDDEN_DIM: usize = 1024;
 

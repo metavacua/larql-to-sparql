@@ -1,4 +1,6 @@
 //! `impl GateIndex for VectorIndex` — the trait implementation that
+// SPDX-License-Identifier: Apache-2.0
+
 //! lets `VectorIndex` plug into the `GateIndex` abstraction (also
 //! implemented by `PatchedVindex`). Pulled out of `core.rs` so the
 //! struct definition + constructors stay focused.
@@ -22,11 +24,15 @@ impl GateIndex for VectorIndex {
     }
 
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.down_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+        self.down_overrides
+            .get(&(layer, feature))
+            .map(|v| v.as_slice())
     }
 
     fn up_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.up_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+        self.up_overrides
+            .get(&(layer, feature))
+            .map(|v| v.as_slice())
     }
 
     fn has_overrides_at(&self, layer: usize) -> bool {
@@ -123,7 +129,9 @@ impl GateIndex for VectorIndex {
     }
 
     fn interleaved_q4_mmap_ref(&self) -> Option<&[u8]> {
-        self.interleaved_q4_mmap.as_ref().map(|m| m.as_ref() as &[u8])
+        self.interleaved_q4_mmap
+            .as_ref()
+            .map(|m| m.as_ref() as &[u8])
     }
 
     fn has_interleaved_q4k(&self) -> bool {
@@ -131,35 +139,67 @@ impl GateIndex for VectorIndex {
     }
 
     fn interleaved_q4k_mmap_ref(&self) -> Option<&[u8]> {
-        self.interleaved_q4k_mmap.as_ref().map(|m| m.as_ref() as &[u8])
+        self.interleaved_q4k_mmap
+            .as_ref()
+            .map(|m| m.as_ref() as &[u8])
     }
 
     fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
         VectorIndex::interleaved_q4k_layer_data(self, layer)
     }
 
-    fn q4k_ffn_layer(&self, layer: usize, component: usize)
-        -> Option<std::sync::Arc<Vec<f32>>>
-    {
+    fn q4k_ffn_layer(&self, layer: usize, component: usize) -> Option<std::sync::Arc<Vec<f32>>> {
         VectorIndex::q4k_ffn_layer(self, layer, component)
     }
 
-    fn q4k_ffn_row_into(&self, layer: usize, component: usize, feat: usize, out: &mut [f32]) -> bool {
+    fn q4k_ffn_row_into(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        out: &mut [f32],
+    ) -> bool {
         VectorIndex::q4k_ffn_row_into(self, layer, component, feat, out)
     }
 
-    fn q4k_ffn_row_dot(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+    fn q4k_ffn_row_dot(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
         VectorIndex::q4k_ffn_row_dot(self, layer, component, feat, x)
     }
 
-    fn q4k_ffn_row_dot_via_cache(&self, layer: usize, component: usize, feat: usize, x: &[f32]) -> Option<f32> {
+    fn q4k_ffn_row_dot_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        x: &[f32],
+    ) -> Option<f32> {
         VectorIndex::q4k_ffn_row_dot_via_cache(self, layer, component, feat, x)
     }
-    fn q4k_ffn_row_scaled_add_via_cache(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+    fn q4k_ffn_row_scaled_add_via_cache(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
         VectorIndex::q4k_ffn_row_scaled_add_via_cache(self, layer, component, feat, alpha, out)
     }
 
-    fn q4k_ffn_row_scaled_add(&self, layer: usize, component: usize, feat: usize, alpha: f32, out: &mut [f32]) -> bool {
+    fn q4k_ffn_row_scaled_add(
+        &self,
+        layer: usize,
+        component: usize,
+        feat: usize,
+        alpha: f32,
+        out: &mut [f32],
+    ) -> bool {
         VectorIndex::q4k_ffn_row_scaled_add(self, layer, component, feat, alpha, out)
     }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// VectorIndex mutation and persistence methods
 ///
 /// Adds INSERT/DELETE/UPDATE support and the ability to save a modified vindex back to disk.
@@ -6,8 +8,8 @@ use std::path::Path;
 
 use ndarray::Array1;
 
-use crate::error::VindexError;
 use crate::config::VindexConfig;
+use crate::error::VindexError;
 use crate::index::{FeatureMeta, VectorIndex};
 
 impl VectorIndex {
@@ -33,7 +35,13 @@ impl VectorIndex {
     /// If the index is in mmap mode, promotes this layer to heap first.
     pub fn set_gate_vector(&mut self, layer: usize, feature: usize, vector: &Array1<f32>) {
         // Promote from mmap to heap if needed
-        if self.gate_mmap_bytes.is_some() && self.gate_vectors.get(layer).map(|v| v.is_none()).unwrap_or(true) {
+        if self.gate_mmap_bytes.is_some()
+            && self
+                .gate_vectors
+                .get(layer)
+                .map(|v| v.is_none())
+                .unwrap_or(true)
+        {
             self.promote_layer_to_heap(layer);
         }
 
@@ -66,7 +74,9 @@ impl VectorIndex {
     /// via `set_down_vector`. Returns the same data as the
     /// `GateIndex::down_override` trait method.
     pub fn down_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.down_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+        self.down_overrides
+            .get(&(layer, feature))
+            .map(|v| v.as_slice())
     }
 
     /// Set a custom up vector override for a feature. Mirrors
@@ -87,7 +97,9 @@ impl VectorIndex {
     /// Up vector override for `(layer, feature)`, if any has been set
     /// via `set_up_vector`. Same shape as `down_override_at`.
     pub fn up_override_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.up_overrides.get(&(layer, feature)).map(|v| v.as_slice())
+        self.up_overrides
+            .get(&(layer, feature))
+            .map(|v| v.as_slice())
     }
 
     /// Copy a layer's gate vectors from mmap to heap (for mutation).
@@ -103,8 +115,10 @@ impl VectorIndex {
                         let raw = &mmap[byte_offset..byte_end];
                         let floats = crate::config::dtype::decode_floats(raw, self.gate_mmap_dtype);
                         let matrix = ndarray::Array2::from_shape_vec(
-                            (slice.num_features, self.hidden_size), floats
-                        ).unwrap();
+                            (slice.num_features, self.hidden_size),
+                            floats,
+                        )
+                        .unwrap();
                         while self.gate_vectors.len() <= layer {
                             self.gate_vectors.push(None);
                         }
@@ -130,7 +144,9 @@ impl VectorIndex {
         // Mmap path: scan on demand
         if let Some(ref dm) = self.down_meta_mmap {
             let nf = dm.num_features(layer);
-            if nf == 0 { return None; }
+            if nf == 0 {
+                return None;
+            }
             // Look for empty slot
             for i in 0..nf {
                 if dm.feature_meta(layer, i).is_none() {
@@ -208,9 +224,10 @@ impl VectorIndex {
                 let entity_match = entity
                     .map(|e| {
                         meta.top_token.to_lowercase().contains(&e.to_lowercase())
-                            || meta.top_k.iter().any(|t| {
-                                t.token.to_lowercase().contains(&e.to_lowercase())
-                            })
+                            || meta
+                                .top_k
+                                .iter()
+                                .any(|t| t.token.to_lowercase().contains(&e.to_lowercase()))
                     })
                     .unwrap_or(true);
                 if entity_match && relation_match {
@@ -225,7 +242,9 @@ impl VectorIndex {
     /// JSONL is no longer written — use `larql dump-meta` for human-readable output.
     /// Loading still falls back to JSONL for v1 compat if binary is absent.
     pub fn save_down_meta(&self, dir: &Path) -> Result<usize, VindexError> {
-        let max_top_k = self.down_meta.iter()
+        let max_top_k = self
+            .down_meta
+            .iter()
             .filter_map(|l| l.as_ref())
             .flat_map(|metas| metas.iter().filter_map(|m| m.as_ref()))
             .map(|m| m.top_k.len())
@@ -251,10 +270,15 @@ impl VectorIndex {
 
         for layer in 0..self.num_layers {
             // Try heap first (may have promoted layers), then mmap
-            let data: Option<Vec<f32>> = if let Some(Some(ref matrix)) = self.gate_vectors.get(layer) {
-                Some(matrix.as_slice().ok_or_else(|| {
-                    VindexError::Parse("gate vectors not contiguous".into())
-                })?.to_vec())
+            let data: Option<Vec<f32>> = if let Some(Some(ref matrix)) =
+                self.gate_vectors.get(layer)
+            {
+                Some(
+                    matrix
+                        .as_slice()
+                        .ok_or_else(|| VindexError::Parse("gate vectors not contiguous".into()))?
+                        .to_vec(),
+                )
             } else if let Some(ref mmap) = self.gate_mmap_bytes {
                 if let Some(slice) = self.gate_mmap_slices.get(layer) {
                     if slice.num_features > 0 {
@@ -264,12 +288,21 @@ impl VectorIndex {
                         let byte_end = byte_offset + byte_count;
                         if byte_end <= mmap.len() {
                             Some(crate::config::dtype::decode_floats(
-                                &mmap[byte_offset..byte_end], self.gate_mmap_dtype
+                                &mmap[byte_offset..byte_end],
+                                self.gate_mmap_dtype,
                             ))
-                        } else { None }
-                    } else { None }
-                } else { None }
-            } else { None };
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             if let Some(ref data) = data {
                 let num_features = data.len() / self.hidden_size;
@@ -303,19 +336,15 @@ impl VectorIndex {
     /// Save config (index.json) to disk.
     pub fn save_config(config: &VindexConfig, dir: &Path) -> Result<(), VindexError> {
         let path = dir.join("index.json");
-        let json = serde_json::to_string_pretty(config)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(config).map_err(|e| VindexError::Parse(e.to_string()))?;
         std::fs::write(path, json)?;
         Ok(())
     }
 
     /// Save the full vindex (gate_vectors.bin + down_meta.jsonl + index.json).
     /// Updates the config's layer info to match current state.
-    pub fn save_vindex(
-        &self,
-        dir: &Path,
-        config: &mut VindexConfig,
-    ) -> Result<(), VindexError> {
+    pub fn save_vindex(&self, dir: &Path, config: &mut VindexConfig) -> Result<(), VindexError> {
         let layer_infos = self.save_gate_vectors(dir)?;
         config.layers = layer_infos;
         self.save_down_meta(dir)?;

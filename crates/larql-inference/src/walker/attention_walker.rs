@@ -1,4 +1,6 @@
 //! Walk attention OV circuits — extract routing edges from attention heads.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each attention head is a routing rule. The OV circuit tells you:
 //! when this head fires on input X, it copies output Y.
@@ -61,10 +63,7 @@ impl AttentionWalker {
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| InferenceError::Parse(e.to_string()))?;
 
-        Ok(Self {
-            weights,
-            tokenizer,
-        })
+        Ok(Self { weights, tokenizer })
     }
 
     pub fn num_layers(&self) -> usize {

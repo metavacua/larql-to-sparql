@@ -1,4 +1,6 @@
 //! # ISBN expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! ISBN-10 / ISBN-13 validation and conversion. Input may include hyphens or
 //! whitespace; they are stripped. ISBN-10 check digits may be `0..9` or `X`.

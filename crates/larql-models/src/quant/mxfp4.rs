@@ -1,4 +1,6 @@
 //! MXFP4 dequantization — OpenAI's microscaling 4-bit float format.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Used by GPT-OSS models. Each weight is stored as a 4-bit value (two per byte)
 //! with shared e8m0 (exponent-only) scales per group of 32 elements.
@@ -13,15 +15,18 @@ use crate::detect::ModelError;
 /// Bit layout: [sign(1)][exponent(2)][mantissa(1)]
 /// Values: ±{0, 0.5, 1, 1.5, 2, 3, 4, 6}
 const MXFP4_TABLE: [f32; 16] = [
-    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-    -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
 ];
 
 /// Convert e8m0 scale byte to float multiplier.
 /// e8m0 = pure exponent, no mantissa: value = 2^(exponent - 127)
 pub fn e8m0_to_f32(byte: u8) -> f32 {
-    if byte == 0 { return 0.0; }
-    if byte == 255 { return f32::NAN; }
+    if byte == 0 {
+        return 0.0;
+    }
+    if byte == 255 {
+        return f32::NAN;
+    }
     f32::from_bits((byte as u32) << 23)
 }
 
@@ -111,10 +116,14 @@ pub fn dequantize_all_experts(
         ))
     })?;
     let need_blocks = num_experts.checked_mul(blocks_per_expert).ok_or_else(|| {
-        ModelError::Parse(format!("MXFP4: total blocks overflow ({num_experts} experts)"))
+        ModelError::Parse(format!(
+            "MXFP4: total blocks overflow ({num_experts} experts)"
+        ))
     })?;
     let need_scales = num_experts.checked_mul(scales_per_expert).ok_or_else(|| {
-        ModelError::Parse(format!("MXFP4: total scales overflow ({num_experts} experts)"))
+        ModelError::Parse(format!(
+            "MXFP4: total scales overflow ({num_experts} experts)"
+        ))
     })?;
     if blocks_data.len() < need_blocks {
         return Err(ModelError::Parse(format!(
@@ -148,10 +157,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn e8m0_zero() { assert_eq!(e8m0_to_f32(0), 0.0); }
+    fn e8m0_zero() {
+        assert_eq!(e8m0_to_f32(0), 0.0);
+    }
 
     #[test]
-    fn e8m0_one() { assert_eq!(e8m0_to_f32(127), 1.0); }
+    fn e8m0_one() {
+        assert_eq!(e8m0_to_f32(127), 1.0);
+    }
 
     #[test]
     fn e8m0_powers_of_two() {
@@ -162,7 +175,9 @@ mod tests {
     }
 
     #[test]
-    fn e8m0_nan() { assert!(e8m0_to_f32(255).is_nan()); }
+    fn e8m0_nan() {
+        assert!(e8m0_to_f32(255).is_nan());
+    }
 
     #[test]
     fn table_positive() {
@@ -183,7 +198,9 @@ mod tests {
         let scales = vec![127u8]; // scale=1.0
         let result = dequantize_expert(&blocks, &scales, 1, 1).unwrap();
         assert_eq!(result.len(), 32);
-        for &v in &result { assert!((v - 1.0).abs() < 1e-6); }
+        for &v in &result {
+            assert!((v - 1.0).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -191,7 +208,9 @@ mod tests {
         let blocks = vec![0x22u8; 16];
         let scales = vec![128u8]; // scale=2.0
         let result = dequantize_expert(&blocks, &scales, 1, 1).unwrap();
-        for &v in &result { assert!((v - 2.0).abs() < 1e-6); }
+        for &v in &result {
+            assert!((v - 2.0).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -199,7 +218,9 @@ mod tests {
         let blocks = vec![0xAAu8; 16]; // lo=10(-1.0), hi=10(-1.0)
         let scales = vec![127u8];
         let result = dequantize_expert(&blocks, &scales, 1, 1).unwrap();
-        for &v in &result { assert!((v - (-1.0)).abs() < 1e-6); }
+        for &v in &result {
+            assert!((v - (-1.0)).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -207,7 +228,9 @@ mod tests {
         let blocks = vec![0xFFu8; 16];
         let scales = vec![0u8];
         let result = dequantize_expert(&blocks, &scales, 1, 1).unwrap();
-        for &v in &result { assert_eq!(v, 0.0); }
+        for &v in &result {
+            assert_eq!(v, 0.0);
+        }
     }
 
     #[test]

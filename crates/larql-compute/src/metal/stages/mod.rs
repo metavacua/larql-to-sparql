@@ -1,4 +1,6 @@
 //! Metal pipeline stages — per-stage, format-aware Metal dispatches.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each stage is a pure free function that takes a `ComputeCommandEncoder`
 //! plus the pipelines, buffers, and per-layer metadata it needs. The
@@ -11,13 +13,13 @@
 //! golden-value tests one place to aim at when a shader/layout change
 //! moves a stage's output.
 
-pub mod quant_matvec;
-pub mod input_norm;
-pub mod qkv_proj;
-pub mod qk_norm;
-pub mod rope;
 pub mod attention;
-pub mod o_proj;
 pub mod ffn;
-pub mod residual;
+pub mod input_norm;
 pub mod layer_scalar;
+pub mod o_proj;
+pub mod qk_norm;
+pub mod qkv_proj;
+pub mod quant_matvec;
+pub mod residual;
+pub mod rope;

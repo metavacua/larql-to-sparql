@@ -1,4 +1,6 @@
 //! Extract full vectors from model weight matrices to intermediate NDJSON files.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Same safetensors loading and BLAS matmuls as weight_walker, but captures the
 //! full weight vector (hidden-dim) alongside top-k token metadata. Output is one

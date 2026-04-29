@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /// Bit-packing for 3-bit and 4-bit quantized indices.
 ///
 /// 4-bit: two values per byte (trivial nibble packing)

@@ -1,4 +1,6 @@
 //! `RemoteMoeBackend` — Mixture-of-Experts weight-shard dispatch over HTTP.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Not to be confused with [`crate::experts`] — that module hosts deterministic
 //! WASM compute experts (gcd, base64, …). This module dispatches *MoE expert
@@ -56,8 +58,12 @@ pub enum RemoteMoeError {
 impl std::fmt::Display for RemoteMoeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unreachable { url, cause } => write!(f, "expert shard unreachable: {url} ({cause})"),
-            Self::ServerError { status, body } => write!(f, "expert shard returned {status}: {body}"),
+            Self::Unreachable { url, cause } => {
+                write!(f, "expert shard unreachable: {url} ({cause})")
+            }
+            Self::ServerError { status, body } => {
+                write!(f, "expert shard returned {status}: {body}")
+            }
             Self::BadResponse(msg) => write!(f, "bad expert response: {msg}"),
             Self::NoShard { expert_id } => write!(f, "no shard owns expert {expert_id}"),
             Self::Client(msg) => write!(f, "HTTP client error: {msg}"),
@@ -85,7 +91,12 @@ pub struct ShardConfig {
 impl ShardConfig {
     pub fn new(start: usize, end: usize, url: impl Into<String>) -> Self {
         let url = url.into().trim_end_matches('/').to_string();
-        Self { start, end, url, timeout: Duration::from_secs(30) }
+        Self {
+            start,
+            end,
+            url,
+            timeout: Duration::from_secs(30),
+        }
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -98,7 +109,11 @@ impl ShardConfig {
         let mut parts = s.splitn(2, '-');
         let start: usize = parts.next()?.parse().ok()?;
         let end: usize = parts.next()?.parse().ok()?;
-        if start <= end { Some((start, end)) } else { None }
+        if start <= end {
+            Some((start, end))
+        } else {
+            None
+        }
     }
 }
 
@@ -119,10 +134,13 @@ impl Shard {
 
         // Health check — fail fast rather than dying mid-forward-pass.
         let health_url = format!("{}/v1/health", config.url);
-        let resp = client.get(&health_url).send().map_err(|e| RemoteMoeError::Unreachable {
-            url: health_url.clone(),
-            cause: e.to_string(),
-        })?;
+        let resp = client
+            .get(&health_url)
+            .send()
+            .map_err(|e| RemoteMoeError::Unreachable {
+                url: health_url.clone(),
+                cause: e.to_string(),
+            })?;
         if !resp.status().is_success() {
             return Err(RemoteMoeError::ServerError {
                 status: resp.status().as_u16(),
@@ -144,15 +162,15 @@ impl Shard {
     ) -> Result<Vec<ExpertResultItem>, RemoteMoeError> {
         let url = format!("{}/v1/expert/batch", self.config.url);
         let body = BatchRequest { requests };
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .map_err(|e| RemoteMoeError::Unreachable {
-                url: url.clone(),
-                cause: e.to_string(),
-            })?;
+        let resp =
+            self.client
+                .post(&url)
+                .json(&body)
+                .send()
+                .map_err(|e| RemoteMoeError::Unreachable {
+                    url: url.clone(),
+                    cause: e.to_string(),
+                })?;
 
         if !resp.status().is_success() {
             return Err(RemoteMoeError::ServerError {
@@ -199,31 +217,47 @@ struct ExpertResultItem {
 // having the expert weights locally.
 
 fn rms_norm(x: &[f32], w: &[f32], eps: f32, offset: f32) -> Vec<f32> {
-    if w.is_empty() || x.is_empty() { return x.to_vec(); }
+    if w.is_empty() || x.is_empty() {
+        return x.to_vec();
+    }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32 + eps).sqrt();
-    x.iter().zip(w.iter()).map(|(&xi, &wi)| xi / rms * (wi + offset)).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(&xi, &wi)| xi / rms * (wi + offset))
+        .collect()
 }
 
 /// Parameter-free RMSNorm (HF `Gemma4RMSNorm(with_scale=False)`): scales
 /// `x` by `1/sqrt(mean(x²) + eps)` with no learned weight.
 fn rms_norm_no_weight(x: &[f32], eps: f32) -> Vec<f32> {
-    if x.is_empty() { return Vec::new(); }
+    if x.is_empty() {
+        return Vec::new();
+    }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32 + eps).sqrt();
     x.iter().map(|v| v / rms).collect()
 }
 
 fn matmul_vec(x: &[f32], w: &[f32], out_rows: usize, in_cols: usize) -> Vec<f32> {
-    (0..out_rows).map(|row| {
-        let w_row = &w[row * in_cols..(row + 1) * in_cols];
-        x.iter().zip(w_row.iter()).map(|(a, b)| a * b).sum()
-    }).collect()
+    (0..out_rows)
+        .map(|row| {
+            let w_row = &w[row * in_cols..(row + 1) * in_cols];
+            x.iter().zip(w_row.iter()).map(|(a, b)| a * b).sum()
+        })
+        .collect()
 }
 
 fn softmax(v: &mut [f32]) {
     let max = v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let mut sum = 0.0f32;
-    for x in v.iter_mut() { *x = (*x - max).exp(); sum += *x; }
-    if sum > 0.0 { for x in v.iter_mut() { *x /= sum; } }
+    for x in v.iter_mut() {
+        *x = (*x - max).exp();
+        sum += *x;
+    }
+    if sum > 0.0 {
+        for x in v.iter_mut() {
+            *x /= sum;
+        }
+    }
 }
 
 fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
@@ -231,8 +265,10 @@ fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     indexed.truncate(k);
-    (indexed.iter().map(|(i, _)| *i).collect(),
-     indexed.iter().map(|(_, v)| *v).collect())
+    (
+        indexed.iter().map(|(i, _)| *i).collect(),
+        indexed.iter().map(|(_, v)| *v).collect(),
+    )
 }
 
 /// Routing-only parameters. A subset of `MoeLayerWeights` — the expert weight
@@ -287,12 +323,18 @@ impl MoeRouterWeights<'_> {
         };
 
         let mut router_in: Vec<f32> = if !self.router_scale.is_empty() {
-            router_in_normed.iter().zip(self.router_scale.iter()).map(|(a, b)| a * b).collect()
+            router_in_normed
+                .iter()
+                .zip(self.router_scale.iter())
+                .map(|(a, b)| a * b)
+                .collect()
         } else {
             router_in_normed
         };
         if self.router_input_scalar != 1.0 && self.router_input_scalar != 0.0 {
-            for v in router_in.iter_mut() { *v *= self.router_input_scalar; }
+            for v in router_in.iter_mut() {
+                *v *= self.router_input_scalar;
+            }
         }
 
         let mut logits = matmul_vec(&router_in, self.router_proj, self.num_experts, hidden);
@@ -304,7 +346,9 @@ impl MoeRouterWeights<'_> {
         // gemma4_top_k_softmax which normalises after selection.
         let weight_sum: f32 = weights.iter().sum();
         if weight_sum > 0.0 {
-            for w in &mut weights { *w /= weight_sum; }
+            for w in &mut weights {
+                *w /= weight_sum;
+            }
         }
 
         if !self.router_per_expert_scale.is_empty() {
@@ -333,7 +377,9 @@ impl RemoteMoeBackend {
     /// Build from a shard list. Performs a health check on each shard.
     pub fn connect(configs: Vec<ShardConfig>) -> Result<Self, RemoteMoeError> {
         let shards: Result<Vec<Shard>, _> = configs.into_iter().map(Shard::connect).collect();
-        Ok(Self { shards: Arc::new(RwLock::new(shards?)) })
+        Ok(Self {
+            shards: Arc::new(RwLock::new(shards?)),
+        })
     }
 
     /// Replace the shard map live (no model reload, no inference interruption).
@@ -416,8 +462,11 @@ impl RemoteMoeBackend {
             .collect();
 
         // 4. Accumulate weighted outputs.
-        let expert_weight_map: std::collections::HashMap<usize, f32> =
-            expert_indices.iter().copied().zip(expert_weights.iter().copied()).collect();
+        let expert_weight_map: std::collections::HashMap<usize, f32> = expert_indices
+            .iter()
+            .copied()
+            .zip(expert_weights.iter().copied())
+            .collect();
 
         let mut out = vec![0.0f32; hidden];
         for result in results_per_shard {
@@ -425,10 +474,15 @@ impl RemoteMoeBackend {
                 if item.output.len() != hidden {
                     return Err(RemoteMoeError::BadResponse(format!(
                         "expert {}/{} returned {} floats, expected {hidden}",
-                        item.layer, item.expert_id, item.output.len()
+                        item.layer,
+                        item.expert_id,
+                        item.output.len()
                     )));
                 }
-                let weight = expert_weight_map.get(&item.expert_id).copied().unwrap_or(0.0);
+                let weight = expert_weight_map
+                    .get(&item.expert_id)
+                    .copied()
+                    .unwrap_or(0.0);
                 for (acc, &val) in out.iter_mut().zip(item.output.iter()) {
                     *acc += weight * val;
                 }
@@ -515,7 +569,9 @@ mod tests {
         // route should still produce a valid top-k.
         let num_experts = 4;
         let hidden = 4;
-        let router_proj: Vec<f32> = (0..num_experts * hidden).map(|i| (i as f32) * 0.1).collect();
+        let router_proj: Vec<f32> = (0..num_experts * hidden)
+            .map(|i| (i as f32) * 0.1)
+            .collect();
         let router = MoeRouterWeights {
             router_proj: &router_proj,
             router_scale: &[],
@@ -539,7 +595,10 @@ mod tests {
         assert_eq!(indices.len(), 2);
         assert_eq!(weights.len(), 2);
         let sum: f32 = weights.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-5, "weights should sum to 1, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < 1e-5,
+            "weights should sum to 1, got {sum}"
+        );
         assert!(weights.iter().all(|&w| w >= 0.0));
     }
 
@@ -580,7 +639,11 @@ mod tests {
             ..unscaled
         };
         let (_, idx_flipped, _) = flipped.route(&h, 0.0, 1e-6);
-        assert_eq!(idx_flipped, vec![1], "negative scalar should flip the winner");
+        assert_eq!(
+            idx_flipped,
+            vec![1],
+            "negative scalar should flip the winner"
+        );
     }
 
     #[test]

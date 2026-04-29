@@ -1,4 +1,6 @@
 //! Q4 matvec v3: half-precision accumulation + 8 rows per thread.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Apple GPU float16 throughput is 2× float32.
 //! Dequant to half, accumulate in half, convert to float at end.

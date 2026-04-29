@@ -1,4 +1,6 @@
 //! Debug + diagnostic helpers for the decode pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Three env-gated facilities:
 //! - `DECODE_DEBUG=1` — one-line summary of the first few decode calls
@@ -21,12 +23,17 @@ pub(super) fn log_decode_entry(
     inter: usize,
     layers: &[FullPipelineLayer],
 ) {
-    if std::env::var("DECODE_DEBUG").is_err() || call_n >= 3 { return; }
+    if std::env::var("DECODE_DEBUG").is_err() || call_n >= 3 {
+        return;
+    }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
     let has_moe = layers.iter().any(|l| l.moe.is_some());
     let has_combined = layers.iter().any(|l| l.moe_combined_output_norm);
     let n = layers.len();
-    let outer_loaded = layers.iter().filter(|l| l.moe_outer_post_norm.is_some()).count();
+    let outer_loaded = layers
+        .iter()
+        .filter(|l| l.moe_outer_post_norm.is_some())
+        .count();
     let post1_loaded = layers.iter().filter(|l| l.post_ffn_norm.is_some()).count();
     eprintln!(
         "[decode_token call={call_n}] x_rms={rms:.4} hidden={hidden} inter={inter} has_moe={has_moe} moe_combined_norm={has_combined} outer_post_norm={outer_loaded}/{n} post_ffn_norm_1={post1_loaded}/{n}"
@@ -154,7 +161,9 @@ impl ResidualDump {
         h_post_attn: &[f32],
         layer_out: &[f32],
     ) {
-        let Some(file) = self.file.as_mut() else { return };
+        let Some(file) = self.file.as_mut() else {
+            return;
+        };
         use std::io::Write;
         debug_assert_eq!(layer_in.len(), layer_out.len());
         debug_assert_eq!(layer_in.len(), h_post_attn.len());

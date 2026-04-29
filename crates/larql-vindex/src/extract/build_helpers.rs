@@ -1,4 +1,6 @@
 //! Helpers for the `build_vindex` extraction pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Each function is a discrete pipeline stage or utility used by
 //! `super::build::build_vindex`:
@@ -19,8 +21,8 @@
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use ndarray::Array2;
 use larql_models::ModelWeights;
+use ndarray::Array2;
 
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
@@ -44,7 +46,12 @@ pub(crate) fn chrono_now() -> String {
     let sec = secs % 60;
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        years_approx, months.min(12), day.min(31), hour, min, sec
+        years_approx,
+        months.min(12),
+        day.min(31),
+        hour,
+        min,
+        sec
     )
 }
 
@@ -63,7 +70,9 @@ pub(crate) fn build_whole_word_vocab(
         if let Ok(tok) = tokenizer.decode(&[id as u32], true) {
             let tok = tok.trim();
             if tok.len() >= 3
-                && tok.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '\'')
+                && tok
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '\'')
             {
                 ww_ids.push(id);
             }
@@ -76,7 +85,10 @@ pub(crate) fn build_whole_word_vocab(
         ww_embed.row_mut(i).assign(&embed.row(id));
     }
 
-    eprintln!("    Whole-word vocab: {} tokens (of {})", ww_count, vocab_size);
+    eprintln!(
+        "    Whole-word vocab: {} tokens (of {})",
+        ww_count, vocab_size
+    );
     (ww_ids, ww_embed)
 }
 
@@ -237,7 +249,10 @@ pub(super) fn run_clustering_pipeline(
     };
 
     let output_labeled = output_labels.iter().filter(|l| l.is_some()).count();
-    eprintln!("  Wikidata output matching: {}/{} clusters labeled", output_labeled, optimal_k);
+    eprintln!(
+        "  Wikidata output matching: {}/{} clusters labeled",
+        output_labeled, optimal_k
+    );
 
     // Tier 2+3: embedding projection + pattern detection
     let (embed_labels, top_tokens_per_cluster) =
@@ -291,7 +306,10 @@ pub(super) fn run_clustering_pipeline(
     assign_file.flush()?;
 
     callbacks.on_stage_done(
-        &format!("relation_clusters (k={}, {} features)", optimal_k, n_features),
+        &format!(
+            "relation_clusters (k={}, {} features)",
+            optimal_k, n_features
+        ),
         0.0,
     );
 

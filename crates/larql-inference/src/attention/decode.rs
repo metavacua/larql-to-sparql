@@ -1,4 +1,6 @@
 //! Decode-step attention — GQA for a single new token against a
+// SPDX-License-Identifier: Apache-2.0
+
 //! growing KV cache.
 //!
 //! Prefill does full O(seq²) attention and returns K/V per layer. Decode
@@ -11,8 +13,8 @@
 
 use ndarray::Array2;
 
-use super::SharedKV;
 use super::rope::apply_rope_partial_at;
+use super::SharedKV;
 
 /// Per-layer K/V cache. Can grow unbounded or be clamped to a fixed
 /// sliding window (Markov-residual-bounded strategy — keep the last W
@@ -80,7 +82,9 @@ impl KvCache {
             return;
         };
         let rows = k.shape()[0];
-        if rows <= window { return; }
+        if rows <= window {
+            return;
+        }
         let start = rows - window;
         let k_slice = k.slice(ndarray::s![start..rows, ..]).to_owned();
         let v_slice = v.slice(ndarray::s![start..rows, ..]).to_owned();
@@ -207,47 +211,87 @@ pub fn run_attention_block_decode_step_backend(
     let position = abs_position;
 
     let h_norm = crate::forward::apply_norm(
-        weights, h_new, &arch.input_layernorm_key(layer), norm_offset,
+        weights,
+        h_new,
+        &arch.input_layernorm_key(layer),
+        norm_offset,
     );
 
     let w_q = weights.tensors.get(&arch.attn_q_key(layer))?;
     let w_o = weights.tensors.get(&arch.attn_o_key(layer))?;
     let mut q_full = dot_proj_gpu(&h_norm, w_q, backend);
-    if let Some(bias) = arch.attn_q_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_q_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut q_full, bias);
     }
 
     let qk_offset = weights.arch.qk_norm_weight_offset();
-    let qk_norm_off = if qk_offset != 0.0 { qk_offset } else { norm_offset };
-    let q_normed = match arch.attn_q_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    let qk_norm_off = if qk_offset != 0.0 {
+        qk_offset
+    } else {
+        norm_offset
+    };
+    let q_normed = match arch
+        .attn_q_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         Some(norm_w) => rms_norm_heads(&q_full, norm_w, num_q, head_dim, qk_norm_off),
         None => q_full,
     };
     let layer_rope_base = arch.rope_base_for_layer(layer);
     let rotary_frac = arch.rotary_fraction_for_layer(layer);
-    let q_rope = apply_rope_partial_at(&q_normed, num_q, head_dim, layer_rope_base, rotary_frac, position);
+    let q_rope = apply_rope_partial_at(
+        &q_normed,
+        num_q,
+        head_dim,
+        layer_rope_base,
+        rotary_frac,
+        position,
+    );
 
     // New token's K, V — RoPE'd at `position`, then appended to cache.
     let w_k = weights.tensors.get(&arch.attn_k_key(layer))?;
     let v_from_k = !weights.tensors.contains_key(&arch.attn_v_key(layer));
-    let w_v = if v_from_k { w_k } else { weights.tensors.get(&arch.attn_v_key(layer))? };
+    let w_v = if v_from_k {
+        w_k
+    } else {
+        weights.tensors.get(&arch.attn_v_key(layer))?
+    };
 
     let mut k_full_new = dot_proj_gpu(&h_norm, w_k, backend);
     let mut v_full_new = dot_proj_gpu(&h_norm, w_v, backend);
-    if let Some(bias) = arch.attn_k_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_k_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut k_full_new, bias);
     }
-    if let Some(bias) = arch.attn_v_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_v_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut v_full_new, bias);
     }
     if arch.has_v_norm() {
         v_full_new = rms_norm_heads_no_weight(&v_full_new, num_kv, head_dim);
     }
-    let k_normed = match arch.attn_k_norm_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    let k_normed = match arch
+        .attn_k_norm_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         Some(norm_w) => rms_norm_heads(&k_full_new, norm_w, num_kv, head_dim, qk_norm_off),
         None => k_full_new,
     };
-    let k_new_rope = apply_rope_partial_at(&k_normed, num_kv, head_dim, layer_rope_base, rotary_frac, position);
+    let k_new_rope = apply_rope_partial_at(
+        &k_normed,
+        num_kv,
+        head_dim,
+        layer_rope_base,
+        rotary_frac,
+        position,
+    );
 
     // Concatenate cache + new along seq axis.
     let (k_concat, v_concat) = match kv_entry {
@@ -256,10 +300,18 @@ pub fn run_attention_block_decode_step_backend(
             let total = k_cached.shape()[0] + 1;
             let mut k_out = Array2::<f32>::zeros((total, kv_dim));
             let mut v_out = Array2::<f32>::zeros((total, kv_dim));
-            k_out.slice_mut(ndarray::s![..k_cached.shape()[0], ..]).assign(k_cached);
-            v_out.slice_mut(ndarray::s![..v_cached.shape()[0], ..]).assign(v_cached);
-            k_out.slice_mut(ndarray::s![k_cached.shape()[0].., ..]).assign(&k_new_rope);
-            v_out.slice_mut(ndarray::s![v_cached.shape()[0].., ..]).assign(&v_full_new);
+            k_out
+                .slice_mut(ndarray::s![..k_cached.shape()[0], ..])
+                .assign(k_cached);
+            v_out
+                .slice_mut(ndarray::s![..v_cached.shape()[0], ..])
+                .assign(v_cached);
+            k_out
+                .slice_mut(ndarray::s![k_cached.shape()[0].., ..])
+                .assign(&k_new_rope);
+            v_out
+                .slice_mut(ndarray::s![v_cached.shape()[0].., ..])
+                .assign(&v_full_new);
             (k_out, v_out)
         }
         None => (k_new_rope, v_full_new),
@@ -267,21 +319,30 @@ pub fn run_attention_block_decode_step_backend(
 
     let softcap = arch.attn_logit_softcapping();
     let attn_out = gqa_attention_decode_step(
-        &q_rope, &k_concat, &v_concat,
-        num_q, head_dim, reps, scale, softcap,
+        &q_rope, &k_concat, &v_concat, num_q, head_dim, reps, scale, softcap,
     );
 
     let mut attn_projected = dot_proj_gpu(&attn_out, w_o, backend);
-    if let Some(bias) = arch.attn_o_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .attn_o_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut attn_projected, bias);
     }
 
     let res_mult = arch.residual_multiplier();
     let h_post_attn = if arch.has_post_norms() {
         let normed = crate::forward::apply_norm(
-            weights, &attn_projected, &arch.post_attention_layernorm_key(layer), norm_offset,
+            weights,
+            &attn_projected,
+            &arch.post_attention_layernorm_key(layer),
+            norm_offset,
         );
-        if res_mult != 1.0 { h_new + &(&normed * res_mult) } else { h_new + &normed }
+        if res_mult != 1.0 {
+            h_new + &(&normed * res_mult)
+        } else {
+            h_new + &normed
+        }
     } else if res_mult != 1.0 {
         h_new + &(&attn_projected * res_mult)
     } else {

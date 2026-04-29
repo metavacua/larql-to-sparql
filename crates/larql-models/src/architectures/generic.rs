@@ -1,4 +1,6 @@
 //! Generic/fallback architecture for unknown model types.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Uses Llama-style defaults: no embedding scaling, no norm offset,
 //! no QK norm, no post-norms, standard RoPE base.

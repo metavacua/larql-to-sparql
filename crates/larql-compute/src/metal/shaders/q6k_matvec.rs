@@ -1,4 +1,6 @@
 //! Q6_K matrix-vector multiply — used by Ollama for V projection and FFN down.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Q6_K super-block layout (256 values = 210 bytes):
 //!   [0..127]    128 bytes: lo4 — lower 4 bits of each value (2 per byte)

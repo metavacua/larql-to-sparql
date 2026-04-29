@@ -1,4 +1,6 @@
 //! Accuracy test suite — the five tests that prove the video frame.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Test 1: Paris test (pass/fail sanity across all 5 strategies)
 //! Test 2: Top-1 match rate on 100 diverse prompts
@@ -9,8 +11,8 @@
 //! Requires `real-model` feature — needs actual model weights.
 
 #[cfg(feature = "real-model")]
+pub mod needle;
+#[cfg(feature = "real-model")]
 pub mod prompts;
 #[cfg(feature = "real-model")]
 pub mod runner;
-#[cfg(feature = "real-model")]
-pub mod needle;

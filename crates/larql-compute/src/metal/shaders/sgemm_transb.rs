@@ -1,4 +1,5 @@
 //! f32 tiled matrix multiply transposed: C = A × B^T.
+// SPDX-License-Identifier: Apache-2.0
 
 pub const SHADER: &str = r#"
 constant uint TS_T = 32;

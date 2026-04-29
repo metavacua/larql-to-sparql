@@ -1,4 +1,5 @@
 #![allow(clippy::doc_overindented_list_items)]
+// SPDX-License-Identifier: Apache-2.0
 #![allow(clippy::type_complexity)]
 
 use clap::{Parser, Subcommand};

@@ -1,4 +1,6 @@
 //! Linear algebra primitives for MEMIT — Cholesky decomposition and solve.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! All operations use f64 for numerical stability (the MEMIT covariance
 //! inverse is ill-conditioned at f32 for ffn_dim > 2048).
@@ -13,7 +15,11 @@ use ndarray::Array2;
 pub fn cholesky(a: &Array2<f64>, ridge: f64) -> Result<Array2<f64>, String> {
     let n = a.shape()[0];
     if a.shape()[1] != n {
-        return Err(format!("cholesky: matrix must be square, got {}×{}", n, a.shape()[1]));
+        return Err(format!(
+            "cholesky: matrix must be square, got {}×{}",
+            n,
+            a.shape()[1]
+        ));
     }
 
     let mut l = Array2::<f64>::zeros((n, n));

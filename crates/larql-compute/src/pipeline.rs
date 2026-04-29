@@ -1,4 +1,6 @@
 //! Pipeline layer types — per-layer architecture parameters for the compute pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These types carry all model-specific behavior per-layer:
 //! norm type, activation, attention geometry, RoPE, FFN type, etc.
@@ -10,18 +12,18 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum QuantFormat {
-    Q4_0,   // 18 bytes per 32 values (one f16 scale)
-    Q4_K,   // 148 bytes per 256 values (super-block with group scales)
-    Q4_KF,  // 160 bytes per 256 values (pre-baked half scales — fast decode)
-    Q6_K,   // 210 bytes per 256 values (6-bit with sub-block scales)
-    Q8_0,   // int8 values + separate f32 scales
+    Q4_0,  // 18 bytes per 32 values (one f16 scale)
+    Q4_K,  // 148 bytes per 256 values (super-block with group scales)
+    Q4_KF, // 160 bytes per 256 values (pre-baked half scales — fast decode)
+    Q6_K,  // 210 bytes per 256 values (6-bit with sub-block scales)
+    Q8_0,  // int8 values + separate f32 scales
 }
 
 /// A quantized weight matrix — raw bytes with format tag.
 #[derive(Clone, Copy)]
 pub struct QuantWeight<'a> {
     pub data: &'a [u8],
-    pub scales: Option<&'a [f32]>,  // only for Q8_0 (separate scale array)
+    pub scales: Option<&'a [f32]>, // only for Q8_0 (separate scale array)
     pub format: QuantFormat,
 }
 
@@ -203,6 +205,10 @@ impl<'a> FullPipelineLayer<'a> {
 impl From<bool> for Activation {
     /// `true` = GeluTanh (Gemma), `false` = Silu (Llama).
     fn from(use_gelu_tanh: bool) -> Self {
-        if use_gelu_tanh { Activation::GeluTanh } else { Activation::Silu }
+        if use_gelu_tanh {
+            Activation::GeluTanh
+        } else {
+            Activation::Silu
+        }
     }
 }

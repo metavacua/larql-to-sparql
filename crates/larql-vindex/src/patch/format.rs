@@ -1,4 +1,6 @@
 //! Patch file format — `.vlp` JSON diffs that overlay an immutable
+// SPDX-License-Identifier: Apache-2.0
+
 //! base vindex without modifying its files on disk.
 //!
 //! This module owns the on-the-wire representation: `VindexPatch`,
@@ -84,9 +86,7 @@ pub enum PatchOp {
     },
     /// Architecture B: remove all KNN entries for an entity.
     #[serde(rename = "delete_knn")]
-    DeleteKnn {
-        entity: String,
-    },
+    DeleteKnn { entity: String },
 }
 
 /// Compact down_meta for a patch operation.
@@ -119,8 +119,8 @@ impl PatchOp {
 impl VindexPatch {
     /// Write patch to a .vlp file.
     pub fn save(&self, path: &Path) -> Result<(), VindexError> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| VindexError::Parse(e.to_string()))?;
         std::fs::write(path, json)?;
         Ok(())
     }
@@ -128,8 +128,8 @@ impl VindexPatch {
     /// Load patch from a .vlp file.
     pub fn load(path: &Path) -> Result<Self, VindexError> {
         let text = std::fs::read_to_string(path)?;
-        let patch: VindexPatch = serde_json::from_str(&text)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let patch: VindexPatch =
+            serde_json::from_str(&text).map_err(|e| VindexError::Parse(e.to_string()))?;
         Ok(patch)
     }
 
@@ -165,9 +165,8 @@ impl VindexPatch {
 
 /// Encode a gate vector (f32 slice) as base64 string.
 pub fn encode_gate_vector(vec: &[f32]) -> String {
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(vec.as_ptr() as *const u8, vec.len() * 4)
-    };
+    let bytes: &[u8] =
+        unsafe { std::slice::from_raw_parts(vec.as_ptr() as *const u8, vec.len() * 4) };
     base64_encode(bytes)
 }
 
@@ -175,12 +174,13 @@ pub fn encode_gate_vector(vec: &[f32]) -> String {
 pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
     let bytes = base64_decode(b64)?;
     if bytes.len() % 4 != 0 {
-        return Err(VindexError::Parse("gate vector bytes not aligned to f32".into()));
+        return Err(VindexError::Parse(
+            "gate vector bytes not aligned to f32".into(),
+        ));
     }
-    let floats: Vec<f32> = unsafe {
-        std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4)
-    }
-    .to_vec();
+    let floats: Vec<f32> =
+        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4) }
+            .to_vec();
     Ok(floats)
 }
 
@@ -196,8 +196,16 @@ fn base64_encode(data: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
         result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 { result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char); } else { result.push('='); }
-        if chunk.len() > 2 { result.push(CHARS[(triple & 0x3F) as usize] as char); } else { result.push('='); }
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
     }
     result
 }
@@ -217,15 +225,21 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, VindexError> {
     let input = input.as_bytes();
     let mut result = Vec::with_capacity(input.len() * 3 / 4);
     for chunk in input.chunks(4) {
-        if chunk.len() < 4 { break; }
+        if chunk.len() < 4 {
+            break;
+        }
         let a = val(chunk[0])?;
         let b = val(chunk[1])?;
         let c = val(chunk[2])?;
         let d = val(chunk[3])?;
         let triple = (a << 18) | (b << 12) | (c << 6) | d;
         result.push(((triple >> 16) & 0xFF) as u8);
-        if chunk[2] != b'=' { result.push(((triple >> 8) & 0xFF) as u8); }
-        if chunk[3] != b'=' { result.push((triple & 0xFF) as u8); }
+        if chunk[2] != b'=' {
+            result.push(((triple >> 8) & 0xFF) as u8);
+        }
+        if chunk[3] != b'=' {
+            result.push((triple & 0xFF) as u8);
+        }
     }
     Ok(result)
 }

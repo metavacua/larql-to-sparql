@@ -1,4 +1,6 @@
 //! # Unit expert
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Unit conversion across length, mass, temperature, volume, speed, energy.
 //! Units are language-neutral identifiers (`"km"`, `"mi"`, `"C"`, `"F"`,

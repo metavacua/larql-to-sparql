@@ -1,4 +1,6 @@
 //! PatchedVindex — runtime overlay on an immutable base index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Holds the resolved override maps (`overrides_meta`, `overrides_gate`,
 //! `deleted`) plus the L0 `KnnStore`. Knows how to apply a `VindexPatch`
@@ -185,15 +187,15 @@ impl PatchedVindex {
     /// patch overlay. Used by `COMPILE INTO VINDEX` to read each
     /// inserted gate vector for sidecar serialisation.
     pub fn overrides_gate_at(&self, layer: usize, feature: usize) -> Option<&[f32]> {
-        self.overrides_gate.get(&(layer, feature)).map(|v| v.as_slice())
+        self.overrides_gate
+            .get(&(layer, feature))
+            .map(|v| v.as_slice())
     }
 
     /// Read-only iterator over every gate override slot in the overlay.
     /// Used by `COMPILE INTO VINDEX WITH REFINE` to enumerate the
     /// constellation before refining.
-    pub fn overrides_gate_iter(
-        &self,
-    ) -> impl Iterator<Item = (usize, usize, &[f32])> + '_ {
+    pub fn overrides_gate_iter(&self) -> impl Iterator<Item = (usize, usize, &[f32])> + '_ {
         self.overrides_gate
             .iter()
             .map(|(&(l, f), v)| (l, f, v.as_slice()))
@@ -259,7 +261,6 @@ impl PatchedVindex {
         weakest_idx
     }
 
-
     /// Look up feature metadata, checking overrides first.
     pub fn feature_meta(&self, layer: usize, feature: usize) -> Option<FeatureMeta> {
         let key = (layer, feature);
@@ -275,13 +276,21 @@ impl PatchedVindex {
     /// Gate KNN with patched vectors.
     /// For features with overridden gate vectors, uses the patch vector.
     /// For deleted features, excludes them from results.
-    pub fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
+    pub fn gate_knn(
+        &self,
+        layer: usize,
+        residual: &Array1<f32>,
+        top_k: usize,
+    ) -> Vec<(usize, f32)> {
         let mut hits = self.base.gate_knn(layer, residual, top_k * 2); // oversample
 
         // Apply gate vector overrides
         for (&(l, f), gate_vec) in &self.overrides_gate {
-            if l != layer { continue; }
-            let score: f32 = gate_vec.iter()
+            if l != layer {
+                continue;
+            }
+            let score: f32 = gate_vec
+                .iter()
                 .zip(residual.iter())
                 .map(|(a, b)| a * b)
                 .sum();
@@ -311,12 +320,19 @@ impl PatchedVindex {
                 .into_iter()
                 .filter_map(|(feature, gate_score)| {
                     let meta = self.feature_meta(layer, feature)?.clone();
-                    Some(WalkHit { layer, feature, gate_score, meta })
+                    Some(WalkHit {
+                        layer,
+                        feature,
+                        gate_score,
+                        meta,
+                    })
                 })
                 .collect();
             trace_layers.push((layer, walk_hits));
         }
-        WalkTrace { layers: trace_layers }
+        WalkTrace {
+            layers: trace_layers,
+        }
     }
 
     /// Flatten all patches into the base, producing a new clean VectorIndex (heap mode).
@@ -331,18 +347,25 @@ impl PatchedVindex {
             } else if let Some(ref mmap) = self.base.gate_mmap_bytes {
                 // Mmap mode — decode this layer's slice to an Array2
                 self.base.gate_mmap_slices.get(layer).and_then(|slice| {
-                    if slice.num_features == 0 { return None; }
+                    if slice.num_features == 0 {
+                        return None;
+                    }
                     let bpf = crate::config::dtype::bytes_per_float(self.base.gate_mmap_dtype);
                     let byte_offset = slice.float_offset * bpf;
                     let byte_count = slice.num_features * self.base.hidden_size * bpf;
                     let byte_end = byte_offset + byte_count;
-                    if byte_end > mmap.len() { return None; }
+                    if byte_end > mmap.len() {
+                        return None;
+                    }
                     let floats = crate::config::dtype::decode_floats(
-                        &mmap[byte_offset..byte_end], self.base.gate_mmap_dtype
+                        &mmap[byte_offset..byte_end],
+                        self.base.gate_mmap_dtype,
                     );
                     ndarray::Array2::from_shape_vec(
-                        (slice.num_features, self.base.hidden_size), floats
-                    ).ok()
+                        (slice.num_features, self.base.hidden_size),
+                        floats,
+                    )
+                    .ok()
                 })
             } else {
                 None
@@ -351,7 +374,9 @@ impl PatchedVindex {
             let gate = base_gate.map(|mut g| {
                 // Apply gate vector overrides
                 for (&(l, f), vec) in &self.overrides_gate {
-                    if l != layer { continue; }
+                    if l != layer {
+                        continue;
+                    }
                     if f < g.shape()[0] && vec.len() == g.shape()[1] {
                         for (j, val) in vec.iter().enumerate() {
                             g[[f, j]] = *val;
@@ -364,30 +389,48 @@ impl PatchedVindex {
 
             // Build metadata from heap or mmap
             let num_features = self.base.num_features(layer);
-            let mut new_metas: Vec<Option<FeatureMeta>> = if let Some(heap) = self.base.down_meta_at(layer) {
-                heap.to_vec()
-            } else if num_features > 0 {
-                // Mmap: read each feature on demand
-                (0..num_features).map(|f| self.base.feature_meta(layer, f)).collect()
-            } else {
-                Vec::new()
-            };
+            let mut new_metas: Vec<Option<FeatureMeta>> =
+                if let Some(heap) = self.base.down_meta_at(layer) {
+                    heap.to_vec()
+                } else if num_features > 0 {
+                    // Mmap: read each feature on demand
+                    (0..num_features)
+                        .map(|f| self.base.feature_meta(layer, f))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
             // Apply meta overrides
             for (&(l, f), override_meta) in &self.overrides_meta {
-                if l != layer { continue; }
-                while new_metas.len() <= f { new_metas.push(None); }
+                if l != layer {
+                    continue;
+                }
+                while new_metas.len() <= f {
+                    new_metas.push(None);
+                }
                 new_metas[f] = override_meta.clone();
             }
             // Apply deletes
             for &(l, f) in &self.deleted {
-                if l == layer && f < new_metas.len() { new_metas[f] = None; }
+                if l == layer && f < new_metas.len() {
+                    new_metas[f] = None;
+                }
             }
 
-            new_meta.push(if new_metas.is_empty() { None } else { Some(new_metas) });
+            new_meta.push(if new_metas.is_empty() {
+                None
+            } else {
+                Some(new_metas)
+            });
         }
 
-        VectorIndex::new(new_gate, new_meta, self.base.num_layers, self.base.hidden_size)
+        VectorIndex::new(
+            new_gate,
+            new_meta,
+            self.base.num_layers,
+            self.base.hidden_size,
+        )
     }
 
     /// Number of active patches.
@@ -434,7 +477,6 @@ impl PatchedVindex {
     }
 }
 
-
 #[cfg(test)]
 mod gate_override_tests {
     //! Direct unit tests for the gate-override accessors and mutator
@@ -452,7 +494,11 @@ mod gate_override_tests {
             top_token: token.into(),
             top_token_id: 0,
             c_score: 0.9,
-            top_k: vec![TopKEntry { token: token.into(), token_id: 0, logit: 0.9 }],
+            top_k: vec![TopKEntry {
+                token: token.into(),
+                token_id: 0,
+                logit: 0.9,
+            }],
         }
     }
 
@@ -461,10 +507,7 @@ mod gate_override_tests {
     fn make_empty_base() -> PatchedVindex {
         let gate0 = Array2::<f32>::zeros((3, 4));
         let gate1 = Array2::<f32>::zeros((3, 4));
-        let down_meta = vec![
-            Some(vec![None, None, None]),
-            Some(vec![None, None, None]),
-        ];
+        let down_meta = vec![Some(vec![None, None, None]), Some(vec![None, None, None])];
         let index = VectorIndex::new(vec![Some(gate0), Some(gate1)], down_meta, 2, 4);
         PatchedVindex::new(index)
     }

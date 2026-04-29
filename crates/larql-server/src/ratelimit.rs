@@ -1,4 +1,5 @@
 //! Per-IP rate limiting middleware using a token bucket.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -76,9 +77,7 @@ impl RateLimiter {
         if let Ok(mut buckets) = self.buckets.lock() {
             let now = Instant::now();
             // Remove buckets that have been full for > 5 minutes (idle IPs).
-            buckets.retain(|_, b| {
-                now.duration_since(b.last_refill).as_secs() < 300
-            });
+            buckets.retain(|_, b| now.duration_since(b.last_refill).as_secs() < 300);
         }
     }
 }
@@ -111,11 +110,7 @@ pub async fn rate_limit_middleware(
 
     if let Some(ip) = ip {
         if !limiter.check(ip) {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate limit exceeded",
-            )
-                .into_response();
+            return (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
         }
     }
 
@@ -181,7 +176,7 @@ mod tests {
         let ip2: IpAddr = "10.0.0.2".parse().unwrap();
         assert!(rl.check(ip1));
         assert!(!rl.check(ip1)); // ip1 exhausted
-        assert!(rl.check(ip2));  // ip2 still has tokens
+        assert!(rl.check(ip2)); // ip2 still has tokens
     }
 
     #[test]

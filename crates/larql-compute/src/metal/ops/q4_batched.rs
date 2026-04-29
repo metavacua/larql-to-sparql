@@ -1,4 +1,6 @@
 //! Batched Q4 operations — pair dispatch and multi-layer pipeline.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Amortises GPU dispatch overhead by encoding multiple operations
 //! into single command buffers.
@@ -6,12 +8,12 @@
 //! - `pair_batch`: gate+up for all seq positions in one submission
 //! - `multi_layer_ffn`: 21 layers × (gate+up+GEGLU+down+Q8) in one submission
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
+use super::q4_common::{quantize_to_q8, Q4Pipelines};
 use crate::metal::buffers::BufferCache;
 use crate::metal::shaders::q4_matvec as shader;
-use super::q4_common::{Q4Pipelines, quantize_to_q8};
 
 /// Batched gate+up for ALL seq positions in ONE GPU submission.
 /// Encodes 2×seq_len Q4 matvec dispatches in a single command buffer.
@@ -84,8 +86,14 @@ pub fn pair_batch(
     let mut gate_results = Vec::with_capacity(seq_len);
     let mut up_results = Vec::with_capacity(seq_len);
     for s in 0..seq_len {
-        gate_results.push(crate::metal::buffers::read_buffer_f32(&gate_bufs[s], num_rows));
-        up_results.push(crate::metal::buffers::read_buffer_f32(&up_bufs[s], num_rows));
+        gate_results.push(crate::metal::buffers::read_buffer_f32(
+            &gate_bufs[s],
+            num_rows,
+        ));
+        up_results.push(crate::metal::buffers::read_buffer_f32(
+            &up_bufs[s],
+            num_rows,
+        ));
     }
     (gate_results, up_results)
 }
@@ -116,9 +124,18 @@ pub fn multi_layer_ffn(
     let (q8_init, q8s_init) = quantize_to_q8(x);
 
     // Pre-cache weight buffers
-    let gate_bufs: Vec<_> = layers_q4.iter().map(|(g, _, _)| bufs.get_bytes(g)).collect();
-    let up_bufs: Vec<_> = layers_q4.iter().map(|(_, u, _)| bufs.get_bytes(u)).collect();
-    let down_bufs: Vec<_> = layers_q4.iter().map(|(_, _, d)| bufs.get_bytes(d)).collect();
+    let gate_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(g, _, _)| bufs.get_bytes(g))
+        .collect();
+    let up_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(_, u, _)| bufs.get_bytes(u))
+        .collect();
+    let down_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(_, _, d)| bufs.get_bytes(d))
+        .collect();
 
     // Pre-allocate ALL intermediate buffers
     let mut q8_bufs = Vec::with_capacity(num_layers + 1);

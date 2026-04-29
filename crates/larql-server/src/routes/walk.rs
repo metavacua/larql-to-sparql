@@ -1,9 +1,10 @@
 //! GET /v1/walk — feature scan for a prompt.
+// SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -18,7 +19,9 @@ pub struct WalkParams {
     pub layers: Option<String>,
 }
 
-fn default_top() -> usize { 5 }
+fn default_top() -> usize {
+    5
+}
 
 /// Parse a layer range string like "24-33" or "14,26,27".
 fn parse_layers(s: &str, all: &[usize]) -> Vec<usize> {
@@ -33,10 +36,7 @@ fn parse_layers(s: &str, all: &[usize]) -> Vec<usize> {
         .collect()
 }
 
-fn walk_prompt(
-    model: &LoadedModel,
-    params: &WalkParams,
-) -> Result<serde_json::Value, ServerError> {
+fn walk_prompt(model: &LoadedModel, params: &WalkParams) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
     let encoding = model

@@ -1,4 +1,5 @@
 //! `INFER` — full forward pass with attention. Requires model weights.
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::error::LqlError;
 use crate::executor::{Backend, Session};

@@ -1,4 +1,5 @@
 //! larql-server library — shared between the binary and integration tests.
+// SPDX-License-Identifier: Apache-2.0
 
 // tonic::Status is a fat error type (176 bytes). It's our external contract
 // for all gRPC handlers, so flipping to Box<Status> is not worth the churn.

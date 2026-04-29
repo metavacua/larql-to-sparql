@@ -1,4 +1,6 @@
 //! DESCRIBE types — DescribeEdge and LabelSource.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! These represent the output of a DESCRIBE operation on an entity.
 //! The actual DESCRIBE logic lives in the executor (larql-lql), but these

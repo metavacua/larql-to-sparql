@@ -1,4 +1,5 @@
 //! Predicate-based edge filtering.
+// SPDX-License-Identifier: Apache-2.0
 
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
@@ -72,20 +73,30 @@ impl FilterConfig {
 
         if let Some(min) = self.min_layer {
             let layer = meta_u64("layer");
-            if layer.is_none_or(|l| (l as usize) < min) { return false; }
+            if layer.is_none_or(|l| (l as usize) < min) {
+                return false;
+            }
         }
         if let Some(max) = self.max_layer {
             let layer = meta_u64("layer");
-            if layer.is_none_or(|l| (l as usize) > max) { return false; }
+            if layer.is_none_or(|l| (l as usize) > max) {
+                return false;
+            }
         }
         if let Some(min) = self.min_selectivity {
-            if meta_f64("selectivity").is_none_or(|v| v < min) { return false; }
+            if meta_f64("selectivity").is_none_or(|v| v < min) {
+                return false;
+            }
         }
         if let Some(min) = self.min_c_in {
-            if meta_f64("c_in").is_none_or(|v| v < min) { return false; }
+            if meta_f64("c_in").is_none_or(|v| v < min) {
+                return false;
+            }
         }
         if let Some(min) = self.min_c_out {
-            if meta_f64("c_out").is_none_or(|v| v < min) { return false; }
+            if meta_f64("c_out").is_none_or(|v| v < min) {
+                return false;
+            }
         }
 
         true
@@ -135,9 +146,30 @@ mod tests {
 
     fn build_test_graph() -> Graph {
         let mut g = Graph::new();
-        g.add_edge(test_edge_with_meta("France", "capital-of", "Paris", 0.9, 26, 0.8));
-        g.add_edge(test_edge_with_meta("Germany", "capital-of", "Berlin", 0.7, 26, 0.6));
-        g.add_edge(test_edge_with_meta("France", "language-of", "French", 0.5, 10, 0.3));
+        g.add_edge(test_edge_with_meta(
+            "France",
+            "capital-of",
+            "Paris",
+            0.9,
+            26,
+            0.8,
+        ));
+        g.add_edge(test_edge_with_meta(
+            "Germany",
+            "capital-of",
+            "Berlin",
+            0.7,
+            26,
+            0.6,
+        ));
+        g.add_edge(test_edge_with_meta(
+            "France",
+            "language-of",
+            "French",
+            0.5,
+            10,
+            0.3,
+        ));
         g.add_edge(test_edge("Japan", "continent", "Asia", 1.0).with_source(SourceType::Document));
         g
     }

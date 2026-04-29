@@ -1,4 +1,6 @@
 //! Graph-based FFN backend — replaces the gate matmul with a precomputed index.
+// SPDX-License-Identifier: Apache-2.0
+
 //!
 //! Offline: for each layer, compute gate activations for every embedding token,
 //! record the top-K features per token. This is the "graph" — a token→features map.
@@ -359,12 +361,9 @@ impl GateIndex {
     /// Precompute entity feature lists for all layers at once.
     /// Returns a vec indexed by layer number (sparse — unlisted layers are empty).
     /// Zero allocation at query time — just index into the vec.
-    pub fn precompute_entity(
-        &self,
-        token_ids: &[u32],
-        top_k: usize,
-    ) -> Vec<Vec<usize>> {
-        let token_scores: Vec<(usize, f32)> = token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
+    pub fn precompute_entity(&self, token_ids: &[u32], top_k: usize) -> Vec<Vec<usize>> {
+        let token_scores: Vec<(usize, f32)> =
+            token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
         let max_layer = self.index.keys().copied().max().unwrap_or(0);
         let mut result = vec![Vec::new(); max_layer + 1];
         for &layer in self.index.keys() {
