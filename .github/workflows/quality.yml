@@ -1,0 +1,266 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Code scanning and code-quality workflow.
+#
+# Per docs/specs/compliance-pipeline.md (Out-of-scope), security scanning
+# and vulnerability triage are intentionally NOT part of validate.yml. This
+# file is the separate, parallel workflow that owns those concerns. It must
+# never call into validate.yml, and validate.yml must never call into it.
+#
+# The two workflows are independent gates:
+#
+#   validate.yml  — deterministic candidate-validity (Axioms A1–A5)
+#   quality.yml   — code scanning + code quality (this file)
+#
+# All checks here are pure functions of the tree at HEAD plus a fixed set of
+# tool versions pinned in `env:` below. SARIF outputs are uploaded to GitHub
+# Code Scanning under distinct categories so findings can be triaged in the
+# Security tab.
+
+name: quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly RustSec advisory refresh against the committed lockfile, so
+    # newly-disclosed vulnerabilities surface even when no PR is open.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  # SARIF upload to the Code Scanning API requires `security-events: write`.
+  security-events: write
+  # `actions: read` lets the CodeQL action read workflow metadata.
+  actions: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pinned tool versions. Bumping any of these is a deliberate change to the
+# scanning surface and should be done in a dedicated PR.
+env:
+  RUST_TOOLCHAIN: "1.84.0"
+  CARGO_AUDIT_VERSION: "0.21.2"
+  CARGO_DENY_VERSION: "0.18.2"
+  CLIPPY_SARIF_VERSION: "0.7.0"
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Q1: Formatting. cargo fmt --check is a pure structural predicate; a
+  # mismatch here is always a deterministic remediation (`cargo fmt`).
+  # ---------------------------------------------------------------------
+  fmt:
+    name: fmt (cargo fmt --check)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --component rustfmt \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo fmt --version
+
+      - name: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
+
+  # ---------------------------------------------------------------------
+  # Q2: Clippy. Runs with -D warnings (gate) AND emits SARIF that is
+  # uploaded to Code Scanning so individual findings are visible in the
+  # Security tab even on green runs.
+  # ---------------------------------------------------------------------
+  clippy:
+    name: clippy (-D warnings + SARIF)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --component clippy \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo clippy --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-clippy
+
+      - name: Install clippy-sarif and sarif-fmt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: clippy-sarif@${{ env.CLIPPY_SARIF_VERSION }},sarif-fmt@${{ env.CLIPPY_SARIF_VERSION }}
+
+      - name: Run clippy and emit SARIF
+        # `--message-format=json` is non-fatal so we can capture all
+        # diagnostics into SARIF before the gating step decides verdict.
+        run: |
+          set -o pipefail
+          cargo clippy \
+            --workspace --tests --all-targets \
+            --message-format=json \
+            -- -D warnings \
+            | clippy-sarif \
+            | tee clippy.sarif \
+            | sarif-fmt
+        continue-on-error: true
+
+      - name: Upload clippy SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: clippy.sarif
+          category: clippy
+
+      - name: Gate on clippy warnings
+        # Re-runs clippy with a strict gate. Cheap relative to the build
+        # in the previous step (cache is warm).
+        run: cargo clippy --workspace --tests --all-targets -- -D warnings
+
+  # ---------------------------------------------------------------------
+  # Q3: Tests. The full workspace test surface. Feature-gated backends
+  # (e.g. metal) are intentionally not enabled here — they require host
+  # hardware that ubuntu-24.04 does not provide.
+  # ---------------------------------------------------------------------
+  test:
+    name: test (cargo test --workspace)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-test
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+  # ---------------------------------------------------------------------
+  # Q4: cargo-audit — RustSec advisory database scan against Cargo.lock.
+  # Runs on every PR and on a weekly cron so that newly-disclosed advisories
+  # surface even when the tree is dormant.
+  # ---------------------------------------------------------------------
+  audit:
+    name: audit (cargo-audit / RustSec)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}
+
+      - name: cargo audit
+        # `--deny warnings` promotes unmaintained/yanked crates and other
+        # advisory-but-not-vulnerability findings to failures.
+        run: cargo audit --deny warnings
+
+  # ---------------------------------------------------------------------
+  # Q5: cargo-deny — license allow-list, banned crates, advisories,
+  # source allow-list. Configured by deny.toml at the repo root. The
+  # license allow-list mirrors the Apache-2.0-only policy enforced by
+  # scripts/check_apache_license.sh for *first-party* sources, applied
+  # here to the *transitive dependency closure*.
+  # ---------------------------------------------------------------------
+  deny:
+    name: deny (cargo-deny / licenses + bans + sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+
+      - name: cargo deny check
+        run: cargo deny --all-features check advisories bans licenses sources
+
+  # ---------------------------------------------------------------------
+  # Q6: CodeQL — semantic code scanning. Python is GA; we cover the
+  # python script + binding surface in scripts/ and crates/larql-python/.
+  # Rust CodeQL support is in public preview but stable enough to gate on.
+  # ---------------------------------------------------------------------
+  codeql:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ---------------------------------------------------------------------
+  # Aggregate gate. Mirrors validate.yml's `candidate-validity` shape so
+  # branch protection (if adopted for this workflow) can require a single
+  # check. Independent of validate.yml — neither calls the other.
+  # ---------------------------------------------------------------------
+  quality-gate:
+    name: quality gate
+    runs-on: ubuntu-24.04
+    needs: [fmt, clippy, test, audit, deny, codeql]
+    steps:
+      - name: All quality checks passed
+        run: |
+          echo "fmt, clippy, test, audit, deny, codeql all green."
+          echo "This workflow is independent of validate.yml. Per the"
+          echo "compliance pipeline spec, code scanning is out-of-scope"
+          echo "for the candidate-validity gate; this workflow is the"
+          echo "separate carrier required by that policy."
