@@ -44,6 +44,7 @@ path = [
   "scripts/check_changelog.sh",
   "scripts/version_preflight.sh",
   "docs/specs/compliance-pipeline.md",
+  "deny.toml",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
