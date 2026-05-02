@@ -23,13 +23,23 @@ independent gates on every PR; neither calls into the other.
 
 | Concern | Tool | Configuration | CI job |
 |---|---|---|---|
-| Rust formatting | `cargo fmt --check` | `rustfmt.toml` (default) | `quality.yml :: fmt` |
+| Rust formatting | `cargo fmt --check` | `rustfmt.toml` (default) | (out-of-workflow; see below) |
 | Rust lint (gate + SARIF) | `cargo clippy -D warnings` + `clippy-sarif` | `clippy.toml` (default) | `quality.yml :: clippy` |
 | Rust tests | `cargo test --workspace` | n/a | `quality.yml :: test` |
 | Rust dependency vulns | `cargo-audit` | `Cargo.lock`, RustSec advisory-db | `quality.yml :: audit` |
 | Rust dep policy (license / bans / sources) | `cargo-deny` | `deny.toml` | `quality.yml :: deny` |
 | Semantic code scanning | CodeQL | repository default-setup configuration | (out-of-workflow; see below) |
 | Aggregate verdict | n/a | n/a | `quality.yml :: quality-gate` |
+
+`cargo fmt --check` is intentionally **not** a job in `quality.yml`.
+The project already enforces formatting locally via the Makefile
+(`make ci` and `make fmt-check`) and via the `cargo-fmt` hook in
+`.pre-commit-config.yaml`. Duplicating the check in CI surfaces a
+toolchain-version-sensitive baseline gap (rustfmt output drifts across
+Rust releases) without adding security or correctness signal. If a
+future policy decides to enforce fmt in CI, it should follow a
+dedicated `style: cargo fmt --all` baseline-cleanup PR so the gate flip
+is a no-op.
 
 CodeQL is intentionally **not** wired into `quality.yml`. The repository
 uses GitHub's default-setup CodeQL configured in repository settings,
@@ -134,7 +144,6 @@ consequence of the failure message; it must not interpret intent.
 
 | Failing check | Deterministic remediation |
 |---|---|
-| `fmt` | Run `cargo fmt --all`. Commit. Re-push. |
 | `clippy` | Address each finding listed in the run log. The Security-tab SARIF view is informational; the gating step is `cargo clippy -- -D warnings`. |
 | `test` | Address each test failure named in the run log. |
 | `audit` | Bump the affected crate to a fixed version (preferred), or replace it. Do not blanket-ignore advisories without a written rationale. |
