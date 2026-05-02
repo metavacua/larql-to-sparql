@@ -94,6 +94,10 @@ jobs:
   clippy:
     name: clippy (-D warnings + SARIF)
     runs-on: ubuntu-24.04
+    # The weekly cron is for refreshing advisory-feed scanners
+    # (audit, deny). Lint/test/aggregate jobs add no signal on a
+    # dormant tree and would just burn minutes; skip them on schedule.
+    if: github.event_name != 'schedule'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,13 +138,23 @@ jobs:
         continue-on-error: true
 
       - name: Upload clippy SARIF to Code Scanning
-        if: always()
+        # SARIF upload is ancillary: it populates the Security tab. The
+        # actual gate is the next step (`cargo clippy ... -D warnings`),
+        # which must determine the job verdict regardless of whether the
+        # Code Scanning API was reachable. Hence both `continue-on-error`
+        # (don't fail the job on upload error) and `hashFiles(...)`
+        # (don't even attempt upload if no SARIF was produced).
+        if: always() && hashFiles('clippy.sarif') != ''
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: clippy.sarif
           category: clippy
 
       - name: Gate on clippy warnings
+        # `if: always()` so the gate runs even if the SARIF upload step
+        # errored (or was skipped because no SARIF was produced).
+        if: always()
         # Re-runs clippy with a strict gate. Cheap relative to the build
         # in the previous step (cache is warm).
         run: cargo clippy --workspace --tests --all-targets -- -D warnings
@@ -153,6 +167,7 @@ jobs:
   test:
     name: test (cargo test --workspace)
     runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -277,6 +292,9 @@ jobs:
     name: quality gate
     runs-on: ubuntu-24.04
     needs: [clippy, test, audit, deny]
+    # Skipped on cron because clippy/test are also skipped on cron;
+    # there is nothing to aggregate.
+    if: github.event_name != 'schedule'
     steps:
       - name: All quality checks passed
         run: |
