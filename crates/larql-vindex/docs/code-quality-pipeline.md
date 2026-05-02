@@ -107,10 +107,15 @@ not encoded in either workflow.
 
 ## Schedule
 
-The `audit` job runs on a weekly cron (Monday 06:00 UTC) so newly-disclosed
-RustSec advisories surface even when the tree is dormant. The other jobs
-run only on `pull_request` to `main`, `push` to `main`, and
-`workflow_dispatch`.
+The advisory-feed scanners (`audit` and `deny`) run on a weekly cron
+(Monday 06:00 UTC) so newly-disclosed RustSec advisories surface even
+when the tree is dormant. `deny` is included because its `advisories`
+section consults the same RustSec database that `audit` does.
+
+`clippy`, `test`, and `quality-gate` are gated with
+`if: github.event_name != 'schedule'`. They add no signal on a dormant
+tree and would just burn minutes; they run only on `pull_request` to
+`main`, `push` to `main`, and `workflow_dispatch`.
 
 ## Local mirror
 
