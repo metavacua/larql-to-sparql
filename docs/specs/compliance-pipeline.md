@@ -119,6 +119,11 @@ If a future repository policy adopts any of the above, it must live in a
 **separate** workflow file and must not call into `validate.yml`. The PR gate
 is intentionally scoped to candidate-validity only.
 
+The first such carrier is `.github/workflows/quality.yml`, which owns code
+scanning and code quality (lint/format/tests, `cargo-audit`, `cargo-deny`,
+CodeQL). It is documented in [code-quality-pipeline.md](code-quality-pipeline.md)
+and runs as an independent gate; neither workflow calls into the other.
+
 ## Local developer workflow
 
 ```bash
