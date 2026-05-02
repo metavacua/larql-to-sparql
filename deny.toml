@@ -100,5 +100,12 @@ skip-tree = []
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Both URLs are required because Cargo.lock encodes whichever index format
+# was active when the lockfile was generated. Sparse (default since Cargo
+# 1.68) and the legacy git registry resolve to different SourceId values
+# that cargo-deny matches verbatim, so listing only one is fragile.
+allow-registry = [
+  "https://github.com/rust-lang/crates.io-index",
+  "sparse+https://index.crates.io/",
+]
 allow-git = []
