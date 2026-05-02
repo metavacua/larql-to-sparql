@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# cargo-deny configuration. Owns the deterministic predicates that the
+# `deny` job in .github/workflows/quality.yml evaluates against the
+# transitive dependency closure:
+#
+#   advisories  — RustSec advisory DB filter (vulnerabilities, unmaintained)
+#   bans        — duplicate-version and crate ban list
+#   licenses    — license allow-list across all dependencies
+#   sources     — registry / git source allow-list
+#
+# This file mirrors, at the dependency level, the same Apache-2.0-only
+# orientation that scripts/check_apache_license.sh enforces for first-party
+# sources. The allow-list is intentionally broad enough to admit the common
+# permissive licenses found in the Rust ecosystem; further restriction would
+# need a deliberate policy decision in a dedicated PR.
+
+[graph]
+# Evaluate the dependency graph for the host the workflow runs on
+# (ubuntu-24.04). Feature-gated backends like `metal` resolve to no extra
+# crates on this triple, which matches CI behaviour exactly.
+all-features = false
+no-default-features = false
+targets = [
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "x86_64-unknown-linux-musl" },
+  { triple = "aarch64-unknown-linux-gnu" },
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+]
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Advisories: fail on any unfixed vulnerability or unmaintained crate.
+# ---------------------------------------------------------------------------
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+# ---------------------------------------------------------------------------
+# Licenses: explicit allow-list. Anything outside this list fails the gate
+# and must be either replaced upstream or added here in a deliberate PR.
+# ---------------------------------------------------------------------------
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "MPL-2.0",
+  "OpenSSL",
+]
+exceptions = []
+
+# Crates whose published license metadata is non-machine-readable but whose
+# upstream license is well-known. Add entries deliberately, with a hash to
+# pin to a specific source tarball.
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+  { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+# ---------------------------------------------------------------------------
+# Bans: duplicate detection and explicit deny list. Duplicates are warned
+# rather than denied because the workspace pulls a deep tree and aligning
+# all transitive versions is not always feasible without upstream PRs.
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Sources: only allow crates from crates.io and explicitly-listed git
+# remotes. Anything sourced from an unknown registry or git host fails.
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
