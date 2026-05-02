@@ -51,14 +51,22 @@ env:
   # give a small buffer above the absolute floor. validate.yml's pinned
   # toolchain is independent and can lag because that workflow does not
   # invoke cargo at all.
-  RUST_TOOLCHAIN: "1.86.0"
-  # cargo-audit 0.21.2 cannot parse CVSS 4.0 advisories (the cvss crate
-  # it depended on at that release predates CVSS 4.0 support); the
-  # advisory database now contains CVSS-4.0-only entries (e.g.
-  # RUSTSEC-2026-0073), so the older cargo-audit aborts before any
-  # vulnerability matching happens. 0.21.5 picks up the fix.
-  CARGO_AUDIT_VERSION: "0.21.5"
-  CARGO_DENY_VERSION: "0.18.2"
+  # 1.88.0 is the floor: at this PR's resolution the tree pulls
+  # `home v0.5.12`, `cookie_store v0.22.1`, and the `time-*` crates,
+  # all of which declare `rust-version = 1.88`. Bumping further is
+  # cheap; bumping below 1.88 fails resolution.
+  RUST_TOOLCHAIN: "1.88.0"
+  # Scanner tools (cargo-audit, cargo-deny) are intentionally NOT
+  # version-pinned. They must keep pace with the evolving formats of
+  # their backing advisory database: pinning to a specific patch made
+  # the older cargo-audit reject CVSS-4.0 entries (e.g. RUSTSEC-2026-0073)
+  # because its bundled cvss-parser predated CVSS 4.0. Tracking latest
+  # is the correct policy for a tool whose value depends on currency
+  # with an external feed.
+  #
+  # Reproducibility is preserved where it matters: the *Rust toolchain*
+  # is pinned (RUST_TOOLCHAIN above), so the dep-tree resolution and
+  # build behaviour are stable. Only the scanner-tool versions float.
   CLIPPY_SARIF_VERSION: "0.7.0"
   CARGO_TERM_COLOR: always
   # Note: do NOT set RUSTFLAGS=-D warnings at workflow scope. That would
@@ -197,10 +205,12 @@ jobs:
       - name: Generate Cargo.lock
         run: cargo generate-lockfile
 
-      - name: Install cargo-audit
+      - name: Install cargo-audit (tracking latest)
+        # See env: at the top of the file for the rationale on why this
+        # tool is not version-pinned.
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}
+          tool: cargo-audit
 
       - name: cargo audit
         # `--deny warnings` promotes unmaintained/yanked crates and other
@@ -235,10 +245,12 @@ jobs:
         # Cargo.lock so we materialise it at job start.
         run: cargo generate-lockfile
 
-      - name: Install cargo-deny
+      - name: Install cargo-deny (tracking latest)
+        # See env: at the top of the file for the rationale on why this
+        # tool is not version-pinned.
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+          tool: cargo-deny
 
       - name: cargo deny check
         # The flag set must mirror deny.toml :: graph (all-features = false,

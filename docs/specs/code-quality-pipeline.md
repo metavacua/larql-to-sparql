@@ -74,18 +74,21 @@ historical snapshot — acceptable for advisory tracking, since the scan
 target is "what would be installed today" rather than what was installed
 on a specific past commit.
 
-## Pinned tool versions
+## Pinned versions and floating versions
 
-All tool versions are pinned in `.github/workflows/quality.yml :: env`.
-Bumping any of them is a deliberate change to the scanning surface and
-should be done in a dedicated PR so the change is explicit in history.
+The Rust toolchain and the SARIF emitter are pinned in
+`.github/workflows/quality.yml :: env`. The advisory-feed scanners are
+intentionally **not** pinned: they must keep pace with the formats of
+their backing databases (a pinned `cargo-audit` rejected CVSS-4.0
+entries because its bundled cvss-parser predated CVSS 4.0). Pinning a
+scanner against an evolving feed defeats the scanner's purpose.
 
-| Variable | Purpose |
-|---|---|
-| `RUST_TOOLCHAIN` | Pinned rustc toolchain. Mirrors the value used by `validate.yml`. |
-| `CARGO_AUDIT_VERSION` | `cargo-audit` release pinned by `taiki-e/install-action`. |
-| `CARGO_DENY_VERSION` | `cargo-deny` release pinned by `taiki-e/install-action`. |
-| `CLIPPY_SARIF_VERSION` | `clippy-sarif`/`sarif-fmt` release pinned by `taiki-e/install-action`. |
+| Variable | Behaviour | Reason |
+|---|---|---|
+| `RUST_TOOLCHAIN` | **pinned** | Reproducible dep-tree resolution and clippy/test verdicts. |
+| `CLIPPY_SARIF_VERSION` | **pinned** | Pure SARIF format emitter; not advisory-coupled. |
+| `cargo-audit` | tracks latest (no pin in `tool:` spec) | Must accept the current advisory-db format. |
+| `cargo-deny` | tracks latest (no pin in `tool:` spec) | Same reason. |
 
 ## Independence from `validate.yml`
 
