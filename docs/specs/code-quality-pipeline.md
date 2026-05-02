@@ -28,23 +28,41 @@ independent gates on every PR; neither calls into the other.
 | Rust tests | `cargo test --workspace` | n/a | `quality.yml :: test` |
 | Rust dependency vulns | `cargo-audit` | `Cargo.lock`, RustSec advisory-db | `quality.yml :: audit` |
 | Rust dep policy (license / bans / sources) | `cargo-deny` | `deny.toml` | `quality.yml :: deny` |
-| Semantic code scanning | CodeQL | `security-and-quality` queries | `quality.yml :: codeql` |
+| Semantic code scanning | CodeQL | repository default-setup configuration | (out-of-workflow; see below) |
 | Aggregate verdict | n/a | n/a | `quality.yml :: quality-gate` |
+
+CodeQL is intentionally **not** wired into `quality.yml`. The repository
+uses GitHub's default-setup CodeQL configured in repository settings,
+which already analyses python, rust, actions, and c-cpp. Defining a
+parallel CodeQL job here would emit duplicate SARIF for the same
+`/language:*` categories and conflict with the default-setup uploads.
+Changes to the CodeQL surface (queries, languages) live in the
+repository's Code Scanning settings, not in this workflow.
 
 ## SARIF and the Security tab
 
-Three jobs upload SARIF to GitHub Code Scanning under distinct categories
-so that findings can be triaged and dismissed independently:
+Clippy is the only job in this workflow that uploads SARIF; CodeQL
+SARIF is uploaded by the default-setup workflow described above.
 
-| Category | Source |
-|---|---|
-| `clippy` | `clippy-sarif` over `cargo clippy --message-format=json` |
-| `/language:python` | `github/codeql-action/analyze` (Python) |
+| Category | Source | Owner |
+|---|---|---|
+| `clippy` | `clippy-sarif` over `cargo clippy --message-format=json` | `quality.yml :: clippy` |
+| `/language:*` | `github/codeql-action/analyze` | repository default-setup CodeQL |
 
 `audit` and `deny` are gating-only — they fail the workflow on any
 finding rather than emitting SARIF. This is intentional: dependency-level
 findings have a single deterministic remediation (bump or replace the
 crate) and do not need per-finding triage in the Security tab.
+
+## Cargo.lock policy
+
+The repository's `.gitignore` excludes `Cargo.lock` (workspace policy).
+The `audit` and `deny` jobs therefore generate a fresh lockfile at job
+start with `cargo generate-lockfile` before scanning. This means each
+run resolves against the index at run time, not against a frozen
+historical snapshot — acceptable for advisory tracking, since the scan
+target is "what would be installed today" rather than what was installed
+on a specific past commit.
 
 ## Pinned tool versions
 
@@ -84,17 +102,29 @@ run only on `pull_request` to `main`, `push` to `main`, and
 ## Local mirror
 
 The `make ci` target already mirrors `fmt`, `clippy`, and `test`. To run
-the dependency-policy gates locally:
+the dependency-policy gates locally, substitute the pinned versions from
+`.github/workflows/quality.yml :: env` for the placeholders below
+(the env vars are workflow-local and are not exported to your shell):
 
 ```bash
+# Replace ${...} with the literal values from quality.yml.
 cargo install cargo-audit --locked --version "${CARGO_AUDIT_VERSION}"
 cargo install cargo-deny  --locked --version "${CARGO_DENY_VERSION}"
 
+# A lockfile is required (Cargo.lock is gitignored).
+cargo generate-lockfile
+
 cargo audit --deny warnings
-cargo deny --all-features check advisories bans licenses sources
+cargo deny check advisories bans licenses sources
 ```
 
-CodeQL has no practical local mirror; it runs in CI only.
+The `cargo deny` invocation deliberately omits `--all-features`: the
+graph configuration in `deny.toml` already pins `all-features = false`,
+and passing the flag here would evaluate a different dependency graph
+than CI evaluates.
+
+CodeQL has no practical local mirror; it runs in CI only and is owned
+by the repository's default-setup configuration.
 
 ## Remediation contract
 
@@ -112,4 +142,9 @@ consequence of the failure message; it must not interpret intent.
 | `deny` (bans) | Resolve the duplicate by aligning versions across the workspace, or add a justified `skip` entry. |
 | `deny` (sources) | Either drop the offending source, or add it explicitly to `allow-git` / `allow-registry`. |
 | `deny` (advisories) | Same as `audit`. |
-| `codeql` | Address each finding in the GitHub Security tab. False positives may be dismissed via the UI with a written justification. |
+
+CodeQL findings, when they appear, are owned by the repository's
+default-setup configuration. Address each finding in the GitHub Security
+tab; false positives may be dismissed via the UI with a written
+justification. The `quality.yml` aggregate gate does not depend on
+CodeQL.

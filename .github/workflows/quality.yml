@@ -50,7 +50,10 @@ env:
   CARGO_DENY_VERSION: "0.18.2"
   CLIPPY_SARIF_VERSION: "0.7.0"
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
+  # Note: do NOT set RUSTFLAGS=-D warnings at workflow scope. That would
+  # promote rustc warnings (including those originating in transitive
+  # dependencies) to hard errors and is more aggressive than the project's
+  # local Makefile policy, which only uses clippy-level `-- -D warnings`.
 
 jobs:
   # ---------------------------------------------------------------------
@@ -171,6 +174,12 @@ jobs:
   # Q4: cargo-audit — RustSec advisory database scan against Cargo.lock.
   # Runs on every PR and on a weekly cron so that newly-disclosed advisories
   # surface even when the tree is dormant.
+  #
+  # The repository's .gitignore excludes Cargo.lock (workspace policy), so a
+  # lockfile is generated deterministically at job start before scanning.
+  # This means each run resolves against the index at run time rather than a
+  # frozen snapshot — acceptable for advisory tracking, since the scan target
+  # is "what would be installed today" rather than a historical commit.
   # ---------------------------------------------------------------------
   audit:
     name: audit (cargo-audit / RustSec)
@@ -180,6 +189,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2
@@ -207,45 +226,38 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        # See the audit job for the rationale; the workspace gitignores
+        # Cargo.lock so we materialise it at job start.
+        run: cargo generate-lockfile
+
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
 
       - name: cargo deny check
-        run: cargo deny --all-features check advisories bans licenses sources
+        # The flag set must mirror deny.toml :: graph (all-features = false,
+        # no-default-features = false). Passing --all-features here would
+        # evaluate a different dependency graph than the configuration
+        # declares, defeating the purpose of pinning the graph in config.
+        run: cargo deny check advisories bans licenses sources
 
   # ---------------------------------------------------------------------
-  # Q6: CodeQL — semantic code scanning. Python is GA; we cover the
-  # python script + binding surface in scripts/ and crates/larql-python/.
-  # Rust CodeQL support is in public preview but stable enough to gate on.
-  # ---------------------------------------------------------------------
-  codeql:
-    name: codeql (${{ matrix.language }})
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [python]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-and-quality
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:${{ matrix.language }}"
+  # CodeQL is intentionally NOT defined here. The repository uses GitHub's
+  # default-setup CodeQL (configured in repository settings) which already
+  # analyses python, rust, actions, and c-cpp. Adding a parallel CodeQL
+  # workflow would emit duplicate SARIF for the same `/language:*`
+  # categories and conflict with the default-setup uploads. To change the
+  # CodeQL surface (queries, languages), edit it in the repository's Code
+  # Scanning settings rather than here.
 
   # ---------------------------------------------------------------------
   # Aggregate gate. Mirrors validate.yml's `candidate-validity` shape so
@@ -255,11 +267,13 @@ jobs:
   quality-gate:
     name: quality gate
     runs-on: ubuntu-24.04
-    needs: [fmt, clippy, test, audit, deny, codeql]
+    needs: [fmt, clippy, test, audit, deny]
     steps:
       - name: All quality checks passed
         run: |
-          echo "fmt, clippy, test, audit, deny, codeql all green."
+          echo "fmt, clippy, test, audit, deny all green."
+          echo "CodeQL is owned by the repository's default-setup configuration;"
+          echo "see docs/specs/code-quality-pipeline.md for the boundary."
           echo "This workflow is independent of validate.yml. Per the"
           echo "compliance pipeline spec, code scanning is out-of-scope"
           echo "for the candidate-validity gate; this workflow is the"
