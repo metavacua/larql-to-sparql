@@ -10,11 +10,23 @@
 #   licenses    — license allow-list across all dependencies
 #   sources     — registry / git source allow-list
 #
-# This file mirrors, at the dependency level, the same Apache-2.0-only
-# orientation that scripts/check_apache_license.sh enforces for first-party
-# sources. The allow-list is intentionally broad enough to admit the common
-# permissive licenses found in the Rust ecosystem; further restriction would
-# need a deliberate policy decision in a dedicated PR.
+# The allow-list reflects the audited inbound license posture of the
+# resolved dependency closure, as documented in audit/dependency-licenses.md.
+# Two non-trivially-permissive families are explicitly admitted:
+#
+#   * AGPL-3.0 family — the direct dependency `evalexpr v12.x` (consumed by
+#     `crates/model-compute` behind feature `native`) is AGPL-3.0-only.
+#     Admission of AGPL transitives is a deliberate policy decision aligned
+#     with the fork's forward licensing posture (CC-BY-SA-4.0 + AGPL-3.0-or-later
+#     for new contributions); see audit/upstream-report.md U-1 for the
+#     obligations this creates.
+#
+#   * CDLA-Permissive-2.0 — `webpki-roots` and `webpki-root-certs` (transitive
+#     via `ureq` -> `hf-hub`). Permissive Linux Foundation licence intended
+#     for data; no copyleft effect.
+#
+# Any further license added here must be backed by an audit-report entry in
+# audit/dependency-licenses.md and a deliberate policy PR.
 
 [graph]
 # Evaluate the dependency graph for the host the workflow runs on
@@ -51,6 +63,7 @@ ignore = []
 version = 2
 confidence-threshold = 0.93
 allow = [
+  # Permissive set — trivially compatible with any outbound license.
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "MIT",
@@ -60,11 +73,31 @@ allow = [
   "ISC",
   "Zlib",
   "Unicode-3.0",
-  "Unicode-DFS-2016",
   "CC0-1.0",
+  "0BSD",
+  "Unlicense",
+  # Weak copyleft (file-scoped). Admissible without changing outbound posture.
   "MPL-2.0",
-  "OpenSSL",
+  # Linux Foundation data licence; permissive. Brought in by `webpki-roots`
+  # and `webpki-root-certs` (see audit/dependency-licenses.md D-2).
+  "CDLA-Permissive-2.0",
+  # Strong copyleft — admitted deliberately. The fork's distributable
+  # already carries AGPL obligations via `evalexpr v12.x` (consumed by
+  # `crates/model-compute` feature `native`); see audit/dependency-licenses.md
+  # D-1 and audit/upstream-report.md U-1.
+  # cargo-deny normalises the deprecated SPDX-id `AGPL-3.0` to
+  # `AGPL-3.0-only` for matching, so listing only the canonical form here.
+  "AGPL-3.0-only",
 ]
+# Note: the fork's own outbound license set (AGPL-3.0-or-later, CC-BY-SA-4.0)
+# governs FIRST-PARTY files only and is enforced by REUSE.toml +
+# scripts/check_first_party_licenses.sh, not by deny.toml. This file scopes
+# the inbound DEPENDENCY license policy. We therefore do not list
+# AGPL-3.0-or-later or CC-BY-SA-4.0 here unless and until a transitive
+# dependency declares one of them.
+# Removed entries (audit/dependency-licenses.md D-7):
+#   "OpenSSL"          — no crate in the resolved graph declares it.
+#   "Unicode-DFS-2016" — superseded upstream by Unicode-3.0 (already allowed).
 exceptions = []
 
 # Crates whose published license metadata is non-machine-readable but whose

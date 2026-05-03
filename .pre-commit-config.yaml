@@ -83,9 +83,9 @@ repos:
         types: [rust]
         pass_filenames: false
 
-      - id: apache-license
-        name: Apache-2.0 §4 mechanical gate
-        entry: scripts/check_apache_license.sh
+      - id: first-party-licenses
+        name: first-party license gate (REUSE-driven §4)
+        entry: scripts/check_first_party_licenses.sh
         language: system
         pass_filenames: false
         stages: [pre-push]
