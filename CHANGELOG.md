@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Improve error extraction and ensure error details appear in PR comments
 - Rebuild with correct single section structure
 - Remove duplicate sections and regenerate
+- Resolve broken pipe error in extract-errors action
 - Scope cron to advisory scanners and harden SARIF upload
 - Verify and lock unreleased section
 
