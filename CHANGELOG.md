@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Bump toolchain to 1.88 and unpin scanner-tool versions
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct exit code handling in code-quality workflow jobs
+- Correct failure detection for error comment posting
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Improve error extraction and comment posting robustness
