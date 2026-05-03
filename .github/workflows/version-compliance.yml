@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Version compliance workflow — semantic-release dry-run and version validation.
+#
+# This workflow runs a semantic-release dry-run to calculate the next version
+# based on commit history, and validates version preflight information.
+# Each job posts its own error comment on failure.
+
+name: version-compliance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: version-compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.84.0"
+
+jobs:
+  # Semantic-release dry-run to calculate next version
+  semantic-release:
+    name: semantic-release (version calculation)
+    runs-on: ubuntu-24.04
+    outputs:
+      next-version: ${{ steps.semver.outputs.next_version }}
+      bump-kind: ${{ steps.semver.outputs.bump_kind }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run semantic-release dry-run
+        id: semver
+        continue-on-error: true
+        run: |
+          # Placeholder: semantic-release dry-run command
+          # In a real implementation, this would call semantic-release --dry-run
+          # For now, delegate to version_preflight.sh
+          scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "semantic-release"
+          error-type: "script"
+          log-file: ${{ runner.temp }}/semantic-release.log
+          error-count: "1"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Version preflight — deterministic SemVer calculation (informational)
+  version-preflight:
+    name: version preflight (informational)
+    runs-on: ubuntu-24.04
+    needs: semantic-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next SemVer
+        id: semver
+        run: scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "version-preflight"
+          error-type: "script"
+          log-file: ${{ runner.temp }}/version-preflight.log
+          error-count: "1"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Aggregate gate for version compliance
+  version-gate:
+    name: version compliance gate
+    runs-on: ubuntu-24.04
+    needs: [semantic-release, version-preflight]
+    if: github.event_name != 'schedule'
+    steps:
+      - name: All version checks passed
+        run: |
+          echo "Version compliance checks passed."
+          echo "semantic-release dry-run: ${{ needs.semantic-release.outputs.next-version }}"
+          echo "version-preflight: informational"

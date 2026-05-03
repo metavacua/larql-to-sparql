@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# API validation workflow — cargo-public-api checks.
+#
+# This workflow validates that public API changes follow semver requirements.
+# Posts per-job error comments on failure.
+
+name: api-validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: api-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Public API surface validation
+  public-api:
+    name: public-api (cargo-public-api)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: api-validation
+
+      - name: Install cargo-public-api
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+
+      - name: Run cargo-public-api
+        id: api-check
+        continue-on-error: true
+        run: |
+          cargo public-api diff \
+            > "${{ runner.temp }}/public-api.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/public-api.log"
+          exit $exit_code
+
+      - name: Extract API changes
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/public-api.log
+          tool-type: cargo
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "public-api"
+          error-type: "cargo"
+          log-file: ${{ runner.temp }}/public-api.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Aggregate gate for API validation
+  api-gate:
+    name: api validation gate
+    runs-on: ubuntu-24.04
+    needs: [public-api]
+    if: github.event_name != 'schedule'
+    steps:
+      - name: All API checks passed
+        run: |
+          echo "Public API validation passed."

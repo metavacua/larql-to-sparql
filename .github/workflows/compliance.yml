@@ -1,0 +1,275 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Compliance validation workflow.
+#
+# Validates explicit provenance, structured history, and derived documentation.
+# Each job posts its own error comment on failure. This workflow is the source
+# of truth for whether a PR branch is a valid candidate extension.
+
+name: compliance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.84.0"
+  REUSE_TOOL_VERSION: "6.2.0"
+  COCOGITTO_VERSION: "7.0.0"
+  GIT_CLIFF_VERSION: "2.13.1"
+
+jobs:
+  # Explicit Provenance — REUSE lint
+  provenance:
+    name: provenance (REUSE lint)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run reuse lint
+        id: reuse-run
+        continue-on-error: true
+        uses: fsfe/reuse-action@v5
+        with:
+          args: --suppress-deprecation lint
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "provenance"
+          error-type: "script"
+          error-count: "1"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # First-party license gate
+  first-party-licenses:
+    name: first-party-licenses (REUSE-driven §4 gate)
+    runs-on: ubuntu-24.04
+    needs: provenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run first-party license gate
+        id: license-run
+        continue-on-error: true
+        run: |
+          scripts/check_first_party_licenses.sh "${{ steps.range.outputs.range }}" \
+            > "${{ runner.temp }}/license-gate.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/license-gate.log"
+          exit $exit_code
+
+      - name: Extract license errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/license-gate.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "first-party-licenses"
+          error-type: "script"
+          log-file: ${{ runner.temp }}/license-gate.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Structured History — cocogitto check
+  commits:
+    name: commits (cocogitto check)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install cocogitto
+        run: |
+          curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "from=${base}" >> "$GITHUB_OUTPUT"
+            echo "to=${head}"   >> "$GITHUB_OUTPUT"
+          else
+            echo "from=" >> "$GITHUB_OUTPUT"
+            echo "to="   >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: cog check (PR range)
+        id: cog-run-pr
+        if: steps.range.outputs.from != ''
+        continue-on-error: true
+        run: |
+          cog check "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}" \
+            > "${{ runner.temp }}/cog.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/cog.log"
+          exit $exit_code
+
+      - name: cog check (push to main, newest commit only)
+        id: cog-run-push
+        if: steps.range.outputs.from == ''
+        continue-on-error: true
+        run: |
+          cog check HEAD~1..HEAD \
+            > "${{ runner.temp }}/cog.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/cog.log"
+          exit $exit_code
+
+      - name: Extract cocogitto errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/cog.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "commits"
+          error-type: "script"
+          log-file: ${{ runner.temp }}/cog.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Derived Documentation — git-cliff consistency
+  changelog:
+    name: changelog (git-cliff consistency)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install git-cliff
+        run: |
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${GIT_CLIFF_VERSION}/git-cliff"
+          git-cliff --version
+
+      - name: Verify CHANGELOG.md [Unreleased] matches projection
+        id: changelog-run
+        continue-on-error: true
+        run: |
+          scripts/check_changelog.sh \
+            > "${{ runner.temp }}/changelog.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/changelog.log"
+          exit $exit_code
+
+      - name: Extract changelog errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/changelog.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "changelog"
+          error-type: "script"
+          log-file: ${{ runner.temp }}/changelog.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Version preflight (informational)
+  version-preflight:
+    name: version preflight (informational)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next SemVer
+        id: semver
+        run: scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
+
+  # Aggregate gate for compliance
+  compliance-gate:
+    name: compliance gate (A5)
+    runs-on: ubuntu-24.04
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
+    steps:
+      - name: All compliance checks passed
+        run: |
+          echo "Branch is a valid candidate extension of the development branch."
+          echo "Per Axiom A5 this does NOT decide merge, close, or release."

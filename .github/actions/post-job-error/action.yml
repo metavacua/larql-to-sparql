@@ -1,0 +1,137 @@
+name: Post Job Error Comment
+description: Post or update a GitHub PR comment with job error details
+
+inputs:
+  job-name:
+    description: Name of the job (e.g., "cargo-public-api")
+    required: true
+  error-type:
+    description: Type of error (cargo, lint, script)
+    required: false
+    default: cargo
+  log-file:
+    description: Path to log file with error details
+    required: false
+  error-count:
+    description: Number of errors found
+    required: false
+    default: '1'
+  errors:
+    description: Extracted error text (pre-formatted)
+    required: false
+  truncated:
+    description: Whether error output was truncated
+    required: false
+    default: 'false'
+  github-token:
+    description: GitHub token for API access
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare error comment
+      id: prepare
+      shell: bash
+      env:
+        JOB_NAME: ${{ inputs.job-name }}
+        ERROR_TYPE: ${{ inputs.error-type }}
+        ERROR_COUNT: ${{ inputs.error-count }}
+        ERRORS: ${{ inputs.errors }}
+        TRUNCATED: ${{ inputs.truncated }}
+        LOG_FILE: ${{ inputs.log-file }}
+      run: |
+        # Determine emoji based on error type
+        case "$ERROR_TYPE" in
+          cargo) emoji="🦀" ;;
+          lint) emoji="🔍" ;;
+          script) emoji="📝" ;;
+          *) emoji="⚠️" ;;
+        esac
+
+        # Start building comment body
+        body="${emoji} **$JOB_NAME** failed"
+        body+=$'\n\n'
+        body+="**Error Count:** $ERROR_COUNT"
+        body+=$'\n'
+
+        # Add error details if provided
+        if [[ -n "$ERRORS" ]]; then
+          body+=$'\n### Errors\n'
+          body+='```\n'
+          body+="$ERRORS"
+          body+=$'\n```\n'
+        fi
+
+        # Add truncation note if applicable
+        if [[ "$TRUNCATED" == "true" ]]; then
+          body+=$'\n⚠️ **Output truncated** - only first $ERROR_COUNT errors shown above. '
+          body+='See full logs in the workflow run artifacts.'
+          body+=$'\n'
+        fi
+
+        # Add workflow run link
+        if [[ -n "$GITHUB_SERVER_URL" && -n "$GITHUB_REPOSITORY" && -n "$GITHUB_RUN_ID" ]]; then
+          body+=$'\n[View full workflow run]('
+          body+="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          body+=$'\n'
+        fi
+
+        # Escape for JSON output
+        body="${body//'\'/'\\'"}"
+        body="${body//$'"'/'\\"'}"
+        body="${body//$'\n'/'\\n'}"
+
+        echo "body=$body" >> "$GITHUB_OUTPUT"
+
+        # Create a stable comment identifier based on job name
+        comment_id="<!-- job-error-comment: $JOB_NAME -->"
+        echo "comment-id=$comment_id" >> "$GITHUB_OUTPUT"
+
+    - name: Post or update PR comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const body = `${{ steps.prepare.outputs.body }}`;
+          const commentId = `${{ steps.prepare.outputs.comment-id }}`;
+
+          // Search for existing comment from this job
+          const comments = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          let existingComment = comments.data.find(comment =>
+            comment.body.includes(commentId)
+          );
+
+          if (existingComment) {
+            // Update existing comment
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: `${commentId}\n\n${body}`,
+            });
+            console.log(`Updated existing comment #${existingComment.id}`);
+          } else {
+            // Create new comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${commentId}\n\n${body}`,
+            });
+            console.log('Created new comment');
+          }
+
+    - name: Upload full logs as artifact (if truncated)
+      if: inputs.truncated == 'true' && inputs.log-file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.job-name }}-full-logs
+        path: ${{ inputs.log-file }}
+        retention-days: 7

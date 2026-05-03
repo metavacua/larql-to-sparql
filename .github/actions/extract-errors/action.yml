@@ -1,0 +1,92 @@
+name: Extract Errors
+description: Extract and truncate errors from tool output logs
+
+inputs:
+  log-file:
+    description: Path to log file to extract errors from
+    required: true
+  tool-type:
+    description: Type of tool (cargo, generic, script)
+    required: false
+    default: cargo
+  error-limit:
+    description: Maximum number of errors to extract
+    required: false
+    default: '20'
+
+outputs:
+  errors:
+    description: Extracted errors as formatted text
+    value: ${{ steps.extract.outputs.errors }}
+  error-count:
+    description: Total number of errors found
+    value: ${{ steps.extract.outputs.error-count }}
+  truncated:
+    description: Whether output was truncated
+    value: ${{ steps.extract.outputs.truncated }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract errors from log
+      id: extract
+      shell: bash
+      env:
+        LOG_FILE: ${{ inputs.log-file }}
+        TOOL_TYPE: ${{ inputs.tool-type }}
+        ERROR_LIMIT: ${{ inputs.error-limit }}
+      run: |
+        # Function to extract cargo errors
+        extract_cargo_errors() {
+          local limit=$1
+          # Extract error lines (error[...]: or error:) and related context
+          grep -E "^error(\[|:)" "$LOG_FILE" | head -n "$limit"
+        }
+
+        # Function to extract generic errors
+        extract_generic_errors() {
+          local limit=$1
+          # Extract lines containing 'error' (case-insensitive) and related markers
+          grep -iE "(^|[[:space:]])error(:|[[:space:]])" "$LOG_FILE" | head -n "$limit"
+        }
+
+        # Check if log file exists
+        if [[ ! -f "$LOG_FILE" ]]; then
+          echo "errors=" >> "$GITHUB_OUTPUT"
+          echo "error-count=0" >> "$GITHUB_OUTPUT"
+          echo "truncated=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Extract errors based on tool type
+        case "$TOOL_TYPE" in
+          cargo)
+            errors=$(extract_cargo_errors "$ERROR_LIMIT")
+            ;;
+          generic|script)
+            errors=$(extract_generic_errors "$ERROR_LIMIT")
+            ;;
+          *)
+            errors=$(extract_generic_errors "$ERROR_LIMIT")
+            ;;
+        esac
+
+        # Count total errors
+        total_errors=$(grep -cE "^error(\[|:)" "$LOG_FILE" 2>/dev/null || echo 0)
+
+        # Determine if truncated
+        extracted_count=$(echo "$errors" | grep -c . 2>/dev/null || echo 0)
+        if [[ $extracted_count -ge $ERROR_LIMIT && $total_errors -gt $ERROR_LIMIT ]]; then
+          truncated="true"
+        else
+          truncated="false"
+        fi
+
+        # Escape newlines and special characters for output
+        errors="${errors//'%'/'%25'}"
+        errors="${errors//$'\n'/'%0A'}"
+        errors="${errors//$'\r'/'%0D'}"
+
+        echo "errors=$errors" >> "$GITHUB_OUTPUT"
+        echo "error-count=$total_errors" >> "$GITHUB_OUTPUT"
+        echo "truncated=$truncated" >> "$GITHUB_OUTPUT"

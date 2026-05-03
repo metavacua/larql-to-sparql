@@ -1,0 +1,291 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Code quality workflow.
+#
+# Lint, test, and advisory scanning. Each job posts its own error comment
+# on failure. SARIF outputs are uploaded to GitHub Code Scanning.
+
+name: code-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: code-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.88.0"
+  CLIPPY_SARIF_VERSION: "0.7.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Clippy linting with SARIF upload
+  clippy:
+    name: clippy (-D warnings + SARIF)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --component clippy \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo clippy --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: code-quality-clippy
+
+      - name: Install clippy-sarif and sarif-fmt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: clippy-sarif@${{ env.CLIPPY_SARIF_VERSION }},sarif-fmt@${{ env.CLIPPY_SARIF_VERSION }}
+
+      - name: Run clippy and emit SARIF
+        id: clippy-run
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy \
+            --workspace --tests --all-targets \
+            --message-format=json \
+            -- -D warnings \
+            | clippy-sarif \
+            | tee clippy.sarif \
+            | sarif-fmt > "${{ runner.temp }}/clippy.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/clippy.log"
+          exit $exit_code
+
+      - name: Upload clippy SARIF to Code Scanning
+        if: always() && hashFiles('clippy.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: clippy.sarif
+          category: clippy
+
+      - name: Extract clippy errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/clippy.log
+          tool-type: cargo
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "clippy"
+          error-type: "lint"
+          log-file: ${{ runner.temp }}/clippy.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Gate on clippy warnings
+        if: always()
+        run: cargo clippy --workspace --tests --all-targets -- -D warnings
+
+  # Test suite
+  test:
+    name: test (cargo test --workspace)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: code-quality-test
+
+      - name: cargo test --workspace
+        id: test-run
+        continue-on-error: true
+        run: |
+          cargo test --workspace --no-fail-fast \
+            > "${{ runner.temp }}/test.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/test.log"
+          exit $exit_code
+
+      - name: Extract test errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/test.log
+          tool-type: cargo
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "test"
+          error-type: "cargo"
+          log-file: ${{ runner.temp }}/test.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Security advisory scanning
+  audit:
+    name: audit (cargo-audit / RustSec)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Install cargo-audit (tracking latest)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        id: audit-run
+        continue-on-error: true
+        run: |
+          cargo audit --deny warnings \
+            > "${{ runner.temp }}/audit.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/audit.log"
+          exit $exit_code
+
+      - name: Extract audit errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/audit.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "audit"
+          error-type: "cargo"
+          log-file: ${{ runner.temp }}/audit.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Dependency and license scanning
+  deny:
+    name: deny (cargo-deny / licenses + bans + sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Install cargo-deny (tracking latest)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        id: deny-run
+        continue-on-error: true
+        run: |
+          cargo deny check advisories bans licenses sources \
+            > "${{ runner.temp }}/deny.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/deny.log"
+          exit $exit_code
+
+      - name: Extract deny errors
+        if: failure()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/deny.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "deny"
+          error-type: "cargo"
+          log-file: ${{ runner.temp }}/deny.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Aggregate gate
+  quality-gate:
+    name: quality gate
+    runs-on: ubuntu-24.04
+    needs: [clippy, test, audit, deny]
+    if: github.event_name != 'schedule'
+    steps:
+      - name: All quality checks passed
+        run: |
+          echo "clippy, test, audit, deny all green."

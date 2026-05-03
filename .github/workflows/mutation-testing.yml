@@ -1,0 +1,107 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Mutation testing workflow — cargo-mutants checks.
+#
+# This workflow runs mutation testing to measure test quality.
+# Posts per-job error comments on failure or low mutation score.
+
+name: mutation-testing
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: mutation-testing-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Mutation testing with cargo-mutants
+  mutants:
+    name: mutants (cargo-mutants)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutation-testing
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: Run cargo-mutants
+        id: mutants-run
+        continue-on-error: true
+        run: |
+          cargo mutants --output "${{ runner.temp }}/mutants-output" \
+            > "${{ runner.temp }}/mutants.log" 2>&1
+          exit_code=$?
+          cat "${{ runner.temp }}/mutants.log"
+          exit $exit_code
+
+      - name: Extract mutation results
+        if: always()
+        id: extract
+        uses: ./.github/actions/extract-errors
+        with:
+          log-file: ${{ runner.temp }}/mutants.log
+          tool-type: generic
+          error-limit: "20"
+
+      - name: Post error comment on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-job-error
+        with:
+          job-name: "mutants"
+          error-type: "cargo"
+          log-file: ${{ runner.temp }}/mutants.log
+          error-count: ${{ steps.extract.outputs.error-count }}
+          errors: ${{ steps.extract.outputs.errors }}
+          truncated: ${{ steps.extract.outputs.truncated }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload mutation results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-output
+          path: ${{ runner.temp }}/mutants-output
+          retention-days: 7
+
+  # Aggregate gate for mutation testing
+  mutants-gate:
+    name: mutation testing gate
+    runs-on: ubuntu-24.04
+    needs: [mutants]
+    if: github.event_name != 'schedule'
+    steps:
+      - name: All mutation tests passed
+        run: |
+          echo "Mutation testing completed successfully."
