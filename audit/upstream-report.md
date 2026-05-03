@@ -19,9 +19,9 @@ upstream, but each item below may warrant a deliberate licensing decision.
 ## TL;DR
 
 1. The upstream tree is uniformly declared `Apache-2.0` and is
-   mechanically clean by REUSE 3.3 (1102 of 1102 tracked files have both
-   copyright and license metadata; the only `SPDX-License-Identifier` value
-   found anywhere in the tree is `Apache-2.0`).
+   mechanically clean by REUSE 3.3 (every tracked file has both copyright
+   and license metadata via the manifest; the only `SPDX-License-Identifier`
+   value present anywhere in the upstream tree is `Apache-2.0`).
 2. **One direct dependency carries strong-copyleft obligations that the
    top-level `Apache-2.0` declaration does not propagate**: `evalexpr v12.x`
    is **AGPL-3.0-only**, consumed by `crates/model-compute` behind the
