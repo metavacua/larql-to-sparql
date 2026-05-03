@@ -79,18 +79,18 @@ impl ChatTemplate {
     /// `<s>` include it).
     pub fn wrap(&self, user_prompt: &str) -> String {
         match self {
-            Self::Gemma => format!(
-                "<start_of_turn>user\n{user_prompt}\n<end_of_turn>\n<start_of_turn>model\n"
-            ),
+            Self::Gemma => {
+                format!("<start_of_turn>user\n{user_prompt}\n<end_of_turn>\n<start_of_turn>model\n")
+            }
             Self::Mistral => format!("[INST] {user_prompt} [/INST]"),
             Self::Llama => format!(
                 "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n\
                  {user_prompt}<|eot_id|>\
                  <|start_header_id|>assistant<|end_header_id|>\n\n"
             ),
-            Self::ChatML => format!(
-                "<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
-            ),
+            Self::ChatML => {
+                format!("<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n")
+            }
             Self::Plain => user_prompt.to_string(),
         }
     }
@@ -113,31 +113,58 @@ mod tests {
 
     #[test]
     fn for_model_id_gemma() {
-        assert_eq!(ChatTemplate::for_model_id("google/gemma-3-4b-it"), ChatTemplate::Gemma);
-        assert_eq!(ChatTemplate::for_model_id("Gemma-2-2B"), ChatTemplate::Gemma);
+        assert_eq!(
+            ChatTemplate::for_model_id("google/gemma-3-4b-it"),
+            ChatTemplate::Gemma
+        );
+        assert_eq!(
+            ChatTemplate::for_model_id("Gemma-2-2B"),
+            ChatTemplate::Gemma
+        );
     }
 
     #[test]
     fn for_model_id_mistral_family() {
-        assert_eq!(ChatTemplate::for_model_id("mistralai/Mistral-7B-Instruct-v0.3"), ChatTemplate::Mistral);
-        assert_eq!(ChatTemplate::for_model_id("mistralai/Mixtral-8x7B"), ChatTemplate::Mistral);
+        assert_eq!(
+            ChatTemplate::for_model_id("mistralai/Mistral-7B-Instruct-v0.3"),
+            ChatTemplate::Mistral
+        );
+        assert_eq!(
+            ChatTemplate::for_model_id("mistralai/Mixtral-8x7B"),
+            ChatTemplate::Mistral
+        );
     }
 
     #[test]
     fn for_model_id_llama() {
-        assert_eq!(ChatTemplate::for_model_id("meta-llama/Llama-3.2-3B-Instruct"), ChatTemplate::Llama);
-        assert_eq!(ChatTemplate::for_model_id("TinyLlama/TinyLlama-1.1B"), ChatTemplate::Llama);
+        assert_eq!(
+            ChatTemplate::for_model_id("meta-llama/Llama-3.2-3B-Instruct"),
+            ChatTemplate::Llama
+        );
+        assert_eq!(
+            ChatTemplate::for_model_id("TinyLlama/TinyLlama-1.1B"),
+            ChatTemplate::Llama
+        );
     }
 
     #[test]
     fn for_model_id_chatml_family() {
-        assert_eq!(ChatTemplate::for_model_id("Qwen/Qwen2.5-7B-Instruct"), ChatTemplate::ChatML);
-        assert_eq!(ChatTemplate::for_model_id("deepseek-ai/DeepSeek-V2"), ChatTemplate::ChatML);
+        assert_eq!(
+            ChatTemplate::for_model_id("Qwen/Qwen2.5-7B-Instruct"),
+            ChatTemplate::ChatML
+        );
+        assert_eq!(
+            ChatTemplate::for_model_id("deepseek-ai/DeepSeek-V2"),
+            ChatTemplate::ChatML
+        );
     }
 
     #[test]
     fn for_model_id_unknown_falls_back_to_plain() {
-        assert_eq!(ChatTemplate::for_model_id("some-random-model"), ChatTemplate::Plain);
+        assert_eq!(
+            ChatTemplate::for_model_id("some-random-model"),
+            ChatTemplate::Plain
+        );
         assert_eq!(ChatTemplate::for_model_id(""), ChatTemplate::Plain);
     }
 
@@ -174,10 +201,7 @@ mod tests {
 
     #[test]
     fn mistral_wrap_includes_inst_markers() {
-        assert_eq!(
-            ChatTemplate::Mistral.wrap("hello"),
-            "[INST] hello [/INST]"
-        );
+        assert_eq!(ChatTemplate::Mistral.wrap("hello"), "[INST] hello [/INST]");
     }
 
     #[test]

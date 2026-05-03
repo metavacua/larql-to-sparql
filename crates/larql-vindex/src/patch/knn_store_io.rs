@@ -72,8 +72,8 @@ impl KnnStore {
                     "relation": entry.relation,
                     "confidence": entry.confidence,
                 });
-                let meta_bytes = serde_json::to_vec(&meta)
-                    .map_err(|e| format!("json encode: {e}"))?;
+                let meta_bytes =
+                    serde_json::to_vec(&meta).map_err(|e| format!("json encode: {e}"))?;
                 buf.extend_from_slice(&(meta_bytes.len() as u32).to_le_bytes());
                 buf.extend_from_slice(&meta_bytes);
             }
@@ -133,8 +133,8 @@ impl KnnStore {
                 cursor
                     .read_exact(&mut meta_bytes)
                     .map_err(|e| format!("read meta: {e}"))?;
-                let meta: serde_json::Value = serde_json::from_slice(&meta_bytes)
-                    .map_err(|e| format!("json decode: {e}"))?;
+                let meta: serde_json::Value =
+                    serde_json::from_slice(&meta_bytes).map_err(|e| format!("json decode: {e}"))?;
 
                 layer_entries.push(KnnEntry {
                     key: keys[i].clone(),

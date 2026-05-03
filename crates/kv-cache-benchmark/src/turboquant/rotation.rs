@@ -24,7 +24,10 @@ fn apply_sign_flips(y: &mut [f32]) {
 /// Self-inverse because (DHD)^2 = DH(DD)HD = DH·I·HD = D(HH)D = D·I·D = I
 pub fn wht(x: &[f32]) -> Vec<f32> {
     let d = x.len();
-    assert!(d.is_power_of_two(), "WHT requires power-of-2 dimension, got {d}");
+    assert!(
+        d.is_power_of_two(),
+        "WHT requires power-of-2 dimension, got {d}"
+    );
 
     let mut y = x.to_vec();
 
@@ -70,10 +73,7 @@ mod tests {
         let x_recon = wht(&y);
 
         for (a, b) in x.iter().zip(x_recon.iter()) {
-            assert!(
-                (a - b).abs() < 1e-4,
-                "WHT not self-inverse: {a} vs {b}"
-            );
+            assert!((a - b).abs() < 1e-4, "WHT not self-inverse: {a} vs {b}");
         }
     }
 

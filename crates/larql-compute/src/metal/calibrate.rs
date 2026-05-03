@@ -4,8 +4,8 @@
 use ndarray::Array2;
 use std::time::Instant;
 
-use super::f32_ops::F32Ops;
 use super::buffers::BufferCache;
+use super::f32_ops::F32Ops;
 use metal::CommandQueue;
 
 /// Conservative default before calibration runs.
@@ -15,16 +15,12 @@ pub const DEFAULT_FLOP_THRESHOLD: usize = 500_000_000;
 pub const MIN_FLOP_FLOOR: usize = 100_000;
 
 /// Run calibration and return the optimal FLOP threshold.
-pub fn calibrate(
-    f32_ops: &F32Ops,
-    queue: &CommandQueue,
-    bufs: &BufferCache,
-) -> usize {
+pub fn calibrate(f32_ops: &F32Ops, queue: &CommandQueue, bufs: &BufferCache) -> usize {
     let test_cases: &[(usize, usize, usize)] = &[
-        (6, 256, 256),       // ~800K FLOPs
-        (6, 2560, 512),      // ~15M FLOPs
-        (6, 2560, 2560),     // ~79M FLOPs — attention projection
-        (6, 10240, 2560),    // ~315M FLOPs — FFN gate/up
+        (6, 256, 256),    // ~800K FLOPs
+        (6, 2560, 512),   // ~15M FLOPs
+        (6, 2560, 2560),  // ~79M FLOPs — attention projection
+        (6, 10240, 2560), // ~315M FLOPs — FFN gate/up
     ];
 
     let mut best = DEFAULT_FLOP_THRESHOLD;
@@ -40,7 +36,9 @@ pub fn calibrate(
         // Warm Metal buffer cache
         let _ = f32_ops.dispatch_transb(queue, bufs, a_slice, b_slice, m, n, k);
 
-        let cpu_us = bench_median(5, || { let _ = a.dot(&b.t()); });
+        let cpu_us = bench_median(5, || {
+            let _ = a.dot(&b.t());
+        });
         let metal_us = bench_median(5, || {
             let _ = f32_ops.dispatch_transb(queue, bufs, a_slice, b_slice, m, n, k);
         });

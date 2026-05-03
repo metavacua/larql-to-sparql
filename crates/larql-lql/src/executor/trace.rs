@@ -18,7 +18,10 @@ impl super::Session {
         save: Option<&str>,
     ) -> Result<Vec<String>, LqlError> {
         // Weight backend: dense inference (no vindex)
-        if let super::Backend::Weight { weights, tokenizer, .. } = &self.backend {
+        if let super::Backend::Weight {
+            weights, tokenizer, ..
+        } = &self.backend
+        {
             let ffn = larql_inference::WeightFfn { weights };
             return self.exec_trace_with_ffn(
                 weights, tokenizer, &ffn, prompt, answer, decompose, layers, positions, save,
@@ -31,7 +34,8 @@ impl super::Session {
         if !config.has_model_weights {
             return Err(LqlError::Execution(format!(
                 "TRACE requires model weights. Rebuild: EXTRACT MODEL \"{}\" INTO \"{}\" WITH ALL",
-                config.model, path.display(),
+                config.model,
+                path.display(),
             )));
         }
 
@@ -81,15 +85,23 @@ impl super::Session {
 
         // Fill in token strings
         trace.prompt = prompt.to_string();
-        trace.tokens = token_ids.iter()
-            .map(|&id| tokenizer.decode(&[id], true).unwrap_or_else(|_| format!("t{}", id)))
+        trace.tokens = token_ids
+            .iter()
+            .map(|&id| {
+                tokenizer
+                    .decode(&[id], true)
+                    .unwrap_or_else(|_| format!("t{}", id))
+            })
             .collect();
 
         let mut out = Vec::new();
         let n_layers = trace.n_layers;
         out.push(format!(
             "Trace: \"{}\" ({} tokens, {} layers, {:.0}ms)",
-            prompt, trace.tokens.len(), n_layers, elapsed_ms,
+            prompt,
+            trace.tokens.len(),
+            n_layers,
+            elapsed_ms,
         ));
 
         // Determine layer range to display
@@ -115,7 +127,9 @@ impl super::Session {
             ));
 
             for w in &traj {
-                if w.layer < l_start || w.layer > l_end { continue; }
+                if w.layer < l_start || w.layer > l_end {
+                    continue;
+                }
 
                 let who = if w.layer == -1 {
                     "embed"
@@ -167,7 +181,9 @@ impl super::Session {
                 let res_norm = vec_norm(&node.residual);
                 let ratio = if attn_norm + ffn_norm > 0.0 {
                     attn_norm / (attn_norm + ffn_norm) * 100.0
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
 
                 let layer_str = if layer == -1 {
                     "emb".to_string()
@@ -191,7 +207,9 @@ impl super::Session {
         ));
 
         for s in &summaries {
-            if s.layer < l_start || s.layer > l_end { continue; }
+            if s.layer < l_start || s.layer > l_end {
+                continue;
+            }
             let layer_str = if s.layer == -1 {
                 "emb".to_string()
             } else {
@@ -215,12 +233,17 @@ impl super::Session {
     ) -> Result<Vec<String>, LqlError> {
         if let Some(path) = save {
             let mut writer = larql_inference::TraceWriter::create(
-                std::path::Path::new(path), trace.hidden_size, trace.n_layers,
-            ).map_err(|e| LqlError::exec("save trace", e))?;
+                std::path::Path::new(path),
+                trace.hidden_size,
+                trace.n_layers,
+            )
+            .map_err(|e| LqlError::exec("save trace", e))?;
 
-            let written = writer.write_trace(trace)
+            let written = writer
+                .write_trace(trace)
                 .map_err(|e| LqlError::exec("write trace", e))?;
-            writer.finish()
+            writer
+                .finish()
                 .map_err(|e| LqlError::exec("finish trace", e))?;
 
             out.push(String::new());

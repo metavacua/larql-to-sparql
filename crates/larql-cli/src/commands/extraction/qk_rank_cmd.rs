@@ -36,7 +36,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "  {} layers, {} Q heads, {} KV heads, head_dim={} ({:.1}s)",
-        num_layers, num_q_heads, num_kv_heads, head_dim,
+        num_layers,
+        num_q_heads,
+        num_kv_heads,
+        head_dim,
         start.elapsed().as_secs_f64()
     );
 
@@ -91,7 +94,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
             // Count significant singular values
             let s_max = singular_values[0];
             let threshold_val = s_max * args.threshold;
-            let rank = singular_values.iter().filter(|&&s| s > threshold_val).count();
+            let rank = singular_values
+                .iter()
+                .filter(|&&s| s > threshold_val)
+                .count();
 
             rank_histogram[rank] += 1;
             all_ranks.push((layer, head_dim, rank));
@@ -144,7 +150,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n═══ Summary ═══\n");
     println!("  Total heads analyzed: {}", total_heads);
     println!("  Head dimension: {}", head_dim);
-    println!("  Threshold: {:.0}% of max singular value", args.threshold * 100.0);
+    println!(
+        "  Threshold: {:.0}% of max singular value",
+        args.threshold * 100.0
+    );
 
     // Rank distribution
     println!("\n  Rank distribution:");

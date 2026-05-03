@@ -13,8 +13,8 @@
 //! All paths are per-position single-vector dispatches. Multi-position
 //! prefill is achieved by looping over positions with buffer offsets.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 use super::quant_matvec;
 
@@ -41,10 +41,15 @@ pub fn encode_fused_f32(
     wv_buf: &Buffer,
     f32_in: &Buffer,
     f32_in_off: u64,
-    q_out: &Buffer, q_off: u64,
-    k_out: &Buffer, k_off: u64,
-    v_out: &Buffer, v_off: u64,
-    q_rows: usize, kv_rows: usize, hidden: usize,
+    q_out: &Buffer,
+    q_off: u64,
+    k_out: &Buffer,
+    k_off: u64,
+    v_out: &Buffer,
+    v_off: u64,
+    q_rows: usize,
+    kv_rows: usize,
+    hidden: usize,
 ) {
     use crate::metal::shaders::q4kf_qkv_proj as q4kf_qkv;
     let total_rows = (q_rows + kv_rows + kv_rows) as u32;
@@ -92,12 +97,8 @@ pub fn encode_per_proj(
 ) {
     for p in projections {
         quant_matvec::encode(
-            enc, p.format, p.w_buf,
-            f32_in, f32_in_off,
-            q8_in, q8_in_off, q8s_in, q8s_in_off,
-            p.out_buf, p.out_off,
-            pipes,
-            p.rows, hidden,
+            enc, p.format, p.w_buf, f32_in, f32_in_off, q8_in, q8_in_off, q8s_in, q8s_in_off,
+            p.out_buf, p.out_off, pipes, p.rows, hidden,
         );
     }
 }
@@ -110,15 +111,25 @@ pub fn encode_per_proj(
 pub fn encode_fused_q8(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
-    wq_buf: &Buffer, wq_scale: &Buffer,
-    wk_buf: &Buffer, wk_scale: &Buffer,
-    wv_buf: &Buffer, wv_scale: &Buffer,
-    q8_in: &Buffer, q8_in_off: u64,
-    q8s_in: &Buffer, q8s_in_off: u64,
-    q_out: &Buffer, q_off: u64,
-    k_out: &Buffer, k_off: u64,
-    v_out: &Buffer, v_off: u64,
-    q_rows: usize, kv_rows: usize, hidden: usize,
+    wq_buf: &Buffer,
+    wq_scale: &Buffer,
+    wk_buf: &Buffer,
+    wk_scale: &Buffer,
+    wv_buf: &Buffer,
+    wv_scale: &Buffer,
+    q8_in: &Buffer,
+    q8_in_off: u64,
+    q8s_in: &Buffer,
+    q8s_in_off: u64,
+    q_out: &Buffer,
+    q_off: u64,
+    k_out: &Buffer,
+    k_off: u64,
+    v_out: &Buffer,
+    v_off: u64,
+    q_rows: usize,
+    kv_rows: usize,
+    hidden: usize,
 ) {
     let q_rows_val = q_rows as u32;
     let k_rows_val = kv_rows as u32;
@@ -141,8 +152,5 @@ pub fn encode_fused_q8(
     enc.set_bytes(12, 4, &k_rows_val as *const u32 as *const c_void);
     enc.set_bytes(13, 4, &v_rows_val as *const u32 as *const c_void);
     enc.set_bytes(14, 4, &k_val as *const u32 as *const c_void);
-    enc.dispatch_thread_groups(
-        MTLSize::new(total_rows, 1, 1),
-        MTLSize::new(256, 1, 1),
-    );
+    enc.dispatch_thread_groups(MTLSize::new(total_rows, 1, 1), MTLSize::new(256, 1, 1));
 }

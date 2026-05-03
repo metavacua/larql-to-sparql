@@ -25,7 +25,9 @@ impl FfnL1Cache {
 
     pub fn with_max_entries(num_layers: usize, max_entries: usize) -> Self {
         Self {
-            layers: (0..num_layers).map(|_| RefCell::new(HashMap::new())).collect(),
+            layers: (0..num_layers)
+                .map(|_| RefCell::new(HashMap::new()))
+                .collect(),
             max_entries,
             hits: Cell::new(0),
             misses: Cell::new(0),
@@ -82,12 +84,20 @@ impl FfnL1Cache {
         }
     }
 
-    pub fn hits(&self) -> u64 { self.hits.get() }
-    pub fn misses(&self) -> u64 { self.misses.get() }
+    pub fn hits(&self) -> u64 {
+        self.hits.get()
+    }
+    pub fn misses(&self) -> u64 {
+        self.misses.get()
+    }
 
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits.get() + self.misses.get();
-        if total == 0 { 0.0 } else { self.hits.get() as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits.get() as f64 / total as f64
+        }
     }
 }
 
@@ -163,8 +173,8 @@ mod tests {
         let hit_key = FfnL1Cache::key(&[1]);
         let miss_key = FfnL1Cache::key(&[99]);
         cache.insert(0, hit_key, vec![1.0]);
-        cache.get(0, hit_key);   // hit
-        cache.get(0, miss_key);  // miss
+        cache.get(0, hit_key); // hit
+        cache.get(0, miss_key); // miss
         assert!((cache.hit_rate() - 0.5).abs() < 1e-9);
     }
 
@@ -228,7 +238,10 @@ mod tests {
         // Residuals that differ by << 1/256 in each dimension → same i16 bucket
         let base: Vec<f32> = (0..32).map(|i| i as f32 * 0.001).collect();
         let noise: Vec<f32> = base.iter().map(|&v| v + 1e-5).collect();
-        assert_eq!(FfnL1Cache::residual_key(&base), FfnL1Cache::residual_key(&noise));
+        assert_eq!(
+            FfnL1Cache::residual_key(&base),
+            FfnL1Cache::residual_key(&noise)
+        );
     }
 
     #[test]
@@ -242,7 +255,7 @@ mod tests {
         let key = FfnL1Cache::key(&[3, 7]);
         cache.insert(0, key, vec![1.0, 2.0]);
         cache.insert(0, key, vec![9.0, 8.0]); // overwrite
-        // Should have the second value (HashMap semantics)
+                                              // Should have the second value (HashMap semantics)
         assert_eq!(cache.get(0, key), Some(vec![9.0, 8.0]));
     }
 }

@@ -14,23 +14,29 @@
 //! Usage:
 //!   cargo run --release -p larql-inference --example routing_experiment
 
-use std::collections::HashSet;
-use larql_inference::{InferenceModel, WeightFfn};
 use larql_inference::forward::trace_forward_full;
+use larql_inference::{InferenceModel, WeightFfn};
+use std::collections::HashSet;
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na < 1e-12 || nb < 1e-12 { return 0.0; }
+    if na < 1e-12 || nb < 1e-12 {
+        return 0.0;
+    }
     dot / (na * nb)
 }
 
 fn jaccard(a: &HashSet<usize>, b: &HashSet<usize>) -> f32 {
-    if a.is_empty() && b.is_empty() { return 1.0; }
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
     let inter = a.intersection(b).count();
     let union = a.union(b).count();
-    if union == 0 { return 0.0; }
+    if union == 0 {
+        return 0.0;
+    }
     inter as f32 / union as f32
 }
 
@@ -51,59 +57,150 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dense_ffn = WeightFfn { weights };
 
     let templates: Vec<(&str, &str, Vec<&str>)> = vec![
-        ("capital", "The capital of {} is", vec![
-            "France", "Germany", "Japan", "Brazil", "Egypt",
-            "Australia", "Mexico", "India", "Canada", "Italy",
-            "Spain", "China", "Russia", "Turkey", "Thailand",
-            "Argentina", "Nigeria", "Kenya", "Poland", "Sweden",
-        ]),
-        ("language", "The language spoken in {} is", vec![
-            "France", "Germany", "Japan", "Brazil", "Egypt",
-            "China", "Russia", "Thailand", "Mexico", "Italy",
-            "Spain", "India", "Turkey", "Poland", "Sweden",
-            "Greece", "Portugal", "Vietnam", "Indonesia", "Korea",
-        ]),
-        ("currency", "The currency of {} is the", vec![
-            "Japan", "Brazil", "India", "Mexico", "China",
-            "Russia", "Thailand", "Turkey", "Poland", "Sweden",
-            "Australia", "Canada", "Egypt", "Nigeria", "Kenya",
-            "Argentina", "Switzerland", "Norway", "Denmark", "Hungary",
-        ]),
-        ("born", "{} was born in", vec![
-            "Einstein", "Mozart", "Shakespeare", "Picasso", "Darwin",
-            "Beethoven", "Galileo", "Newton", "Tesla", "Curie",
-            "Aristotle", "Plato", "Napoleon", "Cleopatra", "Gandhi",
-            "Confucius", "Columbus", "Copernicus", "Gutenberg", "Euler",
-        ]),
+        (
+            "capital",
+            "The capital of {} is",
+            vec![
+                "France",
+                "Germany",
+                "Japan",
+                "Brazil",
+                "Egypt",
+                "Australia",
+                "Mexico",
+                "India",
+                "Canada",
+                "Italy",
+                "Spain",
+                "China",
+                "Russia",
+                "Turkey",
+                "Thailand",
+                "Argentina",
+                "Nigeria",
+                "Kenya",
+                "Poland",
+                "Sweden",
+            ],
+        ),
+        (
+            "language",
+            "The language spoken in {} is",
+            vec![
+                "France",
+                "Germany",
+                "Japan",
+                "Brazil",
+                "Egypt",
+                "China",
+                "Russia",
+                "Thailand",
+                "Mexico",
+                "Italy",
+                "Spain",
+                "India",
+                "Turkey",
+                "Poland",
+                "Sweden",
+                "Greece",
+                "Portugal",
+                "Vietnam",
+                "Indonesia",
+                "Korea",
+            ],
+        ),
+        (
+            "currency",
+            "The currency of {} is the",
+            vec![
+                "Japan",
+                "Brazil",
+                "India",
+                "Mexico",
+                "China",
+                "Russia",
+                "Thailand",
+                "Turkey",
+                "Poland",
+                "Sweden",
+                "Australia",
+                "Canada",
+                "Egypt",
+                "Nigeria",
+                "Kenya",
+                "Argentina",
+                "Switzerland",
+                "Norway",
+                "Denmark",
+                "Hungary",
+            ],
+        ),
+        (
+            "born",
+            "{} was born in",
+            vec![
+                "Einstein",
+                "Mozart",
+                "Shakespeare",
+                "Picasso",
+                "Darwin",
+                "Beethoven",
+                "Galileo",
+                "Newton",
+                "Tesla",
+                "Curie",
+                "Aristotle",
+                "Plato",
+                "Napoleon",
+                "Cleopatra",
+                "Gandhi",
+                "Confucius",
+                "Columbus",
+                "Copernicus",
+                "Gutenberg",
+                "Euler",
+            ],
+        ),
     ];
 
     let all_layers: Vec<usize> = (0..num_layers).collect();
     let activation_top_k = 200;
 
     println!("=== Routing Stability Experiment ===\n");
-    println!("{} templates, {} entities each, {} layers\n",
-        templates.len(), templates[0].2.len(), num_layers);
+    println!(
+        "{} templates, {} entities each, {} layers\n",
+        templates.len(),
+        templates[0].2.len(),
+        num_layers
+    );
 
     // Store all results for cross-template analysis
     let mut all_residuals: Vec<(String, Vec<Vec<Vec<f32>>>)> = Vec::new(); // (template, [entity][layer][hidden])
-    let mut all_attn: Vec<(String, Vec<Vec<Vec<f32>>>)> = Vec::new();     // (template, [entity][layer][flat_attn])
+    let mut all_attn: Vec<(String, Vec<Vec<Vec<f32>>>)> = Vec::new(); // (template, [entity][layer][flat_attn])
     let mut all_features: Vec<(String, Vec<Vec<HashSet<usize>>>)> = Vec::new(); // (template, [entity][layer]{features})
 
     for (tname, template, entities) in &templates {
         println!("--- Template: {tname} (\"{template}\") ---");
 
-        let mut t_residuals: Vec<Vec<Vec<f32>>> = Vec::new();  // [entity][layer][hidden]
-        let mut t_attn: Vec<Vec<Vec<f32>>> = Vec::new();       // [entity][layer][flat_attn]
+        let mut t_residuals: Vec<Vec<Vec<f32>>> = Vec::new(); // [entity][layer][hidden]
+        let mut t_attn: Vec<Vec<Vec<f32>>> = Vec::new(); // [entity][layer][flat_attn]
         let mut t_features: Vec<Vec<HashSet<usize>>> = Vec::new(); // [entity][layer]{features}
 
         for entity in entities {
             let prompt = template.replace("{}", entity);
-            let encoding = tokenizer.encode(prompt.as_str(), true).map_err(|e| format!("{e}"))?;
+            let encoding = tokenizer
+                .encode(prompt.as_str(), true)
+                .map_err(|e| format!("{e}"))?;
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
             let trace = trace_forward_full(
-                weights, &token_ids, &all_layers,
-                true, activation_top_k, true, &dense_ffn,
+                weights,
+                &token_ids,
+                &all_layers,
+                true,
+                activation_top_k,
+                true,
+                &dense_ffn,
             );
 
             // Extract per-layer data
@@ -127,12 +224,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 // FFN features (top activations with |act| > 1.0)
-                let feats: HashSet<usize> = trace.activations.iter()
+                let feats: HashSet<usize> = trace
+                    .activations
+                    .iter()
                     .find(|(l, _)| *l == layer)
-                    .map(|(_, acts)| acts.iter()
-                        .filter(|(_, a)| a.abs() > 1.0)
-                        .map(|(f, _)| *f)
-                        .collect())
+                    .map(|(_, acts)| {
+                        acts.iter()
+                            .filter(|(_, a)| a.abs() > 1.0)
+                            .map(|(f, _)| *f)
+                            .collect()
+                    })
                     .unwrap_or_default();
                 e_features.push(feats);
             }
@@ -145,7 +246,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let n = entities.len();
 
         // Per-layer stability metrics
-        println!("  {:>5} {:>8} {:>9} {:>9} {:>9}", "Layer", "Res cos", "Attn cos", "FFN Jacc", "FFN union");
+        println!(
+            "  {:>5} {:>8} {:>9} {:>9} {:>9}",
+            "Layer", "Res cos", "Attn cos", "FFN Jacc", "FFN union"
+        );
 
         for layer in 0..num_layers {
             // Pairwise residual cosine
@@ -160,7 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             for i in 0..n {
-                for j in (i+1)..n {
+                for j in (i + 1)..n {
                     res_cos_sum += cosine(&t_residuals[i][layer], &t_residuals[j][layer]) as f64;
                     if !t_attn[i][layer].is_empty() && !t_attn[j][layer].is_empty() {
                         attn_cos_sum += cosine(&t_attn[i][layer], &t_attn[j][layer]) as f64;
@@ -188,24 +292,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Cross-template separation: residual cosine between templates
     println!("--- Cross-template residual cosine (L16, entity 0 vs entity 0) ---");
     for i in 0..all_residuals.len() {
-        for j in (i+1)..all_residuals.len() {
+        for j in (i + 1)..all_residuals.len() {
             let cos = cosine(&all_residuals[i].1[0][16], &all_residuals[j].1[0][16]);
-            println!("  {} vs {}: {cos:.4}", all_residuals[i].0, all_residuals[j].0);
+            println!(
+                "  {} vs {}: {cos:.4}",
+                all_residuals[i].0, all_residuals[j].0
+            );
         }
     }
 
     println!("\n--- Cross-template FFN Jaccard (L16, entity 0 vs entity 0) ---");
     for i in 0..all_features.len() {
-        for j in (i+1)..all_features.len() {
+        for j in (i + 1)..all_features.len() {
             let jacc = jaccard(&all_features[i].1[0][16], &all_features[j].1[0][16]);
-            println!("  {} vs {}: {jacc:.4}", all_features[i].0, all_features[j].0);
+            println!(
+                "  {} vs {}: {jacc:.4}",
+                all_features[i].0, all_features[j].0
+            );
         }
     }
 
     // Feature union size across all entities per template (how many distinct features per layer?)
     println!("\n--- Feature universe per template per layer ---");
-    println!("  {:>10} {:>5} {:>5} {:>5} {:>5} {:>5}", "", "L0", "L8", "L16", "L24", "L33");
-    for (tname, _, t_features) in all_features.iter()
+    println!(
+        "  {:>10} {:>5} {:>5} {:>5} {:>5} {:>5}",
+        "", "L0", "L8", "L16", "L24", "L33"
+    );
+    for (tname, _, t_features) in all_features
+        .iter()
         .map(|(name, feats)| (name, &templates, feats))
     {
         let mut line = format!("  {tname:>10}");

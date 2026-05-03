@@ -51,9 +51,13 @@ fn bench_cholesky_solve(c: &mut Criterion) {
         let a = synth_spd_f64(n, 99);
         let l = cholesky(&a, 1e-6).unwrap();
         let rhs = Array2::<f64>::from_elem((n, 64), 0.5);
-        group.bench_with_input(BenchmarkId::from_parameter(n), &(&l, &rhs), |b, (l, rhs)| {
-            b.iter(|| cholesky_solve(l, rhs));
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(n),
+            &(&l, &rhs),
+            |b, (l, rhs)| {
+                b.iter(|| cholesky_solve(l, rhs));
+            },
+        );
     }
     group.finish();
 }
@@ -63,7 +67,14 @@ fn bench_ridge_decomposition(c: &mut Criterion) {
     // d=2560 is Gemma 3 4B's hidden_dim; d=128 is a small-model proxy.
     let mut group = c.benchmark_group("ridge_decomposition_solve");
     group.sample_size(20); // d=2560, N=120 is multi-second per iter
-    for &(n, d) in &[(10usize, 128usize), (30, 128), (10, 2560), (30, 2560), (60, 2560), (120, 2560)] {
+    for &(n, d) in &[
+        (10usize, 128usize),
+        (30, 128),
+        (10, 2560),
+        (30, 2560),
+        (60, 2560),
+        (120, 2560),
+    ] {
         let keys = synth_matrix_f32(n, d, 1);
         let targets = synth_matrix_f32(n, d, 2);
         let label = format!("N={n}_d={d}");
@@ -78,5 +89,10 @@ fn bench_ridge_decomposition(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_cholesky, bench_cholesky_solve, bench_ridge_decomposition);
+criterion_group!(
+    benches,
+    bench_cholesky,
+    bench_cholesky_solve,
+    bench_ridge_decomposition
+);
 criterion_main!(benches);

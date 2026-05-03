@@ -45,9 +45,7 @@ fn main() {
     let vocab = 32usize;
 
     println!("Building synthetic llama fixture...");
-    println!(
-        "  hidden={hidden}  intermediate={intermediate}  layers={num_layers}  vocab={vocab}"
-    );
+    println!("  hidden={hidden}  intermediate={intermediate}  layers={num_layers}  vocab={vocab}");
     make_synthetic_model(&model_dir, hidden, intermediate, num_layers, vocab);
 
     // ── Extract twice: once as f32, once as Q4_K ──
@@ -114,25 +112,31 @@ fn main() {
     let mut entries: Vec<_> = std::fs::read_dir(&out_q4k)
         .unwrap()
         .filter_map(Result::ok)
-        .map(|e| (e.file_name().into_string().unwrap(), e.metadata().map(|m| m.len()).unwrap_or(0)))
+        .map(|e| {
+            (
+                e.file_name().into_string().unwrap(),
+                e.metadata().map(|m| m.len()).unwrap_or(0),
+            )
+        })
         .collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, size) in &entries {
-        let marker = if name.contains("q4k") { " ← Q4_K bytes" } else { "" };
+        let marker = if name.contains("q4k") {
+            " ← Q4_K bytes"
+        } else {
+            ""
+        };
         println!("  {:<38} {:>10}{marker}", name, fmt_bytes(*size));
     }
 
     // ── Manifest preview ──
 
     println!("\n── attn_weights_q4k_manifest.json (first 2 entries) ──");
-    let attn_manifest = std::fs::read_to_string(out_q4k.join("attn_weights_q4k_manifest.json"))
-        .unwrap();
+    let attn_manifest =
+        std::fs::read_to_string(out_q4k.join("attn_weights_q4k_manifest.json")).unwrap();
     let attn_entries: Vec<serde_json::Value> = serde_json::from_str(&attn_manifest).unwrap();
     for entry in attn_entries.iter().take(2) {
-        println!(
-            "  {{ key: {},",
-            entry["key"].as_str().unwrap()
-        );
+        println!("  {{ key: {},", entry["key"].as_str().unwrap());
         println!(
             "    shape: {:?}, format: {}, offset: {}, length: {} }}",
             entry["shape"].as_array().unwrap(),
@@ -141,7 +145,10 @@ fn main() {
             entry["length"].as_u64().unwrap()
         );
     }
-    println!("  ... {} more entries (4 per layer × {num_layers} layers)", attn_entries.len() - 2);
+    println!(
+        "  ... {} more entries (4 per layer × {num_layers} layers)",
+        attn_entries.len() - 2
+    );
 
     // ── Config dispatch ──
 
@@ -159,8 +166,8 @@ fn main() {
     let slices = index.attn_q4k_layer_data(0).expect("layer 0 slices");
     let (q_bytes, q_format) = slices[0];
     let n_elements = hidden * hidden; // Q shape [hidden, hidden]
-    // Dequant reads from the raw slab; padded tail beyond n_elements
-    // is zero and left unchanged.
+                                      // Dequant reads from the raw slab; padded tail beyond n_elements
+                                      // is zero and left unchanged.
     let padded = n_elements.div_ceil(256) * 256;
     let dequant = larql_models::quant::ggml::dequantize_q4_k(q_bytes, padded).unwrap();
 
@@ -182,8 +189,13 @@ fn main() {
     println!("  max error:   {max_err:.5}");
     println!("  mean error:  {mean_err:.5}");
     println!("  first 5 source:  {:?}", &source_sample[..5]);
-    println!("  first 5 dequant: {:?}",
-        &dequant[..5].iter().map(|x| (x * 10000.0).round() / 10000.0).collect::<Vec<_>>());
+    println!(
+        "  first 5 dequant: {:?}",
+        &dequant[..5]
+            .iter()
+            .map(|x| (x * 10000.0).round() / 10000.0)
+            .collect::<Vec<_>>()
+    );
 
     // ── V slot is Q6_K — tighter tolerance ──
 
@@ -246,19 +258,74 @@ fn make_synthetic_model(
         metadata.push((name.into(), shape));
     };
 
-    push(&mut tensors, &mut metadata, "model.embed_tokens.weight", vec![vocab, hidden]);
-    push(&mut tensors, &mut metadata, "model.norm.weight", vec![hidden]);
+    push(
+        &mut tensors,
+        &mut metadata,
+        "model.embed_tokens.weight",
+        vec![vocab, hidden],
+    );
+    push(
+        &mut tensors,
+        &mut metadata,
+        "model.norm.weight",
+        vec![hidden],
+    );
     for layer in 0..num_layers {
         let lp = format!("model.layers.{layer}");
-        push(&mut tensors, &mut metadata, &format!("{lp}.self_attn.q_proj.weight"), vec![hidden, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.self_attn.k_proj.weight"), vec![hidden, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.self_attn.v_proj.weight"), vec![hidden, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.self_attn.o_proj.weight"), vec![hidden, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.mlp.gate_proj.weight"), vec![intermediate, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.mlp.up_proj.weight"), vec![intermediate, hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.mlp.down_proj.weight"), vec![hidden, intermediate]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.input_layernorm.weight"), vec![hidden]);
-        push(&mut tensors, &mut metadata, &format!("{lp}.post_attention_layernorm.weight"), vec![hidden]);
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.self_attn.q_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.self_attn.k_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.self_attn.v_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.self_attn.o_proj.weight"),
+            vec![hidden, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.mlp.gate_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.mlp.up_proj.weight"),
+            vec![intermediate, hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.mlp.down_proj.weight"),
+            vec![hidden, intermediate],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.input_layernorm.weight"),
+            vec![hidden],
+        );
+        push(
+            &mut tensors,
+            &mut metadata,
+            &format!("{lp}.post_attention_layernorm.weight"),
+            vec![hidden],
+        );
     }
 
     let tensor_bytes: Vec<(String, Vec<u8>, Vec<usize>)> = metadata
@@ -274,12 +341,8 @@ fn make_synthetic_model(
         .map(|(name, bytes, shape)| {
             (
                 name.clone(),
-                safetensors::tensor::TensorView::new(
-                    safetensors::Dtype::F32,
-                    shape.clone(),
-                    bytes,
-                )
-                .unwrap(),
+                safetensors::tensor::TensorView::new(safetensors::Dtype::F32, shape.clone(), bytes)
+                    .unwrap(),
             )
         })
         .collect();
@@ -313,4 +376,3 @@ fn fmt_bytes(n: u64) -> String {
         format!("{v:.2} {}", UNITS[i])
     }
 }
-

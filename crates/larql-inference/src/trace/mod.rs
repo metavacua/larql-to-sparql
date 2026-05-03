@@ -8,16 +8,16 @@
 //! mmap'd, and paged out by the OS. Only the active token's chain
 //! is in RAM. Old chains are on disk, paged in on demand.
 
-mod types;
-mod capture;
-mod store;
 mod boundary;
+mod capture;
 mod context;
+mod store;
+mod types;
 mod vocab;
 
-pub use types::*;
-pub use capture::*;
-pub use store::*;
 pub use boundary::*;
+pub use capture::*;
 pub use context::*;
+pub use store::*;
+pub use types::*;
 pub use vocab::*;

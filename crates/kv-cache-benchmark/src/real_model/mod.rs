@@ -8,11 +8,11 @@
 //! - Markov RS:   runs bounded-window forward pass, stores residuals + cold tier token IDs
 //! - Graph Walk:  vindex walk through FFN graph, no forward pass for factual queries
 
-pub mod runner;
-pub mod kv_capture;
-pub mod turboquant_layer;
-pub mod markov_layer;
-pub mod graph_walk_layer;
 pub mod decode_comparison;
+pub mod graph_walk_layer;
+pub mod kv_capture;
+pub mod markov_layer;
+pub mod runner;
+pub mod turboquant_layer;
 
-pub use runner::{RealModelBenchmark, RealModelResult, run_all_strategies};
+pub use runner::{run_all_strategies, RealModelBenchmark, RealModelResult};

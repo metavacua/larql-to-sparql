@@ -15,7 +15,8 @@ use std::path::Path;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let vindex_dir = std::env::args().nth(1)
+    let vindex_dir = std::env::args()
+        .nth(1)
         .ok_or("Usage: convert_gates_f32 <vindex_dir>")?;
     let dir = Path::new(&vindex_dir);
 
@@ -57,7 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     let mut new_offset: u64 = 0;
 
-    let layers = config["layers"].as_array_mut()
+    let layers = config["layers"]
+        .as_array_mut()
         .ok_or("Missing layers array in index.json")?;
 
     for layer_info in layers.iter_mut() {
@@ -78,10 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Write f32 bytes
         let f32_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                f32_data.as_ptr() as *const u8,
-                f32_data.len() * 4,
-            )
+            std::slice::from_raw_parts(f32_data.as_ptr() as *const u8, f32_data.len() * 4)
         };
         f32_file.write_all(f32_bytes)?;
 
@@ -91,8 +90,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         new_offset += new_length;
 
         if layer.is_multiple_of(10) || layer == num_layers - 1 {
-            println!("  Layer {layer}/{num_layers}: {num_features} features, {:.1}MB",
-                new_length as f64 / 1e6);
+            println!(
+                "  Layer {layer}/{num_layers}: {num_features} features, {:.1}MB",
+                new_length as f64 / 1e6
+            );
         }
     }
 
@@ -108,7 +109,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = t0.elapsed();
     let f32_size = new_offset;
-    println!("\nF32 file: {:.1} MB ({:.1}s)", f32_size as f64 / 1e6, elapsed.as_secs_f64());
+    println!(
+        "\nF32 file: {:.1} MB ({:.1}s)",
+        f32_size as f64 / 1e6,
+        elapsed.as_secs_f64()
+    );
 
     // Update index.json
     config["dtype"] = serde_json::json!("f32");
