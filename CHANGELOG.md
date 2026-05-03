@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Bump toolchain to 1.88 and unpin scanner-tool versions
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
+- Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Scope cron to advisory scanners and harden SARIF upload
 
 
