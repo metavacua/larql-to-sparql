@@ -36,46 +36,35 @@ runs:
         TOOL_TYPE: ${{ inputs.tool-type }}
         ERROR_LIMIT: ${{ inputs.error-limit }}
       run: |
-        # Function to extract cargo errors
-        extract_cargo_errors() {
-          local limit=$1
-          # Extract error lines (error[...]: or error:) and related context
-          grep -E "^error(\[|:)" "$LOG_FILE" | head -n "$limit"
-        }
-
-        # Function to extract generic errors
-        extract_generic_errors() {
-          local limit=$1
-          # Extract lines containing 'error' (case-insensitive) and related markers
-          grep -iE "(^|[[:space:]])error(:|[[:space:]])" "$LOG_FILE" | head -n "$limit"
-        }
-
-        # Check if log file exists
-        if [[ ! -f "$LOG_FILE" ]]; then
+        # Check if log file exists and has content
+        if [[ ! -f "$LOG_FILE" ]] || [[ ! -s "$LOG_FILE" ]]; then
           echo "errors=" >> "$GITHUB_OUTPUT"
           echo "error-count=0" >> "$GITHUB_OUTPUT"
           echo "truncated=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
-        # Extract errors based on tool type
-        case "$TOOL_TYPE" in
-          cargo)
-            errors=$(extract_cargo_errors "$ERROR_LIMIT")
-            ;;
-          generic|script)
-            errors=$(extract_generic_errors "$ERROR_LIMIT")
-            ;;
-          *)
-            errors=$(extract_generic_errors "$ERROR_LIMIT")
-            ;;
-        esac
-
-        # Count total errors (tool-specific)
+        # For cargo tools, extract explicit error lines
         if [[ "$TOOL_TYPE" == "cargo" ]]; then
+          errors=$(grep -E "^error(\[|:)" "$LOG_FILE" | head -n "$ERROR_LIMIT")
           total_errors=$(grep -cE "^error(\[|:)" "$LOG_FILE" 2>/dev/null || echo 0)
         else
-          total_errors=$(grep -icE "(^|[[:space:]])error(:|[[:space:]])" "$LOG_FILE" 2>/dev/null || echo 0)
+          # For generic/script tools, use a multi-stage approach
+          # First try to extract lines with error keywords
+          errors=$(grep -iE "(error|failed|failure|panic)" "$LOG_FILE" | head -n "$ERROR_LIMIT")
+
+          # If no errors found with keywords, extract last N lines (often contains summary)
+          if [[ -z "$errors" ]]; then
+            errors=$(tail -n "$ERROR_LIMIT" "$LOG_FILE")
+          fi
+
+          # Count error-like lines
+          total_errors=$(grep -icE "(error|failed|failure)" "$LOG_FILE" 2>/dev/null || echo 0)
+
+          # If still 0, use line count as approximation
+          if [[ $total_errors -eq 0 ]]; then
+            total_errors=$(wc -l < "$LOG_FILE")
+          fi
         fi
 
         # Determine if truncated

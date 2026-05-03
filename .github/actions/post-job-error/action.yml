@@ -61,6 +61,12 @@ runs:
           body+='```\n'
           body+="$ERRORS"
           body+=$'\n```\n'
+        elif [[ -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
+          # Fallback: extract last lines from log file if errors weren't extracted
+          body+=$'\n### Output (last 20 lines)\n'
+          body+='```\n'
+          body+="$(tail -20 "$LOG_FILE")"
+          body+=$'\n```\n'
         fi
 
         # Add truncation note if applicable
