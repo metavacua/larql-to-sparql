@@ -244,9 +244,15 @@ mod test_context_store {
 
         {
             let mut writer = ContextWriter::create(
-                &path, HIDDEN, N_LAYERS, WINDOW,
-                ContextTier::Residual, CRITICAL, 100,
-            ).unwrap();
+                &path,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::Residual,
+                CRITICAL,
+                100,
+            )
+            .unwrap();
             writer.append(0, WINDOW, &r0, &[], &[]).unwrap();
             writer.append(WINDOW, WINDOW, &r1, &[], &[]).unwrap();
             assert_eq!(writer.n_boundaries(), 2);
@@ -280,10 +286,18 @@ mod test_context_store {
 
         {
             let mut writer = ContextWriter::create(
-                &path, HIDDEN, N_LAYERS, WINDOW,
-                ContextTier::FfnDeltas, CRITICAL, 100,
-            ).unwrap();
-            writer.append(0, WINDOW, &residual, &ffn_deltas, &[]).unwrap();
+                &path,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::FfnDeltas,
+                CRITICAL,
+                100,
+            )
+            .unwrap();
+            writer
+                .append(0, WINDOW, &residual, &ffn_deltas, &[])
+                .unwrap();
             writer.finish().unwrap();
         }
 
@@ -314,10 +328,18 @@ mod test_context_store {
 
         {
             let mut writer = ContextWriter::create(
-                &path, HIDDEN, N_LAYERS, WINDOW,
-                ContextTier::Full, CRITICAL, 100,
-            ).unwrap();
-            writer.append(0, WINDOW, &residual, &ffn_deltas, &attn_deltas).unwrap();
+                &path,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::Full,
+                CRITICAL,
+                100,
+            )
+            .unwrap();
+            writer
+                .append(0, WINDOW, &residual, &ffn_deltas, &attn_deltas)
+                .unwrap();
             writer.finish().unwrap();
         }
 
@@ -340,11 +362,21 @@ mod test_context_store {
 
         {
             let mut writer = ContextWriter::create(
-                &path, HIDDEN, N_LAYERS, WINDOW,
-                ContextTier::Residual, CRITICAL, 100,
-            ).unwrap();
-            writer.append(0, 100, &synth_vec(HIDDEN, 1), &[], &[]).unwrap();
-            writer.append(100, 100, &synth_vec(HIDDEN, 2), &[], &[]).unwrap();
+                &path,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::Residual,
+                CRITICAL,
+                100,
+            )
+            .unwrap();
+            writer
+                .append(0, 100, &synth_vec(HIDDEN, 1), &[], &[])
+                .unwrap();
+            writer
+                .append(100, 100, &synth_vec(HIDDEN, 2), &[], &[])
+                .unwrap();
             writer.finish().unwrap();
         }
 
@@ -361,8 +393,18 @@ mod test_context_store {
         // Tier 1: 1 vector
         let path1 = dir.path().join("ctx_bpb1.bin");
         {
-            let mut w = ContextWriter::create(&path1, HIDDEN, N_LAYERS, WINDOW, ContextTier::Residual, CRITICAL, 10).unwrap();
-            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &[], &[]).unwrap();
+            let mut w = ContextWriter::create(
+                &path1,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::Residual,
+                CRITICAL,
+                10,
+            )
+            .unwrap();
+            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &[], &[])
+                .unwrap();
             w.finish().unwrap();
         }
         let s1 = ContextStore::open(&path1).unwrap();
@@ -372,8 +414,18 @@ mod test_context_store {
         let path2 = dir.path().join("ctx_bpb2.bin");
         {
             let ffn: Vec<Vec<f32>> = (0..3).map(|i| synth_vec(HIDDEN, 10 + i)).collect();
-            let mut w = ContextWriter::create(&path2, HIDDEN, N_LAYERS, WINDOW, ContextTier::FfnDeltas, CRITICAL, 10).unwrap();
-            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &ffn, &[]).unwrap();
+            let mut w = ContextWriter::create(
+                &path2,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::FfnDeltas,
+                CRITICAL,
+                10,
+            )
+            .unwrap();
+            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &ffn, &[])
+                .unwrap();
             w.finish().unwrap();
         }
         let s2 = ContextStore::open(&path2).unwrap();
@@ -384,12 +436,25 @@ mod test_context_store {
         {
             let ffn: Vec<Vec<f32>> = (0..3).map(|i| synth_vec(HIDDEN, 20 + i)).collect();
             let attn: Vec<Vec<f32>> = (0..3).map(|i| synth_vec(HIDDEN, 30 + i)).collect();
-            let mut w = ContextWriter::create(&path3, HIDDEN, N_LAYERS, WINDOW, ContextTier::Full, CRITICAL, 10).unwrap();
-            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &ffn, &attn).unwrap();
+            let mut w = ContextWriter::create(
+                &path3,
+                HIDDEN,
+                N_LAYERS,
+                WINDOW,
+                ContextTier::Full,
+                CRITICAL,
+                10,
+            )
+            .unwrap();
+            w.append(0, WINDOW, &synth_vec(HIDDEN, 1), &ffn, &attn)
+                .unwrap();
             w.finish().unwrap();
         }
         let s3 = ContextStore::open(&path3).unwrap();
-        assert_eq!(s3.bytes_per_boundary(), (1 + 2 * CRITICAL.len()) * HIDDEN * 4);
+        assert_eq!(
+            s3.bytes_per_boundary(),
+            (1 + 2 * CRITICAL.len()) * HIDDEN * 4
+        );
     }
 }
 
@@ -464,7 +529,12 @@ mod test_additive_property {
                 assert!(
                     (residual[i] - expected).abs() < 1e-6,
                     "layer {} dim {}: {} != {} + {} + {}",
-                    layer_idx, i, residual[i], prev_residual[i], attn_delta[i], ffn_delta[i],
+                    layer_idx,
+                    i,
+                    residual[i],
+                    prev_residual[i],
+                    attn_delta[i],
+                    ffn_delta[i],
                 );
             }
         }

@@ -1,16 +1,16 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 #![allow(clippy::single_range_in_vec_init)]
 
-pub mod model_config;
-pub mod metrics;
-pub mod standard_kv;
-pub mod turboquant;
-pub mod markov_residual;
-pub mod graph_walk;
-pub mod benchmark;
-pub mod shader_bench;
 pub mod accuracy;
 pub mod accuracy_suite;
+pub mod benchmark;
+pub mod graph_walk;
+pub mod markov_residual;
+pub mod metrics;
+pub mod model_config;
+pub mod shader_bench;
+pub mod standard_kv;
+pub mod turboquant;
 
 #[cfg(feature = "real-model")]
 pub mod real_model;
@@ -45,7 +45,12 @@ pub trait KvStrategy {
     fn encode(&self, keys: &[Vec<f32>], values: &[Vec<f32>]) -> Vec<u8>;
 
     /// Decode encoded bytes back to KV vectors.
-    fn decode(&self, encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>);
+    fn decode(
+        &self,
+        encoded: &[u8],
+        num_vectors: usize,
+        dim: usize,
+    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>);
 
     /// Analytical memory for `seq_len` tokens (config-level, no data needed).
     fn memory_bytes(&self, config: &ModelConfig, seq_len: usize) -> usize;

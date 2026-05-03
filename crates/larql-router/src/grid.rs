@@ -12,9 +12,8 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
 use larql_router_protocol::{
-    AckMsg, AnnounceMsg, Gap, GridService, ModelCoverage, RejectMsg, RouterMessage,
-    RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
-    StatusResponse,
+    AckMsg, AnnounceMsg, Gap, GridService, ModelCoverage, RejectMsg, RouterMessage, RouterPayload,
+    ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest, StatusResponse,
 };
 
 // ── Per-server record ─────────────────────────────────────────────────────────
@@ -112,7 +111,9 @@ impl GridState {
         let mut out = HashMap::with_capacity(layers.len());
         for &layer in layers {
             match self.route(model_id, layer as u32) {
-                Some(url) => { out.insert(layer, url); }
+                Some(url) => {
+                    out.insert(layer, url);
+                }
                 None => return Err(layer),
             }
         }
@@ -142,7 +143,10 @@ impl GridState {
             by_model.entry(&entry.model_id).or_default().push(entry);
         }
         for (model_id, entries) in &by_model {
-            let layer_count: u32 = entries.iter().map(|e| e.layer_end - e.layer_start + 1).sum();
+            let layer_count: u32 = entries
+                .iter()
+                .map(|e| e.layer_end - e.layer_start + 1)
+                .sum();
             tracing::info!(
                 model_id = model_id,
                 servers = entries.len(),
@@ -156,7 +160,10 @@ impl GridState {
         // Build per-model coverage
         let mut by_model: HashMap<String, Vec<&ServerEntry>> = HashMap::new();
         for entry in self.servers.values() {
-            by_model.entry(entry.model_id.clone()).or_default().push(entry);
+            by_model
+                .entry(entry.model_id.clone())
+                .or_default()
+                .push(entry);
         }
 
         let models: Vec<ModelCoverage> = by_model
@@ -230,11 +237,19 @@ pub struct GridServiceImpl {
 impl GridServiceImpl {
     #[allow(dead_code)]
     pub fn new(state: Arc<RwLock<GridState>>) -> Self {
-        Self { state, next_id: AtomicU64::new(1), grid_key: None }
+        Self {
+            state,
+            next_id: AtomicU64::new(1),
+            grid_key: None,
+        }
     }
 
     pub fn new_with_key(state: Arc<RwLock<GridState>>, key: Option<String>) -> Self {
-        Self { state, next_id: AtomicU64::new(1), grid_key: key }
+        Self {
+            state,
+            next_id: AtomicU64::new(1),
+            grid_key: key,
+        }
     }
 
     fn alloc_server_id(&self) -> String {

@@ -61,10 +61,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--vindex" => { i += 1; vindex_path = PathBuf::from(&args[i]); }
-            "--server" => { i += 1; server_url = args[i].clone(); }
-            "--layers" => { i += 1; layers_arg = args[i].clone(); }
-            "--seq-len" => { i += 1; seq_len = args[i].parse()?; }
+            "--vindex" => {
+                i += 1;
+                vindex_path = PathBuf::from(&args[i]);
+            }
+            "--server" => {
+                i += 1;
+                server_url = args[i].clone();
+            }
+            "--layers" => {
+                i += 1;
+                layers_arg = args[i].clone();
+            }
+            "--seq-len" => {
+                i += 1;
+                seq_len = args[i].parse()?;
+            }
             _ => eprintln!("unknown arg: {}", args[i]),
         }
         i += 1;
@@ -100,8 +112,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let remote_config = RemoteFfnConfig::new(&server_url).with_timeout(Duration::from_secs(60));
     let remote = RemoteWalkBackend::connect(remote_config)?;
     assert_eq!(
-        remote.hidden_size(), hidden,
-        "remote hidden_size {} != local {hidden}", remote.hidden_size()
+        remote.hidden_size(),
+        hidden,
+        "remote hidden_size {} != local {hidden}",
+        remote.hidden_size()
     );
     println!("  connected. remote hidden={}", remote.hidden_size());
 
@@ -133,13 +147,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut max_rel = 0.0f32;
         for (l, r) in local_out.iter().zip(remote_out.iter()) {
             let abs = (l - r).abs();
-            if abs > max_abs { max_abs = abs; }
+            if abs > max_abs {
+                max_abs = abs;
+            }
             let denom = l.abs().max(1e-8);
             let rel = abs / denom;
-            if rel > max_rel { max_rel = rel; }
+            if rel > max_rel {
+                max_rel = rel;
+            }
         }
         let ok = max_abs <= 1e-5;
-        if !ok { all_ok = false; }
+        if !ok {
+            all_ok = false;
+        }
         let flag = if ok { "OK" } else { "FAIL" };
         println!(
             "  L{layer:02}  local={local_ms:6.1}ms  remote={remote_ms:6.1}ms  \

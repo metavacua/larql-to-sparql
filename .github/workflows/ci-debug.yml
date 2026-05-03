@@ -1,0 +1,101 @@
+name: CI Debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'OS to debug on'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - macos-latest
+
+env:
+  RUST_BACKTRACE: full
+  CARGO_TERM_COLOR: always
+  RUST_LOG: debug
+
+jobs:
+  debug:
+    name: Debug CI on ${{ inputs.os }}
+    runs-on: ${{ inputs.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Print system info
+        run: |
+          echo "=== System Info ==="
+          uname -a
+          echo "=== Disk Space ==="
+          df -h
+          echo "=== Memory ==="
+          free -h || vm_stat
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Print Rust toolchain info
+        run: |
+          rustc --version --verbose
+          cargo --version
+
+      - name: Cache Rust/Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Check code formatting (verbose)
+        run: cargo fmt --check --verbose
+
+      - name: Lint with Clippy (verbose)
+        run: cargo clippy --workspace --tests --verbose -- -D warnings
+
+      - name: Run Rust tests (verbose)
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            cargo test --lib --no-default-features --verbose
+          else
+            cargo test --lib --features metal --verbose
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Print Python info
+        run: |
+          python --version
+          python -m pip --version
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Print uv info
+        run: uv --version
+
+      - name: Install Python dependencies (verbose)
+        run: |
+          cd crates/larql-python
+          uv sync --no-install-project --group dev --verbose
+
+      - name: Build Python extension (verbose)
+        run: |
+          cd crates/larql-python
+          uv run --no-sync maturin develop --release --verbose
+
+      - name: Test Python extension (verbose)
+        run: |
+          cd crates/larql-python
+          uv run --no-sync pytest tests/ -v
+
+      - name: Print cache info
+        run: |
+          echo "=== Cargo Cache ==="
+          ls -lh ~/.cargo/registry/cache/ || echo "No cache found"
+          echo "=== Workspace ==="
+          du -sh target/ || echo "No target directory"

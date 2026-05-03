@@ -7,12 +7,12 @@
 
 extern crate blas_src;
 
-use std::time::Instant;
 use ndarray::Array2;
+use std::time::Instant;
 
-use larql_inference::InferenceModel;
 use larql_inference::ffn::FfnBackend;
 use larql_inference::vindex::WalkFfn;
+use larql_inference::InferenceModel;
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,7 +20,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut vindex_path = std::path::PathBuf::from("output/gemma3-4b-v2.vindex");
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "--vindex" { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
+        if args[i] == "--vindex" {
+            i += 1;
+            vindex_path = std::path::PathBuf::from(&args[i]);
+        }
         i += 1;
     }
 
@@ -40,8 +43,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== Sequence Length Scaling Benchmark ===");
     println!("hidden={hidden}, intermediate={intermediate}\n");
-    println!("{:>5} {:>10} {:>10} {:>10} {:>10} {:>10}",
-        "seq", "Dense/L", "Walk/L", "Speedup", "Dense BW", "Walk BW");
+    println!(
+        "{:>5} {:>10} {:>10} {:>10} {:>10} {:>10}",
+        "seq", "Dense/L", "Walk/L", "Speedup", "Dense BW", "Walk BW"
+    );
 
     for &seq in &[1, 6, 16, 32, 64, 128] {
         let x = Array2::<f32>::from_elem((seq, hidden), 0.01);
@@ -54,12 +59,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Dense FFN
         let t0 = Instant::now();
-        for _ in 0..n { let _ = dense_ffn.forward(layer, &x); }
+        for _ in 0..n {
+            let _ = dense_ffn.forward(layer, &x);
+        }
         let dense_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
         // Walk FFN
         let t0 = Instant::now();
-        for _ in 0..n { let _ = walk_ffn.forward(layer, &x); }
+        for _ in 0..n {
+            let _ = walk_ffn.forward(layer, &x);
+        }
         let walk_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
         let speedup = dense_ms / walk_ms;
@@ -72,8 +81,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Also measure all 21 layers (L13-33) at different seq lengths
     println!("\n--- Full L13-33 (21 layers) ---\n");
-    println!("{:>5} {:>12} {:>12} {:>10}",
-        "seq", "Dense 21L", "Walk 21L", "Speedup");
+    println!(
+        "{:>5} {:>12} {:>12} {:>10}",
+        "seq", "Dense 21L", "Walk 21L", "Speedup"
+    );
 
     for &seq in &[1, 6, 32, 64, 128] {
         let x = Array2::<f32>::from_elem((seq, hidden), 0.01);
@@ -87,13 +98,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let t0 = Instant::now();
         for _ in 0..n {
-            for layer in 13..34 { let _ = dense_ffn.forward(layer, &x); }
+            for layer in 13..34 {
+                let _ = dense_ffn.forward(layer, &x);
+            }
         }
         let dense_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
         let t0 = Instant::now();
         for _ in 0..n {
-            for layer in 13..34 { let _ = walk_ffn.forward(layer, &x); }
+            for layer in 13..34 {
+                let _ = walk_ffn.forward(layer, &x);
+            }
         }
         let walk_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 

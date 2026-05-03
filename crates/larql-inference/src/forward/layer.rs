@@ -3,21 +3,29 @@
 //! Orchestrates the per-layer computation: attention (with optional KV sharing),
 //! FFN, per-layer embeddings, and layer scalar multiplication.
 
-use ndarray::Array2;
+use super::apply_norm;
+use super::ple::apply_per_layer_embedding;
 use crate::attention::{AttentionWeights, SharedKV};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use crate::residual::rms_norm;
-use super::apply_norm;
-use super::ple::{apply_per_layer_embedding};
+use ndarray::Array2;
 
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
-pub fn run_attention_public(weights: &ModelWeights, h: &Array2<f32>, layer: usize) -> Option<Array2<f32>> {
+pub fn run_attention_public(
+    weights: &ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+) -> Option<Array2<f32>> {
     run_attention(weights, h, layer)
 }
 
 /// Run attention for a single layer. Returns the post-attention residual.
-pub(super) fn run_attention(weights: &ModelWeights, h: &Array2<f32>, layer: usize) -> Option<Array2<f32>> {
+pub(super) fn run_attention(
+    weights: &ModelWeights,
+    h: &Array2<f32>,
+    layer: usize,
+) -> Option<Array2<f32>> {
     let (h_post_attn, _) = run_attention_inner(weights, h, layer, false, None)?;
     Some(h_post_attn)
 }
@@ -31,7 +39,13 @@ pub(super) fn run_attention_inner(
     shared_kv: Option<&SharedKV>,
 ) -> Option<(Array2<f32>, Option<AttentionWeights>)> {
     let (h_post_attn, _attn_projected, attn_weights) =
-        crate::attention::run_attention_block_shared(weights, h, layer, capture_attention, shared_kv)?;
+        crate::attention::run_attention_block_shared(
+            weights,
+            h,
+            layer,
+            capture_attention,
+            shared_kv,
+        )?;
     Some((h_post_attn, attn_weights))
 }
 
@@ -60,7 +74,11 @@ pub fn run_ffn(
     // Layer-0 stage dumps (LARQL_CPU_STAGE_DUMP=<dir>) — matches the
     // Metal `LARQL_METAL_DUMP_LAYERS` convention. Lets us diff per-stage
     // intermediates between CPU and Metal for the first layer.
-    let stage_dump_dir = if layer == 0 { std::env::var("LARQL_CPU_STAGE_DUMP").ok() } else { None };
+    let stage_dump_dir = if layer == 0 {
+        std::env::var("LARQL_CPU_STAGE_DUMP").ok()
+    } else {
+        None
+    };
     let dump_f32 = |name: &str, arr: &Array2<f32>| {
         if let Some(ref dir) = stage_dump_dir {
             let slice = arr.as_slice().unwrap_or(&[]);
@@ -139,7 +157,10 @@ pub fn run_layer_with_ffn(
     shared_kv: Option<&SharedKV>,
 ) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<SharedKV>)> {
     let (h_post_attn, kv_out) = if shared_kv.is_some() {
-        (run_attention_inner(weights, h, layer, false, shared_kv)?.0, None)
+        (
+            run_attention_inner(weights, h, layer, false, shared_kv)?.0,
+            None,
+        )
     } else {
         let (h_pa, kv) = run_attention_with_kv_cache(weights, h, layer)?;
         (h_pa, Some(kv))
@@ -162,8 +183,14 @@ pub(super) fn run_layer_with_capture(
     capture_attention: bool,
     ple_input: Option<&Array2<f32>>,
     shared_kv: Option<&SharedKV>,
-) -> Option<(Array2<f32>, Option<Array2<f32>>, Option<AttentionWeights>, Option<SharedKV>)> {
-    let (h_post_attn, attn_weights) = run_attention_inner(weights, h, layer, capture_attention, shared_kv)?;
+) -> Option<(
+    Array2<f32>,
+    Option<Array2<f32>>,
+    Option<AttentionWeights>,
+    Option<SharedKV>,
+)> {
+    let (h_post_attn, attn_weights) =
+        run_attention_inner(weights, h, layer, capture_attention, shared_kv)?;
     let kv_out = None;
     let (h_post_ffn, activation) = run_ffn(weights, &h_post_attn, layer, ffn, capture_activation);
     let mut h_out = apply_per_layer_embedding(weights, &h_post_ffn, layer, ple_input);

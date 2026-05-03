@@ -4,7 +4,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let model = larql_inference::InferenceModel::load("google/gemma-3-4b-it")?;
     let weights = model.weights();
     let vd = std::path::PathBuf::from("output/gemma3-4b-v2.vindex");
-    let mut index = larql_vindex::VectorIndex::load_vindex(&vd, &mut larql_vindex::SilentLoadCallbacks)?;
+    let mut index =
+        larql_vindex::VectorIndex::load_vindex(&vd, &mut larql_vindex::SilentLoadCallbacks)?;
     let _ = index.load_attn_q4k(&vd);
     let _ = index.load_interleaved_q4k(&vd);
     let backend = larql_inference::default_backend();
@@ -37,7 +38,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let expected_q = (q_dim * hidden).div_ceil(256) * 148;
         let expected_k = (kv_dim * hidden).div_ceil(256) * 148;
         let _expected_o = (hidden * q_dim).div_ceil(256) * 148;
-        println!("\n  Expected Q bytes: {} (q_dim={} × hidden={})", expected_q, q_dim, hidden);
+        println!(
+            "\n  Expected Q bytes: {} (q_dim={} × hidden={})",
+            expected_q, q_dim, hidden
+        );
         println!("  Actual Q bytes:   {}", q.0.len());
         println!("  Match: {}\n", q.0.len() == expected_q);
         println!("  Expected K bytes: {}", expected_k);
@@ -59,7 +63,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref r) = result {
             let nonzero = r.iter().filter(|v| v.abs() > 1e-10).count();
             let max = r.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-            println!("  q4k_matvec result: len={}, nonzero={}, max={:.4}", r.len(), nonzero, max);
+            println!(
+                "  q4k_matvec result: len={}, nonzero={}, max={:.4}",
+                r.len(),
+                nonzero,
+                max
+            );
         } else {
             println!("  q4k_matvec returned None!");
         }
@@ -89,7 +98,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref r) = result {
             let nonzero = r.iter().filter(|v| v.abs() > 1e-10).count();
             let max = r.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-            println!("  Gate Q4K matvec: len={}, nonzero={}, max={:.4}", r.len(), nonzero, max);
+            println!(
+                "  Gate Q4K matvec: len={}, nonzero={}, max={:.4}",
+                r.len(),
+                nonzero,
+                max
+            );
         } else {
             println!("  Gate Q4K matvec returned None!");
         }

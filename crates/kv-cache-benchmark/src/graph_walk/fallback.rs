@@ -6,7 +6,6 @@
 ///
 /// The benchmark reports what % of queries resolve at each tier
 /// and the accuracy per tier vs full forward pass baseline.
-
 use super::walk_state::{WalkState, WalkTier};
 
 /// Result of tier-based routing.
@@ -77,22 +76,34 @@ impl TierDistribution {
     }
 
     pub fn tier_a_pct(&self) -> f64 {
-        if self.total == 0 { 0.0 } else { self.tier_a_count as f64 / self.total as f64 * 100.0 }
+        if self.total == 0 {
+            0.0
+        } else {
+            self.tier_a_count as f64 / self.total as f64 * 100.0
+        }
     }
 
     pub fn tier_b_pct(&self) -> f64 {
-        if self.total == 0 { 0.0 } else { self.tier_b_count as f64 / self.total as f64 * 100.0 }
+        if self.total == 0 {
+            0.0
+        } else {
+            self.tier_b_count as f64 / self.total as f64 * 100.0
+        }
     }
 
     pub fn tier_c_pct(&self) -> f64 {
-        if self.total == 0 { 0.0 } else { self.tier_c_count as f64 / self.total as f64 * 100.0 }
+        if self.total == 0 {
+            0.0
+        } else {
+            self.tier_c_count as f64 / self.total as f64 * 100.0
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::walk_state::WalkMode;
+    use super::*;
 
     #[test]
     fn test_tier_routing() {

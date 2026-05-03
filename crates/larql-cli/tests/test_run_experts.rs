@@ -23,9 +23,19 @@ fn run(args: &[&str]) -> std::process::Output {
 fn run_help_lists_experts_flags() {
     let out = run(&["run", "--help"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(out.status.success(), "run --help failed:\nstderr={}", String::from_utf8_lossy(&out.stderr));
-    assert!(stdout.contains("--experts"), "run --help missing --experts:\n{stdout}");
-    assert!(stdout.contains("--experts-dir"), "run --help missing --experts-dir:\n{stdout}");
+    assert!(
+        out.status.success(),
+        "run --help failed:\nstderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("--experts"),
+        "run --help missing --experts:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--experts-dir"),
+        "run --help missing --experts-dir:\n{stdout}"
+    );
 }
 
 #[test]
@@ -84,9 +94,10 @@ fn find_wasm_dir() -> Option<PathBuf> {
     let workspace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../larql-experts/target/wasm32-wasip1/release");
     if workspace_dir.is_dir()
-        && std::fs::read_dir(&workspace_dir)
-            .ok()?
-            .any(|e| e.ok().is_some_and(|e| e.path().extension().is_some_and(|x| x == "wasm")))
+        && std::fs::read_dir(&workspace_dir).ok()?.any(|e| {
+            e.ok()
+                .is_some_and(|e| e.path().extension().is_some_and(|x| x == "wasm"))
+        })
     {
         Some(workspace_dir)
     } else {
@@ -169,14 +180,12 @@ fn experts_dir_override_validates_existence() {
         Ok(h) => PathBuf::from(h).join(".larql/cache"),
         Err(_) => return,
     };
-    let vindex = std::fs::read_dir(&cache)
-        .ok()
-        .and_then(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .find(|p| p.is_dir() && p.join("config.json").exists())
-        });
+    let vindex = std::fs::read_dir(&cache).ok().and_then(|entries| {
+        entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.is_dir() && p.join("config.json").exists())
+    });
     let Some(vindex_path) = vindex else {
         eprintln!("skip: no vindex found under {}", cache.display());
         return;

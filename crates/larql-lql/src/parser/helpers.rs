@@ -1,8 +1,8 @@
 //! Shared parsing helpers: token utilities, value/field/condition parsers.
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-use super::{Parser, ParseError};
 
 impl Parser {
     // ── Composite parsers ──
@@ -21,7 +21,9 @@ impl Parser {
         self.expect_token(&Token::Dash)?;
         let end = self.expect_u32()?;
         if start > end {
-            return Err(ParseError(format!("invalid range: start ({start}) > end ({end})")));
+            return Err(ParseError(format!(
+                "invalid range: start ({start}) > end ({end})"
+            )));
         }
         Ok(Range { start, end })
     }
@@ -41,36 +43,78 @@ impl Parser {
                     None
                 }
             }
-            Token::Keyword(Keyword::Syntax) => { self.advance(); Some(LayerBand::Syntax) }
-            Token::Keyword(Keyword::Knowledge) => { self.advance(); Some(LayerBand::Knowledge) }
-            Token::Keyword(Keyword::Output) => { self.advance(); Some(LayerBand::Output) }
+            Token::Keyword(Keyword::Syntax) => {
+                self.advance();
+                Some(LayerBand::Syntax)
+            }
+            Token::Keyword(Keyword::Knowledge) => {
+                self.advance();
+                Some(LayerBand::Knowledge)
+            }
+            Token::Keyword(Keyword::Output) => {
+                self.advance();
+                Some(LayerBand::Output)
+            }
             _ => None,
         }
     }
 
     pub(crate) fn parse_walk_mode(&mut self) -> Result<WalkMode, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Hybrid) => { self.advance(); Ok(WalkMode::Hybrid) }
-            Token::Keyword(Keyword::Pure) => { self.advance(); Ok(WalkMode::Pure) }
-            Token::Keyword(Keyword::Dense) => { self.advance(); Ok(WalkMode::Dense) }
-            _ => Err(ParseError(format!("expected HYBRID, PURE, or DENSE, got {:?}", self.peek()))),
+            Token::Keyword(Keyword::Hybrid) => {
+                self.advance();
+                Ok(WalkMode::Hybrid)
+            }
+            Token::Keyword(Keyword::Pure) => {
+                self.advance();
+                Ok(WalkMode::Pure)
+            }
+            Token::Keyword(Keyword::Dense) => {
+                self.advance();
+                Ok(WalkMode::Dense)
+            }
+            _ => Err(ParseError(format!(
+                "expected HYBRID, PURE, or DENSE, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
     pub(crate) fn parse_output_format(&mut self) -> Result<OutputFormat, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::Safetensors) => { self.advance(); Ok(OutputFormat::Safetensors) }
-            Token::Keyword(Keyword::Gguf) => { self.advance(); Ok(OutputFormat::Gguf) }
-            _ => Err(ParseError(format!("expected SAFETENSORS or GGUF, got {:?}", self.peek()))),
+            Token::Keyword(Keyword::Safetensors) => {
+                self.advance();
+                Ok(OutputFormat::Safetensors)
+            }
+            Token::Keyword(Keyword::Gguf) => {
+                self.advance();
+                Ok(OutputFormat::Gguf)
+            }
+            _ => Err(ParseError(format!(
+                "expected SAFETENSORS or GGUF, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
     pub(crate) fn parse_conflict_strategy(&mut self) -> Result<ConflictStrategy, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::KeepSource) => { self.advance(); Ok(ConflictStrategy::KeepSource) }
-            Token::Keyword(Keyword::KeepTarget) => { self.advance(); Ok(ConflictStrategy::KeepTarget) }
-            Token::Keyword(Keyword::HighestConfidence) => { self.advance(); Ok(ConflictStrategy::HighestConfidence) }
-            _ => Err(ParseError(format!("expected KEEP_SOURCE, KEEP_TARGET, or HIGHEST_CONFIDENCE, got {:?}", self.peek()))),
+            Token::Keyword(Keyword::KeepSource) => {
+                self.advance();
+                Ok(ConflictStrategy::KeepSource)
+            }
+            Token::Keyword(Keyword::KeepTarget) => {
+                self.advance();
+                Ok(ConflictStrategy::KeepTarget)
+            }
+            Token::Keyword(Keyword::HighestConfidence) => {
+                self.advance();
+                Ok(ConflictStrategy::HighestConfidence)
+            }
+            _ => Err(ParseError(format!(
+                "expected KEEP_SOURCE, KEEP_TARGET, or HIGHEST_CONFIDENCE, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -85,12 +129,30 @@ impl Parser {
 
     fn parse_component(&mut self) -> Result<Component, ParseError> {
         match self.peek() {
-            Token::Keyword(Keyword::FfnGate) => { self.advance(); Ok(Component::FfnGate) }
-            Token::Keyword(Keyword::FfnDown) => { self.advance(); Ok(Component::FfnDown) }
-            Token::Keyword(Keyword::FfnUp) => { self.advance(); Ok(Component::FfnUp) }
-            Token::Keyword(Keyword::Embeddings) => { self.advance(); Ok(Component::Embeddings) }
-            Token::Keyword(Keyword::AttnOv) => { self.advance(); Ok(Component::AttnOv) }
-            Token::Keyword(Keyword::AttnQk) => { self.advance(); Ok(Component::AttnQk) }
+            Token::Keyword(Keyword::FfnGate) => {
+                self.advance();
+                Ok(Component::FfnGate)
+            }
+            Token::Keyword(Keyword::FfnDown) => {
+                self.advance();
+                Ok(Component::FfnDown)
+            }
+            Token::Keyword(Keyword::FfnUp) => {
+                self.advance();
+                Ok(Component::FfnUp)
+            }
+            Token::Keyword(Keyword::Embeddings) => {
+                self.advance();
+                Ok(Component::Embeddings)
+            }
+            Token::Keyword(Keyword::AttnOv) => {
+                self.advance();
+                Ok(Component::AttnOv)
+            }
+            Token::Keyword(Keyword::AttnQk) => {
+                self.advance();
+                Ok(Component::AttnQk)
+            }
             // Also accept unquoted identifiers for convenience
             Token::Ident(ref s) => {
                 let c = match s.to_lowercase().as_str() {
@@ -105,7 +167,10 @@ impl Parser {
                 self.advance();
                 Ok(c)
             }
-            _ => Err(ParseError(format!("expected component name, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected component name, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -140,7 +205,10 @@ impl Parser {
                 self.advance();
                 Ok(Field::Named(name))
             }
-            _ => Err(ParseError(format!("expected field name, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected field name, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -162,15 +230,42 @@ impl Parser {
 
     fn parse_compare_op(&mut self) -> Result<CompareOp, ParseError> {
         match self.peek() {
-            Token::Eq => { self.advance(); Ok(CompareOp::Eq) }
-            Token::Neq => { self.advance(); Ok(CompareOp::Neq) }
-            Token::Gt => { self.advance(); Ok(CompareOp::Gt) }
-            Token::Lt => { self.advance(); Ok(CompareOp::Lt) }
-            Token::Gte => { self.advance(); Ok(CompareOp::Gte) }
-            Token::Lte => { self.advance(); Ok(CompareOp::Lte) }
-            Token::Keyword(Keyword::Like) => { self.advance(); Ok(CompareOp::Like) }
-            Token::Keyword(Keyword::In) => { self.advance(); Ok(CompareOp::In) }
-            _ => Err(ParseError(format!("expected comparison operator, got {:?}", self.peek()))),
+            Token::Eq => {
+                self.advance();
+                Ok(CompareOp::Eq)
+            }
+            Token::Neq => {
+                self.advance();
+                Ok(CompareOp::Neq)
+            }
+            Token::Gt => {
+                self.advance();
+                Ok(CompareOp::Gt)
+            }
+            Token::Lt => {
+                self.advance();
+                Ok(CompareOp::Lt)
+            }
+            Token::Gte => {
+                self.advance();
+                Ok(CompareOp::Gte)
+            }
+            Token::Lte => {
+                self.advance();
+                Ok(CompareOp::Lte)
+            }
+            Token::Keyword(Keyword::Like) => {
+                self.advance();
+                Ok(CompareOp::Like)
+            }
+            Token::Keyword(Keyword::In) => {
+                self.advance();
+                Ok(CompareOp::In)
+            }
+            _ => Err(ParseError(format!(
+                "expected comparison operator, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -287,7 +382,11 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError(format!("expected {:?}, got {:?}", kw, self.peek())))
+            Err(ParseError(format!(
+                "expected {:?}, got {:?}",
+                kw,
+                self.peek()
+            )))
         }
     }
 
@@ -298,7 +397,10 @@ impl Parser {
                 self.advance();
                 Ok(s)
             }
-            _ => Err(ParseError(format!("expected string literal, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected string literal, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -308,7 +410,10 @@ impl Parser {
                 self.advance();
                 Ok(n as u32)
             }
-            _ => Err(ParseError(format!("expected positive integer, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected positive integer, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -322,7 +427,10 @@ impl Parser {
                 self.advance();
                 Ok(n as f32)
             }
-            _ => Err(ParseError(format!("expected number, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected number, got {:?}",
+                self.peek()
+            ))),
         }
     }
 
@@ -332,7 +440,10 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError(format!("expected {:?}, got {:?}", expected, tok)))
+            Err(ParseError(format!(
+                "expected {:?}, got {:?}",
+                expected, tok
+            )))
         }
     }
 
@@ -347,7 +458,11 @@ impl Parser {
                 self.advance();
                 Ok(())
             }
-            _ => Err(ParseError(format!("expected '{}', got {:?}", name, self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected '{}', got {:?}",
+                name,
+                self.peek()
+            ))),
         }
     }
 
@@ -364,7 +479,10 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
-            _ => Err(ParseError(format!("expected field name, got {:?}", self.peek()))),
+            _ => Err(ParseError(format!(
+                "expected field name, got {:?}",
+                self.peek()
+            ))),
         }
     }
 }

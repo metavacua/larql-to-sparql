@@ -8,11 +8,11 @@
 
 extern crate blas_src;
 
-use std::time::Instant;
-use ndarray::Array2;
-use larql_compute::cpu_backend;
 use larql_compute::cpu::q4;
 use larql_compute::cpu::q4::quantize_q4_0;
+use larql_compute::cpu_backend;
+use ndarray::Array2;
+use std::time::Instant;
 
 fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     let mut s = seed;
@@ -22,12 +22,16 @@ fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     })
 }
 
-struct Timer { n: usize }
+struct Timer {
+    n: usize,
+}
 impl Timer {
     fn run<F: FnMut()>(&self, name: &str, mut f: F) -> f64 {
         f();
         let t0 = Instant::now();
-        for _ in 0..self.n { f(); }
+        for _ in 0..self.n {
+            f();
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / self.n as f64;
         let tps = 1000.0 / ms;
         println!("  {name:55} {ms:>7.2}ms  ({tps:>5.1} tok/s)");
@@ -52,19 +56,53 @@ fn main() {
     // Build 21 layers of Q4 data
     let mut layers_q4: Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> = Vec::new();
     for l in 0..21u64 {
-        let g: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32).collect();
-        let u: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32).collect();
-        let d: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 3e7) * 0.0003).cos() as f32).collect();
+        let g: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32)
+            .collect();
+        let u: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32)
+            .collect();
+        let d: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 3e7) * 0.0003).cos() as f32)
+            .collect();
         let mut dt = vec![0.0f32; hidden * inter];
-        for r in 0..inter { for c in 0..hidden { dt[c * inter + r] = d[r * hidden + c]; } }
+        for r in 0..inter {
+            for c in 0..hidden {
+                dt[c * inter + r] = d[r * hidden + c];
+            }
+        }
         layers_q4.push((quantize_q4_0(&g), quantize_q4_0(&u), quantize_q4_0(&dt)));
     }
 
     // Build attention weights for 21 layers
-    let attn_wq: Vec<Vec<f32>> = (0..21).map(|l| (0..hidden * hidden).map(|i| ((i + l * 1000) as f32 * 0.0001).cos()).collect()).collect();
-    let attn_wk: Vec<Vec<f32>> = (0..21).map(|l| (0..kv_dim * hidden).map(|i| ((i + l * 2000) as f32 * 0.0002).sin()).collect()).collect();
-    let attn_wv: Vec<Vec<f32>> = (0..21).map(|l| (0..kv_dim * hidden).map(|i| ((i + l * 3000) as f32 * 0.0003).cos()).collect()).collect();
-    let attn_wo: Vec<Vec<f32>> = (0..21).map(|l| (0..hidden * hidden).map(|i| ((i + l * 4000) as f32 * 0.0004).sin()).collect()).collect();
+    let attn_wq: Vec<Vec<f32>> = (0..21)
+        .map(|l| {
+            (0..hidden * hidden)
+                .map(|i| ((i + l * 1000) as f32 * 0.0001).cos())
+                .collect()
+        })
+        .collect();
+    let attn_wk: Vec<Vec<f32>> = (0..21)
+        .map(|l| {
+            (0..kv_dim * hidden)
+                .map(|i| ((i + l * 2000) as f32 * 0.0002).sin())
+                .collect()
+        })
+        .collect();
+    let attn_wv: Vec<Vec<f32>> = (0..21)
+        .map(|l| {
+            (0..kv_dim * hidden)
+                .map(|i| ((i + l * 3000) as f32 * 0.0003).cos())
+                .collect()
+        })
+        .collect();
+    let attn_wo: Vec<Vec<f32>> = (0..21)
+        .map(|l| {
+            (0..hidden * hidden)
+                .map(|i| ((i + l * 4000) as f32 * 0.0004).sin())
+                .collect()
+        })
+        .collect();
 
     // ── 1. Prefill (seq=6, no KV cache) ──
     println!("--- 1. Prefill: seq=6, 21 layers (no KV cache) ---\n");
@@ -93,26 +131,31 @@ fn main() {
             let g = q4::q4_matvec(gate_q4, &h, inter, hidden);
             let u = q4::q4_matvec(up_q4, &h, inter, hidden);
             let mut act = vec![0.0f32; inter];
-            for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+            for i in 0..inter {
+                act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+            }
             h = q4::q4_matvec(down_t_q4, &act, hidden, inter);
         }
     });
 
     // CPU f32 BLAS decode (seq=1, attention only — 4 projections)
-    t.run("CPU f32 decode (seq=1, attn 4 proj only, 21 layers)", || {
-        let h = synth(1, hidden, 42);
-        for l in 0..21 {
-            let wq = Array2::from_shape_vec((hidden, hidden), attn_wq[l].clone()).unwrap();
-            let wk = Array2::from_shape_vec((kv_dim, hidden), attn_wk[l].clone()).unwrap();
-            let wv = Array2::from_shape_vec((kv_dim, hidden), attn_wv[l].clone()).unwrap();
-            let wo = Array2::from_shape_vec((hidden, hidden), attn_wo[l].clone()).unwrap();
-            let _ = cpu.matmul_transb(h.view(), wq.view());
-            let _ = cpu.matmul_transb(h.view(), wk.view());
-            let _ = cpu.matmul_transb(h.view(), wv.view());
-            // O proj after attention: [1, hidden] @ [hidden, hidden]^T
-            let _ = cpu.matmul_transb(h.view(), wo.view());
-        }
-    });
+    t.run(
+        "CPU f32 decode (seq=1, attn 4 proj only, 21 layers)",
+        || {
+            let h = synth(1, hidden, 42);
+            for l in 0..21 {
+                let wq = Array2::from_shape_vec((hidden, hidden), attn_wq[l].clone()).unwrap();
+                let wk = Array2::from_shape_vec((kv_dim, hidden), attn_wk[l].clone()).unwrap();
+                let wv = Array2::from_shape_vec((kv_dim, hidden), attn_wv[l].clone()).unwrap();
+                let wo = Array2::from_shape_vec((hidden, hidden), attn_wo[l].clone()).unwrap();
+                let _ = cpu.matmul_transb(h.view(), wq.view());
+                let _ = cpu.matmul_transb(h.view(), wk.view());
+                let _ = cpu.matmul_transb(h.view(), wv.view());
+                // O proj after attention: [1, hidden] @ [hidden, hidden]^T
+                let _ = cpu.matmul_transb(h.view(), wo.view());
+            }
+        },
+    );
 
     // CPU full decode (seq=1, attn + FFN)
     t.run("CPU full decode (seq=1, attn + Q4 FFN, 21 layers)", || {
@@ -133,7 +176,9 @@ fn main() {
             let g = q4::q4_matvec(gate_q4, &h, inter, hidden);
             let u = q4::q4_matvec(up_q4, &h, inter, hidden);
             let mut act = vec![0.0f32; inter];
-            for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+            for i in 0..inter {
+                act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+            }
             h = q4::q4_matvec(down_t_q4, &act, hidden, inter);
         }
     });
@@ -151,9 +196,20 @@ fn main() {
                 for l in 0..21 {
                     let (gate_q4, up_q4, down_t_q4) = &layers_q4[l];
                     let _ = metal.full_layer_direct(
-                        &attn_wq[l], &attn_wk[l], &attn_wv[l], &attn_wo[l],
-                        gate_q4, up_q4, down_t_q4,
-                        &x, 1, hidden, num_q, num_kv, head_dim, inter,
+                        &attn_wq[l],
+                        &attn_wk[l],
+                        &attn_wv[l],
+                        &attn_wo[l],
+                        gate_q4,
+                        up_q4,
+                        down_t_q4,
+                        &x,
+                        1,
+                        hidden,
+                        num_q,
+                        num_kv,
+                        head_dim,
+                        inter,
                         1.0 / (head_dim as f32).sqrt(),
                     );
                 }
@@ -167,7 +223,9 @@ fn main() {
                     let g = metal.q4_matvec_direct(gate_q4, &q8, &sc, inter, hidden);
                     let u = metal.q4_matvec_direct(up_q4, &q8, &sc, inter, hidden);
                     let mut act = vec![0.0f32; inter];
-                    for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+                    for i in 0..inter {
+                        act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+                    }
                     h = metal.q4_f32_matvec_direct(down_t_q4, &act, hidden, inter);
                 }
             });

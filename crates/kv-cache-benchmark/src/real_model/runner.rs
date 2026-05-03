@@ -13,17 +13,16 @@
 //!     decode time.
 //!  4. Graph Walk       — vindex FFN walk; no forward pass for factual queries.
 
-use larql_inference::model::ModelWeights;
-use larql_inference::forward::logits_to_predictions_pub;
-use larql_vindex::VectorIndex;
 use larql_compute::ComputeBackend;
+use larql_inference::forward::logits_to_predictions_pub;
+use larql_inference::model::ModelWeights;
+use larql_vindex::VectorIndex;
 
-use super::kv_capture;
-use super::turboquant_layer;
-use super::markov_layer;
 use super::graph_walk_layer;
+use super::kv_capture;
+use super::markov_layer;
+use super::turboquant_layer;
 use crate::turboquant::TurboQuant;
-
 
 /// Result from running one strategy on a real model.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -56,7 +55,12 @@ impl<'a> RealModelBenchmark<'a> {
         index: &'a VectorIndex,
         backend: &'a dyn ComputeBackend,
     ) -> Self {
-        Self { weights, tokenizer, index, backend }
+        Self {
+            weights,
+            tokenizer,
+            index,
+            backend,
+        }
     }
 }
 
@@ -67,7 +71,10 @@ pub fn run_all_strategies(
     top_k: usize,
     window_size: usize,
 ) -> Vec<RealModelResult> {
-    let encoding = bench.tokenizer.encode(prompt, true).expect("tokenize failed");
+    let encoding = bench
+        .tokenizer
+        .encode(prompt, true)
+        .expect("tokenize failed");
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
     let mut results = Vec::with_capacity(4);
@@ -75,13 +82,14 @@ pub fn run_all_strategies(
     // === Strategy 1: Standard KV (baseline) ===
     let t0 = std::time::Instant::now();
     let kv = kv_capture::capture_kv(bench.weights, &token_ids);
-    let baseline_preds = logits_to_predictions_pub(
-        bench.weights, &kv.hidden, bench.tokenizer, top_k, 1.0,
-    );
+    let baseline_preds =
+        logits_to_predictions_pub(bench.weights, &kv.hidden, bench.tokenizer, top_k, 1.0);
     let std_us = t0.elapsed().as_secs_f64() * 1e6;
     let std_mem = kv_capture::kv_memory_bytes(&kv);
 
-    let baseline_top1 = baseline_preds.predictions.first()
+    let baseline_top1 = baseline_preds
+        .predictions
+        .first()
         .map(|(t, _)| t.clone())
         .unwrap_or_default();
 
@@ -89,7 +97,11 @@ pub fn run_all_strategies(
         strategy: "Standard KV (FP16)".to_string(),
         prompt: prompt.to_string(),
         top1_token: baseline_top1.clone(),
-        top1_prob: baseline_preds.predictions.first().map(|(_, p)| *p).unwrap_or(0.0),
+        top1_prob: baseline_preds
+            .predictions
+            .first()
+            .map(|(_, p)| *p)
+            .unwrap_or(0.0),
         top5: baseline_preds.predictions.clone(),
         memory_bytes: std_mem,
         wall_clock_us: std_us,
@@ -108,15 +120,22 @@ pub fn run_all_strategies(
     // For the benchmark, we report compression stats. The hidden state is identical
     // because TQ is applied post-forward-pass (cache compression, not compute change).
     results.push(RealModelResult {
-        strategy: format!("TurboQuant 4-bit (MSE={:.6}, cos={:.4})", tq_result.mse, tq_result.cosine_sim),
+        strategy: format!(
+            "TurboQuant 4-bit (MSE={:.6}, cos={:.4})",
+            tq_result.mse, tq_result.cosine_sim
+        ),
         prompt: prompt.to_string(),
         top1_token: baseline_top1.clone(), // Same forward pass
-        top1_prob: baseline_preds.predictions.first().map(|(_, p)| *p).unwrap_or(0.0),
+        top1_prob: baseline_preds
+            .predictions
+            .first()
+            .map(|(_, p)| *p)
+            .unwrap_or(0.0),
         top5: baseline_preds.predictions.clone(),
         memory_bytes: tq_result.compressed_bytes,
         wall_clock_us: std_us + tq_us, // Forward pass + quantize overhead
-        top1_match: true, // Same forward pass, TQ is storage compression
-        hidden_cosine: Some(1.0), // Hidden state unchanged
+        top1_match: true,              // Same forward pass, TQ is storage compression
+        hidden_cosine: Some(1.0),      // Hidden state unchanged
     });
 
     // === Strategy 3: Markov Residual Stream ===
@@ -135,22 +154,29 @@ pub fn run_all_strategies(
     let t0 = std::time::Instant::now();
     let rs_result = markov_layer::rs_prefill(bench.weights, &token_ids, Some(window_size));
     let rs_preds = logits_to_predictions_pub(
-        bench.weights, &rs_result.hidden, bench.tokenizer, top_k, 1.0,
+        bench.weights,
+        &rs_result.hidden,
+        bench.tokenizer,
+        top_k,
+        1.0,
     );
     let rs_us = t0.elapsed().as_secs_f64() * 1e6;
 
-    let rs_top1 = rs_preds.predictions.first()
+    let rs_top1 = rs_preds
+        .predictions
+        .first()
         .map(|(t, _)| t.clone())
         .unwrap_or_default();
 
-    let (_rs_mse, rs_cosine) = markov_layer::compare_hidden_states(
-        &kv.hidden, &rs_result.hidden,
-    );
+    let (_rs_mse, rs_cosine) = markov_layer::compare_hidden_states(&kv.hidden, &rs_result.hidden);
 
     // Show both RS store memory and equivalent standard-KV memory for context.
     let kv_equiv_bytes = markov_layer::kv_memory_bytes_for_seq(bench.weights, token_ids.len());
     let rs_window = rs_result.window_tokens;
-    let cold_bytes = rs_result.store.cold_residuals.as_ref()
+    let cold_bytes = rs_result
+        .store
+        .cold_residuals
+        .as_ref()
         .map(|c| c.iter().map(|s| s.len() * 4).sum::<usize>())
         .unwrap_or(0);
     let hot_bytes = rs_result.memory_bytes - cold_bytes;
@@ -175,11 +201,17 @@ pub fn run_all_strategies(
     // === Strategy 4: Graph Walk ===
     let t0 = std::time::Instant::now();
     let gw = graph_walk_layer::run_graph_walk(
-        bench.weights, bench.tokenizer, bench.index, &token_ids, top_k,
+        bench.weights,
+        bench.tokenizer,
+        bench.index,
+        &token_ids,
+        top_k,
     );
     let gw_us = t0.elapsed().as_secs_f64() * 1e6;
 
-    let gw_top1 = gw.predictions.first()
+    let gw_top1 = gw
+        .predictions
+        .first()
         .map(|(t, _)| t.clone())
         .unwrap_or_default();
 
@@ -205,13 +237,19 @@ pub fn run_prompt_suite(
     top_k: usize,
     window_size: usize,
 ) -> Vec<Vec<RealModelResult>> {
-    prompts.iter().map(|p| run_all_strategies(bench, p, top_k, window_size)).collect()
+    prompts
+        .iter()
+        .map(|p| run_all_strategies(bench, p, top_k, window_size))
+        .collect()
 }
 
 /// Format results as a comparison table.
 pub fn format_results(results: &[RealModelResult]) -> String {
     let mut out = String::new();
-    out.push_str(&format!("\n=== Real Model Benchmark: \"{}\" ===\n\n", results[0].prompt));
+    out.push_str(&format!(
+        "\n=== Real Model Benchmark: \"{}\" ===\n\n",
+        results[0].prompt
+    ));
     out.push_str(&format!(
         "{:<40} {:>10} {:>12} {:>10} {:>8}\n",
         "Strategy", "Top-1", "Memory", "Time (ms)", "Match?"
