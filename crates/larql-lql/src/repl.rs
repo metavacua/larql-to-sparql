@@ -87,9 +87,10 @@ pub fn run_repl() {
                 if !trimmed_stmt.ends_with(';')
                     && !trimmed_stmt.to_uppercase().starts_with("STATS")
                     && !trimmed_stmt.to_uppercase().starts_with("SHOW MODELS")
-                    && !is_complete_statement(trimmed_stmt) {
-                        continue;
-                    }
+                    && !is_complete_statement(trimmed_stmt)
+                {
+                    continue;
+                }
 
                 let input = statement_buf.trim().to_string();
                 statement_buf.clear();
@@ -169,10 +170,16 @@ fn run_repl_basic() {
         if statement_buf.is_empty() {
             match trimmed.to_lowercase().as_str() {
                 "exit" | "quit" | "\\q" => break,
-                "clear" | "clear;" => { print!("\x1B[2J\x1B[1;1H");
-                            use std::io::Write;
-                            std::io::stdout().flush().ok(); continue; }
-                "help" | "\\h" | "\\?" => { print_help(); continue; }
+                "clear" | "clear;" => {
+                    print!("\x1B[2J\x1B[1;1H");
+                    use std::io::Write;
+                    std::io::stdout().flush().ok();
+                    continue;
+                }
+                "help" | "\\h" | "\\?" => {
+                    print_help();
+                    continue;
+                }
                 "" => continue,
                 _ => {}
             }
@@ -187,14 +194,24 @@ fn run_repl_basic() {
 
         let input = statement_buf.trim().to_string();
         statement_buf.clear();
-        if input.is_empty() { continue; }
+        if input.is_empty() {
+            continue;
+        }
 
         match parser::parse(&input) {
             Ok(stmt) => match session.execute(&stmt) {
-                Ok(lines) => { for line in &lines { println!("{line}"); } }
-                Err(e) => { eprintln!("Error: {e}"); }
+                Ok(lines) => {
+                    for line in &lines {
+                        println!("{line}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                }
             },
-            Err(e) => { eprintln!("Error: {e}"); }
+            Err(e) => {
+                eprintln!("Error: {e}");
+            }
         }
     }
     println!("Goodbye.");

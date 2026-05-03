@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -28,8 +28,12 @@ pub struct SelectRequest {
     pub order: String,
 }
 
-fn default_limit() -> usize { 20 }
-fn default_order() -> String { "desc".into() }
+fn default_limit() -> usize {
+    20
+}
+fn default_order() -> String {
+    "desc".into()
+}
 
 fn select_edges(
     model: &LoadedModel,
@@ -95,19 +99,33 @@ fn select_edges(
     match req.order_by.as_deref() {
         Some("gate_score") | Some("confidence") | Some("c_score") => {
             rows.sort_by(|a, b| {
-                let cmp = a.c_score.partial_cmp(&b.c_score).unwrap_or(std::cmp::Ordering::Equal);
-                if descending { cmp.reverse() } else { cmp }
+                let cmp = a
+                    .c_score
+                    .partial_cmp(&b.c_score)
+                    .unwrap_or(std::cmp::Ordering::Equal);
+                if descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
             });
         }
         Some("layer") => {
             rows.sort_by(|a, b| {
                 let cmp = a.layer.cmp(&b.layer);
-                if descending { cmp.reverse() } else { cmp }
+                if descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
             });
         }
         _ => {
             rows.sort_by(|a, b| {
-                let cmp = a.c_score.partial_cmp(&b.c_score).unwrap_or(std::cmp::Ordering::Equal);
+                let cmp = a
+                    .c_score
+                    .partial_cmp(&b.c_score)
+                    .unwrap_or(std::cmp::Ordering::Equal);
                 cmp.reverse()
             });
         }

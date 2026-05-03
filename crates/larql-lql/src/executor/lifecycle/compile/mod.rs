@@ -22,12 +22,10 @@ impl Session {
         on_conflict: Option<CompileConflict>,
     ) -> Result<Vec<String>, LqlError> {
         let vindex_path = match vindex {
-            VindexRef::Current => {
-                match &self.backend {
-                    Backend::Vindex { path, .. } => path.clone(),
-                    _ => return Err(LqlError::NoBackend),
-                }
-            }
+            VindexRef::Current => match &self.backend {
+                Backend::Vindex { path, .. } => path.clone(),
+                _ => return Err(LqlError::NoBackend),
+            },
             VindexRef::Path(p) => PathBuf::from(p),
         };
 
@@ -64,7 +62,11 @@ fn collect_memit_facts_with_recording(
                      seen: &mut std::collections::HashSet<_>|
      -> Result<(), LqlError> {
         if let larql_vindex::PatchOp::Insert {
-            layer, entity, relation, target, ..
+            layer,
+            entity,
+            relation,
+            target,
+            ..
         } = op
         {
             let rel_str = relation.as_deref().unwrap_or("relation");

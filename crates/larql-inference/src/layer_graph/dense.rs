@@ -1,9 +1,9 @@
 use ndarray::Array2;
 
-use larql_compute::ComputeBackend;
+use super::{LayerGraph, LayerOutput};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput};
+use larql_compute::ComputeBackend;
 
 /// Dense baseline: standard matmul attention + pluggable FFN backend.
 /// This is today's working path — nothing changes, just wrapped in the trait.
@@ -22,14 +22,21 @@ impl<'a> LayerGraph for DenseLayerGraph<'a> {
         layer: usize,
     ) -> Option<LayerOutput> {
         // Attention: dense matmul (Q·K·V), optionally GPU-accelerated
-        let (h_post_attn, _attn_proj, attn_weights) =
-            crate::attention::run_attention_block_gpu(
-                weights, h, layer, self.capture_attention, self.backend,
-            )?;
+        let (h_post_attn, _attn_proj, attn_weights) = crate::attention::run_attention_block_gpu(
+            weights,
+            h,
+            layer,
+            self.capture_attention,
+            self.backend,
+        )?;
 
         // FFN: delegated to backend (dense, walk, sparse, etc.)
         let (h_out, activation) = crate::forward::run_ffn(
-            weights, &h_post_attn, layer, self.ffn, self.capture_activation,
+            weights,
+            &h_post_attn,
+            layer,
+            self.ffn,
+            self.capture_activation,
         );
 
         Some(LayerOutput {

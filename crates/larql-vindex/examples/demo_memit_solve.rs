@@ -93,7 +93,10 @@ fn main() {
     // Bonus: enumerate all France facts (would be multi-relation in practice).
     println!("\nfacts_for_entity(\"France\"):");
     for f in store.facts_for_entity("France") {
-        println!("  {} {} → {} (cos={:.3})", f.entity, f.relation, f.target, f.reconstruction_cos);
+        println!(
+            "  {} {} → {} (cos={:.3})",
+            f.entity, f.relation, f.target, f.reconstruction_cos
+        );
     }
 
     println!("\nDone.");

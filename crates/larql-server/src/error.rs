@@ -24,7 +24,9 @@ impl IntoResponse for ServerError {
         let (status, message) = match &self {
             ServerError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             ServerError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            ServerError::InferenceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg.clone()),
+            ServerError::InferenceUnavailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, msg.clone())
+            }
             ServerError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
 

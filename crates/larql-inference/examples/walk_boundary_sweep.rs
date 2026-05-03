@@ -23,9 +23,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use larql_inference::{
-    predict, predict_with_ffn, predict_with_router,
-    InferenceModel, LayerFfnRouter, WeightFfn, PredictResult,
-    vindex::WalkFfn,
+    predict, predict_with_ffn, predict_with_router, vindex::WalkFfn, InferenceModel,
+    LayerFfnRouter, PredictResult, WeightFfn,
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
 
@@ -50,8 +49,14 @@ fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model" => { i += 1; model = args[i].clone(); }
-            "--vindex" => { i += 1; vindex = PathBuf::from(&args[i]); }
+            "--model" => {
+                i += 1;
+                model = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex = PathBuf::from(&args[i]);
+            }
             "--top-k" => {
                 i += 1;
                 top_k = if args[i] == "full" || args[i] == "unlimited" {
@@ -63,7 +68,8 @@ fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
             "--prompts" => {
                 i += 1;
                 prompts = Some(
-                    args[i].split(';')
+                    args[i]
+                        .split(';')
                         .map(|p| {
                             let parts: Vec<&str> = p.splitn(2, '=').collect();
                             if parts.len() == 2 {
@@ -93,8 +99,12 @@ fn parse_args() -> (String, PathBuf, usize, Option<Vec<(String, String)>>) {
 
 /// Check if the ground truth is in the top-1 prediction.
 fn is_correct(result: &PredictResult, expected: &str) -> bool {
-    if expected.is_empty() { return true; }
-    result.predictions.first()
+    if expected.is_empty() {
+        return true;
+    }
+    result
+        .predictions
+        .first()
         .map(|(tok, _)| tok.to_lowercase().contains(&expected.to_lowercase()))
         .unwrap_or(false)
 }
@@ -141,11 +151,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Ground Truth (all-dense) ---\n");
     let mut ground_truth: Vec<(String, f64)> = Vec::new();
     for (prompt, expected) in &prompts {
-        let encoding = tokenizer.encode(prompt.as_str(), true)
+        let encoding = tokenizer
+            .encode(prompt.as_str(), true)
             .map_err(|e| format!("tokenize: {e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let result = predict(weights, tokenizer, &token_ids, 5);
-        let (top1, prob) = result.predictions.first()
+        let (top1, prob) = result
+            .predictions
+            .first()
             .map(|(t, p)| (t.clone(), *p))
             .unwrap_or_default();
         let correct = is_correct(&result, expected);
@@ -166,8 +179,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("--- Boundary Sweep (dense 0..B, walk B..{num_layers}) ---");
-    println!("  {} boundaries x {} prompts = {} forward passes\n",
-        boundaries.len(), prompts.len(), boundaries.len() * prompts.len());
+    println!(
+        "  {} boundaries x {} prompts = {} forward passes\n",
+        boundaries.len(),
+        prompts.len(),
+        boundaries.len() * prompts.len()
+    );
     println!(
         "  {:>4}  {:>6}  {:>8}  {:>8}  {:>6}  details",
         "B", "walk%", "correct", "top1_avg", "time"
@@ -193,7 +210,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let sweep_start = Instant::now();
 
         for (i, (prompt, expected)) in prompts.iter().enumerate() {
-            let encoding = tokenizer.encode(prompt.as_str(), true)
+            let encoding = tokenizer
+                .encode(prompt.as_str(), true)
                 .map_err(|e| format!("tokenize: {e}"))?;
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
@@ -207,19 +225,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 predict_with_router(weights, tokenizer, &token_ids, 5, &router)
             };
 
-            let (top1, prob) = result.predictions.first()
+            let (top1, prob) = result
+                .predictions
+                .first()
                 .map(|(t, p)| (t.clone(), *p))
                 .unwrap_or_default();
 
             let matches_ground = top1 == ground_truth[i].0;
             let correct = is_correct(&result, expected);
-            if correct { correct_count += 1; }
+            if correct {
+                correct_count += 1;
+            }
             total_prob += prob;
 
             // Track divergence from ground truth
             if !matches_ground {
-                details.push(format!("{}->{}({:.0}%)",
-                    ground_truth[i].0, top1, prob * 100.0));
+                details.push(format!(
+                    "{}->{}({:.0}%)",
+                    ground_truth[i].0,
+                    top1,
+                    prob * 100.0
+                ));
             }
         }
 

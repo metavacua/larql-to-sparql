@@ -15,8 +15,8 @@
 extern crate blas_src;
 
 fn main() {
-    use larql_compute::{default_backend, cpu_backend};
     use larql_compute::cpu::ops::q4_common::{quantize_q4_0, quantize_q4_k, quantize_to_q8};
+    use larql_compute::{cpu_backend, default_backend};
     use ndarray::Array2;
     use std::time::Instant;
 
@@ -30,7 +30,11 @@ fn main() {
     let cpu = cpu_backend();
     println!("   Default: {} ({})", backend.name(), backend.device_info());
     println!("   CPU:     {}", cpu.name());
-    println!("   Q4 support: {}, KV cache: {}\n", backend.has_q4(), backend.has_kv_cache());
+    println!(
+        "   Q4 support: {}, KV cache: {}\n",
+        backend.has_q4(),
+        backend.has_kv_cache()
+    );
 
     // ── 2. f32 Matmul with Auto-Routing ──
     println!("2. f32 Matmul (BLAS → auto GPU/CPU routing)");
@@ -38,20 +42,30 @@ fn main() {
     let b = Array2::from_shape_fn((2560, 2560), |_| 0.01f32);
     let t = Instant::now();
     let _c = backend.matmul_transb(a.view(), b.view());
-    println!("   [6, 2560] @ [2560, 2560]^T → {:.2}ms\n", t.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "   [6, 2560] @ [2560, 2560]^T → {:.2}ms\n",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
 
     // ── 3. Q4_0 Quantization ──
     println!("3. Q4_0 Quantization (production FFN kernel)");
-    let matrix: Vec<f32> = (0..10240 * 2560).map(|i| (i as f32 * 0.0001).cos()).collect();
+    let matrix: Vec<f32> = (0..10240 * 2560)
+        .map(|i| (i as f32 * 0.0001).cos())
+        .collect();
     let q4 = quantize_q4_0(&matrix);
     let x: Vec<f32> = (0..2560).map(|i| (i as f32 * 0.001).sin()).collect();
     let (q8_x, q8_s) = quantize_to_q8(&x);
     let t = Instant::now();
     let scores = backend.q4_matvec(&q4, &q8_x, &q8_s, 10240, 2560);
     let q4_ms = t.elapsed().as_secs_f64() * 1000.0;
-    println!("   Q4_0 [10240, 2560] @ Q8[2560]: {q4_ms:.2}ms  (14.7MB data, {:.0} GB/s)",
-        14.7 / q4_ms);
-    println!("   Output nonzero: {}\n", scores.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001)));
+    println!(
+        "   Q4_0 [10240, 2560] @ Q8[2560]: {q4_ms:.2}ms  (14.7MB data, {:.0} GB/s)",
+        14.7 / q4_ms
+    );
+    println!(
+        "   Output nonzero: {}\n",
+        scores.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001))
+    );
 
     // ── 4. Q4_K Ollama-Compatible ──
     println!("4. Q4_K Quantization (Ollama-compatible, 148B per 256 values)");
@@ -59,8 +73,14 @@ fn main() {
     let q4k = quantize_q4_k(&small);
     let t = Instant::now();
     let q4k_out = backend.q4k_matvec(&q4k, &x, 256, 2560);
-    println!("   Q4_K [256, 2560] @ f32[2560]: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
-    println!("   Output nonzero: {}\n", q4k_out.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001)));
+    println!(
+        "   Q4_K [256, 2560] @ f32[2560]: {:.2}ms",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
+    println!(
+        "   Output nonzero: {}\n",
+        q4k_out.is_some_and(|s| s.iter().any(|v| v.abs() > 0.001))
+    );
 
     // ── 5. Fused QKV ──
     println!("5. Fused QKV Projection (ADR-003)");
@@ -80,21 +100,69 @@ fn main() {
         let gate = quantize_q4_0(&vec![0.01f32; 10240 * 2560]);
         let up = quantize_q4_0(&vec![0.01f32; 10240 * 2560]);
         let down = quantize_q4_0(&vec![0.01f32; 2560 * 10240]);
-        let wq = quantize_q4_k(&(0..2560*2560).map(|i| (i as f32 * 0.0001).cos()).collect::<Vec<_>>());
-        let wk = quantize_q4_k(&(0..1280*2560).map(|i| (i as f32 * 0.0002).sin()).collect::<Vec<_>>());
-        let wv = quantize_q4_k(&(0..1280*2560).map(|i| (i as f32 * 0.0003).cos()).collect::<Vec<_>>());
-        let wo = quantize_q4_k(&(0..2560*2560).map(|i| (i as f32 * 0.0004).sin()).collect::<Vec<_>>());
+        let wq = quantize_q4_k(
+            &(0..2560 * 2560)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect::<Vec<_>>(),
+        );
+        let wk = quantize_q4_k(
+            &(0..1280 * 2560)
+                .map(|i| (i as f32 * 0.0002).sin())
+                .collect::<Vec<_>>(),
+        );
+        let wv = quantize_q4_k(
+            &(0..1280 * 2560)
+                .map(|i| (i as f32 * 0.0003).cos())
+                .collect::<Vec<_>>(),
+        );
+        let wo = quantize_q4_k(
+            &(0..2560 * 2560)
+                .map(|i| (i as f32 * 0.0004).sin())
+                .collect::<Vec<_>>(),
+        );
 
         let layer = larql_compute::FullPipelineLayer {
-            wq: larql_compute::QuantWeight { data: &wq, scales: None, format: larql_compute::QuantFormat::Q4_K },
-            wk: larql_compute::QuantWeight { data: &wk, scales: None, format: larql_compute::QuantFormat::Q4_K },
-            wv: larql_compute::QuantWeight { data: &wv, scales: None, format: larql_compute::QuantFormat::Q4_K },
-            wo: larql_compute::QuantWeight { data: &wo, scales: None, format: larql_compute::QuantFormat::Q4_K },
-            gate: larql_compute::QuantWeight { data: &gate, scales: None, format: larql_compute::QuantFormat::Q4_0 },
-            up: larql_compute::QuantWeight { data: &up, scales: None, format: larql_compute::QuantFormat::Q4_0 },
-            down: larql_compute::QuantWeight { data: &down, scales: None, format: larql_compute::QuantFormat::Q4_0 },
-            input_norm: &norm, post_attn_norm: &norm,
-            pre_ffn_norm: None, post_ffn_norm: None, norm_offset: 1.0, has_post_norms: false,
+            wq: larql_compute::QuantWeight {
+                data: &wq,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_K,
+            },
+            wk: larql_compute::QuantWeight {
+                data: &wk,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_K,
+            },
+            wv: larql_compute::QuantWeight {
+                data: &wv,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_K,
+            },
+            wo: larql_compute::QuantWeight {
+                data: &wo,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_K,
+            },
+            gate: larql_compute::QuantWeight {
+                data: &gate,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_0,
+            },
+            up: larql_compute::QuantWeight {
+                data: &up,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_0,
+            },
+            down: larql_compute::QuantWeight {
+                data: &down,
+                scales: None,
+                format: larql_compute::QuantFormat::Q4_0,
+            },
+            input_norm: &norm,
+            post_attn_norm: &norm,
+            pre_ffn_norm: None,
+            post_ffn_norm: None,
+            norm_offset: 1.0,
+            has_post_norms: false,
             activation: larql_compute::Activation::Silu,
             qk_norm_offset: 0.0,
             eps: 1e-6,
@@ -115,19 +183,25 @@ fn main() {
             k_norm_weight: None,
             ffn_up_bias: None,
             ffn_down_bias: None,
-            moe: None, moe_combined_output_norm: false, moe_outer_post_norm: None,
+            moe: None,
+            moe_combined_output_norm: false,
+            moe_outer_post_norm: None,
         };
         let layers = vec![layer];
 
         let t = Instant::now();
         let result = backend.full_pipeline_q4(
-            &layers, &x, 2560, 10240, 2560, 1280,
-            1, 8, 4, 320, 10000.0, false, 0.0,
+            &layers, &x, 2560, 10240, 2560, 1280, 1, 8, 4, 320, 10000.0, false, 0.0,
         );
-        println!("   1 layer (attn+FFN, 1 cmd): {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
-        println!("   Output: {} elements, nonzero: {}\n",
+        println!(
+            "   1 layer (attn+FFN, 1 cmd): {:.2}ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
+        println!(
+            "   Output: {} elements, nonzero: {}\n",
             result.as_ref().map_or(0, |r| r.len()),
-            result.is_some_and(|r| r.iter().any(|v| v.abs() > 1e-6)));
+            result.is_some_and(|r| r.iter().any(|v| v.abs() > 1e-6))
+        );
     }
 
     // ── 8. Architecture Summary ──

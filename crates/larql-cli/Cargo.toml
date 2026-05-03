@@ -32,7 +32,6 @@ minijinja = "2"
 libc = "0.2"
 
 [features]
-default = ["metal"]
 metal = [
     "larql-compute/metal",
     "larql-inference/metal",

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::embed_store::EmbedStoreF16;
 
 use larql_models::ModelWeights;
-use larql_vindex::{PatchedVindex, VindexConfig, ndarray::Array2, tokenizers};
+use larql_vindex::{ndarray::Array2, tokenizers, PatchedVindex, VindexConfig};
 use tokio::sync::RwLock;
 
 use crate::cache::DescribeCache;
@@ -191,8 +191,12 @@ pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize
             let parts: Vec<&str> = key.split('_').collect();
             if parts.len() == 2 {
                 if let (Some(layer), Some(feat)) = (
-                    parts[0].strip_prefix('L').and_then(|s| s.parse::<usize>().ok()),
-                    parts[1].strip_prefix('F').and_then(|s| s.parse::<usize>().ok()),
+                    parts[0]
+                        .strip_prefix('L')
+                        .and_then(|s| s.parse::<usize>().ok()),
+                    parts[1]
+                        .strip_prefix('F')
+                        .and_then(|s| s.parse::<usize>().ok()),
                 ) {
                     labels.insert((layer, feat), rel.to_string());
                 }
@@ -221,10 +225,10 @@ mod loaded_model_tests {
     //! expression here; the end-to-end walk is validated by the
     //! `larql bench <model>` example script.
     use super::*;
+    use larql_vindex::ndarray::Array2;
     use larql_vindex::{
         ExtractLevel, LayerBands, QuantFormat, VectorIndex, VindexConfig, VindexLayerInfo,
     };
-    use larql_vindex::ndarray::Array2;
 
     fn tiny_config(quant: QuantFormat) -> VindexConfig {
         VindexConfig {
@@ -247,8 +251,12 @@ mod loaded_model_tests {
                 output: (0, 0),
             }),
             layers: vec![VindexLayerInfo {
-                layer: 0, num_features: 2, offset: 0, length: 32,
-                num_experts: None, num_features_per_expert: None,
+                layer: 0,
+                num_features: 2,
+                offset: 0,
+                length: 32,
+                num_experts: None,
+                num_features_per_expert: None,
             }],
             down_top_k: 1,
             has_model_weights: false,
@@ -262,7 +270,8 @@ mod loaded_model_tests {
         let index = VectorIndex::new(vec![Some(gate)], vec![None], 1, hidden);
         let patched = larql_vindex::PatchedVindex::new(index);
 
-        let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+        let tok_json =
+            r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
         let tokenizer = larql_vindex::tokenizers::Tokenizer::from_bytes(tok_json).unwrap();
 
         LoadedModel {

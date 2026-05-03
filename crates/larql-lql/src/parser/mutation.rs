@@ -1,8 +1,8 @@
 //! Mutation statement parsers: INSERT, DELETE, UPDATE, MERGE
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-use super::{Parser, ParseError};
 
 impl Parser {
     pub(crate) fn parse_insert(&mut self) -> Result<Statement, ParseError> {
@@ -56,11 +56,19 @@ impl Parser {
                         self.advance();
                     }
                     match self.peek() {
-                        Token::Keyword(Keyword::Knn) => { self.advance(); mode = InsertMode::Knn; }
-                        Token::Keyword(Keyword::Compose) => { self.advance(); mode = InsertMode::Compose; }
-                        other => return Err(ParseError(format!(
-                            "expected KNN or COMPOSE after MODE, got {other:?}"
-                        ))),
+                        Token::Keyword(Keyword::Knn) => {
+                            self.advance();
+                            mode = InsertMode::Knn;
+                        }
+                        Token::Keyword(Keyword::Compose) => {
+                            self.advance();
+                            mode = InsertMode::Compose;
+                        }
+                        other => {
+                            return Err(ParseError(format!(
+                                "expected KNN or COMPOSE after MODE, got {other:?}"
+                            )))
+                        }
                     }
                 }
                 _ => break,
@@ -135,7 +143,11 @@ impl Parser {
             }
         }
         self.eat_semicolon();
-        Ok(Statement::Rebalance { max_iters, floor, ceiling })
+        Ok(Statement::Rebalance {
+            max_iters,
+            floor,
+            ceiling,
+        })
     }
 
     pub(crate) fn parse_merge(&mut self) -> Result<Statement, ParseError> {
@@ -157,6 +169,10 @@ impl Parser {
         }
 
         self.eat_semicolon();
-        Ok(Statement::Merge { source, target, conflict })
+        Ok(Statement::Merge {
+            source,
+            target,
+            conflict,
+        })
     }
 }

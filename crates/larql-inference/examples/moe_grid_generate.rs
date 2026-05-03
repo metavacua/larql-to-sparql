@@ -15,13 +15,11 @@
 
 extern crate blas_src;
 
-use std::sync::Arc;
 use larql_inference::{
-    RemoteMoeBackend, ShardConfig,
-    layer_graph::grid::generate_with_remote_moe,
-    encode_prompt,
+    encode_prompt, layer_graph::grid::generate_with_remote_moe, RemoteMoeBackend, ShardConfig,
 };
-use larql_vindex::{load_vindex_tokenizer, VectorIndex, SilentLoadCallbacks};
+use larql_vindex::{load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex};
+use std::sync::Arc;
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
@@ -33,12 +31,13 @@ fn main() -> Result<(), BoxErr> {
             std::path::PathBuf::from(home).join("chris-models/gemma-4-26B-A4B-it.vindex")
         });
 
-    let shards_spec = std::env::var("SHARDS")
-        .unwrap_or_else(|_| "0-127:http://localhost:9191".into());
-    let prompt = std::env::var("PROMPT")
-        .unwrap_or_else(|_| "The capital of France is".into());
+    let shards_spec =
+        std::env::var("SHARDS").unwrap_or_else(|_| "0-127:http://localhost:9191".into());
+    let prompt = std::env::var("PROMPT").unwrap_or_else(|_| "The capital of France is".into());
     let max_tokens: usize = std::env::var("MAX_TOKENS")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(8);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8);
 
     println!("vindex : {}", vindex_path.display());
     println!("shards : {shards_spec}");
@@ -47,15 +46,21 @@ fn main() -> Result<(), BoxErr> {
     println!();
 
     // ── Parse shard spec "START-END:URL,..." ─────────────────────────────────
-    let shard_configs: Vec<ShardConfig> = shards_spec.split(',').map(|piece| {
-        // Find the colon that separates range from URL (URL contains colons too).
-        let dash = piece.find('-').unwrap_or(0);
-        let colon = piece[dash..].find(':').map(|c| c + dash).unwrap_or(piece.len());
-        let range_str = &piece[..colon];
-        let url_str = piece[colon+1..].to_string();
-        let (start, end) = parse_range(range_str);
-        ShardConfig::new(start, end, url_str)
-    }).collect();
+    let shard_configs: Vec<ShardConfig> = shards_spec
+        .split(',')
+        .map(|piece| {
+            // Find the colon that separates range from URL (URL contains colons too).
+            let dash = piece.find('-').unwrap_or(0);
+            let colon = piece[dash..]
+                .find(':')
+                .map(|c| c + dash)
+                .unwrap_or(piece.len());
+            let range_str = &piece[..colon];
+            let url_str = piece[colon + 1..].to_string();
+            let (start, end) = parse_range(range_str);
+            ShardConfig::new(start, end, url_str)
+        })
+        .collect();
 
     println!("Connecting to {} shard(s)…", shard_configs.len());
     let remote = Arc::new(RemoteMoeBackend::connect(shard_configs)?);
@@ -73,13 +78,17 @@ fn main() -> Result<(), BoxErr> {
     let cfg = larql_vindex::load_vindex_config(&vindex_path)?;
     let weights = larql_vindex::load_model_weights_q4k(&vindex_path, &mut cb)?;
     let tokenizer = load_vindex_tokenizer(&vindex_path)?;
-    println!("done ({:.1}s)  model={} layers={} hidden={}",
-        t0.elapsed().as_secs_f64(), cfg.model, cfg.num_layers, cfg.hidden_size);
+    println!(
+        "done ({:.1}s)  model={} layers={} hidden={}",
+        t0.elapsed().as_secs_f64(),
+        cfg.model,
+        cfg.num_layers,
+        cfg.hidden_size
+    );
 
     // ── Backend (Metal or CPU) ────────────────────────────────────────────────
     #[cfg(feature = "metal")]
-    let backend = larql_inference::MetalBackend::new()
-        .ok_or("Metal not available")?;
+    let backend = larql_inference::MetalBackend::new().ok_or("Metal not available")?;
     #[cfg(not(feature = "metal"))]
     let backend = larql_inference::CpuBackend;
 
@@ -94,13 +103,7 @@ fn main() -> Result<(), BoxErr> {
     std::io::Write::flush(&mut std::io::stdout()).ok();
 
     let result = generate_with_remote_moe(
-        &weights,
-        &tokenizer,
-        prompt_ids,
-        max_tokens,
-        &index,
-        &remote,
-        &backend,
+        &weights, &tokenizer, prompt_ids, max_tokens, &index, &remote, &backend,
     )?;
 
     for (tok, ms) in result.tokens.iter().zip(result.decode_ms.iter()) {
@@ -113,16 +116,24 @@ fn main() -> Result<(), BoxErr> {
         print!("{tok}");
     }
     println!();
-    println!("\n{} tokens  avg decode {:.0}ms/tok",
+    println!(
+        "\n{} tokens  avg decode {:.0}ms/tok",
         result.tokens.len(),
-        result.decode_ms.iter().sum::<f64>() / result.decode_ms.len().max(1) as f64);
+        result.decode_ms.iter().sum::<f64>() / result.decode_ms.len().max(1) as f64
+    );
 
     Ok(())
 }
 
 fn parse_range(s: &str) -> (usize, usize) {
     let parts: Vec<&str> = s.splitn(2, '-').collect();
-    let start = parts.first().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
-    let end = parts.get(1).and_then(|p| p.trim().parse().ok()).unwrap_or(start);
+    let start = parts
+        .first()
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or(0);
+    let end = parts
+        .get(1)
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or(start);
     (start, end)
 }
