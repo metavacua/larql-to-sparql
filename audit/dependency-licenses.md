@@ -229,9 +229,10 @@ The fork's declared forward licensing posture is **AGPL-3.0-or-later**
    `"AGPL-3.0-or-later"`, `"CDLA-Permissive-2.0"`. Optionally add `"BSL-1.0"`
    defensively for future Windows targets.
 2. Drop unused `"OpenSSL"` and `"Unicode-DFS-2016"` from the allow-list.
-3. Add `LICENSES/AGPL-3.0-or-later.txt` and `LICENSES/CC-BY-SA-4.0.txt` per
-   REUSE 3.x layout (the existing pipeline's `provenance` job will fail
-   without them the first time a file declares either SPDX-id).
+3. Add `LICENSES/AGPL-3.0-or-later.txt` per REUSE 3.x layout (the existing
+   pipeline's `provenance` job will fail without it the first time a file
+   declares the SPDX-id). `LICENSES/CC-BY-SA-4.0.txt` was already added in
+   Phase A so the audit reports themselves resolve.
 4. Update `NOTICE` to enumerate the AGPL transitive obligation
    (`evalexpr v12.x`) and document the source-availability commitment under
    AGPL §2 / §13.

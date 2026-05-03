@@ -24,9 +24,9 @@ it produces evidence and recommends annotations; it does not change behaviour.
 
 | Metric | Value | Source |
 |---|---|---|
-| Files under version control | 1102 | `reuse lint :: SUMMARY` |
-| Files with copyright information | 1102 / 1102 | `reuse lint` |
-| Files with license information | 1102 / 1102 | `reuse lint` |
+| Files under version control | 1107 | `reuse lint :: SUMMARY` (after audit/ + LICENSES/CC-BY-SA-4.0.txt added) |
+| Files with copyright information | 1107 / 1107 | `reuse lint` |
+| Files with license information | 1107 / 1107 | `reuse lint` |
 | Distinct first-party SPDX identifiers in use | 1 (`Apache-2.0`) | `reuse lint :: Used licenses` |
 | Bad / deprecated / missing licenses | 0 / 0 / 0 | `reuse lint :: SUMMARY` |
 | Invalid SPDX expressions detected | 4 (all in one file, all false positives) | `reuse lint :: INVALID SPDX LICENSE EXPRESSIONS` |
@@ -119,19 +119,20 @@ flags this for upstream's confirmation — and recommends upstream adopt an
 `AUTHORS` file or in-tree CLA mechanism if they intend to accept third-party
 contributions.
 
-## Recommended REUSE.toml amendments (to be applied in Phase B)
+## REUSE.toml amendments applied in this PR
 
 | Path | Annotation | Rationale |
 |---|---|---|
 | `knowledge/LICENSE` | `SPDX-FileCopyrightText = "NONE"`, `SPDX-License-Identifier = "Apache-2.0"`, precedence `override` | License-text boilerplate; same treatment as the top-level `LICENSE`. |
 | `audit/**` | `SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"`, `SPDX-License-Identifier = "CC-BY-SA-4.0"`, precedence `override` | New audit deliverables authored by this fork; per the forward licensing posture, fork-authored docs are CC-BY-SA-4.0. |
+| `LICENSES/CC-BY-SA-4.0.txt` | `NONE`, `CC-BY-SA-4.0`, precedence `override` | Canonical CC-BY-SA-4.0 license text per REUSE 3.x; required so the new SPDX identifier resolves to its boilerplate. |
 
-Phase B will additionally introduce a fork-default annotation block for
-*future* code contributions (`SPDX-License-Identifier = "AGPL-3.0-or-later"`)
-and docs contributions (`SPDX-License-Identifier = "CC-BY-SA-4.0"`),
-both attributed to the fork's contributor copyright line. The existing
-upstream-default block stays as the catch-all for paths whose origin is the
-upstream repository.
+A subsequent compliance-pipeline-correction pass will introduce a
+fork-default annotation block for *future* code contributions
+(`SPDX-License-Identifier = "AGPL-3.0-or-later"`) and docs contributions
+(`SPDX-License-Identifier = "CC-BY-SA-4.0"`), both attributed to the fork's
+contributor copyright line. The existing upstream-default block stays as
+the catch-all for paths whose origin is the upstream repository.
 
 ## Conclusion
 
