@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - Add deterministic changelog and SemVer preflight checks
+- Add semantic versioning compliance workflow
 
 ### Fixed
 
@@ -28,5 +29,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Scope cron to advisory scanners and harden SARIF upload
+- Simplify workflow error collection using checks API
 
 
