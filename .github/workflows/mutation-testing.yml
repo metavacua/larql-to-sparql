@@ -58,7 +58,6 @@ jobs:
 
       - name: Run cargo-mutants
         id: mutants-run
-        continue-on-error: true
         run: |
           cargo mutants --output "${{ runner.temp }}/mutants-output" \
             > "${{ runner.temp }}/mutants.log" 2>&1
@@ -76,7 +75,7 @@ jobs:
           error-limit: "20"
 
       - name: Post error comment on failure
-        if: failure() && github.event_name == 'pull_request'
+        if: steps.mutants-run.outcome == 'failure' && github.event_name == 'pull_request'
         uses: ./.github/actions/post-job-error
         with:
           job-name: "mutants"

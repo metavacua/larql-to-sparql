@@ -54,7 +54,6 @@ jobs:
 
       - name: Run semantic-release dry-run
         id: semver
-        continue-on-error: true
         run: |
           # Placeholder: semantic-release dry-run command
           # In a real implementation, this would call semantic-release --dry-run
@@ -62,7 +61,7 @@ jobs:
           scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
 
       - name: Post error comment on failure
-        if: failure() && github.event_name == 'pull_request'
+        if: steps.semver.outcome == 'failure' && github.event_name == 'pull_request'
         uses: ./.github/actions/post-job-error
         with:
           job-name: "semantic-release"
