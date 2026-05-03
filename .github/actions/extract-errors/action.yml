@@ -36,6 +36,8 @@ runs:
         TOOL_TYPE: ${{ inputs.tool-type }}
         ERROR_LIMIT: ${{ inputs.error-limit }}
       run: |
+        set +e  # Disable exit on error for this section
+
         # Check if log file exists and has content
         if [[ ! -f "$LOG_FILE" ]] || [[ ! -s "$LOG_FILE" ]]; then
           echo "errors=" >> "$GITHUB_OUTPUT"
@@ -46,24 +48,24 @@ runs:
 
         # For cargo tools, extract explicit error lines
         if [[ "$TOOL_TYPE" == "cargo" ]]; then
-          errors=$(grep -E "^error(\[|:)" "$LOG_FILE" | head -n "$ERROR_LIMIT")
+          errors=$(grep -E "^error(\[|:)" "$LOG_FILE" 2>/dev/null | head -n "$ERROR_LIMIT" || true)
           total_errors=$(grep -cE "^error(\[|:)" "$LOG_FILE" 2>/dev/null || echo 0)
         else
           # For generic/script tools, use a multi-stage approach
-          # First try to extract lines with error keywords
-          errors=$(grep -iE "(error|failed|failure|panic)" "$LOG_FILE" | head -n "$ERROR_LIMIT")
+          # First try to extract lines with error keywords (limit to ERROR_LIMIT with -m flag)
+          errors=$(grep -im "$ERROR_LIMIT" -E "(error|failed|failure|panic)" "$LOG_FILE" 2>/dev/null || true)
 
           # If no errors found with keywords, extract last N lines (often contains summary)
           if [[ -z "$errors" ]]; then
-            errors=$(tail -n "$ERROR_LIMIT" "$LOG_FILE")
+            errors=$(tail -n "$ERROR_LIMIT" "$LOG_FILE" 2>/dev/null || true)
           fi
 
           # Count error-like lines
-          total_errors=$(grep -icE "(error|failed|failure)" "$LOG_FILE" 2>/dev/null || echo 0)
+          total_errors=$(grep -ic -E "(error|failed|failure)" "$LOG_FILE" 2>/dev/null || echo 0)
 
           # If still 0, use line count as approximation
           if [[ $total_errors -eq 0 ]]; then
-            total_errors=$(wc -l < "$LOG_FILE")
+            total_errors=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
           fi
         fi
 
@@ -84,3 +86,5 @@ runs:
           echo "error-count=$total_errors"
           echo "truncated=$truncated"
         } >> "$GITHUB_OUTPUT"
+
+        set -e  # Re-enable exit on error
