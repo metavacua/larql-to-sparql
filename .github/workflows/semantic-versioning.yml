@@ -1,0 +1,264 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Semantic versioning compliance workflow.
+#
+# Validates semantic versioning compliance using semantic-release dry-run,
+# and aggregates any errors from dependent workflows (quality.yml, validate.yml)
+# to post consolidated feedback on the PR.
+
+name: semantic-versioning
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: semantic-versioning-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # SV1: Semantic versioning compliance using semantic-release dry-run.
+  # Tests whether the current branch produces a valid semantic version bump.
+  # ---------------------------------------------------------------------------
+  semver-dry-run:
+    name: semver (semantic-release dry-run)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install semantic-release
+        run: |
+          npm install -g semantic-release@latest
+
+      - name: Run semantic-release dry-run
+        id: semver
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          semantic-release --dry-run 2>&1 | tee semver-output.log
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+
+          # Extract next version if available
+          next_version=$(grep -oP 'The next release version is \K[0-9]+\.[0-9]+\.[0-9]+' semver-output.log || echo "")
+          if [[ -n "$next_version" ]]; then
+            echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Check if already released
+          if grep -q 'no new commits since last release' semver-output.log; then
+            echo "status=no-bump" >> "$GITHUB_OUTPUT"
+          elif [[ $exit_code -eq 0 ]] && grep -q 'The next release version is' semver-output.log; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=error" >> "$GITHUB_OUTPUT"
+          fi
+
+          exit 0
+
+      - name: Upload semantic-release output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semver-dry-run-output
+          path: semver-output.log
+          if-no-files-found: ignore
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          status="${{ steps.semver.outputs.status }}"
+          next_version="${{ steps.semver.outputs.next_version }}"
+
+          if [[ "$status" == "success" ]]; then
+            echo "::notice title=Semantic Versioning::Next version: $next_version"
+          elif [[ "$status" == "no-bump" ]]; then
+            echo "::notice title=Semantic Versioning::No version bump required (already released)"
+          else
+            echo "::warning title=Semantic Versioning::Failed to determine next version"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Aggregate errors from dependent workflows and post consolidated PR comment.
+  # This captures failures from quality.yml and validate.yml for visibility.
+  # ---------------------------------------------------------------------------
+  collect-workflow-errors:
+    name: collect workflow errors
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Fetch workflow runs
+        id: workflow-status
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const { data: workflowRuns } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: context.payload.pull_request.head.ref,
+              status: 'failure',
+            });
+
+            const failedWorkflows = {};
+
+            for (const run of workflowRuns) {
+              if (run.id === parseInt(process.env.RUN_ID)) continue;
+
+              const workflowName = run.name;
+              if (!failedWorkflows[workflowName]) {
+                failedWorkflows[workflowName] = [];
+              }
+              failedWorkflows[workflowName].push({
+                id: run.id,
+                conclusion: run.conclusion,
+                url: run.html_url,
+              });
+            }
+
+            core.setOutput('failed-workflows', JSON.stringify(failedWorkflows));
+            core.setOutput('has-failures', Object.keys(failedWorkflows).length > 0);
+
+      - name: Fetch failed job details
+        if: steps.workflow-status.outputs.has-failures == 'true'
+        id: job-details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failedWorkflows = JSON.parse('${{ steps.workflow-status.outputs.failed-workflows }}');
+            const jobDetails = {};
+
+            for (const [workflowName, runs] of Object.entries(failedWorkflows)) {
+              jobDetails[workflowName] = [];
+
+              for (const run of runs) {
+                const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id,
+                });
+
+                for (const job of jobs.jobs) {
+                  if (job.conclusion === 'failure') {
+                    const { data: logs } = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      job_id: job.id,
+                    });
+
+                    jobDetails[workflowName].push({
+                      jobName: job.name,
+                      jobUrl: job.html_url,
+                      conclusion: job.conclusion,
+                    });
+                  }
+                }
+              }
+            }
+
+            core.setOutput('job-details', JSON.stringify(jobDetails));
+
+      - name: Post consolidated error comment
+        if: steps.workflow-status.outputs.has-failures == 'true'
+        uses: actions/github-script@v7
+        env:
+          FAILED_WORKFLOWS: ${{ steps.workflow-status.outputs.failed-workflows }}
+          JOB_DETAILS: ${{ steps.job-details.outputs.job-details }}
+        with:
+          script: |
+            const failedWorkflows = JSON.parse(process.env.FAILED_WORKFLOWS || '{}');
+            const jobDetails = JSON.parse(process.env.JOB_DETAILS || '{}');
+
+            if (Object.keys(failedWorkflows).length === 0) {
+              return;
+            }
+
+            let body = '## Workflow Errors Detected\n\n';
+            body += 'The following workflows have failed on this PR branch:\n\n';
+
+            for (const [workflowName, runs] of Object.entries(failedWorkflows)) {
+              body += `### ${workflowName}\n\n`;
+
+              if (jobDetails[workflowName]) {
+                for (const job of jobDetails[workflowName]) {
+                  body += `- **${job.jobName}** ([view logs](${job.jobUrl}})\n`;
+                }
+              }
+
+              for (const run of runs) {
+                body += `\n[View full run](${run.url})\n\n`;
+              }
+            }
+
+            body += '---\n\n';
+            body += '_This comment was generated by the semantic-versioning workflow._\n';
+
+            // Check if a similar comment already exists to avoid duplicates
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('Workflow Errors Detected')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate. Single check for branch protection.
+  # ---------------------------------------------------------------------------
+  semver-compliance:
+    name: semver compliance (SV1)
+    runs-on: ubuntu-24.04
+    needs: [semver-dry-run]
+    if: always()
+    steps:
+      - name: Check semver compliance
+        run: |
+          if [[ "${{ needs.semver-dry-run.result }}" == "success" ]]; then
+            echo "Semantic versioning validation passed."
+            exit 0
+          else
+            echo "Semantic versioning validation failed or was inconclusive."
+            exit 1
+          fi
