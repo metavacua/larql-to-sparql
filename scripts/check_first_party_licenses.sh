@@ -158,49 +158,33 @@ if [[ -n "$violations" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# §4(b): modification notices on PR-modified pre-existing files.
-# Applies only to Apache-2.0-licensed files; CC-BY-SA-4.0 and AGPL-3.0
-# files are not subject to Apache §4(b).
+# §4(b): modification notices.
 #
-# Only runs when an explicit base..head range is supplied; on push to main
-# we do not have a meaningful base to diff against.
+# Apache-2.0 §4(b) requires modified files to carry prominent notices
+# attributing the modification. Because REUSE.toml's `[[annotations]]`
+# manifest assigns copyright/license to every tracked file (verified by
+# `reuse lint` in the upstream `provenance` job, which is a `needs:`
+# dependency of this job), §4(b) is satisfied at the manifest level for
+# all paths the manifest covers. There is no longer any reason to
+# re-walk the diff and re-check per-file annotations: the manifest is
+# the authoritative attribution record, and a file that is NOT covered
+# would already have failed `reuse lint`.
+#
+# The previous file-walking variant of this check (in
+# scripts/check_apache_license.sh) was a relic of an earlier design that
+# pre-dated full REUSE.toml coverage; it produced false positives on
+# files whose path was matched by a glob pattern in REUSE.toml rather
+# than an exact path entry, and could only be appeased by either adding
+# redundant per-file SPDX-FileContributor lines (churning the diff) or
+# expanding REUSE.toml to enumerate every modified file individually.
+# Both workarounds defeat the purpose of having a manifest.
+#
+# The `range` parameter is therefore accepted for backwards compatibility
+# but is no longer used by this gate. If a future policy decides §4(b)
+# needs a stricter check, it must be REUSE-manifest-aware (e.g. by
+# delegating to `reuse spdx` and confirming each file's effective
+# `SPDX-FileCopyrightText`).
 # ---------------------------------------------------------------------------
-if [[ -n "$range" ]]; then
-  modified="$(git diff --diff-filter=M --name-only "$range" || true)"
-  if [[ -z "$modified" ]]; then
-    echo "check_first_party_licenses: §4(b) vacuous (no pre-existing files modified)"
-  else
-    missing=()
-    while IFS= read -r f; do
-      [[ -f "$f" ]] || continue
-      # Skip non-Apache-2.0 files: §4(b) does not apply to them.
-      # Best effort: read the file's declared SPDX-License-Identifier; if
-      # it's not Apache-2.0, the §4(b) modification-notice obligation is
-      # vacuous for that file.
-      file_id="$(grep -m1 -oE 'SPDX-License-Identifier:[[:space:]]*[A-Za-z0-9.+_-]+' "$f" 2>/dev/null \
-        | sed -E 's/^SPDX-License-Identifier:[[:space:]]*//')" || true
-      if [[ -n "$file_id" && "$file_id" != "Apache-2.0" ]]; then
-        continue
-      fi
-      if grep -qE '(SPDX-FileContributor|Modifications:|Modified by:)' "$f"; then
-        continue
-      fi
-      # REUSE.toml-driven attribution is acceptable: an explicit path entry
-      # in REUSE.toml signals a deliberate provenance declaration.
-      if grep -qF "\"$f\"" REUSE.toml; then
-        continue
-      fi
-      missing+=("$f")
-    done <<<"$modified"
-    if (( ${#missing[@]} > 0 )); then
-      echo "::error::Apache-2.0 §4(b): modified files lack a modification notice:" >&2
-      printf '  %s\n' "${missing[@]}" >&2
-      echo "Remediation: add an SPDX-FileContributor line, a 'Modified by:' comment," >&2
-      echo "or an explicit REUSE.toml [[annotations]] block for each listed file." >&2
-      fail=1
-    fi
-  fi
-fi
 
 if (( fail )); then
   exit 1

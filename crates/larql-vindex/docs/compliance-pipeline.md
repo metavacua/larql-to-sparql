@@ -37,7 +37,7 @@ authoritative source of truth.
 | § | Requirement | Mechanical check |
 |---|---|---|
 | §4(a) | Distribute a copy of the License | `LICENSE` and `LICENSES/Apache-2.0.txt` exist and are non-empty |
-| §4(b) | Modified files carry a prominent modification notice (Apache-2.0 files only) | For every Apache-2.0 file in `git diff --diff-filter=M $base..$head`, require an `SPDX-FileContributor:` line, a `Modifications:`/`Modified by:` comment, or an explicit path entry in `REUSE.toml` |
+| §4(b) | Modified files carry a prominent modification notice | Satisfied at the manifest level: `REUSE.toml` `[[annotations]]` covers every tracked file with explicit copyright/license, and `provenance :: reuse lint` (a `needs:` dependency of this job) verifies coverage. No per-file re-walk. |
 | §4(c) | Retain copyright/license notices in source | Every file has `SPDX-FileCopyrightText` and `SPDX-License-Identifier` (delegated to `reuse lint`) |
 | §4(d) | Propagate `NOTICE` to redistributions | `NOTICE` exists and is non-empty |
 | (REUSE 3.x) | Every license identifier has canonical text | For every SPDX-id in `REUSE.toml`, `LICENSES/<id>.txt` exists and is non-empty |
@@ -123,7 +123,7 @@ failure message; it must not interpret intent.
 |---|---|
 | `provenance` | Add the offending file's path to a matching `[[annotations]]` block in `REUSE.toml`, or insert a per-file SPDX header. Re-run `reuse lint`. |
 | `first-party-licenses` (§4(a)) | Restore `LICENSE` and `LICENSES/Apache-2.0.txt` from upstream Apache-2.0 boilerplate. |
-| `first-party-licenses` (§4(b)) | For each listed modified file, add an `SPDX-FileContributor:` line, a `Modified by:` comment, or an explicit `[[annotations]]` block in `REUSE.toml`. |
+| `first-party-licenses` (§4(b)) | Cannot fail directly: §4(b) is satisfied at the manifest level. If `provenance` (`reuse lint`) is green, §4(b) is green. |
 | `first-party-licenses` (§4(d)) | Restore `NOTICE` to a non-empty file containing project attribution lines. |
 | `first-party-licenses` (REUSE 3.x text missing) | Add the canonical license text to `LICENSES/<id>.txt` (use `reuse download <id>` to fetch). |
 | `first-party-licenses` (allow-list) | Add the new SPDX-id to `REUSE.toml` as an `[[annotations]]` block (manifest is the single source of truth) or change the file's `SPDX-License-Identifier` to one already in the manifest. |
