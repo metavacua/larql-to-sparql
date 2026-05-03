@@ -72,11 +72,13 @@ jobs:
             --workspace --tests --all-targets \
             --message-format=json \
             -- -D warnings \
+            | tee "${{ runner.temp }}/clippy-raw.json" \
             | clippy-sarif \
             | tee clippy.sarif \
-            | sarif-fmt > "${{ runner.temp }}/clippy.log" 2>&1
+            | sarif-fmt
           exit_code=$?
-          cat "${{ runner.temp }}/clippy.log"
+          # Extract error summary for logging
+          grep -i "error" "${{ runner.temp }}/clippy-raw.json" > "${{ runner.temp }}/clippy.log" 2>&1 || true
           exit $exit_code
 
       - name: Upload clippy SARIF to Code Scanning

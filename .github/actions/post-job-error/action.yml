@@ -65,7 +65,7 @@ runs:
 
         # Add truncation note if applicable
         if [[ "$TRUNCATED" == "true" ]]; then
-          body+=$'\n⚠️ **Output truncated** - only first $ERROR_COUNT errors shown above. '
+          body+=$'\n⚠️ **Output truncated** - only the first errors are shown above. '
           body+='See full logs in the workflow run artifacts.'
           body+=$'\n'
         fi
@@ -77,36 +77,39 @@ runs:
           body+=$'\n'
         fi
 
-        # Escape for JSON output
-        body="${body//'\'/'\\'"}"
-        body="${body//$'"'/'\\"'}"
-        body="${body//$'\n'/'\\n'}"
-
-        echo "body=$body" >> "$GITHUB_OUTPUT"
-
-        # Create a stable comment identifier based on job name
-        comment_id="<!-- job-error-comment: $JOB_NAME -->"
-        echo "comment-id=$comment_id" >> "$GITHUB_OUTPUT"
+        # Use heredoc for safe multi-line output
+        DELIMITER=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64)
+        {
+          echo "body<<$DELIMITER"
+          echo "$body"
+          echo "$DELIMITER"
+          echo "comment-id=<!-- job-error-comment: $JOB_NAME -->"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Post or update PR comment
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
+      env:
+        BODY: ${{ steps.prepare.outputs.body }}
+        COMMENT_ID: ${{ steps.prepare.outputs.comment-id }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const body = `${{ steps.prepare.outputs.body }}`;
-          const commentId = `${{ steps.prepare.outputs.comment-id }}`;
+          const body = process.env.BODY;
+          const commentId = process.env.COMMENT_ID;
 
-          // Search for existing comment from this job
-          const comments = await github.rest.issues.listComments({
+          // Search for existing comment from this job, with pagination
+          const comments = await github.paginate(github.rest.issues.listComments, {
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
           });
 
-          let existingComment = comments.data.find(comment =>
+          const existingComment = comments.find(comment =>
             comment.body.includes(commentId)
           );
+
+          const fullBody = `${commentId}\n\n${body}`;
 
           if (existingComment) {
             // Update existing comment
@@ -114,7 +117,7 @@ runs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               comment_id: existingComment.id,
-              body: `${commentId}\n\n${body}`,
+              body: fullBody,
             });
             console.log(`Updated existing comment #${existingComment.id}`);
           } else {
@@ -123,7 +126,7 @@ runs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `${commentId}\n\n${body}`,
+              body: fullBody,
             });
             console.log('Created new comment');
           }

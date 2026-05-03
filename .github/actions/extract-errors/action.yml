@@ -71,8 +71,12 @@ runs:
             ;;
         esac
 
-        # Count total errors
-        total_errors=$(grep -cE "^error(\[|:)" "$LOG_FILE" 2>/dev/null || echo 0)
+        # Count total errors (tool-specific)
+        if [[ "$TOOL_TYPE" == "cargo" ]]; then
+          total_errors=$(grep -cE "^error(\[|:)" "$LOG_FILE" 2>/dev/null || echo 0)
+        else
+          total_errors=$(grep -icE "(^|[[:space:]])error(:|[[:space:]])" "$LOG_FILE" 2>/dev/null || echo 0)
+        fi
 
         # Determine if truncated
         extracted_count=$(echo "$errors" | grep -c . 2>/dev/null || echo 0)
@@ -82,11 +86,12 @@ runs:
           truncated="false"
         fi
 
-        # Escape newlines and special characters for output
-        errors="${errors//'%'/'%25'}"
-        errors="${errors//$'\n'/'%0A'}"
-        errors="${errors//$'\r'/'%0D'}"
-
-        echo "errors=$errors" >> "$GITHUB_OUTPUT"
-        echo "error-count=$total_errors" >> "$GITHUB_OUTPUT"
-        echo "truncated=$truncated" >> "$GITHUB_OUTPUT"
+        # Use heredoc for multi-line output to avoid escaping issues
+        DELIMITER=$(dd if=/dev/urandom bs=15 count=1 2>/dev/null | base64)
+        {
+          echo "errors<<$DELIMITER"
+          echo "$errors"
+          echo "$DELIMITER"
+          echo "error-count=$total_errors"
+          echo "truncated=$truncated"
+        } >> "$GITHUB_OUTPUT"
