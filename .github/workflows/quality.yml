@@ -235,8 +235,8 @@ jobs:
   # ---------------------------------------------------------------------
   # Q5: cargo-deny — license allow-list, banned crates, advisories,
   # source allow-list. Configured by deny.toml at the repo root. The
-  # license allow-list mirrors the Apache-2.0-only policy enforced by
-  # scripts/check_apache_license.sh for *first-party* sources, applied
+  # license allow-list mirrors the audited multi-license policy enforced by
+  # scripts/check_first_party_licenses.sh for *first-party* sources, applied
   # here to the *transitive dependency closure*.
   # ---------------------------------------------------------------------
   deny:

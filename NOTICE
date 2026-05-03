@@ -3,22 +3,58 @@ larql-to-sparql
 Copyright (C) 2026 Chris Hay
 Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
 
-This product is licensed under the Apache License, Version 2.0 (the "License");
-you may not use this software except in compliance with the License. You may
-obtain a copy of the License under LICENSES/Apache-2.0.txt or at:
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
 The pre-existing LARQL codebase under this repository's `main` branch
 originates from https://github.com/chrishayuk/larql (created 2026) and is
-attributed to Chris Hay.
+attributed to Chris Hay. That portion of the work is licensed under the
+Apache License, Version 2.0 (LICENSES/Apache-2.0.txt; see
+http://www.apache.org/licenses/LICENSE-2.0).
 
 The deterministic compliance toolchain added by PR
 `claude/implement-standardized-tool-PGol9` (REUSE.toml, NOTICE,
 CHANGELOG.md, cog.toml, cliff.toml, .pre-commit-config.yaml,
 .github/workflows/validate.yml, scripts/check_changelog.sh,
-scripts/version_preflight.sh, docs/specs/compliance-pipeline.md) is
-attributed to Ian Douglas Lawrence Norman McLean.
+scripts/version_preflight.sh, scripts/check_first_party_licenses.sh,
+docs/specs/compliance-pipeline.md, docs/specs/code-quality-pipeline.md,
+deny.toml) is attributed to Ian Douglas Lawrence Norman McLean and is
+licensed under the Apache License, Version 2.0.
 
-Per-file SPDX provenance is recorded in REUSE.toml and verified by
-`reuse lint` in the deterministic PR validation workflow.
+Forward licensing posture for this fork
+----------------------------------------
+
+New contributions to this fork (i.e. additions made under this repository's
+control, not synced from upstream chrishayuk/larql) are dual-licensed:
+
+  * Code, scripts, configuration, and other functional artefacts:
+    AGPL-3.0-or-later (LICENSES/AGPL-3.0-or-later.txt).
+  * Documentation, audit reports, design notes, data, and other
+    non-functional artefacts: CC-BY-SA-4.0 (LICENSES/CC-BY-SA-4.0.txt).
+
+Per-file provenance and license assignment is recorded authoritatively in
+REUSE.toml and verified by `reuse lint` in the validate.yml workflow.
+
+Transitive obligations
+----------------------
+
+The distributable artefacts produced by this workspace include (or, for
+feature-gated builds, may include) third-party dependencies that carry
+obligations beyond a permissive licence. The audit deliverables under
+audit/ enumerate these in full; the most material entries are reproduced
+here for the benefit of redistributors:
+
+  * evalexpr v12.x (https://github.com/ISibboI/evalexpr) is licensed
+    AGPL-3.0-only and is consumed by `crates/model-compute` behind the
+    feature flag `native`. When that feature is enabled (it is enabled in
+    the default `larql-cli` build), the resulting binary is subject to
+    AGPL-3.0 obligations, including the §13 network-distribution clause
+    (offer source to remote users of a modified version exposed over a
+    network). Corresponding source for evalexpr is available upstream;
+    this project does not modify evalexpr.
+
+  * webpki-roots / webpki-root-certs v1.0.x are licensed
+    CDLA-Permissive-2.0 and are consumed transitively via
+    ureq -> hf-hub -> larql-vindex. The CDLA Permissive 2.0 imposes no
+    copyleft obligation; verbatim redistribution is permitted under the
+    same terms.
+
+See audit/dependency-licenses.md for the complete inventory and
+audit/upstream-report.md for context that may apply to upstream forks.
