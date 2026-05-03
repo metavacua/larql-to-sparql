@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Improve error extraction and comment posting robustness
+- Improve error extraction and ensure error details appear in PR comments
 - Rebuild with correct single section structure
 - Remove duplicate sections and regenerate
 - Scope cron to advisory scanners and harden SARIF upload
