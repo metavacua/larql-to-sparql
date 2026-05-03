@@ -53,12 +53,36 @@ SPDX-License-Identifier = "Apache-2.0"
 
 # ---------------------------------------------------------------------------
 # Verbatim Apache-2.0 license text. Boilerplate; not separately copyrighted.
+# `knowledge/LICENSE` is a duplicate of the top-level Apache-2.0 boilerplate
+# carried by the `larql-knowledge` Python sub-project so it can be installed
+# stand-alone; it receives the same NONE-copyright treatment.
 # ---------------------------------------------------------------------------
 [[annotations]]
 path = [
   "LICENSE",
   "LICENSES/Apache-2.0.txt",
+  "knowledge/LICENSE",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "Apache-2.0"
+
+# Verbatim CC-BY-SA-4.0 license text. Boilerplate; not separately copyrighted.
+[[annotations]]
+path = "LICENSES/CC-BY-SA-4.0.txt"
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# ---------------------------------------------------------------------------
+# Licensing audit deliverables produced by Phase A of the cleanup workstream
+# (see audit/first-party-report.md, audit/dependency-licenses.md,
+# audit/upstream-report.md). Authored by the fork; per the forward licensing
+# posture documented in audit/upstream-report.md, fork-authored documentation
+# is licensed CC-BY-SA-4.0.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "audit/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
