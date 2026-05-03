@@ -72,13 +72,15 @@ jobs:
             --workspace --tests --all-targets \
             --message-format=json \
             -- -D warnings \
-            | tee "${{ runner.temp }}/clippy-raw.json" \
-            | clippy-sarif \
-            | tee clippy.sarif \
-            | sarif-fmt
+            > "${{ runner.temp }}/clippy-raw.json" 2>&1
           exit_code=$?
-          # Extract error summary for logging
+
+          # Convert to SARIF
+          cat "${{ runner.temp }}/clippy-raw.json" | clippy-sarif | tee clippy.sarif | sarif-fmt
+
+          # Extract error lines for logging
           grep -i "error" "${{ runner.temp }}/clippy-raw.json" > "${{ runner.temp }}/clippy.log" 2>&1 || true
+
           exit $exit_code
 
       - name: Upload clippy SARIF to Code Scanning
@@ -142,10 +144,8 @@ jobs:
         id: test-run
         continue-on-error: true
         run: |
-          cargo test --workspace --no-fail-fast \
-            > "${{ runner.temp }}/test.log" 2>&1
+          cargo test --workspace --no-fail-fast 2>&1 | tee "${{ runner.temp }}/test.log"
           exit_code=$?
-          cat "${{ runner.temp }}/test.log"
           exit $exit_code
 
       - name: Extract test errors
@@ -198,10 +198,8 @@ jobs:
         id: audit-run
         continue-on-error: true
         run: |
-          cargo audit --deny warnings \
-            > "${{ runner.temp }}/audit.log" 2>&1
+          cargo audit --deny warnings 2>&1 | tee "${{ runner.temp }}/audit.log"
           exit_code=$?
-          cat "${{ runner.temp }}/audit.log"
           exit $exit_code
 
       - name: Extract audit errors
@@ -254,10 +252,8 @@ jobs:
         id: deny-run
         continue-on-error: true
         run: |
-          cargo deny check advisories bans licenses sources \
-            > "${{ runner.temp }}/deny.log" 2>&1
+          cargo deny check advisories bans licenses sources 2>&1 | tee "${{ runner.temp }}/deny.log"
           exit_code=$?
-          cat "${{ runner.temp }}/deny.log"
           exit $exit_code
 
       - name: Extract deny errors
