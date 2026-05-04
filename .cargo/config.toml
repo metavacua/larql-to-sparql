@@ -1,8 +1,7 @@
 # Cargo configuration for cross-platform builds
 
 [build]
-# Use parallel jobs by default
-jobs = 0
+# Use parallel jobs by default (0 is invalid; unset to auto-detect CPU count)
 
 # Android cross-compilation configuration
 [target.aarch64-linux-android]

@@ -37,5 +37,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Linux/WSL2 support + temperature parameter
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
+- Upgrade dependencies to fix cargo audit security vulnerabilities
 
 
