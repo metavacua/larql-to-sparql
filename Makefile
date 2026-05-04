@@ -1,4 +1,4 @@
-.PHONY: build release test check clean fmt lint demos
+.PHONY: build release test check clean fmt lint demos platform-test platform-test-ubuntu platform-test-android platform-test-chromeos platform-test-macos
 
 # Build
 build:
