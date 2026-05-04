@@ -15,10 +15,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - Add deterministic changelog and SemVer preflight checks
-- Cross-platform CI/CD foundation (Phase 1: Ubuntu)
-- Add ChromeOS (Phase 2a) cross-platform CI/CD support
-- Add Android (Phase 2b) cross-platform CI/CD support with dual targets (aarch64-linux-android, armv7-linux-androideabi)
-- Add macOS (Phase 3) cross-platform CI/CD support with Metal GPU on Apple Silicon
+- Cross-platform CI/CD foundation (Phase 1)
 
 ### Fixed
 
