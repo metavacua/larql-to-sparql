@@ -81,7 +81,7 @@ fn main() {
 
     // ── 1. 21-layer Q4 3-dispatch (Metal) ──
     println!("--- 1. 21-layer Q4 FFN (Metal 3-dispatch per layer) ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             t.run("Metal Q4 21-layer FFN (3-dispatch/layer)", || {
@@ -135,7 +135,7 @@ fn main() {
 
     // ── 4. Mixed: CPU f32 attention + Metal Q4 FFN (per layer) ──
     println!("\n--- 4. Mixed: CPU attn + Metal Q4 FFN (per layer) ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             // Simulate attention as 4 f32 matmul_transb (Q, K, V, O projections)
@@ -169,7 +169,7 @@ fn main() {
 
     // ── 5. Multi-layer Q4 FFN: one command buffer for ALL 21 layers ──
     println!("\n--- 5. Multi-layer Q4 (1 command buffer, ALL 21 layers) ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             let layers_refs: Vec<(&[u8], &[u8], &[u8])> = layers_q4
@@ -188,7 +188,7 @@ fn main() {
 
     // ── 6. Full layer on Metal (old per-layer benchmark) (attention + FFN, one command buffer) ──
     println!("\n--- 5. Full layer on Metal (attn + FFN, 1 cmd buffer) ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             let w_q: Vec<f32> = (0..hidden * hidden)

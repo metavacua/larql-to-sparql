@@ -20,7 +20,7 @@ fn main() {
         println!("Run with --features metal");
     }
 
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use larql_compute::cpu::q4;
         use larql_compute::cpu::q4::quantize_q4_0;

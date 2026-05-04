@@ -10,7 +10,7 @@ fn main() {
     eprintln!("This example requires --features metal on macOS");
 }
 
-#[cfg(feature = "metal")]
+#[cfg(all(feature = "metal", target_os = "macos"))]
 fn main() {
     use std::time::Instant;
     let metal = larql_compute::metal::MetalBackend::new().expect("Metal required");

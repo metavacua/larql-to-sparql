@@ -1,7 +1,7 @@
 // Quick Q8 QKV benchmark — test fused projection speed
 
 fn main() {
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use metal::*;
         use std::time::Instant;

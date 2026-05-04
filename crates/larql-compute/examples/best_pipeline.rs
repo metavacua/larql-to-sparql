@@ -16,7 +16,7 @@ fn main() {
         println!("Run with --features metal");
     }
 
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use larql_compute::metal::ops::full_pipeline::LayerWeights;
         use larql_compute::metal::MetalBackend;

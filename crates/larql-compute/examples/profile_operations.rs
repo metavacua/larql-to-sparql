@@ -137,7 +137,7 @@ fn main() {
     }
 
     // ── Metal shaders ──
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use larql_compute::ComputeBackend;
 

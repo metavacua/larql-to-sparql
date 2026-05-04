@@ -17,7 +17,7 @@ fn main() {
         println!("Run with --features metal");
     }
 
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use larql_compute::metal::ops::kv_cache::{append_and_attend, KVCache};
         use larql_compute::metal::MetalBackend;

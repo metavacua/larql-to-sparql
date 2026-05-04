@@ -235,7 +235,7 @@ fn main() {
 
     // ── 7. Q4×f32 transposed down matvec ──
     println!("\n--- 7. Q4×f32 transposed down matvec ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             let down_f32: Vec<f32> = (0..inter * hidden)
@@ -276,7 +276,7 @@ fn main() {
 
     // ── 8. Fused FFN (gate+up+GEGLU+down, one dispatch) ──
     println!("\n--- 8. Fused FFN (one Metal dispatch per position) ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             let gate_f32: Vec<f32> = (0..inter * hidden)
