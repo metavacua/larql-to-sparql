@@ -11,9 +11,9 @@
 //! Expert weights are stored as packed BF16: [num_experts, out_dim, in_dim].
 //! We dequantize only the selected top-k expert slices on demand.
 
-mod math;
 mod expert;
 mod forward;
+mod math;
 
 pub use expert::{run_single_expert, run_single_expert_with_norm};
 pub use forward::cpu_moe_forward;
@@ -24,8 +24,13 @@ mod tests {
     use crate::MoeLayerWeights;
 
     fn make_moe<'a>(
-        _hidden: usize, inter: usize, num_experts: usize, top_k: usize,
-        gate_up: &'a [u8], down: &'a [u8], router: &'a [f32],
+        _hidden: usize,
+        inter: usize,
+        num_experts: usize,
+        top_k: usize,
+        gate_up: &'a [u8],
+        down: &'a [u8],
+        router: &'a [f32],
     ) -> MoeLayerWeights<'a> {
         MoeLayerWeights {
             experts_gate_up: gate_up,
@@ -62,7 +67,10 @@ mod tests {
         let h = vec![1.0f32; hidden];
         let out = cpu_moe_forward(&h, &moe, 0.0, 1e-6);
         assert_eq!(out.len(), hidden);
-        assert!(out.iter().all(|v| v.abs() < 1e-5), "zero weights → zero output");
+        assert!(
+            out.iter().all(|v| v.abs() < 1e-5),
+            "zero weights → zero output"
+        );
     }
 
     #[test]
@@ -90,7 +98,7 @@ mod tests {
             }
         }
         // Expert 0, up rows (rows inter..2*inter): set to 1.0
-        for row in inter..2*inter {
+        for row in inter..2 * inter {
             for col in 0..hidden {
                 let byte_off = (row * hidden + col) * 2;
                 gate_up[byte_off] = one_bf16[0];
@@ -115,6 +123,9 @@ mod tests {
         let out = cpu_moe_forward(&h, &moe, 0.0, 1e-6);
         assert_eq!(out.len(), hidden);
         // Output should be nonzero since gate activates
-        assert!(out.iter().any(|v| v.abs() > 0.01), "expected nonzero output from identity-like expert");
+        assert!(
+            out.iter().any(|v| v.abs() > 0.01),
+            "expected nonzero output from identity-like expert"
+        );
     }
 }

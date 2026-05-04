@@ -23,14 +23,17 @@ fn main() {
 
     // Memory comparison table (KV-reconstructing strategies only).
     let config = kv_cache_benchmark::model_config::ModelConfig::gemma_4b();
-    println!("\n{}", kv_cache_benchmark::benchmark::format_comparative_table(
-        &config,
-        &[
-            &kv_cache_benchmark::standard_kv::StandardKv as &dyn kv_cache_benchmark::KvStrategy,
-            &kv_cache_benchmark::turboquant::TurboQuant::new(4),
-            &kv_cache_benchmark::markov_residual::MarkovResidual::new(512),
-        ],
-    ));
+    println!(
+        "\n{}",
+        kv_cache_benchmark::benchmark::format_comparative_table(
+            &config,
+            &[
+                &kv_cache_benchmark::standard_kv::StandardKv as &dyn kv_cache_benchmark::KvStrategy,
+                &kv_cache_benchmark::turboquant::TurboQuant::new(4),
+                &kv_cache_benchmark::markov_residual::MarkovResidual::new(512),
+            ],
+        )
+    );
 
     // Graph Walk is projected (no K/V reconstruction); report memory separately.
     let gw = kv_cache_benchmark::graph_walk::GraphWalk::gemma_4b();

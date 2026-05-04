@@ -10,10 +10,10 @@
 
 use ndarray::Array2;
 
+use super::weight::dense_ffn_forward;
+use super::{gelu_tanh, sigmoid};
 use crate::forward::add_bias;
 use crate::model::ModelWeights;
-use super::{sigmoid, gelu_tanh};
-use super::weight::dense_ffn_forward;
 
 /// Compute FFN output for a pre-selected set of features.
 ///
@@ -145,7 +145,11 @@ fn sparse_ffn_forward_impl(
             let up_proj = up_sub.dot(&x_row);
             for (i, &feat) in features.iter().enumerate() {
                 let g = gate_proj[i];
-                let activated = if use_gelu { gelu_tanh(g) } else { g * sigmoid(g) };
+                let activated = if use_gelu {
+                    gelu_tanh(g)
+                } else {
+                    g * sigmoid(g)
+                };
                 let val = activated * up_proj[i];
                 sparse_act[i] = val;
                 full_activation[[s, feat]] = val;
@@ -153,14 +157,23 @@ fn sparse_ffn_forward_impl(
         } else {
             let up_proj = up_sub.dot(&x_row);
             let mut vals = up_proj.to_vec();
-            if let Some(bias) = arch.ffn_up_bias_key(layer).and_then(|bk| weights.vectors.get(&bk)) {
+            if let Some(bias) = arch
+                .ffn_up_bias_key(layer)
+                .and_then(|bk| weights.vectors.get(&bk))
+            {
                 for (i, &feat) in features.iter().enumerate() {
-                    if feat < bias.len() { vals[i] += bias[feat]; }
+                    if feat < bias.len() {
+                        vals[i] += bias[feat];
+                    }
                 }
             }
             for (i, &feat) in features.iter().enumerate() {
                 let v = vals[i];
-                let val = if use_gelu { gelu_tanh(v) } else { v * sigmoid(v) };
+                let val = if use_gelu {
+                    gelu_tanh(v)
+                } else {
+                    v * sigmoid(v)
+                };
                 sparse_act[i] = val;
                 full_activation[[s, feat]] = val;
             }
@@ -170,7 +183,9 @@ fn sparse_ffn_forward_impl(
         let act_view = ndarray::ArrayView1::from(&sparse_act[..k]);
         let out_vec = down_view.dot(&act_view);
         let mut out_row = out.row_mut(s);
-        ndarray::Zip::from(&mut out_row).and(&out_vec).for_each(|o, &v| *o = v);
+        ndarray::Zip::from(&mut out_row)
+            .and(&out_vec)
+            .for_each(|o, &v| *o = v);
 
         // Apply overrides: swap standard down contribution with custom vector
         if !override_map.is_empty() {
@@ -188,7 +203,10 @@ fn sparse_ffn_forward_impl(
         }
     }
 
-    if let Some(bias) = arch.ffn_down_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .ffn_down_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut out, bias);
     }
 
@@ -261,7 +279,11 @@ fn sparse_ffn_forward_full_impl(
             let up_proj = up_sub.dot(&x_row);
             for (i, &feat) in features.iter().enumerate() {
                 let g = gate_proj[i];
-                let activated = if use_gelu { gelu_tanh(g) } else { g * sigmoid(g) };
+                let activated = if use_gelu {
+                    gelu_tanh(g)
+                } else {
+                    g * sigmoid(g)
+                };
                 let val = activated * up_proj[i];
                 sparse_act[i] = val;
                 full_activation[[s, feat]] = val;
@@ -269,14 +291,23 @@ fn sparse_ffn_forward_full_impl(
         } else {
             let up_proj = up_sub.dot(&x_row);
             let mut vals = up_proj.to_vec();
-            if let Some(bias) = arch.ffn_up_bias_key(layer).and_then(|bk| weights.vectors.get(&bk)) {
+            if let Some(bias) = arch
+                .ffn_up_bias_key(layer)
+                .and_then(|bk| weights.vectors.get(&bk))
+            {
                 for (i, &feat) in features.iter().enumerate() {
-                    if feat < bias.len() { vals[i] += bias[feat]; }
+                    if feat < bias.len() {
+                        vals[i] += bias[feat];
+                    }
                 }
             }
             for (i, &feat) in features.iter().enumerate() {
                 let v = vals[i];
-                let val = if use_gelu { gelu_tanh(v) } else { v * sigmoid(v) };
+                let val = if use_gelu {
+                    gelu_tanh(v)
+                } else {
+                    v * sigmoid(v)
+                };
                 sparse_act[i] = val;
                 full_activation[[s, feat]] = val;
             }
@@ -287,7 +318,9 @@ fn sparse_ffn_forward_full_impl(
         // the residual is `silu(gate_override · x) * (up_override · x)`
         // — exactly the install_compiled_slot Python semantics.
         for (i, &feat) in features.iter().enumerate() {
-            let Some(ov) = override_map.get(&feat) else { continue; };
+            let Some(ov) = override_map.get(&feat) else {
+                continue;
+            };
             // Only recompute if at least one of gate / up is overridden.
             if ov.gate.is_none() && ov.up.is_none() {
                 continue;
@@ -295,24 +328,36 @@ fn sparse_ffn_forward_full_impl(
             // Gate dot product (override or original gathered row).
             let g = if let Some(g_ov) = ov.gate {
                 if g_ov.len() == hidden {
-                    g_ov.iter().zip(x_row.iter()).map(|(a, b)| a * b).sum::<f32>()
+                    g_ov.iter()
+                        .zip(x_row.iter())
+                        .map(|(a, b)| a * b)
+                        .sum::<f32>()
                 } else {
                     // Length mismatch — fall through to original.
                     if let Some(ref gate_sub) = gate_sub {
                         gate_sub.row(i).dot(&x_row)
-                    } else { 0.0 }
+                    } else {
+                        0.0
+                    }
                 }
             } else if let Some(ref gate_sub) = gate_sub {
                 gate_sub.row(i).dot(&x_row)
             } else {
                 0.0
             };
-            let activated = if use_gelu { gelu_tanh(g) } else { g * sigmoid(g) };
+            let activated = if use_gelu {
+                gelu_tanh(g)
+            } else {
+                g * sigmoid(g)
+            };
 
             // Up dot product (override or original).
             let up_score = if let Some(u_ov) = ov.up {
                 if u_ov.len() == hidden {
-                    u_ov.iter().zip(x_row.iter()).map(|(a, b)| a * b).sum::<f32>()
+                    u_ov.iter()
+                        .zip(x_row.iter())
+                        .map(|(a, b)| a * b)
+                        .sum::<f32>()
                 } else {
                     up_sub.row(i).dot(&x_row)
                 }
@@ -320,7 +365,11 @@ fn sparse_ffn_forward_full_impl(
                 up_sub.row(i).dot(&x_row)
             };
 
-            let new_act = if is_gated { activated * up_score } else { activated };
+            let new_act = if is_gated {
+                activated * up_score
+            } else {
+                activated
+            };
             sparse_act[i] = new_act;
             full_activation[[s, feat]] = new_act;
         }
@@ -330,14 +379,24 @@ fn sparse_ffn_forward_full_impl(
         let act_view = ndarray::ArrayView1::from(&sparse_act[..k]);
         let out_vec = down_view.dot(&act_view);
         let mut out_row = out.row_mut(s);
-        ndarray::Zip::from(&mut out_row).and(&out_vec).for_each(|o, &v| *o = v);
+        ndarray::Zip::from(&mut out_row)
+            .and(&out_vec)
+            .for_each(|o, &v| *o = v);
 
         for (i, &feat) in features.iter().enumerate() {
-            let Some(ov) = override_map.get(&feat) else { continue; };
-            let Some(d_ov) = ov.down else { continue; };
-            if d_ov.len() != hidden { continue; }
+            let Some(ov) = override_map.get(&feat) else {
+                continue;
+            };
+            let Some(d_ov) = ov.down else {
+                continue;
+            };
+            if d_ov.len() != hidden {
+                continue;
+            }
             let activation = sparse_act[i];
-            if activation.abs() <= 1e-8 { continue; }
+            if activation.abs() <= 1e-8 {
+                continue;
+            }
             // Subtract the dense column contribution and add the override.
             for j in 0..hidden {
                 out_row[j] -= down_view[[j, i]] * activation;
@@ -346,7 +405,10 @@ fn sparse_ffn_forward_full_impl(
         }
     }
 
-    if let Some(bias) = arch.ffn_down_bias_key(layer).and_then(|k| weights.vectors.get(&k)) {
+    if let Some(bias) = arch
+        .ffn_down_bias_key(layer)
+        .and_then(|k| weights.vectors.get(&k))
+    {
         add_bias(&mut out, bias);
     }
 
@@ -410,7 +472,10 @@ pub fn select_top_k_features(
     } else {
         let w_up = weights.tensors.get(&arch.ffn_up_key(layer)).unwrap();
         let mut p = w_up.dot(x_row);
-        if let Some(bias) = arch.ffn_up_bias_key(layer).and_then(|bk| weights.vectors.get(&bk)) {
+        if let Some(bias) = arch
+            .ffn_up_bias_key(layer)
+            .and_then(|bk| weights.vectors.get(&bk))
+        {
             for i in 0..p.len().min(bias.len()) {
                 p[i] += bias[i];
             }
@@ -426,7 +491,11 @@ pub fn select_top_k_features(
         .copied()
         .enumerate()
         .map(|(i, v)| {
-            let act = if use_gelu { gelu_tanh(v) } else { v * sigmoid(v) };
+            let act = if use_gelu {
+                gelu_tanh(v)
+            } else {
+                v * sigmoid(v)
+            };
             (i, act)
         })
         .collect();

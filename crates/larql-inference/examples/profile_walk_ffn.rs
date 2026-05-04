@@ -13,14 +13,19 @@
 
 use std::time::Instant;
 
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let model_path = args.iter().position(|a| a == "--model")
-        .and_then(|i| args.get(i + 1)).map(|s| s.as_str())
+    let model_path = args
+        .iter()
+        .position(|a| a == "--model")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.as_str())
         .unwrap_or("google/gemma-3-4b-it");
-    let vindex_path = args.iter().position(|a| a == "--vindex")
-        .and_then(|i| args.get(i + 1)).map(|s| s.as_str())
+    let vindex_path = args
+        .iter()
+        .position(|a| a == "--vindex")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.as_str())
         .unwrap_or("output/gemma3-4b-v2.vindex");
 
     println!("=== WalkFfn Bottleneck Analysis ===\n");
@@ -30,9 +35,9 @@ fn main() {
     let model = larql_inference::InferenceModel::load(model_path).unwrap();
     let weights = model.weights();
     let vindex_dir = std::path::PathBuf::from(vindex_path);
-    let mut index = larql_vindex::VectorIndex::load_vindex(
-        &vindex_dir, &mut larql_vindex::SilentLoadCallbacks,
-    ).unwrap();
+    let mut index =
+        larql_vindex::VectorIndex::load_vindex(&vindex_dir, &mut larql_vindex::SilentLoadCallbacks)
+            .unwrap();
     let _ = index.load_down_features(&vindex_dir);
     let _ = index.load_up_features(&vindex_dir);
     let _ = index.load_gate_vectors_q4(&vindex_dir);
@@ -41,13 +46,19 @@ fn main() {
     let hidden = weights.hidden_size;
     let intermediate = gate_index.num_features(14);
     let arch = &*weights.arch;
-    let use_gelu = matches!(arch.activation(), larql_models::Activation::GeluTanh | larql_models::Activation::Gelu);
+    let use_gelu = matches!(
+        arch.activation(),
+        larql_models::Activation::GeluTanh | larql_models::Activation::Gelu
+    );
     let is_gated = arch.ffn_type() == larql_models::FfnType::Gated;
 
     println!("  hidden={hidden}, intermediate={intermediate}");
     println!("  activation={:?}, gated={is_gated}", arch.activation());
     println!("  down_features: {}", gate_index.has_down_features());
-    println!("  up_features: {}", gate_index.up_layer_matrix(14).is_some());
+    println!(
+        "  up_features: {}",
+        gate_index.up_layer_matrix(14).is_some()
+    );
 
     // Get a realistic hidden state by running forward to L14
     eprintln!("Running forward to L14 for realistic hidden state...");
@@ -56,20 +67,26 @@ fn main() {
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     let mut h = larql_inference::forward::embed_tokens_pub(weights, &token_ids);
     for layer in 0..14 {
-        let (h_post_attn, _, _) = larql_inference::attention::run_attention_block_gpu(
-            weights, &h, layer, false, None,
-        ).unwrap();
+        let (h_post_attn, _, _) =
+            larql_inference::attention::run_attention_block_gpu(weights, &h, layer, false, None)
+                .unwrap();
         let dense_ffn = larql_inference::WeightFfn { weights };
-        let (h_out, _) = larql_inference::forward::run_ffn(weights, &h_post_attn, layer, &dense_ffn, false);
+        let (h_out, _) =
+            larql_inference::forward::run_ffn(weights, &h_post_attn, layer, &dense_ffn, false);
         h = h_out;
     }
     // Use last position
-    let x = h.slice(ndarray::s![h.shape()[0]-1..h.shape()[0], ..]).to_owned();
+    let x = h
+        .slice(ndarray::s![h.shape()[0] - 1..h.shape()[0], ..])
+        .to_owned();
     eprintln!("  hidden state shape: {:?}\n", x.shape());
 
     let norm_offset = arch.norm_weight_offset();
     let x_normed = larql_inference::forward::apply_norm(
-        weights, &x, &arch.post_attention_layernorm_key(14), norm_offset,
+        weights,
+        &x,
+        &arch.post_attention_layernorm_key(14),
+        norm_offset,
     );
 
     let test_layers = [14, 18, 22, 26, 30];
@@ -77,7 +94,11 @@ fn main() {
     eprintln!("  gate_q4: {}", index.gate_q4_data(14).is_some());
 
     let backend = larql_inference::default_backend();
-    eprintln!("  backend: {} (has_q4={})\n", backend.name(), backend.has_q4());
+    eprintln!(
+        "  backend: {} (has_q4={})\n",
+        backend.name(),
+        backend.has_q4()
+    );
 
     let iters = 20;
 
@@ -90,7 +111,9 @@ fn main() {
 
         // f32 BLAS
         let t = Instant::now();
-        for _ in 0..iters { let _ = gate_index.gate_knn(layer, &x_row, k); }
+        for _ in 0..iters {
+            let _ = gate_index.gate_knn(layer, &x_row, k);
+        }
         let f32_us = t.elapsed().as_micros() as f64 / iters as f64;
 
         // Q4 via backend
@@ -103,7 +126,11 @@ fn main() {
 
         println!("  f32 BLAS gate KNN:  {:>7.0}µs", f32_us);
         if q4_hits.is_some() {
-            println!("  Q4 gate KNN:        {:>7.0}µs  ({:.1}x faster)", q4_us, f32_us / q4_us);
+            println!(
+                "  Q4 gate KNN:        {:>7.0}µs  ({:.1}x faster)",
+                q4_us,
+                f32_us / q4_us
+            );
         } else {
             println!("  Q4 gate KNN:        not available (no Q4 gate data or backend)");
         }
@@ -148,7 +175,11 @@ fn main() {
                 } else {
                     gate_score * larql_inference::ffn::sigmoid(gate_score)
                 };
-                activations[i] = if is_gated { activated_gate * up_scores[i] } else { activated_gate };
+                activations[i] = if is_gated {
+                    activated_gate * up_scores[i]
+                } else {
+                    activated_gate
+                };
             }
         }
         let act_us = t.elapsed().as_micros() as f64 / iters as f64;
@@ -172,7 +203,10 @@ fn main() {
         let t = Instant::now();
         for _ in 0..iters {
             let _ = larql_inference::forward::apply_norm(
-                weights, &x, &arch.post_attention_layernorm_key(layer), norm_offset,
+                weights,
+                &x,
+                &arch.post_attention_layernorm_key(layer),
+                norm_offset,
             );
         }
         let norm_us = t.elapsed().as_micros() as f64 / iters as f64;
@@ -180,14 +214,37 @@ fn main() {
         let total = gate_us + up_us + act_us + down_us + norm_us;
         println!("  Step              µs       %");
         println!("  ──────────────── ────── ─────");
-        println!("  Gate KNN (K={k})  {:>6.0}  {:>4.1}%", gate_us, gate_us / total * 100.0);
-        println!("  Up dots ({k} dots){:>7.0}  {:>4.1}%", up_us, up_us / total * 100.0);
-        println!("  GEGLU activation {:>6.0}  {:>4.1}%", act_us, act_us / total * 100.0);
-        println!("  Down accum ({k}×h){:>6.0}  {:>4.1}%", down_us, down_us / total * 100.0);
-        println!("  Pre-FFN norm     {:>6.0}  {:>4.1}%", norm_us, norm_us / total * 100.0);
+        println!(
+            "  Gate KNN (K={k})  {:>6.0}  {:>4.1}%",
+            gate_us,
+            gate_us / total * 100.0
+        );
+        println!(
+            "  Up dots ({k} dots){:>7.0}  {:>4.1}%",
+            up_us,
+            up_us / total * 100.0
+        );
+        println!(
+            "  GEGLU activation {:>6.0}  {:>4.1}%",
+            act_us,
+            act_us / total * 100.0
+        );
+        println!(
+            "  Down accum ({k}×h){:>6.0}  {:>4.1}%",
+            down_us,
+            down_us / total * 100.0
+        );
+        println!(
+            "  Pre-FFN norm     {:>6.0}  {:>4.1}%",
+            norm_us,
+            norm_us / total * 100.0
+        );
         println!("  ──────────────── ──────");
         println!("  Total            {:>6.0}µs", total);
-        println!("  Non-zero feats:  {}/{k}", activations.iter().filter(|a| a.abs() > 1e-10).count());
+        println!(
+            "  Non-zero feats:  {}/{k}",
+            activations.iter().filter(|a| a.abs() > 1e-10).count()
+        );
     }
 
     // ── K scaling ──
@@ -224,7 +281,11 @@ fn main() {
             let mut out = ndarray::Array1::<f32>::zeros(hidden);
             if let Some(ref dv) = down_view {
                 for &(feat, gate_score) in hits.iter().take(k) {
-                    let act = if use_gelu { larql_inference::ffn::gelu_tanh(gate_score) } else { gate_score * larql_inference::ffn::sigmoid(gate_score) };
+                    let act = if use_gelu {
+                        larql_inference::ffn::gelu_tanh(gate_score)
+                    } else {
+                        gate_score * larql_inference::ffn::sigmoid(gate_score)
+                    };
                     if act.abs() > 1e-10 {
                         out.scaled_add(act, &dv.row(feat));
                     }
@@ -235,8 +296,11 @@ fn main() {
 
         let total = gate_us + up_us + down_us;
         // Dense FFN: gate+up+down = ~9ms (from bench_components)
-        println!("  {k:>5}  {gate_us:>6.0}  {up_us:>6.0}  {:>6}  {down_us:>6.0}  {total:>7.0}   {:.2}x",
-            "-", total / 9000.0);
+        println!(
+            "  {k:>5}  {gate_us:>6.0}  {up_us:>6.0}  {:>6}  {down_us:>6.0}  {total:>7.0}   {:.2}x",
+            "-",
+            total / 9000.0
+        );
     }
 
     // ── Layer variation ──
@@ -248,7 +312,9 @@ fn main() {
         let k = 200;
 
         let t = Instant::now();
-        for _ in 0..iters { let _ = gate_index.gate_knn(layer, &x_row, k); }
+        for _ in 0..iters {
+            let _ = gate_index.gate_knn(layer, &x_row, k);
+        }
         let gate_us = t.elapsed().as_micros() as f64 / iters as f64;
 
         let hits = gate_index.gate_knn(layer, &x_row, k);
@@ -256,7 +322,9 @@ fn main() {
         let t = Instant::now();
         if let Some(uv) = gate_index.up_layer_matrix(layer) {
             for _ in 0..iters {
-                for &(feat, _) in hits.iter().take(k) { let _ = uv.row(feat).dot(&x_row); }
+                for &(feat, _) in hits.iter().take(k) {
+                    let _ = uv.row(feat).dot(&x_row);
+                }
             }
         }
         let up_us = t.elapsed().as_micros() as f64 / iters as f64;
@@ -266,14 +334,23 @@ fn main() {
             for _ in 0..iters {
                 let mut out = ndarray::Array1::<f32>::zeros(hidden);
                 for &(feat, gs) in hits.iter().take(k) {
-                    let act = if use_gelu { larql_inference::ffn::gelu_tanh(gs) } else { gs * larql_inference::ffn::sigmoid(gs) };
-                    if act.abs() > 1e-10 { out.scaled_add(act, &dv.row(feat)); }
+                    let act = if use_gelu {
+                        larql_inference::ffn::gelu_tanh(gs)
+                    } else {
+                        gs * larql_inference::ffn::sigmoid(gs)
+                    };
+                    if act.abs() > 1e-10 {
+                        out.scaled_add(act, &dv.row(feat));
+                    }
                 }
             }
         }
         let down_us = t.elapsed().as_micros() as f64 / iters as f64;
 
-        println!("  L{layer:>2}   {gate_us:>6.0}  {up_us:>6.0}  {down_us:>6.0}  {:>6.0}", gate_us + up_us + down_us);
+        println!(
+            "  L{layer:>2}   {gate_us:>6.0}  {up_us:>6.0}  {down_us:>6.0}  {:>6.0}",
+            gate_us + up_us + down_us
+        );
     }
 
     println!("\n=== Done ===");

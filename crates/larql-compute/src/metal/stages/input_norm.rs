@@ -13,8 +13,8 @@
 //! caller loops over positions. The caller owns the encoder lifecycle —
 //! these helpers only issue dispatches.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// f32-output input RMS norm.
 ///

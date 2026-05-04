@@ -1,4 +1,4 @@
-use crate::{KvStrategy, model_config::ModelConfig};
+use crate::{model_config::ModelConfig, KvStrategy};
 
 /// Strategy 1: Standard FP16 KV cache.
 ///
@@ -25,7 +25,12 @@ impl KvStrategy for StandardKv {
         buf
     }
 
-    fn decode(&self, encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    fn decode(
+        &self,
+        encoded: &[u8],
+        num_vectors: usize,
+        dim: usize,
+    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         let floats_per_set = num_vectors * dim;
         let bytes_per_set = floats_per_set * 2;
 
@@ -90,7 +95,11 @@ fn f16_decode(bytes: [u8; 2]) -> f32 {
         // Subnormal fp16
         let mut f = frac as f32 / 1024.0;
         f *= 2.0f32.powi(-14);
-        if sign == 1 { -f } else { f }
+        if sign == 1 {
+            -f
+        } else {
+            f
+        }
     } else if exp == 0x1F {
         if frac == 0 {
             f32::from_bits((sign << 31) | (0xFF << 23))
@@ -130,7 +139,10 @@ mod tests {
             let decoded = f16_decode(encoded);
             let err = (v - decoded).abs();
             // FP16 has ~3 decimal digits of precision
-            assert!(err < 0.01 * v.abs().max(0.001), "fp16 roundtrip failed for {v}: got {decoded}, err {err}");
+            assert!(
+                err < 0.01 * v.abs().max(0.001),
+                "fp16 roundtrip failed for {v}: got {decoded}, err {err}"
+            );
         }
     }
 

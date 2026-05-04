@@ -35,25 +35,23 @@ pub mod backend;
 pub mod cpu;
 pub mod pipeline;
 
-#[cfg(feature = "metal")]
+#[cfg(all(feature = "metal", target_os = "macos"))]
 pub mod metal;
 
 // ── Re-exports: pipeline types ──
 
 pub use pipeline::{
-    QuantFormat, QuantWeight,
-    NormType, FfnType, Activation,
-    FullPipelineLayer, MoeLayerWeights,
+    Activation, FfnType, FullPipelineLayer, MoeLayerWeights, NormType, QuantFormat, QuantWeight,
 };
 
 // ── Re-exports: backend ──
 
-pub use backend::{ComputeBackend, MatMulOp, dot_proj_gpu, matmul_gpu};
+pub use backend::{dot_proj_gpu, matmul_gpu, ComputeBackend, MatMulOp};
+pub use cpu::ops::linalg::{cholesky, cholesky_inverse, cholesky_solve, ridge_decomposition_solve};
+pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
-pub use cpu::ops::vector::{dot, norm, cosine};
-pub use cpu::ops::linalg::{cholesky, cholesky_solve, cholesky_inverse, ridge_decomposition_solve};
 
-#[cfg(feature = "metal")]
+#[cfg(all(feature = "metal", target_os = "macos"))]
 pub use metal::MetalBackend;
 
 /// Create the best available backend.
@@ -68,7 +66,7 @@ pub use metal::MetalBackend;
 /// println!("{} ({})", backend.name(), backend.device_info());
 /// ```
 pub fn default_backend() -> Box<dyn ComputeBackend> {
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(m) = metal::MetalBackend::new() {
             m.calibrate();

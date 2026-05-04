@@ -12,12 +12,12 @@
 use ndarray::Array2;
 use rayon::prelude::*;
 
-use larql_compute::ComputeBackend;
-use crate::ffn::FfnBackend;
 use crate::ffn::sparse_compute::sparse_ffn_forward;
+use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use crate::vindex::l1_cache::FfnL1Cache;
 use crate::vindex::walk_config::WalkFfnConfig;
+use larql_compute::ComputeBackend;
 
 use larql_vindex::{GateIndex, WalkHit, WalkTrace};
 
@@ -66,7 +66,10 @@ impl<'a> WalkFfn<'a> {
         config: WalkFfnConfig,
     ) -> Self {
         Self {
-            weights, index, config, backend: None,
+            weights,
+            index,
+            config,
+            backend: None,
             trace_residuals: std::cell::RefCell::new(Vec::new()),
             record_trace: false,
             l1_cache: None,
@@ -139,7 +142,11 @@ impl<'a> WalkFfn<'a> {
         Self::new_unlimited(weights, index).with_backend(backend)
     }
 
-    pub fn new_with_trace(weights: &'a ModelWeights, index: &'a dyn GateIndex, top_k: usize) -> Self {
+    pub fn new_with_trace(
+        weights: &'a ModelWeights,
+        index: &'a dyn GateIndex,
+        top_k: usize,
+    ) -> Self {
         Self::new(weights, index, top_k).with_trace()
     }
 
@@ -154,10 +161,7 @@ impl<'a> WalkFfn<'a> {
     /// alignment. Matching the dense FFN by processing every
     /// feature keeps the baseline intact and the installed slot
     /// proportional.
-    pub fn new_unlimited_with_trace(
-        weights: &'a ModelWeights,
-        index: &'a dyn GateIndex,
-    ) -> Self {
+    pub fn new_unlimited_with_trace(weights: &'a ModelWeights, index: &'a dyn GateIndex) -> Self {
         Self::new_unlimited(weights, index).with_trace()
     }
 
@@ -168,7 +172,11 @@ impl<'a> WalkFfn<'a> {
     }
 
     pub fn take_trace(&self) -> WalkTrace {
-        let residuals = self.trace_residuals.borrow_mut().drain(..).collect::<Vec<_>>();
+        let residuals = self
+            .trace_residuals
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
         let mut layers = Vec::with_capacity(residuals.len());
         for (layer, residual) in residuals {
             let r = ndarray::Array1::from_vec(residual);
@@ -177,7 +185,12 @@ impl<'a> WalkFfn<'a> {
                 .into_iter()
                 .filter_map(|(feature, gate_score)| {
                     let meta = self.index.feature_meta(layer, feature)?.clone();
-                    Some(WalkHit { layer, feature, gate_score, meta })
+                    Some(WalkHit {
+                        layer,
+                        feature,
+                        gate_score,
+                        meta,
+                    })
                 })
                 .collect();
             layers.push((layer, walk_hits));
@@ -194,11 +207,7 @@ impl<'a> WalkFfn<'a> {
     ///   4. out += activation * down_mmap[feat]               (scaled vector add)
     ///
     /// Operations: K dot products + K scaled adds per position. No matmuls.
-    fn walk_ffn_sparse(
-        &self,
-        layer: usize,
-        x: &Array2<f32>,
-    ) -> Option<(Array2<f32>, Array2<f32>)> {
+    fn walk_ffn_sparse(&self, layer: usize, x: &Array2<f32>) -> Option<(Array2<f32>, Array2<f32>)> {
         let hidden = x.shape()[1];
         let seq_len = x.shape()[0];
         let intermediate = self.index.num_features(layer);
@@ -236,8 +245,11 @@ impl<'a> WalkFfn<'a> {
         // has touched this layer we can skip them entirely.
         let layer_has_overrides = self.index.has_overrides_at(layer);
         let up_bias_for_layer = if !is_gated {
-            arch.ffn_up_bias_key(layer).and_then(|bk| self.weights.vectors.get(&bk).cloned())
-        } else { None };
+            arch.ffn_up_bias_key(layer)
+                .and_then(|bk| self.weights.vectors.get(&bk).cloned())
+        } else {
+            None
+        };
 
         // K=full gemv fast path. When every feature is active (top-K > N),
         // the per-feature loop is mathematically equivalent to three dense
@@ -268,15 +280,21 @@ impl<'a> WalkFfn<'a> {
         let k_is_full = hits_len_ge_intermediate(&self.config, layer, intermediate);
         if !layer_has_overrides && is_gated && k_is_full {
             let x_slice_for_matmul: Option<&[f32]> = x.as_slice();
-            if let (Some(gate_scores), Some(x_flat)) =
-                (self.index.gate_scores_batch_backend(layer, x, self.backend), x_slice_for_matmul)
-            {
+            if let (Some(gate_scores), Some(x_flat)) = (
+                self.index.gate_scores_batch_backend(layer, x, self.backend),
+                x_slice_for_matmul,
+            ) {
                 // Up leg — native f32 mmap if present, else direct Q4K matmul.
                 let up_scores: Option<ndarray::Array2<f32>> = if let Some(v) = up_native {
                     Some(larql_compute::dot_proj_gpu(x, &v, self.backend))
-                } else if let Some(y) = self.index.q4k_matmul_transb(layer, 1, x_flat, seq_len, self.backend) {
+                } else if let Some(y) =
+                    self.index
+                        .q4k_matmul_transb(layer, 1, x_flat, seq_len, self.backend)
+                {
                     ndarray::Array2::from_shape_vec((seq_len, intermediate), y).ok()
-                } else { None };
+                } else {
+                    None
+                };
 
                 if let Some(up_scores) = up_scores {
                     let activation = if use_gelu {
@@ -291,8 +309,12 @@ impl<'a> WalkFfn<'a> {
                     } else if let Some(act_flat) = act_slice {
                         self.index
                             .q4k_matmul_transb(layer, 2, act_flat, seq_len, self.backend)
-                            .and_then(|y| ndarray::Array2::from_shape_vec((seq_len, hidden), y).ok())
-                    } else { None };
+                            .and_then(|y| {
+                                ndarray::Array2::from_shape_vec((seq_len, hidden), y).ok()
+                            })
+                    } else {
+                        None
+                    };
                     if let Some(out_matmul) = out_matmul {
                         out.assign(&out_matmul);
                         full_activation.assign(&activation);
@@ -319,9 +341,14 @@ impl<'a> WalkFfn<'a> {
             //   2. Q4 gate KNN via compute backend (0.5ms Metal, 1ms CPU Q4)
             //   3. f32 brute-force BLAS (1.1ms) as fallback
             let top_k = self.top_k_for(layer);
-            let hits = self.index.gate_walk(layer, &x_owned, top_k)
-                    .or_else(|| self.backend.and_then(|be| self.index.gate_knn_q4(layer, &x_owned, top_k, be)))
-                    .unwrap_or_else(|| self.index.gate_knn(layer, &x_owned, top_k));
+            let hits = self
+                .index
+                .gate_walk(layer, &x_owned, top_k)
+                .or_else(|| {
+                    self.backend
+                        .and_then(|be| self.index.gate_knn_q4(layer, &x_owned, top_k, be))
+                })
+                .unwrap_or_else(|| self.index.gate_knn(layer, &x_owned, top_k));
 
             let mut out_row = out.row_mut(s);
 
@@ -330,15 +357,16 @@ impl<'a> WalkFfn<'a> {
             // calls `larql_models::quant::ggml::q4k_row_dot` directly (no
             // dyn dispatch per feature). On M3 Max this takes 31B K=full
             // from ~15 s to ~2 s per forward.
-            let parallelisable = !layer_has_overrides
-                && is_gated
-                && hits.len() >= 512
-                && down_native.is_none();
+            let parallelisable =
+                !layer_has_overrides && is_gated && hits.len() >= 512 && down_native.is_none();
             // Populate the down cache here — only when the parallel path
             // will actually use it. At K=full the gemv fast path already
             // returned, so this pays for itself only on sparse K layers.
-            let down_cache_local: Option<std::sync::Arc<Vec<f32>>> =
-                if parallelisable { self.index.q4k_ffn_layer(layer, 2) } else { None };
+            let down_cache_local: Option<std::sync::Arc<Vec<f32>>> = if parallelisable {
+                self.index.q4k_ffn_layer(layer, 2)
+            } else {
+                None
+            };
             if let Some(down_arc) = down_cache_local.as_ref().filter(|_| parallelisable) {
                 let down_data: &[f32] = down_arc.as_slice();
                 // Hoist up-side Q4K slice out of the hot loop — one dyn call
@@ -366,8 +394,10 @@ impl<'a> WalkFfn<'a> {
                                 let start = feat * bytes_per_row;
                                 let end = start + bytes_per_row;
                                 larql_models::quant::ggml::q4k_row_dot(
-                                    &up_bytes[start..end], x_slice,
-                                ).unwrap_or(0.0)
+                                    &up_bytes[start..end],
+                                    x_slice,
+                                )
+                                .unwrap_or(0.0)
                             } else {
                                 // Unknown up format — cheapest is to skip this
                                 // feature. Accuracy at K=full may suffer but the
@@ -413,7 +443,9 @@ impl<'a> WalkFfn<'a> {
                     // early-out skips the HashMap lookup on clean layers.
                     let up_ov = if layer_has_overrides {
                         self.index.up_override(layer, feat)
-                    } else { None };
+                    } else {
+                        None
+                    };
                     let up_score = if let Some(up_ov) = up_ov {
                         if up_ov.len() == hidden {
                             ndarray::ArrayView1::from(up_ov).dot(&x_row)
@@ -436,9 +468,15 @@ impl<'a> WalkFfn<'a> {
                 } else {
                     let mut v = gate_score;
                     if let Some(ref bias) = up_bias_for_layer {
-                        if feat < bias.len() { v += bias[feat]; }
+                        if feat < bias.len() {
+                            v += bias[feat];
+                        }
                     }
-                    if use_gelu { crate::ffn::gelu_tanh(v) } else { v * crate::ffn::sigmoid(v) }
+                    if use_gelu {
+                        crate::ffn::gelu_tanh(v)
+                    } else {
+                        v * crate::ffn::sigmoid(v)
+                    }
                 };
 
                 full_activation[[s, feat]] = act;
@@ -447,7 +485,9 @@ impl<'a> WalkFfn<'a> {
                     // Down: INSERT override (rare) > native mmap > Q4K cache.
                     let down_ov = if layer_has_overrides {
                         self.index.down_override(layer, feat)
-                    } else { None };
+                    } else {
+                        None
+                    };
                     if let Some(override_down) = down_ov {
                         if override_down.len() == hidden {
                             out_row.scaled_add(act, &ndarray::ArrayView1::from(override_down));
@@ -461,9 +501,10 @@ impl<'a> WalkFfn<'a> {
                         // against the transposed cache — populates it on
                         // demand; sized ~intermediate×hidden per layer.
                         let out_slice = out_row.as_slice_mut().unwrap();
-                        if !self.index.q4k_ffn_row_scaled_add_via_cache(
-                            layer, 2, feat, act, out_slice,
-                        ) {
+                        if !self
+                            .index
+                            .q4k_ffn_row_scaled_add_via_cache(layer, 2, feat, act, out_slice)
+                        {
                             return None;
                         }
                     }
@@ -472,7 +513,8 @@ impl<'a> WalkFfn<'a> {
         }
 
         // Down bias
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
+        if let Some(bias) = arch
+            .ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
         {
             crate::forward::add_bias(&mut out, bias);
@@ -493,7 +535,9 @@ impl<'a> WalkFfn<'a> {
 
         let q4_mmap = self.index.interleaved_q4_mmap_ref()?;
         let intermediate = self.index.num_features(layer);
-        if intermediate == 0 { return None; }
+        if intermediate == 0 {
+            return None;
+        }
         let hidden = x.shape()[1];
         let seq_len = x.shape()[0];
 
@@ -502,8 +546,10 @@ impl<'a> WalkFfn<'a> {
         let layer_start = layer * q4_bytes_per_layer;
 
         let gate_q4 = &q4_mmap[layer_start..layer_start + q4_bytes_per_matrix];
-        let up_q4 = &q4_mmap[layer_start + q4_bytes_per_matrix..layer_start + 2 * q4_bytes_per_matrix];
-        let down_q4 = &q4_mmap[layer_start + 2 * q4_bytes_per_matrix..layer_start + 3 * q4_bytes_per_matrix];
+        let up_q4 =
+            &q4_mmap[layer_start + q4_bytes_per_matrix..layer_start + 2 * q4_bytes_per_matrix];
+        let down_q4 =
+            &q4_mmap[layer_start + 2 * q4_bytes_per_matrix..layer_start + 3 * q4_bytes_per_matrix];
 
         // Prefetch next layer
         self.index.prefetch_interleaved_q4_layer(layer + 1);
@@ -518,14 +564,16 @@ impl<'a> WalkFfn<'a> {
         let mut full_activation = Array2::<f32>::zeros((seq_len, intermediate));
 
         // Check for Metal Q4 backend
-        let metal_q4 = self.backend.and_then(|be| if be.has_q4() { Some(be) } else { None });
+        let metal_q4 = self
+            .backend
+            .and_then(|be| if be.has_q4() { Some(be) } else { None });
 
         if let Some(be) = metal_q4 {
             // Metal: ONE GPU submission for all gate+up across ALL seq positions
             let x_flat = x.as_slice().unwrap();
-            let (all_gate, all_up) = be.q4_matvec_pair_batch(
-                gate_q4, up_q4, x_flat, seq_len, intermediate, hidden,
-            ).unwrap();
+            let (all_gate, all_up) = be
+                .q4_matvec_pair_batch(gate_q4, up_q4, x_flat, seq_len, intermediate, hidden)
+                .unwrap();
 
             // GEGLU on CPU (element-wise, all positions)
             let mut all_activation: Vec<Vec<f32>> = Vec::with_capacity(seq_len);
@@ -546,9 +594,13 @@ impl<'a> WalkFfn<'a> {
 
             // Down: one submission per position (GPU vecmat)
             for (s, activation_row) in all_activation.iter().enumerate().take(seq_len) {
-                let down_result = be.q4_vecmat(activation_row, down_q4, intermediate, hidden).unwrap();
+                let down_result = be
+                    .q4_vecmat(activation_row, down_q4, intermediate, hidden)
+                    .unwrap();
                 let mut out_row = out.row_mut(s);
-                for j in 0..hidden { out_row[j] = down_result[j]; }
+                for j in 0..hidden {
+                    out_row[j] = down_result[j];
+                }
             }
         } else {
             // C kernel path: vdotq for gate/up, scalar for down
@@ -573,11 +625,14 @@ impl<'a> WalkFfn<'a> {
 
                 let down_result = q4_vecmat::dispatch(&activation, down_q4, intermediate, hidden);
                 let mut out_row = out.row_mut(s);
-                for j in 0..hidden { out_row[j] = down_result[j]; }
+                for j in 0..hidden {
+                    out_row[j] = down_result[j];
+                }
             }
         }
 
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
+        if let Some(bias) = arch
+            .ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
         {
             crate::forward::add_bias(&mut out, bias);
@@ -623,7 +678,8 @@ impl<'a> WalkFfn<'a> {
         // down: activation @ down_matrix (contiguous, right after up in memory)
         let mut out = larql_compute::matmul_gpu(&activation, &down_view, self.backend);
 
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
+        if let Some(bias) = arch
+            .ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
         {
             crate::forward::add_bias(&mut out, bias);
@@ -668,7 +724,8 @@ impl<'a> WalkFfn<'a> {
         // Down: activation @ down_matrix (mmap)
         let mut out = larql_compute::matmul_gpu(&activation, &down_view, self.backend);
 
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
+        if let Some(bias) = arch
+            .ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
         {
             crate::forward::add_bias(&mut out, bias);
@@ -697,12 +754,13 @@ impl<'a> WalkFfn<'a> {
 
         let dequant = |bytes: &[u8], fmt: &str, rows: usize, cols: usize| -> Array2<f32> {
             let padded = rows * cols;
-            let flat = match fmt {
-                "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded)
-                    .expect("q6k dequant"),
-                _ => larql_models::quant::ggml::dequantize_q4_k(bytes, padded)
-                    .expect("q4k dequant"),
-            };
+            let flat =
+                match fmt {
+                    "Q6_K" => larql_models::quant::ggml::dequantize_q6_k(bytes, padded)
+                        .expect("q6k dequant"),
+                    _ => larql_models::quant::ggml::dequantize_q4_k(bytes, padded)
+                        .expect("q4k dequant"),
+                };
             Array2::from_shape_vec((rows, cols), flat[..rows * cols].to_vec())
                 .expect("dequant shape mismatch")
         };
@@ -732,11 +790,7 @@ impl<'a> WalkFfn<'a> {
     /// matrix directly from the feature-major mmap (zero-copy BLAS gemm).
     /// Total: gate(105MB) + up(105MB) + down_mmap(105MB) = 315MB.
     /// Same bandwidth as dense but down read is from mmap (potentially cached).
-    fn walk_ffn_exact(
-        &self,
-        layer: usize,
-        x: &Array2<f32>,
-    ) -> (Array2<f32>, Array2<f32>) {
+    fn walk_ffn_exact(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let arch = &*self.weights.arch;
 
         // If FFN weights were dropped (walk-only mode), fall through to full mmap
@@ -769,7 +823,8 @@ impl<'a> WalkFfn<'a> {
             }
         } else {
             let mut proj = crate::forward::dot_proj(x, w_up);
-            if let Some(bias) = arch.ffn_up_bias_key(layer)
+            if let Some(bias) = arch
+                .ffn_up_bias_key(layer)
                 .and_then(|bk| self.weights.vectors.get(&bk))
             {
                 crate::forward::add_bias(&mut proj, bias);
@@ -792,7 +847,8 @@ impl<'a> WalkFfn<'a> {
         };
 
         let mut out = out;
-        if let Some(bias) = arch.ffn_down_bias_key(layer)
+        if let Some(bias) = arch
+            .ffn_down_bias_key(layer)
             .and_then(|k| self.weights.vectors.get(&k))
         {
             crate::forward::add_bias(&mut out, bias);
@@ -807,14 +863,12 @@ impl<'a> FfnBackend for WalkFfn<'a> {
         self.forward_with_activation(layer, x).0
     }
 
-    fn forward_with_activation(
-        &self,
-        layer: usize,
-        x: &Array2<f32>,
-    ) -> (Array2<f32>, Array2<f32>) {
+    fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let num_features = self.index.num_features(layer);
         if num_features == 0 {
-            let dense_ffn = crate::ffn::WeightFfn { weights: self.weights };
+            let dense_ffn = crate::ffn::WeightFfn {
+                weights: self.weights,
+            };
             return dense_ffn.forward_with_activation(layer, x);
         }
 
@@ -860,7 +914,8 @@ impl<'a> FfnBackend for WalkFfn<'a> {
                 if let Some(cached) = cache.get(layer, key) {
                     let hidden = x.shape()[1];
                     let mut out = Array2::<f32>::zeros((1, hidden));
-                    out.row_mut(0).assign(&ndarray::ArrayView1::from(cached.as_slice()));
+                    out.row_mut(0)
+                        .assign(&ndarray::ArrayView1::from(cached.as_slice()));
                     return (out, Array2::zeros((1, num_features)));
                 }
             }
@@ -935,7 +990,11 @@ impl<'a> FfnBackend for WalkFfn<'a> {
                     .filter(|o| o.gate.is_some() || o.up.is_some() || o.down.is_some())
                     .collect();
                 break 'routing crate::ffn::sparse_ffn_forward_with_full_overrides(
-                    self.weights, layer, x, &features, &slot_overrides,
+                    self.weights,
+                    layer,
+                    x,
+                    &features,
+                    &slot_overrides,
                 );
             }
             break 'routing sparse_ffn_forward(self.weights, layer, x, &features);

@@ -1,6 +1,6 @@
-use kv_cache_benchmark::*;
-use kv_cache_benchmark::model_config::ModelConfig;
 use kv_cache_benchmark::markov_residual::MarkovResidual;
+use kv_cache_benchmark::model_config::ModelConfig;
+use kv_cache_benchmark::*;
 
 #[test]
 fn test_markov_cold_tier_size() {
@@ -61,7 +61,10 @@ fn test_markov_much_smaller_than_standard() {
     // At 4K the window still dominates, but MarkovRS is still smaller than standard.
     let std_4k = standard.memory_bytes(&config, 4096);
     let mrk_4k = markov.memory_bytes(&config, 4096);
-    assert!(mrk_4k < std_4k, "Markov RS should be smaller than standard KV at 4K");
+    assert!(
+        mrk_4k < std_4k,
+        "Markov RS should be smaller than standard KV at 4K"
+    );
 }
 
 #[test]
@@ -69,12 +72,8 @@ fn test_markov_encode_decode() {
     let strategy = MarkovResidual::new(4);
     let dim = 8;
 
-    let keys: Vec<Vec<f32>> = (0..10)
-        .map(|i| vec![i as f32; dim])
-        .collect();
-    let values: Vec<Vec<f32>> = (0..10)
-        .map(|i| vec![i as f32 + 100.0; dim])
-        .collect();
+    let keys: Vec<Vec<f32>> = (0..10).map(|i| vec![i as f32; dim]).collect();
+    let values: Vec<Vec<f32>> = (0..10).map(|i| vec![i as f32 + 100.0; dim]).collect();
 
     let encoded = strategy.encode(&keys, &values);
     let (dec_keys, _dec_values) = strategy.decode(&encoded, 10, dim);
@@ -121,7 +120,8 @@ fn test_markov_reconstruction_exact() {
             assert!(
                 (dec_keys[i][j] - keys[i][j]).abs() < 1e-6,
                 "Not bit-perfect at [{i}][{j}]: {} vs {}",
-                dec_keys[i][j], keys[i][j],
+                dec_keys[i][j],
+                keys[i][j],
             );
         }
     }

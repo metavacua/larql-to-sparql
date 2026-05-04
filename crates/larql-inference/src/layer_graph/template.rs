@@ -1,8 +1,8 @@
 use ndarray::Array2;
 
+use super::{LayerGraph, LayerOutput};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput};
 
 // ── Template detection ──
 
@@ -24,10 +24,18 @@ pub fn detect_template(token_ids: &[u32], templates: &[TemplatePattern]) -> Opti
 
     for (i, tmpl) in templates.iter().enumerate() {
         let prefix = &tmpl.prefix_tokens;
-        if prefix.len() > token_ids.len() { continue; }
+        if prefix.len() > token_ids.len() {
+            continue;
+        }
         // Check if tokens start with this prefix (skipping BOS if present)
-        let offset = if token_ids.len() > prefix.len() && token_ids[0] != prefix[0] { 1 } else { 0 };
-        if offset + prefix.len() > token_ids.len() { continue; }
+        let offset = if token_ids.len() > prefix.len() && token_ids[0] != prefix[0] {
+            1
+        } else {
+            0
+        };
+        if offset + prefix.len() > token_ids.len() {
+            continue;
+        }
         let matches = prefix.iter().zip(&token_ids[offset..]).all(|(a, b)| a == b);
         if matches && prefix.len() > best_len {
             best = Some(i);
@@ -77,8 +85,13 @@ impl TemplateUniverse {
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
             let trace = crate::forward::trace_forward_full(
-                weights, &token_ids, &all_layers,
-                true, 500, false, ffn,
+                weights,
+                &token_ids,
+                &all_layers,
+                true,
+                500,
+                false,
+                ffn,
             );
 
             for (layer, acts) in &trace.activations {
@@ -91,7 +104,8 @@ impl TemplateUniverse {
             }
         }
 
-        let features = layer_features.into_iter()
+        let features = layer_features
+            .into_iter()
             .map(|(layer, set)| {
                 let mut v: Vec<usize> = set.into_iter().collect();
                 v.sort_unstable();
@@ -99,7 +113,10 @@ impl TemplateUniverse {
             })
             .collect();
 
-        Self { name: name.to_string(), features }
+        Self {
+            name: name.to_string(),
+            features,
+        }
     }
 
     /// Get the feature universe for a layer.
@@ -151,10 +168,16 @@ impl<'a> LayerGraph for GuidedWalkLayerGraph<'a> {
         // FFN: guided walk — score only template universe features
         let residual = guided_walk_ffn(weights, &h_post_attn, layer, self.universe, self.index);
 
-        Some(LayerOutput { residual, activation: None, attention: None })
+        Some(LayerOutput {
+            residual,
+            activation: None,
+            attention: None,
+        })
     }
 
-    fn name(&self) -> &str { "guided-walk" }
+    fn name(&self) -> &str {
+        "guided-walk"
+    }
 }
 
 /// Guided walk FFN: pre-FFN norm → gate scores for universe → GEGLU → accumulate.
@@ -233,7 +256,11 @@ fn guided_walk_ffn(
                 activated_gate * up_score
             } else {
                 let v = gate_score;
-                if use_gelu { crate::ffn::gelu_tanh(v) } else { v * crate::ffn::sigmoid(v) }
+                if use_gelu {
+                    crate::ffn::gelu_tanh(v)
+                } else {
+                    v * crate::ffn::sigmoid(v)
+                }
             };
 
             if act.abs() > 1e-10 {
