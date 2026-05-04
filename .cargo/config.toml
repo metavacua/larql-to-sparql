@@ -1,0 +1,14 @@
+# Cargo configuration for cross-platform builds
+
+[build]
+# Use parallel jobs by default
+jobs = 0
+
+# Android cross-compilation configuration
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android-clang"
+ar = "aarch64-linux-android-ar"
+
+[target.armv7-linux-androideabi]
+linker = "armv7a-linux-androideabi-clang"
+ar = "armv7a-linux-androideabi-ar"
