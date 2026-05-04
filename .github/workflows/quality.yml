@@ -294,7 +294,7 @@ jobs:
     needs: [clippy, test, audit, deny]
     # Skipped on cron because clippy/test are also skipped on cron;
     # there is nothing to aggregate.
-    if: github.event_name != 'schedule'
+    if: github.event_name != 'schedule' && !contains(needs.*.result, 'failure')
     steps:
       - name: All quality checks passed
         run: |
@@ -305,3 +305,12 @@ jobs:
           echo "compliance pipeline spec, code scanning is out-of-scope"
           echo "for the candidate-validity gate; this workflow is the"
           echo "separate carrier required by that policy."
+
+  report-quality-errors:
+    name: Report quality check failures
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request' && github.event_name != 'schedule' && contains(needs.*.result, 'failure')
+    needs: [clippy, test, audit, deny]
+    uses: ./.github/workflows/error-report.yml
+    with:
+      workflow_name: quality

@@ -198,8 +198,18 @@ jobs:
     name: candidate validity (A5)
     runs-on: ubuntu-24.04
     needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
+    if: ${{ !contains(needs.*.result, 'failure') }}
     steps:
       - name: All deterministic checks passed
         run: |
           echo "Branch is a valid candidate extension of the development branch."
           echo "Per Axiom A5 this does NOT decide merge, close, or release."
+
+  report-validation-errors:
+    name: Report validation failures
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
+    uses: ./.github/workflows/error-report.yml
+    with:
+      workflow_name: validate

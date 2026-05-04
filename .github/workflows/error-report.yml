@@ -1,215 +1,199 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# Error reporting and aggregation workflow.
+# Error reporting and aggregation workflow (reusable).
 #
-# When quality.yml or validate.yml fail, this workflow:
-# 1. Fetches logs from the failed workflow run
-# 2. Extracts tool-specific errors (Clippy, Cargo test, REUSE lint, etc.)
-# 3. Sanitizes outputs to remove security-sensitive information
-# 4. Posts organized PR comments per failed tool/checker
+# Called by quality.yml and validate.yml when jobs fail. Fetches logs from
+# the current workflow run, extracts tool-specific errors, sanitizes
+# security-sensitive data, and posts organized PR comments per failed
+# tool/checker.
 #
-# This consolidates error reporting so contributors can see diagnostic
-# details directly in the PR without navigating to the Actions UI.
+# This centralizes error reporting so contributors see diagnostic details
+# directly in the PR without navigating to the Actions UI.
 
 name: error-report
 
 on:
-  workflow_run:
-    workflows: [quality, validate]
-    types: [completed]
+  workflow_call:
+    inputs:
+      workflow_name:
+        required: true
+        type: string
+        description: "Name of the workflow that failed (e.g., 'quality' or 'validate')"
 
 permissions:
+  pull-requests: write
   contents: read
   actions: read
-  pull-requests: write
 
 jobs:
-  # Collect and post error summaries for any failed jobs
-  report-errors:
-    name: Report errors from failed workflow
+  report-failures:
+    name: Post error comments to PR
     runs-on: ubuntu-24.04
-    if: github.event.workflow_run.conclusion == 'failure'
+    if: github.event_name == 'pull_request' || github.event.pull_request != null
     steps:
-      - name: Checkout (for scripts)
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Download workflow logs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          REPO: ${{ github.repository }}
-        run: |
-          # Fetch all jobs in the failed workflow run
-          mkdir -p workflow-logs
-
-          jobs_json=$(gh api repos/${REPO}/actions/runs/${RUN_ID}/jobs --paginate --jq '.jobs[] | select(.conclusion == "failure") | {id: .id, name: .name}' | jq -s '.')
-
-          if [ "$jobs_json" == "[]" ] || [ -z "$jobs_json" ]; then
-            echo "No failed jobs found."
-            exit 0
-          fi
-
-          # For each failed job, download its logs and save with job name
-          echo "$jobs_json" | jq -r '.[] | "\(.id),\(.name)"' | while IFS=',' read -r job_id job_name; do
-            echo "Downloading logs for job ${job_id} (${job_name})..."
-            # Sanitize job name for filename
-            safe_name=$(echo "$job_name" | tr ' /' '_' | tr -dc '[:alnum:]_')
-            gh api repos/${REPO}/actions/jobs/${job_id}/logs > "workflow-logs/${safe_name}.log" 2>&1 || true
-          done
-
-          echo "Downloaded logs:"
-          ls -la workflow-logs/ || echo "No logs found"
-
-      - name: Extract and post errors per tool
+      - name: Fetch workflow logs and post errors
         uses: actions/github-script@v7
         env:
-          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          WORKFLOW_NAME: ${{ inputs.workflow_name }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
         with:
           script: |
-            const fs = require('fs');
-            const path = require('path');
+            const workflow_name = process.env.WORKFLOW_NAME;
+            const run_id = process.env.RUN_ID;
+            const repo_parts = process.env.REPO.split('/');
+            const owner = repo_parts[0];
+            const repo = repo_parts[1];
 
-            // Skip if this is not a PR
-            if (!context.payload.workflow_run.pull_requests ||
-                context.payload.workflow_run.pull_requests.length === 0) {
-              console.log('Skipping: workflow_run is not associated with a PR');
+            // Get PR number from context
+            let pr_number = null;
+            if (context.payload.pull_request) {
+              pr_number = context.payload.pull_request.number;
+            } else if (context.issue && context.issue.number) {
+              pr_number = context.issue.number;
+            }
+
+            if (!pr_number) {
+              console.log('Skipping: not associated with a pull request');
               return;
             }
 
-            const pr_number = context.payload.workflow_run.pull_requests[0].number;
-            const workflow_name = process.env.WORKFLOW_NAME;
-            const run_url = process.env.RUN_URL;
+            console.log(`Reporting errors for ${workflow_name} run ${run_id} on PR ${pr_number}`);
 
-            // Parse logs to extract errors by tool
-            const logsDir = 'workflow-logs';
-            const toolErrors = {};
+            // Fetch all jobs from the workflow run
+            let jobs = [];
+            try {
+              const response = await github.rest.actions.listJobsForWorkflowRun({
+                owner: owner,
+                repo: repo,
+                run_id: parseInt(run_id),
+              });
+              jobs = response.data.jobs || [];
+            } catch (err) {
+              console.error('Failed to fetch jobs:', err);
+              return;
+            }
 
-            if (!fs.existsSync(logsDir)) {
-              console.log('No logs directory found');
+            // Filter for failed jobs
+            const failedJobs = jobs.filter(job => job.conclusion === 'failure');
+            if (failedJobs.length === 0) {
+              console.log('No failed jobs found');
               return;
             }
 
             // Helper: sanitize sensitive information
-            function sanitizeLogs(logs) {
-              let sanitized = logs;
+            function sanitizeOutput(output) {
+              let sanitized = output;
 
-              // GitHub tokens (ghp_, ghu_, ghs_, ghat_)
+              // GitHub tokens
               sanitized = sanitized.replace(/g[hp][hs]t?_[A-Za-z0-9_]{36,255}/g, '***REDACTED_TOKEN***');
 
               // AWS keys
               sanitized = sanitized.replace(/AKIA[0-9A-Z]{16}/g, '***REDACTED_AWS_KEY***');
 
-              // API keys in common formats
+              // API keys and secrets
               sanitized = sanitized.replace(/api[_-]?key\s*[=:]\s*[^\s,;]+/gi, 'api_key=***REDACTED***');
               sanitized = sanitized.replace(/secret\s*[=:]\s*[^\s,;]+/gi, 'secret=***REDACTED***');
+              sanitized = sanitized.replace(/password\s*[=:]\s*[^\s,;]+/gi, 'password=***REDACTED***');
+              sanitized = sanitized.replace(/token\s*[=:]\s*[^\s,;]+/gi, 'token=***REDACTED***');
 
               return sanitized;
             }
 
-            // Helper: extract error sections from logs
-            function extractErrorSections(logContent) {
-              const lines = logContent.split('\n');
-              const errorSections = [];
-              let currentSection = [];
-              let isErrorContext = false;
-
-              for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-
-                // Detect error lines (::error format and common patterns)
-                if (line.includes('::error') ||
-                    line.match(/^error(\[|:|\s)/i) ||
-                    line.includes('failed') && line.includes('error') ||
-                    (isErrorContext && currentSection.length < 30)) {
-
-                  if (!isErrorContext && currentSection.length > 0) {
-                    // Save previous section
-                    if (currentSection.length > 0) {
-                      errorSections.push(currentSection.join('\n'));
-                    }
-                    currentSection = [];
-                  }
-
-                  isErrorContext = true;
-                  currentSection.push(line);
-                } else if (isErrorContext) {
-                  // Continue context for a bit
-                  if (currentSection.length < 30) {
-                    currentSection.push(line);
-                  } else {
-                    // Section is long enough, save it
-                    errorSections.push(currentSection.join('\n'));
-                    currentSection = [];
-                    isErrorContext = false;
-                  }
-                }
-              }
-
-              if (currentSection.length > 0) {
-                errorSections.push(currentSection.join('\n'));
-              }
-
-              return errorSections.filter(s => s.trim().length > 0);
-            }
-
-            // Helper: identify tool from filename
-            function identifyTool(fileName) {
-              const lower = fileName.toLowerCase();
+            // Helper: identify tool from job name
+            function identifyTool(jobName) {
+              const lower = jobName.toLowerCase();
 
               if (lower.includes('clippy')) return 'clippy';
               if (lower.includes('test')) return 'test';
               if (lower.includes('audit')) return 'audit';
               if (lower.includes('deny')) return 'deny';
               if (lower.includes('provenance') || lower.includes('reuse')) return 'reuse';
-              if (lower.includes('first')) return 'licenses';
+              if (lower.includes('first') || (lower.includes('license') && !lower.includes('test'))) return 'licenses';
               if (lower.includes('commit') || lower.includes('cocogitto')) return 'commits';
               if (lower.includes('changelog') || lower.includes('cliff')) return 'changelog';
 
               return null;
             }
 
-            // Read all log files and extract errors
-            try {
-              const files = fs.readdirSync(logsDir).filter(f => f.endsWith('.log'));
+            // Helper: extract error sections from log text
+            function extractErrors(logText) {
+              const lines = logText.split('\n');
+              const errors = [];
+              let currentError = [];
 
-              if (files.length === 0) {
-                console.log('No log files found');
-                return;
-              }
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const isErrorLine = line.match(/^error(\[|:|\s)/i) ||
+                                   line.includes('error:') ||
+                                   line.includes('::error');
 
-              for (const file of files) {
-                const filePath = path.join(logsDir, file);
-                const logContent = fs.readFileSync(filePath, 'utf-8');
-                const tool = identifyTool(file);
-
-                if (!tool) {
-                  console.log(`Skipping ${file}: could not identify tool`);
-                  continue;
-                }
-
-                const errorSections = extractErrorSections(logContent);
-
-                if (errorSections.length > 0) {
-                  // Sanitize all error sections
-                  const sanitized = errorSections.map(s => sanitizeLogs(s));
-
-                  if (!toolErrors[tool]) {
-                    toolErrors[tool] = [];
+                if (isErrorLine) {
+                  if (currentError.length > 0) {
+                    errors.push(currentError.join('\n'));
+                    currentError = [];
                   }
-                  toolErrors[tool].push(...sanitized);
+                  currentError.push(line);
+                } else if (currentError.length > 0) {
+                  currentError.push(line);
+                  // Limit error context size
+                  if (currentError.length > 30) {
+                    errors.push(currentError.join('\n'));
+                    currentError = [];
+                  }
                 }
               }
-            } catch (err) {
-              console.error('Error reading logs:', err);
-              return;
+
+              if (currentError.length > 0) {
+                errors.push(currentError.join('\n'));
+              }
+
+              return errors.filter(e => e.trim().length > 0);
             }
 
-            // Post comments for each tool with errors
+            // Fetch logs and group errors by tool
+            const toolErrors = {};
+            const run_url = `${context.payload.repository.html_url}/actions/runs/${run_id}`;
+
+            for (const job of failedJobs) {
+              const tool = identifyTool(job.name);
+              if (!tool) {
+                console.log(`Skipping ${job.name}: could not identify tool`);
+                continue;
+              }
+
+              // Fetch job logs
+              let logContent = '';
+              try {
+                const response = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner: owner,
+                  repo: repo,
+                  job_id: job.id,
+                });
+                logContent = response.data;
+              } catch (err) {
+                console.log(`Could not fetch logs for job ${job.id}:`, err.message);
+                continue;
+              }
+
+              // Extract errors
+              const errors = extractErrors(logContent);
+              if (errors.length === 0) {
+                console.log(`No errors found in ${job.name}`);
+                continue;
+              }
+
+              // Sanitize
+              const sanitized = errors.map(e => sanitizeOutput(e));
+
+              if (!toolErrors[tool]) {
+                toolErrors[tool] = [];
+              }
+              toolErrors[tool].push(...sanitized);
+            }
+
+            // Tool display names
             const toolLabels = {
               'clippy': '🦀 Clippy (Rust Linting)',
               'test': '🧪 Test Suite',
@@ -221,17 +205,19 @@ jobs:
               'changelog': '📖 CHANGELOG'
             };
 
+            // Post comments for each tool
             for (const [tool, errors] of Object.entries(toolErrors)) {
               if (errors.length === 0) continue;
 
-              // Combine error sections with separator
-              let errorText = errors.join('\n\n---\n\n');
+              // Combine errors
+              let errorText = errors.slice(0, 3).join('\n\n---\n\n');
+
+              // Truncate if needed
               if (errorText.length > 60000) {
                 errorText = errorText.substring(0, 60000) + '\n\n... (output truncated)';
               }
 
               const title = toolLabels[tool] || tool;
-
               const body = [
                 `## ❌ ${title}`,
                 '',
@@ -244,12 +230,12 @@ jobs:
 
               try {
                 await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
+                  owner: owner,
+                  repo: repo,
                   issue_number: pr_number,
                   body: body,
                 });
-                console.log(`Posted error comment for tool: ${tool}`);
+                console.log(`Posted error comment for: ${tool}`);
               } catch (err) {
                 console.error(`Failed to post comment for ${tool}:`, err);
               }
