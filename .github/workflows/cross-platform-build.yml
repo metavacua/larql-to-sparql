@@ -208,6 +208,18 @@ jobs:
           ndk-version: r27
           link-to-sdk: true
 
+      - name: Configure Android NDK environment
+        run: |
+          # Verify NDK installation
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+          ls -la "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" 2>/dev/null | head -5 || echo "NDK toolchain not found; checking alternatives..."
+
+          # Add Android NDK toolchain to PATH
+          echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+          # Export for cargo
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+
       - name: Add Android target
         run: rustup target add ${{ matrix.android-target }}
 
