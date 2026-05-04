@@ -198,13 +198,18 @@ phase_python_setup() {
         return 1
     fi
 
-    log_info "Python version:"
-    python3 --version
+    # Verify Python version matches requirement
+    local py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+    log_info "Python version: $py_version"
+    if [[ "$py_version" != "$PYTHON_VERSION" ]]; then
+        log_warning "Python version mismatch: expected $PYTHON_VERSION, found $py_version"
+    fi
 
     # Check if uv is installed
     if ! command_exists uv; then
         log_warning "uv is not installed. Installing..."
-        pip3 install uv
+        python3 -m pip install --user uv
+        export PATH="$HOME/.local/bin:$PATH"
         log_success "uv installed"
     else
         log_success "uv is installed"
@@ -232,7 +237,8 @@ phase_precommit_hooks() {
 
     if ! command_exists pre-commit; then
         log_warning "pre-commit is not installed. Installing via pip3..."
-        pip3 install pre-commit
+        python3 -m pip install --user pre-commit
+        export PATH="$HOME/.local/bin:$PATH"
     fi
 
     log_info "Installing pre-commit hooks..."
@@ -254,9 +260,14 @@ phase_cicd_tools() {
         log_info "Installing cocogitto $COCOGITTO_VERSION..."
         case "$(uname -s)" in
             Linux)
-                curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-                    | tar -xz -C /tmp cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl/cog
-                sudo mv /tmp/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl/cog /usr/local/bin/
+                if [[ "$(uname -m)" == "x86_64" ]]; then
+                    curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+                        | tar -xz -C /tmp cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl/cog
+                    sudo mv /tmp/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl/cog /usr/local/bin/
+                else
+                    log_warning "Non-x86_64 Linux detected; installing cocogitto via cargo..."
+                    cargo install cocogitto --version "$COCOGITTO_VERSION"
+                fi
                 ;;
             Darwin)
                 log_warning "macOS detected; installing cocogitto via cargo..."
@@ -277,9 +288,14 @@ phase_cicd_tools() {
         log_info "Installing git-cliff $GIT_CLIFF_VERSION..."
         case "$(uname -s)" in
             Linux)
-                curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-                    | tar -xz -C /tmp
-                sudo mv /tmp/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl/git-cliff /usr/local/bin/
+                if [[ "$(uname -m)" == "x86_64" ]]; then
+                    curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+                        | tar -xz -C /tmp
+                    sudo mv "/tmp/git-cliff-${GIT_CLIFF_VERSION}/git-cliff" /usr/local/bin/
+                else
+                    log_warning "Non-x86_64 Linux detected; installing git-cliff via cargo..."
+                    cargo install git-cliff --version "$GIT_CLIFF_VERSION"
+                fi
                 ;;
             Darwin)
                 log_warning "macOS detected; installing git-cliff via cargo..."
@@ -298,7 +314,8 @@ phase_cicd_tools() {
     # REUSE tool (license compliance)
     if ! command_exists reuse; then
         log_info "Installing REUSE tool $REUSE_TOOL_VERSION..."
-        pip3 install reuse
+        python3 -m pip install --user reuse
+        export PATH="$HOME/.local/bin:$PATH"
         log_success "REUSE tool installed"
     else
         log_success "REUSE tool is installed"
