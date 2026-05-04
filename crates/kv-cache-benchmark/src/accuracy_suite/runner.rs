@@ -235,8 +235,8 @@ pub fn format_accuracy_table(strategies: &[StrategyAccuracy]) -> String {
             "baseline".to_string()
         } else if s.gen_token_match_rate >= 0.999 {
             "100%".to_string()
-        } else if s.gen_first_diverge.is_some() {
-            format!("tok {:.0}", s.gen_first_diverge.unwrap())
+        } else if let Some(diverge_tok) = s.gen_first_diverge {
+            format!("tok {:.0}", diverge_tok)
         } else {
             "—".to_string()
         };
