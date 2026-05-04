@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - Add deterministic changelog and SemVer preflight checks
+- Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 
 ### Fixed
 
