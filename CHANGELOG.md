@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - Add deterministic changelog and SemVer preflight checks
+- Add cross-platform CI/CD foundation (Phase 1): GitHub Actions workflow and local test scripts for Ubuntu, with Phase 2-3 skeletons for Android/ChromeOS/macOS
 
 ### Fixed
 
