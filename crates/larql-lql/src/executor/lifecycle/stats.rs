@@ -1,13 +1,19 @@
 //! `STATS` — vindex / model summary, knowledge-graph coverage, layer bands.
 
 use crate::error::LqlError;
+use crate::executor::helpers::{dir_size, format_bytes, format_number};
 use crate::executor::{Backend, Session};
-use crate::executor::helpers::{format_number, format_bytes, dir_size};
 
 impl Session {
     pub(crate) fn exec_stats(&self, _vindex_path: Option<&str>) -> Result<Vec<String>, LqlError> {
         match &self.backend {
-            Backend::Vindex { path, config, patched, relation_classifier, .. } => {
+            Backend::Vindex {
+                path,
+                config,
+                patched,
+                relation_classifier,
+                ..
+            } => {
                 let index = patched.base();
                 let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
                 let file_size = dir_size(path);
@@ -62,22 +68,19 @@ impl Session {
                         0
                     };
 
-                    out.push(format!("  Clusters:          {}", num_clusters));
+                    out.push(format!("  Clusters:          {num_clusters}"));
                     if num_probes > 0 {
                         out.push(format!(
-                            "  Mapped relations:  {} features ({} types, probe-confirmed)",
-                            num_probes, probe_type_count,
+                            "  Mapped relations:  {num_probes} features ({probe_type_count} types, probe-confirmed)",
                         ));
                     }
                     if mapped_clusters > 0 {
                         out.push(format!(
-                            "  Partially mapped:  {} clusters (Wikidata/WordNet matched)",
-                            mapped_clusters,
+                            "  Partially mapped:  {mapped_clusters} clusters (Wikidata/WordNet matched)",
                         ));
                     }
                     out.push(format!(
-                        "  Unmapped:          {} clusters (model knows, we haven't identified yet)",
-                        unmapped_clusters,
+                        "  Unmapped:          {unmapped_clusters} clusters (model knows, we haven't identified yet)",
                     ));
                 } else {
                     out.push("  (no relation clusters found)".into());
@@ -85,15 +88,18 @@ impl Session {
 
                 // Layer band breakdown
                 let layers = index.loaded_layers();
-                let syntax_features: usize = layers.iter()
+                let syntax_features: usize = layers
+                    .iter()
                     .filter(|l| **l <= 13)
                     .map(|l| index.num_features(*l))
                     .sum();
-                let knowledge_features: usize = layers.iter()
+                let knowledge_features: usize = layers
+                    .iter()
                     .filter(|l| **l >= 14 && **l <= 27)
                     .map(|l| index.num_features(*l))
                     .sum();
-                let output_features: usize = layers.iter()
+                let output_features: usize = layers
+                    .iter()
                     .filter(|l| **l >= 28)
                     .map(|l| index.num_features(*l))
                     .sum();
@@ -134,23 +140,23 @@ impl Session {
                             0.0
                         };
                         let cluster_pct = (mapped_clusters as f64 / num_clusters as f64) * 100.0;
-                        let total_mapped_pct = ((mapped_clusters as f64 / num_clusters as f64) * 100.0)
-                            .min(100.0);
+                        let total_mapped_pct =
+                            ((mapped_clusters as f64 / num_clusters as f64) * 100.0).min(100.0);
                         let unmapped_pct = 100.0 - total_mapped_pct;
 
                         out.push(String::new());
                         out.push("  Coverage:".into());
                         out.push(format!(
                             "    Probe-confirmed:   {:.2}% of features ({} / {})",
-                            probe_pct, num_probes, format_number(total_features),
+                            probe_pct,
+                            num_probes,
+                            format_number(total_features),
                         ));
                         out.push(format!(
-                            "    Cluster-labelled:  {:.0}% of clusters ({} / {})",
-                            cluster_pct, mapped_clusters, num_clusters,
+                            "    Cluster-labelled:  {cluster_pct:.0}% of clusters ({mapped_clusters} / {num_clusters})",
                         ));
                         out.push(format!(
-                            "    Unmapped:          ~{:.0}% — the model knows more than we've labelled",
-                            unmapped_pct,
+                            "    Unmapped:          ~{unmapped_pct:.0}% — the model knows more than we've labelled",
                         ));
                     }
                 }
@@ -160,15 +166,20 @@ impl Session {
                 out.push(format!("Path:            {}", path.display()));
                 Ok(out)
             }
-            Backend::Weight { model_id, weights, .. } => {
+            Backend::Weight {
+                model_id, weights, ..
+            } => {
                 let mut out = Vec::new();
-                out.push(format!("Model:           {}", model_id));
+                out.push(format!("Model:           {model_id}"));
                 out.push("Backend:         live weights (no vindex)".to_string());
                 out.push(String::new());
                 out.push(format!("Layers:          {}", weights.num_layers));
                 out.push(format!("Hidden size:     {}", weights.hidden_size));
                 out.push(format!("Intermediate:    {}", weights.intermediate_size));
-                out.push(format!("Vocab size:      {}", format_number(weights.vocab_size)));
+                out.push(format!(
+                    "Vocab size:      {}",
+                    format_number(weights.vocab_size)
+                ));
                 out.push(String::new());
                 out.push("Supported:       INFER, EXPLAIN INFER, STATS".into());
                 out.push("For WALK/DESCRIBE/SELECT/INSERT: EXTRACT into a vindex first.".into());

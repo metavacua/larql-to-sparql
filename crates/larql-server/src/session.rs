@@ -51,11 +51,7 @@ impl SessionManager {
 
     /// Get or create a session's PatchedVindex.
     #[allow(dead_code)]
-    pub async fn get_or_create(
-        &self,
-        session_id: &str,
-        model: &Arc<LoadedModel>,
-    ) -> PatchedVindex {
+    pub async fn get_or_create(&self, session_id: &str, model: &Arc<LoadedModel>) -> PatchedVindex {
         let mut sessions = self.sessions.write().await;
 
         // Evict expired sessions opportunistically (max 10 per call).
@@ -104,16 +100,14 @@ impl SessionManager {
         let mut sessions = self.sessions.write().await;
         let now = Instant::now();
 
-        let session = sessions
-            .entry(session_id.to_string())
-            .or_insert_with(|| {
-                // We need the base — block briefly.
-                let base = model.patched.blocking_read();
-                SessionState {
-                    patched: PatchedVindex::new(base.base().clone()),
-                    last_accessed: now,
-                }
-            });
+        let session = sessions.entry(session_id.to_string()).or_insert_with(|| {
+            // We need the base — block briefly.
+            let base = model.patched.blocking_read();
+            SessionState {
+                patched: PatchedVindex::new(base.base().clone()),
+                last_accessed: now,
+            }
+        });
 
         session.last_accessed = now;
         let op_count = patch.operations.len();
@@ -142,29 +136,27 @@ impl SessionManager {
     }
 
     /// Remove a patch from a session.
-    pub async fn remove_patch(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<usize, String> {
+    pub async fn remove_patch(&self, session_id: &str, name: &str) -> Result<usize, String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(session_id)
-            .ok_or_else(|| format!("session '{}' not found", session_id))?;
+            .ok_or_else(|| format!("session '{session_id}' not found"))?;
 
         let idx = session
             .patched
             .patches
             .iter()
             .position(|p| p.description.as_deref().unwrap_or("unnamed") == name)
-            .ok_or_else(|| format!("patch '{}' not found in session", name))?;
+            .ok_or_else(|| format!("patch '{name}' not found in session"))?;
 
         session.patched.remove_patch(idx);
         Ok(session.patched.num_patches())
     }
 
     /// Blocking write access to sessions map (for use in spawn_blocking).
-    pub fn sessions_blocking_write(&self) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
+    pub fn sessions_blocking_write(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
         self.sessions.blocking_write()
     }
 

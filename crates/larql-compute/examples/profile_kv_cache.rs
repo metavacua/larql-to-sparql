@@ -13,41 +13,54 @@ use std::time::Instant;
 
 fn main() {
     #[cfg(not(feature = "metal"))]
-    { println!("Run with --features metal");}
+    {
+        println!("Run with --features metal");
+    }
 
     #[cfg(feature = "metal")]
     {
+        use larql_compute::metal::ops::kv_cache::{append_and_attend, KVCache};
         use larql_compute::metal::MetalBackend;
-        use larql_compute::metal::ops::kv_cache::{KVCache, append_and_attend};
 
         let metal = MetalBackend::new().expect("Metal required");
         let bufs = metal.bufs();
 
         let num_q_heads = 8;
         let num_kv_heads = 4;
-        let head_dim = 320;   // Gemma: 2560 / 8 = 320 (approx)
+        let head_dim = 320; // Gemma: 2560 / 8 = 320 (approx)
         let max_seq = 512;
         let num_layers = 21;
         let n = 20;
 
         println!("=== KV Cache Attention Benchmark ===");
-        println!("{num_layers} layers, {num_q_heads} Q heads, {num_kv_heads} KV heads, dim={head_dim}");
+        println!(
+            "{num_layers} layers, {num_q_heads} Q heads, {num_kv_heads} KV heads, dim={head_dim}"
+        );
         println!("Max cache: {max_seq} tokens\n");
 
         let mut cache = KVCache::new(bufs, num_layers, max_seq, num_kv_heads, head_dim);
         let scale = 1.0 / (head_dim as f32).sqrt();
 
         // Simulate generation: append tokens and measure attention time
-        println!("  {:<10} {:>10} {:>10}", "Cache len", "Per-token", "tok/s (attn)");
+        println!(
+            "  {:<10} {:>10} {:>10}",
+            "Cache len", "Per-token", "tok/s (attn)"
+        );
 
         for &gen_tokens in &[1, 5, 10, 20, 50, 100] {
             cache.clear();
 
             // Fill cache to gen_tokens
             for t in 0..gen_tokens {
-                let q_data: Vec<f32> = (0..num_q_heads * head_dim).map(|i| ((i + t * 100) as f32 * 0.001).sin()).collect();
-                let k_data: Vec<f32> = (0..num_kv_heads * head_dim).map(|i| ((i + t * 200) as f32 * 0.002).cos()).collect();
-                let v_data: Vec<f32> = (0..num_kv_heads * head_dim).map(|i| ((i + t * 300) as f32 * 0.003).sin()).collect();
+                let q_data: Vec<f32> = (0..num_q_heads * head_dim)
+                    .map(|i| ((i + t * 100) as f32 * 0.001).sin())
+                    .collect();
+                let k_data: Vec<f32> = (0..num_kv_heads * head_dim)
+                    .map(|i| ((i + t * 200) as f32 * 0.002).cos())
+                    .collect();
+                let v_data: Vec<f32> = (0..num_kv_heads * head_dim)
+                    .map(|i| ((i + t * 300) as f32 * 0.003).sin())
+                    .collect();
 
                 let buf_q = bufs.transient_from_f32(&q_data);
                 let buf_k = bufs.transient_from_f32(&k_data);
@@ -57,10 +70,16 @@ fn main() {
                 let cmd = metal.queue().new_command_buffer();
                 for l in 0..num_layers {
                     append_and_attend(
-                        cmd, &mut cache.layers[l],
-                        &metal.kv_append_pipeline, &metal.kv_attend_pipeline,
-                        &buf_k, &buf_v, &buf_q, &buf_out,
-                        num_q_heads, scale,
+                        cmd,
+                        &mut cache.layers[l],
+                        &metal.kv_append_pipeline,
+                        &metal.kv_attend_pipeline,
+                        &buf_k,
+                        &buf_v,
+                        &buf_q,
+                        &buf_out,
+                        num_q_heads,
+                        scale,
                     );
                 }
                 cmd.commit();
@@ -68,9 +87,15 @@ fn main() {
             }
 
             // Now benchmark one more token with full cache
-            let q_data: Vec<f32> = (0..num_q_heads * head_dim).map(|i| (i as f32 * 0.001).sin()).collect();
-            let k_data: Vec<f32> = (0..num_kv_heads * head_dim).map(|i| (i as f32 * 0.002).cos()).collect();
-            let v_data: Vec<f32> = (0..num_kv_heads * head_dim).map(|i| (i as f32 * 0.003).sin()).collect();
+            let q_data: Vec<f32> = (0..num_q_heads * head_dim)
+                .map(|i| (i as f32 * 0.001).sin())
+                .collect();
+            let k_data: Vec<f32> = (0..num_kv_heads * head_dim)
+                .map(|i| (i as f32 * 0.002).cos())
+                .collect();
+            let v_data: Vec<f32> = (0..num_kv_heads * head_dim)
+                .map(|i| (i as f32 * 0.003).sin())
+                .collect();
 
             let buf_q = bufs.transient_from_f32(&q_data);
             let buf_k = bufs.transient_from_f32(&k_data);
@@ -78,18 +103,28 @@ fn main() {
             let buf_out = bufs.output((num_q_heads * head_dim * 4) as u64);
 
             // Reset cache position to gen_tokens (don't double-count)
-            for l in 0..num_layers { cache.layers[l].current_len = gen_tokens; }
+            for l in 0..num_layers {
+                cache.layers[l].current_len = gen_tokens;
+            }
 
             // Warmup
             {
-                for l in 0..num_layers { cache.layers[l].current_len = gen_tokens; }
+                for l in 0..num_layers {
+                    cache.layers[l].current_len = gen_tokens;
+                }
                 let cmd = metal.queue().new_command_buffer();
                 for l in 0..num_layers {
                     append_and_attend(
-                        cmd, &mut cache.layers[l],
-                        &metal.kv_append_pipeline, &metal.kv_attend_pipeline,
-                        &buf_k, &buf_v, &buf_q, &buf_out,
-                        num_q_heads, scale,
+                        cmd,
+                        &mut cache.layers[l],
+                        &metal.kv_append_pipeline,
+                        &metal.kv_attend_pipeline,
+                        &buf_k,
+                        &buf_v,
+                        &buf_q,
+                        &buf_out,
+                        num_q_heads,
+                        scale,
                     );
                 }
                 cmd.commit();
@@ -99,14 +134,22 @@ fn main() {
             // Benchmark
             let t0 = Instant::now();
             for _ in 0..n {
-                for l in 0..num_layers { cache.layers[l].current_len = gen_tokens; }
+                for l in 0..num_layers {
+                    cache.layers[l].current_len = gen_tokens;
+                }
                 let cmd = metal.queue().new_command_buffer();
                 for l in 0..num_layers {
                     append_and_attend(
-                        cmd, &mut cache.layers[l],
-                        &metal.kv_append_pipeline, &metal.kv_attend_pipeline,
-                        &buf_k, &buf_v, &buf_q, &buf_out,
-                        num_q_heads, scale,
+                        cmd,
+                        &mut cache.layers[l],
+                        &metal.kv_append_pipeline,
+                        &metal.kv_attend_pipeline,
+                        &buf_k,
+                        &buf_v,
+                        &buf_q,
+                        &buf_out,
+                        num_q_heads,
+                        scale,
                     );
                 }
                 cmd.commit();

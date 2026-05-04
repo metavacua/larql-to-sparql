@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use ndarray::ArcArray2;
 
-use super::edge::install_edge;
 use super::detect::detect_ffn_pattern;
+use super::edge::install_edge;
 use super::save::{copy_model_config, merge_for_save, write_safetensors};
 use super::CompileArgs;
 
@@ -21,7 +21,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("LARQL AOT Compiler — single mode");
     eprintln!("  base:   {}", args.base.display());
     eprintln!("  prompt: {}...", &prompt[..prompt.len().min(60)]);
-    eprintln!("  answer: {}", answer);
+    eprintln!("  answer: {answer}");
     eprintln!("  layer:  {}", args.layer);
     eprintln!("  slot:   {}", args.slot);
     eprintln!("  output: {}", args.output.display());
@@ -33,14 +33,10 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let tokenizer_path = args.base.join("tokenizer.json");
     if !tokenizer_path.exists() {
-        return Err(format!(
-            "tokenizer.json not found in {}",
-            args.base.display()
-        )
-        .into());
+        return Err(format!("tokenizer.json not found in {}", args.base.display()).into());
     }
-    let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
-        .map_err(|e| format!("tokenizer: {}", e))?;
+    let tokenizer =
+        tokenizers::Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer: {e}"))?;
 
     let (wrapped_prompt, template_source) = if args.no_chat_template {
         (prompt.clone(), "raw (--no-chat-template)".to_string())
@@ -54,28 +50,25 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     // must come from the same sequence. See verify_compiled.py.
     let encoding = tokenizer
         .encode(wrapped_prompt.as_str(), true)
-        .map_err(|e| format!("tokenize: {}", e))?;
+        .map_err(|e| format!("tokenize: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-    eprintln!("  chat wrap:    {}", template_source);
+    eprintln!("  chat wrap:    {template_source}");
     eprintln!("  prompt tokens: {}", token_ids.len());
 
     eprintln!("\nCapturing L{} residual...", args.layer);
-    let residuals = larql_inference::forward::capture_residuals(
-        &weights,
-        &token_ids,
-        &[args.layer],
-    );
+    let residuals =
+        larql_inference::forward::capture_residuals(&weights, &token_ids, &[args.layer]);
     let (_, residual) = residuals
         .into_iter()
         .find(|(l, _)| *l == args.layer)
         .ok_or("failed to capture residual")?;
 
     let trigger_norm: f32 = residual.iter().map(|x| x * x).sum::<f32>().sqrt();
-    eprintln!("  trigger norm: {:.2}", trigger_norm);
+    eprintln!("  trigger norm: {trigger_norm:.2}");
 
     let ans_encoding = tokenizer
         .encode(answer.as_str(), false)
-        .map_err(|e| format!("tokenize answer: {}", e))?;
+        .map_err(|e| format!("tokenize answer: {e}"))?;
     let ans_ids = ans_encoding.get_ids();
     if ans_ids.is_empty() {
         return Err("answer tokenizes to empty".into());
@@ -105,7 +98,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         let original = weights
             .tensors
             .get(key)
-            .ok_or_else(|| format!("tensor not found: {}", key))?;
+            .ok_or_else(|| format!("tensor not found: {key}"))?;
         modified.insert(key.clone(), original.to_owned().into());
     }
 
@@ -121,10 +114,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.gate_scale,
         args.alpha,
     )?;
-    eprintln!(
-        "  gate_scale={}, alpha={:.3}",
-        args.gate_scale, stats.alpha
-    );
+    eprintln!("  gate_scale={}, alpha={:.3}", args.gate_scale, stats.alpha);
     eprintln!("  installed at L{} slot {}", args.layer, args.slot);
 
     // ── Balancer: scale the down vector up/down until the target token's
@@ -142,16 +132,14 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         for key in [&gate_key, &up_key, &down_key] {
             weights.tensors.insert(key.clone(), modified[key].clone());
         }
-        let pred = larql_inference::forward::predict(
-            &weights, &tokenizer, &token_ids, 20,
-        );
+        let pred = larql_inference::forward::predict(&weights, &tokenizer, &token_ids, 20);
         let prob: f64 = pred
             .predictions
             .iter()
             .find(|(tok, _)| tok.trim() == answer.as_str())
             .map(|(_, p)| *p)
             .unwrap_or(0.0);
-        eprintln!("  iter {}: prob('{}') = {:.3}", iter, answer, prob);
+        eprintln!("  iter {iter}: prob('{answer}') = {prob:.3}");
 
         let scale = if prob > args.ceiling {
             DOWN_SCALE

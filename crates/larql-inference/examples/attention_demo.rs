@@ -44,7 +44,10 @@ fn main() {
     println!("  Input V: [0.5, 0.5, 0.5, 0.5]");
     println!(
         "  Output:  [{:.4}, {:.4}, {:.4}, {:.4}]",
-        out[[0, 0]], out[[0, 1]], out[[0, 2]], out[[0, 3]]
+        out[[0, 0]],
+        out[[0, 1]],
+        out[[0, 2]],
+        out[[0, 3]]
     );
     println!("  (Single token → attention weight = 1.0 → output = V)\n");
 
@@ -65,7 +68,10 @@ fn main() {
     for i in 0..seq {
         println!(
             "  Token {i} sees 0..={i}: output = [{:.3}, {:.3}, {:.3}, {:.3}]",
-            out[[i, 0]], out[[i, 1]], out[[i, 2]], out[[i, 3]]
+            out[[i, 0]],
+            out[[i, 1]],
+            out[[i, 2]],
+            out[[i, 3]]
         );
     }
     println!("  (Each token averages V rows it can see)\n");
@@ -143,13 +149,20 @@ fn main() {
     let scale = 1.0 / (hd as f64).sqrt();
 
     let (out_no_cap, _) = gqa_attention_with_weights(&q, &k, &v, 1, hd, 1, scale, seq, false, None);
-    let (out_cap, _) = gqa_attention_with_weights(&q, &k, &v, 1, hd, 1, scale, seq, false, Some(50.0));
+    let (out_cap, _) =
+        gqa_attention_with_weights(&q, &k, &v, 1, hd, 1, scale, seq, false, Some(50.0));
 
     let diff = max_diff(&out_no_cap, &out_cap);
-    println!("  Without softcap: last token = [{:.4}, {:.4}, ...]",
-        out_no_cap[[seq - 1, 0]], out_no_cap[[seq - 1, 1]]);
-    println!("  With softcap=50: last token = [{:.4}, {:.4}, ...]",
-        out_cap[[seq - 1, 0]], out_cap[[seq - 1, 1]]);
+    println!(
+        "  Without softcap: last token = [{:.4}, {:.4}, ...]",
+        out_no_cap[[seq - 1, 0]],
+        out_no_cap[[seq - 1, 1]]
+    );
+    println!(
+        "  With softcap=50: last token = [{:.4}, {:.4}, ...]",
+        out_cap[[seq - 1, 0]],
+        out_cap[[seq - 1, 1]]
+    );
     println!("  Max diff: {diff:.2e}  (softcap compresses extreme scores)\n");
 
     // ── 6. Attention Weight Capture ──
@@ -161,9 +174,8 @@ fn main() {
     let v = synth_matrix(seq, num_heads * hd, 42);
     let scale = 1.0 / (hd as f64).sqrt();
 
-    let (_, weights) = gqa_attention_with_weights(
-        &q, &k, &v, num_heads, hd, 1, scale, seq, true, None,
-    );
+    let (_, weights) =
+        gqa_attention_with_weights(&q, &k, &v, num_heads, hd, 1, scale, seq, true, None);
     let weights = weights.unwrap();
     println!("  {num_heads} heads, seq={seq}, capturing last token's attention");
     for (h, w) in weights.heads.iter().enumerate() {
@@ -188,7 +200,10 @@ fn main() {
     println!("--- 7. Memory Comparison ---");
     println!("  Fused (online softmax) never allocates the [seq, seq] scores matrix.");
     println!("  Per head, fused uses O(head_dim) accumulator vs O(seq^2) materialized.\n");
-    println!("  {:>6}  {:>12}  {:>12}  {:>8}", "seq", "materialized", "fused_acc", "savings");
+    println!(
+        "  {:>6}  {:>12}  {:>12}  {:>8}",
+        "seq", "materialized", "fused_acc", "savings"
+    );
     let num_heads_demo = 10;
     let hd_demo = 256;
     for &s in &[6, 24, 128, 512, 2048] {

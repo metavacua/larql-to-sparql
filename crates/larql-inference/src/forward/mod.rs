@@ -12,21 +12,21 @@
 //! - `trace`: Residual/activation capture and calibration
 
 pub mod embed;
-pub mod ple;
-pub mod layer;
-pub mod predict;
-pub mod kv_generate;
-pub mod trace;
-pub mod memit;
-pub mod target_delta;
 pub mod infer_patched;
+pub mod kv_generate;
+pub mod layer;
+pub mod memit;
+pub mod ple;
+pub mod predict;
+pub mod target_delta;
+pub mod trace;
 
-use ndarray::Array2;
 use crate::attention::AttentionWeights;
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use larql_models::NormType;
 use crate::residual::rms_norm;
+use larql_models::NormType;
+use ndarray::Array2;
 
 // ── Types ──
 
@@ -96,7 +96,10 @@ pub fn apply_norm(
 }
 
 /// Compute x @ w.T via BLAS.
-pub fn dot_proj(x: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>, w: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>) -> Array2<f32> {
+pub fn dot_proj(
+    x: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
+    w: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
+) -> Array2<f32> {
     x.dot(&w.t())
 }
 
@@ -114,28 +117,25 @@ pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
 // ── Re-exports: preserve all `crate::forward::*` paths ──
 
 pub use embed::embed_tokens_pub;
-pub use layer::{run_ffn, run_attention_public, run_layer_with_ffn};
-pub use kv_generate::{
-    generate_cached, generate_cached_backend, generate_cached_with_window,
-    generate_cached_constrained,
-};
-pub use predict::{
-    predict, predict_with_temperature, predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace,
-    predict_with_router, predict_with_strategy, predict_from_hidden, predict_from_hidden_with_ffn,
-    logits_to_predictions_pub, logit_lens_top1,
-    forward_raw_logits, forward_raw_logits_with_prefix, RawForward,
-    hidden_to_raw_logits,
-};
-pub use trace::{
-    forward_to_layer, capture_residuals, capture_decoy_residuals,
-    capture_ffn_activation_matrix, estimate_ffn_covariance,
-    trace_forward, trace_forward_with_ffn, trace_forward_full,
-    calibrate_scalar_gains,
-    capture_spec_residuals, SpecCapture,
-};
-pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitResult, MemitFactResult};
-pub use target_delta::{TargetDelta, TargetDeltaOpts};
 pub use infer_patched::{
     apply_knn_override, infer_patched, infer_patched_q4k, walk_trace_from_residuals,
     InferPatchedResult, KnnOverride, KNN_COSINE_THRESHOLD,
+};
+pub use kv_generate::{
+    generate_cached, generate_cached_backend, generate_cached_constrained,
+    generate_cached_with_window,
+};
+pub use layer::{run_attention_public, run_ffn, run_layer_with_ffn};
+pub use memit::{run_memit, run_memit_with_target_opt, MemitFact, MemitFactResult, MemitResult};
+pub use predict::{
+    forward_raw_logits, forward_raw_logits_with_prefix, hidden_to_raw_logits, logit_lens_top1,
+    logits_to_predictions_pub, predict, predict_from_hidden, predict_from_hidden_with_ffn,
+    predict_with_ffn, predict_with_ffn_attention, predict_with_ffn_trace, predict_with_router,
+    predict_with_strategy, predict_with_temperature, RawForward,
+};
+pub use target_delta::{TargetDelta, TargetDeltaOpts};
+pub use trace::{
+    calibrate_scalar_gains, capture_decoy_residuals, capture_ffn_activation_matrix,
+    capture_residuals, capture_spec_residuals, estimate_ffn_covariance, forward_to_layer,
+    trace_forward, trace_forward_full, trace_forward_with_ffn, SpecCapture,
 };

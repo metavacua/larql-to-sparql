@@ -37,19 +37,27 @@ enum HfCommand {
 
 pub fn run(args: HfArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
-        HfCommand::Download { repo, output, revision } => run_download(&repo, output.as_deref(), revision.as_deref()),
+        HfCommand::Download {
+            repo,
+            output,
+            revision,
+        } => run_download(&repo, output.as_deref(), revision.as_deref()),
         HfCommand::Publish { vindex, repo } => run_publish(&vindex, &repo),
     }
 }
 
-fn run_download(repo: &str, output: Option<&std::path::Path>, revision: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_download(
+    repo: &str,
+    output: Option<&std::path::Path>,
+    revision: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let hf_path = if let Some(rev) = revision {
-        format!("hf://{}@{}", repo, rev)
+        format!("hf://{repo}@{rev}")
     } else {
-        format!("hf://{}", repo)
+        format!("hf://{repo}")
     };
 
-    eprintln!("Downloading vindex from HuggingFace: {}", hf_path);
+    eprintln!("Downloading vindex from HuggingFace: {hf_path}");
     let cached_path = larql_vindex::resolve_hf_vindex(&hf_path)?;
     eprintln!("  Cached at: {}", cached_path.display());
 
@@ -68,7 +76,10 @@ fn run_download(repo: &str, output: Option<&std::path::Path>, revision: Option<&
     if let Ok(config) = larql_vindex::load_vindex_config(&cached_path) {
         let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
         eprintln!("\n  Model: {}", config.model);
-        eprintln!("  {} layers, {} features", config.num_layers, total_features);
+        eprintln!(
+            "  {} layers, {} features",
+            config.num_layers, total_features
+        );
         eprintln!("  Extract level: {}", config.extract_level);
     }
 
@@ -76,15 +87,15 @@ fn run_download(repo: &str, output: Option<&std::path::Path>, revision: Option<&
 }
 
 fn run_publish(vindex: &std::path::Path, repo: &str) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Publishing vindex to HuggingFace: {}", repo);
+    eprintln!("Publishing vindex to HuggingFace: {repo}");
 
     let mut callbacks = CliPublishCallbacks;
     let url = larql_vindex::publish_vindex(vindex, repo, &mut callbacks)?;
 
-    eprintln!("\nPublished: {}", url);
+    eprintln!("\nPublished: {url}");
     eprintln!("\nUsage:");
     eprintln!("  larql repl");
-    eprintln!("  larql> USE \"hf://{}\";", repo);
+    eprintln!("  larql> USE \"hf://{repo}\";");
 
     Ok(())
 }
@@ -93,7 +104,7 @@ struct CliPublishCallbacks;
 
 impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     fn on_start(&mut self, repo: &str) {
-        eprintln!("  Creating repo: {}", repo);
+        eprintln!("  Creating repo: {repo}");
     }
 
     fn on_file_start(&mut self, filename: &str, size: u64) {
@@ -104,7 +115,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
         } else {
             format!("{:.1} KB", size as f64 / 1024.0)
         };
-        eprint!("  Uploading {} ({})...", filename, size_str);
+        eprint!("  Uploading {filename} ({size_str})...");
     }
 
     fn on_file_done(&mut self, _filename: &str) {
@@ -120,18 +131,18 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
         } else {
             format!("{:.1} KB", size as f64 / 1024.0)
         };
-        eprintln!(
-            "  Skipping  {} ({}) — unchanged (sha256 {}…)",
-            filename, size_str, short_sha
-        );
+        eprintln!("  Skipping  {filename} ({size_str}) — unchanged (sha256 {short_sha}…)");
     }
 
     fn on_complete(&mut self, url: &str) {
-        eprintln!("  URL: {}", url);
+        eprintln!("  URL: {url}");
     }
 }
 
-fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn copy_dir(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;

@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -25,9 +25,15 @@ pub struct DescribeParams {
     pub min_score: f32,
 }
 
-fn default_band() -> String { "knowledge".into() }
-fn default_limit() -> usize { 20 }
-fn default_min_score() -> f32 { 5.0 }
+fn default_band() -> String {
+    "knowledge".into()
+}
+fn default_limit() -> usize {
+    20
+}
+fn default_min_score() -> f32 {
+    5.0
+}
 
 fn describe_entity(
     model: &LoadedModel,
@@ -52,11 +58,17 @@ fn describe_entity(
 
     let hidden = model.embeddings.shape()[1];
     let query = if token_ids.len() == 1 {
-        model.embeddings.row(token_ids[0] as usize).mapv(|v| v * model.embed_scale)
+        model
+            .embeddings
+            .row(token_ids[0] as usize)
+            .mapv(|v| v * model.embed_scale)
     } else {
         let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
         for &tok in &token_ids {
-            avg += &model.embeddings.row(tok as usize).mapv(|v| v * model.embed_scale);
+            avg += &model
+                .embeddings
+                .row(tok as usize)
+                .mapv(|v| v * model.embed_scale);
         }
         avg /= token_ids.len() as f32;
         avg
@@ -78,13 +90,19 @@ fn describe_entity(
     let all_layers = patched.loaded_layers();
 
     let scan_layers: Vec<usize> = match params.band.as_str() {
-        "syntax" => all_layers.iter().copied()
+        "syntax" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.syntax.0 && *l <= bands.syntax.1)
             .collect(),
-        "knowledge" => all_layers.iter().copied()
+        "knowledge" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.knowledge.0 && *l <= bands.knowledge.1)
             .collect(),
-        "output" => all_layers.iter().copied()
+        "output" => all_layers
+            .iter()
+            .copied()
             .filter(|l| *l >= bands.output.0 && *l <= bands.output.1)
             .collect(),
         _ => all_layers,
@@ -160,7 +178,11 @@ fn describe_entity(
     }
 
     let mut ranked: Vec<&EdgeInfo> = edges.values().collect();
-    ranked.sort_by(|a, b| b.gate.partial_cmp(&a.gate).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| {
+        b.gate
+            .partial_cmp(&a.gate)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     ranked.truncate(params.limit);
 
     let edge_json: Vec<serde_json::Value> = ranked
@@ -176,7 +198,10 @@ fn describe_entity(
             });
 
             // Probe-confirmed relation label.
-            if let Some(label) = model.probe_labels.get(&(info.best_layer, info.best_feature)) {
+            if let Some(label) = model
+                .probe_labels
+                .get(&(info.best_layer, info.best_feature))
+            {
                 edge["relation"] = serde_json::json!(label);
                 edge["source"] = serde_json::json!("probe");
             }
@@ -224,10 +249,7 @@ async fn describe_with_cache(
             let etag = crate::etag::compute_etag(&cached);
             let if_none_match = headers.get("if-none-match").and_then(|v| v.to_str().ok());
             if crate::etag::matches_etag(if_none_match, &etag) {
-                return Ok((
-                    axum::http::StatusCode::NOT_MODIFIED,
-                    [("etag", etag)],
-                ).into_response());
+                return Ok((axum::http::StatusCode::NOT_MODIFIED, [("etag", etag)]).into_response());
             }
             return Ok((
                 [
@@ -235,7 +257,8 @@ async fn describe_with_cache(
                     ("cache-control", "public, max-age=86400".into()),
                 ],
                 Json(cached),
-            ).into_response());
+            )
+                .into_response());
         }
         Some(key)
     } else {
@@ -259,7 +282,8 @@ async fn describe_with_cache(
             ("cache-control", "public, max-age=86400".into()),
         ],
         Json(result),
-    ).into_response())
+    )
+        .into_response())
 }
 
 pub async fn handle_describe(
@@ -283,6 +307,6 @@ pub async fn handle_describe_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     describe_with_cache(&state, model, &headers, params).await
 }

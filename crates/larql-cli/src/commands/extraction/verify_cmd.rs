@@ -23,7 +23,11 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    eprintln!("Verifying: {} ({} files)", args.vindex.display(), stored.len());
+    eprintln!(
+        "Verifying: {} ({} files)",
+        args.vindex.display(),
+        stored.len()
+    );
 
     let results = larql_vindex::format::checksums::verify_checksums(&args.vindex, stored)?;
 
@@ -36,15 +40,15 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
                 if mb > 1024.0 {
                     format!("{:.2} GB", mb / 1024.0)
                 } else {
-                    format!("{:.1} MB", mb)
+                    format!("{mb:.1} MB")
                 }
             })
             .unwrap_or_else(|_| "missing".into());
 
         if *ok {
-            println!("  {} ... OK ({})", filename, size_str);
+            println!("  {filename} ... OK ({size_str})");
         } else {
-            println!("  {} ... FAILED ({})", filename, size_str);
+            println!("  {filename} ... FAILED ({size_str})");
             all_ok = false;
         }
     }

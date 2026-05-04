@@ -1,6 +1,6 @@
-use kv_cache_benchmark::graph_walk::GraphWalk;
-use kv_cache_benchmark::graph_walk::walk_state::{WalkState, WalkMode, WalkTier};
 use kv_cache_benchmark::graph_walk::fallback::TierDistribution;
+use kv_cache_benchmark::graph_walk::walk_state::{WalkMode, WalkState, WalkTier};
+use kv_cache_benchmark::graph_walk::GraphWalk;
 
 #[test]
 fn test_graph_walk_memory_tiny() {
@@ -12,7 +12,10 @@ fn test_graph_walk_memory_tiny() {
 
     let mem_370k = gw.memory_bytes(370_000);
     assert_eq!(mem_370k, 370_000 * 4);
-    assert!(mem_370k < 2_000_000, "Graph walk per-conversation should be < 2MB");
+    assert!(
+        mem_370k < 2_000_000,
+        "Graph walk per-conversation should be < 2MB"
+    );
 }
 
 #[test]
@@ -35,18 +38,16 @@ fn test_graph_walk_matches_forward_pass_detection() {
 
     for (tokens, expected_relation, expected_entity) in queries {
         let state = WalkState::from_tokens(&tokens);
-        assert_eq!(state.mode, WalkMode::Factual, "Query: {:?}", tokens);
+        assert_eq!(state.mode, WalkMode::Factual, "Query: {tokens:?}");
         assert_eq!(
             state.current_relation.as_deref(),
             Some(expected_relation),
-            "Query: {:?}",
-            tokens
+            "Query: {tokens:?}"
         );
         assert_eq!(
             state.last_entity.as_deref(),
             Some(expected_entity),
-            "Query: {:?}",
-            tokens
+            "Query: {tokens:?}"
         );
     }
 }
@@ -99,8 +100,7 @@ fn test_graph_walk_fallback_triggers() {
         assert_eq!(
             state.tier,
             WalkTier::MarkovFallback,
-            "Expected fallback for: {:?}",
-            tokens
+            "Expected fallback for: {tokens:?}"
         );
     }
 }

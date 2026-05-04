@@ -31,7 +31,7 @@ impl Session {
             for (i, (tok, prob)) in result.predictions.iter().enumerate() {
                 out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
             }
-            out.push(format!("  {:.0}ms", elapsed_ms));
+            out.push(format!("  {elapsed_ms:.0}ms"));
             if !compare {
                 out.push(String::new());
                 out.push(
@@ -139,7 +139,7 @@ impl Session {
                 let label_str = if label.is_empty() {
                     String::new()
                 } else {
-                    format!("{:<14}", label)
+                    format!("{label:<14}")
                 };
                 let top_token = hit.meta.top_token.trim();
                 let down_top: String = hit
@@ -175,7 +175,7 @@ impl Session {
             for (i, (tok, prob)) in dense.predictions.iter().enumerate() {
                 out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
             }
-            out.push(format!("  {:.0}ms", dense_ms));
+            out.push(format!("  {dense_ms:.0}ms"));
         }
 
         Ok(out)

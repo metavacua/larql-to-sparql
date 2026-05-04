@@ -75,8 +75,7 @@ impl Session {
             "diffuse"
         };
         out.push(format!(
-            "  signal: {} ({} edges, max gate {:.1})",
-            signal, edge_count, max_gate,
+            "  signal: {signal} ({edge_count} edges, max gate {max_gate:.1})",
         ));
 
         let formatted =
@@ -107,7 +106,11 @@ impl Session {
                 "  Output (L{}-{}):",
                 bands.output.0, bands.output.1
             ));
-            let cap = if mode == DescribeMode::Brief { 5 } else { max_edges };
+            let cap = if mode == DescribeMode::Brief {
+                5
+            } else {
+                max_edges
+            };
             for edge in formatted.output_band.iter().take(cap) {
                 out.push(format_describe_edge(edge, mode));
             }
@@ -209,7 +212,7 @@ impl Session {
                         .map(|(i, e)| format!("E{} ({:.0}%)", e, result.probs[i] * 100.0))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    out.push(format!("    L{:2}: {}", l, experts_str));
+                    out.push(format!("    L{l:2}: {experts_str}"));
                 }
             }
             out.push(String::new());
@@ -279,13 +282,13 @@ impl Session {
                         .map(|(t, _)| t.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    out.push(format!("    E{}: {}", eid, display));
+                    out.push(format!("    E{eid}: {display}"));
                 }
             }
         }
 
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        out.push(format!("\n  {:.0}ms", elapsed_ms));
+        out.push(format!("\n  {elapsed_ms:.0}ms"));
 
         Ok(Some(out))
     }
@@ -551,7 +554,7 @@ fn format_describe_edge(edge: &FormattedEdge, mode: DescribeMode) -> String {
                 format!("{:<14}", "[—]")
             } else {
                 let tag = format!("[{}]", edge.label);
-                format!("{:<14}", tag)
+                format!("{tag:<14}")
             };
             let (min_l, max_l) = layer_range(&edge.layers);
             let layer_str = if min_l == max_l {

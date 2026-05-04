@@ -12,8 +12,8 @@
 
 use std::time::Instant;
 
-use larql_inference::{vindex::WalkFfn, InferenceModel};
 use larql_inference::ffn::FfnBackend;
+use larql_inference::{vindex::WalkFfn, InferenceModel};
 use larql_vindex::{PatchedVindex, SilentLoadCallbacks, VectorIndex};
 use ndarray::Array2;
 
@@ -25,9 +25,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--model"  => { i += 1; model_name = args[i].clone(); }
-            "--vindex" => { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
-            "--top-k"  => { i += 1; top_k = args[i].parse()?; }
+            "--model" => {
+                i += 1;
+                model_name = args[i].clone();
+            }
+            "--vindex" => {
+                i += 1;
+                vindex_path = std::path::PathBuf::from(&args[i]);
+            }
+            "--top-k" => {
+                i += 1;
+                top_k = args[i].parse()?;
+            }
             _ => {}
         }
         i += 1;
@@ -43,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let index = VectorIndex::load_vindex(&vindex_path, &mut cb)?;
 
     let num_layers = weights.num_layers;
-    let hidden     = weights.hidden_size;
+    let hidden = weights.hidden_size;
     let bench_layer = num_layers / 2;
 
     println!("=== FFN L1 Cache Demo ===");
@@ -63,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let walk = WalkFfn::new(weights, &index, top_k).with_l1_cache(num_layers);
 
         let t0 = Instant::now();
-        let _  = walk.forward(bench_layer, &x);
+        let _ = walk.forward(bench_layer, &x);
         let first_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let t0 = Instant::now();
@@ -74,10 +83,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let (hits, misses) = walk.l1_cache_stats().unwrap_or((0, 0));
         println!("  call 1 (miss):    {first_ms:.3} ms");
-        println!("  calls 2-100 (hit): {cached_ms:.4} ms/call  ({:.0}x speedup)",
-            first_ms / cached_ms.max(1e-6));
-        println!("  hits={hits}  misses={misses}  hit_rate={:.1}%\n",
-            100.0 * hits as f64 / (hits + misses).max(1) as f64);
+        println!(
+            "  calls 2-100 (hit): {cached_ms:.4} ms/call  ({:.0}x speedup)",
+            first_ms / cached_ms.max(1e-6)
+        );
+        println!(
+            "  hits={hits}  misses={misses}  hit_rate={:.1}%\n",
+            100.0 * hits as f64 / (hits + misses).max(1) as f64
+        );
     }
 
     // ── Scenario 2: paraphrase collapse ────────────────────────────────
@@ -86,7 +99,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         // Perturb the residual by a tiny amount — simulates a paraphrase
         let epsilon = 1e-4_f32;
-        let perturbed: Vec<f32> = base_residual.iter().enumerate()
+        let perturbed: Vec<f32> = base_residual
+            .iter()
+            .enumerate()
             .map(|(i, &v)| v + epsilon * ((i % 7) as f32 - 3.0))
             .collect();
 
@@ -102,7 +117,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let hit_rate = 100.0 * hits as f64 / (hits + misses).max(1) as f64;
         println!("  hits={hits}  misses={misses}  hit_rate={hit_rate:.1}%");
         if hits > 0 {
-            println!("  → Paraphrase residual activated the same feature set (expected for cos≈0.99)");
+            println!(
+                "  → Paraphrase residual activated the same feature set (expected for cos≈0.99)"
+            );
         } else {
             println!("  → Paraphrase residual activated a different feature set");
             println!("    (perturbation was large enough to cross a gate boundary)");
@@ -140,10 +157,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  Patched model: hits={h2}  misses={m2}");
 
         // Verify: cache was bypassed (0 hits on patched), and outputs differ
-        assert_eq!(h2, 0, "Cache must not be read when overrides exist at the layer");
-        let diff: f32 = out_clean.iter().zip(out_patched.iter())
+        assert_eq!(
+            h2, 0,
+            "Cache must not be read when overrides exist at the layer"
+        );
+        let diff: f32 = out_clean
+            .iter()
+            .zip(out_patched.iter())
             .map(|(a, b)| (a - b).abs())
-            .sum::<f32>() / hidden as f32;
+            .sum::<f32>()
+            / hidden as f32;
         println!("  Output difference (mean |Δ|): {diff:.6}");
         if diff > 1e-6 {
             println!("  ✓ Patch was applied — outputs diverge as expected");

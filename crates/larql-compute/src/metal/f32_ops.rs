@@ -3,9 +3,9 @@
 //! Tiled sgemm (32×32) for large matmuls, falls back to CPU for small ones.
 //! The FLOP threshold is set by calibration.
 
-use std::ffi::c_void;
 use metal::*;
 use ndarray::{Array2, ArrayView2};
+use std::ffi::c_void;
 
 use super::buffers::BufferCache;
 
@@ -24,7 +24,9 @@ impl F32Ops {
         bufs: &BufferCache,
         a_data: &[f32],
         b_data: &[f32],
-        m: usize, n: usize, k: usize,
+        m: usize,
+        n: usize,
+        k: usize,
     ) -> Vec<f32> {
         let buf_a = bufs.get_f32(a_data);
         let buf_b = bufs.get_f32(b_data);
@@ -48,7 +50,9 @@ impl F32Ops {
         bufs: &BufferCache,
         a_data: &[f32],
         b_data: &[f32],
-        m: usize, n: usize, k: usize,
+        m: usize,
+        n: usize,
+        k: usize,
     ) -> Vec<f32> {
         let buf_a = bufs.get_f32(a_data);
         let buf_b = bufs.get_f32(b_data);
@@ -70,8 +74,12 @@ impl F32Ops {
     pub fn encode_static(
         pipeline: &ComputePipelineState,
         encoder: &ComputeCommandEncoderRef,
-        buf_a: &Buffer, buf_b: &Buffer, buf_c: &Buffer,
-        m: usize, n: usize, k: usize,
+        buf_a: &Buffer,
+        buf_b: &Buffer,
+        buf_c: &Buffer,
+        m: usize,
+        n: usize,
+        k: usize,
     ) {
         let m_val = m as u32;
         let n_val = n as u32;
@@ -91,23 +99,34 @@ impl F32Ops {
 
     /// f32 matmul with automatic GPU/CPU routing.
     pub fn matmul(
-        &self, queue: &CommandQueue, bufs: &BufferCache,
-        a: ArrayView2<f32>, b: ArrayView2<f32>,
+        &self,
+        queue: &CommandQueue,
+        bufs: &BufferCache,
+        a: ArrayView2<f32>,
+        b: ArrayView2<f32>,
         flop_threshold: usize,
     ) -> Array2<f32> {
         let (m, k) = (a.shape()[0], a.shape()[1]);
         let n = b.shape()[1];
-        if 2 * m * n * k < flop_threshold { return a.dot(&b); }
+        if 2 * m * n * k < flop_threshold {
+            return a.dot(&b);
+        }
 
         let a_owned;
         let a_data: &[f32] = match a.as_slice() {
             Some(s) => s,
-            None => { a_owned = a.as_standard_layout().into_owned(); a_owned.as_slice().unwrap() }
+            None => {
+                a_owned = a.as_standard_layout().into_owned();
+                a_owned.as_slice().unwrap()
+            }
         };
         let b_owned;
         let b_data: &[f32] = match b.as_slice() {
             Some(s) => s,
-            None => { b_owned = b.as_standard_layout().into_owned(); b_owned.as_slice().unwrap() }
+            None => {
+                b_owned = b.as_standard_layout().into_owned();
+                b_owned.as_slice().unwrap()
+            }
         };
 
         let c = self.dispatch_notrans(queue, bufs, a_data, b_data, m, n, k);
@@ -116,23 +135,34 @@ impl F32Ops {
 
     /// f32 matmul_transb with automatic GPU/CPU routing.
     pub fn matmul_transb(
-        &self, queue: &CommandQueue, bufs: &BufferCache,
-        a: ArrayView2<f32>, b: ArrayView2<f32>,
+        &self,
+        queue: &CommandQueue,
+        bufs: &BufferCache,
+        a: ArrayView2<f32>,
+        b: ArrayView2<f32>,
         flop_threshold: usize,
     ) -> Array2<f32> {
         let (m, k) = (a.shape()[0], a.shape()[1]);
         let n = b.shape()[0];
-        if 2 * m * n * k < flop_threshold { return a.dot(&b.t()); }
+        if 2 * m * n * k < flop_threshold {
+            return a.dot(&b.t());
+        }
 
         let a_owned;
         let a_data: &[f32] = match a.as_slice() {
             Some(s) => s,
-            None => { a_owned = a.as_standard_layout().into_owned(); a_owned.as_slice().unwrap() }
+            None => {
+                a_owned = a.as_standard_layout().into_owned();
+                a_owned.as_slice().unwrap()
+            }
         };
         let b_owned;
         let b_data: &[f32] = match b.as_slice() {
             Some(s) => s,
-            None => { b_owned = b.as_standard_layout().into_owned(); b_owned.as_slice().unwrap() }
+            None => {
+                b_owned = b.as_standard_layout().into_owned();
+                b_owned.as_slice().unwrap()
+            }
         };
 
         let c = self.dispatch_transb(queue, bufs, a_data, b_data, m, n, k);

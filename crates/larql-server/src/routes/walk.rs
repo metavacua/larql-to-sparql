@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -18,7 +18,9 @@ pub struct WalkParams {
     pub layers: Option<String>,
 }
 
-fn default_top() -> usize { 5 }
+fn default_top() -> usize {
+    5
+}
 
 /// Parse a layer range string like "24-33" or "14,26,27".
 fn parse_layers(s: &str, all: &[usize]) -> Vec<usize> {
@@ -33,10 +35,7 @@ fn parse_layers(s: &str, all: &[usize]) -> Vec<usize> {
         .collect()
 }
 
-fn walk_prompt(
-    model: &LoadedModel,
-    params: &WalkParams,
-) -> Result<serde_json::Value, ServerError> {
+fn walk_prompt(model: &LoadedModel, params: &WalkParams) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
     let encoding = model
@@ -114,7 +113,7 @@ pub async fn handle_walk_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     let model = Arc::clone(model);
     let result = tokio::task::spawn_blocking(move || walk_prompt(&model, &params))
         .await

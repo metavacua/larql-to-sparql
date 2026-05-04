@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -17,9 +17,17 @@ fn is_content_token(tok: &str) -> bool {
         return false;
     }
     // is_readable_token inline
-    let readable = tok.chars().filter(|c| {
-        c.is_ascii_alphanumeric() || *c == ' ' || *c == '-' || *c == '\'' || *c == '.' || *c == ','
-    }).count();
+    let readable = tok
+        .chars()
+        .filter(|c| {
+            c.is_ascii_alphanumeric()
+                || *c == ' '
+                || *c == '-'
+                || *c == '\''
+                || *c == '.'
+                || *c == ','
+        })
+        .count();
     let total = tok.chars().count();
     if readable * 2 < total || total == 0 {
         return false;
@@ -43,18 +51,88 @@ fn is_content_token(tok: &str) -> bool {
     let lower = tok.to_lowercase();
     !matches!(
         lower.as_str(),
-        "the" | "and" | "for" | "but" | "not" | "you" | "all" | "can"
-        | "her" | "was" | "one" | "our" | "out" | "are" | "has" | "his"
-        | "how" | "its" | "may" | "new" | "now" | "old" | "see" | "way"
-        | "who" | "did" | "get" | "let" | "say" | "she" | "too" | "use"
-        | "from" | "have" | "been" | "will" | "with" | "this" | "that"
-        | "they" | "were" | "some" | "them" | "than" | "when"
-        | "what" | "your" | "each" | "make" | "like" | "just" | "over"
-        | "such" | "take" | "also" | "into" | "only" | "very" | "more"
-        | "does" | "most" | "about" | "which" | "their" | "would" | "there"
-        | "could" | "other" | "after" | "being" | "where" | "these" | "those"
-        | "first" | "should" | "because" | "through" | "before"
-        | "par" | "aux" | "che" | "del"
+        "the"
+            | "and"
+            | "for"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "her"
+            | "was"
+            | "one"
+            | "our"
+            | "out"
+            | "are"
+            | "has"
+            | "his"
+            | "how"
+            | "its"
+            | "may"
+            | "new"
+            | "now"
+            | "old"
+            | "see"
+            | "way"
+            | "who"
+            | "did"
+            | "get"
+            | "let"
+            | "say"
+            | "she"
+            | "too"
+            | "use"
+            | "from"
+            | "have"
+            | "been"
+            | "will"
+            | "with"
+            | "this"
+            | "that"
+            | "they"
+            | "were"
+            | "some"
+            | "them"
+            | "than"
+            | "when"
+            | "what"
+            | "your"
+            | "each"
+            | "make"
+            | "like"
+            | "just"
+            | "over"
+            | "such"
+            | "take"
+            | "also"
+            | "into"
+            | "only"
+            | "very"
+            | "more"
+            | "does"
+            | "most"
+            | "about"
+            | "which"
+            | "their"
+            | "would"
+            | "there"
+            | "could"
+            | "other"
+            | "after"
+            | "being"
+            | "where"
+            | "these"
+            | "those"
+            | "first"
+            | "should"
+            | "because"
+            | "through"
+            | "before"
+            | "par"
+            | "aux"
+            | "che"
+            | "del"
     )
 }
 
@@ -66,9 +144,7 @@ pub struct RelationsParams {
     pub source: Option<String>,
 }
 
-fn list_relations(
-    model: &LoadedModel,
-) -> Result<serde_json::Value, ServerError> {
+fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
     let patched = model.patched.blocking_read();
@@ -116,7 +192,9 @@ fn list_relations(
                     continue;
                 }
                 let key = tok.to_lowercase();
-                let examples: Vec<String> = meta.top_k.iter()
+                let examples: Vec<String> = meta
+                    .top_k
+                    .iter()
                     .filter(|t| t.token.trim() != tok && is_content_token(t.token.trim()))
                     .take(3)
                     .map(|t| t.token.trim().to_string())
@@ -168,7 +246,8 @@ fn list_relations(
     }
     let mut probe_sorted: Vec<(&String, &usize)> = probe_relations.iter().collect();
     probe_sorted.sort_by(|a, b| b.1.cmp(a.1));
-    let probe_list: Vec<serde_json::Value> = probe_sorted.iter()
+    let probe_list: Vec<serde_json::Value> = probe_sorted
+        .iter()
         .map(|(name, count)| serde_json::json!({"name": name, "count": count}))
         .collect();
 
@@ -206,7 +285,7 @@ pub async fn handle_relations_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     let model = Arc::clone(model);
     let result = tokio::task::spawn_blocking(move || list_relations(&model))
         .await

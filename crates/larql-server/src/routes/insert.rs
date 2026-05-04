@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
@@ -27,8 +27,12 @@ pub struct InsertRequest {
     pub confidence: f32,
 }
 
-fn default_alpha() -> f32 { 0.25 }
-fn default_confidence() -> f32 { 0.9 }
+fn default_alpha() -> f32 {
+    0.25
+}
+fn default_confidence() -> f32 {
+    0.9
+}
 
 /// Extract session ID from headers.
 fn session_id(headers: &HeaderMap) -> Option<String> {
@@ -55,8 +59,11 @@ fn compute_residuals(
         Err(_) => return Vec::new(),
     };
 
-    let prompt = format!("The {} of {} is",
-        req.relation.replace(['-', '_'], " "), req.entity);
+    let prompt = format!(
+        "The {} of {} is",
+        req.relation.replace(['-', '_'], " "),
+        req.entity
+    );
     let encoding = match model.tokenizer.encode(prompt.as_str(), true) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -64,11 +71,12 @@ fn compute_residuals(
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
     let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(weights, patched);
-    let _result = larql_inference::predict_with_ffn(
-        weights, &model.tokenizer, &token_ids, 1, &walk_ffn,
-    );
+    let _result =
+        larql_inference::predict_with_ffn(weights, &model.tokenizer, &token_ids, 1, &walk_ffn);
 
-    walk_ffn.take_residuals().into_iter()
+    walk_ffn
+        .take_residuals()
+        .into_iter()
         .filter(|(layer, _)| insert_layers.contains(layer))
         .collect()
 }
@@ -95,10 +103,14 @@ fn apply_insert(
     let mut target_embed = vec![0.0f32; hidden];
     for &tok in &target_ids {
         let row = model.embeddings.row(tok as usize);
-        for j in 0..hidden { target_embed[j] += row[j] * model.embed_scale; }
+        for j in 0..hidden {
+            target_embed[j] += row[j] * model.embed_scale;
+        }
     }
     let n = target_ids.len().max(1) as f32;
-    for v in &mut target_embed { *v /= n; }
+    for v in &mut target_embed {
+        *v /= n;
+    }
 
     let use_constellation = !residuals.is_empty();
 
@@ -109,39 +121,51 @@ fn apply_insert(
         };
 
         // Gate vector: residual (constellation) or entity embedding (fallback)
-        let gate_vec: Vec<f32> = if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
-            let mut gv = residual.clone();
-            if let Some(gate_matrix) = patched.base().gate_vectors_at(layer) {
-                let sample = gate_matrix.nrows().min(100);
-                if sample > 0 {
-                    let avg_norm: f32 = (0..sample)
-                        .map(|i| gate_matrix.row(i).dot(&gate_matrix.row(i)).sqrt())
-                        .sum::<f32>() / sample as f32;
-                    let res_norm: f32 = gv.iter().map(|v| v * v).sum::<f32>().sqrt();
-                    if res_norm > 1e-8 && avg_norm > 0.0 {
-                        let scale = avg_norm / res_norm;
-                        for v in &mut gv { *v *= scale; }
+        let gate_vec: Vec<f32> =
+            if let Some((_, ref residual)) = residuals.iter().find(|(l, _)| *l == layer) {
+                let mut gv = residual.clone();
+                if let Some(gate_matrix) = patched.base().gate_vectors_at(layer) {
+                    let sample = gate_matrix.nrows().min(100);
+                    if sample > 0 {
+                        let avg_norm: f32 = (0..sample)
+                            .map(|i| gate_matrix.row(i).dot(&gate_matrix.row(i)).sqrt())
+                            .sum::<f32>()
+                            / sample as f32;
+                        let res_norm: f32 = gv.iter().map(|v| v * v).sum::<f32>().sqrt();
+                        if res_norm > 1e-8 && avg_norm > 0.0 {
+                            let scale = avg_norm / res_norm;
+                            for v in &mut gv {
+                                *v *= scale;
+                            }
+                        }
                     }
                 }
-            }
-            gv
-        } else {
-            let enc = match model.tokenizer.encode(req.entity.as_str(), false) {
-                Ok(e) => e,
-                Err(_) => continue,
+                gv
+            } else {
+                let enc = match model.tokenizer.encode(req.entity.as_str(), false) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let ids = enc.get_ids();
+                let mut ev = vec![0.0f32; hidden];
+                for &tok in ids {
+                    let row = model.embeddings.row(tok as usize);
+                    for j in 0..hidden {
+                        ev[j] += row[j] * model.embed_scale;
+                    }
+                }
+                let n = ids.len().max(1) as f32;
+                for v in &mut ev {
+                    *v /= n;
+                }
+                let norm: f32 = ev.iter().map(|v| v * v).sum::<f32>().sqrt();
+                if norm > 1e-8 {
+                    for v in &mut ev {
+                        *v /= norm;
+                    }
+                }
+                ev
             };
-            let ids = enc.get_ids();
-            let mut ev = vec![0.0f32; hidden];
-            for &tok in ids {
-                let row = model.embeddings.row(tok as usize);
-                for j in 0..hidden { ev[j] += row[j] * model.embed_scale; }
-            }
-            let n = ids.len().max(1) as f32;
-            for v in &mut ev { *v /= n; }
-            let norm: f32 = ev.iter().map(|v| v * v).sum::<f32>().sqrt();
-            if norm > 1e-8 { for v in &mut ev { *v /= norm; } }
-            ev
-        };
 
         let down_vec: Vec<f32> = target_embed.iter().map(|v| v * req.alpha).collect();
 
@@ -174,8 +198,13 @@ fn run_insert(
 
     // Determine insert layers
     let last = model.config.num_layers.saturating_sub(1);
-    let bands = model.config.layer_bands.clone()
-        .or_else(|| larql_vindex::LayerBands::for_family(&model.config.family, model.config.num_layers))
+    let bands = model
+        .config
+        .layer_bands
+        .clone()
+        .or_else(|| {
+            larql_vindex::LayerBands::for_family(&model.config.family, model.config.num_layers)
+        })
         .unwrap_or(larql_vindex::LayerBands {
             syntax: (0, last),
             knowledge: (0, last),
@@ -194,12 +223,10 @@ fn run_insert(
         let mut sessions = state.sessions.sessions_blocking_write();
         let now = std::time::Instant::now();
 
-        let session = sessions
-            .entry(sid.to_string())
-            .or_insert_with(|| {
-                let base = model.patched.blocking_read();
-                crate::session::SessionState::new(base.base().clone(), now)
-            });
+        let session = sessions.entry(sid.to_string()).or_insert_with(|| {
+            let base = model.patched.blocking_read();
+            crate::session::SessionState::new(base.base().clone(), now)
+        });
         session.touch(now);
 
         let residuals = compute_residuals(model, &session.patched, req, &insert_layers);
@@ -241,11 +268,10 @@ pub async fn handle_insert(
     let model = Arc::clone(model);
     let sid = session_id(&headers);
     let state2 = Arc::clone(&state);
-    let result = tokio::task::spawn_blocking(move || {
-        run_insert(&state2, &model, &req, sid.as_deref())
-    })
-    .await
-    .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let result =
+        tokio::task::spawn_blocking(move || run_insert(&state2, &model, &req, sid.as_deref()))
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))??;
     Ok(Json(result))
 }
 
@@ -258,14 +284,13 @@ pub async fn handle_insert_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     let model = Arc::clone(model);
     let sid = session_id(&headers);
     let state2 = Arc::clone(&state);
-    let result = tokio::task::spawn_blocking(move || {
-        run_insert(&state2, &model, &req, sid.as_deref())
-    })
-    .await
-    .map_err(|e| ServerError::Internal(e.to_string()))??;
+    let result =
+        tokio::task::spawn_blocking(move || run_insert(&state2, &model, &req, sid.as_deref()))
+            .await
+            .map_err(|e| ServerError::Internal(e.to_string()))??;
     Ok(Json(result))
 }

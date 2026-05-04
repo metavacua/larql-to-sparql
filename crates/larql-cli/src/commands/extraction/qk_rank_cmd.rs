@@ -36,7 +36,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "  {} layers, {} Q heads, {} KV heads, head_dim={} ({:.1}s)",
-        num_layers, num_q_heads, num_kv_heads, head_dim,
+        num_layers,
+        num_q_heads,
+        num_kv_heads,
+        head_dim,
         start.elapsed().as_secs_f64()
     );
 
@@ -91,7 +94,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
             // Count significant singular values
             let s_max = singular_values[0];
             let threshold_val = s_max * args.threshold;
-            let rank = singular_values.iter().filter(|&&s| s > threshold_val).count();
+            let rank = singular_values
+                .iter()
+                .filter(|&&s| s > threshold_val)
+                .count();
 
             rank_histogram[rank] += 1;
             all_ranks.push((layer, head_dim, rank));
@@ -131,8 +137,7 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             if args.all || rank <= head_dim / 2 {
                 println!(
-                    "L{:<4} H{:<4} {:>5} {:>5} {:>8.1} {:>8.1} {:>8.1}  {}",
-                    layer, q_head, rank, head_dim, s_max, s_10, s_50, spectrum
+                    "L{layer:<4} H{q_head:<4} {rank:>5} {head_dim:>5} {s_max:>8.1} {s_10:>8.1} {s_50:>8.1}  {spectrum}"
                 );
             }
 
@@ -142,9 +147,12 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Summary ──
     println!("\n═══ Summary ═══\n");
-    println!("  Total heads analyzed: {}", total_heads);
-    println!("  Head dimension: {}", head_dim);
-    println!("  Threshold: {:.0}% of max singular value", args.threshold * 100.0);
+    println!("  Total heads analyzed: {total_heads}");
+    println!("  Head dimension: {head_dim}");
+    println!(
+        "  Threshold: {:.0}% of max singular value",
+        args.threshold * 100.0
+    );
 
     // Rank distribution
     println!("\n  Rank distribution:");
@@ -173,10 +181,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("\n  Rank statistics:");
-    println!("    min: {}", min_rank);
-    println!("    median: {}", median_rank);
-    println!("    mean: {:.1}", avg_rank);
-    println!("    max: {}", max_rank);
+    println!("    min: {min_rank}");
+    println!("    median: {median_rank}");
+    println!("    mean: {avg_rank:.1}");
+    println!("    max: {max_rank}");
 
     // Template capacity estimate
     // If median head has rank R, and heads are somewhat independent,

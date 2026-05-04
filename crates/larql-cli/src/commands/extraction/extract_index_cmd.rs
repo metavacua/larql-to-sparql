@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
+use larql_inference::InferenceModel;
 use larql_vindex::IndexBuildCallbacks;
-use larql_inference::{ InferenceModel};
 
 #[derive(Args)]
 pub struct ExtractIndexArgs {
@@ -149,13 +149,7 @@ impl IndexBuildCallbacks for CliBuildCallbacks {
             .set_message(format!("{component} L{layer} ({}/{})", layer + 1, total));
     }
 
-    fn on_feature_progress(
-        &mut self,
-        component: &str,
-        _layer: usize,
-        done: usize,
-        total: usize,
-    ) {
+    fn on_feature_progress(&mut self, component: &str, _layer: usize, done: usize, total: usize) {
         if total > 0 {
             self.feature_bar.set_length(total as u64);
         }
@@ -213,18 +207,24 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         larql_vindex::build_vindex_from_vectors(vectors_dir, &args.output, &mut callbacks)?;
 
-        if matches!(level, larql_vindex::ExtractLevel::Inference | larql_vindex::ExtractLevel::All) {
+        if matches!(
+            level,
+            larql_vindex::ExtractLevel::Inference | larql_vindex::ExtractLevel::All
+        ) {
             let model_name = args.model.as_deref().ok_or(
                 "--model required with --level inference/all (need model to extract weights)",
             )?;
-            eprintln!("\nLoading model for weights: {}", model_name);
+            eprintln!("\nLoading model for weights: {model_name}");
             let model = InferenceModel::load(model_name)?;
             let weight_opts = larql_vindex::WriteWeightsOptions {
                 level,
                 ffn_compact: args.compact,
             };
             larql_vindex::write_model_weights_with_opts(
-                model.weights(), &args.output, &mut callbacks, weight_opts,
+                model.weights(),
+                &args.output,
+                &mut callbacks,
+                weight_opts,
             )?;
         }
     } else {
@@ -246,8 +246,14 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             larql_vindex::StorageDtype::F32 => "f32",
             larql_vindex::StorageDtype::F16 => "f16",
         };
-        eprintln!("Extracting: {} → {} (level={}, dtype={}, quant={})",
-            model_path.display(), args.output.display(), level_str, dtype_str, args.quant);
+        eprintln!(
+            "Extracting: {} → {} (level={}, dtype={}, quant={})",
+            model_path.display(),
+            args.output.display(),
+            level_str,
+            dtype_str,
+            args.quant
+        );
 
         let output = &args.output;
 
@@ -275,7 +281,9 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
                 "--down-q4k requires --quant q4k (only the Q4K writer honours this flag)".into(),
             );
         }
-        let q4k_opts = larql_vindex::Q4kWriteOptions { down_q4k: args.down_q4k };
+        let q4k_opts = larql_vindex::Q4kWriteOptions {
+            down_q4k: args.down_q4k,
+        };
         larql_vindex::build_vindex_streaming(
             &model_path,
             &tokenizer,
@@ -300,10 +308,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Output: {}", args.output.display());
 
     if build_elapsed.as_secs() >= 60 {
-        eprintln!(
-            "  Build time: {:.1}min",
-            build_elapsed.as_secs_f64() / 60.0
-        );
+        eprintln!("  Build time: {:.1}min", build_elapsed.as_secs_f64() / 60.0);
     } else {
         eprintln!("  Build time: {:.1}s", build_elapsed.as_secs_f64());
     }
@@ -328,10 +333,10 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             if size_mb > 1024.0 {
                 eprintln!("  {name}: {:.2} GB", size_mb / 1024.0);
             } else if size_mb > 0.1 {
-                eprintln!("  {name}: {:.1} MB", size_mb);
+                eprintln!("  {name}: {size_mb:.1} MB");
             } else {
                 let size_kb = meta.len() as f64 / 1024.0;
-                eprintln!("  {name}: {:.1} KB", size_kb);
+                eprintln!("  {name}: {size_kb:.1} KB");
             }
         } else {
             eprintln!("  {name}: (not found)");
@@ -342,7 +347,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     let total_size: u64 = std::fs::read_dir(&args.output)
         .ok()
         .map(|entries| {
-            entries.filter_map(|e| e.ok())
+            entries
+                .filter_map(|e| e.ok())
                 .filter_map(|e| e.metadata().ok())
                 .map(|m| m.len())
                 .sum()

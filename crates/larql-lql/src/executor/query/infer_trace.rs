@@ -104,7 +104,7 @@ impl Session {
         };
 
         let mut out = Vec::new();
-        out.push(format!("Inference trace for {:?}{}:", prompt, band_label));
+        out.push(format!("Inference trace for {prompt:?}{band_label}:"));
         if let Some(ovr) = &knn_override {
             out.push(format!(
                 "Prediction: {} (KNN override, cos={:.2}, L{}) in {:.0}ms",
@@ -167,8 +167,7 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!(
-            "Inference trace for {:?} (dense — no vindex):",
-            prompt
+            "Inference trace for {prompt:?} (dense — no vindex):"
         ));
         out.push(format!(
             "Prediction: {} ({:.2}%) in {:.0}ms",
@@ -358,8 +357,7 @@ fn render_trace_layer(
 
         if feature_part.is_some() || !lens_part.is_empty() {
             out.push(format!(
-                "  L{:2}  {:<19}  {:<16} → {}",
-                layer, feature_str, attn_part, lens_part,
+                "  L{layer:2}  {feature_str:<19}  {attn_part:<16} → {lens_part}",
             ));
         }
     } else {
@@ -379,7 +377,7 @@ fn render_trace_layer(
             let label_str = if label.is_empty() {
                 format!("{:14}", "")
             } else {
-                format!("{:<14}", label)
+                format!("{label:<14}")
             };
             let top_token = hit.meta.top_token.trim();
             let down_top: String = hit

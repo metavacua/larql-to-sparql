@@ -22,9 +22,7 @@
 
 use larql_lql::{parse, Session};
 use larql_vindex::ndarray::Array2;
-use larql_vindex::{
-    FeatureMeta, QuantFormat, StorageDtype, VectorIndex, VindexConfig,
-};
+use larql_vindex::{FeatureMeta, QuantFormat, StorageDtype, VectorIndex, VindexConfig};
 
 fn main() {
     println!("=== LSM compact demo (synthetic browse-only vindex) ===\n");

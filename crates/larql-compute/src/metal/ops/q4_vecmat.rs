@@ -5,8 +5,8 @@
 //! One thread per output element. GPU-hostile pattern but
 //! parallelised across K output elements.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 

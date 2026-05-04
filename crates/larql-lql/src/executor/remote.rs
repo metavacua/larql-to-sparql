@@ -1,9 +1,9 @@
 //! Remote executor — forwards LQL queries to a larql-server via HTTP.
 
+use super::Backend;
+use super::Session;
 use crate::ast::*;
 use crate::error::LqlError;
-use super::Session;
-use super::Backend;
 
 impl Session {
     /// Connect to a remote larql-server.
@@ -39,11 +39,14 @@ impl Session {
         let features = stats["features"].as_u64().unwrap_or(0);
 
         // Generate a unique session ID for this connection
-        let session_id = format!("larql-{}-{}", std::process::id(),
+        let session_id = format!(
+            "larql-{}-{}",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis());
+                .as_millis()
+        );
 
         self.backend = Backend::Remote {
             url: url.clone(),
@@ -68,8 +71,15 @@ impl Session {
     /// Get the remote URL, client, and session ID, or error.
     fn require_remote(&self) -> Result<(&str, &reqwest::blocking::Client, &str), LqlError> {
         match &self.backend {
-            Backend::Remote { url, client, session_id, .. } => Ok((url, client, session_id)),
-            _ => Err(LqlError::Execution("not connected to a remote server".into())),
+            Backend::Remote {
+                url,
+                client,
+                session_id,
+                ..
+            } => Ok((url, client, session_id)),
+            _ => Err(LqlError::Execution(
+                "not connected to a remote server".into(),
+            )),
         }
     }
 
@@ -133,7 +143,6 @@ impl Session {
             .map_err(|e| LqlError::exec("invalid response", e))
     }
 
-
     // ── Remote query forwarding ──
 
     pub(crate) fn remote_describe(
@@ -143,7 +152,10 @@ impl Session {
         mode: crate::ast::DescribeMode,
     ) -> Result<Vec<String>, LqlError> {
         let verbose = mode == crate::ast::DescribeMode::Verbose;
-        let show_also = matches!(mode, crate::ast::DescribeMode::Verbose | crate::ast::DescribeMode::Raw);
+        let show_also = matches!(
+            mode,
+            crate::ast::DescribeMode::Verbose | crate::ast::DescribeMode::Raw
+        );
 
         let band_str = match band {
             Some(LayerBand::Syntax) => "syntax",
@@ -177,19 +189,26 @@ impl Session {
 
                     let show_labels = mode != crate::ast::DescribeMode::Raw;
                     let label = if show_labels && !relation.is_empty() {
-                        format!("{:<12}", relation)
+                        format!("{relation:<12}")
                     } else {
                         format!("{:<12}", "")
                     };
 
-                    let tag = if show_labels && source == "probe" { "  (probe)" } else { "" };
+                    let tag = if show_labels && source == "probe" {
+                        "  (probe)"
+                    } else {
+                        ""
+                    };
 
                     let also_str = if show_also {
-                        edge["also"].as_array()
-                            .map(|arr| arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", "))
+                        edge["also"]
+                            .as_array()
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
                             .filter(|s| !s.is_empty())
                             .map(|s| format!("  also: {s}"))
                             .unwrap_or_default()
@@ -198,15 +217,14 @@ impl Session {
                     };
 
                     out.push(format!(
-                        "    {} → {:20} {:>7.1}  L{:<3}{}{}",
-                        label, target, gate, layer, tag, also_str,
+                        "    {label} → {target:20} {gate:>7.1}  L{layer:<3}{tag}{also_str}",
                     ));
                 }
             }
         }
 
         if let Some(ms) = body["latency_ms"].as_f64() {
-            out.push(format!("\n{:.1}ms (remote)", ms));
+            out.push(format!("\n{ms:.1}ms (remote)"));
         }
 
         // Overlay local patch edges.
@@ -242,11 +260,10 @@ impl Session {
                         let label = if relation.is_empty() {
                             format!("{:<12}", "")
                         } else {
-                            format!("{:<12}", relation)
+                            format!("{relation:<12}")
                         };
                         out.push(format!(
-                            "    {} → {:20} {:>7.2}  L{:<3}  (local)",
-                            label, target, conf, layer,
+                            "    {label} → {target:20} {conf:>7.2}  L{layer:<3}  (local)",
                         ));
                     }
                 }
@@ -265,10 +282,7 @@ impl Session {
         let top_k = top.unwrap_or(10).to_string();
         let layers_str = layers.map(|r| format!("{}-{}", r.start, r.end));
 
-        let mut params: Vec<(&str, &str)> = vec![
-            ("prompt", prompt),
-            ("top", top_k.as_str()),
-        ];
+        let mut params: Vec<(&str, &str)> = vec![("prompt", prompt), ("top", top_k.as_str())];
         if let Some(ref s) = layers_str {
             params.push(("layers", s.as_str()));
         }
@@ -276,7 +290,7 @@ impl Session {
         let body = self.remote_get_json("/v1/walk", &params)?;
 
         let mut out = Vec::new();
-        out.push(format!("Feature scan for {:?}", prompt));
+        out.push(format!("Feature scan for {prompt:?}"));
         out.push(String::new());
 
         if let Some(hits) = body["hits"].as_array() {
@@ -287,14 +301,13 @@ impl Session {
                 let target = hit["target"].as_str().unwrap_or("?");
 
                 out.push(format!(
-                    "  L{:2}: F{:<5} gate={:+.1}  top={:?}",
-                    layer, feature, gate, target,
+                    "  L{layer:2}: F{feature:<5} gate={gate:+.1}  top={target:?}",
                 ));
             }
         }
 
         if let Some(ms) = body["latency_ms"].as_f64() {
-            out.push(format!("\n{:.1}ms (remote)", ms));
+            out.push(format!("\n{ms:.1}ms (remote)"));
         }
 
         Ok(out)
@@ -327,7 +340,7 @@ impl Session {
                         out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
                     }
                     if let Some(ms) = result[format!("{mode}_ms")].as_f64() {
-                        out.push(format!("  {:.0}ms", ms));
+                        out.push(format!("  {ms:.0}ms"));
                     }
                     out.push(String::new());
                 }
@@ -342,7 +355,7 @@ impl Session {
         }
 
         if let Some(ms) = result["latency_ms"].as_f64() {
-            out.push(format!("{:.0}ms (remote)", ms));
+            out.push(format!("{ms:.0}ms (remote)"));
         }
 
         Ok(out)
@@ -384,7 +397,7 @@ impl Session {
         };
 
         let mut out = Vec::new();
-        out.push(format!("Inference trace for {:?}{}:", prompt, band_label));
+        out.push(format!("Inference trace for {prompt:?}{band_label}:"));
 
         if let Some(preds) = result["predictions"].as_array() {
             if let Some(first) = preds.first() {
@@ -404,7 +417,8 @@ impl Session {
                     // Compact single-line format
                     let feat = features.and_then(|f| f.first());
                     let feature_str = if let Some(feat) = feat {
-                        let relation = feat["relation"].as_str()
+                        let relation = feat["relation"]
+                            .as_str()
                             .or_else(|| feat["relation"].as_null().map(|_| ""))
                             .unwrap_or("");
                         if relations_only && relation.is_empty() {
@@ -412,8 +426,12 @@ impl Session {
                         } else {
                             let gate = feat["gate_score"].as_f64().unwrap_or(0.0);
                             let top_token = feat["top_token"].as_str().unwrap_or("?");
-                            let name = if !relation.is_empty() { relation } else { top_token };
-                            Some(format!("{:<14} {:+.1}", name, gate))
+                            let name = if !relation.is_empty() {
+                                relation
+                            } else {
+                                top_token
+                            };
+                            Some(format!("{name:<14} {gate:+.1}"))
                         }
                     } else {
                         None
@@ -421,7 +439,8 @@ impl Session {
                     let empty = format!("{:19}", "");
                     let feature_part = feature_str.as_deref().unwrap_or(&empty);
 
-                    let attn_part = layer_obj.get("attention")
+                    let attn_part = layer_obj
+                        .get("attention")
                         .and_then(|a| a.as_array())
                         .and_then(|arr| arr.first())
                         .and_then(|v| {
@@ -431,7 +450,8 @@ impl Session {
                         })
                         .unwrap_or_default();
 
-                    let lens_part = layer_obj.get("lens")
+                    let lens_part = layer_obj
+                        .get("lens")
                         .and_then(|l| {
                             let tok = l["token"].as_str()?;
                             let prob = l["probability"].as_f64()?;
@@ -441,8 +461,7 @@ impl Session {
 
                     if feature_str.is_some() || !lens_part.is_empty() {
                         out.push(format!(
-                            "  L{:2}  {:<19}  {:<16} → {}",
-                            layer, feature_part, attn_part, lens_part,
+                            "  L{layer:2}  {feature_part:<19}  {attn_part:<16} → {lens_part}",
                         ));
                     }
                 } else {
@@ -451,7 +470,8 @@ impl Session {
                         for feat in features {
                             let feature = feat["feature"].as_u64().unwrap_or(0);
                             let gate = feat["gate_score"].as_f64().unwrap_or(0.0);
-                            let relation = feat["relation"].as_str()
+                            let relation = feat["relation"]
+                                .as_str()
                                 .or_else(|| feat["relation"].as_null().map(|_| ""))
                                 .unwrap_or("");
                             if relations_only && relation.is_empty() {
@@ -460,7 +480,7 @@ impl Session {
                             let label_str = if relation.is_empty() {
                                 format!("{:14}", "")
                             } else {
-                                format!("{:<14}", relation)
+                                format!("{relation:<14}")
                             };
                             let top_token = feat["top_token"].as_str().unwrap_or("?");
                             let top_tokens: String = feat["top_tokens"]
@@ -473,8 +493,7 @@ impl Session {
                                 })
                                 .unwrap_or_default();
                             out.push(format!(
-                                "  L{:2}: {} F{:<5} gate={:+.1}  → {:15} [{}]",
-                                layer, label_str, feature, gate, top_token, top_tokens,
+                                "  L{layer:2}: {label_str} F{feature:<5} gate={gate:+.1}  → {top_token:15} [{top_tokens}]",
                             ));
                         }
                     }
@@ -483,7 +502,7 @@ impl Session {
         }
 
         if let Some(ms) = result["latency_ms"].as_f64() {
-            out.push(format!("\n{:.0}ms (remote)", ms));
+            out.push(format!("\n{ms:.0}ms (remote)"));
         }
 
         Ok(out)
@@ -498,12 +517,24 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!("Model: {}", body["model"].as_str().unwrap_or("?")));
-        out.push(format!("Family: {}", body["family"].as_str().unwrap_or("?")));
+        out.push(format!(
+            "Family: {}",
+            body["family"].as_str().unwrap_or("?")
+        ));
         out.push(format!("Layers: {}", body["layers"].as_u64().unwrap_or(0)));
-        out.push(format!("Features: {}", body["features"].as_u64().unwrap_or(0)));
-        out.push(format!("Hidden: {}", body["hidden_size"].as_u64().unwrap_or(0)));
+        out.push(format!(
+            "Features: {}",
+            body["features"].as_u64().unwrap_or(0)
+        ));
+        out.push(format!(
+            "Hidden: {}",
+            body["hidden_size"].as_u64().unwrap_or(0)
+        ));
         out.push(format!("Dtype: {}", body["dtype"].as_str().unwrap_or("?")));
-        out.push(format!("Extract level: {}", body["extract_level"].as_str().unwrap_or("?")));
+        out.push(format!(
+            "Extract level: {}",
+            body["extract_level"].as_str().unwrap_or("?")
+        ));
 
         if let Some(bands) = body.get("layer_bands") {
             if let (Some(s), Some(k), Some(o)) = (
@@ -531,7 +562,11 @@ impl Session {
         Ok(out)
     }
 
-    pub(crate) fn remote_show_relations(&self, mode: crate::ast::DescribeMode, with_examples: bool) -> Result<Vec<String>, LqlError> {
+    pub(crate) fn remote_show_relations(
+        &self,
+        mode: crate::ast::DescribeMode,
+        with_examples: bool,
+    ) -> Result<Vec<String>, LqlError> {
         use crate::ast::DescribeMode;
         let body = self.remote_get_json("/v1/relations", &[])?;
 
@@ -548,7 +583,7 @@ impl Session {
                     for rel in probes {
                         let name = rel["name"].as_str().unwrap_or("?");
                         let count = rel["count"].as_u64().unwrap_or(0);
-                        out.push(format!("{:<25} {:>8}", name, count));
+                        out.push(format!("{name:<25} {count:>8}"));
                     }
                     out.push(String::new());
                 }
@@ -556,9 +591,7 @@ impl Session {
         }
 
         // Raw token relations (show for Verbose, Raw, or when no probes)
-        let show_raw = mode == DescribeMode::Raw
-            || mode == DescribeMode::Verbose
-            || out.is_empty();
+        let show_raw = mode == DescribeMode::Raw || mode == DescribeMode::Verbose || out.is_empty();
 
         if show_raw {
             if let Some(rels) = body["relations"].as_array() {
@@ -577,11 +610,12 @@ impl Session {
                         let max_l = rel["max_layer"].as_u64().unwrap_or(0);
                         let examples_str = if with_examples {
                             if let Some(arr) = rel["examples"].as_array() {
-                                let ex: Vec<&str> = arr.iter()
-                                    .filter_map(|v| v.as_str())
-                                    .collect();
-                                if ex.is_empty() { String::new() }
-                                else { format!("  e.g. {}", ex.join(", ")) }
+                                let ex: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                                if ex.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("  e.g. {}", ex.join(", "))
+                                }
                             } else {
                                 String::new()
                             }
@@ -589,8 +623,7 @@ impl Session {
                             String::new()
                         };
                         out.push(format!(
-                            "{:<25} {:>8} {:>8.2} {:>5}-{}{}",
-                            name, count, score, min_l, max_l, examples_str,
+                            "{name:<25} {count:>8} {score:>8.2} {min_l:>5}-{max_l}{examples_str}",
                         ));
                     }
                 }
@@ -626,10 +659,9 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!(
-            "Inserted: {} —[{}]→ {} ({} layers, mode: {})",
-            entity, relation, target, inserted, mode,
+            "Inserted: {entity} —[{relation}]→ {target} ({inserted} layers, mode: {mode})",
         ));
-        out.push(format!("{:.0}ms (remote)", ms));
+        out.push(format!("{ms:.0}ms (remote)"));
 
         Ok(out)
     }
@@ -680,7 +712,9 @@ impl Session {
             false,
         )?;
 
-        Ok(vec![format!("Deleted: L{layer} F{feature} → remote server")])
+        Ok(vec![format!(
+            "Deleted: L{layer} F{feature} → remote server"
+        )])
     }
 
     pub(crate) fn remote_update(
@@ -722,13 +756,13 @@ impl Session {
                 _ => None,
             });
 
-        let down_meta = target.as_ref().map(|t| {
-            larql_vindex::patch::core::PatchDownMeta {
+        let down_meta = target
+            .as_ref()
+            .map(|t| larql_vindex::patch::core::PatchDownMeta {
                 top_token: t.clone(),
                 top_token_id: 0,
                 c_score: confidence.unwrap_or(0.9),
-            }
-        });
+            });
 
         let op = larql_vindex::PatchOp::Update {
             layer,
@@ -758,7 +792,9 @@ impl Session {
             .as_deref()
             .map(|t| format!(" target={t}"))
             .unwrap_or_default();
-        Ok(vec![format!("Updated: L{layer} F{feature}{desc} → remote server")])
+        Ok(vec![format!(
+            "Updated: L{layer} F{feature}{desc} → remote server"
+        )])
     }
 
     // ── Remote SELECT ──
@@ -788,26 +824,21 @@ impl Session {
                         body.insert("layer".into(), serde_json::json!(n));
                     }
                 }
-                "confidence" | "c_score" => {
-                    match &cond.value {
-                        crate::ast::Value::Number(n) => {
-                            body.insert("min_confidence".into(), serde_json::json!(n));
-                        }
-                        crate::ast::Value::Integer(n) => {
-                            body.insert("min_confidence".into(), serde_json::json!(n));
-                        }
-                        _ => {}
+                "confidence" | "c_score" => match &cond.value {
+                    crate::ast::Value::Number(n) => {
+                        body.insert("min_confidence".into(), serde_json::json!(n));
                     }
-                }
+                    crate::ast::Value::Integer(n) => {
+                        body.insert("min_confidence".into(), serde_json::json!(n));
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
 
-        let result = self.remote_post_json(
-            "/v1/select",
-            &serde_json::Value::Object(body),
-            false,
-        )?;
+        let result =
+            self.remote_post_json("/v1/select", &serde_json::Value::Object(body), false)?;
 
         let mut out = Vec::new();
 
@@ -827,15 +858,14 @@ impl Session {
                     let score = edge["c_score"].as_f64().unwrap_or(0.0);
                     let relation = edge["relation"].as_str().unwrap_or("");
                     out.push(format!(
-                        "  {:<20} {:<15} {:>6.3}  L{:<5} F{}",
-                        target, relation, score, layer, feature
+                        "  {target:<20} {relation:<15} {score:>6.3}  L{layer:<5} F{feature}"
                     ));
                 }
             }
         }
 
         if let Some(total) = result["total"].as_u64() {
-            out.push(format!("\n{} total", total));
+            out.push(format!("\n{total} total"));
         }
 
         Ok(out)
@@ -863,14 +893,20 @@ impl Session {
                      Patch stays client-side — server never sees it."
                 )])
             }
-            _ => Err(LqlError::Execution("not connected to a remote server".into())),
+            _ => Err(LqlError::Execution(
+                "not connected to a remote server".into(),
+            )),
         }
     }
 
     pub(crate) fn remote_show_patches(&self) -> Result<Vec<String>, LqlError> {
         let local_patches = match &self.backend {
             Backend::Remote { local_patches, .. } => local_patches,
-            _ => return Err(LqlError::Execution("not connected to a remote server".into())),
+            _ => {
+                return Err(LqlError::Execution(
+                    "not connected to a remote server".into(),
+                ))
+            }
         };
 
         let mut out = Vec::new();
@@ -883,17 +919,29 @@ impl Session {
                 let name = patch.description.as_deref().unwrap_or("(unnamed)");
                 out.push(format!(
                     "  {}. {:<40} {} ops ({} ins, {} upd, {} del)",
-                    i + 1, name, patch.len(), ins, upd, del,
+                    i + 1,
+                    name,
+                    patch.len(),
+                    ins,
+                    upd,
+                    del,
                 ));
             }
         }
         Ok(out)
     }
 
-    pub(crate) fn remote_remove_local_patch(&mut self, name: &str) -> Result<Vec<String>, LqlError> {
+    pub(crate) fn remote_remove_local_patch(
+        &mut self,
+        name: &str,
+    ) -> Result<Vec<String>, LqlError> {
         let local_patches = match &mut self.backend {
             Backend::Remote { local_patches, .. } => local_patches,
-            _ => return Err(LqlError::Execution("not connected to a remote server".into())),
+            _ => {
+                return Err(LqlError::Execution(
+                    "not connected to a remote server".into(),
+                ))
+            }
         };
 
         let pos = local_patches
@@ -905,7 +953,9 @@ impl Session {
                 local_patches.remove(i);
                 Ok(vec![format!("Removed local patch: {name}")])
             }
-            None => Err(LqlError::Execution(format!("local patch not found: {name}"))),
+            None => Err(LqlError::Execution(format!(
+                "local patch not found: {name}"
+            ))),
         }
     }
 }

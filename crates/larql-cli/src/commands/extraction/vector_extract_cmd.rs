@@ -108,7 +108,7 @@ pub fn run(args: VectorExtractArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
     eprintln!("  components: {}", components.join(", "));
     if let Some(ref layers) = args.layers {
-        eprintln!("  layers: {:?}", layers);
+        eprintln!("  layers: {layers:?}");
     }
     eprintln!();
 

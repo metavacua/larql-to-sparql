@@ -15,9 +15,9 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) {
     let per_iter_us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     let per_iter_ms = per_iter_us / 1000.0;
     if per_iter_ms > 1.0 {
-        println!("  {:<40} {:>8.2} ms  ({} iters)", name, per_iter_ms, iters);
+        println!("  {name:<40} {per_iter_ms:>8.2} ms  ({iters} iters)");
     } else {
-        println!("  {:<40} {:>8.1} us  ({} iters)", name, per_iter_us, iters);
+        println!("  {name:<40} {per_iter_us:>8.1} us  ({iters} iters)");
     }
 }
 
@@ -27,7 +27,7 @@ fn build_graph(n: usize) -> Graph {
         let edge = Edge::new(
             format!("Entity_{}", i / 10),
             format!("rel_{}", i % 10),
-            format!("Target_{}", i),
+            format!("Target_{i}"),
         )
         .with_confidence(0.5 + (i as f64 % 50.0) / 100.0);
         graph.add_edge(edge);
@@ -104,18 +104,14 @@ fn main() {
     let mut algo_graph = Graph::new();
     for i in 0..1_000 {
         algo_graph.add_edge(
-            Edge::new(
-                format!("N{}", i),
-                "connects",
-                format!("N{}", (i + 1) % 1_000),
-            )
-            .with_confidence(0.9),
+            Edge::new(format!("N{i}"), "connects", format!("N{}", (i + 1) % 1_000))
+                .with_confidence(0.9),
         );
         // Add some cross-links
         if i % 10 == 0 {
             algo_graph.add_edge(
                 Edge::new(
-                    format!("N{}", i),
+                    format!("N{i}"),
                     "shortcut",
                     format!("N{}", (i + 100) % 1_000),
                 )

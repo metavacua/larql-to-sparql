@@ -5,7 +5,6 @@
 //! Simpler than Q4 — no nibble unpacking. Each weight is one signed byte.
 //! Used for V projection where Q4 accuracy is insufficient.
 
-
 /// Quantize a weight matrix to Q8 format: int8 values + per-block f32 scales.
 /// Returns (int8_data[N*K], scales[N * K/32]).
 pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (Vec<i8>, Vec<f32>) {
@@ -34,9 +33,12 @@ pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (
 
 /// Q8 matvec on CPU: scores[N] = Q8_w[N,K] @ Q8_x[K].
 pub fn dispatch(
-    w_q8: &[i8], w_scales: &[f32],
-    x_q8: &[i8], x_scales: &[f32],
-    num_rows: usize, hidden: usize,
+    w_q8: &[i8],
+    w_scales: &[f32],
+    x_q8: &[i8],
+    x_scales: &[f32],
+    num_rows: usize,
+    hidden: usize,
 ) -> Vec<f32> {
     let blocks = hidden / 32;
     let mut scores = vec![0.0f32; num_rows];
@@ -67,7 +69,9 @@ mod tests {
     fn q8_matvec_produces_output() {
         let hidden = 256;
         let rows = 64;
-        let weights: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let weights: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
 
         let (w_q8, w_scales) = quantize_weights_q8(&weights, rows, hidden);
@@ -82,7 +86,9 @@ mod tests {
     fn q8_vs_f32_high_cosine() {
         let hidden = 256;
         let rows = 32;
-        let weights: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let weights: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
 
         // f32 reference
@@ -99,7 +105,11 @@ mod tests {
         let q8_result = dispatch(&w_q8, &w_scales, &x_q8, &x_scales, rows, hidden);
 
         // Cosine similarity
-        let dot: f32 = f32_result.iter().zip(q8_result.iter()).map(|(a, b)| a * b).sum();
+        let dot: f32 = f32_result
+            .iter()
+            .zip(q8_result.iter())
+            .map(|(a, b)| a * b)
+            .sum();
         let na: f32 = f32_result.iter().map(|x| x * x).sum::<f32>().sqrt();
         let nb: f32 = q8_result.iter().map(|x| x * x).sum::<f32>().sqrt();
         let cos = dot / (na * nb);

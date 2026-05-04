@@ -55,15 +55,19 @@ enum ConvertCommand {
 
 pub fn run(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
-        ConvertCommand::GgufToVindex { input, output, level, f16 } => {
-            run_gguf_to_vindex(&input, &output, &level, f16)
-        }
-        ConvertCommand::SafetensorsToVindex { input, output, level, f16 } => {
-            run_safetensors_to_vindex(&input, &output, &level, f16)
-        }
-        ConvertCommand::GgufInfo { input } => {
-            run_gguf_info(&input)
-        }
+        ConvertCommand::GgufToVindex {
+            input,
+            output,
+            level,
+            f16,
+        } => run_gguf_to_vindex(&input, &output, &level, f16),
+        ConvertCommand::SafetensorsToVindex {
+            input,
+            output,
+            level,
+            f16,
+        } => run_safetensors_to_vindex(&input, &output, &level, f16),
+        ConvertCommand::GgufInfo { input } => run_gguf_info(&input),
     }
 }
 
@@ -79,10 +83,10 @@ fn run_gguf_to_vindex(
 
     // Show metadata summary
     if let Some(name) = gguf.metadata.get("general.name") {
-        eprintln!("  Model: {:?}", name);
+        eprintln!("  Model: {name:?}");
     }
     if let Some(arch) = gguf.metadata.get("general.architecture") {
-        eprintln!("  Architecture: {:?}", arch);
+        eprintln!("  Architecture: {arch:?}");
     }
 
     eprintln!("  Loading and dequantizing tensors...");
@@ -105,25 +109,26 @@ fn run_gguf_to_vindex(
         larql_vindex::StorageDtype::F32
     };
 
-    let model_name = gguf.metadata.get("general.name")
+    let model_name = gguf
+        .metadata
+        .get("general.name")
         .and_then(|v| v.as_str())
         .unwrap_or("gguf-model")
         .to_string();
 
     // Find tokenizer — check same directory as GGUF file
-    let tokenizer = input.parent()
-        .and_then(|dir| {
-            let tok_path = dir.join("tokenizer.json");
-            if tok_path.exists() {
-                larql_vindex::tokenizers::Tokenizer::from_file(&tok_path).ok()
-            } else {
-                None
-            }
-        });
+    let tokenizer = input.parent().and_then(|dir| {
+        let tok_path = dir.join("tokenizer.json");
+        if tok_path.exists() {
+            larql_vindex::tokenizers::Tokenizer::from_file(&tok_path).ok()
+        } else {
+            None
+        }
+    });
 
-    let tokenizer_ref = tokenizer.as_ref().ok_or(
-        "tokenizer.json not found next to GGUF file. Place it in the same directory."
-    )?;
+    let tokenizer_ref = tokenizer
+        .as_ref()
+        .ok_or("tokenizer.json not found next to GGUF file. Place it in the same directory.")?;
 
     eprintln!("\nExtracting to {}", output.display());
 
@@ -152,13 +157,12 @@ fn run_safetensors_to_vindex(
     // This is essentially extract-index
     eprintln!("Loading safetensors: {}", input.display());
     let weights = larql_models::load_model_dir(input)?;
-    let tokenizer = larql_vindex::load_vindex_tokenizer(input)
-        .or_else(|_| {
-            // Try to load from the model directory
-            let tok_path = input.join("tokenizer.json");
-            larql_vindex::tokenizers::Tokenizer::from_file(&tok_path)
-                .map_err(|e| larql_vindex::VindexError::Parse(e.to_string()))
-        })?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(input).or_else(|_| {
+        // Try to load from the model directory
+        let tok_path = input.join("tokenizer.json");
+        larql_vindex::tokenizers::Tokenizer::from_file(&tok_path)
+            .map_err(|e| larql_vindex::VindexError::Parse(e.to_string()))
+    })?;
 
     let extract_level = match level {
         "inference" => larql_vindex::ExtractLevel::Inference,
@@ -172,7 +176,8 @@ fn run_safetensors_to_vindex(
         larql_vindex::StorageDtype::F32
     };
 
-    let model_name = input.file_name()
+    let model_name = input
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "model".into());
 
@@ -211,13 +216,13 @@ fn run_gguf_info(input: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
                 if s.len() > 80 {
                     println!("  {}: \"{}...\"", key, &s[..80]);
                 } else {
-                    println!("  {}: \"{}\"", key, s);
+                    println!("  {key}: \"{s}\"");
                 }
             }
             larql_models::loading::gguf::GgufValue::Array(arr) => {
                 println!("  {}: [{} elements]", key, arr.len());
             }
-            other => println!("  {}: {:?}", key, other),
+            other => println!("  {key}: {other:?}"),
         }
     }
 

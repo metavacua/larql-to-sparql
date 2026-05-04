@@ -92,7 +92,7 @@ impl Session {
             }
         }
 
-        out.push(format!("\n{:.1}ms", elapsed_ms));
+        out.push(format!("\n{elapsed_ms:.1}ms"));
         if compare {
             out.push(String::new());
             out.push(

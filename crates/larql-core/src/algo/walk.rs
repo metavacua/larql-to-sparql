@@ -22,7 +22,15 @@ pub fn walk_all_paths(
     max_paths: usize,
 ) -> Vec<WalkResult> {
     let mut results = Vec::new();
-    walk_recursive(graph, subject, relations, 0, &mut Vec::new(), &mut results, max_paths * 10);
+    walk_recursive(
+        graph,
+        subject,
+        relations,
+        0,
+        &mut Vec::new(),
+        &mut results,
+        max_paths * 10,
+    );
 
     results.sort_by(|a, b| b.min_confidence.partial_cmp(&a.min_confidence).unwrap());
     results.truncate(max_paths);
@@ -39,7 +47,10 @@ fn walk_recursive(
     limit: usize,
 ) {
     if depth >= relations.len() {
-        let min_conf = path.iter().map(|e| e.confidence).fold(f64::INFINITY, f64::min);
+        let min_conf = path
+            .iter()
+            .map(|e| e.confidence)
+            .fold(f64::INFINITY, f64::min);
         results.push(WalkResult {
             destination: current.to_string(),
             path: path.clone(),
@@ -47,12 +58,22 @@ fn walk_recursive(
         });
         return;
     }
-    if results.len() >= limit { return; }
+    if results.len() >= limit {
+        return;
+    }
 
     let edges = graph.select(current, Some(relations[depth]));
     for edge in edges {
         path.push(edge.clone());
-        walk_recursive(graph, &edge.object, relations, depth + 1, path, results, limit);
+        walk_recursive(
+            graph,
+            &edge.object,
+            relations,
+            depth + 1,
+            path,
+            results,
+            limit,
+        );
         path.pop();
     }
 }

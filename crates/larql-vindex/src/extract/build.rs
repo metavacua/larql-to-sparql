@@ -26,8 +26,8 @@ use crate::config::{VindexConfig, VindexLayerInfo, VindexModelConfig};
 use crate::error::VindexError;
 
 use super::build_helpers::{
-    build_whole_word_vocab, chrono_now, compute_gate_top_tokens,
-    compute_offset_direction, run_clustering_pipeline, ClusterData,
+    build_whole_word_vocab, chrono_now, compute_gate_top_tokens, compute_offset_direction,
+    run_clustering_pipeline, ClusterData,
 };
 
 pub use crate::extract::callbacks::IndexBuildCallbacks;
@@ -109,7 +109,8 @@ impl<'a> BuildContext<'a> {
         let mut offset: u64 = 0;
 
         for layer in 0..self.num_layers {
-            self.callbacks.on_layer_start("gate", layer, self.num_layers);
+            self.callbacks
+                .on_layer_start("gate", layer, self.num_layers);
             let start = std::time::Instant::now();
 
             if self.is_moe && self.n_experts > 0 {
@@ -217,7 +218,8 @@ impl<'a> BuildContext<'a> {
         );
 
         for (layer, layer_down_meta) in all_down_meta.iter_mut().enumerate().take(self.num_layers) {
-            self.callbacks.on_layer_start("down", layer, self.num_layers);
+            self.callbacks
+                .on_layer_start("down", layer, self.num_layers);
             let start = std::time::Instant::now();
 
             // Collect all down matrices for this layer (dense: 1, MoE: num_experts)
@@ -261,8 +263,12 @@ impl<'a> BuildContext<'a> {
             let gate_top_tokens: Vec<String> = if is_knowledge_layer && !self.is_moe {
                 let num_features = down_matrices[0].0.shape()[1];
                 compute_gate_top_tokens(
-                    self.weights, self.tokenizer, layer, num_features,
-                    &ww_ids_shared, &ww_embed_shared,
+                    self.weights,
+                    self.tokenizer,
+                    layer,
+                    num_features,
+                    &ww_ids_shared,
+                    &ww_embed_shared,
                 )
             } else {
                 vec![]
@@ -276,10 +282,15 @@ impl<'a> BuildContext<'a> {
                 for batch_start in (0..num_features).step_by(batch_size) {
                     let batch_end = (batch_start + batch_size).min(num_features);
                     self.callbacks.on_feature_progress(
-                        "down", layer, feature_offset + batch_start, total_features_this_layer,
+                        "down",
+                        layer,
+                        feature_offset + batch_start,
+                        total_features_this_layer,
                     );
 
-                    let w_chunk = w_down.slice(ndarray::s![.., batch_start..batch_end]).to_owned();
+                    let w_chunk = w_down
+                        .slice(ndarray::s![.., batch_start..batch_end])
+                        .to_owned();
                     let cpu = larql_compute::CpuBackend;
                     use larql_compute::ComputeBackend;
                     let chunk_logits = cpu.matmul(self.weights.embed.view(), w_chunk.view());
@@ -331,9 +342,12 @@ impl<'a> BuildContext<'a> {
                         if is_knowledge_layer && top_token_id > 0 && !gate_top_tokens.is_empty() {
                             let gate_tok = &gate_top_tokens[feat];
                             if let Some(offset) = compute_offset_direction(
-                                gate_tok, top_token_id as usize,
-                                self.weights, self.tokenizer,
-                                self.hidden_size, self.vocab_size,
+                                gate_tok,
+                                top_token_id as usize,
+                                self.weights,
+                                self.tokenizer,
+                                self.hidden_size,
+                                self.vocab_size,
                             ) {
                                 self.cluster_directions.extend_from_slice(&offset);
                                 self.cluster_features.push((layer, feat));
@@ -476,12 +490,16 @@ impl<'a> BuildContext<'a> {
         };
 
         // Preliminary write — `write_model_weights` reads the index.
-        let config_json = serde_json::to_string_pretty(&config)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let config_json =
+            serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
         std::fs::write(self.output_dir.join("index.json"), config_json)?;
 
         if extract_level != crate::ExtractLevel::Browse {
-            crate::format::weights::write_model_weights(self.weights, self.output_dir, self.callbacks)?;
+            crate::format::weights::write_model_weights(
+                self.weights,
+                self.output_dir,
+                self.callbacks,
+            )?;
             config.has_model_weights = true;
         }
 
@@ -495,8 +513,8 @@ impl<'a> BuildContext<'a> {
         });
         config.checksums = crate::format::checksums::compute_checksums(self.output_dir).ok();
 
-        let config_json = serde_json::to_string_pretty(&config)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
+        let config_json =
+            serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
         std::fs::write(self.output_dir.join("index.json"), config_json)?;
         Ok(())
     }
@@ -523,9 +541,7 @@ pub fn build_vindex(
     callbacks: &mut dyn IndexBuildCallbacks,
 ) -> Result<(), VindexError> {
     std::fs::create_dir_all(output_dir)?;
-    let mut ctx = BuildContext::new(
-        weights, tokenizer, output_dir, callbacks, dtype, down_top_k,
-    );
+    let mut ctx = BuildContext::new(weights, tokenizer, output_dir, callbacks, dtype, down_top_k);
     ctx.write_gate_vectors()?;
     ctx.write_embeddings()?;
     ctx.write_down_meta_and_clusters()?;
@@ -566,8 +582,11 @@ pub fn build_vindex_resume(
             num_features_per_expert: None,
         });
     }
-    eprintln!("  Reconstructed {} layer infos from gate_vectors.bin ({:.1} GB)",
-        layer_infos.len(), gate_size as f64 / 1e9);
+    eprintln!(
+        "  Reconstructed {} layer infos from gate_vectors.bin ({:.1} GB)",
+        layer_infos.len(),
+        gate_size as f64 / 1e9
+    );
 
     // Read down_meta.jsonl to collect cluster directions (L14-28)
     let cluster_layer_min = 14.min(num_layers);
@@ -582,19 +601,34 @@ pub fn build_vindex_resume(
     let (ww_ids, ww_embed) =
         build_whole_word_vocab(tokenizer, &weights.embed, vocab_size, hidden_size);
 
-    eprintln!("  Computing gate input tokens for L{}-{}...", cluster_layer_min, cluster_layer_max - 1);
+    eprintln!(
+        "  Computing gate input tokens for L{}-{}...",
+        cluster_layer_min,
+        cluster_layer_max - 1
+    );
     let mut gate_top_tokens_per_layer: std::collections::HashMap<usize, Vec<String>> =
         std::collections::HashMap::new();
     for layer in cluster_layer_min..cluster_layer_max {
         let layer_start = std::time::Instant::now();
         let tokens = compute_gate_top_tokens(
-            weights, tokenizer, layer, intermediate_size,
-            &ww_ids, &ww_embed,
+            weights,
+            tokenizer,
+            layer,
+            intermediate_size,
+            &ww_ids,
+            &ww_embed,
         );
         gate_top_tokens_per_layer.insert(layer, tokens);
-        eprintln!("    gate L{:2}: {:.1}s", layer, layer_start.elapsed().as_secs_f64());
+        eprintln!(
+            "    gate L{:2}: {:.1}s",
+            layer,
+            layer_start.elapsed().as_secs_f64()
+        );
     }
-    eprintln!("  Gate input tokens computed for {} layers", gate_top_tokens_per_layer.len());
+    eprintln!(
+        "  Gate input tokens computed for {} layers",
+        gate_top_tokens_per_layer.len()
+    );
 
     eprintln!("  Reading down_meta.jsonl for offset directions...");
     let down_path = output_dir.join("down_meta.jsonl");
@@ -604,35 +638,51 @@ pub fn build_vindex_resume(
     for line in std::io::BufRead::lines(reader) {
         let line = line?;
         let line = line.trim();
-        if line.is_empty() { continue; }
-        let obj: serde_json::Value = serde_json::from_str(line)
-            .map_err(|e| VindexError::Parse(e.to_string()))?;
-        if obj.get("_header").is_some() { continue; }
+        if line.is_empty() {
+            continue;
+        }
+        let obj: serde_json::Value =
+            serde_json::from_str(line).map_err(|e| VindexError::Parse(e.to_string()))?;
+        if obj.get("_header").is_some() {
+            continue;
+        }
 
         let layer = obj.get("l").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let feat = obj.get("f").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let top_token_id = obj.get("i").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
-        if layer >= cluster_layer_min && layer < cluster_layer_max
-            && top_token_id > 2 && top_token_id < vocab_size
+        if layer >= cluster_layer_min
+            && layer < cluster_layer_max
+            && top_token_id > 2
+            && top_token_id < vocab_size
         {
             if let Some(gate_tokens) = gate_top_tokens_per_layer.get(&layer) {
                 if feat < gate_tokens.len() {
                     let gate_tok = &gate_tokens[feat];
                     if let Some(offset) = compute_offset_direction(
-                        gate_tok, top_token_id,
-                        weights, tokenizer, hidden_size, vocab_size,
+                        gate_tok,
+                        top_token_id,
+                        weights,
+                        tokenizer,
+                        hidden_size,
+                        vocab_size,
                     ) {
                         cluster_directions.extend_from_slice(&offset);
                         cluster_features.push((layer, feat));
-                        let all_tokens: Vec<String> = obj.get("k")
+                        let all_tokens: Vec<String> = obj
+                            .get("k")
                             .and_then(|v| v.as_array())
-                            .map(|arr| arr.iter()
-                                .filter_map(|e| e.get("t").and_then(|t| t.as_str()).map(|s| s.to_string()))
-                                .collect())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|e| {
+                                        e.get("t").and_then(|t| t.as_str()).map(|s| s.to_string())
+                                    })
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         cluster_top_tokens.push(all_tokens.join("|"));
-                        let out_str = obj.get("t")
+                        let out_str = obj
+                            .get("t")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
@@ -644,10 +694,14 @@ pub fn build_vindex_resume(
         }
         count += 1;
         if count.is_multiple_of(50000) {
-            eprint!("\r  Read {} features...", count);
+            eprint!("\r  Read {count} features...");
         }
     }
-    eprintln!("\r  Read {} features, {} in knowledge layers", count, cluster_features.len());
+    eprintln!(
+        "\r  Read {} features, {} in knowledge layers",
+        count,
+        cluster_features.len()
+    );
 
     run_clustering_pipeline(
         ClusterData {
@@ -665,7 +719,8 @@ pub fn build_vindex_resume(
     )?;
 
     callbacks.on_stage("tokenizer");
-    let tokenizer_json = tokenizer.to_string(true)
+    let tokenizer_json = tokenizer
+        .to_string(true)
         .map_err(|e| VindexError::Parse(format!("tokenizer serialize: {e}")))?;
     std::fs::write(output_dir.join("tokenizer.json"), tokenizer_json)?;
     callbacks.on_stage_done("tokenizer", 0.0);
@@ -738,8 +793,8 @@ pub fn build_vindex_resume(
 
     config.checksums = crate::format::checksums::compute_checksums(output_dir).ok();
 
-    let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| VindexError::Parse(e.to_string()))?;
+    let config_json =
+        serde_json::to_string_pretty(&config).map_err(|e| VindexError::Parse(e.to_string()))?;
     std::fs::write(output_dir.join("index.json"), config_json)?;
 
     Ok(())

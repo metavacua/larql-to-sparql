@@ -4,10 +4,7 @@ use std::collections::HashMap;
 
 use ndarray::ArcArray2;
 
-pub fn detect_ffn_pattern(
-    tensors: &HashMap<String, ArcArray2<f32>>,
-    component: &str,
-) -> String {
+pub fn detect_ffn_pattern(tensors: &HashMap<String, ArcArray2<f32>>, component: &str) -> String {
     let patterns: &[&str] = match component {
         "gate" => &[
             "model.layers.{}.mlp.gate_proj.weight",
@@ -46,7 +43,7 @@ pub fn detect_ffn_pattern(
         }
     }
 
-    format!("model.layers.{{}}.mlp.{}_proj.weight", component)
+    format!("model.layers.{{}}.mlp.{component}_proj.weight")
 }
 
 pub fn ensure_cloned(
@@ -57,7 +54,7 @@ pub fn ensure_cloned(
     if !modified.contains_key(key) {
         let original = originals
             .get(key)
-            .ok_or_else(|| format!("tensor not found: {}", key))?;
+            .ok_or_else(|| format!("tensor not found: {key}"))?;
         modified.insert(key.to_string(), original.to_owned().into());
     }
     Ok(())

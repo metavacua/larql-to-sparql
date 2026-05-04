@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
+use super::helpers::{dir_size, format_bytes, format_number, is_content_token};
+use super::Session;
 use crate::ast::*;
 use crate::error::LqlError;
-use super::Session;
-use super::helpers::{format_number, format_bytes, dir_size, is_content_token};
 
 impl Session {
     pub(crate) fn exec_show_compact_status(&self) -> Result<Vec<String>, LqlError> {
@@ -17,15 +17,18 @@ impl Session {
             .map(|(layer, _, _)| layer)
             .collect();
         let n_layers = patched.num_layers();
-        let features_per_layer = if n_layers > 0 { patched.num_features(0) } else { 0 };
+        let features_per_layer = if n_layers > 0 {
+            patched.num_features(0)
+        } else {
+            0
+        };
         let hidden_dim = patched.hidden_size();
         let memit_supported = hidden_dim >= 1024;
 
         let mut out = Vec::new();
         out.push(format!("Storage engine status (epoch {}):", self.epoch));
         out.push(format!(
-            "  L0 (WAL/KNN):    {} entries (0 tombstones)",
-            l0_entries,
+            "  L0 (WAL/KNN):    {l0_entries} entries (0 tombstones)",
         ));
         out.push(format!(
             "  L1 (arch-A):     {} edges across {} layers",
@@ -36,13 +39,11 @@ impl Session {
             out.push("  L2 (MEMIT):      0 facts across 0 cycles".to_string());
         } else {
             out.push(format!(
-                "  L2 (MEMIT):      not available (hidden_dim={} < 1024)",
-                hidden_dim,
+                "  L2 (MEMIT):      not available (hidden_dim={hidden_dim} < 1024)",
             ));
         }
         out.push(format!(
-            "  Base model:      {} layers × {} features",
-            n_layers, features_per_layer,
+            "  Base model:      {n_layers} layers × {features_per_layer} features",
         ));
         Ok(out)
     }
@@ -61,7 +62,11 @@ impl Session {
         let scan_layers: Vec<usize> = if let Some(l) = layer_filter {
             vec![l as usize]
         } else {
-            all_layers.iter().copied().filter(|l| *l >= 14 && *l <= 27).collect()
+            all_layers
+                .iter()
+                .copied()
+                .filter(|l| *l >= 14 && *l <= 27)
+                .collect()
         };
 
         // ── Probe-confirmed relations (skip for Raw mode) ──
@@ -107,7 +112,9 @@ impl Session {
                             continue;
                         }
                         let key = tok.to_lowercase();
-                        let examples: Vec<String> = meta.top_k.iter()
+                        let examples: Vec<String> = meta
+                            .top_k
+                            .iter()
                             .filter(|t| t.token.trim() != tok && is_content_token(t.token.trim()))
                             .take(3)
                             .map(|t| t.token.trim().to_string())
@@ -137,7 +144,7 @@ impl Session {
 
         let mut out = Vec::new();
         let layer_label = if let Some(l) = layer_filter {
-            format!("L{}", l)
+            format!("L{l}")
         } else {
             "L14-27".into()
         };
@@ -145,16 +152,22 @@ impl Session {
         // ── Probe-confirmed section ──
         if !probe_relations.is_empty() {
             let total_labels: usize = probe_relations.values().sum();
-            out.push(format!("Probe-confirmed relations ({} labels):", total_labels));
+            out.push(format!(
+                "Probe-confirmed relations ({total_labels} labels):"
+            ));
             out.push(format!("{:<25} {:>8}", "Relation", "Features"));
             out.push("-".repeat(35));
 
             let mut probe_sorted: Vec<(&String, &usize)> = probe_relations.iter().collect();
             probe_sorted.sort_by(|a, b| b.1.cmp(a.1));
 
-            let limit = if mode == DescribeMode::Brief { 30 } else { probe_sorted.len() };
+            let limit = if mode == DescribeMode::Brief {
+                30
+            } else {
+                probe_sorted.len()
+            };
             for (name, count) in probe_sorted.into_iter().take(limit) {
-                out.push(format!("{:<25} {:>8}", name, count));
+                out.push(format!("{name:<25} {count:>8}"));
             }
         }
 
@@ -164,18 +177,20 @@ impl Session {
                 out.push(String::new());
             }
 
-            let mut sorted: Vec<(&str, &TokenInfo)> = tokens.values()
+            let mut sorted: Vec<(&str, &TokenInfo)> = tokens
+                .values()
                 .map(|info| (info.original.as_str(), info))
                 .collect();
             sorted.sort_by(|a, b| b.1.count.cmp(&a.1.count));
 
-            let limit = if mode == DescribeMode::Verbose { 50 } else { 30 };
+            let limit = if mode == DescribeMode::Verbose {
+                50
+            } else {
+                30
+            };
             sorted.truncate(limit);
 
-            out.push(format!(
-                "Top output tokens ({}):",
-                layer_label
-            ));
+            out.push(format!("Top output tokens ({layer_label}):"));
             out.push(format!(
                 "{:<25} {:>8} {:>8} {:>10}",
                 "Token", "Count", "Score", "Layers"
@@ -190,12 +205,7 @@ impl Session {
                 };
                 out.push(format!(
                     "{:<25} {:>8} {:>8.2} {:>5}-{}{}",
-                    tok,
-                    info.count,
-                    info.max_score,
-                    info.min_layer,
-                    info.max_layer,
-                    examples_str,
+                    tok, info.count, info.max_score, info.min_layer, info.max_layer, examples_str,
                 ));
             }
         }
@@ -271,16 +281,24 @@ impl Session {
         let limit = limit.unwrap_or(config.num_layers as u32) as usize;
 
         // Extract filters from WHERE conditions
-        let token_filter = conditions.iter().find(|c| c.field == "relation" || c.field == "token").and_then(|c| {
-            if let Value::String(ref s) = c.value { Some(s.as_str()) } else { None }
-        });
-        let min_score = conditions.iter().find(|c| c.field == "confidence" || c.field == "c_score").and_then(|c| {
-            match &c.value {
+        let token_filter = conditions
+            .iter()
+            .find(|c| c.field == "relation" || c.field == "token")
+            .and_then(|c| {
+                if let Value::String(ref s) = c.value {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
+            });
+        let min_score = conditions
+            .iter()
+            .find(|c| c.field == "confidence" || c.field == "c_score")
+            .and_then(|c| match &c.value {
                 Value::Number(n) => Some(*n as f32),
                 Value::Integer(n) => Some(*n as f32),
                 _ => None,
-            }
-        });
+            });
 
         let nf = patched.num_features(layer as usize);
         if nf == 0 {
@@ -392,8 +410,10 @@ impl Session {
         } else {
             format!(" across {} layers", scan_layers.len())
         };
-        out.push(format!("Distinct entities{layer_note} ({} total, showing top {limit}):",
-            entities.len().max(limit)));
+        out.push(format!(
+            "Distinct entities{layer_note} ({} total, showing top {limit}):",
+            entities.len().max(limit)
+        ));
         out.push(format!(
             "{:<24} {:>10} {:>10}",
             "Entity", "Features", "Max Score"
@@ -401,10 +421,7 @@ impl Session {
         out.push("-".repeat(48));
 
         for (tok, count, max_score) in &entities {
-            out.push(format!(
-                "{:<24} {:>10} {:>10.4}",
-                tok, count, max_score
-            ));
+            out.push(format!("{tok:<24} {count:>10} {max_score:>10.4}"));
         }
 
         if entities.is_empty() {
@@ -433,9 +450,7 @@ impl Session {
                             let size = dir_size(&path);
                             out.push(format!(
                                 "{:<35} {:>10} {:>8} {:>12}",
-                                path.file_name()
-                                    .unwrap_or_default()
-                                    .to_string_lossy(),
+                                path.file_name().unwrap_or_default().to_string_lossy(),
                                 format_bytes(size),
                                 config.num_layers,
                                 "ready",
