@@ -132,7 +132,7 @@ failure message; it must not interpret intent.
 | `commits` | Amend the commit so its header matches the Conventional Commits grammar declared in `cog.toml`. Force-push to the PR branch. |
 | `changelog` | Run `git-cliff --config cliff.toml --unreleased --output CHANGELOG.md`, commit the result with `docs(changelog): regenerate unreleased`, and re-push. Do not hand-edit the `[Unreleased]` block. |
 | `version-preflight` | This job is informational. A non-zero exit indicates an unparseable commit, which is also caught by `commits`; remediate there. |
-| `semver-surface` | The public-API surface delta is breaking but `bump_kind` is not `major`. Amend the offending commit's header to carry `!` (e.g. `feat!: …`) or add a `BREAKING CHANGE:` footer to its body, then force-push. |
+| `semver-surface` | The public-API surface delta is breaking but `bump_kind` is not `major`. Amend the offending commit's header to carry `!` (e.g. `feat!: …`) or add a `BREAKING CHANGE:` footer to its body, then force-push. If the gate emits a `::warning title=semver-surface inconclusive::` annotation instead of failing, the workspace did not build and no verdict was produced; this is an upstream condition that the gate intentionally does not block on. |
 | `semantic-release-dry-run` | An independent reference implementation rejected the commit history. Inspect the run log for the exact rejected commit; remediate via `commits` (the cocogitto check) and re-push. |
 
 ## Out-of-scope (explicit non-goals)
