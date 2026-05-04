@@ -20,6 +20,8 @@ remediating a failure.
 | **A2: Structured History** | `cog` (cocogitto) | `cog.toml` | `pre-commit` `cog-verify` (commit-msg) | `validate.yml :: commits` |
 | **A3: Derived Documentation** | `git-cliff` + `scripts/check_changelog.sh` | `cliff.toml`, `CHANGELOG.md` | `pre-commit` `changelog-consistency` (pre-push) | `validate.yml :: changelog` |
 | **A2 (SemVer)** | `scripts/version_preflight.sh` | `cog.toml` (bump rules) | n/a (informational) | `validate.yml :: version-preflight` |
+| **A2 (SemVer surface)** | `cargo-semver-checks` | workspace `Cargo.toml` | n/a (CI-only) | `validate.yml :: semver-surface` |
+| **A2 (SemVer reference)** | `semantic-release` (dry-run) | inlined `.releaserc` | n/a (CI-only) | `validate.yml :: semantic-release-dry-run` |
 | **A4: Verified Compliance** | aggregate gate | `validate.yml :: candidate-validity` | `make ci` | `validate.yml :: candidate-validity` |
 | **A5: Candidate Validity Only** | repository policy | branch protection | n/a | `candidate-validity` is a non-merging signal |
 
@@ -130,6 +132,8 @@ failure message; it must not interpret intent.
 | `commits` | Amend the commit so its header matches the Conventional Commits grammar declared in `cog.toml`. Force-push to the PR branch. |
 | `changelog` | Run `git-cliff --config cliff.toml --unreleased --output CHANGELOG.md`, commit the result with `docs(changelog): regenerate unreleased`, and re-push. Do not hand-edit the `[Unreleased]` block. |
 | `version-preflight` | This job is informational. A non-zero exit indicates an unparseable commit, which is also caught by `commits`; remediate there. |
+| `semver-surface` | The public-API surface delta is breaking but `bump_kind` is not `major`. Amend the offending commit's header to carry `!` (e.g. `feat!: …`) or add a `BREAKING CHANGE:` footer to its body, then force-push. |
+| `semantic-release-dry-run` | An independent reference implementation rejected the commit history. Inspect the run log for the exact rejected commit; remediate via `commits` (the cocogitto check) and re-push. |
 
 ## Out-of-scope (explicit non-goals)
 
@@ -183,6 +187,8 @@ pull_request -> [provenance] [commits]
                                    \
                                     +--> [changelog]
                                     +--> [version-preflight]
+                                    +--> [semver-surface]            (PR-only)
+                                    +--> [semantic-release-dry-run]
                                                        \
                                                         +--> [candidate-validity]
 ```

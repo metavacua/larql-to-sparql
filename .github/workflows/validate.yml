@@ -194,13 +194,185 @@ jobs:
           echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
 
   # ---------------------------------------------------------------------
+  # A2 (cont.): SemVer-surface consistency. The version-preflight job derives
+  # `bump_kind` purely from commit *types* (`feat:` -> minor, `!` -> major,
+  # etc.). It cannot detect when a `feat:` commit silently breaks the public
+  # API surface, which would mis-classify a major bump as minor.
+  #
+  # cargo-semver-checks is the source of truth for "did the public API
+  # break". This job runs it against the PR base, and cross-checks the
+  # verdict against `bump_kind`: a breaking API delta requires the
+  # commit-derived bump to be `major`, otherwise the PR is structurally
+  # inconsistent and must be remediated by amending the offending commit
+  # to use `!` notation or a `BREAKING CHANGE:` footer.
+  #
+  # Crates excluded from the scan:
+  #   - larql-python  (PyO3 cdylib; rustdoc-JSON build trips on Python deps)
+  #   - kv-cache-benchmark (binary-only; no public API surface to track)
+  # ---------------------------------------------------------------------
+  semver-surface:
+    name: semver-surface (cargo-semver-checks vs bump_kind)
+    runs-on: ubuntu-24.04
+    needs: [commits, version-preflight]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: validate-semver
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+
+      - name: Recompute bump_kind for cross-check
+        id: bump
+        run: |
+          scripts/version_preflight.sh \
+            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+      - name: cargo semver-checks (baseline = PR base)
+        id: semverchk
+        # Run with `set +e` so we can capture the exit code without aborting.
+        # cargo-semver-checks exits non-zero iff the API delta requires a
+        # major bump. We feed that signal into the cross-check below.
+        run: |
+          set +e
+          cargo semver-checks check-release \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            --baseline-rev "${{ github.event.pull_request.base.sha }}"
+          rc=$?
+          echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cross-check API delta vs commit-derived bump
+        # The deterministic invariant: a breaking API delta requires the
+        # commit-derived bump_kind to be `major`. Any other combination is
+        # structurally inconsistent and must be remediated upstream.
+        run: |
+          bump_kind="${{ steps.bump.outputs.bump_kind }}"
+          rc="${{ steps.semverchk.outputs.exit_code }}"
+          echo "version_preflight bump_kind=${bump_kind}"
+          echo "cargo-semver-checks exit_code=${rc}"
+          if [[ "$rc" != "0" && "$bump_kind" != "major" ]]; then
+            echo "::error::API-breaking change detected but commit-derived bump is '${bump_kind}'."
+            echo "::error::Amend the offending commit so its header carries '!' or its body includes a 'BREAKING CHANGE:' footer."
+            exit 1
+          fi
+          if [[ "$rc" != "0" ]]; then
+            echo "API delta is breaking; commits already declare major. Consistent."
+          else
+            echo "API delta is non-breaking; bump_kind '${bump_kind}' is acceptable."
+          fi
+
+  # ---------------------------------------------------------------------
+  # A2 / A3 (cont.): Independent reference implementation cross-check.
+  # The repository's custom Bash implementations (scripts/version_preflight.sh
+  # and scripts/check_changelog.sh) are the primary derivers, but they are
+  # repo-local code paths that could drift from the Conventional Commits
+  # spec. semantic-release is a widely-used Node.js implementation of the
+  # same spec; running it in dry-run mode produces an independent verdict
+  # on whether the validated commits would yield a coherent release.
+  #
+  # The cross-check is implicit: if both this job and version-preflight
+  # succeed, the two implementations agree the commit history is
+  # well-formed. Disagreement would surface as one job passing and the
+  # other failing.
+  #
+  # No publishing happens — `--dry-run` skips the publish lifecycle stage,
+  # and no auth tokens are configured. This job is purely a deterministic
+  # parser cross-check.
+  # ---------------------------------------------------------------------
+  semantic-release-dry-run:
+    name: semantic-release dry-run (independent SemVer reference)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve branch name for semantic-release
+        id: branch
+        # semantic-release refuses to operate on a detached HEAD. On PR
+        # events the workflow checks out the merge ref in detached state,
+        # so we synthesise a local branch pointing at HEAD with the same
+        # name semantic-release would expect (the PR head ref).
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            branch="${{ github.event.pull_request.head.ref }}"
+          else
+            branch="${GITHUB_REF##*/}"
+          fi
+          git checkout -B "${branch}"
+          echo "name=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Write minimal semantic-release config
+        # Inlined here rather than committed at the repo root so the
+        # repository remains free of release-tooling configuration. The
+        # only goal is to verify commit-message parseability under an
+        # independent implementation; we do not wire any publishing
+        # plugins, write artefacts, or push.
+        run: |
+          cat > /tmp/.releaserc.json <<EOF
+          {
+            "branches": ["main", "${{ steps.branch.outputs.name }}"],
+            "plugins": [
+              "@semantic-release/commit-analyzer",
+              "@semantic-release/release-notes-generator"
+            ],
+            "tagFormat": "v\${version}"
+          }
+          EOF
+
+      - name: semantic-release --dry-run
+        # `--no-ci` lets dry-run proceed without a CI-provided auth token;
+        # the lack of publishing plugins makes the run side-effect-free.
+        run: |
+          npx --yes \
+            --package=semantic-release@24 \
+            --package=@semantic-release/commit-analyzer@13 \
+            --package=@semantic-release/release-notes-generator@14 \
+            -- semantic-release --dry-run --no-ci \
+            --extends /tmp/.releaserc.json
+
+  # ---------------------------------------------------------------------
   # Aggregate gate. Required by branch protection so the deterministic
   # verdict reduces to a single check.
   # ---------------------------------------------------------------------
   candidate-validity:
     name: candidate validity (A5)
     runs-on: ubuntu-24.04
-    needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight, semver-surface, semantic-release-dry-run]
+    # `semver-surface` is PR-only; on push to main we still want this gate
+    # to be green. `always() && !failure() && !cancelled()` yields green
+    # when all `needs:` are either success or skipped, but red on any
+    # failure or cancellation.
+    if: always() && !failure() && !cancelled()
     steps:
       - name: All deterministic checks passed
         run: |
@@ -217,7 +389,7 @@ jobs:
     name: report failure (PR comment)
     runs-on: ubuntu-24.04
     if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
-    needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight, semver-surface, semantic-release-dry-run]
     steps:
       - name: Post failure summary to PR
         uses: actions/github-script@v7
@@ -227,6 +399,8 @@ jobs:
           COMMITS_RESULT:           ${{ needs.commits.result }}
           CHANGELOG_RESULT:         ${{ needs.changelog.result }}
           VERSION_PREFLIGHT_RESULT: ${{ needs.version-preflight.result }}
+          SEMVER_SURFACE_RESULT:    ${{ needs.semver-surface.result }}
+          SEMANTIC_RELEASE_RESULT:  ${{ needs.semantic-release-dry-run.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
@@ -236,6 +410,8 @@ jobs:
               "commits (cocogitto check)":        process.env.COMMITS_RESULT,
               "changelog (git-cliff consistency)": process.env.CHANGELOG_RESULT,
               "version preflight":                 process.env.VERSION_PREFLIGHT_RESULT,
+              "semver-surface (cargo-semver-checks)": process.env.SEMVER_SURFACE_RESULT,
+              "semantic-release dry-run":          process.env.SEMANTIC_RELEASE_RESULT,
             };
             const rows = Object.entries(results)
               .map(([n, r]) => `| ${n} | ${r} |`)
