@@ -2,17 +2,18 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# Development environment setup script.
+# Development environment setup script (repository-agnostic).
 #
-# This script initializes a development environment for the larql-to-sparql
-# project by installing and configuring all dependencies required by the CI/CD
-# pipeline and local development workflow.
+# This script installs and configures CI/CD tools and development dependencies.
+# It works standalone or within any Rust/Python project, autodetecting project
+# structure to optionally configure project-specific environments.
 #
 # Usage:
 #   ./scripts/setup-dev-env.sh                 # Full setup
 #   ./scripts/setup-dev-env.sh --help          # Show help
 #   ./scripts/setup-dev-env.sh --minimal       # Skip optional tools
 #   ./scripts/setup-dev-env.sh --platform-only # Android NDK + cross-compile targets only
+#   ./scripts/setup-dev-env.sh --no-project    # Skip project-specific setup
 
 set -euo pipefail
 
@@ -29,6 +30,7 @@ NDK_VERSION="r27"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_SETUP=true
 
 # Color codes for output
 RED='\033[0;31m'
@@ -78,7 +80,7 @@ check_cmd() {
 
 print_help() {
     cat <<EOF
-Development Environment Setup for larql-to-sparql
+CI/CD Development Environment Setup (Repository-Agnostic)
 
 Usage: $0 [OPTIONS]
 
@@ -89,6 +91,7 @@ Options:
   --verbose           Enable verbose output
   --no-hooks          Skip pre-commit hook installation
   --no-python         Skip Python environment setup
+  --no-project        Skip project-specific setup (larql-python, etc.)
 
 Configuration:
   Rust toolchain:     $RUST_TOOLCHAIN
@@ -97,11 +100,15 @@ Configuration:
 
 This script performs:
   1. Rust toolchain installation and setup
-  2. Python 3.12 and uv environment setup
-  3. Pre-commit hook configuration
+  2. Python environment setup (optional, can skip with --no-python)
+  3. Pre-commit hook configuration (optional, can skip with --no-hooks)
   4. CI/CD tool installation (cocogitto, git-cliff, reuse, etc.)
   5. Optional: Android NDK for cross-platform builds
-  6. Validation of the complete setup
+  6. Optional: Project-specific Python bindings (if crates/*/pyproject.toml found)
+  7. Validation of the complete setup
+
+The script is repository-agnostic and works in any directory. It autodetects
+project structure and optionally configures project-specific environments.
 
 EOF
 }
@@ -139,6 +146,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-python)
             NO_PYTHON=true
+            shift
+            ;;
+        --no-project)
+            PROJECT_SETUP=false
             shift
             ;;
         *)
@@ -215,12 +226,51 @@ phase_python_setup() {
         log_success "uv is installed"
     fi
 
-    # Setup Python environment for larql-python crate
-    log_info "Setting up Python environment for larql-python..."
-    cd "$REPO_ROOT/crates/larql-python"
-    uv sync --no-install-project --group dev
-    cd "$REPO_ROOT"
-    log_success "Python environment ready"
+    # Setup project-specific Python environment if available
+    if [[ "$PROJECT_SETUP" == true ]]; then
+        phase_python_project_setup
+    fi
+}
+
+# =============================================================================
+# Phase 2b: Project-Specific Python Setup (Optional)
+# =============================================================================
+
+phase_python_project_setup() {
+    # Detect and configure project-specific Python environments
+    local python_projects=()
+
+    # Look for Python projects with uv configuration
+    if [[ -f "$REPO_ROOT/pyproject.toml" ]]; then
+        python_projects+=("$REPO_ROOT")
+    fi
+
+    # Look for Python crates (like larql-python)
+    if [[ -d "$REPO_ROOT/crates" ]]; then
+        while IFS= read -r -d '' crate_dir; do
+            if [[ -f "$crate_dir/pyproject.toml" ]]; then
+                python_projects+=("$crate_dir")
+            fi
+        done < <(find "$REPO_ROOT/crates" -maxdepth 1 -type d -print0 2>/dev/null)
+    fi
+
+    if [[ ${#python_projects[@]} -eq 0 ]]; then
+        log_info "No Python projects detected in repository"
+        return 0
+    fi
+
+    # Setup each detected Python project
+    for project_dir in "${python_projects[@]}"; do
+        project_name=$(basename "$project_dir")
+        log_info "Setting up Python environment for $project_name..."
+
+        if [[ -f "$project_dir/uv.lock" ]] || [[ -f "$project_dir/pyproject.toml" ]]; then
+            cd "$project_dir"
+            uv sync --no-install-project --group dev 2>/dev/null || true
+            cd "$REPO_ROOT"
+            log_success "Python environment ready for $project_name"
+        fi
+    done
 }
 
 # =============================================================================
@@ -538,7 +588,7 @@ phase_quick_test() {
 
 main() {
     echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║  larql-to-sparql Development Environment Setup                 ║"
+    echo "║  CI/CD Development Environment Setup                           ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo
 
@@ -565,21 +615,22 @@ main() {
     echo
 
     log_success "Development environment is ready"
-    log_info "Next steps:"
-    echo "  1. Run: cd $REPO_ROOT"
-    echo "  2. Run: make ci         (to run all local checks)"
-    echo "  3. Run: make test       (to run full test suite)"
-    echo "  4. Run: make demos      (to run demo examples)"
-    echo
-    log_info "For CI/CD validation, run:"
-    echo "  • pre-commit run --all-files  (validate all files)"
-    echo "  • cog check HEAD~N..HEAD      (validate commit history)"
-    echo
-    log_info "For cross-platform testing:"
-    echo "  • make platform-test-ubuntu   (Ubuntu build)"
-    echo "  • make platform-test-android  (Android cross-compile)"
-    echo "  • make platform-test-chromeos (ChromeOS build)"
-    echo "  • make platform-test-macos    (macOS build)"
+    log_info "Common next steps:"
+
+    if [[ -f "$REPO_ROOT/Makefile" ]]; then
+        echo "  • make ci               (run all local checks)"
+        echo "  • make test             (run full test suite)"
+    fi
+
+    if [[ -f "$REPO_ROOT/.git" ]]; then
+        echo "  • pre-commit run --all-files  (validate all files)"
+        echo "  • cog check HEAD~N..HEAD      (validate commit history)"
+    fi
+
+    if [[ -d "$REPO_ROOT/crates" ]]; then
+        echo "  • cargo build --release       (build release binary)"
+        echo "  • cargo test --workspace      (run workspace tests)"
+    fi
     echo
 }
 
