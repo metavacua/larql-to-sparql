@@ -51,12 +51,9 @@ impl Kernel for DateTimeKernel {
                 let n: i64 = args[1].trim().parse().map_err(|_| {
                     KernelError::Parse(format!("add_days: expected integer, got {:?}", args[1]))
                 })?;
-                let result = d
-                    .checked_add_signed(Duration::days(n))
-                    .ok_or_else(|| KernelError::OutOfRange(format!(
-                        "add_days({}, {}) overflow",
-                        args[0], n
-                    )))?;
+                let result = d.checked_add_signed(Duration::days(n)).ok_or_else(|| {
+                    KernelError::OutOfRange(format!("add_days({}, {}) overflow", args[0], n))
+                })?;
                 Ok(result.format("%Y-%m-%d").to_string())
             }
             "weekday" => {
@@ -104,7 +101,9 @@ fn expect_args(name: &str, args: &[&str], expected: usize) -> Result<(), KernelE
     } else {
         Err(KernelError::Parse(format!(
             "{}: expected {} args, got {}",
-            name, expected, args.len()
+            name,
+            expected,
+            args.len()
         )))
     }
 }
@@ -121,13 +120,19 @@ mod tests {
     #[test]
     fn days_between_forward() {
         let k = DateTimeKernel;
-        assert_eq!(k.invoke("days_between(2026-01-01, 2026-04-16)").unwrap(), "105");
+        assert_eq!(
+            k.invoke("days_between(2026-01-01, 2026-04-16)").unwrap(),
+            "105"
+        );
     }
 
     #[test]
     fn days_between_negative_when_reversed() {
         let k = DateTimeKernel;
-        assert_eq!(k.invoke("days_between(2026-04-16, 2026-01-01)").unwrap(), "-105");
+        assert_eq!(
+            k.invoke("days_between(2026-04-16, 2026-01-01)").unwrap(),
+            "-105"
+        );
     }
 
     #[test]
@@ -167,8 +172,14 @@ mod tests {
         let err = k.invoke("weekday(2025-02-29)").unwrap_err();
         assert!(matches!(err, KernelError::Parse(_)));
         // 365 days across non-leap 2025; 366 across leap 2024
-        assert_eq!(k.invoke("days_between(2025-01-01, 2026-01-01)").unwrap(), "365");
-        assert_eq!(k.invoke("days_between(2024-01-01, 2025-01-01)").unwrap(), "366");
+        assert_eq!(
+            k.invoke("days_between(2025-01-01, 2026-01-01)").unwrap(),
+            "365"
+        );
+        assert_eq!(
+            k.invoke("days_between(2024-01-01, 2025-01-01)").unwrap(),
+            "366"
+        );
     }
 
     #[test]

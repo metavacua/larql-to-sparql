@@ -5,9 +5,9 @@
 //!
 //! Run: cargo run --release --features metal -p larql-compute --example profile_new_kernels
 
-#[cfg(not(feature = "metal"))]
+#[cfg(not(all(feature = "metal", target_os = "macos")))]
 fn main() {
-    eprintln!("This example requires --features metal");
+    eprintln!("This example requires --features metal on macOS");
 }
 
 #[cfg(feature = "metal")]
@@ -27,7 +27,9 @@ fn main() {
     // ── Standalone Activations ──
     println!("--- Standalone Activations (inter={inter}) ---\n");
     {
-        let input: Vec<f32> = (0..inter).map(|i| (i as f32 - inter as f32 / 2.0) * 0.001).collect();
+        let input: Vec<f32> = (0..inter)
+            .map(|i| (i as f32 - inter as f32 / 2.0) * 0.001)
+            .collect();
         let input_buf = bufs.transient_from_f32(&input);
         let out_buf = bufs.output((inter * 4) as u64);
         let n_val = inter as u32;
@@ -40,7 +42,10 @@ fn main() {
             enc.set_buffer(0, Some(&input_buf), 0);
             enc.set_buffer(1, Some(&out_buf), 0);
             enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(inter as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -55,7 +60,10 @@ fn main() {
             enc.set_buffer(0, Some(&input_buf), 0);
             enc.set_buffer(1, Some(&out_buf), 0);
             enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(inter as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -71,7 +79,10 @@ fn main() {
             enc.set_buffer(0, Some(&input_buf), 0);
             enc.set_buffer(1, Some(&out_buf), 0);
             enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(inter as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -90,7 +101,10 @@ fn main() {
             enc.set_buffer(1, Some(&up_buf), 0);
             enc.set_buffer(2, Some(&out_buf), 0);
             enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(inter as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(inter as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -106,7 +120,9 @@ fn main() {
     // ── LayerNorm vs RMSNorm ──
     println!("--- LayerNorm vs RMSNorm (hidden={hidden}) ---\n");
     {
-        let x: Vec<f32> = (0..hidden).map(|i| (i as f32 - hidden as f32 / 2.0) * 0.01).collect();
+        let x: Vec<f32> = (0..hidden)
+            .map(|i| (i as f32 - hidden as f32 / 2.0) * 0.01)
+            .collect();
         let weight: Vec<f32> = vec![1.0; hidden];
         let bias: Vec<f32> = vec![0.0; hidden];
         let x_buf = bufs.transient_from_f32(&x);
@@ -129,7 +145,10 @@ fn main() {
             enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &offset as *const f32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(hidden as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -149,7 +168,10 @@ fn main() {
             enc.set_bytes(4, 4, &n_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(6, 4, &offset as *const f32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(hidden as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -168,7 +190,10 @@ fn main() {
             enc.set_bytes(3, 4, &n_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &eps as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(5, 4, &offset as *const f32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(hidden as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -176,8 +201,14 @@ fn main() {
         let ln_nb_us = t.elapsed().as_micros() as f64 / iters as f64;
 
         println!("  RMSNorm:             {rms_us:7.1}µs");
-        println!("  LayerNorm (bias):    {ln_us:7.1}µs  ({:.2}x RMSNorm)", ln_us / rms_us);
-        println!("  LayerNorm (no bias): {ln_nb_us:7.1}µs  ({:.2}x RMSNorm)", ln_nb_us / rms_us);
+        println!(
+            "  LayerNorm (bias):    {ln_us:7.1}µs  ({:.2}x RMSNorm)",
+            ln_us / rms_us
+        );
+        println!(
+            "  LayerNorm (no bias): {ln_nb_us:7.1}µs  ({:.2}x RMSNorm)",
+            ln_nb_us / rms_us
+        );
         println!();
     }
 
@@ -199,7 +230,10 @@ fn main() {
             enc.set_buffer(1, Some(&out_buf), 0);
             enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(3, 4, &eps as *const f32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(head_dim as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(head_dim as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -231,7 +265,10 @@ fn main() {
             enc.set_buffer(1, Some(&out_buf), 0);
             enc.set_bytes(2, 4, &n_val as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(3, 4, &scalar as *const f32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new(hidden as u64, 1, 1), metal::MTLSize::new(256, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new(hidden as u64, 1, 1),
+                metal::MTLSize::new(256, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -262,7 +299,10 @@ fn main() {
             enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &rdim_full as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new((head_dim / 2) as u64, 1, 1), metal::MTLSize::new(128, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new((head_dim / 2) as u64, 1, 1),
+                metal::MTLSize::new(128, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -281,7 +321,10 @@ fn main() {
             enc.set_bytes(2, 4, &base as *const f32 as *const std::ffi::c_void);
             enc.set_bytes(3, 4, &pos as *const u32 as *const std::ffi::c_void);
             enc.set_bytes(4, 4, &rdim_25 as *const u32 as *const std::ffi::c_void);
-            enc.dispatch_threads(metal::MTLSize::new((head_dim / 8) as u64, 1, 1), metal::MTLSize::new(32, 1, 1));
+            enc.dispatch_threads(
+                metal::MTLSize::new((head_dim / 8) as u64, 1, 1),
+                metal::MTLSize::new(32, 1, 1),
+            );
             enc.end_encoding();
             cmd.commit();
             cmd.wait_until_completed();
@@ -289,7 +332,10 @@ fn main() {
         let partial_us = t.elapsed().as_micros() as f64 / iters as f64;
 
         println!("  Full RoPE (256 dims):    {full_us:7.1}µs");
-        println!("  Partial RoPE (64 dims):  {partial_us:7.1}µs  ({:.1}x speedup)", full_us / partial_us);
+        println!(
+            "  Partial RoPE (64 dims):  {partial_us:7.1}µs  ({:.1}x speedup)",
+            full_us / partial_us
+        );
         println!();
     }
 

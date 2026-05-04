@@ -13,8 +13,16 @@ fn make_meta(token: &str, id: u32, score: f32) -> FeatureMeta {
         top_token_id: id,
         c_score: score,
         top_k: vec![
-            larql_models::TopKEntry { token: token.to_string(), token_id: id, logit: score },
-            larql_models::TopKEntry { token: "also".to_string(), token_id: id + 1, logit: score * 0.5 },
+            larql_models::TopKEntry {
+                token: token.to_string(),
+                token_id: id,
+                logit: score,
+            },
+            larql_models::TopKEntry {
+                token: "also".to_string(),
+                token_id: id + 1,
+                logit: score * 0.5,
+            },
         ],
     }
 }
@@ -87,7 +95,10 @@ fn main() {
 
     let start = Instant::now();
     let index = bench_index();
-    println!("  Built in {:.0}ms\n", start.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "  Built in {:.0}ms\n",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
 
     let patched = PatchedVindex::new(index);
 
@@ -259,9 +270,11 @@ fn main() {
         description: None,
         author: None,
         tags: vec![],
-        operations: vec![
-            larql_vindex::PatchOp::Delete { layer: 0, feature: 0, reason: None },
-        ],
+        operations: vec![larql_vindex::PatchOp::Delete {
+            layer: 0,
+            feature: 0,
+            reason: None,
+        }],
     };
     // Measure apply+remove on a fresh PatchedVindex (reuses existing base via clone).
     // Note: clone cost dominates in debug builds. Run with --release for accurate numbers.
@@ -306,8 +319,16 @@ fn main() {
             author: None,
             tags: vec![],
             operations: vec![
-                larql_vindex::PatchOp::Delete { layer: 0, feature: 0, reason: None },
-                larql_vindex::PatchOp::Delete { layer: 1, feature: 1, reason: None },
+                larql_vindex::PatchOp::Delete {
+                    layer: 0,
+                    feature: 0,
+                    reason: None,
+                },
+                larql_vindex::PatchOp::Delete {
+                    layer: 1,
+                    feature: 1,
+                    reason: None,
+                },
             ],
         };
         session.apply_patch(patch);
@@ -371,22 +392,32 @@ fn main() {
         }
         h
     });
-    bench("embed 1-token binary encode (request)", 1000, 1_000_000, || {
-        let mut buf = Vec::with_capacity(8);
-        buf.extend_from_slice(&1u32.to_le_bytes());
-        buf.extend_from_slice(&9515u32.to_le_bytes());
-        buf
-    });
-    bench("embed binary response encode (seq=1, hidden=256)", 1000, 100_000, || {
-        let mut buf = Vec::with_capacity(8 + embed_hidden * 4);
-        buf.extend_from_slice(&1u32.to_le_bytes());
-        buf.extend_from_slice(&(embed_hidden as u32).to_le_bytes());
-        let row = embed_table.row(0);
-        for &v in row.iter() {
-            buf.extend_from_slice(&v.to_le_bytes());
-        }
-        buf
-    });
+    bench(
+        "embed 1-token binary encode (request)",
+        1000,
+        1_000_000,
+        || {
+            let mut buf = Vec::with_capacity(8);
+            buf.extend_from_slice(&1u32.to_le_bytes());
+            buf.extend_from_slice(&9515u32.to_le_bytes());
+            buf
+        },
+    );
+    bench(
+        "embed binary response encode (seq=1, hidden=256)",
+        1000,
+        100_000,
+        || {
+            let mut buf = Vec::with_capacity(8 + embed_hidden * 4);
+            buf.extend_from_slice(&1u32.to_le_bytes());
+            buf.extend_from_slice(&(embed_hidden as u32).to_le_bytes());
+            let row = embed_table.row(0);
+            for &v in row.iter() {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            buf
+        },
+    );
 
     println!("\n── Embed service — logits projection ──");
     // Simulate /v1/logits: one matmul residual @ lm_head.T
@@ -396,7 +427,9 @@ fn main() {
     let lm_head = embed_table.slice(larql_vindex::ndarray::s![..small_vocab, ..]);
     let query = {
         let mut q = Array1::<f32>::zeros(embed_hidden);
-        q[0] = 1.0; q[1] = 0.5; q[5] = 0.3;
+        q[0] = 1.0;
+        q[1] = 0.5;
+        q[5] = 0.3;
         q
     };
 
@@ -413,20 +446,37 @@ fn main() {
         scores
     });
 
-    bench("logits binary response encode (5 tokens)", 1000, 500_000, || {
-        let top5 = [(9515u32, 0.801f32), (235, 0.042), (100, 0.012), (5, 0.008), (1, 0.003)];
-        let resp = serde_json::json!({
-            "top_k": top5.iter().map(|(id, p)| serde_json::json!({"token_id": id, "prob": p})).collect::<Vec<_>>(),
-            "latency_ms": 2.1f32,
-        });
-        serde_json::to_string(&resp).unwrap()
-    });
+    bench(
+        "logits binary response encode (5 tokens)",
+        1000,
+        500_000,
+        || {
+            let top5 = [
+                (9515u32, 0.801f32),
+                (235, 0.042),
+                (100, 0.012),
+                (5, 0.008),
+                (1, 0.003),
+            ];
+            let resp = serde_json::json!({
+                "top_k": top5.iter().map(|(id, p)| serde_json::json!({"token_id": id, "prob": p})).collect::<Vec<_>>(),
+                "latency_ms": 2.1f32,
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
 
     println!("  Note: production Gemma 3 4B logits = 262208 × 2560 ~ 2ms CPU, ~0.1ms Metal");
 
     println!("\n── Summary ──");
     let total_features: usize = all_layers.iter().map(|l| patched.num_features(*l)).sum();
-    println!("  Index: {} layers, {} features/layer, {} total, hidden={}", all_layers.len(), 1024, total_features, hidden);
+    println!(
+        "  Index: {} layers, {} features/layer, {} total, hidden={}",
+        all_layers.len(),
+        1024,
+        total_features,
+        hidden
+    );
     println!("  All times include full operation (KNN + sort + truncate + metadata)");
     println!("\n  Expected server latency = operation time + serialization + network RTT");
     println!("  Embed endpoint: dominated by table lookup (~O(1) with hot cache)");

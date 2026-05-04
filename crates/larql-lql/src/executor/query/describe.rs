@@ -107,7 +107,11 @@ impl Session {
                 "  Output (L{}-{}):",
                 bands.output.0, bands.output.1
             ));
-            let cap = if mode == DescribeMode::Brief { 5 } else { max_edges };
+            let cap = if mode == DescribeMode::Brief {
+                5
+            } else {
+                max_edges
+            };
             for edge in formatted.output_band.iter().take(cap) {
                 out.push(format_describe_edge(edge, mode));
             }

@@ -58,10 +58,7 @@ pub fn instantiate(
 /// Compile and instantiate a WASM expert in one step — kept for callers that
 /// want the historical semantics (e.g. tests that need immediate metadata
 /// without touching the registry layer).
-pub fn load_expert(
-    engine: &Engine,
-    path: &Path,
-) -> anyhow::Result<(Store<ExpertStore>, Instance)> {
+pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<ExpertStore>, Instance)> {
     let module = load_module(engine, path)?;
     instantiate(engine, &module)
 }

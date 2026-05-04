@@ -10,11 +10,15 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let model_path = args.iter().position(|a| a == "--model")
+    let model_path = args
+        .iter()
+        .position(|a| a == "--model")
         .and_then(|i| args.get(i + 1))
         .map(|s| s.as_str())
         .unwrap_or("google/gemma-3-4b-it");
-    let vindex_path = args.iter().position(|a| a == "--vindex")
+    let vindex_path = args
+        .iter()
+        .position(|a| a == "--vindex")
         .and_then(|i| args.get(i + 1))
         .map(|s| s.as_str())
         .unwrap_or("output/gemma3-4b-v2.vindex");
@@ -25,18 +29,19 @@ fn main() {
 
     // Load model
     eprintln!("Loading model...");
-    let model = larql_inference::InferenceModel::load(model_path)
-        .expect("Failed to load model");
+    let model = larql_inference::InferenceModel::load(model_path).expect("Failed to load model");
     let weights = model.weights();
-    eprintln!("  {} layers, hidden={}", weights.num_layers, weights.hidden_size);
+    eprintln!(
+        "  {} layers, hidden={}",
+        weights.num_layers, weights.hidden_size
+    );
 
     // Load vindex + all walk/attn data
     eprintln!("Loading vindex...");
     let vindex_dir = std::path::PathBuf::from(vindex_path);
-    let mut index = larql_vindex::VectorIndex::load_vindex(
-        &vindex_dir,
-        &mut larql_vindex::SilentLoadCallbacks,
-    ).expect("Failed to load vindex");
+    let mut index =
+        larql_vindex::VectorIndex::load_vindex(&vindex_dir, &mut larql_vindex::SilentLoadCallbacks)
+            .expect("Failed to load vindex");
 
     // Load optional data files
     let _ = index.load_down_features(&vindex_dir);
@@ -49,7 +54,10 @@ fn main() {
     eprintln!("  down_features: {}", gate_index.has_down_features());
     eprintln!("  attn Q4K: {}", index.attn_q4k_layer_data(0).is_some());
     eprintln!("  interleaved Q4K: {}", gate_index.has_interleaved_q4k());
-    eprintln!("  interleaved Q4: {}", gate_index.interleaved_q4_mmap_ref().is_some());
+    eprintln!(
+        "  interleaved Q4: {}",
+        gate_index.interleaved_q4_mmap_ref().is_some()
+    );
     eprintln!("  lm_head: {}", index.has_lm_head());
 
     // Backend
@@ -73,8 +81,14 @@ fn main() {
     {
         // Warm up
         let _ = larql_inference::predict_hybrid(
-            weights, model.tokenizer(), &token_ids, 5,
-            &index, &*backend, &cached, layer_range.clone(),
+            weights,
+            model.tokenizer(),
+            &token_ids,
+            5,
+            &index,
+            &*backend,
+            &cached,
+            layer_range.clone(),
         );
 
         let t = Instant::now();
@@ -82,14 +96,23 @@ fn main() {
         for _ in 0..iters {
             backend.reset_kv_cache();
             result = Some(larql_inference::predict_hybrid(
-                weights, model.tokenizer(), &token_ids, 5,
-                &index, &*backend, &cached, layer_range.clone(),
+                weights,
+                model.tokenizer(),
+                &token_ids,
+                5,
+                &index,
+                &*backend,
+                &cached,
+                layer_range.clone(),
             ));
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0 / iters as f64;
         let r = result.unwrap();
-        let (tok, prob) = r.predictions.first()
-            .map(|(t, p)| (t.as_str(), *p)).unwrap_or(("?", 0.0));
+        let (tok, prob) = r
+            .predictions
+            .first()
+            .map(|(t, p)| (t.as_str(), *p))
+            .unwrap_or(("?", 0.0));
         println!("  Time:   {ms:.1}ms");
         println!("  tok/s:  {:.0}", 1000.0 / ms);
         println!("  Top-1:  {tok} ({:.1}%)\n", prob * 100.0);
@@ -99,8 +122,14 @@ fn main() {
     println!("--- predict_honest (full GPU decode) ---\n");
     {
         let _ = larql_inference::predict_honest(
-            weights, model.tokenizer(), &token_ids, 5,
-            &index, &*backend, &cached, layer_range.clone(),
+            weights,
+            model.tokenizer(),
+            &token_ids,
+            5,
+            &index,
+            &*backend,
+            &cached,
+            layer_range.clone(),
         );
 
         let t = Instant::now();
@@ -108,14 +137,23 @@ fn main() {
         for _ in 0..iters {
             backend.reset_kv_cache();
             result = Some(larql_inference::predict_honest(
-                weights, model.tokenizer(), &token_ids, 5,
-                &index, &*backend, &cached, layer_range.clone(),
+                weights,
+                model.tokenizer(),
+                &token_ids,
+                5,
+                &index,
+                &*backend,
+                &cached,
+                layer_range.clone(),
             ));
         }
         let ms = t.elapsed().as_secs_f64() * 1000.0 / iters as f64;
         let r = result.unwrap();
-        let (tok, prob) = r.predictions.first()
-            .map(|(t, p)| (t.as_str(), *p)).unwrap_or(("?", 0.0));
+        let (tok, prob) = r
+            .predictions
+            .first()
+            .map(|(t, p)| (t.as_str(), *p))
+            .unwrap_or(("?", 0.0));
         println!("  Time:   {ms:.1}ms");
         println!("  tok/s:  {:.0}", 1000.0 / ms);
         println!("  Top-1:  {tok} ({:.1}%)\n", prob * 100.0);
@@ -125,15 +163,25 @@ fn main() {
     println!("--- CPU walk (BLAS attention + walk FFN) ---\n");
     {
         let walk_ffn = larql_inference::vindex::WalkFfn::new(weights, &index, 8192);
-        let walk_graph = larql_inference::WalkLayerGraph { ffn: &walk_ffn, backend: None };
+        let walk_graph = larql_inference::WalkLayerGraph {
+            ffn: &walk_ffn,
+            backend: None,
+        };
 
         let t = Instant::now();
         let result = larql_inference::predict_with_graph(
-            weights, model.tokenizer(), &token_ids, 5, &walk_graph,
+            weights,
+            model.tokenizer(),
+            &token_ids,
+            5,
+            &walk_graph,
         );
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        let (tok, prob) = result.predictions.first()
-            .map(|(t, p)| (t.as_str(), *p)).unwrap_or(("?", 0.0));
+        let (tok, prob) = result
+            .predictions
+            .first()
+            .map(|(t, p)| (t.as_str(), *p))
+            .unwrap_or(("?", 0.0));
         println!("  Time:   {ms:.1}ms");
         println!("  tok/s:  {:.0}", 1000.0 / ms);
         println!("  Top-1:  {tok} ({:.1}%)\n", prob * 100.0);

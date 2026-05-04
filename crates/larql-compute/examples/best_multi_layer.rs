@@ -8,11 +8,11 @@
 
 extern crate blas_src;
 
-use std::time::Instant;
-use ndarray::Array2;
-use larql_compute::{default_backend, cpu_backend};
 use larql_compute::cpu::q4;
 use larql_compute::cpu::q4::quantize_q4_0;
+use larql_compute::{cpu_backend, default_backend};
+use ndarray::Array2;
+use std::time::Instant;
 
 fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     let mut s = seed;
@@ -22,12 +22,16 @@ fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     })
 }
 
-struct Timer { n: usize }
+struct Timer {
+    n: usize,
+}
 impl Timer {
     fn run<F: FnMut()>(&self, name: &str, mut f: F) -> f64 {
         f(); // warmup
         let t0 = Instant::now();
-        for _ in 0..self.n { f(); }
+        for _ in 0..self.n {
+            f();
+        }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / self.n as f64;
         println!("  {name:50} {ms:>7.2}ms");
         ms
@@ -50,12 +54,22 @@ fn main() {
     let mut layers_q4: Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> = Vec::new();
     let mut layers_f32: Vec<(Array2<f32>, Array2<f32>, Array2<f32>)> = Vec::new();
     for l in 0..21u64 {
-        let g: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32).collect();
-        let u: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32).collect();
-        let d: Vec<f32> = (0..inter * hidden).map(|i| ((i as f64 + l as f64 * 3e7) * 0.0003).cos() as f32).collect();
+        let g: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 1e7) * 0.0001).cos() as f32)
+            .collect();
+        let u: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 2e7) * 0.0002).sin() as f32)
+            .collect();
+        let d: Vec<f32> = (0..inter * hidden)
+            .map(|i| ((i as f64 + l as f64 * 3e7) * 0.0003).cos() as f32)
+            .collect();
         // Transpose down for matvec pattern
         let mut dt = vec![0.0f32; hidden * inter];
-        for r in 0..inter { for c in 0..hidden { dt[c * inter + r] = d[r * hidden + c]; } }
+        for r in 0..inter {
+            for c in 0..hidden {
+                dt[c * inter + r] = d[r * hidden + c];
+            }
+        }
         layers_q4.push((quantize_q4_0(&g), quantize_q4_0(&u), quantize_q4_0(&dt)));
         layers_f32.push((
             Array2::from_shape_vec((inter, hidden), g).unwrap(),
@@ -77,7 +91,9 @@ fn main() {
                     let g = metal.q4_matvec_direct(gate_q4, &q8, &sc, inter, hidden);
                     let u = metal.q4_matvec_direct(up_q4, &q8, &sc, inter, hidden);
                     let mut act = vec![0.0f32; inter];
-                    for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+                    for i in 0..inter {
+                        act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+                    }
                     h = metal.q4_f32_matvec_direct(down_t_q4, &act, hidden, inter);
                 }
             });
@@ -107,7 +123,9 @@ fn main() {
                 let g = q4::q4_matvec(gate_q4, &h, inter, hidden);
                 let u = q4::q4_matvec(up_q4, &h, inter, hidden);
                 let mut act = vec![0.0f32; inter];
-                for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+                for i in 0..inter {
+                    act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+                }
                 // For down: use CPU vecmat (original layout would be q4_vecmat,
                 // but we have transposed, so use matvec with hidden as num_rows)
                 h = q4::q4_matvec(down_t_q4, &act, hidden, inter);
@@ -121,7 +139,8 @@ fn main() {
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             // Simulate attention as 4 f32 matmul_transb (Q, K, V, O projections)
-            let attn_weights: Vec<Array2<f32>> = (0..21).map(|l| synth(2560, 2560, 1000 + l)).collect();
+            let attn_weights: Vec<Array2<f32>> =
+                (0..21).map(|l| synth(2560, 2560, 1000 + l)).collect();
 
             t.run("Mixed: CPU attn (f32) + Metal FFN (Q4) × 21", || {
                 let h = synth(6, hidden, 42);
@@ -139,7 +158,9 @@ fn main() {
                     let g = metal.q4_matvec_direct(gate_q4, &q8, &sc, inter, hidden);
                     let u = metal.q4_matvec_direct(up_q4, &q8, &sc, inter, hidden);
                     let mut act = vec![0.0f32; inter];
-                    for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+                    for i in 0..inter {
+                        act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+                    }
                     let _ = metal.q4_f32_matvec_direct(down_t_q4, &act, hidden, inter);
                 }
             });
@@ -151,7 +172,10 @@ fn main() {
     #[cfg(feature = "metal")]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
-            let layers_refs: Vec<(&[u8], &[u8], &[u8])> = layers_q4.iter().map(|(g, u, d)| (g.as_slice(), u.as_slice(), d.as_slice())).collect();
+            let layers_refs: Vec<(&[u8], &[u8], &[u8])> = layers_q4
+                .iter()
+                .map(|(g, u, d)| (g.as_slice(), u.as_slice(), d.as_slice()))
+                .collect();
             let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
 
             t.run("Metal multi-layer Q4 (21L, 1 cmd buffer, all GPU)", || {
@@ -159,7 +183,7 @@ fn main() {
             });
         }
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("  (Metal not enabled)");
 
     // ── 6. Full layer on Metal (old per-layer benchmark) (attention + FFN, one command buffer) ──
@@ -167,19 +191,39 @@ fn main() {
     #[cfg(feature = "metal")]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
-            let w_q: Vec<f32> = (0..hidden * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
-            let w_k: Vec<f32> = (0..512 * hidden).map(|i| (i as f32 * 0.0002).sin()).collect();
-            let w_v: Vec<f32> = (0..512 * hidden).map(|i| (i as f32 * 0.0003).cos()).collect();
-            let w_o: Vec<f32> = (0..hidden * hidden).map(|i| (i as f32 * 0.0004).sin()).collect();
+            let w_q: Vec<f32> = (0..hidden * hidden)
+                .map(|i| (i as f32 * 0.0001).cos())
+                .collect();
+            let w_k: Vec<f32> = (0..512 * hidden)
+                .map(|i| (i as f32 * 0.0002).sin())
+                .collect();
+            let w_v: Vec<f32> = (0..512 * hidden)
+                .map(|i| (i as f32 * 0.0003).cos())
+                .collect();
+            let w_o: Vec<f32> = (0..hidden * hidden)
+                .map(|i| (i as f32 * 0.0004).sin())
+                .collect();
             let x: Vec<f32> = (0..6 * hidden).map(|i| (i as f32 * 0.001).sin()).collect();
 
             let (gate_q4, up_q4, down_t_q4) = &layers_q4[0];
 
             t.run("Metal full layer (attn+FFN, 1 cmd buffer)", || {
                 let _ = metal.full_layer_direct(
-                    &w_q, &w_k, &w_v, &w_o,
-                    gate_q4, up_q4, down_t_q4,
-                    &x, 6, hidden, 8, 4, 320, inter, 1.0 / (320.0f32).sqrt(),
+                    &w_q,
+                    &w_k,
+                    &w_v,
+                    &w_o,
+                    gate_q4,
+                    up_q4,
+                    down_t_q4,
+                    &x,
+                    6,
+                    hidden,
+                    8,
+                    4,
+                    320,
+                    inter,
+                    1.0 / (320.0f32).sqrt(),
                 );
             });
 
@@ -198,22 +242,28 @@ fn main() {
                 let g = metal.q4_matvec_direct(gate_q4, &q8, &sc, inter, hidden);
                 let u = metal.q4_matvec_direct(up_q4, &q8, &sc, inter, hidden);
                 let mut act = vec![0.0f32; inter];
-                for i in 0..inter { act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i]; }
+                for i in 0..inter {
+                    act[i] = (g[i] / (1.0 + (-g[i]).exp())) * u[i];
+                }
                 let _ = metal.q4_f32_matvec_direct(down_t_q4, &act, hidden, inter);
             });
         }
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("  (Metal not enabled)");
 
     // ── 6. Batch size sweep (Q4 matvec) ──
     println!("\n--- 6. Batch size sweep (Q4 matvec, one matrix) ---\n");
     {
-        let matrix: Vec<f32> = (0..inter * hidden).map(|i| (i as f32 * 0.0001).cos()).collect();
+        let matrix: Vec<f32> = (0..inter * hidden)
+            .map(|i| (i as f32 * 0.0001).cos())
+            .collect();
         let q4_data = quantize_q4_0(&matrix);
 
         for &seq in &[1, 6, 16, 32] {
-            let x: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 * 0.001).sin()).collect();
+            let x: Vec<f32> = (0..seq * hidden)
+                .map(|i| (i as f32 * 0.001).sin())
+                .collect();
             let label = format!("CPU Q4 matvec seq={seq} ({seq} calls)");
             t.run(&label, || {
                 for s in 0..seq {

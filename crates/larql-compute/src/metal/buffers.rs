@@ -42,27 +42,37 @@ impl BufferCache {
             // allocated once and reused.
             let stub_key: CacheKey = (0, 0);
             let mut cache = self.cache.lock().unwrap();
-            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
-            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            if let Some(buf) = cache.get(&stub_key) {
+                return (*buf).clone();
+            }
+            let buf = self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
             cache.insert(stub_key, buf.clone());
             return buf;
         }
 
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
-        if let Some(buf) = cache.get(&key) { return buf.clone(); }
+        if let Some(buf) = cache.get(&key) {
+            return (*buf).clone();
+        }
 
         let bytes = data.len() * 4;
         let ptr = data.as_ptr() as *const c_void;
 
         let buf = if Self::is_page_aligned(ptr, bytes) {
             self.device.new_buffer_with_bytes_no_copy(
-                ptr as *mut c_void, bytes as u64,
-                MTLResourceOptions::StorageModeShared, None,
+                ptr as *mut c_void,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
+                None,
             )
         } else {
             self.device.new_buffer_with_data(
-                ptr, bytes as u64, MTLResourceOptions::StorageModeShared,
+                ptr,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
             )
         };
 
@@ -77,27 +87,37 @@ impl BufferCache {
         if data.is_empty() {
             let stub_key: CacheKey = (1, 0);
             let mut cache = self.cache.lock().unwrap();
-            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
-            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            if let Some(buf) = cache.get(&stub_key) {
+                return (*buf).clone();
+            }
+            let buf = self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
             cache.insert(stub_key, buf.clone());
             return buf;
         }
 
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
-        if let Some(buf) = cache.get(&key) { return buf.clone(); }
+        if let Some(buf) = cache.get(&key) {
+            return (*buf).clone();
+        }
 
         let ptr = data.as_ptr() as *const c_void;
         let bytes = data.len();
 
         let buf = if Self::is_page_aligned(ptr, bytes) {
             self.device.new_buffer_with_bytes_no_copy(
-                ptr as *mut c_void, bytes as u64,
-                MTLResourceOptions::StorageModeShared, None,
+                ptr as *mut c_void,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
+                None,
             )
         } else {
             self.device.new_buffer_with_data(
-                ptr, bytes as u64, MTLResourceOptions::StorageModeShared,
+                ptr,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
             )
         };
 
@@ -124,10 +144,10 @@ impl BufferCache {
         )
     }
 
-
     /// Create an empty output buffer of given byte size.
     pub fn output(&self, bytes: u64) -> Buffer {
-        self.device.new_buffer(bytes, MTLResourceOptions::StorageModeShared)
+        self.device
+            .new_buffer(bytes, MTLResourceOptions::StorageModeShared)
     }
 
     /// Number of cached buffers (for diagnostics).

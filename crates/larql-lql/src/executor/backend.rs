@@ -79,9 +79,7 @@ impl Session {
     // ── Backend accessors ──
 
     /// Get readonly access to the patched vindex (base + overlay).
-    pub(crate) fn require_patched(
-        &self,
-    ) -> Result<&larql_vindex::PatchedVindex, LqlError> {
+    pub(crate) fn require_patched(&self) -> Result<&larql_vindex::PatchedVindex, LqlError> {
         match &self.backend {
             Backend::Vindex { patched, .. } => Ok(patched),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
@@ -97,9 +95,21 @@ impl Session {
     /// Get mutable access to the patched overlay.
     pub(crate) fn require_patched_mut(
         &mut self,
-    ) -> Result<(&Path, &larql_vindex::VindexConfig, &mut larql_vindex::PatchedVindex), LqlError> {
+    ) -> Result<
+        (
+            &Path,
+            &larql_vindex::VindexConfig,
+            &mut larql_vindex::PatchedVindex,
+        ),
+        LqlError,
+    > {
         match &mut self.backend {
-            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
+            Backend::Vindex {
+                path,
+                config,
+                patched,
+                ..
+            } => Ok((path, config, patched)),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
                 "mutation requires a vindex. Extract first:\n  \
                  EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
@@ -113,10 +123,21 @@ impl Session {
     /// Get readonly access to path + config + base index.
     pub(crate) fn require_vindex(
         &self,
-    ) -> Result<(&Path, &larql_vindex::VindexConfig, &larql_vindex::PatchedVindex), LqlError>
-    {
+    ) -> Result<
+        (
+            &Path,
+            &larql_vindex::VindexConfig,
+            &larql_vindex::PatchedVindex,
+        ),
+        LqlError,
+    > {
         match &self.backend {
-            Backend::Vindex { path, config, patched, .. } => Ok((path, config, patched)),
+            Backend::Vindex {
+                path,
+                config,
+                patched,
+                ..
+            } => Ok((path, config, patched)),
             Backend::Weight { model_id, .. } => Err(LqlError::Execution(format!(
                 "this operation requires a vindex. Extract first:\n  \
                  EXTRACT MODEL \"{}\" INTO \"{}.vindex\"",
@@ -129,16 +150,17 @@ impl Session {
 
     pub(crate) fn relation_classifier(&self) -> Option<&RelationClassifier> {
         match &self.backend {
-            Backend::Vindex { relation_classifier, .. } => relation_classifier.as_ref(),
+            Backend::Vindex {
+                relation_classifier,
+                ..
+            } => relation_classifier.as_ref(),
             _ => None,
         }
     }
 
     /// Mutable access to the Vindex backend's L2 MEMIT store.
     /// Used by `COMPACT MAJOR` to persist decomposed (k, d) pairs.
-    pub(crate) fn memit_store_mut(
-        &mut self,
-    ) -> Result<&mut larql_vindex::MemitStore, LqlError> {
+    pub(crate) fn memit_store_mut(&mut self) -> Result<&mut larql_vindex::MemitStore, LqlError> {
         match &mut self.backend {
             Backend::Vindex { memit_store, .. } => Ok(memit_store),
             _ => Err(LqlError::NoBackend),

@@ -12,17 +12,17 @@
 //! The `LayerGraph` trait abstracts this: given a residual, produce the
 //! layer output. The implementation decides how attention and FFN are computed.
 
-mod dense;
-mod walk;
 mod cached;
-mod template;
-pub mod pipeline_layer;
-pub mod prefill;
-pub mod logits;
+mod dense;
 pub mod generate;
 pub mod grid;
 pub mod hybrid;
+pub mod logits;
+pub mod pipeline_layer;
 pub mod predict;
+pub mod prefill;
+mod template;
+mod walk;
 
 pub use generate::{generate, generate_constrained, GenerateResult, StageTimings};
 
@@ -32,11 +32,11 @@ use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;
 
 // Re-export everything publicly
-pub use dense::*;
-pub use walk::*;
 pub use cached::*;
-pub use template::*;
+pub use dense::*;
 pub use predict::*;
+pub use template::*;
+pub use walk::*;
 
 /// Output of a single layer's computation.
 pub struct LayerOutput {

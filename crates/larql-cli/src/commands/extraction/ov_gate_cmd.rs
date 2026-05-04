@@ -5,8 +5,8 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::ndarray;
 use larql_inference::tokenizers;
-use larql_vindex::load_feature_labels;
 use larql_inference::InferenceModel;
+use larql_vindex::load_feature_labels;
 
 #[derive(Args)]
 pub struct OvGateArgs {
@@ -60,7 +60,11 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "  {} layers, {} Q heads, {} KV heads, head_dim={}, hidden={} ({:.1}s)",
-        num_layers, num_q_heads, num_kv_heads, head_dim, hidden_size,
+        num_layers,
+        num_q_heads,
+        num_kv_heads,
+        head_dim,
+        hidden_size,
         start.elapsed().as_secs_f64()
     );
 
@@ -98,7 +102,11 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
     if !ndjson {
         println!(
             "\n{:<6} {:<5} {:>8}  {:<60}  {:<60}",
-            "Layer", "Head", "Coupling", "Top gate features (what head activates)", "Top gate features (what head hears)"
+            "Layer",
+            "Head",
+            "Coupling",
+            "Top gate features (what head activates)",
+            "Top gate features (what head hears)"
         );
         println!("{}", "-".repeat(150));
     }
@@ -119,7 +127,12 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
         eprint!("L{layer}... ");
         let _ = std::io::stderr().flush();
         if (li + 1) % 10 == 0 {
-            eprintln!("({}/{} layers, {:.0}s)", li + 1, layers.len(), compute_start.elapsed().as_secs_f64());
+            eprintln!(
+                "({}/{} layers, {:.0}s)",
+                li + 1,
+                layers.len(),
+                compute_start.elapsed().as_secs_f64()
+            );
             eprint!("  ");
             let _ = std::io::stderr().flush();
         }
@@ -162,38 +175,53 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     }
-    eprintln!("\n  {} heads computed ({:.1}s)", all_heads.len(), compute_start.elapsed().as_secs_f64());
+    eprintln!(
+        "\n  {} heads computed ({:.1}s)",
+        all_heads.len(),
+        compute_start.elapsed().as_secs_f64()
+    );
 
     // Label unique features
     let label_start = Instant::now();
-    let feature_labels: std::collections::HashMap<(usize, usize), String> = if let Some(ref labels_path) = args.labels {
-        eprintln!("  Loading labels from {}...", labels_path.display());
-        let labels = load_feature_labels(labels_path)?;
-        eprintln!("  {} labels loaded ({:.1}s)", labels.len(), label_start.elapsed().as_secs_f64());
-        labels
-    } else {
-        eprintln!("  Labeling features (slow — use --labels for instant labels)...");
-        let mut labels: std::collections::HashMap<(usize, usize), String> = std::collections::HashMap::new();
-        for hd in &all_heads {
-            for &(f, _) in &hd.couplings {
-                labels.entry((hd.layer, f)).or_default();
+    let feature_labels: std::collections::HashMap<(usize, usize), String> =
+        if let Some(ref labels_path) = args.labels {
+            eprintln!("  Loading labels from {}...", labels_path.display());
+            let labels = load_feature_labels(labels_path)?;
+            eprintln!(
+                "  {} labels loaded ({:.1}s)",
+                labels.len(),
+                label_start.elapsed().as_secs_f64()
+            );
+            labels
+        } else {
+            eprintln!("  Labeling features (slow — use --labels for instant labels)...");
+            let mut labels: std::collections::HashMap<(usize, usize), String> =
+                std::collections::HashMap::new();
+            for hd in &all_heads {
+                for &(f, _) in &hd.couplings {
+                    labels.entry((hd.layer, f)).or_default();
+                }
             }
-        }
-        let total_features = labels.len();
-        for (i, (&(layer, feat), label)) in labels.iter_mut().enumerate() {
-            let gate_key = arch.ffn_gate_key(layer);
-            if let Some(w_gate) = weights.tensors.get(&gate_key) {
-                let gate_row = w_gate.row(feat);
-                *label = project_top_token(&weights.embed, &gate_row.to_vec(), model.tokenizer());
+            let total_features = labels.len();
+            for (i, (&(layer, feat), label)) in labels.iter_mut().enumerate() {
+                let gate_key = arch.ffn_gate_key(layer);
+                if let Some(w_gate) = weights.tensors.get(&gate_key) {
+                    let gate_row = w_gate.row(feat);
+                    *label =
+                        project_top_token(&weights.embed, &gate_row.to_vec(), model.tokenizer());
+                }
+                if (i + 1) % 500 == 0 {
+                    eprint!("\r  {}/{} features...", i + 1, total_features);
+                    let _ = std::io::stderr().flush();
+                }
             }
-            if (i + 1) % 500 == 0 {
-                eprint!("\r  {}/{} features...", i + 1, total_features);
-                let _ = std::io::stderr().flush();
-            }
-        }
-        eprintln!("\r  {} features labeled ({:.1}s)", total_features, label_start.elapsed().as_secs_f64());
-        labels
-    };
+            eprintln!(
+                "\r  {} features labeled ({:.1}s)",
+                total_features,
+                label_start.elapsed().as_secs_f64()
+            );
+            labels
+        };
 
     // Output
     let mut total_edges = 0usize;
@@ -201,7 +229,10 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref mut writer) = ndjson_writer {
         for hd in &all_heads {
             for &(f, c) in &hd.couplings {
-                let top_tok = feature_labels.get(&(hd.layer, f)).map(|s| s.as_str()).unwrap_or("?");
+                let top_tok = feature_labels
+                    .get(&(hd.layer, f))
+                    .map(|s| s.as_str())
+                    .unwrap_or("?");
                 let record = serde_json::json!({
                     "head": format!("L{}_H{}", hd.layer, hd.head),
                     "layer": hd.layer,
@@ -221,21 +252,32 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
         writer.flush()?;
         eprintln!(
             "\nWrote {} coupling edges ({} layers × {} heads × top-{})",
-            total_edges, layers.len(), num_q_heads, args.top_k,
+            total_edges,
+            layers.len(),
+            num_q_heads,
+            args.top_k,
         );
     } else {
         println!(
             "\n{:<6} {:<5} {:>8}  {:<60}  {:<60}",
-            "Layer", "Head", "Coupling", "Top gate features (what head activates)", "Top gate features (what head hears)"
+            "Layer",
+            "Head",
+            "Coupling",
+            "Top gate features (what head activates)",
+            "Top gate features (what head hears)"
         );
         println!("{}", "-".repeat(150));
 
         for hd in &all_heads {
-            let top_activates: String = hd.couplings
+            let top_activates: String = hd
+                .couplings
                 .iter()
                 .take(5)
                 .map(|(f, c)| {
-                    let tok = feature_labels.get(&(hd.layer, *f)).map(|s| s.as_str()).unwrap_or("?");
+                    let tok = feature_labels
+                        .get(&(hd.layer, *f))
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
                     format!("F{}→{} ({:.2})", f, tok, c)
                 })
                 .collect::<Vec<_>>()
@@ -267,7 +309,10 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             if args.verbose {
                 for (f, c) in &hd.couplings {
-                    let tok = feature_labels.get(&(hd.layer, *f)).map(|s| s.as_str()).unwrap_or("?");
+                    let tok = feature_labels
+                        .get(&(hd.layer, *f))
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
                     println!("        F{:<6} coupling={:.3}  gate_hears={}", f, c, tok);
                 }
             }

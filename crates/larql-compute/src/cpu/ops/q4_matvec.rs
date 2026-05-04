@@ -15,12 +15,22 @@ pub fn dispatch(q4_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Ve
 }
 
 /// Q4 matvec with pre-quantized Q8 input (avoids re-quantizing).
-pub fn dispatch_q8(q4_data: &[u8], q8_x: &[i8], q8_scales: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {
+pub fn dispatch_q8(
+    q4_data: &[u8],
+    q8_x: &[i8],
+    q8_scales: &[f32],
+    num_rows: usize,
+    hidden: usize,
+) -> Vec<f32> {
     let mut scores = vec![0.0f32; num_rows];
     unsafe {
         q4_0_matvec_c(
-            q4_data.as_ptr(), q8_x.as_ptr(), q8_scales.as_ptr(),
-            scores.as_mut_ptr(), num_rows, hidden,
+            q4_data.as_ptr(),
+            q8_x.as_ptr(),
+            q8_scales.as_ptr(),
+            scores.as_mut_ptr(),
+            num_rows,
+            hidden,
         );
     }
     scores
@@ -37,7 +47,9 @@ mod tests {
         let hidden = 256;
         let rows = 64;
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
-        let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let matrix: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let q4 = quantize_q4_0(&matrix);
         let result = dispatch(&q4, &x, rows, hidden);
         assert_eq!(result.len(), rows);
@@ -49,7 +61,9 @@ mod tests {
         let hidden = 256;
         let rows = 32;
         let x = vec![0.0f32; hidden];
-        let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let matrix: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let q4 = quantize_q4_0(&matrix);
         let result = dispatch(&q4, &x, rows, hidden);
         assert!(result.iter().all(|&v| v.abs() < 0.01));
