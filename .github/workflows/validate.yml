@@ -342,7 +342,7 @@ jobs:
         # repository remains free of release-tooling configuration. The
         # only goal is to verify commit-message parseability under an
         # independent implementation; we do not wire any publishing
-        # plugins, write artefacts, or push.
+        # plugins, write artifacts, or push.
         run: |
           cat > /tmp/.releaserc.json <<EOF
           {
