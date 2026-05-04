@@ -13,12 +13,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Add CI/CD-based development environment setup script
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - Add deterministic changelog and SemVer preflight checks
 - Cross-platform CI/CD foundation (Phase 1)
 - Implement Android (Phase 2b) cross-platform CI/CD support
 - Implement ChromeOS (Phase 2a) cross-platform CI/CD support
 - Implement macOS (Phase 3) cross-platform CI/CD support
+
+### Changed
+
+- Make setup script repository-agnostic with autodetection
 
 ### Fixed
 
@@ -33,6 +38,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Improve portability and safety (setup script)
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
