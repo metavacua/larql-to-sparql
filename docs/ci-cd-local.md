@@ -20,8 +20,8 @@ Or equivalently:
 
 ```bash
 make platform-test-ubuntu      # Ubuntu (Phase 1)
-make platform-test-android     # Android (Phase 2, skeleton)
-make platform-test-chromeos    # ChromeOS (Phase 2, skeleton)
+make platform-test-chromeos    # ChromeOS (Phase 2a)
+make platform-test-android     # Android (Phase 2b, skeleton)
 make platform-test-macos       # macOS (Phase 3, skeleton)
 ```
 
@@ -42,8 +42,8 @@ Each platform script runs:
 | Platform | Status | CI/CD Job | Local Script |
 |----------|--------|-----------|--------------|
 | Ubuntu 24.04 | ✓ Phase 1 | `.github/workflows/cross-platform-build.yml` → `build-ubuntu` | `./scripts/ci/build-ubuntu.sh` |
-| Android | ◐ Phase 2 | `.github/workflows/cross-platform-build.yml` → `build-android` (commented out) | `./scripts/ci/build-android.sh` (skeleton) |
-| ChromeOS | ◐ Phase 2 | `.github/workflows/cross-platform-build.yml` → `build-chromeos` (commented out) | `./scripts/ci/build-chromeos.sh` (skeleton) |
+| ChromeOS 24.04 | ✓ Phase 2a | `.github/workflows/cross-platform-build.yml` → `build-chromeos` | `./scripts/ci/build-chromeos.sh` |
+| Android | ◐ Phase 2b | `.github/workflows/cross-platform-build.yml` → `build-android` (commented out) | `./scripts/ci/build-android.sh` (skeleton) |
 | macOS (Intel/ARM) | ◐ Phase 3 | `.github/workflows/cross-platform-build.yml` → `build-macos` (commented out) | `./scripts/ci/build-macos.sh` (skeleton) |
 
 ## Prerequisites
@@ -248,10 +248,17 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - Run `make platform-test` regularly before pushing
 - Scripts mirror GitHub Actions for consistency
 
-### Phase 2 (Android/ChromeOS, in progress)
-- Skeleton scripts ready in `./scripts/ci/build-android.sh` and `./scripts/ci/build-chromeos.sh`
-- Research and implementation tasks documented in skeleton scripts
-- CI workflow matrix will be extended once Phase 2 implementation begins
+### Phase 2a (ChromeOS, complete)
+- ChromeOS build script implemented in `./scripts/ci/build-chromeos.sh`
+- GitHub Actions job enabled in `.github/workflows/cross-platform-build.yml`
+- Targets x86_64-unknown-linux-gnu (Crostini Linux container)
+- Build process identical to Ubuntu since both target the same Linux environment
+
+### Phase 2b (Android, in progress)
+- Skeleton script ready in `./scripts/ci/build-android.sh`
+- Requires Android NDK setup and research
+- Dual targets: aarch64-linux-android and armv7-linux-androideabi
+- Build-only validation; no runtime testing or Python bindings
 
 ### Phase 3 (macOS, deferred)
 - Skeleton script ready in `./scripts/ci/build-macos.sh`

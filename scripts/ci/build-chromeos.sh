@@ -2,22 +2,25 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# ChromeOS platform build script (Phase 2 placeholder).
+# ChromeOS platform build and test script (Phase 2a).
 #
-# ChromeOS runs a Linux container (Crostini) so the build process may be
-# identical or very similar to Ubuntu. This script is a skeleton to allow
-# platform-specific customization if needed in the future.
+# ChromeOS runs a Linux container (Crostini) targeting x86_64-unknown-linux-gnu.
+# The build process is nearly identical to Ubuntu since both target the same
+# Linux environment. This script validates that the project builds and tests
+# successfully on ChromeOS.
 #
-# Phase 2 implementation will:
-#   - Determine if Crostini (Linux container) is the target or native ChromeOS API
-#   - Configure minimal feature set if needed
-#   - Validate cross-platform compatibility
+# Assumptions:
+#   - Rust is installed and on PATH
+#   - Python 3.12+ is available (for Python bindings test)
+#   - uv package manager is installed
+#   - Running on ChromeOS with Linux container (Crostini) enabled
 #
 # Usage:
 #   ./scripts/ci/build-chromeos.sh
 #
 # Environment variables:
 #   VERBOSE: Enable verbose output (set to 1)
+#   RUST_TOOLCHAIN: Rust version to use (auto-detected from CI env, optional locally)
 
 set -euo pipefail
 
@@ -26,10 +29,15 @@ readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Color output
 readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
-readonly NC='\033[0m'
+readonly NC='\033[0m' # No Color
 
+# Pinned Rust toolchain (matches .github/workflows/cross-platform-build.yml)
+readonly RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.88.0}"
+
+# Utility functions
 log_header() {
   echo -e "${BLUE}========================================${NC}"
   echo -e "${BLUE}$1${NC}"
@@ -40,29 +48,128 @@ log_step() {
   echo -e "${YELLOW}→ $1${NC}"
 }
 
+log_success() {
+  echo -e "${GREEN}✓ $1${NC}"
+}
+
 log_error() {
   echo -e "${RED}✗ $1${NC}"
 }
 
+check_command() {
+  if ! command -v "$1" &>/dev/null; then
+    log_error "Required command not found: $1"
+    exit 1
+  fi
+}
+
+# Check prerequisites
+check_prerequisites() {
+  log_header "Checking prerequisites"
+
+  check_command cargo
+  check_command rustup
+  check_command python3
+  check_command uv
+
+  log_success "All prerequisites found"
+}
+
+# Install/verify Rust toolchain
+setup_rust_toolchain() {
+  log_header "Setting up Rust toolchain"
+
+  log_step "Installing Rust ${RUST_TOOLCHAIN}"
+  rustup toolchain install "${RUST_TOOLCHAIN}" \
+    --profile minimal \
+    --no-self-update
+
+  rustup default "${RUST_TOOLCHAIN}"
+
+  log_success "Rust toolchain ${RUST_TOOLCHAIN} ready"
+  cargo --version
+  rustc --version
+}
+
+# Build the project
+build() {
+  log_header "Building project (cargo build --release)"
+
+  cd "${REPO_ROOT}"
+
+  if cargo build --release --workspace; then
+    log_success "Build successful"
+  else
+    log_error "Build failed"
+    exit 1
+  fi
+}
+
+# Run tests
+run_tests() {
+  log_header "Running workspace tests (cargo test --workspace)"
+
+  cd "${REPO_ROOT}"
+
+  if cargo test --workspace --no-fail-fast; then
+    log_success "Tests passed"
+  else
+    log_error "Tests failed"
+    exit 1
+  fi
+}
+
+# Test Python bindings
+test_python_bindings() {
+  log_header "Testing Python bindings"
+
+  cd "${REPO_ROOT}/crates/larql-python"
+
+  log_step "Installing Python dependencies (uv sync)"
+  if uv sync --no-install-project --group dev; then
+    log_success "Dependencies synced"
+  else
+    log_error "Failed to sync dependencies"
+    exit 1
+  fi
+
+  log_step "Building Python extension (maturin develop --release)"
+  if uv run --no-sync maturin develop --release; then
+    log_success "Python extension built"
+  else
+    log_error "Failed to build Python extension"
+    exit 1
+  fi
+
+  log_step "Running pytest"
+  if uv run --no-sync pytest tests/ -v; then
+    log_success "Python tests passed"
+  else
+    log_error "Python tests failed"
+    exit 1
+  fi
+
+  cd "${REPO_ROOT}"
+}
+
+# Main
 main() {
-  log_header "ChromeOS Platform Build (Phase 2 Placeholder)"
+  if [[ "${VERBOSE:-0}" == "1" ]]; then
+    set -x
+  fi
 
-  log_step "ChromeOS cross-compilation is under development"
-  log_step "This is a skeleton for Phase 2 implementation"
-
-  echo ""
-  echo "Phase 2 tasks:"
-  echo "  1. Determine ChromeOS target (Crostini Linux container vs. native API)"
-  echo "  2. If Crostini: may be identical to Ubuntu (x86_64-unknown-linux-gnu)"
-  echo "  3. Configure minimal feature set if needed for ChromeOS constraints"
-  echo "  4. Validate that binaries work in ChromeOS environment"
-  echo "  5. Integrate with GitHub Actions cross-platform-build.yml matrix"
+  log_header "ChromeOS Platform Build & Test (Phase 2a)"
+  echo "Target: x86_64-unknown-linux-gnu (Crostini Linux container)"
   echo ""
 
-  # Placeholder: would be implemented in Phase 2
-  log_step "Placeholder: would configure ChromeOS target, build, and test"
+  check_prerequisites
+  setup_rust_toolchain
+  build
+  run_tests
+  test_python_bindings
 
-  exit 0
+  log_header "All checks passed ✓"
+  echo -e "${GREEN}ChromeOS build and test suite completed successfully.${NC}"
 }
 
 main "$@"
