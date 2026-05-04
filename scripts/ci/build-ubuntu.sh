@@ -79,10 +79,9 @@ setup_rust_toolchain() {
   log_step "Installing Rust ${RUST_TOOLCHAIN}"
   rustup toolchain install "${RUST_TOOLCHAIN}" \
     --profile minimal \
-    --no-self-update || true
+    --no-self-update
 
   rustup default "${RUST_TOOLCHAIN}"
-  rustup update || true
 
   log_success "Rust toolchain ${RUST_TOOLCHAIN} ready"
   cargo --version
