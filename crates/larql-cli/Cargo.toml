@@ -19,7 +19,7 @@ larql-lql = { path = "../larql-lql" }
 larql-vindex = { path = "../larql-vindex" }
 clap = { version = "4", features = ["derive"] }
 indicatif = "0.17"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
 base64 = "0.22"
 tokenizers = "0.21"
 safetensors = "0.5"
