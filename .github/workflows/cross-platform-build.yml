@@ -202,6 +202,12 @@ jobs:
           cargo --version
           rustc --version
 
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
       - name: Add Android target
         run: rustup target add ${{ matrix.android-target }}
 
