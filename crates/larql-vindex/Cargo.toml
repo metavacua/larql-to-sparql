@@ -22,7 +22,7 @@ ndarray = "0.16"
 rayon = "1.10"
 
 # Tokenizer (for embeddings loading + token resolution)
-tokenizers = "0.21"
+tokenizers = "0.23"
 
 # Checksums
 sha2 = "0.10"
