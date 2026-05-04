@@ -1,0 +1,138 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cross-platform build and test matrix.
+#
+# This workflow compiles and tests the project across multiple platforms to ensure
+# portability. Phase 1 covers Ubuntu (primary platform); future phases add Android,
+# ChromeOS, and macOS support.
+#
+# Philosophy: Each job in the matrix is a pure, reproducible build for its platform,
+# using pinned tool versions (Rust toolchain). Jobs run in parallel with
+# fail-fast: false to report all platform results.
+
+name: cross-platform-build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Rust toolchain version. Must match validate.yml and quality.yml.
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Phase 1: Ubuntu (primary platform)
+  # -----------------------------------------------------------------------
+  build-ubuntu:
+    name: ubuntu-24.04 (build + test + python)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            os: ubuntu-24.04
+            platform: ubuntu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-ubuntu
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Setup Python (for Python bindings test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Test Python bindings (uv + maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+  # -----------------------------------------------------------------------
+  # Phase 2: Android (placeholder for future implementation)
+  # Currently: skeleton job to document the pattern
+  # -----------------------------------------------------------------------
+  # build-android:
+  #   name: android (cross-compile + test)
+  #   runs-on: ubuntu-24.04
+  #   strategy:
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+  #     # Android NDK setup and cross-compilation logic TBD
+
+  # -----------------------------------------------------------------------
+  # Phase 2: ChromeOS (placeholder for future implementation)
+  # Currently: skeleton job to document the pattern
+  # -----------------------------------------------------------------------
+  # build-chromeos:
+  #   name: chromeos (cross-compile + test)
+  #   runs-on: ubuntu-24.04
+  #   strategy:
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+  #     # ChromeOS cross-compilation logic TBD
+
+  # -----------------------------------------------------------------------
+  # Aggregate gate: All platform builds passed
+  # -----------------------------------------------------------------------
+  platform-build-gate:
+    name: platform builds passed
+    runs-on: ubuntu-24.04
+    needs: [build-ubuntu]
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: Platform matrix builds successful
+        run: |
+          echo "All platform builds completed successfully."
+          echo "Phase 1 (Ubuntu) ✓"
+          echo "Phase 2 (Android, ChromeOS) — pending implementation"
+          echo "Phase 3 (macOS) — pending implementation"
