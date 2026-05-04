@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Implement ChromeOS (Phase 2a) cross-platform CI/CD support
 - Implement macOS (Phase 3) cross-platform CI/CD support
 
+### Changed
+
+- Make setup script repository-agnostic with autodetection
+
 ### Fixed
 
 - Add Android NDK setup to cross-platform-build workflow
