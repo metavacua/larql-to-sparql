@@ -36,7 +36,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Platform-gate metal conditionals for cross-platform compilation
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
+- Use rustls-tls for reqwest to enable Android cross-compilation
 
 

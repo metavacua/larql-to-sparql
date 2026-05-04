@@ -43,7 +43,7 @@ impl BufferCache {
             let stub_key: CacheKey = (0, 0);
             let mut cache = self.cache.lock().unwrap();
             if let Some(buf) = cache.get(&stub_key) {
-                return (*buf).clone();
+                return buf.clone();
             }
             let buf = self
                 .device
@@ -55,7 +55,7 @@ impl BufferCache {
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
         if let Some(buf) = cache.get(&key) {
-            return (*buf).clone();
+            return buf.clone();
         }
 
         let bytes = data.len() * 4;
@@ -88,7 +88,7 @@ impl BufferCache {
             let stub_key: CacheKey = (1, 0);
             let mut cache = self.cache.lock().unwrap();
             if let Some(buf) = cache.get(&stub_key) {
-                return (*buf).clone();
+                return buf.clone();
             }
             let buf = self
                 .device
@@ -100,7 +100,7 @@ impl BufferCache {
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
         if let Some(buf) = cache.get(&key) {
-            return (*buf).clone();
+            return buf.clone();
         }
 
         let ptr = data.as_ptr() as *const c_void;

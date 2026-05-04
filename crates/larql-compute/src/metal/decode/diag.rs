@@ -72,12 +72,12 @@ pub(super) fn dump_layer_buffers(l: usize, bufs: &LayerDiagBufs<'_>) {
             return;
         }
         let s: &[f32] = unsafe { std::slice::from_raw_parts(ptr, n) };
-        let nan = s.iter().filter(|v: &&f32| v.is_nan()).count();
-        let inf = s.iter().filter(|v: &&f32| v.is_infinite()).count();
+        let nan = s.iter().filter(|&v| v.is_nan()).count();
+        let inf = s.iter().filter(|&v| v.is_infinite()).count();
         let maxabs = s
             .iter()
-            .map(|v: &f32| v.abs())
-            .filter(|v: &f32| v.is_finite())
+            .map(|&v| v.abs())
+            .filter(|&v| v.is_finite())
             .fold(0.0f32, f32::max);
         eprintln!("[diag L{l}] {name}: len={n} nan={nan} inf={inf} max_abs={maxabs:.3e}");
     };
