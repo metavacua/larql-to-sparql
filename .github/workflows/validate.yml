@@ -207,9 +207,8 @@ jobs:
 
   report-validation-errors:
     name: Report validation failures
-    runs-on: ubuntu-24.04
     if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
     needs: [provenance, first-party-licenses, commits, changelog, version-preflight]
-    uses: ./.github/workflows/error-report.yml
+    uses: ./.github/workflows/error-report.yml@${{ github.ref }}
     with:
       workflow_name: validate

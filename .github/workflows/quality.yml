@@ -308,9 +308,8 @@ jobs:
 
   report-quality-errors:
     name: Report quality check failures
-    runs-on: ubuntu-24.04
     if: always() && github.event_name == 'pull_request' && github.event_name != 'schedule' && contains(needs.*.result, 'failure')
     needs: [clippy, test, audit, deny]
-    uses: ./.github/workflows/error-report.yml
+    uses: ./.github/workflows/error-report.yml@${{ github.ref }}
     with:
       workflow_name: quality
