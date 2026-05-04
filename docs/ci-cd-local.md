@@ -43,7 +43,7 @@ Each platform script runs:
 |----------|--------|-----------|--------------|
 | Ubuntu 24.04 | ✓ Phase 1 | `.github/workflows/cross-platform-build.yml` → `build-ubuntu` | `./scripts/ci/build-ubuntu.sh` |
 | ChromeOS 24.04 | ✓ Phase 2a | `.github/workflows/cross-platform-build.yml` → `build-chromeos` | `./scripts/ci/build-chromeos.sh` |
-| Android | ◐ Phase 2b | `.github/workflows/cross-platform-build.yml` → `build-android` (commented out) | `./scripts/ci/build-android.sh` (skeleton) |
+| Android (aarch64 + armv7) | ✓ Phase 2b | `.github/workflows/cross-platform-build.yml` → `build-android` | `./scripts/ci/build-android.sh` |
 | macOS (Intel/ARM) | ◐ Phase 3 | `.github/workflows/cross-platform-build.yml` → `build-macos` (commented out) | `./scripts/ci/build-macos.sh` (skeleton) |
 
 ## Prerequisites
@@ -94,20 +94,32 @@ Each platform script runs:
 
 - **Metal SDK**: Bundled with Xcode; no additional installation needed
 
-### Android (Future)
+### Android
 
-- **Android NDK**: Required for cross-compilation
-- **Rust Android targets**: Installed via `rustup`
+- **Android NDK 27.0.11902837+**: Required for cross-compilation
+  - Option 1: Install via Android Studio (Tools → SDK Manager → NDK)
+    ```bash
+    export ANDROID_NDK_HOME=$HOME/Android/sdk/ndk/27.0.11902837
+    ```
+  - Option 2: Download manually from [Android NDK Downloads](https://developer.android.com/ndk/downloads)
+    ```bash
+    export ANDROID_NDK_HOME=/path/to/android-ndk-r27
+    ```
+  - Option 3: On GitHub Actions, NDK is pre-installed on ubuntu-24.04 runners
+
+- **Rust Android targets**: Installed automatically via `rustup target add`
+  - aarch64-linux-android (64-bit ARM)
+  - armv7-linux-androideabi (32-bit ARM)
 
 ## Feature Flags by Platform
 
 | Platform | Features | Notes |
 |----------|----------|-------|
 | Ubuntu | Default (no Metal) | Metal disabled; not available on Linux |
+| ChromeOS | Default (no Metal) | Crostini Linux container; Metal not available |
+| Android (aarch64 + armv7) | Default (no Metal) | Metal not available on Android; build-only |
 | macOS (ARM) | `--features metal` | Metal GPU acceleration for Apple Silicon |
 | macOS (Intel) | Default (no Metal) | Metal not available on Intel Macs |
-| Android | Minimal/custom | GPU via Vulkan (future) |
-| ChromeOS | Default | If Crostini target: identical to Ubuntu |
 
 ## Examples
 
@@ -213,6 +225,40 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - On Intel macOS: Use `cargo build --release --no-default-features`
 - On Linux: Metal is not supported; use default flags without Metal
 
+### Error: "Android NDK not found"
+
+**Cause**: Android NDK is not installed or ANDROID_NDK_HOME is not set.
+
+**Solution**: Install Android NDK and set the environment variable.
+
+1. **Via Android Studio** (recommended):
+   - Open Android Studio → Tools → SDK Manager → SDK Tools
+   - Check "NDK (Side by side)" and select version 27.0.11902837
+   - Click "Apply" and wait for installation
+   - Set: `export ANDROID_NDK_HOME=$HOME/Android/sdk/ndk/27.0.11902837`
+
+2. **Manual download**:
+   - Download NDK from [Android NDK Downloads](https://developer.android.com/ndk/downloads)
+   - Extract: `unzip android-ndk-r27-*.zip`
+   - Set: `export ANDROID_NDK_HOME=/path/to/android-ndk-r27`
+
+3. **GitHub Actions** (CI):
+   - NDK is pre-installed at `/opt/android/ndk/27.0.11902837`
+   - Auto-detected by the build script
+
+### Error: "could not compile for Android target"
+
+**Possible causes:**
+1. Rust Android targets not installed
+2. Toolchain outdated
+3. Platform-specific dependency issue
+
+**Solutions:**
+- Add Android targets: `rustup target add aarch64-linux-android armv7-linux-androideabi`
+- Reinstall toolchain: `rustup toolchain install 1.88.0 --profile minimal`
+- Check if your crate has Android-incompatible dependencies
+- Run with verbose output: `VERBOSE=1 ./scripts/ci/build-android.sh`
+
 ### Error: "Tests failed"
 
 1. **Check the error output** for the specific failing test
@@ -254,11 +300,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - Targets x86_64-unknown-linux-gnu (Crostini Linux container)
 - Build process identical to Ubuntu since both target the same Linux environment
 
-### Phase 2b (Android, in progress)
-- Skeleton script ready in `./scripts/ci/build-android.sh`
-- Requires Android NDK setup and research
-- Dual targets: aarch64-linux-android and armv7-linux-androideabi
+### Phase 2b (Android, complete)
+- Android build script implemented in `./scripts/ci/build-android.sh`
+- GitHub Actions job enabled in `.github/workflows/cross-platform-build.yml`
+- Cross-compiles for dual targets: aarch64-linux-android and armv7-linux-androideabi
 - Build-only validation; no runtime testing or Python bindings
+- Android NDK auto-detected or can be installed separately
 
 ### Phase 3 (macOS, deferred)
 - Skeleton script ready in `./scripts/ci/build-macos.sh`

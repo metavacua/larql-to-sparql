@@ -164,20 +164,50 @@ jobs:
           uv run --no-sync pytest tests/ -v
 
   # -----------------------------------------------------------------------
-  # Phase 2b: Android (placeholder for future implementation)
-  # Currently: skeleton job to document the pattern
+  # Phase 2b: Android (cross-compile to aarch64 and armv7 targets)
+  # Builds for aarch64-linux-android and armv7-linux-androideabi.
+  # Note: Python bindings skipped on Android (no runtime test surface).
   # -----------------------------------------------------------------------
-  # build-android:
-  #   name: android (cross-compile + test)
-  #   runs-on: ubuntu-24.04
-  #   strategy:
-  #     fail-fast: false
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #       with:
-  #         persist-credentials: false
-  #     # Android NDK setup and cross-compilation logic TBD
+  build-android:
+    name: android (cross-compile dual targets)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: android-aarch64
+            os: ubuntu-24.04
+            platform: android
+            android-target: aarch64-linux-android
+          - name: android-armv7
+            os: ubuntu-24.04
+            platform: android
+            android-target: armv7-linux-androideabi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Add Android target
+        run: rustup target add ${{ matrix.android-target }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-android-${{ matrix.android-target }}
+
+      - name: cargo build for ${{ matrix.android-target }}
+        run: cargo build --release --workspace --target ${{ matrix.android-target }} --no-fail-fast
 
   # -----------------------------------------------------------------------
   # Aggregate gate: All platform builds passed
@@ -185,7 +215,7 @@ jobs:
   platform-build-gate:
     name: platform builds passed
     runs-on: ubuntu-24.04
-    needs: [build-ubuntu, build-chromeos]
+    needs: [build-ubuntu, build-chromeos, build-android]
     if: always() && !failure() && !cancelled()
     steps:
       - name: Platform matrix builds successful
@@ -193,5 +223,5 @@ jobs:
           echo "All platform builds completed successfully."
           echo "Phase 1 (Ubuntu) ✓"
           echo "Phase 2a (ChromeOS) ✓"
-          echo "Phase 2b (Android) — pending implementation"
+          echo "Phase 2b (Android) ✓"
           echo "Phase 3 (macOS) — pending implementation"
