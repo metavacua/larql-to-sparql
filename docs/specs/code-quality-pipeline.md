@@ -41,7 +41,7 @@ independent gates on every PR; neither calls into the other.
 
 `msrv`, `mutants`, `python`, and `proto-lint` are introduced with
 `continue-on-error: true` so they surface as visible signals without
-blocking PRs while their baselines stabilise. The path to flipping
+blocking PRs while their baselines stabilize. The path to flipping
 each to a hard gate is:
 
 | Job | Pre-condition for gating |
@@ -177,7 +177,7 @@ consequence of the failure message; it must not interpret intent.
 | `doc` | Address each rustdoc warning printed in the run log. Most are broken intra-doc links resolvable with `[Type]` / `[Type::method]` notation. |
 | `examples` | Build the failing example locally (`cargo build -p <crate> --example <name>`) and update its source against the current public API. |
 | `msrv` (informational) | Either raise `Cargo.toml :: rust-version` to whatever `cargo-msrv find` reports, or pin the dependency that forces the higher MSRV to an older compatible version. |
-| `mutants` (informational) | Inspect the report artefact for surviving mutants; add tests for the corresponding code paths or document a justified carve-out in `.cargo-mutants.toml`. |
+| `mutants` (informational) | Inspect the report artifact for surviving mutants; add tests for the corresponding code paths or document a justified carve-out in `.cargo-mutants.toml`. |
 | `python` (informational) | Reproduce locally via `make python-test`. Common failures are version-skew in the PyO3 ABI or an out-of-date `crates/larql-python/uv.lock`. |
 | `proto-lint` (informational) | Address each `buf lint` finding in the affected `.proto` file. Schema-level fixes are local; wire-compatibility (breaking-change) is a separate concern not yet wired here. |
 | `audit` | Bump the affected crate to a fixed version (preferred), or replace it. Do not blanket-ignore advisories without a written rationale. |

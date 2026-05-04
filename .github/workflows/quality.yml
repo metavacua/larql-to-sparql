@@ -404,10 +404,14 @@ jobs:
           tool: cargo-msrv
 
       - name: cargo msrv verify
-        # Verify each library crate. Binaries (cli) and the PyO3 cdylib
-        # are excluded; their MSRV is whatever the workspace declares.
+        # `cargo msrv verify` operates on a single Cargo manifest and does
+        # not accept `--workspace`; passing it caused an ArgsError. The
+        # workspace-level `rust-version` is declared in the root manifest
+        # under `[workspace.package]`, so verifying the root manifest is
+        # the canonical workspace check. Per-member overrides (none today)
+        # would need a per-crate iteration.
         run: |
-          cargo msrv verify --manifest-path Cargo.toml --workspace
+          cargo msrv verify --manifest-path Cargo.toml
 
   # ---------------------------------------------------------------------
   # Q9: Mutation testing. cargo-mutants flips small predicates (boolean
