@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Enable local CI/CD setup on Linux with platform-specific metal gates
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - Address review feedback and CI environment realities
