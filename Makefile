@@ -1,4 +1,4 @@
-.PHONY: build release test check clean fmt lint demos
+.PHONY: build release test check clean fmt lint demos platform-test platform-test-ubuntu platform-test-android platform-test-chromeos platform-test-macos
 
 # Build
 build:
@@ -27,6 +27,22 @@ lint:
 
 # All quality checks
 ci: fmt-check lint test
+
+# Cross-platform testing
+platform-test:
+	./scripts/ci/comprehensive.sh
+
+platform-test-ubuntu:
+	./scripts/ci/build-ubuntu.sh
+
+platform-test-android:
+	./scripts/ci/build-android.sh
+
+platform-test-chromeos:
+	./scripts/ci/build-chromeos.sh
+
+platform-test-macos:
+	./scripts/ci/build-macos.sh
 
 # Clean
 clean:

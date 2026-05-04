@@ -1,0 +1,319 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cross-platform build and test matrix.
+#
+# This workflow compiles and tests the project across multiple platforms to ensure
+# portability. Phase 1 covers Ubuntu (primary platform); future phases add Android,
+# ChromeOS, and macOS support.
+#
+# Philosophy: Each job in the matrix is a pure, reproducible build for its platform,
+# using pinned tool versions (Rust toolchain). Jobs run in parallel with
+# fail-fast: false to report all platform results.
+
+name: cross-platform-build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Rust toolchain version. Must match validate.yml and quality.yml.
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+# Matrix configuration for macOS jobs
+# macOS runners available: macos-13 (Intel), macos-14 (ARM/M3), macos-15 (ARM/M4)
+# We use macos-15 to test latest Apple Silicon architecture with Metal support
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Phase 1: Ubuntu (primary platform)
+  # -----------------------------------------------------------------------
+  build-ubuntu:
+    name: ubuntu-24.04 (build + test + python)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            os: ubuntu-24.04
+            platform: ubuntu
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-ubuntu
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Setup Python (for Python bindings test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Test Python bindings (uv + maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+  # -----------------------------------------------------------------------
+  # Phase 2: Android (placeholder for future implementation)
+  # Currently: skeleton job to document the pattern
+  # -----------------------------------------------------------------------
+  # build-android:
+  #   name: android (cross-compile + test)
+  #   runs-on: ubuntu-24.04
+  #   strategy:
+  #     fail-fast: false
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+  #     # Android NDK setup and cross-compilation logic TBD
+
+  # -----------------------------------------------------------------------
+  # Phase 2a: ChromeOS (build + test + python)
+  # ChromeOS runs a Linux container (Crostini) targeting x86_64-unknown-linux-gnu.
+  # Build process is identical to Ubuntu since both target the same Linux environment.
+  # -----------------------------------------------------------------------
+  build-chromeos:
+    name: chromeos-24.04 (build + test + python)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: chromeos-24.04
+            os: ubuntu-24.04
+            platform: chromeos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-chromeos
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Setup Python (for Python bindings test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Test Python bindings (uv + maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+  # -----------------------------------------------------------------------
+  # Phase 2b: Android (cross-compile to aarch64 and armv7 targets)
+  # Builds for aarch64-linux-android and armv7-linux-androideabi.
+  # Note: Python bindings skipped on Android (no runtime test surface).
+  # -----------------------------------------------------------------------
+  build-android:
+    name: android (cross-compile dual targets)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: android-aarch64
+            os: ubuntu-24.04
+            platform: android
+            android-target: aarch64-linux-android
+          - name: android-armv7
+            os: ubuntu-24.04
+            platform: android
+            android-target: armv7-linux-androideabi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Configure Android NDK environment
+        run: |
+          # Verify NDK installation
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+          ls -la "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" 2>/dev/null | head -5 || echo "NDK toolchain not found; checking alternatives..."
+
+          # Add Android NDK toolchain to PATH
+          echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+          # Export for cargo
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+
+      - name: Add Android target
+        run: rustup target add ${{ matrix.android-target }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-android-${{ matrix.android-target }}
+
+      - name: cargo build for ${{ matrix.android-target }}
+        run: cargo build --release --workspace --target ${{ matrix.android-target }} --no-fail-fast
+
+  # -----------------------------------------------------------------------
+  # Phase 3: macOS (build + test + python for ARM and Intel)
+  # Builds with Metal GPU support on Apple Silicon (ARM), without Metal on Intel.
+  # -----------------------------------------------------------------------
+  build-macos:
+    name: macos (build + test + python)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-15
+            platform: macos
+            arch: arm64
+          - name: macos-intel
+            os: macos-13
+            platform: macos
+            arch: intel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross-platform-macos-${{ matrix.arch }}
+
+      - name: cargo build (no Metal)
+        run: cargo build --release --workspace
+
+      - name: cargo test --workspace (no Metal)
+        run: cargo test --workspace --no-fail-fast
+
+      - name: cargo build (with Metal - ARM only)
+        if: matrix.arch == 'arm64'
+        run: cargo build --release --workspace --features metal
+
+      - name: cargo test --workspace (with Metal - ARM only)
+        if: matrix.arch == 'arm64'
+        run: cargo test --workspace --no-fail-fast --features metal
+
+      - name: Setup Python (for Python bindings test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Test Python bindings (uv + maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+  # -----------------------------------------------------------------------
+  # Aggregate gate: All platform builds passed
+  # -----------------------------------------------------------------------
+  platform-build-gate:
+    name: platform builds passed
+    runs-on: ubuntu-24.04
+    needs: [build-ubuntu, build-chromeos, build-android, build-macos]
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: Platform matrix builds successful
+        run: |
+          echo "All platform builds completed successfully."
+          echo "Phase 1 (Ubuntu) ✓"
+          echo "Phase 2a (ChromeOS) ✓"
+          echo "Phase 2b (Android) ✓"
+          echo "Phase 3 (macOS) ✓"
