@@ -21,8 +21,8 @@ Or equivalently:
 ```bash
 make platform-test-ubuntu      # Ubuntu (Phase 1)
 make platform-test-chromeos    # ChromeOS (Phase 2a)
-make platform-test-android     # Android (Phase 2b, skeleton)
-make platform-test-macos       # macOS (Phase 3, skeleton)
+make platform-test-android     # Android (Phase 2b)
+make platform-test-macos       # macOS (Phase 3)
 ```
 
 ## What's Tested
@@ -44,7 +44,7 @@ Each platform script runs:
 | Ubuntu 24.04 | ✓ Phase 1 | `.github/workflows/cross-platform-build.yml` → `build-ubuntu` | `./scripts/ci/build-ubuntu.sh` |
 | ChromeOS 24.04 | ✓ Phase 2a | `.github/workflows/cross-platform-build.yml` → `build-chromeos` | `./scripts/ci/build-chromeos.sh` |
 | Android (aarch64 + armv7) | ✓ Phase 2b | `.github/workflows/cross-platform-build.yml` → `build-android` | `./scripts/ci/build-android.sh` |
-| macOS (Intel/ARM) | ◐ Phase 3 | `.github/workflows/cross-platform-build.yml` → `build-macos` (commented out) | `./scripts/ci/build-macos.sh` (skeleton) |
+| macOS (Intel + ARM) | ✓ Phase 3 | `.github/workflows/cross-platform-build.yml` → `build-macos` | `./scripts/ci/build-macos.sh` |
 
 ## Prerequisites
 
@@ -92,7 +92,11 @@ Each platform script runs:
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 
-- **Metal SDK**: Bundled with Xcode; no additional installation needed
+- **Metal SDK**: Bundled with Xcode (ARM/Apple Silicon only)
+  - No additional installation needed; auto-detected by build script
+  - Intel Macs: Metal not available; builds and tests run without Metal feature
+
+- **Rust 1.88.0+**: Install via [rustup](https://rustup.rs/)
 
 ### Android
 
@@ -259,6 +263,30 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - Check if your crate has Android-incompatible dependencies
 - Run with verbose output: `VERBOSE=1 ./scripts/ci/build-android.sh`
 
+### Error: "xcrun: error" on macOS
+
+**Cause**: Xcode Command Line Tools not installed or updated.
+
+**Solution**: 
+```bash
+xcode-select --install
+# Or if already installed, reset the path:
+sudo xcode-select --reset
+```
+
+### Error: "Could not find Metal library" on macOS
+
+**Cause**: Trying to build with Metal feature on Intel Mac or without Xcode SDK.
+
+**Solution**: The script auto-detects architecture:
+- ARM (Apple Silicon): Metal is enabled by default and available
+- Intel: Metal feature is not available; builds run without it
+- If you see this error despite running the script, ensure Xcode is fully installed:
+  ```bash
+  xcode-select --install
+  xcode-select --reset
+  ```
+
 ### Error: "Tests failed"
 
 1. **Check the error output** for the specific failing test
@@ -307,10 +335,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - Build-only validation; no runtime testing or Python bindings
 - Android NDK auto-detected or can be installed separately
 
-### Phase 3 (macOS, deferred)
-- Skeleton script ready in `./scripts/ci/build-macos.sh`
-- Will include Intel (no Metal) and ARM (Metal GPU) support
-- Integration after Phase 1 and 2 are stable
+### Phase 3 (macOS, complete)
+- macOS build script implemented in `./scripts/ci/build-macos.sh`
+- GitHub Actions jobs enabled in `.github/workflows/cross-platform-build.yml` for ARM and Intel
+- Architecture-specific builds:
+  * macOS 13 (Intel): Builds and tests without Metal
+  * macOS 15 (Apple Silicon): Builds and tests both with and without Metal
+- Full test suite and Python bindings validation on both architectures
 
 ## Development Workflow
 
