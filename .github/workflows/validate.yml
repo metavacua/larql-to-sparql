@@ -35,7 +35,13 @@ concurrency:
 # Pinned tool versions. Bumping any of these is a deliberate change to the
 # deterministic core and should be done in a dedicated PR.
 env:
-  RUST_TOOLCHAIN: "1.84.0"
+  # 1.88.0 mirrors the floor pinned in quality.yml. The workspace's
+  # transitive dependency tree (home v0.5.12, cookie_store v0.22.1, the
+  # time-* crates) declares rust-version = 1.88; building below that
+  # fails resolution. Earlier revisions of this file pinned 1.84 because
+  # validate.yml did not invoke cargo; the semver-surface job changed
+  # that and the two workflows must now share a toolchain floor.
+  RUST_TOOLCHAIN: "1.88.0"
   REUSE_TOOL_VERSION: "6.2.0"
   COCOGITTO_VERSION: "7.0.0"
   GIT_CLIFF_VERSION: "2.13.1"
