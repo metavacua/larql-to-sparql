@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Platform-gate metal conditionals for cross-platform compilation
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
+- Use if-let to avoid unwrap after is_some check
 - Use rustls-tls for reqwest to enable Android cross-compilation
 
 
