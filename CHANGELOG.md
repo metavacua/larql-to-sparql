@@ -29,5 +29,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - Scope cron to advisory scanners and harden SARIF upload
+- Sort added entries in alphabetical order
+- Sort fixed entries in alphabetical order for git-cliff consistency
 
 
