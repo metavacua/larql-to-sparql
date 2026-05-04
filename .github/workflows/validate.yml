@@ -254,38 +254,88 @@ jobs:
 
       - name: cargo semver-checks (baseline = PR base)
         id: semverchk
-        # Run with `set +e` so we can capture the exit code without aborting.
-        # cargo-semver-checks exits non-zero iff the API delta requires a
-        # major bump. We feed that signal into the cross-check below.
+        # Capture stdout+stderr to a file so the cross-check step can
+        # distinguish a real "API-breaking change" verdict from a tool
+        # or workspace-build error. cargo-semver-checks returns the same
+        # non-zero exit code in both cases, so the output text is the
+        # only reliable signal.
         run: |
           set +e
           cargo semver-checks check-release \
             --workspace \
             --exclude larql-python \
             --exclude kv-cache-benchmark \
-            --baseline-rev "${{ github.event.pull_request.base.sha }}"
-          rc=$?
+            --baseline-rev "${{ github.event.pull_request.base.sha }}" \
+            2>&1 | tee semver-checks.log
+          rc="${PIPESTATUS[0]}"
           echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Cross-check API delta vs commit-derived bump
         # The deterministic invariant: a breaking API delta requires the
-        # commit-derived bump_kind to be `major`. Any other combination is
-        # structurally inconsistent and must be remediated upstream.
+        # commit-derived bump_kind to be `major`. A non-zero exit from
+        # cargo-semver-checks alone is not sufficient evidence of a
+        # break — a workspace build failure produces the same exit code
+        # without yielding a verdict. This step parses the captured log
+        # to classify the outcome before applying the cross-check.
+        #
+        # Markers we look for:
+        #   "Summary"          — cargo-semver-checks produced its summary
+        #                        line; the verdict is meaningful.
+        #   "FAIL"             — at least one breaking lint fired.
+        #   "error[" / "error:" without a Summary line — the workspace
+        #                        failed to build and no verdict was
+        #                        produced; the failure is upstream of
+        #                        this gate.
         run: |
           bump_kind="${{ steps.bump.outputs.bump_kind }}"
           rc="${{ steps.semverchk.outputs.exit_code }}"
           echo "version_preflight bump_kind=${bump_kind}"
           echo "cargo-semver-checks exit_code=${rc}"
-          if [[ "$rc" != "0" && "$bump_kind" != "major" ]]; then
+
+          if [[ ! -s semver-checks.log ]]; then
+            echo "::error::cargo-semver-checks produced no output; treating as tool error."
+            exit 1
+          fi
+
+          summary_seen=0
+          fail_seen=0
+          if grep -qE '^[[:space:]]*Summary' semver-checks.log; then
+            summary_seen=1
+          fi
+          if grep -qE '(FAIL|major version bump required)' semver-checks.log; then
+            fail_seen=1
+          fi
+
+          if [[ "$rc" == "0" ]]; then
+            echo "API delta is non-breaking; bump_kind '${bump_kind}' is acceptable."
+            exit 0
+          fi
+
+          if (( summary_seen == 0 )); then
+            # No verdict was produced. The workspace failed to build, or
+            # cargo-semver-checks errored before classifying. Surface
+            # this as a distinct failure so downstream operators don't
+            # mistake it for a SemVer-classification problem.
+            echo "::error::cargo-semver-checks did not produce a verdict (tool/build error)."
+            echo "::error::This is upstream of the semver-surface gate; inspect the cargo-semver-checks log above."
+            echo "::error::Per repository scope, fixing workspace build errors is out of band for this gate;"
+            echo "::error::but the gate is correctly refusing to assert anything about the API delta."
+            exit 1
+          fi
+
+          if (( fail_seen == 1 )) && [[ "$bump_kind" != "major" ]]; then
             echo "::error::API-breaking change detected but commit-derived bump is '${bump_kind}'."
             echo "::error::Amend the offending commit so its header carries '!' or its body includes a 'BREAKING CHANGE:' footer."
             exit 1
           fi
-          if [[ "$rc" != "0" ]]; then
+
+          if (( fail_seen == 1 )); then
             echo "API delta is breaking; commits already declare major. Consistent."
           else
-            echo "API delta is non-breaking; bump_kind '${bump_kind}' is acceptable."
+            echo "cargo-semver-checks reported non-zero without a FAIL line."
+            echo "Treating as tool warning; please inspect the log above."
+            exit 1
           fi
 
   # ---------------------------------------------------------------------
@@ -337,34 +387,43 @@ jobs:
           git checkout -B "${branch}"
           echo "name=${branch}" >> "$GITHUB_OUTPUT"
 
-      - name: Write minimal semantic-release config
-        # Inlined here rather than committed at the repo root so the
-        # repository remains free of release-tooling configuration. The
-        # only goal is to verify commit-message parseability under an
-        # independent implementation; we do not wire any publishing
-        # plugins, write artifacts, or push.
+      - name: Write semantic-release config to workspace
+        # semantic-release uses cosmiconfig to auto-discover its config
+        # from the current working directory: package.json, .releaserc,
+        # .releaserc.json, etc. The earlier `--extends /tmp/path` form
+        # was wrong — `extends` resolves shareable npm-package configs,
+        # not arbitrary file paths.
+        #
+        # We write `.releaserc.json` at the repo root for the lifetime
+        # of this CI step only; the file is never committed and the
+        # workspace is reset between jobs.
+        #
+        # `repositoryUrl` is set explicitly so semantic-release does not
+        # require a `package.json :: repository` field — the project
+        # deliberately avoids carrying Node-side metadata.
         run: |
-          cat > /tmp/.releaserc.json <<EOF
+          cat > .releaserc.json <<EOF
           {
             "branches": ["main", "${{ steps.branch.outputs.name }}"],
             "plugins": [
               "@semantic-release/commit-analyzer",
               "@semantic-release/release-notes-generator"
             ],
-            "tagFormat": "v\${version}"
+            "tagFormat": "v\${version}",
+            "repositoryUrl": "https://github.com/${{ github.repository }}.git"
           }
           EOF
 
       - name: semantic-release --dry-run
         # `--no-ci` lets dry-run proceed without a CI-provided auth token;
         # the lack of publishing plugins makes the run side-effect-free.
+        # Config is auto-discovered from `.releaserc.json` in the cwd.
         run: |
           npx --yes \
             --package=semantic-release@24 \
             --package=@semantic-release/commit-analyzer@13 \
             --package=@semantic-release/release-notes-generator@14 \
-            -- semantic-release --dry-run --no-ci \
-            --extends /tmp/.releaserc.json
+            -- semantic-release --dry-run --no-ci
 
   # ---------------------------------------------------------------------
   # Aggregate gate. Required by branch protection so the deterministic
