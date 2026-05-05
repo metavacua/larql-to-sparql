@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Fix cargo config and wasmtime feature, update changelog
+- Fix metal module conditional compilation and downgrade wasmtime to 36
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
 - Upgrade dependencies to fix cargo audit security vulnerabilities
