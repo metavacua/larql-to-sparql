@@ -144,9 +144,9 @@ jobs:
 
   # -----------------------------------------------------------------------
   # D3: Ubuntu system dependencies audit
-  # Verify that all documented system packages are available on a fresh
-  # Ubuntu runner. This catches missing packages that would cause CI
-  # failures or require developer manual intervention.
+  # Verify that all documented system packages can be installed and are
+  # available on Ubuntu. First installs packages, then verifies they work.
+  # This ensures the setup.sh and CI workflows will succeed on fresh runners.
   # -----------------------------------------------------------------------
   ubuntu-system-deps:
     name: ubuntu system dependencies audit
@@ -181,6 +181,17 @@ jobs:
           echo "Required Ubuntu packages documented"
           cat /tmp/required-packages.txt
 
+      - name: Update package manager
+        run: |
+          sudo apt-get update
+
+      - name: Install all required system packages
+        run: |
+          packages=$(grep -v '^#' /tmp/required-packages.txt | grep -v '^$' | tr '\n' ' ')
+          echo "Installing packages: $packages"
+          sudo apt-get install -y $packages
+          echo "✓ All packages installed"
+
       - name: Verify all system packages are available
         run: |
           missing=0
@@ -190,18 +201,18 @@ jobs:
             [[ -z "$pkg" ]] && continue
 
             if ! dpkg -l | grep -qE "^ii.*$pkg"; then
-              echo "::warning::Package not found: $pkg"
+              echo "::error::Package verification failed: $pkg"
               missing=$((missing + 1))
             else
-              echo "✓ $pkg"
+              echo "✓ $pkg installed and verified"
             fi
           done < /tmp/required-packages.txt
 
           if [[ $missing -gt 0 ]]; then
-            echo "::error::$missing required package(s) missing on ubuntu-24.04"
+            echo "::error::$missing required package(s) failed verification"
             exit 1
           fi
-          echo "✓ All required system packages available"
+          echo "✓ All required system packages verified"
 
       - name: Verify OpenSSL availability via pkg-config
         run: |
@@ -214,7 +225,8 @@ jobs:
 
   # -----------------------------------------------------------------------
   # D4: macOS system dependencies audit
-  # Verify that all documented Homebrew packages are available on macOS.
+  # Verify that all documented Homebrew packages can be installed and are
+  # available on macOS. Installs packages first, then verifies they work.
   # -----------------------------------------------------------------------
   macos-system-deps:
     name: macos system dependencies audit
@@ -246,6 +258,20 @@ jobs:
           echo "Required Homebrew packages documented"
           cat /tmp/required-packages.txt
 
+      - name: Install all required Homebrew packages
+        run: |
+          while read -r pkg; do
+            [[ -z "$pkg" ]] && continue
+
+            if ! brew list "$pkg" &> /dev/null; then
+              echo "Installing $pkg..."
+              brew install "$pkg"
+            else
+              echo "✓ $pkg already installed"
+            fi
+          done < /tmp/required-packages.txt
+          echo "✓ All Homebrew packages installed"
+
       - name: Verify all Homebrew packages are available
         run: |
           missing=0
@@ -253,19 +279,18 @@ jobs:
             [[ -z "$pkg" ]] && continue
 
             if ! brew list "$pkg" &> /dev/null; then
-              echo "::warning::Package not found: $pkg"
+              echo "::error::Package verification failed: $pkg"
               missing=$((missing + 1))
             else
-              echo "✓ $pkg"
+              echo "✓ $pkg verified"
             fi
           done < /tmp/required-packages.txt
 
           if [[ $missing -gt 0 ]]; then
-            echo "::error::$missing required package(s) missing on macOS"
-            echo "::error::Run ./setup.sh to install dependencies"
+            echo "::error::$missing required package(s) failed verification"
             exit 1
           fi
-          echo "✓ All required Homebrew packages available"
+          echo "✓ All required Homebrew packages verified"
 
   # -----------------------------------------------------------------------
   # D5: Rust components availability

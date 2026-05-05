@@ -90,7 +90,7 @@ install_ubuntu_deps() {
 
     local missing_deps=()
     for dep in "${deps[@]}"; do
-        if ! dpkg -l | grep -q "^ii.*$dep"; then
+        if ! dpkg -l "$dep" 2>/dev/null | grep -q "^ii"; then
             missing_deps+=("$dep")
         fi
     done
@@ -108,6 +108,14 @@ install_ubuntu_deps() {
 install_macos_deps() {
     log_info "Installing macOS system dependencies..."
 
+    log_info "Checking Xcode Command Line Tools..."
+    if ! xcode-select --print-path &> /dev/null; then
+        log_warn "Xcode Command Line Tools not found. Starting installer..."
+        xcode-select --install
+        log_error "Please complete the Xcode Command Line Tools installation in the popup window, then re-run this script."
+        return 1
+    fi
+
     # Check if Homebrew is installed
     if ! command -v brew &> /dev/null; then
         log_error "Homebrew not found. Please install it first:"
@@ -116,8 +124,8 @@ install_macos_deps() {
     fi
 
     local deps=(
-        # Build essentials (Xcode Command Line Tools)
-        "openssh"
+        # Build essentials
+        "pkg-config"
 
         # OpenSSL
         "openssl"
@@ -125,12 +133,6 @@ install_macos_deps() {
         # Python
         "python@3.12"
     )
-
-    log_info "Checking Xcode Command Line Tools..."
-    if ! xcode-select --print-path &> /dev/null; then
-        log_info "Installing Xcode Command Line Tools (may take a while)..."
-        xcode-select --install || true
-    fi
 
     local missing_deps=()
     for dep in "${deps[@]}"; do
