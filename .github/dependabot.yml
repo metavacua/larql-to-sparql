@@ -5,12 +5,10 @@
 #
 # Ecosystems tracked:
 #
-#   - cargo: Rust direct dependencies (Cargo.toml-only). Resolves workspace
+#   - cargo: Rust dependencies (both direct and indirect). Resolves workspace
 #            manifest inheritance issues (e.g., when workspace.package.edition
-#            is referenced in member crates). Since Cargo.lock is gitignored per
-#            repository policy, cargo-deny + cargo-audit provide advisory
-#            coverage on a separate schedule; Dependabot focuses on available
-#            updates for Cargo.toml declarations.
+#            is referenced in member crates). Tracks all dependency updates to
+#            expose hidden version conflicts and platform-specific issues.
 #
 #   - pip / uv: Excluded. The Python bindings use `crates/larql-python/uv.lock`
 #              managed by the maturin/uv toolchain. Dependabot's pip ecosystem
@@ -27,12 +25,11 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
       timezone: "Etc/UTC"
     allow:
-      - dependency-type: "direct"
+      - dependency-type: "all"
     groups:
       cargo:
         patterns:
@@ -43,7 +40,7 @@ updates:
     labels:
       - "dependencies"
       - "cargo"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 20
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

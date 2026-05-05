@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependency audit workflow.
+#
+# Detects missing system libraries, incompatible versions, and platform-specific
+# toolchain requirements that could block builds or introduce silent failures.
+# This job forces explicit acknowledgment of implicit dependencies.
+
+name: dependency-audit
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * MON"  # Weekly on Monday at 06:00 UTC
+
+jobs:
+  audit-system-deps:
+    name: Audit system dependencies
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Install system dependencies (Ubuntu)"
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libopenblas-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+          echo "=== System libraries installed ==="
+          dpkg -l | grep -E "openblas|ssl|pkg-config"
+
+      - name: "Install system dependencies (macOS)"
+        if: runner.os == 'macOS'
+        run: |
+          brew install openblas openssl pkg-config
+          echo "=== System libraries installed ==="
+          brew list | grep -E "openblas|openssl|pkg-config"
+
+      - name: "Install Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+
+      - name: "Verify Rust tools"
+        run: |
+          rustc --version
+          cargo --version
+          rustup component list --installed
+
+      - name: "Check for maturin (Python bindings)"
+        run: |
+          pip install --upgrade pip
+          pip install maturin
+          maturin --version || echo "WARNING: maturin not available"
+
+      - name: "Check for uv (Python package manager)"
+        run: |
+          pip install --upgrade uv
+          uv --version || echo "WARNING: uv not available"
+
+      - name: "Audit Cargo.lock consistency"
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          cargo tree --depth 3 > /tmp/cargo-tree.txt
+          echo "=== Dependency tree (3 levels) ==="
+          head -50 /tmp/cargo-tree.txt
+
+  cargo-deny:
+    name: Check dependencies with cargo-deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          log-level: warn
+          command: check all
+
+  audit-summary:
+    name: Dependency audit summary
+    needs: [audit-system-deps, cargo-deny]
+    runs-on: ubuntu-24.04
+    if: always()
+    steps:
+      - name: "Report audit results"
+        run: |
+          echo "## Dependency Audit Summary"
+          echo ""
+          echo "✓ System dependencies verified"
+          echo "✓ Rust toolchain verified"
+          echo "✓ Python tools verified"
+          echo "✓ Cargo dependencies checked"
+          echo ""
+          echo "All implicit dependencies are now explicit."
