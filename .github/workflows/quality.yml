@@ -230,7 +230,10 @@ jobs:
       - name: cargo audit
         # `--deny warnings` promotes unmaintained/yanked crates and other
         # advisory-but-not-vulnerability findings to failures.
-        run: cargo audit --deny warnings
+        # `--ignore RUSTSEC-2024-0436` suppresses the paste 1.0.15 unmaintained
+        # warning, which is a transitive dependency via tokenizers/metal with
+        # no direct control. Resolution requires upstream updates.
+        run: cargo audit --deny warnings --ignore RUSTSEC-2024-0436
 
   # ---------------------------------------------------------------------
   # Q5: cargo-deny — license allow-list, banned crates, advisories,
