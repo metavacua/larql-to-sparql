@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Add Android NDK setup to cross-platform-build workflow
 - Add OpenBlas (libopenblas-dev) installation to CI workflows
 - Add OpenBlas to workspace dependencies for explicit BLAS requirement
+- Add package section to root Cargo.toml for MSRV verification
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
 - Align license enforcement with audited multi-license tree
