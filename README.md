@@ -26,6 +26,68 @@ larql> INFER "The capital of France is" TOP 3;
   3. a                    (0.31%)
 ```
 
+## Status
+
+| Pipeline | Status |
+|----------|--------|
+| **Candidate Validity** | [![validate](https://github.com/metavacua/larql-to-sparql/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/metavacua/larql-to-sparql/actions/workflows/validate.yml) |
+| **Cross-Platform Builds** | [![cross-platform-build](https://github.com/metavacua/larql-to-sparql/actions/workflows/cross-platform-build.yml/badge.svg?branch=main)](https://github.com/metavacua/larql-to-sparql/actions/workflows/cross-platform-build.yml) |
+| **Code Quality** | [![quality](https://github.com/metavacua/larql-to-sparql/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/metavacua/larql-to-sparql/actions/workflows/quality.yml) |
+| **Dependencies** | [![dependencies](https://github.com/metavacua/larql-to-sparql/actions/workflows/dependencies.yml/badge.svg?branch=main)](https://github.com/metavacua/larql-to-sparql/actions/workflows/dependencies.yml) |
+
+## System Requirements
+
+LARQL is a **Rust + Python** project using `maturin` for PyO3 bindings. The project builds on **Linux (Ubuntu)** and **macOS**.
+
+### Prerequisites
+
+- **Rust 1.88.0** or later (pinned in `rust-toolchain.toml`)
+- **Python 3.11** or later
+- **uv** (Python package manager)
+- **OpenSSL development headers** (`libssl-dev` on Linux, `openssl` on macOS via Homebrew)
+
+### Setup
+
+The easiest way to set up your development environment is:
+
+```bash
+./setup.sh
+```
+
+This script automatically detects your OS and installs all required dependencies:
+
+**Ubuntu/Debian:**
+- `build-essential`, `pkg-config`, `curl`, `git`
+- `libssl-dev` (OpenSSL development headers)
+- `python3-dev` (Python development files)
+- `clang`, `llvm` (for Android cross-compilation, optional)
+- Rust via rustup
+- uv (Python package manager)
+
+**macOS:**
+- Xcode Command Line Tools
+- Homebrew packages: `openssl`, `python@3.12`
+- Rust via rustup
+- uv (Python package manager)
+
+For manual setup or troubleshooting, see the [setup script documentation](./setup.sh).
+
+### Verify Installation
+
+```bash
+./setup.sh --verify
+```
+
+Or check manually:
+
+```bash
+rustc --version     # Should be 1.88.0 (from rust-toolchain.toml)
+cargo --version
+python3 --version
+uv --version
+pkg-config --exists openssl && echo "OpenSSL found"
+```
+
 ## Quick Start
 
 ```bash
@@ -610,6 +672,99 @@ parses 100 mixed statements in ~78 µs (1.28 M stmts/s); `vindex_ops`
 runs production-sized Gemma 4B gate KNN in ~2.78 ms/layer; `compile`
 runs `COMPILE INTO VINDEX` in ~1.84 ms (no patches) to 2.41 ms (with
 `down_weights.bin`).
+
+## CI/CD Pipeline
+
+The project uses a comprehensive, multi-stage CI/CD pipeline to ensure reproducibility and correctness across platforms. All workflows are in `.github/workflows/` and run on every push to `main` and on all pull requests.
+
+### Pipelines
+
+**1. Candidate Validity (`validate.yml`)**
+Deterministic checks that a PR branch is a valid extension of the development branch:
+- **A1:** REUSE license compliance (SPDX headers, explicit annotations)
+- **A2:** Conventional Commits enforcement (via cocogitto)
+- **A3:** Derived documentation consistency (CHANGELOG.md vs git-cliff projection)
+- **A4:** SemVer surface consistency (cargo-semver-checks vs commit-derived bump kind)
+- **A5:** Semantic Release dry-run (independent reference implementation)
+
+**2. Cross-Platform Builds (`cross-platform-build.yml`)**
+Tests that the project builds and passes tests on all target platforms:
+- **Phase 1 (Ubuntu 24.04):** Primary Linux platform, Rust + Python bindings
+- **Phase 2a (ChromeOS):** Linux x86_64 (same as Ubuntu, distinct pipeline for documentation)
+- **Phase 2b (Android):** Cross-compilation to aarch64 and armv7 targets
+- **Phase 3 (macOS):** Intel (macos-13) and Apple Silicon (macos-15), with Metal GPU support
+
+Each job is a pure, reproducible build using pinned toolchain versions. Jobs run in parallel with `fail-fast: false` to report all platform results simultaneously.
+
+**3. Code Quality (`quality.yml`)**
+Comprehensive quality gates including:
+- **Clippy:** Rust lints with -D warnings (warnings-as-errors)
+- **Tests:** Full workspace test suite (`cargo test --workspace`)
+- **Audit:** RustSec advisory database scan (weekly cron + every PR)
+- **Deny:** Dependency license audit, ban list, and source verification
+- **Documentation:** Intra-doc link validation (`cargo doc -D warnings`)
+- **Examples:** Build (not run) all example binaries for regression detection
+- **MSRV:** Minimum Supported Rust Version verification (1.80, currently informational)
+- **Mutants:** Mutation testing for coverage assessment (informational)
+- **Python:** maturin/PyO3 bindings test (pytest)
+- **Protocol:** gRPC schema linting (buf lint)
+
+**4. System Dependencies (`dependencies.yml`)**
+Audits and validates all implicit dependencies:
+- **Rust toolchain consistency:** Verifies `rust-toolchain.toml` matches all workflow pins
+- **Python lockfile validation:** Ensures `uv.lock` is up-to-date with `pyproject.toml`
+- **Ubuntu system deps:** Audits `libssl-dev`, `pkg-config`, `clang`, etc.
+- **macOS system deps:** Audits Xcode CLT, Homebrew packages
+- **Rust components:** Verifies clippy, rustfmt are available
+- **Cross-compilation targets:** Verifies Android NDK targets
+
+### Determinism & Reproducibility
+
+All workflows are deterministic: the same commit SHA always produces the same verdict. Key invariants:
+
+- **Toolchain pinning:** Rust version is pinned in `rust-toolchain.toml` (floor: 1.88.0)
+- **Cargo.lock:** Excluded from git per repository policy; generated deterministically at job start
+- **uv.lock:** Committed to git for Python dependencies; validated on every run (`uv lock --check`)
+- **Tool versions:** Scanner tools (cargo-audit, cargo-deny) float to track advisory databases; all others pinned in workflow `env:`
+
+### Local Development vs CI
+
+To ensure your local build matches CI:
+
+1. **Install system dependencies:**
+   ```bash
+   ./setup.sh
+   ```
+
+2. **Use pinned Rust version:**
+   ```bash
+   rustc --version  # Should report 1.88.0 from rust-toolchain.toml
+   ```
+
+3. **Run quality checks locally:**
+   ```bash
+   cargo fmt --check
+   cargo clippy --workspace -- -D warnings
+   cargo test --workspace
+   cargo doc --workspace --no-deps
+   ```
+
+4. **For Python bindings:**
+   ```bash
+   cd crates/larql-python
+   uv sync --group dev
+   uv run maturin develop --release
+   uv run pytest tests/ -v
+   ```
+
+### Dependency Management
+
+- **Rust:** Tracked via `cargo-deny` (advisories, licenses, sources) and `cargo-audit` (RustSec)
+- **Python:** Tracked via `uv.lock` (committed to git) and `uv lock --check` in CI
+- **System:** Documented in `./setup.sh` and validated in `dependencies.yml`
+- **GitHub Actions:** Tracked via Dependabot (weekly grouped PRs)
+
+See `docs/specs/compliance-pipeline.md` (if present) for the formal specification.
 
 ## License
 

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Pinned Rust toolchain version for the workspace.
+#
+# This version must remain synchronized with:
+# - .github/workflows/cross-platform-build.yml :: env.RUST_TOOLCHAIN
+# - .github/workflows/quality.yml :: env.RUST_TOOLCHAIN
+# - .github/workflows/validate.yml :: env.RUST_TOOLCHAIN
+#
+# The floor is 1.88.0, determined by transitive dependencies that require
+# it (home v0.5.12, cookie_store v0.22.1, time-* crates).
+
+[toolchain]
+channel = "1.88.0"
+components = ["clippy", "rustfmt"]

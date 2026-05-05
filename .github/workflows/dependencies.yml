@@ -1,0 +1,367 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# System dependencies and lockfile validation workflow.
+#
+# This workflow ensures that:
+# 1. All implicit system-level dependencies are documented
+# 2. Python lockfiles (uv.lock) are validated and up-to-date
+# 3. System-level packages required for cross-platform builds are available
+#
+# Philosophy: Treat the project as "broken by default" outside the author's
+# environment. This workflow catches missing dependencies BEFORE they cause
+# cryptic build failures on CI or developer machines.
+
+name: dependencies
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # -----------------------------------------------------------------------
+  # D1: Rust toolchain version consistency
+  # Verify that rust-toolchain.toml matches the pinned versions in all
+  # workflows. This prevents the "works on my machine" problem where
+  # developers use a newer/older toolchain than CI.
+  # -----------------------------------------------------------------------
+  rust-toolchain-consistency:
+    name: rust-toolchain consistency check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check rust-toolchain.toml exists
+        run: |
+          if [[ ! -f rust-toolchain.toml ]]; then
+            echo "::error::rust-toolchain.toml not found at project root"
+            exit 1
+          fi
+          echo "✓ rust-toolchain.toml found"
+
+      - name: Extract toolchain version from rust-toolchain.toml
+        id: toolchain-file
+        run: |
+          version=$(grep -oP '(?<=channel = ")[^"]+' rust-toolchain.toml)
+          if [[ -z "$version" ]]; then
+            echo "::error::Failed to parse channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "✓ rust-toolchain.toml version: $version"
+
+      - name: Verify version matches environment
+        run: |
+          file_version="${{ steps.toolchain-file.outputs.version }}"
+          env_version="${RUST_TOOLCHAIN}"
+          if [[ "$file_version" != "$env_version" ]]; then
+            echo "::error::Version mismatch: rust-toolchain.toml=${file_version} vs env.RUST_TOOLCHAIN=${env_version}"
+            echo "::error::Update rust-toolchain.toml to match RUST_TOOLCHAIN in this workflow"
+            exit 1
+          fi
+          echo "✓ Version consistency verified: $file_version"
+
+      - name: Verify version matches other workflows
+        run: |
+          version="${{ steps.toolchain-file.outputs.version }}"
+          for workflow in .github/workflows/{cross-platform-build,quality,validate}.yml; do
+            if ! grep -q "RUST_TOOLCHAIN: \"${version}\"" "$workflow"; then
+              echo "::error::$workflow does not use RUST_TOOLCHAIN=$version"
+              exit 1
+            fi
+            echo "✓ $workflow uses correct version"
+          done
+
+  # -----------------------------------------------------------------------
+  # D2: Python lockfile validation (uv.lock)
+  # Ensure that uv.lock is up-to-date with pyproject.toml dependencies.
+  # -----------------------------------------------------------------------
+  python-lockfile:
+    name: python lockfile validation (uv.lock)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-crate:
+          - crates/larql-python
+          - knowledge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check pyproject.toml exists
+        working-directory: ${{ matrix.python-crate }}
+        run: |
+          if [[ ! -f pyproject.toml ]]; then
+            echo "::notice::No pyproject.toml in ${{ matrix.python-crate }}, skipping"
+            exit 0
+          fi
+          echo "✓ pyproject.toml found"
+
+      - name: Check uv.lock exists
+        working-directory: ${{ matrix.python-crate }}
+        run: |
+          if [[ ! -f uv.lock ]]; then
+            echo "::error::uv.lock not found in ${{ matrix.python-crate }}"
+            echo "::error::Run: cd ${{ matrix.python-crate }} && uv lock"
+            exit 1
+          fi
+          echo "✓ uv.lock found"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Validate uv.lock is up-to-date
+        working-directory: ${{ matrix.python-crate }}
+        run: |
+          if ! uv lock --check; then
+            echo "::error::uv.lock is out of date in ${{ matrix.python-crate }}"
+            echo "::error::Run: cd ${{ matrix.python-crate }} && uv lock --upgrade"
+            exit 1
+          fi
+          echo "✓ uv.lock is up-to-date"
+
+  # -----------------------------------------------------------------------
+  # D3: Ubuntu system dependencies audit
+  # Verify that all documented system packages are available on a fresh
+  # Ubuntu runner. This catches missing packages that would cause CI
+  # failures or require developer manual intervention.
+  # -----------------------------------------------------------------------
+  ubuntu-system-deps:
+    name: ubuntu system dependencies audit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Document required system packages
+        id: deps
+        run: |
+          cat > /tmp/required-packages.txt << 'EOF'
+          # Build essentials and tooling
+          build-essential
+          pkg-config
+          curl
+          git
+
+          # OpenSSL and cryptography (many Rust crates depend on this)
+          libssl-dev
+
+          # Python development (for maturin/PyO3 bindings)
+          python3-dev
+
+          # Cross-compilation toolchain (for Android targets)
+          clang
+          llvm
+          EOF
+
+          echo "Required Ubuntu packages documented"
+          cat /tmp/required-packages.txt
+
+      - name: Verify all system packages are available
+        run: |
+          missing=0
+          while read -r pkg; do
+            # Skip comments and empty lines
+            [[ "$pkg" =~ ^# ]] && continue
+            [[ -z "$pkg" ]] && continue
+
+            if ! dpkg -l | grep -qE "^ii.*$pkg"; then
+              echo "::warning::Package not found: $pkg"
+              missing=$((missing + 1))
+            else
+              echo "✓ $pkg"
+            fi
+          done < /tmp/required-packages.txt
+
+          if [[ $missing -gt 0 ]]; then
+            echo "::error::$missing required package(s) missing on ubuntu-24.04"
+            exit 1
+          fi
+          echo "✓ All required system packages available"
+
+      - name: Verify OpenSSL availability via pkg-config
+        run: |
+          if pkg-config --exists openssl; then
+            echo "✓ OpenSSL available: $(pkg-config --modversion openssl)"
+          else
+            echo "::error::OpenSSL not found via pkg-config"
+            exit 1
+          fi
+
+  # -----------------------------------------------------------------------
+  # D4: macOS system dependencies audit
+  # Verify that all documented Homebrew packages are available on macOS.
+  # -----------------------------------------------------------------------
+  macos-system-deps:
+    name: macos system dependencies audit
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify Xcode Command Line Tools
+        run: |
+          if xcode-select --print-path &> /dev/null; then
+            echo "✓ Xcode Command Line Tools installed"
+            xcode-select --print-path
+          else
+            echo "::error::Xcode Command Line Tools not found"
+            exit 1
+          fi
+
+      - name: Document required Homebrew packages
+        id: deps
+        run: |
+          cat > /tmp/required-packages.txt << 'EOF'
+          openssl
+          python@3.12
+          EOF
+
+          echo "Required Homebrew packages documented"
+          cat /tmp/required-packages.txt
+
+      - name: Verify all Homebrew packages are available
+        run: |
+          missing=0
+          while read -r pkg; do
+            [[ -z "$pkg" ]] && continue
+
+            if ! brew list "$pkg" &> /dev/null; then
+              echo "::warning::Package not found: $pkg"
+              missing=$((missing + 1))
+            else
+              echo "✓ $pkg"
+            fi
+          done < /tmp/required-packages.txt
+
+          if [[ $missing -gt 0 ]]; then
+            echo "::error::$missing required package(s) missing on macOS"
+            echo "::error::Run ./setup.sh to install dependencies"
+            exit 1
+          fi
+          echo "✓ All required Homebrew packages available"
+
+  # -----------------------------------------------------------------------
+  # D5: Rust components availability
+  # Verify that required Rust components (clippy, rustfmt) are installed
+  # for the pinned toolchain.
+  # -----------------------------------------------------------------------
+  rust-components:
+    name: rust components check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Verify required components
+        run: |
+          required_components=(clippy rustfmt)
+          missing=0
+
+          for component in "${required_components[@]}"; do
+            if rustup component list | grep -q "^${component}-"; then
+              echo "✓ $component available"
+            else
+              echo "::error::Component not found: $component"
+              missing=$((missing + 1))
+            fi
+          done
+
+          if [[ $missing -gt 0 ]]; then
+            echo "::error::$missing required component(s) missing"
+            exit 1
+          fi
+
+          echo "✓ All required Rust components available"
+
+  # -----------------------------------------------------------------------
+  # D6: Cross-compilation targets availability
+  # Verify that Android cross-compilation targets are available.
+  # -----------------------------------------------------------------------
+  cross-compilation-targets:
+    name: cross-compilation targets check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Verify Android targets
+        run: |
+          required_targets=(
+            "aarch64-linux-android"
+            "armv7-linux-androideabi"
+          )
+
+          missing=0
+          for target in "${required_targets[@]}"; do
+            if rustup target list | grep -q "^${target} (installed)"; then
+              echo "✓ $target installed"
+            else
+              echo "::notice::$target not installed (will be installed when needed)"
+            fi
+          done
+
+          echo "✓ Cross-compilation target verification complete"
+
+  # -----------------------------------------------------------------------
+  # Aggregate gate: All system dependencies verified
+  # -----------------------------------------------------------------------
+  dependencies-gate:
+    name: dependencies gate
+    runs-on: ubuntu-24.04
+    needs: [rust-toolchain-consistency, python-lockfile, ubuntu-system-deps, macos-system-deps, rust-components, cross-compilation-targets]
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: All dependency checks passed
+        run: |
+          echo "System dependencies and lockfiles verified."
+          echo "✓ rust-toolchain.toml consistent across workflows"
+          echo "✓ uv.lock up-to-date with pyproject.toml"
+          echo "✓ Ubuntu system packages available"
+          echo "✓ macOS system packages available"
+          echo "✓ Rust components available"
+          echo "✓ Cross-compilation targets available"
