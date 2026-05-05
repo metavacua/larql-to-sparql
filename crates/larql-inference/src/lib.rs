@@ -38,7 +38,7 @@ pub fn activation_from_arch(arch: &dyn larql_models::ModelArchitecture) -> larql
         _ => larql_compute::Activation::Silu,
     }
 }
-#[cfg(feature = "metal")]
+#[cfg(all(feature = "metal", target_os = "macos"))]
 pub use larql_compute::MetalBackend;
 
 // Re-export essentials at crate root.
