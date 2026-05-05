@@ -26,6 +26,39 @@ larql> INFER "The capital of France is" TOP 3;
   3. a                    (0.31%)
 ```
 
+## System Dependencies
+
+LARQL requires system-level libraries for optimal performance across all platforms:
+
+### Linux (Ubuntu 24.04 / Debian-based)
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libopenblas-dev      # BLAS/LAPACK for numerical compute (Metal GPU fallback) \
+  libssl-dev           # OpenSSL for secure communications \
+  pkg-config           # Library discovery for native dependencies \
+  build-essential      # C compiler and tools for native extensions
+```
+
+### macOS
+```bash
+brew install openblas openssl pkg-config
+```
+
+### Rust Toolchain
+```bash
+# Install or update Rust (1.80+)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup update
+```
+
+### Python (for bindings)
+```bash
+# For Python 3.9+ support
+pip install --upgrade uv maturin
+```
+
+**Note:** The project uses conditional compilation (Metal GPU on macOS, BLAS on Linux, scalar fallback on unsupported platforms). Missing system libraries will not block builds but may reduce performance or disable optional features. CI validates that all dependencies are available.
+
 ## Quick Start
 
 ```bash
