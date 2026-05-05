@@ -39,5 +39,8 @@ metal = [
     "larql-vindex/metal",
 ]
 
+[target.'cfg(not(target_os = "macos"))'.features]
+default = []
+
 [dev-dependencies]
 tempfile = "3"

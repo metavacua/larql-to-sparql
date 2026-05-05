@@ -37,8 +37,8 @@ tokenizers = "0.23"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # WASM expert registry
-wasmtime = { version = "44", default-features = false, features = ["cranelift", "runtime", "std"] }
-wasmtime-wasi = "44"
+wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = "36"
 anyhow = "1"
 
 

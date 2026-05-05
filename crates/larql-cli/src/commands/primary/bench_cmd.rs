@@ -157,9 +157,16 @@ fn run_larql(
     ).map_err(|e| format!("tokenize: {e}"))?;
 
     let backend: Box<dyn larql_compute::ComputeBackend> = if metal {
-        let b = larql_compute::metal::MetalBackend::new()
-            .ok_or("Metal backend unavailable — rebuild with `--features metal` on an M-series Mac")?;
-        Box::new(b)
+        #[cfg(all(feature = "metal", target_os = "macos"))]
+        {
+            let b = larql_compute::metal::MetalBackend::new()
+                .ok_or("Metal backend unavailable — rebuild with `--features metal` on an M-series Mac")?;
+            Box::new(b)
+        }
+        #[cfg(not(all(feature = "metal", target_os = "macos")))]
+        {
+            return Err("Metal backend not available on this platform".into());
+        }
     } else {
         Box::new(larql_compute::CpuBackend)
     };
@@ -170,6 +177,7 @@ fn run_larql(
     // and populate the Metal buffer caches. The prefill timer would otherwise
     // include this one-time allocation cost even though it is amortized to zero
     // in real multi-turn usage.
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     if metal {
         let _ = generate(
             &weights, &tokenizer, &token_ids,
