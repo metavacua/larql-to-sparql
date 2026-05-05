@@ -8,9 +8,10 @@
 # - .github/workflows/quality.yml :: env.RUST_TOOLCHAIN
 # - .github/workflows/validate.yml :: env.RUST_TOOLCHAIN
 #
-# The floor is 1.88.0, determined by transitive dependencies that require
-# it (home v0.5.12, cookie_store v0.22.1, time-* crates).
+# The floor is 1.89.0, determined by transitive dependencies that require
+# it (smol_str v0.3.6 requires 1.89; home v0.5.12, cookie_store v0.22.1,
+# time-* crates require 1.88.0).
 
 [toolchain]
-channel = "1.88.0"
+channel = "1.89.0"
 components = ["clippy", "rustfmt"]

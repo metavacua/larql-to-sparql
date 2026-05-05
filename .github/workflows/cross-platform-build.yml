@@ -29,7 +29,7 @@ concurrency:
 
 env:
   # Pinned Rust toolchain version. Must match validate.yml and quality.yml.
-  RUST_TOOLCHAIN: "1.88.0"
+  RUST_TOOLCHAIN: "1.89.0"
   CARGO_TERM_COLOR: always
 
 # Matrix configuration for macOS jobs
