@@ -21,7 +21,10 @@ evalexpr = { version = "12", optional = true }
 chrono = { version = "0.4", optional = true, default-features = false, features = ["std", "clock"] }
 
 # Feature: wasm host
-wasmtime = { version = "29", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+# NOTE: wasmtime v29 had critical sandbox-escape vulnerabilities (RUSTSEC-2026-0095/0096).
+# Upgraded to v42 which is patched and compatible with MSRV 1.89.0.
+# See security advisories for details.
+wasmtime = { version = "43", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [dev-dependencies]
 wat = "1"

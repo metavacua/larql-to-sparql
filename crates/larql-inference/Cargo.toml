@@ -37,8 +37,11 @@ tokenizers = "0.21"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+# NOTE: wasmtime v29 had critical sandbox-escape vulnerabilities (RUSTSEC-2026-0095/0096).
+# Upgraded to v43 after updating MSRV to 1.91.0.
+# See security advisories for details.
+wasmtime = { version = "43", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = "43"
 anyhow = "1"
 
 

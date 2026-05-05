@@ -8,10 +8,10 @@
 # - .github/workflows/quality.yml :: env.RUST_TOOLCHAIN
 # - .github/workflows/validate.yml :: env.RUST_TOOLCHAIN
 #
-# The floor is 1.89.0, determined by transitive dependencies that require
-# it (smol_str v0.3.6 requires 1.89; home v0.5.12, cookie_store v0.22.1,
-# time-* crates require 1.88.0).
+# The floor is 1.91.0, determined by transitive dependencies:
+# - wasmtime v42+ (required for security patches) needs 1.91.0
+# - wasmtime v29 had critical vulnerabilities (RUSTSEC-2026-0095/0096: sandbox escapes)
 
 [toolchain]
-channel = "1.89.0"
+channel = "1.91.0"
 components = ["clippy", "rustfmt"]

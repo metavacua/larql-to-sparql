@@ -55,7 +55,7 @@ env:
   # `home v0.5.12`, `cookie_store v0.22.1`, and the `time-*` crates,
   # all of which declare `rust-version = 1.88`. Bumping further is
   # cheap; bumping below 1.88 fails resolution.
-  RUST_TOOLCHAIN: "1.89.0"
+  RUST_TOOLCHAIN: "1.91.0"
   # Scanner tools (cargo-audit, cargo-deny) are intentionally NOT
   # version-pinned. They must keep pace with the evolving formats of
   # their backing advisory database: pinning to a specific patch made
