@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 ### Fixed
 
 - Add Android NDK setup to cross-platform-build workflow
+- Add OpenBlas (libopenblas-dev) installation to CI workflows
+- Add OpenBlas to workspace dependencies for explicit BLAS requirement
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
 - Align license enforcement with audited multi-license tree
@@ -35,6 +37,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
+- Remove invalid jobs = 0 from .cargo/config.toml
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
 
