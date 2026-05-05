@@ -163,9 +163,21 @@ jobs:
         # `if: always()` so the gate runs even if the SARIF upload step
         # errored (or was skipped because no SARIF was produced).
         if: always()
+        id: clippy_gate
         # Re-runs clippy with a strict gate. Cheap relative to the build
         # in the previous step (cache is warm).
-        run: cargo clippy --workspace --tests --all-targets -- -D warnings
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --tests --all-targets -- -D warnings 2>&1 | tee /tmp/clippy.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture clippy diagnostics on failure
+        if: failure() && steps.clippy_gate.outcome == 'failure'
+        run: |
+          echo "=== CLIPPY FAILURE DIAGNOSTICS ===" >&2
+          echo "Full clippy output:" >&2
+          cat /tmp/clippy.log >&2
+          exit 1
 
   # ---------------------------------------------------------------------
   # Q3: Tests. The full workspace test surface. Feature-gated backends
@@ -204,7 +216,19 @@ jobs:
           shared-key: quality-test
 
       - name: cargo test --workspace
-        run: cargo test --workspace --no-fail-fast
+        id: test
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee /tmp/test.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture test diagnostics on failure
+        if: failure() && steps.test.outcome == 'failure'
+        run: |
+          echo "=== TEST FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 150 lines of test output:" >&2
+          tail -150 /tmp/test.log >&2
+          exit 1
 
   # ---------------------------------------------------------------------
   # Q4: cargo-audit — RustSec advisory database scan against Cargo.lock.
@@ -252,9 +276,21 @@ jobs:
           tool: cargo-audit
 
       - name: cargo audit
+        id: audit
         # `--deny warnings` promotes unmaintained/yanked crates and other
         # advisory-but-not-vulnerability findings to failures.
-        run: cargo audit --deny warnings
+        run: |
+          set -o pipefail
+          cargo audit --deny warnings 2>&1 | tee /tmp/audit.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture audit diagnostics on failure
+        if: failure() && steps.audit.outcome == 'failure'
+        run: |
+          echo "=== CARGO AUDIT FAILURE DIAGNOSTICS ===" >&2
+          echo "Full audit output:" >&2
+          cat /tmp/audit.log >&2
+          exit 1
 
   # ---------------------------------------------------------------------
   # Q5: cargo-deny — license allow-list, banned crates, advisories,
@@ -300,11 +336,23 @@ jobs:
           tool: cargo-deny
 
       - name: cargo deny check
+        id: deny
         # The flag set must mirror deny.toml :: graph (all-features = false,
         # no-default-features = false). Passing --all-features here would
         # evaluate a different dependency graph than the configuration
         # declares, defeating the purpose of pinning the graph in config.
-        run: cargo deny check advisories bans licenses sources
+        run: |
+          set -o pipefail
+          cargo deny check advisories bans licenses sources 2>&1 | tee /tmp/deny.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture deny diagnostics on failure
+        if: failure() && steps.deny.outcome == 'failure'
+        run: |
+          echo "=== CARGO DENY FAILURE DIAGNOSTICS ===" >&2
+          echo "Full deny output:" >&2
+          cat /tmp/deny.log >&2
+          exit 1
 
   # ---------------------------------------------------------------------
   # CodeQL is intentionally NOT defined here. The repository uses GitHub's
