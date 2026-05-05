@@ -264,7 +264,7 @@ jobs:
           shared-key: cross-platform-android-${{ matrix.android-target }}
 
       - name: cargo build for ${{ matrix.android-target }}
-        run: cargo build --release --workspace --target ${{ matrix.android-target }} --no-fail-fast
+        run: cargo build --release --workspace --target ${{ matrix.android-target }}
 
   # -----------------------------------------------------------------------
   # Phase 3: macOS (build + test + python for ARM and Intel)
