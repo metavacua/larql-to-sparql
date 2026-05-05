@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Enable cargo-msrv to find rust-version in workspace root
 - Improve system dependency installation in workflows
 - Resolve build failures caused by invalid Cargo configuration
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
