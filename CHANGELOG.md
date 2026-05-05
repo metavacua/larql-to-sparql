@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Clippy warnings in larql-inference
 - Configure Android cross-compilation with linker and PATH setup
 - Correct CHANGELOG.md structure and formatting
+- Correct MSRV to 1.88 (dependencies require edition2024)
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct metal platform guards in larql-inference
 - Correct platform guards in all larql-compute and larql-inference examples
