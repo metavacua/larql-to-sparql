@@ -77,10 +77,10 @@ fn main() -> Result<(), BoxErr> {
         t0.elapsed().as_secs_f64(), cfg.model, cfg.num_layers, cfg.hidden_size);
 
     // ── Backend (Metal or CPU) ────────────────────────────────────────────────
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     let backend = larql_inference::MetalBackend::new()
         .ok_or("Metal not available")?;
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     let backend = larql_inference::CpuBackend;
 
     // ── Tokenize ──────────────────────────────────────────────────────────────

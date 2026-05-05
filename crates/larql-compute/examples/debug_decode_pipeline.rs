@@ -3,7 +3,7 @@
 //!
 //! cargo run --release --features metal -p larql-compute --example debug_decode_pipeline
 
-#[cfg(not(feature = "metal"))]
+#[cfg(not(all(feature = "metal", target_os = "macos")))]
 fn main() {
     eprintln!("This example requires --features metal");
 }

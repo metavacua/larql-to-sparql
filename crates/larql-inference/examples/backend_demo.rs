@@ -48,7 +48,7 @@ fn main() {
     println!("Default backend: {}  (init: {init_ms}ms)", default.name());
 
     // Show calibrated threshold if Metal
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         // The default_backend() already calibrated. Show the result.
         // We need to access the threshold — let's create a second backend to inspect.

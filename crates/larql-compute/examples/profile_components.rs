@@ -3,7 +3,7 @@
 extern crate blas_src;
 
 fn main() {
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     { println!("Run with --features metal");}
 
     #[cfg(all(feature = "metal", target_os = "macos"))]

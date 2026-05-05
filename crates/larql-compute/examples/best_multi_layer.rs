@@ -159,7 +159,7 @@ fn main() {
             });
         }
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("  (Metal not enabled)");
 
     // ── 6. Full layer on Metal (old per-layer benchmark) (attention + FFN, one command buffer) ──
@@ -203,7 +203,7 @@ fn main() {
             });
         }
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("  (Metal not enabled)");
 
     // ── 6. Batch size sweep (Q4 matvec) ──

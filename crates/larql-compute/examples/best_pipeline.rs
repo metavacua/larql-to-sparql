@@ -11,7 +11,7 @@ use std::time::Instant;
 use larql_compute::cpu::q4::quantize_q4_0;
 
 fn main() {
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     { println!("Run with --features metal");}
 
     #[cfg(all(feature = "metal", target_os = "macos"))]

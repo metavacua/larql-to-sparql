@@ -36,6 +36,6 @@ fn main() {
             }
         }
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("Metal not enabled");
 }

@@ -155,6 +155,6 @@ fn main() {
         println!("  Speedup:                      {:.1}x", sep_ms / ms);
         println!("  Per 21 layers:                {:.1}ms fused, {:.1}ms separate", ms * 21.0, sep_ms * 21.0);
     }
-    #[cfg(not(feature = "metal"))]
+    #[cfg(not(all(feature = "metal", target_os = "macos")))]
     println!("Metal not enabled");
 }
