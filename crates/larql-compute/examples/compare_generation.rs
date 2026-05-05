@@ -140,7 +140,7 @@ fn main() {
 
     // ── 3. Metal decode (seq=1) ──
     println!("\n--- 3. Metal decode: seq=1, 21 layers ---\n");
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         if let Some(ref metal) = larql_compute::metal::MetalBackend::new() {
             // Metal full layer at seq=1

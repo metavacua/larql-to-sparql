@@ -8,7 +8,7 @@ fn main() {
     eprintln!("This example requires --features metal");
 }
 
-#[cfg(feature = "metal")]
+#[cfg(all(feature = "metal", target_os = "macos"))]
 fn main() {
     let metal = larql_compute::metal::MetalBackend::new().expect("need metal");
     let bufs = metal.bufs();

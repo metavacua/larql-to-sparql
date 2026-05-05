@@ -1,7 +1,7 @@
 //! Test that all Metal shaders compile.
 
 fn main() {
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use metal::*;
         let device = Device::system_default().expect("No Metal device");

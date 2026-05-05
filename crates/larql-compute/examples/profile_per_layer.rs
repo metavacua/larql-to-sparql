@@ -6,7 +6,7 @@ fn main() {
     #[cfg(not(feature = "metal"))]
     { println!("Run with --features metal");}
 
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         use std::time::Instant;
         use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q4_0};
