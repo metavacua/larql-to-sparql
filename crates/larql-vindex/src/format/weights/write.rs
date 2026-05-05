@@ -607,7 +607,7 @@ fn pad_rows_to_256(data: &[f32], rows: usize, cols: usize) -> (Vec<f32>, usize) 
     for r in 0..rows {
         let row = &data[r * cols..(r + 1) * cols];
         out.extend_from_slice(row);
-        out.extend(std::iter::repeat(0.0f32).take(pad));
+        out.extend(std::iter::repeat_n(0.0f32, pad));
     }
     (out, padded_cols)
 }
