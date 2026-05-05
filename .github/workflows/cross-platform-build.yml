@@ -56,6 +56,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            python3-dev \
+            clang \
+            llvm
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -130,6 +141,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            python3-dev \
+            clang \
+            llvm
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -193,6 +215,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            clang \
+            llvm
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -255,6 +287,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Install system dependencies (macOS)
+        run: |
+          # Verify Xcode Command Line Tools are installed
+          xcode-select --print-path > /dev/null || xcode-select --install
+
+          # Install Homebrew packages if not present
+          if ! brew list openssl &>/dev/null; then
+            brew install openssl
+          fi
 
       - name: Install Rust toolchain
         run: |
