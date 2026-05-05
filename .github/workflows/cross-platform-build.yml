@@ -56,6 +56,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (OpenBlas)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -130,6 +135,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (OpenBlas)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -193,6 +203,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install system dependencies (build tools + OpenBlas)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev
+
       - name: Install Rust toolchain
         run: |
           rustup toolchain install "${RUST_TOOLCHAIN}" \
@@ -255,6 +270,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Install system dependencies (Accelerate framework is built-in on macOS)
+        run: |
+          # Accelerate framework is built-in to macOS, no installation needed
+          # But we can verify it's available
+          ls -la /System/Library/Frameworks/Accelerate.framework/ || echo "Accelerate framework not found"
 
       - name: Install Rust toolchain
         run: |
