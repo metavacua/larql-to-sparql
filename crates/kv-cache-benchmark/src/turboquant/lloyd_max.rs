@@ -7,8 +7,8 @@
 /// A Lloyd-Max codebook: boundaries + centroids for a given bit-width.
 #[derive(Debug, Clone)]
 pub struct Codebook {
-    /// Decision boundaries: n_levels - 1 values. values[i] maps to centroid[j]
-    /// where boundaries[j-1] <= value < boundaries[j].
+    /// Decision boundaries: n_levels - 1 values. values\[i\] maps to centroid\[j\]
+    /// where boundaries\[j-1\] <= value < boundaries\[j\].
     pub boundaries: Vec<f32>,
     /// Reconstruction centroids: n_levels values.
     pub centroids: Vec<f32>,
