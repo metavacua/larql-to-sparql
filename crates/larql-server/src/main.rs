@@ -521,7 +521,8 @@ async fn main() -> Result<(), BoxError> {
         )
         .await?;
 
-        axum_server::bind_rustls(addr.parse()?, tls_config)
+        let socket_addr: std::net::SocketAddr = addr.parse()?;
+        axum_server::bind_rustls(socket_addr, tls_config)
             .serve(app.into_make_service())
             .await?;
     } else {

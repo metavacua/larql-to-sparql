@@ -6,7 +6,7 @@
 //!
 //! Run with: cargo test -p larql-compute --features metal
 
-#![cfg(feature = "metal")]
+#![cfg(all(feature = "metal", target_os = "macos"))]
 
 extern crate blas_src;
 

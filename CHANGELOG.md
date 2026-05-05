@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct CHANGELOG.md structure and formatting
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct metal platform guards in larql-inference
+- Correct platform guards in all larql-compute and larql-inference examples
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Fix cargo config and wasmtime feature, update changelog
