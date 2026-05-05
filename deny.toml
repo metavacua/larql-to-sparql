@@ -85,9 +85,7 @@ allow = [
   # already carries AGPL obligations via `evalexpr v12.x` (consumed by
   # `crates/model-compute` feature `native`); see audit/dependency-licenses.md
   # D-1 and audit/upstream-report.md U-1.
-  # cargo-deny normalises the deprecated SPDX-id `AGPL-3.0` to
-  # `AGPL-3.0-only` for matching, so listing only the canonical form here.
-  "AGPL-3.0-only",
+  "AGPL-3.0-or-later",
 ]
 # Note: the fork's own outbound license set (AGPL-3.0-or-later, CC-BY-SA-4.0)
 # governs FIRST-PARTY files only and is enforced by REUSE.toml +
