@@ -83,10 +83,38 @@ jobs:
           shared-key: cross-platform-ubuntu
 
       - name: cargo build --release
-        run: cargo build --release --workspace
+        id: build
+        run: |
+          set -o pipefail
+          cargo build --release --workspace 2>&1 | tee /tmp/build.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture build diagnostics on failure
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          echo "=== BUILD FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 100 lines of build log:" >&2
+          tail -100 /tmp/build.log >&2
+          echo "=== Cargo version ===" >&2
+          cargo --version >&2
+          echo "=== Rustc version ===" >&2
+          rustc --version >&2
+          exit 1
 
       - name: cargo test --workspace
-        run: cargo test --workspace --no-fail-fast
+        id: test
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee /tmp/test.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture test diagnostics on failure
+        if: failure() && steps.test.outcome == 'failure'
+        run: |
+          echo "=== TEST FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 100 lines of test log:" >&2
+          tail -100 /tmp/test.log >&2
+          exit 1
 
       - name: Setup Python (for Python bindings test)
         uses: actions/setup-python@v5
@@ -169,10 +197,38 @@ jobs:
           shared-key: cross-platform-chromeos
 
       - name: cargo build --release
-        run: cargo build --release --workspace
+        id: build
+        run: |
+          set -o pipefail
+          cargo build --release --workspace 2>&1 | tee /tmp/build.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture build diagnostics on failure
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          echo "=== BUILD FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 100 lines of build log:" >&2
+          tail -100 /tmp/build.log >&2
+          echo "=== Cargo version ===" >&2
+          cargo --version >&2
+          echo "=== Rustc version ===" >&2
+          rustc --version >&2
+          exit 1
 
       - name: cargo test --workspace
-        run: cargo test --workspace --no-fail-fast
+        id: test
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee /tmp/test.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture test diagnostics on failure
+        if: failure() && steps.test.outcome == 'failure'
+        run: |
+          echo "=== TEST FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 100 lines of test log:" >&2
+          tail -100 /tmp/test.log >&2
+          exit 1
 
       - name: Setup Python (for Python bindings test)
         uses: actions/setup-python@v5
@@ -264,7 +320,25 @@ jobs:
           shared-key: cross-platform-android-${{ matrix.android-target }}
 
       - name: cargo build for ${{ matrix.android-target }}
-        run: cargo build --release --workspace --target ${{ matrix.android-target }}
+        id: build
+        run: |
+          set -o pipefail
+          cargo build --release --workspace --target ${{ matrix.android-target }} 2>&1 | tee /tmp/build.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture build diagnostics on failure
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          echo "=== BUILD FAILURE DIAGNOSTICS ===" >&2
+          echo "Last 100 lines of build log:" >&2
+          tail -100 /tmp/build.log >&2
+          echo "=== Cargo version ===" >&2
+          cargo --version >&2
+          echo "=== Rustc version ===" >&2
+          rustc --version >&2
+          echo "=== Target ===" >&2
+          rustup target list | grep ${{ matrix.android-target }} >&2
+          exit 1
 
   # -----------------------------------------------------------------------
   # Phase 3: macOS (build + test + python for ARM and Intel)
@@ -321,18 +395,68 @@ jobs:
           shared-key: cross-platform-macos-${{ matrix.arch }}
 
       - name: cargo build (no Metal)
-        run: cargo build --release --workspace
+        id: build_no_metal
+        run: |
+          set -o pipefail
+          cargo build --release --workspace 2>&1 | tee /tmp/build_no_metal.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture build diagnostics on failure (no Metal)
+        if: failure() && steps.build_no_metal.outcome == 'failure'
+        run: |
+          echo "=== BUILD FAILURE DIAGNOSTICS (NO METAL) ===" >&2
+          echo "Last 100 lines of build log:" >&2
+          tail -100 /tmp/build_no_metal.log >&2
+          echo "=== System ===" >&2
+          system_profiler SPSoftwareDataType >&2
+          exit 1
 
       - name: cargo test --workspace (no Metal)
-        run: cargo test --workspace --no-fail-fast
+        id: test_no_metal
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast 2>&1 | tee /tmp/test_no_metal.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture test diagnostics on failure (no Metal)
+        if: failure() && steps.test_no_metal.outcome == 'failure'
+        run: |
+          echo "=== TEST FAILURE DIAGNOSTICS (NO METAL) ===" >&2
+          echo "Last 100 lines of test log:" >&2
+          tail -100 /tmp/test_no_metal.log >&2
+          exit 1
 
       - name: cargo build (with Metal - ARM only)
+        id: build_metal
         if: matrix.arch == 'arm64'
-        run: cargo build --release --workspace --features metal
+        run: |
+          set -o pipefail
+          cargo build --release --workspace --features metal 2>&1 | tee /tmp/build_metal.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture build diagnostics on failure (with Metal)
+        if: failure() && steps.build_metal.outcome == 'failure' && matrix.arch == 'arm64'
+        run: |
+          echo "=== BUILD FAILURE DIAGNOSTICS (WITH METAL) ===" >&2
+          echo "Last 100 lines of build log:" >&2
+          tail -100 /tmp/build_metal.log >&2
+          exit 1
 
       - name: cargo test --workspace (with Metal - ARM only)
+        id: test_metal
         if: matrix.arch == 'arm64'
-        run: cargo test --workspace --no-fail-fast --features metal
+        run: |
+          set -o pipefail
+          cargo test --workspace --no-fail-fast --features metal 2>&1 | tee /tmp/test_metal.log
+          echo "status=$?" >> $GITHUB_OUTPUT
+
+      - name: Capture test diagnostics on failure (with Metal)
+        if: failure() && steps.test_metal.outcome == 'failure' && matrix.arch == 'arm64'
+        run: |
+          echo "=== TEST FAILURE DIAGNOSTICS (WITH METAL) ===" >&2
+          echo "Last 100 lines of test log:" >&2
+          tail -100 /tmp/test_metal.log >&2
+          exit 1
 
       - name: Setup Python (for Python bindings test)
         uses: actions/setup-python@v5
