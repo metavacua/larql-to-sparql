@@ -58,14 +58,15 @@ jobs:
 
       - name: Install system dependencies (Ubuntu)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             build-essential \
             pkg-config \
             libssl-dev \
             python3-dev \
             clang \
             llvm
+          echo "✓ System dependencies installed"
 
       - name: Install Rust toolchain
         run: |
@@ -143,14 +144,15 @@ jobs:
 
       - name: Install system dependencies (Ubuntu)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             build-essential \
             pkg-config \
             libssl-dev \
             python3-dev \
             clang \
             llvm
+          echo "✓ System dependencies installed"
 
       - name: Install Rust toolchain
         run: |
@@ -217,13 +219,14 @@ jobs:
 
       - name: Install system dependencies (Ubuntu)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             build-essential \
             pkg-config \
             libssl-dev \
             clang \
             llvm
+          echo "✓ System dependencies installed"
 
       - name: Install Rust toolchain
         run: |
@@ -291,12 +294,17 @@ jobs:
       - name: Install system dependencies (macOS)
         run: |
           # Verify Xcode Command Line Tools are installed
-          xcode-select --print-path > /dev/null || xcode-select --install
-
-          # Install Homebrew packages if not present
-          if ! brew list openssl &>/dev/null; then
-            brew install openssl
+          if ! xcode-select --print-path > /dev/null 2>&1; then
+            echo "::error::Xcode Command Line Tools not installed"
+            exit 1
           fi
+
+          # macOS runners have OpenSSL, pkg-config, and Python pre-installed
+          # Verify they're available
+          command -v pkg-config > /dev/null || { echo "::error::pkg-config not found"; exit 1; }
+          command -v python3 > /dev/null || { echo "::error::python3 not found"; exit 1; }
+
+          echo "✓ System dependencies available"
 
       - name: Install Rust toolchain
         run: |
