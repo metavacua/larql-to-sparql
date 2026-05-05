@@ -29,5 +29,3 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Linux/WSL2 support + temperature parameter
 - Remove invalid jobs=0 configuration in Cargo config
 - Scope cron to advisory scanners and harden SARIF upload
-
-
