@@ -335,7 +335,94 @@ jobs:
           echo "✓ All required Rust components available"
 
   # -----------------------------------------------------------------------
-  # D6: Cross-compilation targets availability
+  # D6: Minimum Supported Rust Version (MSRV) validation
+  # Verify that:
+  # 1. The declared MSRV in Cargo.toml matches the actual dependency floor
+  # 2. The project compiles with the declared MSRV
+  # This is critical: if MSRV is wrong or untested, the dependency system
+  # cannot be trusted to ensure reproducible builds.
+  # -----------------------------------------------------------------------
+  msrv-validation:
+    name: MSRV validation and compilation test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev python3-dev clang llvm
+
+      - name: Extract declared MSRV from Cargo.toml
+        id: declared-msrv
+        run: |
+          msrv=$(grep -oP '(?<=rust-version = ")[^"]+' Cargo.toml | head -1)
+          if [[ -z "$msrv" ]]; then
+            echo "::error::No rust-version found in Cargo.toml workspace.package"
+            exit 1
+          fi
+          echo "version=${msrv}" >> "$GITHUB_OUTPUT"
+          echo "✓ Declared MSRV: $msrv"
+
+      - name: Find actual MSRV floor from dependencies
+        id: actual-msrv
+        run: |
+          # Get the highest MSRV required by any dependency
+          actual=$(cargo metadata --format-version 1 2>/dev/null | \
+            jq -r '[.packages[] | select(.rust_version != null) | .rust_version] | sort_by(.) | reverse | .[0]' || echo "")
+
+          if [[ -z "$actual" ]]; then
+            echo "::warning::Could not determine dependency MSRV floor, assuming declared MSRV is correct"
+            echo "version=$(grep -oP '(?<=rust-version = ")[^"]+' Cargo.toml | head -1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${actual}" >> "$GITHUB_OUTPUT"
+            echo "✓ Actual MSRV floor from dependencies: $actual"
+          fi
+
+      - name: Verify declared MSRV matches or exceeds actual floor
+        run: |
+          declared="${{ steps.declared-msrv.outputs.version }}"
+          actual="${{ steps.actual-msrv.outputs.version }}"
+
+          # Normalize versions for comparison (strip trailing .0)
+          norm_declared=$(echo "$declared" | sed 's/\.0$//')
+          norm_actual=$(echo "$actual" | sed 's/\.0$//')
+
+          if [[ "$norm_declared" == "$norm_actual" ]]; then
+            echo "✓ MSRV matches: declared=$declared, actual=$actual"
+          elif [[ "$norm_declared" > "$norm_actual" ]]; then
+            echo "✓ MSRV validated: declared=$declared exceeds actual=$actual"
+          else
+            echo "::error::MSRV mismatch: declared=$declared is lower than actual=$actual"
+            echo "::error::Update Cargo.toml to rust-version = \"$actual\""
+            exit 1
+          fi
+
+      - name: Install Rust toolchain at declared MSRV
+        run: |
+          msrv="${{ steps.declared-msrv.outputs.version }}"
+          echo "Installing Rust $msrv for MSRV validation..."
+          rustup toolchain install "$msrv" --profile minimal --no-self-update
+          rustup default "$msrv"
+          rustc --version
+
+      - name: Test compilation with declared MSRV
+        run: |
+          msrv="${{ steps.declared-msrv.outputs.version }}"
+          echo "Testing project compilation with Rust $msrv (declared MSRV)..."
+          cargo build --release 2>&1 | tee /tmp/msrv-build.log
+          if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            echo "::error::Project failed to compile with declared MSRV $msrv"
+            cat /tmp/msrv-build.log
+            exit 1
+          fi
+          echo "✓ Project compiled successfully with MSRV $msrv"
+
+  # -----------------------------------------------------------------------
+  # D7: Cross-compilation targets availability
   # Verify that Android cross-compilation targets are available.
   # -----------------------------------------------------------------------
   cross-compilation-targets:
@@ -378,7 +465,7 @@ jobs:
   dependencies-gate:
     name: dependencies gate
     runs-on: ubuntu-24.04
-    needs: [rust-toolchain-consistency, python-lockfile, ubuntu-system-deps, macos-system-deps, rust-components, cross-compilation-targets]
+    needs: [rust-toolchain-consistency, python-lockfile, ubuntu-system-deps, macos-system-deps, rust-components, msrv-validation, cross-compilation-targets]
     if: always() && !failure() && !cancelled()
     steps:
       - name: All dependency checks passed
@@ -389,4 +476,5 @@ jobs:
           echo "✓ Ubuntu system packages available"
           echo "✓ macOS system packages available"
           echo "✓ Rust components available"
+          echo "✓ MSRV declared correctly and verified to compile"
           echo "✓ Cross-compilation targets available"
