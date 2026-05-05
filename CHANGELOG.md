@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct metal platform guards in larql-inference
 - Correct platform guards in all larql-compute and larql-inference examples
 - Correct tool release URLs and pre-commit hook wiring
+- Define rust-version in root Cargo.toml for cargo-msrv
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Fix cargo config and wasmtime feature, update changelog
 - Fix metal module conditional compilation and downgrade wasmtime to 36
