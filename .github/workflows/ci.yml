@@ -245,9 +245,10 @@ jobs:
 
       - name: uv lock --locked
         run: uv lock --locked
+        working-directory: crates/larql-python
 
       - name: Verify no uv.lock drift
-        run: git diff --exit-code uv.lock || { echo "uv.lock was modified by uv lock; run 'uv lock' and commit"; exit 1; }
+        run: git diff --exit-code crates/larql-python/uv.lock || { echo "uv.lock was modified by uv lock; run 'uv lock' in crates/larql-python and commit"; exit 1; }
 
   # =========================================================================
   # S2: Static Analysis (linting, formatting, documentation)
