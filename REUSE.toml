@@ -39,6 +39,7 @@ SPDX-License-Identifier = "Apache-2.0"
 [[annotations]]
 path = [
   "REUSE.toml",
+  "LEGAL_TRANSITION.md",
   "NOTICE",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
@@ -49,6 +50,7 @@ path = [
   "scripts/check_changelog.sh",
   "scripts/version_preflight.sh",
   "scripts/check_first_party_licenses.sh",
+  "scripts/check_distribution_notices.sh",
   "scripts/ci/**",
   "docs/specs/compliance-pipeline.md",
   "docs/specs/code-quality-pipeline.md",

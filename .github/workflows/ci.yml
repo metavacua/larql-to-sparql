@@ -1,0 +1,643 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Unified CI/CD pipeline (ci.yml).
+#
+# This workflow consolidates validation, testing, and security scanning into a
+# single deterministic pipeline with explicit stages (S0–S6) that enforce a
+# strict dependency order. The pipeline implements the project's compliance
+# specification per docs/specs/compliance-pipeline.md.
+#
+# ## Pipeline Architecture
+#
+# Dependency graph (strict sequential until S3; S5/S6 informational):
+#
+#   S0 (Meta & License)      → provenance, reuse-toml-guard, first-party-licenses,
+#                               conventional-commits, changelog-consistency
+#   ↓
+#   S1 (Dependency Audit)    → cargo-deny, lockfile-consistency, uv-lock-check
+#   ↓
+#   S2 (Static Analysis)     → rustfmt, clippy, rustdoc, python-lint, proto-lint
+#   ↓
+#   S2.5 (MSRV Verification) → cargo-msrv-verify (gates S3)
+#   ↓
+#   S3 (Build & Test Matrix) → [Ubuntu × macOS] build + test + python + CodeQL
+#   ↓
+#   S5 (Post-Build Quality)  → msrv-discovery, mutants, examples (informational)
+#   ↓
+#   S6 (Post-Build Security) → distribution-notices, optional cargo-vet
+
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly advisory refresh for cargo-deny
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+  # CodeQL analysis in S3 requires uploading SARIF to Code Scanning
+  security-events: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Rust toolchain. Must be kept in sync across all jobs.
+  # Current floor: 1.88.0 (required by home v0.5.12, cookie_store v0.22.1, time-* crates)
+  RUST_TOOLCHAIN: "1.88.0"
+  REUSE_TOOL_VERSION: "6.2.0"
+  COCOGITTO_VERSION: "7.0.0"
+  GIT_CLIFF_VERSION: "2.13.1"
+  CLIPPY_SARIF_VERSION: "0.7.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # =========================================================================
+  # S0: Meta & License Gates
+  # =========================================================================
+
+  reuse-lint:
+    name: reuse-lint (REUSE Specification)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run reuse lint
+        uses: fsfe/reuse-action@v5
+        with:
+          args: --suppress-deprecation lint
+
+  reuse-toml-guard:
+    name: reuse-toml-guard (provenance integrity)
+    runs-on: ubuntu-24.04
+    needs: reuse-lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard REUSE.toml against copyright stripping
+        run: bash scripts/reuse-toml-guard.sh
+
+  first-party-licenses:
+    name: first-party-licenses (Apache 2.0 §4)
+    runs-on: ubuntu-24.04
+    needs: reuse-lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run first-party license gate
+        run: scripts/check_first_party_licenses.sh "${{ steps.range.outputs.range }}"
+
+  conventional-commits:
+    name: conventional-commits (cocogitto)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install cocogitto
+        run: |
+          curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "from=${base}" >> "$GITHUB_OUTPUT"
+            echo "to=${head}"   >> "$GITHUB_OUTPUT"
+          else
+            echo "from=" >> "$GITHUB_OUTPUT"
+            echo "to="   >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: cog check (PR range)
+        if: steps.range.outputs.from != ''
+        run: cog check "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+
+      - name: cog check (push to main, newest commit only)
+        if: steps.range.outputs.from == ''
+        run: cog check HEAD~1..HEAD
+
+  changelog-consistency:
+    name: changelog-consistency (git-cliff)
+    runs-on: ubuntu-24.04
+    needs: conventional-commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install git-cliff
+        run: |
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${GIT_CLIFF_VERSION}/git-cliff"
+          git-cliff --version
+
+      - name: Verify CHANGELOG.md [Unreleased] matches projection
+        run: bash scripts/changelog-consistency.sh
+
+  # =========================================================================
+  # S1: Dependency Audit (licenses, advisories, lockfile integrity)
+  # =========================================================================
+
+  cargo-deny:
+    name: cargo-deny (licenses + advisories + bans + sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Install cargo-deny (tracking latest)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny check advisories bans licenses sources
+
+  lockfile-consistency:
+    name: lockfile-consistency (cargo check --locked)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-lockfile
+
+      - name: cargo check --locked
+        run: cargo check --locked --workspace
+
+      - name: Verify no Cargo.lock drift
+        run: git diff --exit-code Cargo.lock || { echo "Cargo.lock was modified by cargo check; run 'cargo update' and commit"; exit 1; }
+
+  uv-lock-check:
+    name: uv-lock-check (uv lock verification)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: uv lock --check
+        run: uv lock --check
+
+  # =========================================================================
+  # S2: Static Analysis (linting, formatting, documentation)
+  # =========================================================================
+
+  rustfmt:
+    name: rustfmt (cargo fmt --check)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain with rustfmt
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --component rustfmt \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo fmt --version
+
+      - name: cargo fmt --check --all
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (lint with -D warnings)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain with clippy
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --component clippy \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo clippy --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-clippy
+
+      - name: cargo clippy (static pass)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rustdoc:
+    name: rustdoc (cargo doc -D warnings)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-rustdoc
+
+      - name: cargo doc --no-deps -D warnings
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps --exclude larql-python
+
+  # =========================================================================
+  # S2.5: MSRV Verification (gates S3)
+  # =========================================================================
+
+  cargo-msrv-verify:
+    name: cargo-msrv-verify (declared MSRV)
+    runs-on: ubuntu-24.04
+    needs: [rustfmt, clippy, rustdoc]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install rustup
+        run: rustup show
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-msrv-verify
+
+      - name: Install cargo-msrv
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+
+      - name: cargo msrv verify
+        run: cargo msrv verify --manifest-path Cargo.toml
+
+  # =========================================================================
+  # S3: Build & Test Matrix (Ubuntu × macOS, with CodeQL on Ubuntu)
+  # =========================================================================
+
+  build-test-matrix:
+    name: build-test-matrix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    needs: cargo-msrv-verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: ubuntu
+            codeql: true
+          - os: macos-15
+            platform: macos
+            arch: arm64
+            codeql: false
+          - os: macos-13
+            platform: macos
+            arch: intel
+            codeql: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-build-test-${{ matrix.os }}
+
+      - name: Initialize CodeQL (Ubuntu only)
+        if: matrix.codeql
+        uses: github/codeql-action/init@v3
+        with:
+          languages: cpp,python,rust
+          queries: security-and-quality
+
+      - name: cargo build --locked --workspace
+        run: cargo build --locked --workspace
+
+      - name: cargo test --locked --workspace
+        run: cargo test --locked --workspace --no-fail-fast
+
+      - name: cargo test --doc --locked
+        run: cargo test --doc --locked
+
+      - name: Perform CodeQL analysis (Ubuntu only)
+        if: matrix.codeql
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language/rust
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Build and test Python bindings (maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+      - name: cargo build --examples
+        run: cargo build --locked --examples --exclude larql-python
+
+  # =========================================================================
+  # S5: Post-Build Quality (informational, non-blocking)
+  # =========================================================================
+
+  msrv-discovery:
+    name: msrv-discovery (cargo-msrv find)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    needs: build-test-matrix
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install rustup
+        run: rustup show
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-msrv-discovery
+
+      - name: Install cargo-msrv
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+
+      - name: cargo msrv find (discover actual floor)
+        run: cargo msrv find --manifest-path Cargo.toml || true
+
+  mutants:
+    name: mutants (cargo-mutants)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    needs: build-test-matrix
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-mutants
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: cargo mutants (PR diff scope)
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo mutants \
+            --in-diff <(git diff "${{ github.event.pull_request.base.sha }}"..HEAD) \
+            --no-shuffle \
+            --timeout 120 \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            || true
+
+      - name: cargo mutants (full tree, cron only)
+        if: github.event_name == 'schedule'
+        run: |
+          cargo mutants \
+            --no-shuffle \
+            --timeout 120 \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            || true
+
+      - name: Upload mutants report
+        if: always() && hashFiles('mutants.out/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ github.run_id }}
+          path: mutants.out/
+          retention-days: 14
+
+  # =========================================================================
+  # S6: Post-Build Validation (informational, non-blocking)
+  # =========================================================================
+
+  distribution-notices:
+    name: distribution-notices (post-build validation)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    needs: build-test-matrix
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check distribution notices
+        run: bash scripts/check_distribution_notices.sh
+
+  # =========================================================================
+  # Aggregate Gates & Reporting
+  # =========================================================================
+
+  ci-passed:
+    name: ci-passed (all required checks)
+    runs-on: ubuntu-24.04
+    needs: [reuse-lint, reuse-toml-guard, first-party-licenses, conventional-commits,
+            changelog-consistency, cargo-deny, lockfile-consistency, uv-lock-check,
+            rustfmt, clippy, rustdoc, cargo-msrv-verify, build-test-matrix]
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: All required checks passed
+        run: |
+          echo "✓ S0 (Meta & License): All gates passed"
+          echo "✓ S1 (Dependency Audit): Lockfile and supply-chain verified"
+          echo "✓ S2 (Static Analysis): Linting and formatting clean"
+          echo "✓ S2.5 (MSRV): Declared minimum verified"
+          echo "✓ S3 (Build & Test): All platforms built and tested"
+          echo ""
+          echo "Branch is a valid candidate extension of main."
+
+  ci-report-failure:
+    name: ci-report-failure (PR comment)
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request' && failure()
+    needs: [reuse-lint, reuse-toml-guard, first-party-licenses, conventional-commits,
+            changelog-consistency, cargo-deny, lockfile-consistency, uv-lock-check,
+            rustfmt, clippy, rustdoc, cargo-msrv-verify, build-test-matrix]
+    steps:
+      - name: Post failure summary to PR
+        uses: actions/github-script@v7
+        env:
+          REUSE_LINT_RESULT: ${{ needs.reuse-lint.result }}
+          REUSE_TOML_GUARD_RESULT: ${{ needs.reuse-toml-guard.result }}
+          FIRST_PARTY_LICENSES_RESULT: ${{ needs.first-party-licenses.result }}
+          CONVENTIONAL_COMMITS_RESULT: ${{ needs.conventional-commits.result }}
+          CHANGELOG_CONSISTENCY_RESULT: ${{ needs.changelog-consistency.result }}
+          CARGO_DENY_RESULT: ${{ needs.cargo-deny.result }}
+          LOCKFILE_CONSISTENCY_RESULT: ${{ needs.lockfile-consistency.result }}
+          UV_LOCK_CHECK_RESULT: ${{ needs.uv-lock-check.result }}
+          RUSTFMT_RESULT: ${{ needs.rustfmt.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          RUSTDOC_RESULT: ${{ needs.rustdoc.result }}
+          CARGO_MSRV_VERIFY_RESULT: ${{ needs.cargo-msrv-verify.result }}
+          BUILD_TEST_MATRIX_RESULT: ${{ needs.build-test-matrix.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const results = {
+              "S0: reuse-lint": process.env.REUSE_LINT_RESULT,
+              "S0: reuse-toml-guard": process.env.REUSE_TOML_GUARD_RESULT,
+              "S0: first-party-licenses": process.env.FIRST_PARTY_LICENSES_RESULT,
+              "S0: conventional-commits": process.env.CONVENTIONAL_COMMITS_RESULT,
+              "S0: changelog-consistency": process.env.CHANGELOG_CONSISTENCY_RESULT,
+              "S1: cargo-deny": process.env.CARGO_DENY_RESULT,
+              "S1: lockfile-consistency": process.env.LOCKFILE_CONSISTENCY_RESULT,
+              "S1: uv-lock-check": process.env.UV_LOCK_CHECK_RESULT,
+              "S2: rustfmt": process.env.RUSTFMT_RESULT,
+              "S2: clippy": process.env.CLIPPY_RESULT,
+              "S2: rustdoc": process.env.RUSTDOC_RESULT,
+              "S2.5: cargo-msrv-verify": process.env.CARGO_MSRV_VERIFY_RESULT,
+              "S3: build-test-matrix": process.env.BUILD_TEST_MATRIX_RESULT,
+            };
+            const rows = Object.entries(results)
+              .map(([n, r]) => `| ${n} | ${r} |`)
+              .join("\n");
+            const failed = Object.entries(results)
+              .filter(([_, r]) => r === "failure")
+              .map(([n]) => `\`${n}\``);
+            const body = [
+              `## CI validation failed`,
+              ``,
+              `Failed checks: ${failed.join(", ") || "(none reported failure)"}`,
+              ``,
+              `| Check | Result |`,
+              `|---|---|`,
+              rows,
+              ``,
+              `Full run logs: ${process.env.RUN_URL}`,
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
