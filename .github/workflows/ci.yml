@@ -243,8 +243,11 @@ jobs:
         with:
           version: "latest"
 
-      - name: uv lock --check
-        run: uv lock --check
+      - name: uv lock --locked
+        run: uv lock --locked
+
+      - name: Verify no uv.lock drift
+        run: git diff --exit-code uv.lock || { echo "uv.lock was modified by uv lock; run 'uv lock' and commit"; exit 1; }
 
   # =========================================================================
   # S2: Static Analysis (linting, formatting, documentation)
