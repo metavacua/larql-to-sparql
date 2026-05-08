@@ -5,7 +5,6 @@
 ///
 /// These codebooks are the optimal scalar quantizers for this distribution.
 /// Values validated against llama.cpp Discussion #20969 reference implementation.
-
 use super::lloyd_max::Codebook;
 
 /// Get the pre-computed codebook for a given dimension and bit-width.

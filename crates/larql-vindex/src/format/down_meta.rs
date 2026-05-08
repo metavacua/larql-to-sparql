@@ -206,8 +206,11 @@ pub fn mmap_binary(
     let mut pos = 16usize; // after header
 
     for _ in 0..num_layers {
-        if pos + 4 > mmap.len() { break; }
-        let nf = u32::from_le_bytes([mmap[pos], mmap[pos+1], mmap[pos+2], mmap[pos+3]]) as usize;
+        if pos + 4 > mmap.len() {
+            break;
+        }
+        let nf =
+            u32::from_le_bytes([mmap[pos], mmap[pos + 1], mmap[pos + 2], mmap[pos + 3]]) as usize;
         pos += 4; // skip num_features u32
         layer_offsets.push(pos); // records start here
         layer_num_features.push(nf);

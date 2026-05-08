@@ -105,13 +105,10 @@ impl Session {
         //    producing the "cosines look fine, activations have a
         //    25-unit gap" silent-drift class of bug noted in
         //    `experiments/15_v11_model/RESULTS.md §20.3`.
-        let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-            &weights,
-            patched.base(),
-        );
-        let _result = larql_inference::predict_with_ffn(
-            &weights, &tokenizer, &token_ids, 1, &walk_ffn,
-        );
+        let walk_ffn =
+            larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched.base());
+        let _result =
+            larql_inference::predict_with_ffn(&weights, &tokenizer, &token_ids, 1, &walk_ffn);
 
         let per_layer: Vec<(usize, Vec<f32>)> = walk_ffn
             .take_residuals()
@@ -184,9 +181,7 @@ impl Session {
                     &weights,
                     patched.base(),
                 );
-                let _ = larql_inference::predict_with_ffn(
-                    &weights, &tokenizer, &ids, 1, &ffn,
-                );
+                let _ = larql_inference::predict_with_ffn(&weights, &tokenizer, &ids, 1, &ffn);
                 let r = ffn.take_residuals().into_iter().find(|(l, _)| *l == layer);
                 if let Some((_, vec)) = r {
                     captured.push(larql_vindex::ndarray::Array1::from_vec(vec));

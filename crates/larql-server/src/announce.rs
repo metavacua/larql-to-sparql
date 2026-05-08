@@ -57,7 +57,10 @@ pub fn run_announce(config: AnnounceConfig) {
                     backoff = Duration::from_secs(1);
                 }
                 Err(e) => {
-                    warn!("Grid stream error: {e} — retrying in {}s", backoff.as_secs());
+                    warn!(
+                        "Grid stream error: {e} — retrying in {}s",
+                        backoff.as_secs()
+                    );
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(Duration::from_secs(60));
                 }
@@ -87,12 +90,13 @@ async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn std::error::Error 
         .as_ref()
         .map(|k| format!("Bearer {k}").parse())
         .transpose()?;
-    let mut client = GridServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        if let Some(val) = &bearer {
-            req.metadata_mut().insert("authorization", val.clone());
-        }
-        Ok(req)
-    });
+    let mut client =
+        GridServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+            if let Some(val) = &bearer {
+                req.metadata_mut().insert("authorization", val.clone());
+            }
+            Ok(req)
+        });
 
     // Channel for messages we send to the router.
     let (tx, rx) = tokio::sync::mpsc::channel::<ServerMessage>(32);

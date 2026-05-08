@@ -51,7 +51,11 @@ fn reference_attention(
             for j in (i + 1)..seq_len {
                 scores[[i, j]] = -1e9;
             }
-            let max_val = scores.row(i).iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let max_val = scores
+                .row(i)
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
             let mut sum = 0.0f64;
             for j in 0..seq_len {
                 let e = ((scores[[i, j]] - max_val) as f64).exp();
@@ -151,18 +155,28 @@ fn main() {
         let k = synth_matrix(seq, nkv * hd, 200 + seq as u64);
         let v = synth_matrix(seq, nkv * hd, 300 + seq as u64);
 
-        let iters = if seq <= 24 { 200 } else if seq <= 96 { 50 } else { 10 };
+        let iters = if seq <= 24 {
+            200
+        } else if seq <= 96 {
+            50
+        } else {
+            10
+        };
 
         let fused_us = bench(
             &format!("Fused     seq={seq:<4} ({nq} heads, hd={hd})"),
             iters,
-            || { let _ = gqa_attention(&q, &k, &v, nq, hd, reps, scale, seq); },
+            || {
+                let _ = gqa_attention(&q, &k, &v, nq, hd, reps, scale, seq);
+            },
         );
 
         let ref_us = bench(
             &format!("Reference seq={seq:<4} ({nq} heads, hd={hd})"),
             iters,
-            || { let _ = reference_attention(&q, &k, &v, nq, hd, reps, scale as f32, seq); },
+            || {
+                let _ = reference_attention(&q, &k, &v, nq, hd, reps, scale as f32, seq);
+            },
         );
 
         let ratio = ref_us / fused_us.max(0.1);
@@ -170,7 +184,10 @@ fn main() {
         if ratio > 1.0 {
             println!("    -> Fused {ratio:.1}x faster, saves {scores_kb:.1}KB scores matrix\n");
         } else {
-            println!("    -> Reference {:.1}x faster, scores matrix = {scores_kb:.1}KB\n", 1.0 / ratio);
+            println!(
+                "    -> Reference {:.1}x faster, scores matrix = {scores_kb:.1}KB\n",
+                1.0 / ratio
+            );
         }
     }
 
@@ -191,13 +208,17 @@ fn main() {
         let fused_us = bench(
             &format!("Fused     hd={hd:<4} ({nq} heads, seq={seq})"),
             200,
-            || { let _ = gqa_attention(&q, &k, &v, nq, hd, reps, scale, seq); },
+            || {
+                let _ = gqa_attention(&q, &k, &v, nq, hd, reps, scale, seq);
+            },
         );
 
         let ref_us = bench(
             &format!("Reference hd={hd:<4} ({nq} heads, seq={seq})"),
             200,
-            || { let _ = reference_attention(&q, &k, &v, nq, hd, reps, scale as f32, seq); },
+            || {
+                let _ = reference_attention(&q, &k, &v, nq, hd, reps, scale as f32, seq);
+            },
         );
 
         let ratio = ref_us / fused_us.max(0.1);
@@ -244,7 +265,10 @@ fn main() {
 
     // ── 6. Memory comparison ──
     println!("--- Memory: Materialized vs Fused ---\n");
-    println!("  {:>6}  {:>10}  {:>10}  {:>8}", "seq", "scores_mat", "fused_acc", "savings");
+    println!(
+        "  {:>6}  {:>10}  {:>10}  {:>8}",
+        "seq", "scores_mat", "fused_acc", "savings"
+    );
     for &seq in &[6, 24, 128, 512, 1024, 2048] {
         let scores_bytes = seq * seq * nq * std::mem::size_of::<f32>();
         let fused_bytes = seq * 256 * std::mem::size_of::<f64>(); // acc per position, head_dim=256

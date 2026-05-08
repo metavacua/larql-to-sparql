@@ -33,11 +33,8 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use larql_vindex::{
-    SilentLoadCallbacks, VectorIndex,
-    load_vindex_config,
-};
 use larql_models::quant::{ggml, half};
+use larql_vindex::{load_vindex_config, SilentLoadCallbacks, VectorIndex};
 
 fn rss_mb() -> f64 {
     #[cfg(target_os = "macos")]
@@ -153,9 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
         a_times.push(elapsed_ms);
-        println!(
-            "  iter {iter}: {elapsed_ms:7.1}ms  (checksum {sum:+.4e})"
-        );
+        println!("  iter {iter}: {elapsed_ms:7.1}ms  (checksum {sum:+.4e})");
     }
 
     // ── Approach B: dequantize gate slice from interleaved_q4k.bin, pack as f16 ──
@@ -220,7 +215,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n── Summary ──");
     println!("  A (gate_vectors.bin mmap touch):  median {a_med:7.1}ms");
     println!("  B (Q4K dequant → f16 buffer):     median {b_med:7.1}ms   (peak RSS +{peak_rss_delta:.1} MB)");
-    println!("  B − A:  {:+.1}ms startup cost, saves {gate_gb:.2} GB on disk", b_med - a_med);
+    println!(
+        "  B − A:  {:+.1}ms startup cost, saves {gate_gb:.2} GB on disk",
+        b_med - a_med
+    );
     println!(
         "\n  Per-layer avg (approach B): {:.1}ms",
         b_med / num_layers as f64

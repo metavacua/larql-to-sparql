@@ -7,13 +7,13 @@
 //!   cargo run --example multi_turn_demo
 
 fn main() {
-    use kv_cache_benchmark::*;
     use kv_cache_benchmark::benchmark;
+    use kv_cache_benchmark::graph_walk::GraphWalk;
+    use kv_cache_benchmark::markov_residual::MarkovResidual;
     use kv_cache_benchmark::model_config::ModelConfig;
     use kv_cache_benchmark::standard_kv::StandardKv;
     use kv_cache_benchmark::turboquant::TurboQuant;
-    use kv_cache_benchmark::markov_residual::MarkovResidual;
-    use kv_cache_benchmark::graph_walk::GraphWalk;
+    use kv_cache_benchmark::*;
 
     let config = ModelConfig::gemma_4b();
     let num_turns = 25;
@@ -55,7 +55,10 @@ fn main() {
 
     // Summary
     let final_tokens = num_turns * tokens_per_turn;
-    println!("\n=== At {} tokens (turn {}) ===\n", final_tokens, num_turns);
+    println!(
+        "\n=== At {} tokens (turn {}) ===\n",
+        final_tokens, num_turns
+    );
 
     let strategies: Vec<(&str, usize)> = vec![
         ("Standard KV", standard.memory_bytes(&config, final_tokens)),
@@ -66,8 +69,17 @@ fn main() {
 
     let baseline = strategies[0].1;
     for (name, mem) in &strategies {
-        let ratio = if *mem > 0 { baseline as f64 / *mem as f64 } else { 0.0 };
-        println!("  {:<15} {:>12}  ({:.1}× vs baseline)", name, format_bytes(*mem), ratio);
+        let ratio = if *mem > 0 {
+            baseline as f64 / *mem as f64
+        } else {
+            0.0
+        };
+        println!(
+            "  {:<15} {:>12}  ({:.1}× vs baseline)",
+            name,
+            format_bytes(*mem),
+            ratio
+        );
     }
 
     // Full comparative table (KV-reconstructing strategies only).
@@ -76,10 +88,14 @@ fn main() {
 
     // Crossover analysis
     println!("\n=== Crossover Analysis ===\n");
-    println!("Standard KV grows linearly: every turn adds {} per token",
-        format_bytes(config.kv_bytes_per_token()));
+    println!(
+        "Standard KV grows linearly: every turn adds {} per token",
+        format_bytes(config.kv_bytes_per_token())
+    );
     println!("Markov RS is bounded: window = 512 tokens, cold tier = 4 bytes/token");
-    println!("Graph Walk is constant: per-conversation = token IDs only (requires cracked attention)");
+    println!(
+        "Graph Walk is constant: per-conversation = token IDs only (requires cracked attention)"
+    );
 
     // Find crossover point where Markov RS < Standard KV
     for turn in 1..=50 {
@@ -87,7 +103,10 @@ fn main() {
         let std_mem = standard.memory_bytes(&config, tokens);
         let mrk_mem = markov.memory_bytes(&config, tokens);
         if mrk_mem < std_mem {
-            println!("\nMarkov RS < Standard KV at turn {} ({} tokens)", turn, tokens);
+            println!(
+                "\nMarkov RS < Standard KV at turn {} ({} tokens)",
+                turn, tokens
+            );
             break;
         }
     }

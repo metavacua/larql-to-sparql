@@ -15,7 +15,6 @@ pub enum StorageDtype {
     F16,
 }
 
-
 impl std::fmt::Display for StorageDtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -45,9 +44,8 @@ pub fn write_floats(
 pub fn encode_floats(data: &[f32], dtype: StorageDtype) -> Vec<u8> {
     match dtype {
         StorageDtype::F32 => {
-            let bytes: &[u8] = unsafe {
-                std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4)
-            };
+            let bytes: &[u8] =
+                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
             bytes.to_vec()
         }
         StorageDtype::F16 => larql_models::quant::half::encode_f16(data),
@@ -58,9 +56,8 @@ pub fn encode_floats(data: &[f32], dtype: StorageDtype) -> Vec<u8> {
 pub fn decode_floats(data: &[u8], dtype: StorageDtype) -> Vec<f32> {
     match dtype {
         StorageDtype::F32 => {
-            let floats: &[f32] = unsafe {
-                std::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4)
-            };
+            let floats: &[f32] =
+                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4) };
             floats.to_vec()
         }
         StorageDtype::F16 => larql_models::quant::half::decode_f16(data),

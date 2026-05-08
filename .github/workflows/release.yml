@@ -1,0 +1,226 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release workflow (release.yml).
+#
+# This workflow is independent from the CI gate (ci.yml). It provides reference
+# implementations for semantic versioning and release readiness checks without
+# blocking PR validation. Runs on manual trigger or post-merge to main.
+#
+# Jobs in this workflow:
+#   - version-preflight: Compute SemVer bump from commit history
+#   - semver-surface: Cross-check API delta against commit-derived bump
+#   - semantic-release-dry-run: Independent SemVer reference implementation
+#
+# None of these jobs publish, tag, or otherwise mutate the repository or remote.
+# They are deterministic analysis tools whose purpose is to validate release
+# readiness and keep the SemVer derivation transparent.
+
+name: release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # =========================================================================
+  # SemVer Preflight: Deterministic bump derivation
+  # =========================================================================
+
+  version-preflight:
+    name: version-preflight (SemVer derivation)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next SemVer
+        id: semver
+        run: |
+          # Assuming scripts/version_preflight.sh exists and produces:
+          # base_version, bump_kind, next_version
+          bash scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
+
+  # =========================================================================
+  # SemVer Surface: Cross-check API delta vs commit-derived bump
+  # =========================================================================
+
+  semver-surface:
+    name: semver-surface (API delta consistency check)
+    runs-on: ubuntu-24.04
+    needs: version-preflight
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-semver
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+
+      - name: Recompute bump_kind for cross-check
+        id: bump
+        run: |
+          bash scripts/version_preflight.sh \
+            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+      - name: cargo semver-checks (baseline = PR base)
+        id: semverchk
+        run: |
+          set +e
+          cargo semver-checks check-release \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            --baseline-rev "${{ github.event.pull_request.base.sha }}" \
+            2>&1 | tee semver-checks.log
+          rc="${PIPESTATUS[0]}"
+          echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cross-check API delta vs commit-derived bump
+        run: |
+          bump_kind="${{ steps.bump.outputs.bump_kind }}"
+          rc="${{ steps.semverchk.outputs.exit_code }}"
+          echo "version_preflight bump_kind=${bump_kind}"
+          echo "cargo-semver-checks exit_code=${rc}"
+
+          if [[ ! -s semver-checks.log ]]; then
+            echo "::error::cargo-semver-checks produced no output; treating as tool error."
+            exit 1
+          fi
+
+          summary_seen=0
+          fail_seen=0
+          if grep -qE '^[[:space:]]*Summary' semver-checks.log; then
+            summary_seen=1
+          fi
+          if grep -qE '(FAIL|major version bump required)' semver-checks.log; then
+            fail_seen=1
+          fi
+
+          if [[ "$rc" == "0" ]]; then
+            echo "API delta is non-breaking; bump_kind '${bump_kind}' is acceptable."
+            exit 0
+          fi
+
+          if (( summary_seen == 0 )); then
+            echo "::warning title=semver-surface inconclusive::cargo-semver-checks did not produce a verdict. Please inspect the logs."
+            exit 0
+          fi
+
+          if (( fail_seen == 1 )) && [[ "$bump_kind" != "major" ]]; then
+            echo "::error::API-breaking change detected but commit-derived bump is '${bump_kind}'."
+            echo "::error::Amend the offending commit so its header carries '!' or its body includes a 'BREAKING CHANGE:' footer."
+            exit 1
+          fi
+
+          if (( fail_seen == 1 )); then
+            echo "API delta is breaking; commits already declare major. Consistent."
+          else
+            echo "::warning title=semver-surface ambiguous::cargo-semver-checks reported non-zero without a FAIL line. Treating as inconclusive."
+            exit 0
+          fi
+
+  # =========================================================================
+  # Semantic Release Dry-Run: Independent SemVer reference
+  # =========================================================================
+
+  semantic-release-dry-run:
+    name: semantic-release-dry-run (reference implementation)
+    runs-on: ubuntu-24.04
+    needs: version-preflight
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve branch name for semantic-release
+        id: branch
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            branch="${{ github.event.pull_request.head.ref }}"
+          else
+            branch="${GITHUB_REF##*/}"
+          fi
+          git checkout -B "${branch}"
+          echo "name=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Write semantic-release config to workspace
+        run: |
+          cat > .releaserc.json <<EOF
+          {
+            "branches": ["main", "${{ steps.branch.outputs.name }}"],
+            "plugins": [
+              "@semantic-release/commit-analyzer",
+              "@semantic-release/release-notes-generator"
+            ],
+            "tagFormat": "v\${version}",
+            "repositoryUrl": "https://github.com/${{ github.repository }}.git"
+          }
+          EOF
+
+      - name: semantic-release --dry-run
+        run: |
+          npx --yes \
+            --package=semantic-release@24 \
+            --package=@semantic-release/commit-analyzer@13 \
+            --package=@semantic-release/release-notes-generator@14 \
+            -- semantic-release --dry-run --no-ci

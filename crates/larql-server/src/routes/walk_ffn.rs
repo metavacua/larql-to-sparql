@@ -90,7 +90,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::Response;
 use larql_vindex::GateIndex as _;
 use serde::Deserialize;
@@ -127,8 +127,12 @@ pub struct WalkFfnRequest {
     pub full_output: bool,
 }
 
-fn default_seq_len() -> usize { 1 }
-fn default_top_k() -> usize { 8092 }
+fn default_seq_len() -> usize {
+    1
+}
+fn default_top_k() -> usize {
+    8092
+}
 
 // ── Typed output structs (shared by JSON + binary encoders) ──────────────────
 
@@ -148,14 +152,18 @@ pub(crate) struct FfnOutput {
 /// Decode a binary-format request body into a [`WalkFfnRequest`].
 pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, ServerError> {
     if body.len() < 16 {
-        return Err(ServerError::BadRequest("binary: body too short (need ≥ 16 bytes)".into()));
+        return Err(ServerError::BadRequest(
+            "binary: body too short (need ≥ 16 bytes)".into(),
+        ));
     }
 
     let first = u32::from_le_bytes(body[0..4].try_into().unwrap());
 
     let (layer, layers, header_end) = if first == BATCH_MARKER {
         if body.len() < 8 {
-            return Err(ServerError::BadRequest("binary batch: truncated num_layers".into()));
+            return Err(ServerError::BadRequest(
+                "binary batch: truncated num_layers".into(),
+            ));
         }
         let n = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
         let layers_end = 8 + n * 4;
@@ -165,9 +173,7 @@ pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, Serve
             )));
         }
         let layers: Vec<usize> = (0..n)
-            .map(|i| {
-                u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize
-            })
+            .map(|i| u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize)
             .collect();
         (None, Some(layers), layers_end)
     } else {
@@ -179,10 +185,8 @@ pub(crate) fn decode_binary_request(body: &[u8]) -> Result<WalkFfnRequest, Serve
             "binary: truncated fixed header (seq_len/flags/top_k)".into(),
         ));
     }
-    let seq_len =
-        u32::from_le_bytes(body[header_end..header_end + 4].try_into().unwrap()) as usize;
-    let flags =
-        u32::from_le_bytes(body[header_end + 4..header_end + 8].try_into().unwrap());
+    let seq_len = u32::from_le_bytes(body[header_end..header_end + 4].try_into().unwrap()) as usize;
+    let flags = u32::from_le_bytes(body[header_end + 4..header_end + 8].try_into().unwrap());
     let top_k =
         u32::from_le_bytes(body[header_end + 8..header_end + 12].try_into().unwrap()) as usize;
     let full_output = (flags & 1) != 0;
@@ -344,7 +348,9 @@ pub(crate) fn run_full_output_core(
     let walk_ffn = if is_q4k {
         None
     } else {
-        Some(larql_inference::vindex::WalkFfn::new_unlimited(weights, &*patched))
+        Some(larql_inference::vindex::WalkFfn::new_unlimited(
+            weights, &*patched,
+        ))
     };
 
     let hidden = model.config.hidden_size;
@@ -401,7 +407,11 @@ pub(crate) fn run_full_output_core(
     }
 
     let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok(FfnOutput { entries, seq_len, latency_ms })
+    Ok(FfnOutput {
+        entries,
+        seq_len,
+        latency_ms,
+    })
 }
 
 fn run_full_output(
@@ -457,10 +467,7 @@ fn run_features_only(
     }
 }
 
-fn run_walk_ffn(
-    state: &AppState,
-    req: &WalkFfnRequest,
-) -> Result<serde_json::Value, ServerError> {
+fn run_walk_ffn(state: &AppState, req: &WalkFfnRequest) -> Result<serde_json::Value, ServerError> {
     let model = state
         .model(None)
         .ok_or_else(|| ServerError::NotFound("no model loaded".into()))?;
@@ -549,8 +556,8 @@ pub async fn handle_walk_ffn(
     .await
     .map_err(|e| ServerError::Internal(e.to_string()))??;
 
-    let json_bytes = serde_json::to_vec(&result)
-        .map_err(|e| ServerError::Internal(e.to_string()))?;
+    let json_bytes =
+        serde_json::to_vec(&result).map_err(|e| ServerError::Internal(e.to_string()))?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/json")
@@ -705,8 +712,14 @@ mod tests {
     fn encode_batch_output() {
         let out = FfnOutput {
             entries: vec![
-                FfnEntry { layer: 5, output: vec![1.0f32, 2.0] },
-                FfnEntry { layer: 20, output: vec![3.0f32, 4.0] },
+                FfnEntry {
+                    layer: 5,
+                    output: vec![1.0f32, 2.0],
+                },
+                FfnEntry {
+                    layer: 20,
+                    output: vec![3.0f32, 4.0],
+                },
             ],
             seq_len: 1,
             latency_ms: 15.0,
@@ -772,8 +785,14 @@ mod tests {
     fn json_batch_format() {
         let out = FfnOutput {
             entries: vec![
-                FfnEntry { layer: 0, output: vec![1.0f32] },
-                FfnEntry { layer: 1, output: vec![2.0f32] },
+                FfnEntry {
+                    layer: 0,
+                    output: vec![1.0f32],
+                },
+                FfnEntry {
+                    layer: 1,
+                    output: vec![2.0f32],
+                },
             ],
             seq_len: 2,
             latency_ms: 20.0,
