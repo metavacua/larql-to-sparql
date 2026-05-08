@@ -9,8 +9,8 @@ keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-models = { path = "../larql-models" }
-larql-compute = { path = "../larql-compute" }
+larql-models = { path = "../larql-models", version = "0.1.0" }
+larql-compute = { path = "../larql-compute", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -7,11 +7,11 @@ license.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
 [dependencies]
-larql-compute = { path = "../larql-compute" }
-larql-core = { path = "../larql-core" }
-larql-inference = { path = "../larql-inference" }
-larql-models = { path = "../larql-models" }
-larql-vindex = { path = "../larql-vindex" }
+larql-compute = { path = "../larql-compute", version = "0.1.0" }
+larql-core = { path = "../larql-core", version = "0.1.0" }
+larql-inference = { path = "../larql-inference", version = "0.1.0" }
+larql-models = { path = "../larql-models", version = "0.1.0" }
+larql-vindex = { path = "../larql-vindex", version = "0.1.0" }
 ndarray = "0.16"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rustyline = "15"

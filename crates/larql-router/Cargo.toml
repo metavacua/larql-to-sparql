@@ -11,7 +11,7 @@ name = "larql-router"
 path = "src/main.rs"
 
 [dependencies]
-larql-router-protocol = { path = "../larql-router-protocol" }
+larql-router-protocol = { path = "../larql-router-protocol", version = "0.1.0" }
 
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }

@@ -15,10 +15,10 @@ name = "larql-server"
 path = "src/main.rs"
 
 [dependencies]
-larql-vindex = { path = "../larql-vindex" }
-larql-inference = { path = "../larql-inference" }
-larql-models = { path = "../larql-models" }
-larql-router-protocol = { path = "../larql-router-protocol" }
+larql-vindex = { path = "../larql-vindex", version = "0.1.0" }
+larql-inference = { path = "../larql-inference", version = "0.1.0" }
+larql-models = { path = "../larql-models", version = "0.1.0" }
+larql-router-protocol = { path = "../larql-router-protocol", version = "0.1.0" }
 
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
@@ -38,7 +38,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-larql-compute = { path = "../larql-compute" }
+larql-compute = { path = "../larql-compute", version = "0.1.0" }
 
 [build-dependencies]
 tonic-build = "0.13"

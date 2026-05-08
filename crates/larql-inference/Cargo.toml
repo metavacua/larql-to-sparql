@@ -9,10 +9,10 @@ keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-models = { path = "../larql-models" }
-larql-compute = { path = "../larql-compute" }
-larql-core = { path = "../larql-core" }
-larql-vindex = { path = "../larql-vindex" }
+larql-models = { path = "../larql-models", version = "0.1.0" }
+larql-compute = { path = "../larql-compute", version = "0.1.0" }
+larql-core = { path = "../larql-core", version = "0.1.0" }
+larql-vindex = { path = "../larql-vindex", version = "0.1.0" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -37,8 +37,8 @@ tokenizers = "0.21"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 # WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+wasmtime = { version = "43.0.1", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = "43.0.1"
 anyhow = "1"
 
 
