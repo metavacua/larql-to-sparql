@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Linux/WSL2 support + temperature parameter
 - Add Android NDK setup to cross-platform-build workflow
 - Address PR #29 review feedback and surface known build issues
+- Address cargo deny failures with explicit path dependency versions and wasmtime upgrade
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
 - Align license enforcement with audited multi-license tree
