@@ -6,11 +6,11 @@
 //! - `block`: CPU attention block (norm → proj → RoPE → GQA → O → residual)
 //! - `gpu`: GPU-accelerated attention, KV-capture, Q4 projection
 
-pub mod rope;
-pub mod gqa;
 pub mod block;
 pub mod decode;
 pub mod gpu;
+pub mod gqa;
+pub mod rope;
 
 use ndarray::Array2;
 
@@ -26,11 +26,17 @@ pub type SharedKV = (Array2<f32>, Array2<f32>);
 
 // ── Re-exports: preserve `crate::attention::*` paths ──
 
-pub use rope::{apply_rope, apply_rope_partial, apply_rope_partial_at};
-pub use gqa::{gqa_attention, gqa_attention_with_weights};
-pub use block::{run_attention_block, run_attention_block_shared, run_attention_block_with_kv_out, run_attention_block_with_pre_o};
+pub use block::{
+    run_attention_block, run_attention_block_shared, run_attention_block_with_kv_out,
+    run_attention_block_with_pre_o,
+};
 pub use decode::{
     gqa_attention_decode_step, run_attention_block_decode_step,
     run_attention_block_decode_step_backend, KvCache,
 };
-pub use gpu::{run_attention_block_gpu, run_attention_with_kv, run_attention_with_kv_backend, q4_attention_proj};
+pub use gpu::{
+    q4_attention_proj, run_attention_block_gpu, run_attention_with_kv,
+    run_attention_with_kv_backend,
+};
+pub use gqa::{gqa_attention, gqa_attention_with_weights};
+pub use rope::{apply_rope, apply_rope_partial, apply_rope_partial_at};

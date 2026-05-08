@@ -30,9 +30,13 @@ fn demo_embeddings() -> (Array2<f32>, f32) {
     embed[[2, 2]] = 1.0;
     embed[[3, 3]] = 1.0;
     // blended tokens (simulate subword pieces)
-    embed[[4, 0]] = 0.7; embed[[4, 1]] = 0.7;
-    embed[[5, 1]] = 0.6; embed[[5, 2]] = 0.8;
-    embed[[6, 2]] = 0.5; embed[[6, 3]] = 0.5; embed[[6, 0]] = 0.5;
+    embed[[4, 0]] = 0.7;
+    embed[[4, 1]] = 0.7;
+    embed[[5, 1]] = 0.6;
+    embed[[5, 2]] = 0.8;
+    embed[[6, 2]] = 0.5;
+    embed[[6, 3]] = 0.5;
+    embed[[6, 0]] = 0.5;
     embed[[7, 3]] = 1.0;
 
     (embed, scale)
@@ -87,9 +91,16 @@ fn demo_embed(embed: &Array2<f32>, scale: f32, token_ids: &[u32]) {
 /// (tied weights — exact pattern used by Gemma 3/4).
 fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
     let vocab = embed.shape()[0];
-    println!("Request:  {{ \"residual\": [{}...], \"top_k\": {} }}",
-        residual.iter().take(4).map(|v| format!("{:.2}", v)).collect::<Vec<_>>().join(", "),
-        top_k);
+    println!(
+        "Request:  {{ \"residual\": [{}...], \"top_k\": {} }}",
+        residual
+            .iter()
+            .take(4)
+            .map(|v| format!("{:.2}", v))
+            .collect::<Vec<_>>()
+            .join(", "),
+        top_k
+    );
     let start = std::time::Instant::now();
 
     // Compute scores = embed @ residual (one dot product per token)
@@ -102,7 +113,10 @@ fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
         .collect();
 
     // Softmax
-    let max_score = scores.iter().map(|(_, s)| *s).fold(f32::NEG_INFINITY, f32::max);
+    let max_score = scores
+        .iter()
+        .map(|(_, s)| *s)
+        .fold(f32::NEG_INFINITY, f32::max);
     let exp: Vec<f32> = scores.iter().map(|(_, s)| (s - max_score).exp()).collect();
     let sum: f32 = exp.iter().sum();
     let probs: Vec<f32> = exp.iter().map(|e| e / sum).collect();
@@ -119,8 +133,12 @@ fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
     println!("Response: {{");
     println!("  \"top_k\": [");
     for (token_id, prob) in &scores {
-        println!("    {{ \"token_id\": {}, \"token\": {:?}, \"prob\": {:.4} }},",
-            token_id, token_name(*token_id), prob);
+        println!(
+            "    {{ \"token_id\": {}, \"token\": {:?}, \"prob\": {:.4} }},",
+            token_id,
+            token_name(*token_id),
+            prob
+        );
     }
     println!("  ],");
     println!("  \"latency_ms\": {:.4}", ms);
@@ -132,22 +150,41 @@ fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
 fn demo_token_encode(text: &str) {
     // Simple lookup: split on spaces, match against our tiny vocab.
     let mapping = [
-        ("The", 0u32), ("capital", 1), ("of", 2), ("France", 3),
-        ("is", 4), ("Paris", 5), ("Berlin", 6), ("London", 7),
+        ("The", 0u32),
+        ("capital", 1),
+        ("of", 2),
+        ("France", 3),
+        ("is", 4),
+        ("Paris", 5),
+        ("Berlin", 6),
+        ("London", 7),
     ];
-    let ids: Vec<u32> = text.split_whitespace()
+    let ids: Vec<u32> = text
+        .split_whitespace()
         .filter_map(|w| mapping.iter().find(|(k, _)| *k == w).map(|(_, id)| *id))
         .collect();
 
     println!("GET /v1/token/encode?text={:?}", text);
-    println!("Response: {{ \"token_ids\": {:?}, \"text\": {:?} }}", ids, text);
+    println!(
+        "Response: {{ \"token_ids\": {:?}, \"text\": {:?} }}",
+        ids, text
+    );
 }
 
 fn demo_token_decode(ids: &[u32]) {
     let text: Vec<&str> = ids.iter().map(|&id| token_name(id)).collect();
     let decoded = text.join(" ");
-    println!("GET /v1/token/decode?ids={}", ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","));
-    println!("Response: {{ \"text\": {:?}, \"token_ids\": {:?} }}", decoded, ids);
+    println!(
+        "GET /v1/token/decode?ids={}",
+        ids.iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    println!(
+        "Response: {{ \"text\": {:?}, \"token_ids\": {:?} }}",
+        decoded, ids
+    );
 }
 
 // ── Binary wire format demonstration ─────────────────────────────────────────
@@ -162,7 +199,11 @@ fn demo_binary_wire() {
     for &id in &token_ids {
         embed_req.extend_from_slice(&id.to_le_bytes());
     }
-    println!("Embed request  ({} bytes): {:?}", embed_req.len(), &embed_req[..embed_req.len().min(16)]);
+    println!(
+        "Embed request  ({} bytes): {:?}",
+        embed_req.len(),
+        &embed_req[..embed_req.len().min(16)]
+    );
 
     // Embed response: [seq_len u32][hidden_size u32][floats]
     let seq_len = 3u32;
@@ -173,13 +214,20 @@ fn demo_binary_wire() {
     for _ in 0..seq_len * hidden {
         embed_resp.extend_from_slice(&0.5f32.to_le_bytes());
     }
-    println!("Embed response ({} bytes): seq_len={seq_len}, hidden={hidden}, payload={} bytes",
-        embed_resp.len(), seq_len * hidden * 4);
+    println!(
+        "Embed response ({} bytes): seq_len={seq_len}, hidden={hidden}, payload={} bytes",
+        embed_resp.len(),
+        seq_len * hidden * 4
+    );
 
     // Logits request: raw [f32 × hidden_size]
     let residual = [0.1f32, 0.2, 0.3, 0.4];
     let logits_req: Vec<u8> = residual.iter().flat_map(|v| v.to_le_bytes()).collect();
-    println!("Logits request  ({} bytes): {:?}", logits_req.len(), &residual);
+    println!(
+        "Logits request  ({} bytes): {:?}",
+        logits_req.len(),
+        &residual
+    );
 }
 
 // ── Stats response ────────────────────────────────────────────────────────────
@@ -212,7 +260,12 @@ fn main() {
     println!("In production: larql-server <vindex> --embed-only --port 8082");
 
     let (embed, scale) = demo_embeddings();
-    println!("\nEmbeddings: {}×{} matrix, scale={}", embed.shape()[0], embed.shape()[1], scale);
+    println!(
+        "\nEmbeddings: {}×{} matrix, scale={}",
+        embed.shape()[0],
+        embed.shape()[1],
+        scale
+    );
 
     // ── POST /v1/embed ────────────────────────────────────────────────────
     section("POST /v1/embed — single token (decode step)");

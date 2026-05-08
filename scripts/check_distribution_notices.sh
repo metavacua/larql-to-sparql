@@ -9,19 +9,38 @@
 #   - Python wheel (if built): license classifier + NOTICE in dist-info
 #   - Example binaries: spot-check for NOTICE text in help/about
 #
-# This check is informational and does not block PR merge. Failures are
-# reported as warnings with remediation suggestions.
+# This check is informational and does not block PR merge. Missing notices
+# are reported as `::warning::` annotations with remediation suggestions, but
+# the script always exits 0 so it can run with `continue-on-error: true`
+# semantics without flipping the build status to red.
 #
 # Exit codes:
-#   0  All checks passed (or were skipped because no artifacts found)
-#   1  At least one check found a missing notice (warning, not error)
-#   2  Toolchain misconfiguration
+#   0  Always (this check is informational; warnings surface in the run summary)
+#
+# Dependencies:
+#   unzip               (preferred: inspects wheel ZIP archives)
+#   python3 -m zipfile  (fallback if unzip is unavailable)
+#   If neither is present, the wheel check emits a warning and is skipped.
 
 set -euo pipefail
 
 fail=0
 
 echo "check_distribution_notices: Starting post-build validation..."
+
+# -------------------------------------------------------------------------
+# Detect ZIP-inspection backend up front so the wheel check has a clear
+# decision point. We prefer `unzip` (faster, ubiquitous on Linux) but fall
+# back to `python3 -m zipfile`. Both are read-only and side-effect-free.
+# -------------------------------------------------------------------------
+zip_backend=""
+if command -v unzip >/dev/null 2>&1; then
+  zip_backend="unzip"
+elif command -v python3 >/dev/null 2>&1; then
+  zip_backend="python3"
+else
+  echo "::warning::check_distribution_notices: neither 'unzip' nor 'python3' is available; wheel inspection will be skipped" >&2
+fi
 
 # =========================================================================
 # Check 1: cargo doc output includes LICENSE and NOTICE
@@ -50,8 +69,8 @@ fi
 # Check 2: Python wheel includes license metadata and NOTICE
 # =========================================================================
 wheel_count=$(find target -name "*.whl" -type f 2>/dev/null | wc -l)
-if (( wheel_count > 0 )); then
-  echo "check_distribution_notices: Found $wheel_count wheel(s); validating..."
+if (( wheel_count > 0 )) && [[ -n "$zip_backend" ]]; then
+  echo "check_distribution_notices: Found $wheel_count wheel(s); validating with $zip_backend..."
 
   # Extract first wheel for inspection
   first_wheel=$(find target -name "*.whl" -type f -print -quit 2>/dev/null)
@@ -59,19 +78,39 @@ if (( wheel_count > 0 )); then
     wheel_name=$(basename "$first_wheel")
     echo "  Checking: $wheel_name"
 
-    # Wheels are ZIP files; extract and check METADATA for license classifier
-    if unzip -l "$first_wheel" | grep -q "METADATA"; then
-      if unzip -p "$first_wheel" "*/METADATA" | grep -q "License::"; then
+    # Helper: list files in the wheel (one per line)
+    list_wheel() {
+      if [[ "$zip_backend" == "unzip" ]]; then
+        unzip -l "$1" | awk 'NR>3 {print $NF}'
+      else
+        python3 -m zipfile -l "$1" | awk 'NR>1 {print $1}'
+      fi
+    }
+
+    # Helper: dump the contents of a single file inside the wheel to stdout
+    cat_wheel_member() {
+      local wheel="$1" member="$2"
+      if [[ "$zip_backend" == "unzip" ]]; then
+        unzip -p "$wheel" "$member"
+      else
+        python3 -c "import sys, zipfile; print(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]).decode('utf-8', 'replace'))" "$wheel" "$member"
+      fi
+    }
+
+    # Wheels are ZIP files; check METADATA for license classifier
+    metadata_path="$(list_wheel "$first_wheel" | grep -E '\.dist-info/METADATA$' | head -n1)"
+    if [[ -n "$metadata_path" ]]; then
+      if cat_wheel_member "$first_wheel" "$metadata_path" | grep -q "License::"; then
         echo "check_distribution_notices: ✓ wheel METADATA includes license classifier"
       else
         echo "::warning::check_distribution_notices: wheel METADATA missing license classifier" >&2
-        echo "  Remediation: Ensure setup.py/pyproject.toml includes classifiers = ['License :: OSI Approved :: Apache Software License', ...]" >&2
+        echo "  Remediation: Ensure pyproject.toml includes classifiers = ['License :: OSI Approved :: Apache Software License', ...]" >&2
         ((fail++))
       fi
     fi
 
     # Check for NOTICE in dist-info directory
-    if unzip -l "$first_wheel" | grep -qE "[^/]*\.dist-info/NOTICE"; then
+    if list_wheel "$first_wheel" | grep -qE '\.dist-info/NOTICE$'; then
       echo "check_distribution_notices: ✓ wheel includes NOTICE in dist-info"
     else
       echo "::warning::check_distribution_notices: wheel missing NOTICE in dist-info" >&2
@@ -79,6 +118,8 @@ if (( wheel_count > 0 )); then
       ((fail++))
     fi
   fi
+elif (( wheel_count > 0 )); then
+  echo "::warning::check_distribution_notices: $wheel_count wheel(s) found but no ZIP-inspection backend (unzip/python3) is available; skipped"
 else
   echo "check_distribution_notices: ⊘ no .whl found (skipped Python wheel check)"
 fi

@@ -47,10 +47,8 @@ pub struct Session {
     /// `refine_demo` 10-fact run where every prompt returned the
     /// last-installed target before this cache existed).
     #[allow(dead_code)]
-    pub(crate) raw_install_residuals: std::collections::HashMap<
-        (usize, usize),
-        larql_vindex::ndarray::Array1<f32>,
-    >,
+    pub(crate) raw_install_residuals:
+        std::collections::HashMap<(usize, usize), larql_vindex::ndarray::Array1<f32>>,
     /// Per-install fact metadata. Enables cross-fact balance: when a
     /// new INSERT's local balance converges, we replay every prior
     /// install's canonical prompt through INFER and scale the NEW
@@ -118,62 +116,127 @@ impl Session {
             }
             Statement::Use { target } => self.exec_use(target),
             Statement::Stats { vindex } => self.exec_stats(vindex.as_deref()),
-            Statement::Walk { prompt, top, layers, mode, compare } => {
-                self.exec_walk(prompt, *top, layers.as_ref(), *mode, *compare)
-            }
-            Statement::Describe { entity, band, layer, relations_only, mode } => {
-                self.exec_describe(entity, *band, *layer, *relations_only, *mode)
-            }
-            Statement::Select { source, fields, conditions, nearest, order, limit } => {
-                match source {
-                    SelectSource::Edges => self.exec_select(fields, conditions, nearest.as_ref(), order.as_ref(), *limit),
-                    SelectSource::Features => self.exec_select_features(conditions, *limit),
-                    SelectSource::Entities => self.exec_select_entities(conditions, *limit),
+            Statement::Walk {
+                prompt,
+                top,
+                layers,
+                mode,
+                compare,
+            } => self.exec_walk(prompt, *top, layers.as_ref(), *mode, *compare),
+            Statement::Describe {
+                entity,
+                band,
+                layer,
+                relations_only,
+                mode,
+            } => self.exec_describe(entity, *band, *layer, *relations_only, *mode),
+            Statement::Select {
+                source,
+                fields,
+                conditions,
+                nearest,
+                order,
+                limit,
+            } => match source {
+                SelectSource::Edges => {
+                    self.exec_select(fields, conditions, nearest.as_ref(), order.as_ref(), *limit)
                 }
-            }
-            Statement::Explain { prompt, mode, layers, band, verbose, top, relations_only, with_attention } => {
-                match mode {
-                    ExplainMode::Walk => self.exec_explain(prompt, layers.as_ref(), *verbose),
-                    ExplainMode::Infer => self.exec_infer_trace(prompt, *top, *band, *relations_only, *with_attention),
+                SelectSource::Features => self.exec_select_features(conditions, *limit),
+                SelectSource::Entities => self.exec_select_entities(conditions, *limit),
+            },
+            Statement::Explain {
+                prompt,
+                mode,
+                layers,
+                band,
+                verbose,
+                top,
+                relations_only,
+                with_attention,
+            } => match mode {
+                ExplainMode::Walk => self.exec_explain(prompt, layers.as_ref(), *verbose),
+                ExplainMode::Infer => {
+                    self.exec_infer_trace(prompt, *top, *band, *relations_only, *with_attention)
                 }
-            }
-            Statement::ShowRelations { layer, with_examples, mode } => {
-                self.exec_show_relations(*layer, *with_examples, *mode)
-            }
+            },
+            Statement::ShowRelations {
+                layer,
+                with_examples,
+                mode,
+            } => self.exec_show_relations(*layer, *with_examples, *mode),
             Statement::ShowLayers { range } => self.exec_show_layers(range.as_ref()),
-            Statement::ShowFeatures { layer, conditions, limit } => {
-                self.exec_show_features(*layer, conditions, *limit)
-            }
-            Statement::ShowEntities { layer, limit } => {
-                self.exec_show_entities(*layer, *limit)
-            }
+            Statement::ShowFeatures {
+                layer,
+                conditions,
+                limit,
+            } => self.exec_show_features(*layer, conditions, *limit),
+            Statement::ShowEntities { layer, limit } => self.exec_show_entities(*layer, *limit),
             Statement::ShowModels => self.exec_show_models(),
             Statement::ShowCompactStatus => self.exec_show_compact_status(),
             Statement::CompactMinor => self.exec_compact_minor(),
             Statement::CompactMajor { full, lambda } => self.exec_compact_major(*full, *lambda),
-            Statement::Extract { model, output, components, layers, extract_level } => {
-                self.exec_extract(model, output, components.as_deref(), layers.as_ref(), *extract_level)
-            }
-            Statement::Compile { vindex, output, format, target, on_conflict } => {
-                self.exec_compile(
-                    vindex, output, *format, *target, *on_conflict,
-                )
-            }
-            Statement::Diff { a, b, layer, relation, limit, into_patch } => {
-                self.exec_diff(a, b, *layer, relation.as_deref(), *limit, into_patch.as_deref())
-            }
-            Statement::Insert { entity, relation, target, layer, confidence, alpha, mode } => {
+            Statement::Extract {
+                model,
+                output,
+                components,
+                layers,
+                extract_level,
+            } => self.exec_extract(
+                model,
+                output,
+                components.as_deref(),
+                layers.as_ref(),
+                *extract_level,
+            ),
+            Statement::Compile {
+                vindex,
+                output,
+                format,
+                target,
+                on_conflict,
+            } => self.exec_compile(vindex, output, *format, *target, *on_conflict),
+            Statement::Diff {
+                a,
+                b,
+                layer,
+                relation,
+                limit,
+                into_patch,
+            } => self.exec_diff(
+                a,
+                b,
+                *layer,
+                relation.as_deref(),
+                *limit,
+                into_patch.as_deref(),
+            ),
+            Statement::Insert {
+                entity,
+                relation,
+                target,
+                layer,
+                confidence,
+                alpha,
+                mode,
+            } => {
                 let mut out = self.ensure_patch_session();
                 out.extend(self.exec_insert(
-                    entity, relation, target,
-                    *layer, *confidence, *alpha, *mode,
+                    entity,
+                    relation,
+                    target,
+                    *layer,
+                    *confidence,
+                    *alpha,
+                    *mode,
                 )?);
                 self.advance_epoch();
                 Ok(out)
             }
-            Statement::Infer { prompt, top, compare } => {
-                self.exec_infer(prompt, *top, *compare)
-            }
+            Statement::Infer {
+                prompt,
+                top,
+                compare,
+            } => self.exec_infer(prompt, *top, *compare),
             Statement::Delete { conditions } => {
                 let mut out = self.ensure_patch_session();
                 out.extend(self.exec_delete(conditions)?);
@@ -186,12 +249,16 @@ impl Session {
                 self.advance_epoch();
                 Ok(out)
             }
-            Statement::Merge { source, target, conflict } => {
-                self.exec_merge(source, target.as_deref(), *conflict)
-            }
-            Statement::Rebalance { max_iters, floor, ceiling } => {
-                self.exec_rebalance(*max_iters, *floor, *ceiling)
-            }
+            Statement::Merge {
+                source,
+                target,
+                conflict,
+            } => self.exec_merge(source, target.as_deref(), *conflict),
+            Statement::Rebalance {
+                max_iters,
+                floor,
+                ceiling,
+            } => self.exec_rebalance(*max_iters, *floor, *ceiling),
 
             // ── Patch commands ──
             Statement::BeginPatch { path } => self.exec_begin_patch(path),
@@ -200,9 +267,21 @@ impl Session {
             Statement::ShowPatches => self.exec_show_patches(),
             Statement::RemovePatch { path } => self.exec_remove_patch(path),
             // ── Trace commands ──
-            Statement::Trace { prompt, answer, decompose, layers, positions, save } => {
-                self.exec_trace(prompt, answer.as_deref(), *decompose, layers.as_ref(), *positions, save.as_deref())
-            }
+            Statement::Trace {
+                prompt,
+                answer,
+                decompose,
+                layers,
+                positions,
+                save,
+            } => self.exec_trace(
+                prompt,
+                answer.as_deref(),
+                *decompose,
+                layers.as_ref(),
+                *positions,
+                save.as_deref(),
+            ),
         }
     }
 
@@ -269,7 +348,10 @@ impl Session {
             path: path.to_string(),
             operations: if self.auto_patch {
                 // Keep existing operations from auto-patch
-                self.patch_recording.take().map(|r| r.operations).unwrap_or_default()
+                self.patch_recording
+                    .take()
+                    .map(|r| r.operations)
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             },
@@ -308,14 +390,18 @@ impl Session {
 
         let (ins, upd, del) = patch.counts();
         let path = PathBuf::from(&recording.path);
-        patch.save(&path)
+        patch
+            .save(&path)
             .map_err(|e| LqlError::exec("failed to save patch", e))?;
 
         self.auto_patch = false;
 
         Ok(vec![format!(
             "Saved: {} ({} inserts, {} updates, {} deletes)",
-            path.display(), ins, upd, del,
+            path.display(),
+            ins,
+            upd,
+            del,
         )])
     }
 
@@ -356,22 +442,41 @@ impl Session {
                 let name = patch.description.as_deref().unwrap_or("(unnamed)");
                 out.push(format!(
                     "  {}. {:<40} {} ops ({} ins, {} upd, {} del)",
-                    i + 1, name, patch.len(), ins, upd, del,
+                    i + 1,
+                    name,
+                    patch.len(),
+                    ins,
+                    upd,
+                    del,
                 ));
             }
             if patched.num_overrides() > 0 && patched.patches.is_empty() {
-                out.push(format!("  (anonymous session: {} overrides)", patched.num_overrides()));
+                out.push(format!(
+                    "  (anonymous session: {} overrides)",
+                    patched.num_overrides()
+                ));
             }
             let file_total: usize = patched.patches.iter().map(|p| p.len()).sum();
             let overlay_total = patched.num_overrides();
             if file_total > 0 || overlay_total > 0 {
-                out.push(format!("  Total: {} from files, {} in session", file_total, overlay_total));
+                out.push(format!(
+                    "  Total: {} from files, {} in session",
+                    file_total, overlay_total
+                ));
             }
         }
 
         if let Some(ref recording) = self.patch_recording {
-            let label = if recording.path.is_empty() { "(anonymous)" } else { &recording.path };
-            out.push(format!("  Recording: {} ({} ops pending)", label, recording.operations.len()));
+            let label = if recording.path.is_empty() {
+                "(anonymous)"
+            } else {
+                &recording.path
+            };
+            out.push(format!(
+                "  Recording: {} ({} ops pending)",
+                label,
+                recording.operations.len()
+            ));
         }
 
         Ok(out)
@@ -383,9 +488,10 @@ impl Session {
             _ => return Err(LqlError::NoBackend),
         };
 
-        let pos = patched.patches.iter().position(|p| {
-            p.description.as_deref() == Some(path)
-        });
+        let pos = patched
+            .patches
+            .iter()
+            .position(|p| p.description.as_deref() == Some(path));
         match pos {
             Some(i) => {
                 patched.remove_patch(i);
@@ -403,4 +509,3 @@ impl Session {
         self.mutations_since_major += 1;
     }
 }
-

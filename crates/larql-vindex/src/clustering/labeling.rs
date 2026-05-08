@@ -66,10 +66,8 @@ pub fn auto_label_clusters(
             .collect();
 
         let label = if top.is_empty() {
-            let mut freq: Vec<(String, usize)> = cluster_tok
-                .iter()
-                .map(|(t, &c)| (t.clone(), c))
-                .collect();
+            let mut freq: Vec<(String, usize)> =
+                cluster_tok.iter().map(|(t, &c)| (t.clone(), c)).collect();
             freq.sort_by(|a, b| b.1.cmp(&a.1));
             let fallback: Vec<String> = freq
                 .iter()
@@ -136,7 +134,12 @@ pub fn auto_label_clusters_from_embeddings(
 
     for (c, members) in cluster_member_embeds.iter().enumerate().take(k) {
         if members.is_empty() {
-            labels.push(tfidf_labels.get(c).cloned().unwrap_or_else(|| format!("cluster-{c}")));
+            labels.push(
+                tfidf_labels
+                    .get(c)
+                    .cloned()
+                    .unwrap_or_else(|| format!("cluster-{c}")),
+            );
             continue;
         }
 
@@ -161,10 +164,18 @@ pub fn auto_label_clusters_from_embeddings(
             // Fallback: check if members match known entity patterns
             let pattern_label = detect_entity_pattern(members);
             labels.push(pattern_label.unwrap_or_else(|| {
-                tfidf_labels.get(c).cloned().unwrap_or_else(|| format!("cluster-{c}"))
+                tfidf_labels
+                    .get(c)
+                    .cloned()
+                    .unwrap_or_else(|| format!("cluster-{c}"))
             }));
         } else {
-            labels.push(tfidf_labels.get(c).cloned().unwrap_or_else(|| format!("cluster-{c}")));
+            labels.push(
+                tfidf_labels
+                    .get(c)
+                    .cloned()
+                    .unwrap_or_else(|| format!("cluster-{c}")),
+            );
         }
     }
 
@@ -179,32 +190,118 @@ pub fn detect_entity_pattern(members: &[String]) -> Option<String> {
     }
 
     static COUNTRIES: &[&str] = &[
-        "australia", "china", "chinese", "japan", "japanese", "germany", "german",
-        "france", "french", "italy", "italian", "spain", "spanish", "russia", "russian",
-        "brazil", "brazil", "india", "indian", "canada", "canadian", "mexico", "mexican",
-        "britain", "british", "korea", "korean", "turkey", "turkish", "poland", "polish",
-        "sweden", "swedish", "norway", "norwegian", "portugal", "portuguese",
-        "netherlands", "dutch", "greece", "greek", "egypt", "egyptian",
-        "argentina", "iran", "iranian", "thailand", "thai", "vietnam", "vietnamese",
-        "indonesia", "indonesian", "malaysia", "malaysian", "philippines", "filipino",
+        "australia",
+        "china",
+        "chinese",
+        "japan",
+        "japanese",
+        "germany",
+        "german",
+        "france",
+        "french",
+        "italy",
+        "italian",
+        "spain",
+        "spanish",
+        "russia",
+        "russian",
+        "brazil",
+        "brazil",
+        "india",
+        "indian",
+        "canada",
+        "canadian",
+        "mexico",
+        "mexican",
+        "britain",
+        "british",
+        "korea",
+        "korean",
+        "turkey",
+        "turkish",
+        "poland",
+        "polish",
+        "sweden",
+        "swedish",
+        "norway",
+        "norwegian",
+        "portugal",
+        "portuguese",
+        "netherlands",
+        "dutch",
+        "greece",
+        "greek",
+        "egypt",
+        "egyptian",
+        "argentina",
+        "iran",
+        "iranian",
+        "thailand",
+        "thai",
+        "vietnam",
+        "vietnamese",
+        "indonesia",
+        "indonesian",
+        "malaysia",
+        "malaysian",
+        "philippines",
+        "filipino",
     ];
 
     static LANGUAGES: &[&str] = &[
-        "english", "french", "german", "spanish", "italian", "portuguese", "russian",
-        "chinese", "japanese", "korean", "arabic", "hindi", "bengali", "turkish",
-        "dutch", "polish", "swedish", "norwegian", "danish", "finnish", "greek",
-        "czech", "romanian", "hungarian", "thai", "vietnamese", "indonesian",
-        "malay", "tagalog", "swahili", "hebrew", "persian", "urdu",
+        "english",
+        "french",
+        "german",
+        "spanish",
+        "italian",
+        "portuguese",
+        "russian",
+        "chinese",
+        "japanese",
+        "korean",
+        "arabic",
+        "hindi",
+        "bengali",
+        "turkish",
+        "dutch",
+        "polish",
+        "swedish",
+        "norwegian",
+        "danish",
+        "finnish",
+        "greek",
+        "czech",
+        "romanian",
+        "hungarian",
+        "thai",
+        "vietnamese",
+        "indonesian",
+        "malay",
+        "tagalog",
+        "swahili",
+        "hebrew",
+        "persian",
+        "urdu",
     ];
 
     static MONTHS: &[&str] = &[
-        "january", "february", "march", "april", "may", "june",
-        "july", "august", "september", "october", "november", "december",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
     ];
 
     static NUMBERS: &[&str] = &[
-        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "first",
+        "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
     ];
 
     let lower_members: Vec<String> = members.iter().map(|m| m.to_lowercase()).collect();
@@ -213,30 +310,43 @@ pub fn detect_entity_pattern(members: &[String]) -> Option<String> {
 
     // Check languages BEFORE countries — many language names overlap
     // (french, german, spanish are both language and country-related)
-    let lang_hits = lower_members.iter().filter(|m| LANGUAGES.contains(&m.as_str())).count();
+    let lang_hits = lower_members
+        .iter()
+        .filter(|m| LANGUAGES.contains(&m.as_str()))
+        .count();
     if lang_hits >= threshold {
         return Some("language".into());
     }
 
-    let country_hits = lower_members.iter().filter(|m| COUNTRIES.contains(&m.as_str())).count();
+    let country_hits = lower_members
+        .iter()
+        .filter(|m| COUNTRIES.contains(&m.as_str()))
+        .count();
     if country_hits >= threshold {
         return Some("country".into());
     }
 
-    let month_hits = lower_members.iter().filter(|m| MONTHS.contains(&m.as_str())).count();
+    let month_hits = lower_members
+        .iter()
+        .filter(|m| MONTHS.contains(&m.as_str()))
+        .count();
     if month_hits >= threshold {
         return Some("month".into());
     }
 
-    let num_hits = lower_members.iter().filter(|m| NUMBERS.contains(&m.as_str())).count();
+    let num_hits = lower_members
+        .iter()
+        .filter(|m| NUMBERS.contains(&m.as_str()))
+        .count();
     if num_hits >= threshold {
         return Some("number".into());
     }
 
     // Morphological: if most members are short suffixes/prefixes
-    let suffix_hits = lower_members.iter().filter(|m| {
-        m.len() <= 4 && m.chars().all(|c| c.is_ascii_alphabetic())
-    }).count();
+    let suffix_hits = lower_members
+        .iter()
+        .filter(|m| m.len() <= 4 && m.chars().all(|c| c.is_ascii_alphabetic()))
+        .count();
     if suffix_hits >= threshold {
         return Some("morphological".into());
     }
@@ -289,8 +399,12 @@ mod tests {
     fn tfidf_labels_basic() {
         let assignments = vec![0, 0, 0, 1, 1, 1];
         let tokens = vec![
-            "Paris".into(), "Berlin".into(), "Tokyo".into(),
-            "French".into(), "German".into(), "Japanese".into(),
+            "Paris".into(),
+            "Berlin".into(),
+            "Tokyo".into(),
+            "French".into(),
+            "German".into(),
+            "Japanese".into(),
         ];
         let (labels, tops) = auto_label_clusters(&assignments, &tokens, 2);
         assert_eq!(labels.len(), 2);
@@ -322,8 +436,11 @@ mod tests {
     #[test]
     fn detect_country_pattern() {
         let members = vec![
-            "australia".into(), "italy".into(), "germany".into(),
-            "france".into(), "japan".into(),
+            "australia".into(),
+            "italy".into(),
+            "germany".into(),
+            "france".into(),
+            "japan".into(),
         ];
         assert_eq!(detect_entity_pattern(&members), Some("country".into()));
     }
@@ -331,8 +448,11 @@ mod tests {
     #[test]
     fn detect_language_pattern() {
         let members = vec![
-            "english".into(), "french".into(), "german".into(),
-            "spanish".into(), "italian".into(),
+            "english".into(),
+            "french".into(),
+            "german".into(),
+            "spanish".into(),
+            "italian".into(),
         ];
         assert_eq!(detect_entity_pattern(&members), Some("language".into()));
     }
@@ -340,8 +460,11 @@ mod tests {
     #[test]
     fn detect_month_pattern() {
         let members = vec![
-            "january".into(), "february".into(), "march".into(),
-            "october".into(), "november".into(),
+            "january".into(),
+            "february".into(),
+            "march".into(),
+            "october".into(),
+            "november".into(),
         ];
         assert_eq!(detect_entity_pattern(&members), Some("month".into()));
     }
@@ -349,8 +472,11 @@ mod tests {
     #[test]
     fn detect_number_pattern() {
         let members = vec![
-            "one".into(), "two".into(), "three".into(),
-            "four".into(), "five".into(),
+            "one".into(),
+            "two".into(),
+            "three".into(),
+            "four".into(),
+            "five".into(),
         ];
         assert_eq!(detect_entity_pattern(&members), Some("number".into()));
     }
@@ -358,17 +484,26 @@ mod tests {
     #[test]
     fn detect_morphological_pattern() {
         let members = vec![
-            "ing".into(), "tion".into(), "ness".into(),
-            "ment".into(), "ity".into(),
+            "ing".into(),
+            "tion".into(),
+            "ness".into(),
+            "ment".into(),
+            "ity".into(),
         ];
-        assert_eq!(detect_entity_pattern(&members), Some("morphological".into()));
+        assert_eq!(
+            detect_entity_pattern(&members),
+            Some("morphological".into())
+        );
     }
 
     #[test]
     fn detect_no_pattern() {
         let members = vec![
-            "Paris".into(), "music".into(), "running".into(),
-            "table".into(), "happy".into(),
+            "Paris".into(),
+            "music".into(),
+            "running".into(),
+            "table".into(),
+            "happy".into(),
         ];
         assert_eq!(detect_entity_pattern(&members), None);
     }

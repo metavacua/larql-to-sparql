@@ -172,7 +172,7 @@ jobs:
           git-cliff --version
 
       - name: Verify CHANGELOG.md [Unreleased] matches projection
-        run: bash scripts/changelog-consistency.sh
+        run: bash scripts/check_changelog.sh
 
   # =========================================================================
   # S1: Dependency Audit (licenses, advisories, lockfile integrity)
@@ -200,7 +200,11 @@ jobs:
           tool: cargo-deny
 
       - name: cargo deny check
-        run: cargo deny check advisories bans licenses sources
+        run: |
+          if ! cargo deny check advisories bans licenses sources; then
+            echo "::error title=cargo-deny failure (supply-chain gate)::A dependency advisory, license, or ban check failed. This gate is intentionally blocking. Read the full error block above to identify the offending crate; then either pin the dependency to a compatible version, replace it, or — only if the audit justifies it — extend deny.toml allow/skip per the procedure in audit/dependency-licenses.md (D-1 through D-7). See AGENTS.md 'Known build issues' for context."
+            exit 1
+          fi
 
   lockfile-consistency:
     name: lockfile-consistency (cargo check --locked)
@@ -223,11 +227,20 @@ jobs:
         with:
           shared-key: ci-lockfile
 
-      - name: cargo check --locked
-        run: cargo check --locked --workspace
+      - name: cargo metadata --locked (lockfile drift check, no compile)
+        # Use `cargo metadata` instead of `cargo check` here so the gate is
+        # ONLY about lockfile <-> Cargo.toml consistency. Compile errors are
+        # the responsibility of the S3 Build & Test Matrix; mixing them into
+        # this gate would mis-attribute a build problem as a lockfile problem
+        # and surface a misleading error to the coding agent.
+        run: cargo metadata --locked --format-version 1 --no-deps > /dev/null
 
       - name: Verify no Cargo.lock drift
-        run: git diff --exit-code Cargo.lock || { echo "Cargo.lock was modified by cargo check; run 'cargo update' and commit"; exit 1; }
+        run: |
+          if ! git diff --exit-code Cargo.lock; then
+            echo "::error file=Cargo.lock,title=Cargo.lock drift::Cargo.lock changed during 'cargo metadata --locked'. The committed lockfile is inconsistent with Cargo.toml. Run 'cargo update' (intentional bump) or 'cargo generate-lockfile' (fresh resolution) and commit the result."
+            exit 1
+          fi
 
   uv-lock-check:
     name: uv-lock-check (uv lock verification)
@@ -300,7 +313,11 @@ jobs:
           shared-key: ci-clippy
 
       - name: cargo clippy (static pass)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: |
+          if ! cargo clippy --workspace --all-targets -- -D warnings; then
+            echo "::error title=Clippy failure (pre-existing)::Workspace clippy with -D warnings is failing. The two known causes are (1) ~35 compile errors in crates/larql-compute that block all clippy resolution, and (2) ~20+ unchecked .unwrap() calls in benches/tests under --all-targets. Both are documented in AGENTS.md 'Known build issues'. They are NOT acceptable long-term state and must be fixed in a dedicated PR. Do not suppress this gate."
+            exit 1
+          fi
 
   rustdoc:
     name: rustdoc (cargo doc -D warnings)
@@ -327,7 +344,11 @@ jobs:
       - name: cargo doc --no-deps -D warnings
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --workspace --no-deps --exclude larql-python
+        run: |
+          if ! cargo doc --workspace --no-deps --exclude larql-python; then
+            echo "::error title=Rustdoc failure (pre-existing)::cargo doc -D warnings is failing because (a) crates/larql-compute has compile errors that block doc generation, and (b) doc-comment lint suppressions in crates/larql-vindex/src/lib.rs:1-2 indicate accumulated formatting violations across the workspace. Both are documented in AGENTS.md 'Known build issues'. Fix in dedicated PR; do not suppress this gate."
+            exit 1
+          fi
 
   # =========================================================================
   # S2.5: MSRV Verification (gates S3)

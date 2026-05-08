@@ -14,7 +14,12 @@ pub fn rms_norm(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32) -> Arra
 }
 
 /// RMS norm with explicit epsilon.
-pub fn rms_norm_eps(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32, eps: f64) -> Array2<f32> {
+pub fn rms_norm_eps(
+    x: &Array2<f32>,
+    weight: Option<&Vec<f32>>,
+    offset: f32,
+    eps: f64,
+) -> Array2<f32> {
     let (rows, cols) = (x.shape()[0], x.shape()[1]);
     let mut out = Array2::zeros((rows, cols));
 
@@ -56,10 +61,14 @@ pub fn layer_norm_eps(
     for i in 0..rows {
         let row = x.row(i);
         let mean: f64 = row.iter().map(|&v| v as f64).sum::<f64>() / cols as f64;
-        let var: f64 = row.iter().map(|&v| {
-            let d = v as f64 - mean;
-            d * d
-        }).sum::<f64>() / cols as f64;
+        let var: f64 = row
+            .iter()
+            .map(|&v| {
+                let d = v as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / cols as f64;
         let std = (var + eps).sqrt() as f32;
         let mean_f = mean as f32;
         for j in 0..cols {
@@ -74,11 +83,7 @@ pub fn layer_norm_eps(
 
 /// Per-head RMS norm without learned weights (parameter-free normalization).
 /// Used for V-norm in Gemma 4: just normalizes, no scaling.
-pub fn rms_norm_heads_no_weight(
-    x: &Array2<f32>,
-    num_heads: usize,
-    head_dim: usize,
-) -> Array2<f32> {
+pub fn rms_norm_heads_no_weight(x: &Array2<f32>, num_heads: usize, head_dim: usize) -> Array2<f32> {
     rms_norm_heads_no_weight_eps(x, num_heads, head_dim, DEFAULT_EPS)
 }
 

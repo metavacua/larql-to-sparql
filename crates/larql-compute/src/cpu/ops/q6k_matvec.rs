@@ -12,17 +12,29 @@ fn f16_to_f32(bits: u16) -> f32 {
     let exp = ((bits >> 10) & 0x1F) as i32;
     let mant = (bits & 0x3FF) as u32;
     if exp == 0 {
-        if mant == 0 { return if sign == 1 { -0.0 } else { 0.0 }; }
+        if mant == 0 {
+            return if sign == 1 { -0.0 } else { 0.0 };
+        }
         let val = mant as f32 / 1024.0 * 2.0f32.powi(-14);
         return if sign == 1 { -val } else { val };
     }
     if exp == 31 {
         return if mant == 0 {
-            if sign == 1 { f32::NEG_INFINITY } else { f32::INFINITY }
-        } else { f32::NAN };
+            if sign == 1 {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            }
+        } else {
+            f32::NAN
+        };
     }
     let val = (1.0 + mant as f32 / 1024.0) * 2.0f32.powi(exp - 15);
-    if sign == 1 { -val } else { val }
+    if sign == 1 {
+        -val
+    } else {
+        val
+    }
 }
 
 /// CPU Q6_K matvec: out[N] = Q6_K[N, K] @ x[K].
@@ -95,10 +107,15 @@ mod tests {
     fn q6k_produces_nonzero() {
         let hidden = 256;
         let rows = 4;
-        let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let matrix: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let q6k = quantize_q6_k(&matrix);
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
         let out = dispatch(&q6k, &x, rows, hidden);
-        assert!(out.iter().any(|&v| v.abs() > 0.001), "Q6_K matvec should produce nonzero");
+        assert!(
+            out.iter().any(|&v| v.abs() > 0.001),
+            "Q6_K matvec should produce nonzero"
+        );
     }
 }

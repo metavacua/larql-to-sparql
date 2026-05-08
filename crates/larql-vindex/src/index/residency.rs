@@ -99,7 +99,10 @@ impl ResidencyManager {
 
     /// Number of pinned layers.
     pub fn num_pinned(&self) -> usize {
-        self.states.iter().filter(|&&s| s == LayerState::Pinned).count()
+        self.states
+            .iter()
+            .filter(|&&s| s == LayerState::Pinned)
+            .count()
     }
 
     /// Set all layers to MmapQ4 state (Q4 file is loaded).
@@ -114,8 +117,12 @@ impl ResidencyManager {
     /// Pin a layer: copy its Q4 data from mmap into owned memory.
     /// Returns false if the layer would exceed the budget.
     pub fn pin_layer(&mut self, layer: usize, q4_data: &[u8]) -> bool {
-        if layer >= self.num_layers { return false; }
-        if self.states[layer] == LayerState::Pinned { return true; } // already pinned
+        if layer >= self.num_layers {
+            return false;
+        }
+        if self.states[layer] == LayerState::Pinned {
+            return true;
+        } // already pinned
 
         let cost = q4_data.len();
         if self.pinned_bytes + cost > self.budget_bytes {
@@ -130,8 +137,12 @@ impl ResidencyManager {
 
     /// Evict a pinned layer back to mmap state.
     pub fn evict_layer(&mut self, layer: usize) {
-        if layer >= self.num_layers { return; }
-        if self.states[layer] != LayerState::Pinned { return; }
+        if layer >= self.num_layers {
+            return;
+        }
+        if self.states[layer] != LayerState::Pinned {
+            return;
+        }
 
         if let Some(data) = self.pinned_data.remove(&layer) {
             self.pinned_bytes -= data.len();
@@ -165,7 +176,8 @@ impl ResidencyManager {
             .filter(|&l| self.states[l] != LayerState::Pinned && self.layer_features[l] > 0)
             .collect();
         candidates.sort_by(|&a, &b| {
-            self.access_counts[b].cmp(&self.access_counts[a])
+            self.access_counts[b]
+                .cmp(&self.access_counts[a])
                 .then(a.cmp(&b))
         });
 
@@ -192,9 +204,13 @@ impl ResidencyManager {
     {
         let mut pinned = 0;
         for layer in start..end.min(self.num_layers) {
-            if self.states[layer] == LayerState::Pinned { continue; }
+            if self.states[layer] == LayerState::Pinned {
+                continue;
+            }
             let cost = self.layer_q4_bytes(layer);
-            if self.pinned_bytes + cost > self.budget_bytes { break; }
+            if self.pinned_bytes + cost > self.budget_bytes {
+                break;
+            }
             if let Some(data) = get_q4(layer) {
                 if self.pin_layer(layer, &data) {
                     pinned += 1;
@@ -207,8 +223,16 @@ impl ResidencyManager {
     /// Summary string for diagnostics.
     pub fn summary(&self) -> String {
         let pinned = self.num_pinned();
-        let mmap = self.states.iter().filter(|&&s| s == LayerState::MmapQ4).count();
-        let cold = self.states.iter().filter(|&&s| s == LayerState::Cold).count();
+        let mmap = self
+            .states
+            .iter()
+            .filter(|&&s| s == LayerState::MmapQ4)
+            .count();
+        let cold = self
+            .states
+            .iter()
+            .filter(|&&s| s == LayerState::Cold)
+            .count();
         format!(
             "{} pinned ({:.1} MB / {:.1} MB budget), {} mmap, {} cold",
             pinned,

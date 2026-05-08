@@ -51,6 +51,7 @@ path = [
   "scripts/version_preflight.sh",
   "scripts/check_first_party_licenses.sh",
   "scripts/check_distribution_notices.sh",
+  "scripts/reuse-toml-guard.sh",
   "scripts/ci/**",
   "docs/specs/compliance-pipeline.md",
   "docs/specs/code-quality-pipeline.md",

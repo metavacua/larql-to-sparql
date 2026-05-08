@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 pub const L2_DEFAULT_MAX_ENTRIES: usize = 4096;
 
@@ -28,7 +28,9 @@ impl FfnL2Cache {
 
     pub fn with_max_entries(num_layers: usize, max_entries: usize) -> Self {
         Self {
-            layers: (0..num_layers).map(|_| RwLock::new(HashMap::new())).collect(),
+            layers: (0..num_layers)
+                .map(|_| RwLock::new(HashMap::new()))
+                .collect(),
             max_entries,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
@@ -68,14 +70,22 @@ impl FfnL2Cache {
         }
     }
 
-    pub fn hits(&self) -> u64 { self.hits.load(Ordering::Relaxed) }
-    pub fn misses(&self) -> u64 { self.misses.load(Ordering::Relaxed) }
+    pub fn hits(&self) -> u64 {
+        self.hits.load(Ordering::Relaxed)
+    }
+    pub fn misses(&self) -> u64 {
+        self.misses.load(Ordering::Relaxed)
+    }
 
     pub fn hit_rate(&self) -> f64 {
         let h = self.hits();
         let m = self.misses();
         let total = h + m;
-        if total == 0 { 0.0 } else { h as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            h as f64 / total as f64
+        }
     }
 
     /// Snapshot for /v1/stats or logging.
@@ -84,7 +94,11 @@ impl FfnL2Cache {
         let h = self.hits();
         let m = self.misses();
         let total = h + m;
-        let hit_rate = if total == 0 { 0.0 } else { h as f64 / total as f64 };
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            h as f64 / total as f64
+        };
         serde_json::json!({
             "hits": h,
             "misses": m,
@@ -207,13 +221,17 @@ mod tests {
         let key = FfnL2Cache::key(&[1, 2, 3]);
         cache.insert(0, key, vec![1.0, 2.0]);
 
-        let handles: Vec<_> = (0..8).map(|_| {
-            let c = StdArc::clone(&cache);
-            std::thread::spawn(move || {
-                assert!(c.get(0, key).is_some());
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let c = StdArc::clone(&cache);
+                std::thread::spawn(move || {
+                    assert!(c.get(0, key).is_some());
+                })
             })
-        }).collect();
-        for h in handles { h.join().unwrap(); }
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 
     #[test]

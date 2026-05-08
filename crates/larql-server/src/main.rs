@@ -9,13 +9,13 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use larql_vindex::{
-    PatchedVindex, SilentLoadCallbacks, VectorIndex,
-    load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer,
+    load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer, PatchedVindex,
+    SilentLoadCallbacks, VectorIndex,
 };
 
 use larql_server::cache::DescribeCache;
 use larql_server::session::SessionManager;
-use larql_server::state::{AppState, LoadedModel, model_id_from_name, load_probe_labels};
+use larql_server::state::{load_probe_labels, model_id_from_name, AppState, LoadedModel};
 use larql_server::{announce, auth, grpc, ratelimit, routes};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -165,9 +165,13 @@ fn parse_layer_range(s: &str) -> Result<(usize, usize), BoxError> {
     if parts.len() != 2 {
         return Err(format!("--layers: expected 'START-END' (e.g. '0-19'), got '{s}'").into());
     }
-    let start: usize = parts[0].trim().parse()
+    let start: usize = parts[0]
+        .trim()
+        .parse()
         .map_err(|_| format!("--layers: invalid start '{}'", parts[0]))?;
-    let end: usize = parts[1].trim().parse()
+    let end: usize = parts[1]
+        .trim()
+        .parse()
         .map_err(|_| format!("--layers: invalid end '{}'", parts[1]))?;
     if end < start {
         return Err(format!("--layers: end ({end}) must be >= start ({start})").into());
@@ -227,14 +231,20 @@ fn load_single_vindex(
             Ok(()) => info!("  Down features: loaded (mmap walk enabled)"),
             Err(_) => info!("  Down features: not available"),
         }
-        if let Ok(()) = index.load_up_features(&path) { info!("  Up features: loaded (full mmap FFN)") }
+        if let Ok(()) = index.load_up_features(&path) {
+            info!("  Up features: loaded (full mmap FFN)")
+        }
     }
 
     // Warmup eagerly dequantises f16 gate vectors to f32 (~2x blowup). On a
     // 31B vindex that's ~13 GB f16 → ~26 GB f32 resident before the first
     // request. Skip it under `--ffn-only` / `--embed-only`.
     if ffn_only || embed_only {
-        let reason = if embed_only { "--embed-only" } else { "--ffn-only" };
+        let reason = if embed_only {
+            "--embed-only"
+        } else {
+            "--ffn-only"
+        };
         info!("  Warmup: skipped ({reason})");
     } else {
         index.warmup();
@@ -242,7 +252,11 @@ fn load_single_vindex(
     }
 
     let (embeddings, embed_scale) = load_vindex_embeddings(&path)?;
-    info!("  Embeddings: {}x{}", embeddings.shape()[0], embeddings.shape()[1]);
+    info!(
+        "  Embeddings: {}x{}",
+        embeddings.shape()[0],
+        embeddings.shape()[1]
+    );
 
     // In --embed-only mode, attempt an f16-at-rest store to halve RSS.
     // Falls back silently if embeddings.bin is f32 (older vindexes).
@@ -343,7 +357,9 @@ async fn main() -> Result<(), BoxError> {
     // Accept both `larql-server <path>` and `larql-server serve <path>`.
     let args: Vec<String> = std::env::args().collect();
     let filtered: Vec<String> = if args.len() > 1 && args[1] == "serve" {
-        std::iter::once(args[0].clone()).chain(args[2..].iter().cloned()).collect()
+        std::iter::once(args[0].clone())
+            .chain(args[2..].iter().cloned())
+            .collect()
     } else {
         args
     };
@@ -370,13 +386,31 @@ async fn main() -> Result<(), BoxError> {
         }
         info!("Found {} vindexes in {}", paths.len(), dir.display());
         for p in &paths {
-            match load_single_vindex(&p.to_string_lossy(), cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request, expert_filter) {
+            match load_single_vindex(
+                &p.to_string_lossy(),
+                cli.no_infer,
+                cli.ffn_only,
+                cli.embed_only,
+                layer_range,
+                cli.max_gate_cache_layers,
+                cli.release_mmap_after_request,
+                expert_filter,
+            ) {
                 Ok(m) => models.push(Arc::new(m)),
                 Err(e) => warn!("  Skipping {}: {}", p.display(), e),
             }
         }
     } else if let Some(ref vindex_path) = cli.vindex_path {
-        let m = load_single_vindex(vindex_path, cli.no_infer, cli.ffn_only, cli.embed_only, layer_range, cli.max_gate_cache_layers, cli.release_mmap_after_request, expert_filter)?;
+        let m = load_single_vindex(
+            vindex_path,
+            cli.no_infer,
+            cli.ffn_only,
+            cli.embed_only,
+            layer_range,
+            cli.max_gate_cache_layers,
+            cli.release_mmap_after_request,
+            expert_filter,
+        )?;
         models.push(Arc::new(m));
     } else {
         return Err("must provide a vindex path or --dir".into());
@@ -387,18 +421,22 @@ async fn main() -> Result<(), BoxError> {
     }
 
     // Parse rate limiter if specified.
-    let rate_limiter = cli.rate_limit.as_ref().and_then(|spec| {
-        match ratelimit::RateLimiter::parse(spec) {
-            Some(rl) => {
-                info!("Rate limit: {}", spec);
-                Some(Arc::new(rl))
-            }
-            None => {
-                warn!("Invalid rate limit format: {} (expected e.g. '100/min')", spec);
-                None
-            }
-        }
-    });
+    let rate_limiter =
+        cli.rate_limit
+            .as_ref()
+            .and_then(|spec| match ratelimit::RateLimiter::parse(spec) {
+                Some(rl) => {
+                    info!("Rate limit: {}", spec);
+                    Some(Arc::new(rl))
+                }
+                None => {
+                    warn!(
+                        "Invalid rate limit format: {} (expected e.g. '100/min')",
+                        spec
+                    );
+                    None
+                }
+            });
 
     let state = Arc::new(AppState {
         models: models.clone(),
@@ -479,7 +517,11 @@ async fn main() -> Result<(), BoxError> {
     // Grid announce (if --join provided).
     if let Some(join_spec) = cli.join.clone() {
         let listen_url = cli.public_url.clone().unwrap_or_else(|| {
-            let host = if cli.host == "0.0.0.0" { "127.0.0.1" } else { &cli.host };
+            let host = if cli.host == "0.0.0.0" {
+                "127.0.0.1"
+            } else {
+                &cli.host
+            };
             format!("http://{}:{}", host, cli.port)
         });
         let join_urls: Vec<String> = join_spec
@@ -513,13 +555,15 @@ async fn main() -> Result<(), BoxError> {
 
     // TLS or plain HTTP.
     if let (Some(cert_path), Some(key_path)) = (&cli.tls_cert, &cli.tls_key) {
-        info!("TLS: enabled ({}, {})", cert_path.display(), key_path.display());
+        info!(
+            "TLS: enabled ({}, {})",
+            cert_path.display(),
+            key_path.display()
+        );
         info!("Listening: https://{}", addr);
 
-        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-            cert_path, key_path,
-        )
-        .await?;
+        let tls_config =
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
 
         axum_server::bind_rustls(addr.parse()?, tls_config)
             .serve(app.into_make_service())

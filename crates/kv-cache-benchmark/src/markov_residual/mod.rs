@@ -1,8 +1,8 @@
-pub mod window;
 pub mod checkpoint;
 pub mod cold_tier;
+pub mod window;
 
-use crate::{KvStrategy, model_config::ModelConfig};
+use crate::{model_config::ModelConfig, KvStrategy};
 
 /// Strategy 3: Markov Residual Stream.
 ///
@@ -89,7 +89,12 @@ impl KvStrategy for MarkovResidual {
         buf
     }
 
-    fn decode(&self, encoded: &[u8], num_vectors: usize, dim: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    fn decode(
+        &self,
+        encoded: &[u8],
+        num_vectors: usize,
+        dim: usize,
+    ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         let total = u32::from_le_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]) as usize;
         let window = u32::from_le_bytes([encoded[4], encoded[5], encoded[6], encoded[7]]) as usize;
 
@@ -110,7 +115,12 @@ impl KvStrategy for MarkovResidual {
             let mut v = Vec::with_capacity(dim);
             for j in 0..dim {
                 let o = offset + j * 4;
-                let x = f32::from_le_bytes([encoded[o], encoded[o + 1], encoded[o + 2], encoded[o + 3]]);
+                let x = f32::from_le_bytes([
+                    encoded[o],
+                    encoded[o + 1],
+                    encoded[o + 2],
+                    encoded[o + 3],
+                ]);
                 v.push(x);
             }
             keys.push(v.clone());
@@ -121,7 +131,9 @@ impl KvStrategy for MarkovResidual {
     }
 
     fn memory_bytes(&self, config: &ModelConfig, seq_len: usize) -> usize {
-        self.window_bytes(config) + self.checkpoint_bytes(config, seq_len) + self.cold_tier_bytes(seq_len)
+        self.window_bytes(config)
+            + self.checkpoint_bytes(config, seq_len)
+            + self.cold_tier_bytes(seq_len)
     }
 }
 
@@ -143,7 +155,10 @@ mod tests {
         let _checkpoint_fixed = strategy.checkpoint_bytes(&config, 370_000);
 
         let cold_370k = strategy.cold_tier_bytes(370_000);
-        assert!(cold_370k < 2_000_000, "Cold tier (token IDs) should be < 2MB at 370K");
+        assert!(
+            cold_370k < 2_000_000,
+            "Cold tier (token IDs) should be < 2MB at 370K"
+        );
 
         // Total should be WAY less than standard KV
         let standard_mem = config.kv_memory(370_000);

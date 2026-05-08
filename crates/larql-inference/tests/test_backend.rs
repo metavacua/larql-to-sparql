@@ -3,9 +3,9 @@
 //! Tests the backend at transformer-realistic dimensions:
 //! attention projections, QK^T, FFN up/down, and final logits.
 
-use ndarray::Array2;
 use larql_compute::CpuBackend;
-use larql_compute::{ComputeBackend, MatMulOp, default_backend};
+use larql_compute::{default_backend, ComputeBackend, MatMulOp};
+use ndarray::Array2;
 
 /// Deterministic f32 data generator.
 fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
@@ -38,7 +38,7 @@ mod attention_projections {
         // h_norm @ W_q.T: [seq, hidden] x [hidden, num_heads*head_dim] → [seq, num_heads*head_dim]
         let backend = CpuBackend;
         let h_norm = synth_matrix(6, 256, 1); // scaled-down hidden
-        let w_q = synth_matrix(256, 256, 2);  // [out, in] — transposed in dot_proj
+        let w_q = synth_matrix(256, 256, 2); // [out, in] — transposed in dot_proj
         let result = backend.matmul_transb(h_norm.view(), w_q.view());
         assert_eq!(result.shape(), &[6, 256]);
         // Verify non-trivial output
@@ -226,7 +226,10 @@ mod metal_tests {
     #[test]
     fn metal_device_available() {
         let backend = MetalBackend::new();
-        assert!(backend.is_some(), "Metal device should be available on macOS");
+        assert!(
+            backend.is_some(),
+            "Metal device should be available on macOS"
+        );
     }
 
     #[test]

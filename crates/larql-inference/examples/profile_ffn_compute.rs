@@ -5,17 +5,20 @@
 //!   cargo run --release -p larql-inference --example profile_ffn_compute -- \
 //!     --vindex output/gemma3-4b-v2.vindex
 
-use std::time::Instant;
-use ndarray::Array2;
-use larql_inference::InferenceModel;
 use larql_inference::forward::forward_to_layer;
+use larql_inference::InferenceModel;
+use ndarray::Array2;
+use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let mut vindex_path = std::path::PathBuf::from("output/gemma3-4b-v2.vindex");
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "--vindex" { i += 1; vindex_path = std::path::PathBuf::from(&args[i]); }
+        if args[i] == "--vindex" {
+            i += 1;
+            vindex_path = std::path::PathBuf::from(&args[i]);
+        }
         i += 1;
     }
 
@@ -46,7 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h = forward_to_layer(weights, &token_ids, 13);
     let norm_offset = weights.arch.norm_weight_offset();
     let h_norm = larql_inference::forward::apply_norm(
-        weights, &h, &weights.arch.post_attention_layernorm_key(13), norm_offset,
+        weights,
+        &h,
+        &weights.arch.post_attention_layernorm_key(13),
+        norm_offset,
     );
 
     let n = 20;
@@ -63,7 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // gate_scores_batch
     let _ = index.gate_scores_batch(13, &h_norm);
     let t0 = Instant::now();
-    for _ in 0..n { let _ = index.gate_scores_batch(13, &h_norm); }
+    for _ in 0..n {
+        let _ = index.gate_scores_batch(13, &h_norm);
+    }
     let gate_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let gate_scores = index.gate_scores_batch(13, &h_norm).unwrap();
 
@@ -75,14 +83,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let _ = h_norm.dot(&up_view.t());
     let t0 = Instant::now();
-    for _ in 0..n { let _ = h_norm.dot(&up_view.t()); }
+    for _ in 0..n {
+        let _ = h_norm.dot(&up_view.t());
+    }
     let up_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let up_scores = h_norm.dot(&up_view.t());
 
     // 3. GEGLU only (silu(gate) * up)
     let _ = larql_inference::ffn::silu_gate_up(&gate_scores, &up_scores);
     let t0 = Instant::now();
-    for _ in 0..n { let _ = larql_inference::ffn::silu_gate_up(&gate_scores, &up_scores); }
+    for _ in 0..n {
+        let _ = larql_inference::ffn::silu_gate_up(&gate_scores, &up_scores);
+    }
     let geglu_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
     let activation = larql_inference::ffn::silu_gate_up(&gate_scores, &up_scores);
 
@@ -94,17 +106,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let _ = activation.dot(&down_view);
     let t0 = Instant::now();
-    for _ in 0..n { let _ = activation.dot(&down_view); }
+    for _ in 0..n {
+        let _ = activation.dot(&down_view);
+    }
     let down_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
     // 5. Pre-FFN norm
     let _ = larql_inference::forward::apply_norm(
-        weights, &h, &weights.arch.post_attention_layernorm_key(13), norm_offset,
+        weights,
+        &h,
+        &weights.arch.post_attention_layernorm_key(13),
+        norm_offset,
     );
     let t0 = Instant::now();
     for _ in 0..n {
         let _ = larql_inference::forward::apply_norm(
-            weights, &h, &weights.arch.post_attention_layernorm_key(13), norm_offset,
+            weights,
+            &h,
+            &weights.arch.post_attention_layernorm_key(13),
+            norm_offset,
         );
     }
     let norm_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
@@ -112,7 +132,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Residual add
     let other = Array2::<f32>::ones((seq_len, hidden));
     let t0 = Instant::now();
-    for _ in 0..n { let _ = &h + &other; }
+    for _ in 0..n {
+        let _ = &h + &other;
+    }
     let add_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
     // 7. Array2 allocation for activation [seq, intermediate]
@@ -128,7 +150,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use larql_inference::ffn::FfnBackend;
     let _ = walk_ffn.forward(13, &h_norm);
     let t0 = Instant::now();
-    for _ in 0..n { let _ = walk_ffn.forward(13, &h_norm); }
+    for _ in 0..n {
+        let _ = walk_ffn.forward(13, &h_norm);
+    }
     let walk_ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
 
     println!("--- Per-layer component times (warm, layer 13) ---\n");
@@ -151,11 +175,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Scale to 21 layers (L13-33)
     let layers = 21;
     println!("--- Scaled to {layers} layers ---\n");
-    println!("  Gate reads:    {:.0}ms  ({:.1} GB/s)", gate_ms * layers as f64, 105.0 / gate_ms);
-    println!("  Up reads:      {:.0}ms  ({:.1} GB/s)", up_ms * layers as f64, 105.0 / up_ms);
+    println!(
+        "  Gate reads:    {:.0}ms  ({:.1} GB/s)",
+        gate_ms * layers as f64,
+        105.0 / gate_ms
+    );
+    println!(
+        "  Up reads:      {:.0}ms  ({:.1} GB/s)",
+        up_ms * layers as f64,
+        105.0 / up_ms
+    );
     println!("  GEGLU compute: {:.0}ms", geglu_ms * layers as f64);
-    println!("  Down reads:    {:.0}ms  ({:.1} GB/s)", down_ms * layers as f64, 105.0 / down_ms);
-    println!("  Norm+add+alloc:{:.0}ms", (norm_ms + add_ms + alloc_ms) * layers as f64);
+    println!(
+        "  Down reads:    {:.0}ms  ({:.1} GB/s)",
+        down_ms * layers as f64,
+        105.0 / down_ms
+    );
+    println!(
+        "  Norm+add+alloc:{:.0}ms",
+        (norm_ms + add_ms + alloc_ms) * layers as f64
+    );
     println!("  Total sum:     {:.0}ms", sum * layers as f64);
     println!("  Walk measured: {:.0}ms", walk_ms * layers as f64);
 

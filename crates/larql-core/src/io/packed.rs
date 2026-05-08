@@ -173,9 +173,10 @@ pub fn to_packed_bytes(graph: &Graph) -> Result<Vec<u8>, GraphError> {
         let rel = strings.intern(&edge.relation);
         let obj = strings.intern(&edge.object);
 
-        let meta_blob = edge.metadata.as_ref().map(|m| {
-            serde_json::to_vec(m).unwrap_or_default()
-        });
+        let meta_blob = edge
+            .metadata
+            .as_ref()
+            .map(|m| serde_json::to_vec(m).unwrap_or_default());
 
         let inj_blob = edge.injection.map(|(layer, score)| {
             let mut buf = Vec::with_capacity(12);
@@ -254,9 +255,7 @@ pub fn to_packed_bytes(graph: &Graph) -> Result<Vec<u8>, GraphError> {
     buf.extend_from_slice(&meta_section);
 
     // Write string table
-    strings
-        .write_to(&mut buf)
-        .map_err(GraphError::Io)?;
+    strings.write_to(&mut buf).map_err(GraphError::Io)?;
 
     Ok(buf)
 }
@@ -329,12 +328,13 @@ pub fn from_packed_bytes(bytes: &[u8]) -> Result<Graph, GraphError> {
                     u32::from_le_bytes(blob[meta_json_end..meta_json_end + 4].try_into().unwrap())
                         as usize;
                 let inj_score = f32::from_le_bytes(
-                    blob[meta_json_end + 4..meta_json_end + 8].try_into().unwrap(),
+                    blob[meta_json_end + 4..meta_json_end + 8]
+                        .try_into()
+                        .unwrap(),
                 ) as f64;
                 edge.injection = Some((inj_layer, inj_score));
             } else if has_meta {
-                if let Ok(meta) =
-                    serde_json::from_slice::<HashMap<String, serde_json::Value>>(blob)
+                if let Ok(meta) = serde_json::from_slice::<HashMap<String, serde_json::Value>>(blob)
                 {
                     edge.metadata = Some(meta);
                 }
@@ -365,11 +365,7 @@ pub fn load_packed(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
 }
 
 fn estimate_string_table_size(strings: &StringTable) -> usize {
-    strings
-        .strings
-        .iter()
-        .map(|s| 4 + s.len())
-        .sum::<usize>()
+    strings.strings.iter().map(|s| 4 + s.len()).sum::<usize>()
 }
 
 #[cfg(test)]

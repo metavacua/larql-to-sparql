@@ -25,10 +25,10 @@ struct ProbeFile {
     n_components: usize,
     routes: Vec<String>,
     pca_mean: Vec<f64>,
-    pca_components: Vec<Vec<f64>>,   // [n_components, hidden_size]
-    lr_coef: Vec<Vec<f64>>,          // [n_classes, n_components]
-    lr_intercept: Vec<f64>,          // [n_classes]
-    lr_classes: Vec<String>,         // route name per LR class index
+    pca_components: Vec<Vec<f64>>, // [n_components, hidden_size]
+    lr_coef: Vec<Vec<f64>>,        // [n_classes, n_components]
+    lr_intercept: Vec<f64>,        // [n_classes]
+    lr_classes: Vec<String>,       // route name per LR class index
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -59,16 +59,13 @@ impl CascadeTrie {
         let p: ProbeFile = serde_json::from_str(&text)?;
 
         // Flatten 2D vecs to row-major 1D for BLAS-free dot products.
-        let pca_components: Vec<f32> = p.pca_components
+        let pca_components: Vec<f32> = p
+            .pca_components
             .into_iter()
             .flatten()
             .map(|v| v as f32)
             .collect();
-        let lr_coef: Vec<f32> = p.lr_coef
-            .into_iter()
-            .flatten()
-            .map(|v| v as f32)
-            .collect();
+        let lr_coef: Vec<f32> = p.lr_coef.into_iter().flatten().map(|v| v as f32).collect();
 
         Ok(Self {
             layer: p.layer,
@@ -110,8 +107,8 @@ impl CascadeTrie {
         let mut best_score = f32::NEG_INFINITY;
         for c in 0..n_classes {
             let row = &self.lr_coef[c * self.n_components..(c + 1) * self.n_components];
-            let score: f32 = row.iter().zip(z.iter()).map(|(w, x)| w * x).sum::<f32>()
-                + self.lr_intercept[c];
+            let score: f32 =
+                row.iter().zip(z.iter()).map(|(w, x)| w * x).sum::<f32>() + self.lr_intercept[c];
             if score > best_score {
                 best_score = score;
                 best_idx = c;
@@ -200,7 +197,10 @@ mod tests {
 
     #[test]
     fn slug_replaces_slashes() {
-        assert_eq!(CascadeTrie::slug("google/gemma-3-4b-it"), "google--gemma-3-4b-it");
+        assert_eq!(
+            CascadeTrie::slug("google/gemma-3-4b-it"),
+            "google--gemma-3-4b-it"
+        );
         assert_eq!(CascadeTrie::slug("a/b/c"), "a--b--c");
         assert_eq!(CascadeTrie::slug("noslash"), "noslash");
     }

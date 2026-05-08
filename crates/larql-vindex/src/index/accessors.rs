@@ -133,7 +133,10 @@ impl VectorIndex {
                     return None;
                 }
                 let raw = &mmap[byte_offset..byte_offset + byte_count];
-                return Some(crate::config::dtype::decode_floats(raw, self.gate_mmap_dtype));
+                return Some(crate::config::dtype::decode_floats(
+                    raw,
+                    self.gate_mmap_dtype,
+                ));
             }
         }
         None
@@ -216,19 +219,45 @@ impl VectorIndex {
         let advise = |m: &memmap2::Mmap| unsafe {
             let _ = m.unchecked_advise(UncheckedAdvice::DontNeed);
         };
-        if let Some(ref m) = self.gate_mmap_bytes { advise(m); }
-        if let Some(ref m) = self.down_features_mmap { advise(m); }
-        if let Some(ref m) = self.up_features_mmap { advise(m); }
-        if let Some(ref m) = self.lm_head_mmap { advise(m); }
-        if let Some(ref m) = self.lm_head_f16_mmap { advise(m); }
-        if let Some(ref m) = self.interleaved_mmap { advise(m); }
-        if let Some(ref m) = self.interleaved_q4_mmap { advise(m); }
-        if let Some(ref m) = self.interleaved_q4k_mmap { advise(m); }
-        if let Some(ref m) = self.gate_q4_mmap { advise(m); }
-        if let Some(ref m) = self.lm_head_q4_mmap { advise(m); }
-        if let Some(ref m) = self.attn_q4k_mmap { advise(m); }
-        if let Some(ref m) = self.attn_q4_mmap { advise(m); }
-        if let Some(ref m) = self.attn_q8_mmap { advise(m); }
+        if let Some(ref m) = self.gate_mmap_bytes {
+            advise(m);
+        }
+        if let Some(ref m) = self.down_features_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.up_features_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.lm_head_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.lm_head_f16_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.interleaved_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.interleaved_q4_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.interleaved_q4k_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.gate_q4_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.lm_head_q4_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.attn_q4k_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.attn_q4_mmap {
+            advise(m);
+        }
+        if let Some(ref m) = self.attn_q8_mmap {
+            advise(m);
+        }
     }
 
     /// Pre-decode f16 gate vectors to f32 for lock-free access.
@@ -307,7 +336,10 @@ mod release_mmap_pages_tests {
         let encoded = larql_models::quant::half::encode_f16(&data);
         anon[..bytes].copy_from_slice(&encoded);
         let mmap = anon.make_read_only().unwrap();
-        let slices = vec![GateLayerSlice { float_offset: 0, num_features }];
+        let slices = vec![GateLayerSlice {
+            float_offset: 0,
+            num_features,
+        }];
         let idx = VectorIndex::new_mmap(mmap, slices, StorageDtype::F16, None, 1, hidden);
         assert!(idx.is_mmap(), "mmap-backed index sanity check");
 
@@ -321,6 +353,9 @@ mod release_mmap_pages_tests {
         // And the index must stay usable afterwards — `gate_knn` will
         // re-fault whatever pages the kernel actually evicted.
         let hits = idx.gate_knn(0, &q, 1);
-        assert!(!hits.is_empty(), "gate_knn must still work after page release");
+        assert!(
+            !hits.is_empty(),
+            "gate_knn must still work after page release"
+        );
     }
 }

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - Add Android NDK setup to cross-platform-build workflow
+- Address PR #29 review feedback and surface known build issues
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
 - Align license enforcement with audited multi-license tree
@@ -36,6 +37,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Resolve three CI failures from Linux incompatibilities
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
 

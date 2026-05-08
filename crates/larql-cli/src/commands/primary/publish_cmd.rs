@@ -129,19 +129,14 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("source vindex not a directory: {}", src.display()).into());
     }
     if !src.join("index.json").exists() {
-        return Err(format!(
-            "source vindex missing index.json: {}",
-            src.display()
-        )
-        .into());
+        return Err(format!("source vindex missing index.json: {}", src.display()).into());
     }
 
     let publish_full = args.full && !args.no_full;
     let requested_slices = resolve_slice_list(&args.slices)?;
     if !publish_full && requested_slices.is_empty() {
         return Err(
-            "nothing to publish: `--no-full` requires at least one preset in `--slices`"
-                .into(),
+            "nothing to publish: `--no-full` requires at least one preset in `--slices`".into(),
         );
     }
 
@@ -155,10 +150,7 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
             staging: None,
         });
     }
-    let staging_root = args
-        .tmp_dir
-        .clone()
-        .unwrap_or_else(std::env::temp_dir);
+    let staging_root = args.tmp_dir.clone().unwrap_or_else(std::env::temp_dir);
     for preset in &requested_slices {
         let repo = args
             .slice_repo_template
@@ -230,7 +222,12 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 5. Collection step — group the uploaded repos into HF collections.
     let collection_levels = resolve_collection_list(&args.collections)?;
     let collection_urls = if !collection_levels.is_empty() {
-        Some(build_collections(&src, &args, &results, &collection_levels)?)
+        Some(build_collections(
+            &src,
+            &args,
+            &results,
+            &collection_levels,
+        )?)
     } else {
         None
     };
@@ -276,9 +273,9 @@ fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::e
 /// Parse `OWNER/NAME` → `OWNER`. Returns an error for bare names so we
 /// don't accidentally treat a missing namespace as valid.
 fn namespace_of(repo: &str) -> Result<&str, Box<dyn std::error::Error>> {
-    repo.split_once('/').map(|(ns, _)| ns).ok_or_else(|| {
-        format!("--repo must be `OWNER/NAME`, got '{repo}'").into()
-    })
+    repo.split_once('/')
+        .map(|(ns, _)| ns)
+        .ok_or_else(|| format!("--repo must be `OWNER/NAME`, got '{repo}'").into())
 }
 
 /// Extract the short model name from whatever `index.json` happens to
@@ -343,7 +340,12 @@ fn default_family(model_field: &str) -> String {
     let short = short_model_name(model_field);
     let mut segs: Vec<&str> = Vec::new();
     for seg in short.split('-') {
-        if seg.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if seg
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
             break;
         }
         segs.push(seg);
@@ -409,13 +411,11 @@ fn build_collections(
         .map(|r| larql_vindex::CollectionItem {
             repo_id: r.repo.clone(),
             repo_type: args.repo_type.clone(),
-            note: Some(
-                if r.label == "full" {
-                    note_for_full().into()
-                } else {
-                    note_for_preset(&r.label).into()
-                },
-            ),
+            note: Some(if r.label == "full" {
+                note_for_full().into()
+            } else {
+                note_for_preset(&r.label).into()
+            }),
         })
         .collect();
 
@@ -458,12 +458,8 @@ fn build_collections(
             level_title,
             namespace
         );
-        let url = larql_vindex::ensure_collection(
-            namespace,
-            &level_title,
-            Some(&description),
-            &items,
-        )?;
+        let url =
+            larql_vindex::ensure_collection(namespace, &level_title, Some(&description), &items)?;
         println!("  {url}");
         urls.push((level.clone(), url));
     }
@@ -524,9 +520,11 @@ fn execute_step(
         // Sliced upload — carve into staging, upload, clean up.
         (Some(preset), Some(staging)) => {
             println!("\n→ Carving slice `{preset}` …");
-            let parts: BTreeSet<Part> = preset_parts(preset)
-                .map_err(|e| format!("preset `{preset}`: {e}"))?;
-            let outcome = slice_vindex(src, staging, parts, /*force=*/ true, /*dry_run=*/ false)?;
+            let parts: BTreeSet<Part> =
+                preset_parts(preset).map_err(|e| format!("preset `{preset}`: {e}"))?;
+            let outcome = slice_vindex(
+                src, staging, parts, /*force=*/ true, /*dry_run=*/ false,
+            )?;
             println!(
                 "  staged {} file(s), {} — {}",
                 outcome.copied.len(),
@@ -543,7 +541,12 @@ fn execute_step(
     }
 }
 
-fn upload_dir(dir: &Path, repo: &str, force_upload: bool, repo_type: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn upload_dir(
+    dir: &Path,
+    repo: &str,
+    force_upload: bool,
+    repo_type: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut callbacks = CliPublishCallbacks::new();
     let opts = larql_vindex::PublishOptions {
         skip_unchanged: !force_upload,
@@ -694,7 +697,10 @@ mod tests {
     #[test]
     fn slices_invalid_name_errors() {
         let err = resolve_slice_list(&["typo".into()]).unwrap_err();
-        assert!(err.to_string().contains("invalid slice preset"), "got: {err}");
+        assert!(
+            err.to_string().contains("invalid slice preset"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -756,15 +762,24 @@ mod tests {
     #[test]
     fn namespace_of_rejects_bare_name() {
         assert!(namespace_of("chrishayuk/gemma-4-31b").is_ok());
-        assert_eq!(namespace_of("chrishayuk/gemma-4-31b").unwrap(), "chrishayuk");
+        assert_eq!(
+            namespace_of("chrishayuk/gemma-4-31b").unwrap(),
+            "chrishayuk"
+        );
         assert!(namespace_of("gemma-4-31b").is_err());
     }
 
     #[test]
     fn default_model_title_strips_hf_namespace() {
-        assert_eq!(default_model_title("google/gemma-4-31b-it"), "Gemma 4 31b It");
+        assert_eq!(
+            default_model_title("google/gemma-4-31b-it"),
+            "Gemma 4 31b It"
+        );
         assert_eq!(default_model_title("gemma-3-4b-it"), "Gemma 3 4b It");
-        assert_eq!(default_model_title("llama-3-70b-instruct"), "Llama 3 70b Instruct");
+        assert_eq!(
+            default_model_title("llama-3-70b-instruct"),
+            "Llama 3 70b Instruct"
+        );
     }
 
     #[test]
@@ -772,7 +787,8 @@ mod tests {
         // Absolute paths from the HF cache trim trailing slashes and
         // strip the `models--{owner}--` prefix so we don't end up with
         // empty titles.
-        let cached = "/Users/me/.cache/huggingface/hub/models--google--gemma-4-31B-it/snapshots/abc123/";
+        let cached =
+            "/Users/me/.cache/huggingface/hub/models--google--gemma-4-31B-it/snapshots/abc123/";
         assert_eq!(short_model_name(cached), "gemma-4-31B-it");
 
         // Plain path without the `models--` prefix falls back to the
@@ -791,7 +807,8 @@ mod tests {
         // Regression guard: this exact layout is what the 31B Q4K vindex
         // produces in its index.json, and the first pass gave an empty
         // string because `rsplit('/').next()` returned "" for trailing `/`.
-        let cached = "/Users/me/.cache/huggingface/hub/models--google--gemma-4-31B-it/snapshots/abc123/";
+        let cached =
+            "/Users/me/.cache/huggingface/hub/models--google--gemma-4-31B-it/snapshots/abc123/";
         assert_eq!(default_model_title(cached), "Gemma 4 31B It");
         assert_eq!(default_family(cached), "Gemma");
     }
@@ -849,14 +866,20 @@ mod tests {
     #[test]
     fn force_upload_disables_skip() {
         // Simulate the flag state the CLI builds from `--force-upload`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: false, ..Default::default() };
+        let opts = larql_vindex::PublishOptions {
+            skip_unchanged: false,
+            ..Default::default()
+        };
         assert!(!opts.skip_unchanged);
     }
 
     #[test]
     fn default_publish_options_skip_unchanged() {
         // Without `--force-upload`, `skip_unchanged: true`.
-        let opts = larql_vindex::PublishOptions { skip_unchanged: true, ..Default::default() };
+        let opts = larql_vindex::PublishOptions {
+            skip_unchanged: true,
+            ..Default::default()
+        };
         assert!(opts.skip_unchanged);
     }
 
