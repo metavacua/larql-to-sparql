@@ -200,9 +200,7 @@ fn main() {
                 }
                 let mean_abs = sum_abs / count as f64;
                 let cos = dot / (d_norm2.sqrt() * q_norm2.sqrt() + 1e-12);
-                println!(
-                    "{key:55} {n_total:>12} {max_abs:>14.6e} {mean_abs:>14.6e} {cos:>10.6}"
-                );
+                println!("{key:55} {n_total:>12} {max_abs:>14.6e} {mean_abs:>14.6e} {cos:>10.6}");
             }
             (Some(_), None) => println!("{key:55} MISSING IN Q4K"),
             (None, Some(_)) => println!("{key:55} MISSING IN DENSE"),

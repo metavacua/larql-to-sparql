@@ -61,9 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let nonzero = h.iter().filter(|v| v.abs() > 1e-10).count();
             let max = h.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
             let norm: f32 = h.iter().map(|v| v * v).sum::<f32>().sqrt();
-            println!(
-                "  {n_layers:>5}   {nonzero:>6}   {max:>7.4}   {norm:>7.2}"
-            );
+            println!("  {n_layers:>5}   {nonzero:>6}   {max:>7.4}   {norm:>7.2}");
         } else {
             println!("  {n_layers:>5}   None");
         }

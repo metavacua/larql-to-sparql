@@ -57,9 +57,7 @@ fn main() {
         let _normed = rms_norm(&h, &norm_weight, 0.0, 1e-6);
     }
     let rmsnorm_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!(
-        "  RMSNorm [{seq},{hidden}]:             {rmsnorm_us:>8.1}µs"
-    );
+    println!("  RMSNorm [{seq},{hidden}]:             {rmsnorm_us:>8.1}µs");
 
     // ── 3. LayerNorm (for StarCoder2 comparison) ──
     let t = Instant::now();
@@ -81,9 +79,7 @@ fn main() {
         apply_rope_inplace(&mut q, head_dim, num_q_heads, 10000.0, 0);
     }
     let rope_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!(
-        "  RoPE (full, {num_q_heads}Q heads):          {rope_us:>8.1}µs"
-    );
+    println!("  RoPE (full, {num_q_heads}Q heads):          {rope_us:>8.1}µs");
 
     // Partial RoPE (Gemma 4: 25%)
     let t = Instant::now();
@@ -144,9 +140,7 @@ fn main() {
         let _r = &a + &b;
     }
     let resadd_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!(
-        "  Residual add [{seq},{hidden}]:        {resadd_us:>8.1}µs"
-    );
+    println!("  Residual add [{seq},{hidden}]:        {resadd_us:>8.1}µs");
 
     // ── 9. FFN Gate + Up (BLAS) ──
     let t = Instant::now();
@@ -183,9 +177,7 @@ fn main() {
         let _logits = backend.matmul_transb(last_hidden.view(), embed_table.view());
     }
     let logits_us = t.elapsed().as_micros() as f64 / 5.0;
-    println!(
-        "  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {logits_us:>8.0}µs"
-    );
+    println!("  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {logits_us:>8.0}µs");
 
     // ── Summary ──
     let layer_total = rmsnorm_us

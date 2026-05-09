@@ -38,9 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let expected_q = (q_dim * hidden).div_ceil(256) * 148;
         let expected_k = (kv_dim * hidden).div_ceil(256) * 148;
         let _expected_o = (hidden * q_dim).div_ceil(256) * 148;
-        println!(
-            "\n  Expected Q bytes: {expected_q} (q_dim={q_dim} × hidden={hidden})"
-        );
+        println!("\n  Expected Q bytes: {expected_q} (q_dim={q_dim} × hidden={hidden})");
         println!("  Actual Q bytes:   {}", q.0.len());
         println!("  Match: {}\n", q.0.len() == expected_q);
         println!("  Expected K bytes: {expected_k}");

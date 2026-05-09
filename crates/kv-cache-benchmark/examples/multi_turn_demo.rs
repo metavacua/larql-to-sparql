@@ -55,9 +55,7 @@ fn main() {
 
     // Summary
     let final_tokens = num_turns * tokens_per_turn;
-    println!(
-        "\n=== At {final_tokens} tokens (turn {num_turns}) ===\n"
-    );
+    println!("\n=== At {final_tokens} tokens (turn {num_turns}) ===\n");
 
     let strategies: Vec<(&str, usize)> = vec![
         ("Standard KV", standard.memory_bytes(&config, final_tokens)),
@@ -102,9 +100,7 @@ fn main() {
         let std_mem = standard.memory_bytes(&config, tokens);
         let mrk_mem = markov.memory_bytes(&config, tokens);
         if mrk_mem < std_mem {
-            println!(
-                "\nMarkov RS < Standard KV at turn {turn} ({tokens} tokens)"
-            );
+            println!("\nMarkov RS < Standard KV at turn {turn} ({tokens} tokens)");
             break;
         }
     }

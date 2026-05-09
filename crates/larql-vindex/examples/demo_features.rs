@@ -128,9 +128,7 @@ fn main() {
     let _dm_count = index.save_down_meta(&dir).unwrap();
 
     let bin_size = std::fs::metadata(dir.join("down_meta.bin")).unwrap().len();
-    println!(
-        "  down_meta.bin:   {bin_size} bytes (binary only — JSONL no longer written)"
-    );
+    println!("  down_meta.bin:   {bin_size} bytes (binary only — JSONL no longer written)");
     assert!(!dir.join("down_meta.jsonl").exists());
 
     let config = make_config(
@@ -473,9 +471,7 @@ STAGE edge
                 entity,
                 relation,
                 target,
-            } => println!(
-                "    DELETE entity={entity} relation={relation} target={target}"
-            ),
+            } => println!("    DELETE entity={entity} relation={relation} target={target}"),
             larql_vindex::VindexfileDirective::Labels(p) => println!("    LABELS {p}"),
             larql_vindex::VindexfileDirective::Expose(levels) => {
                 println!("    EXPOSE {levels:?}")

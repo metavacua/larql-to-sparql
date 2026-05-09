@@ -399,9 +399,7 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         total,
         match_count as f64 / total.max(1) as f64 * 100.0
     );
-    eprintln!(
-        "  Cosine at L{target}: mean={mean_cos:.6}, min={min_cos:.6}"
-    );
+    eprintln!("  Cosine at L{target}: mean={mean_cos:.6}, min={min_cos:.6}");
     if args.source_layers > 0 {
         eprintln!(
             "  Method: {} real layers → rank-{} projection → L{}-L{} dense",
@@ -423,13 +421,9 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
             inject_at,
             num_layers - 1
         );
-        eprintln!(
-            "  Zero encoder layers. Just embedding lookup + {rank} dot products."
-        );
+        eprintln!("  Zero encoder layers. Just embedding lookup + {rank} dot products.");
     }
-    eprintln!(
-        "  Zero matmul layers. Just an embedding lookup + {rank} dot products."
-    );
+    eprintln!("  Zero matmul layers. Just an embedding lookup + {rank} dot products.");
 
     Ok(())
 }

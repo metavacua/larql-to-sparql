@@ -207,9 +207,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         "{:>25} {:>10.2} {:>12.0}",
         "precomputed + labels", label_us, label_qps
     );
-    println!(
-        "  (checksums: {checksum} {label_checksum} — prevents elimination)"
-    );
+    println!("  (checksums: {checksum} {label_checksum} — prevents elimination)");
 
     Ok(())
 }

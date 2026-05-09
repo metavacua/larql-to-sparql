@@ -310,9 +310,7 @@ fn main() {
         .collect();
     println!("Loaded {} experts in {}ms:", metas.len(), load_ms);
     for (tier, id, version, ops_count, desc) in &metas {
-        println!(
-            "  [{tier:>2}] {id:14} v{version}  {ops_count} op(s)  — {desc}"
-        );
+        println!("  [{tier:>2}] {id:14} v{version}  {ops_count} op(s)  — {desc}");
     }
     println!("Registered ops: {}", registry.ops().len());
     println!();

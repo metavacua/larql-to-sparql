@@ -55,9 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .zip(deq.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
-    println!(
-        "\nRoundtrip: nonzero={deq_nz}/{n_floats}, max_err={max_err:.6}"
-    );
+    println!("\nRoundtrip: nonzero={deq_nz}/{n_floats}, max_err={max_err:.6}");
     println!("Dequantized first 5: {:?}", &deq[..5]);
 
     // NOW compare with what's in the q4k file

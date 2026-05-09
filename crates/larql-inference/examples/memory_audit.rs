@@ -278,9 +278,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         baseline.0, baseline.1
     );
     println!("  Peak:           RSS={max_rss:>7} MB");
-    println!(
-        "  Final:          RSS={final_rss:>7} MB  VSZ={final_vsz:>7} MB"
-    );
+    println!("  Final:          RSS={final_rss:>7} MB  VSZ={final_vsz:>7} MB");
     println!(
         "  RSS drift over {} iters: {:+} MB",
         args.iterations, total_drift

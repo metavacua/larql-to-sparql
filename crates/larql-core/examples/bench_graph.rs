@@ -104,12 +104,8 @@ fn main() {
     let mut algo_graph = Graph::new();
     for i in 0..1_000 {
         algo_graph.add_edge(
-            Edge::new(
-                format!("N{i}"),
-                "connects",
-                format!("N{}", (i + 1) % 1_000),
-            )
-            .with_confidence(0.9),
+            Edge::new(format!("N{i}"), "connects", format!("N{}", (i + 1) % 1_000))
+                .with_confidence(0.9),
         );
         // Add some cross-links
         if i % 10 == 0 {

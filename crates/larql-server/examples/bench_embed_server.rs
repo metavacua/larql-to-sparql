@@ -71,9 +71,7 @@ fn bench<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
     let elapsed = t.elapsed();
     let us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
-    println!(
-        "  {name:<48}  {us:>8.2} µs/op   {ops:>10.0} ops/s   ({iters} iters)",
-    );
+    println!("  {name:<48}  {us:>8.2} µs/op   {ops:>10.0} ops/s   ({iters} iters)",);
 }
 
 fn bench_ns<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
@@ -87,9 +85,7 @@ fn bench_ns<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
     let elapsed = t.elapsed();
     let ns = elapsed.as_secs_f64() * 1_000_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
-    println!(
-        "  {name:<48}  {ns:>8.1} ns/op   {ops:>10.0} ops/s   ({iters} iters)",
-    );
+    println!("  {name:<48}  {ns:>8.1} ns/op   {ops:>10.0} ops/s   ({iters} iters)",);
 }
 
 // ── Wire format helpers (mirrors routes/embed.rs) ─────────────────────────────
@@ -413,9 +409,7 @@ fn main() {
         // RSS overhead of just the mmap after cold open (before any page faults).
         drop(embeddings);
         let (rss_after_mmap, _) = mem_mb();
-        println!(
-            "  mmap open (cold, no pages faulted):  {open_ms:.1}ms  RSS={rss_after_mmap} MB"
-        );
+        println!("  mmap open (cold, no pages faulted):  {open_ms:.1}ms  RSS={rss_after_mmap} MB");
 
         // Touch 5000 tokens (L1 cache fill): fault exactly those pages.
         let l1_cap = 5_000usize;
@@ -512,12 +506,8 @@ fn main() {
         let embed_f16_gb = vocab as f64 * hidden as f64 * 2.0 / 1e9;
         let tok_gb = 0.234f64;
         let l1_gb = l1_cap as f64 * hidden as f64 * 4.0 / 1e9;
-        println!(
-            "  embeddings.bin on disk (f16):          {embed_f16_gb:.2} GB"
-        );
-        println!(
-            "  f32 heap (eager decode):               {embed_f32_gb:.2} GB"
-        );
+        println!("  embeddings.bin on disk (f16):          {embed_f16_gb:.2} GB");
+        println!("  f32 heap (eager decode):               {embed_f32_gb:.2} GB");
         println!(
             "  f16 mmap + L1 cache ({l1_cap} tokens):   {:.2} GB  ({:.0} MB mmap + {:.0} MB L1)",
             embed_f16_gb + l1_gb,

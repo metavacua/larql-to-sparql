@@ -113,9 +113,7 @@ fn main() {
         } else {
             "no"
         };
-        println!(
-            "{name:<14} {norm:>6} {offset:>6} {activ:>8} {ffn:>8} {post:>10} {qk:>8}"
-        );
+        println!("{name:<14} {norm:>6} {offset:>6} {activ:>8} {ffn:>8} {post:>10} {qk:>8}");
     }
 
     // ── MoE comparison ──

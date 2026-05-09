@@ -70,9 +70,7 @@ fn main() {
     let gate_file_size = std::fs::metadata(dir.join("gate_vectors.bin"))
         .unwrap()
         .len();
-    println!(
-        "── Synthetic vindex: {num_layers} layers × {features} features × {hidden} hidden ──"
-    );
+    println!("── Synthetic vindex: {num_layers} layers × {features} features × {hidden} hidden ──");
     println!(
         "  gate_vectors.bin: {:.1} MB on disk",
         gate_file_size as f64 / 1_048_576.0

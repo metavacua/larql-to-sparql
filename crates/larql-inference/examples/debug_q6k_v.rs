@@ -89,9 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let nz = out.iter().filter(|v| v.abs() > 1e-10).count();
                 let max_abs = out.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
-                println!(
-                    "  CPU matmul: nonzero={nz}/{kv_dim}, max_abs={max_abs:.4}"
-                );
+                println!("  CPU matmul: nonzero={nz}/{kv_dim}, max_abs={max_abs:.4}");
             }
             Err(e) => println!("  Dequantize failed: {e}"),
         }

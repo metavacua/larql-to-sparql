@@ -254,9 +254,7 @@ fn run_with_builtin() {
         let label_str = label.as_deref().unwrap_or("(unlabeled)");
         let expected = cluster_names.get(i).unwrap_or(&"?");
         let status = if label.is_some() { "OK" } else { "MISS" };
-        println!(
-            "    Cluster {i} ({expected}): {label_str:<25} {status}"
-        );
+        println!("    Cluster {i} ({expected}): {label_str:<25} {status}");
     }
 
     println!("\n=== Done ===");

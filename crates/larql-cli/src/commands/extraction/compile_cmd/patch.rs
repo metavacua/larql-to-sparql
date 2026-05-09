@@ -78,9 +78,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let Some(b64) = gate_vector_b64 else {
-            eprintln!(
-                "  skip: insert at L{layer}[{feature}] has no gate vector"
-            );
+            eprintln!("  skip: insert at L{layer}[{feature}] has no gate vector");
             continue;
         };
         let gate_vec = decode_f32_b64(b64)?;
@@ -105,9 +103,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
                 weights.embed.row(tid).to_vec()
             }
             None => {
-                eprintln!(
-                    "  skip: insert at L{layer}[{feature}] has no down_meta target"
-                );
+                eprintln!("  skip: insert at L{layer}[{feature}] has no down_meta target");
                 continue;
             }
         };

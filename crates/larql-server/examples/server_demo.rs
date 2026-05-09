@@ -230,9 +230,7 @@ fn main() {
         } else {
             ""
         };
-        println!(
-            "    {{\"name\": \"{name}\", \"count\": {count}}}{comma}"
-        );
+        println!("    {{\"name\": \"{name}\", \"count\": {count}}}{comma}");
     }
     println!("  ],");
     println!("  \"total\": {}", token_counts.len());
@@ -429,9 +427,7 @@ fn main() {
 
     println!("Single layer request:");
     println!("  POST /v1/walk-ffn {{\"layer\": 1, \"residual\": [1.0, 0.2, ...]}}");
-    println!(
-        "  → {{\"layer\": 1, \"features\": {features:?}, \"scores\": {scores:?}}}"
-    );
+    println!("  → {{\"layer\": 1, \"features\": {features:?}, \"scores\": {scores:?}}}");
     println!();
     println!("Batched request (all layers in one round-trip):");
     println!("  POST /v1/walk-ffn {{\"layers\": [0,1,2,3], \"residual\": [...]}}");
