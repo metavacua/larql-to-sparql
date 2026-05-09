@@ -152,8 +152,7 @@ pub fn run(args: FfnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!(
-        "FFN Layer {} Bottleneck Analysis (seq_len={}, hidden={}, intermediate={})",
-        layer, seq_len, hidden, intermediate
+        "FFN Layer {layer} Bottleneck Analysis (seq_len={seq_len}, hidden={hidden}, intermediate={intermediate})"
     );
     println!("{}", "=".repeat(65));
     println!(

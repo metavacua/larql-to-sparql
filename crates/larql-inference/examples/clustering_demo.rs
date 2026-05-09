@@ -33,7 +33,7 @@ fn main() {
 
     println!("  Input: 9 points in 2D, k=3");
     println!("  Centres: {:?}", centres.shape());
-    println!("  Assignments: {:?}", assignments);
+    println!("  Assignments: {assignments:?}");
     println!(
         "  Max distance: {:.4}",
         distances.iter().cloned().fold(0.0f32, f32::max)
@@ -184,7 +184,7 @@ fn main() {
     for (subject, object) in lookups {
         let rels = db.lookup(subject, object);
         if rels.is_empty() {
-            println!("  {} → {} : (no match)", subject, object);
+            println!("  {subject} → {object} : (no match)");
         } else {
             println!("  {} → {} : {}", subject, object, rels.join(", "));
         }
@@ -194,5 +194,5 @@ fn main() {
 }
 
 fn section(name: &str) {
-    println!("── {} ──\n", name);
+    println!("── {name} ──\n");
 }

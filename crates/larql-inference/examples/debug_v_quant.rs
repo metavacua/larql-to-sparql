@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("V proj L0 f32 data:");
     let amax = f32_data.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
     let nz = f32_data.iter().filter(|v| v.abs() > 1e-10).count();
-    println!("  n={}, nonzero={}, amax={:.6}", n_floats, nz, amax);
+    println!("  n={n_floats}, nonzero={nz}, amax={amax:.6}");
     println!("  first 5: {:?}", &f32_data[..5]);
 
     // Quantize to Q6_K
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|v| v.abs())
         .fold(0.0f32, f32::max);
-    println!("First 256 values amax: {:.6}", first_256_amax);
+    println!("First 256 values amax: {first_256_amax:.6}");
     println!("Expected d = amax/32 = {:.8}", first_256_amax / 32.0);
 
     // Dequantize
@@ -56,8 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
     println!(
-        "\nRoundtrip: nonzero={}/{}, max_err={:.6}",
-        deq_nz, n_floats, max_err
+        "\nRoundtrip: nonzero={deq_nz}/{n_floats}, max_err={max_err:.6}"
     );
     println!("Dequantized first 5: {:?}", &deq[..5]);
 
@@ -73,12 +72,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "\nOn-disk Q4K file V scale: {:.8} (bytes: {:02x} {:02x})",
         q4k_d, q4k_d_bytes[0], q4k_d_bytes[1]
     );
-    println!("Fresh quantize scale:    {:.8}", d);
+    println!("Fresh quantize scale:    {d:.8}");
     println!("Match: {}", (d - q4k_d).abs() < 1e-10);
 
     // Check if the stored data matches fresh quantization
     let bytes_match = q6k[..2150400] == q4k_v[..2150400];
-    println!("Byte-for-byte match (fresh vs disk): {}", bytes_match);
+    println!("Byte-for-byte match (fresh vs disk): {bytes_match}");
     if !bytes_match {
         // Find first difference
         for i in 0..2150400 {

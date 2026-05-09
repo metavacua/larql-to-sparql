@@ -65,7 +65,7 @@ fn main() {
             matches.extend(db.lookup(subject, object));
         }
         if matches.is_empty() {
-            println!("  {:15} → {:15} (no match)", subject, object);
+            println!("  {subject:15} → {object:15} (no match)");
         } else {
             println!("  {:15} → {:15} → {}", subject, object, matches.join(", "));
         }
@@ -156,7 +156,7 @@ fn main() {
             for (s, o, expected) in test_rels {
                 let rels = db.lookup(s, o);
                 if rels.is_empty() {
-                    println!("    {:20} → {:20} (no match) {}", s, o, expected);
+                    println!("    {s:20} → {o:20} (no match) {expected}");
                 } else {
                     println!("    {:20} → {:20} → {} {}", s, o, rels.join(", "), expected);
                 }
@@ -223,7 +223,7 @@ fn run_with_builtin() {
     for (s, o) in tests {
         let rels = db.lookup(s, o);
         if rels.is_empty() {
-            println!("    {} → {} : (no match)", s, o);
+            println!("    {s} → {o} : (no match)");
         } else {
             println!("    {} → {} : {}", s, o, rels.join(", "));
         }
@@ -255,8 +255,7 @@ fn run_with_builtin() {
         let expected = cluster_names.get(i).unwrap_or(&"?");
         let status = if label.is_some() { "OK" } else { "MISS" };
         println!(
-            "    Cluster {} ({}): {:<25} {}",
-            i, expected, label_str, status
+            "    Cluster {i} ({expected}): {label_str:<25} {status}"
         );
     }
 
@@ -264,5 +263,5 @@ fn run_with_builtin() {
 }
 
 fn section(name: &str) {
-    println!("── {} ──\n", name);
+    println!("── {name} ──\n");
 }

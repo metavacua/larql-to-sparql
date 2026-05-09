@@ -46,9 +46,9 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| "missing".into());
 
         if *ok {
-            println!("  {} ... OK ({})", filename, size_str);
+            println!("  {filename} ... OK ({size_str})");
         } else {
-            println!("  {} ... FAILED ({})", filename, size_str);
+            println!("  {filename} ... FAILED ({size_str})");
             all_ok = false;
         }
     }

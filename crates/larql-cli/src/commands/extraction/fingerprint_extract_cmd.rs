@@ -330,7 +330,7 @@ pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error
             writeln!(out)?;
         }
 
-        eprintln!("  L{layer}: {} heads extracted", num_q);
+        eprintln!("  L{layer}: {num_q} heads extracted");
     }
 
     // ── Optional: per-token fingerprints ──

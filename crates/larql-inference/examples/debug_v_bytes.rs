@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("  ql first 10: {:?}", &ql[..10]);
         println!("  qh first 10: {:?}", &qh[..10]);
-        println!("  scales: {:?}", scales);
+        println!("  scales: {scales:?}");
 
         // Check if d is zero (would make everything zero)
         println!("\n  d == 0: {}", d == 0.0);
@@ -49,8 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         println!(
-            "\n  First 100 superblocks: d=0 in {}/100, scales=0 in {}/100",
-            zero_d_count, zero_scales_count
+            "\n  First 100 superblocks: d=0 in {zero_d_count}/100, scales=0 in {zero_scales_count}/100"
         );
     }
 

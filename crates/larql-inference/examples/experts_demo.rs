@@ -311,8 +311,7 @@ fn main() {
     println!("Loaded {} experts in {}ms:", metas.len(), load_ms);
     for (tier, id, version, ops_count, desc) in &metas {
         println!(
-            "  [{:>2}] {:14} v{}  {} op(s)  — {}",
-            tier, id, version, ops_count, desc
+            "  [{tier:>2}] {id:14} v{version}  {ops_count} op(s)  — {desc}"
         );
     }
     println!("Registered ops: {}", registry.ops().len());
@@ -380,7 +379,7 @@ fn main() {
             }
             None => {
                 skipped += 1;
-                println!("{:<22} {:<24} (no match)", label, op);
+                println!("{label:<22} {op:<24} (no match)");
             }
         }
     }
@@ -399,7 +398,7 @@ fn main() {
         }
     );
     if skipped > 0 {
-        println!("No match: {} calls", skipped);
+        println!("No match: {skipped} calls");
     }
 
     // ── After calls: show which experts are now live in memory ─────────────

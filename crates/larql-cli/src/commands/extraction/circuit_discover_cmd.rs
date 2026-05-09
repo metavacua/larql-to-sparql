@@ -414,7 +414,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         let heads_str: String = circuit
             .heads
             .iter()
-            .map(|(l, h)| format!("L{}H{}", l, h))
+            .map(|(l, h)| format!("L{l}H{h}"))
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -437,7 +437,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         layer_dist.sort();
         let dist_str: String = layer_dist
             .iter()
-            .map(|(l, c)| format!("L{}×{}", l, c))
+            .map(|(l, c)| format!("L{l}×{c}"))
             .collect::<Vec<_>>()
             .join(" ");
         println!("  Layers: {dist_str}");
@@ -480,7 +480,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
                 serde_json::json!({
                     "id": c.id,
                     "num_heads": c.heads.len(),
-                    "heads": c.heads.iter().map(|(l, h)| format!("L{}H{}", l, h)).collect::<Vec<_>>(),
+                    "heads": c.heads.iter().map(|(l, h)| format!("L{l}H{h}")).collect::<Vec<_>>(),
                     "top_tokens": c.top_tokens,
                     "top_features": c.features.iter().take(10).map(|(l, f, c)| {
                         serde_json::json!({"layer": l, "feature": f, "coupling": c})

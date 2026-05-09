@@ -121,10 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         q8_offset += entry_size;
 
         if total_f32 < 400_000_000 {
-            println!(
-                "    {} [{},{}] → {} bytes Q8 ({} vals + {} scales)",
-                key, rows, cols, entry_size, vals_bytes, scales_bytes
-            );
+            println!("    {key} [{rows},{cols}] → {entry_size} bytes Q8 ({vals_bytes} vals + {scales_bytes} scales)");
         }
     }
 
@@ -136,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_q8 as f64 / 1e6,
         ratio
     );
-    println!("  Time: {:.1}s", elapsed);
+    println!("  Time: {elapsed:.1}s");
 
     let manifest_out = dir.join("attn_weights_q8_manifest.json");
     std::fs::write(&manifest_out, serde_json::to_string_pretty(&q8_manifest)?)?;

@@ -562,8 +562,7 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
     let shared_dims_95 = dims_for_threshold(&shared_cumvar, 0.95);
 
     eprintln!(
-        "  Shared PCA: {} total rows, top-{} components",
-        total_rows, top_k
+        "  Shared PCA: {total_rows} total rows, top-{top_k} components"
     );
     for (i, (sv, cv)) in shared_svs.iter().zip(shared_cumvar.iter()).enumerate() {
         eprintln!("    PC{i}: SV={sv:.1}  cumvar={cv:.4}");

@@ -52,7 +52,7 @@ fn run_download(
     revision: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let hf_path = if let Some(rev) = revision {
-        format!("hf://{}@{}", repo, rev)
+        format!("hf://{repo}@{rev}")
     } else {
         format!("hf://{repo}")
     };
@@ -98,7 +98,7 @@ Published: {url}"
     );
     eprintln!("\nUsage:");
     eprintln!("  larql repl");
-    eprintln!("  larql> USE \"hf://{}\";", repo);
+    eprintln!("  larql> USE \"hf://{repo}\";");
 
     Ok(())
 }
@@ -118,7 +118,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
         } else {
             format!("{:.1} KB", size as f64 / 1024.0)
         };
-        eprint!("  Uploading {} ({})...", filename, size_str);
+        eprint!("  Uploading {filename} ({size_str})...");
     }
 
     fn on_file_done(&mut self, _filename: &str) {
@@ -135,8 +135,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
             format!("{:.1} KB", size as f64 / 1024.0)
         };
         eprintln!(
-            "  Skipping  {} ({}) — unchanged (sha256 {}…)",
-            filename, size_str, short_sha
+            "  Skipping  {filename} ({size_str}) — unchanged (sha256 {short_sha}…)"
         );
     }
 

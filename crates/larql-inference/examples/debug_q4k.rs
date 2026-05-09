@@ -23,8 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Check first few bytes aren't all zeros
         let q_nonzero = q.0.iter().take(1000).filter(|&&b| b != 0).count();
         let k_nonzero = k.0.iter().take(1000).filter(|&&b| b != 0).count();
-        println!("  Q first 1000 bytes: {}/1000 nonzero", q_nonzero);
-        println!("  K first 1000 bytes: {}/1000 nonzero", k_nonzero);
+        println!("  Q first 1000 bytes: {q_nonzero}/1000 nonzero");
+        println!("  K first 1000 bytes: {k_nonzero}/1000 nonzero");
 
         // Expected sizes
         let hidden = weights.hidden_size; // 2560
@@ -39,12 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let expected_k = (kv_dim * hidden).div_ceil(256) * 148;
         let _expected_o = (hidden * q_dim).div_ceil(256) * 148;
         println!(
-            "\n  Expected Q bytes: {} (q_dim={} × hidden={})",
-            expected_q, q_dim, hidden
+            "\n  Expected Q bytes: {expected_q} (q_dim={q_dim} × hidden={hidden})"
         );
         println!("  Actual Q bytes:   {}", q.0.len());
         println!("  Match: {}\n", q.0.len() == expected_q);
-        println!("  Expected K bytes: {}", expected_k);
+        println!("  Expected K bytes: {expected_k}");
         println!("  Actual K bytes:   {}", k.0.len());
         println!("  Match: {}\n", k.0.len() == expected_k);
     } else {
@@ -83,14 +82,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("\n=== Interleaved Q4K FFN ===\n");
         println!("  Total mmap: {} bytes", mmap.len());
-        println!("  Per matrix: {} bytes", per_matrix);
+        println!("  Per matrix: {per_matrix} bytes");
         println!("  Per layer: {} bytes", per_matrix * 3);
         println!("  Expected 34L: {} bytes", per_matrix * 3 * 34);
 
         // Check gate data nonzero
         let gate_data = &mmap[0..per_matrix];
         let gate_nz = gate_data.iter().take(1000).filter(|&&b| b != 0).count();
-        println!("  Gate L0 first 1000 bytes: {}/1000 nonzero", gate_nz);
+        println!("  Gate L0 first 1000 bytes: {gate_nz}/1000 nonzero");
 
         // Try gate matvec
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32) * 0.001).collect();

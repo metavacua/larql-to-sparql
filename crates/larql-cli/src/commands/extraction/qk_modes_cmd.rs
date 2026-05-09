@@ -167,7 +167,7 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
                             .and_then(|labels| labels.get(&(layer, f)))
                             .map(|s| s.as_str())
                             .unwrap_or("?");
-                        format!("F{}→{} ({:+.2})", f, label, score)
+                        format!("F{f}→{label} ({score:+.2})")
                     })
                     .collect::<Vec<_>>()
                     .join(", ");

@@ -47,7 +47,7 @@ fn main() {
                 b.output.0,
                 b.output.1
             ),
-            None => println!("  {:<8} {:>2}L  (too few layers)", family, layers),
+            None => println!("  {family:<8} {layers:>2}L  (too few layers)"),
         }
     }
 
@@ -60,7 +60,7 @@ fn main() {
             .feature_meta(0, feat)
             .map(|m| m.top_token.clone())
             .unwrap_or_else(|| "-".into());
-        println!("    F{}: {} ({:.1})", feat, tok, score);
+        println!("    F{feat}: {tok} ({score:.1})");
     }
 
     // ── 4. Walk ──
@@ -68,7 +68,7 @@ fn main() {
     let trace = index.walk(&q, &[0, 1], 2);
     for (layer, hits) in &trace.layers {
         if hits.is_empty() {
-            println!("  L{}: (none)", layer);
+            println!("  L{layer}: (none)");
             continue;
         }
         for h in hits {
@@ -87,7 +87,7 @@ fn main() {
         ("Expert 0 [1,0,0,0]", vec![1.0, 0.0, 0.0, 0.0]),
         ("Expert 1 [0,0,0,1]", vec![0.0, 0.0, 0.0, 1.0]),
     ] {
-        println!("  {}:", label);
+        println!("  {label}:");
         for (f, s) in moe_index.gate_knn(0, &Array1::from_vec(q.clone()), 2) {
             let e = if f < 3 { 0 } else { 1 };
             let tok = moe_index
@@ -109,7 +109,7 @@ fn main() {
         vec![0.0, 0.0, 0.0, 10.0],
         meta("Canberra", 104, 0.85),
     );
-    println!("  Inserted F{} → Canberra (patch overlay)", slot);
+    println!("  Inserted F{slot} → Canberra (patch overlay)");
     patched.delete_feature(0, 2);
     println!("  Deleted F2 (was Tokyo, patch overlay)");
     println!("  Overrides: {}", patched.num_overrides());
@@ -129,8 +129,7 @@ fn main() {
 
     let bin_size = std::fs::metadata(dir.join("down_meta.bin")).unwrap().len();
     println!(
-        "  down_meta.bin:   {} bytes (binary only — JSONL no longer written)",
-        bin_size
+        "  down_meta.bin:   {bin_size} bytes (binary only — JSONL no longer written)"
     );
     assert!(!dir.join("down_meta.jsonl").exists());
 
@@ -208,7 +207,7 @@ fn main() {
         .zip(decoded.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
-    println!("  Max round-trip error: {:.6}", max_err);
+    println!("  Max round-trip error: {max_err:.6}");
     let _ = std::fs::remove_dir_all(&dir16);
 
     // ── 10. Extract pipeline ──
@@ -263,7 +262,7 @@ fn main() {
         if *size > 1024 {
             println!("    {:<30} {:.1} KB", name, *size as f64 / 1024.0);
         } else {
-            println!("    {:<30} {} B", name, size);
+            println!("    {name:<30} {size} B");
         }
     }
 
@@ -437,7 +436,7 @@ fn main() {
         } else {
             "MISMATCH"
         };
-        println!("  {} → {} ({})", gguf_key, normalized, status);
+        println!("  {gguf_key} → {normalized} ({status})");
     }
 
     // ── 14. Vindexfile parsing ──
@@ -463,24 +462,23 @@ STAGE edge
     println!("  Stages: {}", vf.stages.len());
     for d in &vf.directives {
         match d {
-            larql_vindex::VindexfileDirective::From(p) => println!("    FROM {}", p),
-            larql_vindex::VindexfileDirective::Patch(p) => println!("    PATCH {}", p),
+            larql_vindex::VindexfileDirective::From(p) => println!("    FROM {p}"),
+            larql_vindex::VindexfileDirective::Patch(p) => println!("    PATCH {p}"),
             larql_vindex::VindexfileDirective::Insert {
                 entity,
                 relation,
                 target,
-            } => println!("    INSERT ({}, {}, {})", entity, relation, target),
+            } => println!("    INSERT ({entity}, {relation}, {target})"),
             larql_vindex::VindexfileDirective::Delete {
                 entity,
                 relation,
                 target,
             } => println!(
-                "    DELETE entity={} relation={} target={}",
-                entity, relation, target
+                "    DELETE entity={entity} relation={relation} target={target}"
             ),
-            larql_vindex::VindexfileDirective::Labels(p) => println!("    LABELS {}", p),
+            larql_vindex::VindexfileDirective::Labels(p) => println!("    LABELS {p}"),
             larql_vindex::VindexfileDirective::Expose(levels) => {
-                println!("    EXPOSE {:?}", levels)
+                println!("    EXPOSE {levels:?}")
             }
         }
     }
@@ -503,7 +501,7 @@ STAGE edge
     for (path, expected) in &hf_paths {
         let is_hf = larql_vindex::is_hf_path(path);
         let status = if is_hf == *expected { "OK" } else { "MISMATCH" };
-        println!("  {} → hf={} ({})", path, is_hf, status);
+        println!("  {path} → hf={is_hf} ({status})");
     }
     println!("  Supported: USE \"hf://user/repo\"; downloads and loads automatically");
     println!("  CLI: larql hf download user/repo [-o local/]");
@@ -588,7 +586,7 @@ STAGE edge
 // ── Helpers ──
 
 fn section(name: &str) {
-    println!("\n── {} ──\n", name);
+    println!("\n── {name} ──\n");
 }
 
 fn meta(token: &str, id: u32, score: f32) -> FeatureMeta {

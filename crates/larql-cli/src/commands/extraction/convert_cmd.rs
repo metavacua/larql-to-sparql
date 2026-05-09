@@ -216,13 +216,13 @@ fn run_gguf_info(input: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
                 if s.len() > 80 {
                     println!("  {}: \"{}...\"", key, &s[..80]);
                 } else {
-                    println!("  {}: \"{}\"", key, s);
+                    println!("  {key}: \"{s}\"");
                 }
             }
             larql_models::loading::gguf::GgufValue::Array(arr) => {
                 println!("  {}: [{} elements]", key, arr.len());
             }
-            other => println!("  {}: {:?}", key, other),
+            other => println!("  {key}: {other:?}"),
         }
     }
 

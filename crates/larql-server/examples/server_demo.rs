@@ -151,8 +151,7 @@ fn main() {
     for (i, (target, score, layer)) in edges.iter().enumerate() {
         let comma = if i < edges.len() - 1 { "," } else { "" };
         println!(
-            "    {{\"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}}}{}",
-            target, score, layer, comma
+            "    {{\"target\": \"{target}\", \"gate_score\": {score:.1}, \"layer\": {layer}}}{comma}"
         );
     }
     println!("  ]");
@@ -232,8 +231,7 @@ fn main() {
             ""
         };
         println!(
-            "    {{\"name\": \"{}\", \"count\": {}}}{}",
-            name, count, comma
+            "    {{\"name\": \"{name}\", \"count\": {count}}}{comma}"
         );
     }
     println!("  ],");
@@ -250,7 +248,7 @@ fn main() {
     println!("{{");
     println!("  \"model\": \"demo/test-model\",");
     println!("  \"layers\": {},", all_layers.len());
-    println!("  \"features\": {},", total_features);
+    println!("  \"features\": {total_features},");
     println!("  \"hidden_size\": {},", patched.hidden_size());
     println!("  \"loaded\": {{\"browse\": true, \"inference\": false}}");
     println!("}}");
@@ -432,8 +430,7 @@ fn main() {
     println!("Single layer request:");
     println!("  POST /v1/walk-ffn {{\"layer\": 1, \"residual\": [1.0, 0.2, ...]}}");
     println!(
-        "  → {{\"layer\": 1, \"features\": {:?}, \"scores\": {:?}}}",
-        features, scores
+        "  → {{\"layer\": 1, \"features\": {features:?}, \"scores\": {scores:?}}}"
     );
     println!();
     println!("Batched request (all layers in one round-trip):");

@@ -274,8 +274,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!(
-        "  Summary:  max L2={:.3e} (layer {})   min cos={:.6}   max|Δ|={:.3e}",
-        max_l2, worst_layer, min_cos, max_abs
+        "  Summary:  max L2={max_l2:.3e} (layer {worst_layer})   min cos={min_cos:.6}   max|Δ|={max_abs:.3e}"
     );
 
     // f32 vindexes hit bit-identity (L2=0, cos=1). Q4K/Q6K vindexes carry
@@ -344,7 +343,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         prob_delta_budget,
         if down_q4k { "Q4_K" } else { "Q6_K" }
     );
-    println!("  top-5 Jaccard: {:.3}", jacc);
+    println!("  top-5 Jaccard: {jacc:.3}");
 
     let phase_b_ok = top1_match && prob_delta <= prob_delta_budget;
     println!("  Phase B: {}\n", if phase_b_ok { "PASS" } else { "FAIL" });

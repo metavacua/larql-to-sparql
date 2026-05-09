@@ -17,7 +17,7 @@ fn wasm_dir() -> PathBuf {
 }
 
 fn wasm(name: &str) -> PathBuf {
-    wasm_dir().join(format!("larql_expert_{}.wasm", name))
+    wasm_dir().join(format!("larql_expert_{name}.wasm"))
 }
 
 /// Load a single expert and invoke `op` with `args`.
@@ -25,7 +25,7 @@ fn wasm(name: &str) -> PathBuf {
 fn call(expert: &str, op: &str, args: Value) -> Option<Value> {
     let path = wasm(expert);
     if !path.exists() {
-        eprintln!("skip (missing wasm): {}", expert);
+        eprintln!("skip (missing wasm): {expert}");
         return None;
     }
     let mut reg = ExpertRegistry::default();
@@ -45,12 +45,10 @@ fn assert_eq_expert(expert: &str, op: &str, args: Value, expected: Value) {
 #[track_caller]
 fn assert_approx(expert: &str, op: &str, args: Value, expected: f64, tol: f64) {
     if let Some(v) = call(expert, op, args.clone()) {
-        let got = v.as_f64().unwrap_or_else(|| panic!("not a number: {}", v));
+        let got = v.as_f64().unwrap_or_else(|| panic!("not a number: {v}"));
         assert!(
             (got - expected).abs() <= tol,
-            "expert={expert} op={op} args={args}: expected ~{}, got {}",
-            expected,
-            got
+            "expert={expert} op={op} args={args}: expected ~{expected}, got {got}"
         );
     }
 }
@@ -1747,7 +1745,7 @@ fn graph_topological_sort_dag() {
         let ai = order.iter().position(|&n| n == "A").expect("A present");
         let bi = order.iter().position(|&n| n == "B").expect("B present");
         let ci = order.iter().position(|&n| n == "C").expect("C present");
-        assert!(ai < bi && bi < ci, "invalid topo order: {:?}", order);
+        assert!(ai < bi && bi < ci, "invalid topo order: {order:?}");
     }
 }
 
@@ -1880,9 +1878,8 @@ fn registry_memory_stable_across_many_calls() {
 
     assert_eq!(
         pages_before, pages_after,
-        "arithmetic linear memory grew from {} to {} pages across 2000 calls — \
-         dealloc is probably not paired in caller.rs",
-        pages_before, pages_after
+        "arithmetic linear memory grew from {pages_before} to {pages_after} pages across 2000 calls — \
+         dealloc is probably not paired in caller.rs"
     );
 }
 
@@ -1905,8 +1902,7 @@ fn module_cache_file_is_written_and_reused() {
     }
     assert!(
         cwasm_path.exists(),
-        "expected cache file {:?} to be created on first load",
-        cwasm_path
+        "expected cache file {cwasm_path:?} to be created on first load"
     );
 
     // Second load should succeed against the cached artifact. We can't
@@ -1999,8 +1995,7 @@ fn registry_ops_are_discoverable() {
     ] {
         assert!(
             ops.contains(expected),
-            "op {:?} missing from registry ops",
-            expected
+            "op {expected:?} missing from registry ops"
         );
     }
 }

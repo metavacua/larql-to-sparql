@@ -53,7 +53,7 @@ fn bench_index() -> VectorIndex {
 
         let metas: Vec<Option<FeatureMeta>> = (0..num_features)
             .map(|f| {
-                let token = format!("tok_L{}_F{}", layer, f);
+                let token = format!("tok_L{layer}_F{f}");
                 let score = 0.3 + ((f * 7 + layer * 3) % 70) as f32 / 100.0;
                 Some(make_meta(&token, f as u32 + layer as u32 * 10000, score))
             })
@@ -218,7 +218,7 @@ fn main() {
         std::collections::HashMap::new();
     for l in 0..8 {
         for f in (0..1024).step_by(10) {
-            probe_labels.insert((l, f), format!("rel_L{}_F{}", l, f));
+            probe_labels.insert((l, f), format!("rel_L{l}_F{f}"));
         }
     }
     println!("  {} probe labels loaded", probe_labels.len());

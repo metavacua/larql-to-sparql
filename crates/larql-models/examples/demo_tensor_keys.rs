@@ -65,7 +65,7 @@ fn main() {
         let k_norm = arch
             .attn_k_norm_key(0)
             .unwrap_or_else(|| "(none)".to_string());
-        println!("{:<14} {:<50} {}", name, q_norm, k_norm);
+        println!("{name:<14} {q_norm:<50} {k_norm}");
     }
 
     // ── Prefix stripping ──
@@ -76,10 +76,10 @@ fn main() {
         let prefixes = arch
             .key_prefixes_to_strip()
             .iter()
-            .map(|p| format!("\"{}\"", p))
+            .map(|p| format!("\"{p}\""))
             .collect::<Vec<_>>()
             .join(", ");
-        println!("{:<14} [{}]", name, prefixes);
+        println!("{name:<14} [{prefixes}]");
     }
 
     // ── Special keys ──
@@ -114,8 +114,7 @@ fn main() {
             "no"
         };
         println!(
-            "{:<14} {:>6} {:>6} {:>8} {:>8} {:>10} {:>8}",
-            name, norm, offset, activ, ffn, post, qk
+            "{name:<14} {norm:>6} {offset:>6} {activ:>8} {ffn:>8} {post:>10} {qk:>8}"
         );
     }
 
@@ -163,7 +162,7 @@ fn main() {
         let window = arch
             .sliding_window_size()
             .map_or("none".to_string(), |w| format!("{w}"));
-        println!("  {:<14} {}  (window={})", name, pattern, window);
+        println!("  {name:<14} {pattern}  (window={window})");
     }
 }
 

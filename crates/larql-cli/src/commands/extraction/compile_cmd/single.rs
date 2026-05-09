@@ -139,7 +139,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
             .find(|(tok, _)| tok.trim() == answer.as_str())
             .map(|(_, p)| *p)
             .unwrap_or(0.0);
-        eprintln!("  iter {}: prob('{}') = {:.3}", iter, answer, prob);
+        eprintln!("  iter {iter}: prob('{answer}') = {prob:.3}");
 
         let scale = if prob > args.ceiling {
             DOWN_SCALE

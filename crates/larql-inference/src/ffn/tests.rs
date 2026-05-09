@@ -124,8 +124,7 @@ fn test_ffn_dense_not_zero() {
     let norm: f32 = out.iter().map(|v| v * v).sum::<f32>().sqrt();
     assert!(
         norm > 0.01,
-        "FFN output should be non-zero, got norm={}",
-        norm
+        "FFN output should be non-zero, got norm={norm}"
     );
 }
 
@@ -161,9 +160,7 @@ fn test_ffn_multi_position() {
         for j in 0..4 {
             assert!(
                 (out[[s, j]] - out_single[[0, j]]).abs() < 1e-5,
-                "position {} dim {} mismatch",
-                s,
-                j
+                "position {s} dim {j} mismatch"
             );
         }
     }

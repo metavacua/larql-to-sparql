@@ -49,7 +49,7 @@ fn main() {
             .collect();
     }
     let embed_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  Embed lookup ({seq} tokens):        {:>8.1}µs", embed_us);
+    println!("  Embed lookup ({seq} tokens):        {embed_us:>8.1}µs");
 
     // ── 2. RMSNorm ──
     let t = Instant::now();
@@ -58,8 +58,7 @@ fn main() {
     }
     let rmsnorm_us = t.elapsed().as_micros() as f64 / iters as f64;
     println!(
-        "  RMSNorm [{seq},{hidden}]:             {:>8.1}µs",
-        rmsnorm_us
+        "  RMSNorm [{seq},{hidden}]:             {rmsnorm_us:>8.1}µs"
     );
 
     // ── 3. LayerNorm (for StarCoder2 comparison) ──
@@ -83,8 +82,7 @@ fn main() {
     }
     let rope_us = t.elapsed().as_micros() as f64 / iters as f64;
     println!(
-        "  RoPE (full, {num_q_heads}Q heads):          {:>8.1}µs",
-        rope_us
+        "  RoPE (full, {num_q_heads}Q heads):          {rope_us:>8.1}µs"
     );
 
     // Partial RoPE (Gemma 4: 25%)
@@ -108,7 +106,7 @@ fn main() {
         let _v = backend.matmul_transb(h.view(), wv.view());
     }
     let qkv_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  QKV projection (3× BLAS):       {:>8.1}µs", qkv_us);
+    println!("  QKV projection (3× BLAS):       {qkv_us:>8.1}µs");
 
     // ── 6. Attention scores + softmax + V-weighted sum ──
     let q_mat = synth_2d(seq, num_q_heads * head_dim, 70);
@@ -127,7 +125,7 @@ fn main() {
         );
     }
     let attn_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  Attention (scores+softmax+V):    {:>8.1}µs", attn_us);
+    println!("  Attention (scores+softmax+V):    {attn_us:>8.1}µs");
 
     // ── 7. O Projection ──
     let attn_out = synth_2d(seq, num_q_heads * head_dim, 73);
@@ -136,7 +134,7 @@ fn main() {
         let _o = backend.matmul_transb(attn_out.view(), wo.view());
     }
     let o_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  O projection (BLAS):             {:>8.1}µs", o_us);
+    println!("  O projection (BLAS):             {o_us:>8.1}µs");
 
     // ── 8. Residual add ──
     let a = synth_2d(seq, hidden, 80);
@@ -147,8 +145,7 @@ fn main() {
     }
     let resadd_us = t.elapsed().as_micros() as f64 / iters as f64;
     println!(
-        "  Residual add [{seq},{hidden}]:        {:>8.1}µs",
-        resadd_us
+        "  Residual add [{seq},{hidden}]:        {resadd_us:>8.1}µs"
     );
 
     // ── 9. FFN Gate + Up (BLAS) ──
@@ -158,7 +155,7 @@ fn main() {
         let _up = backend.matmul_transb(h.view(), wup.view());
     }
     let ffn_gu_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  FFN gate+up (2× BLAS):           {:>8.1}µs", ffn_gu_us);
+    println!("  FFN gate+up (2× BLAS):           {ffn_gu_us:>8.1}µs");
 
     // ── 10. GEGLU SiLU activation ──
     let gate_vals = synth_2d(seq, inter, 90);
@@ -168,7 +165,7 @@ fn main() {
         let _act = geglu_silu(&gate_vals, &up_vals);
     }
     let geglu_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  GEGLU SiLU [{seq},{inter}]:        {:>8.1}µs", geglu_us);
+    println!("  GEGLU SiLU [{seq},{inter}]:        {geglu_us:>8.1}µs");
 
     // ── 11. FFN Down (BLAS) ──
     let act_buf = synth_2d(seq, inter, 92);
@@ -177,7 +174,7 @@ fn main() {
         let _down = backend.matmul_transb(act_buf.view(), wdown.view());
     }
     let ffn_down_us = t.elapsed().as_micros() as f64 / iters as f64;
-    println!("  FFN down (BLAS):                 {:>8.1}µs", ffn_down_us);
+    println!("  FFN down (BLAS):                 {ffn_down_us:>8.1}µs");
 
     // ── 12. Logits (vocab projection) ──
     let last_hidden = synth_2d(1, hidden, 100);
@@ -187,8 +184,7 @@ fn main() {
     }
     let logits_us = t.elapsed().as_micros() as f64 / 5.0;
     println!(
-        "  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {:>8.0}µs",
-        logits_us
+        "  Logits [1,{hidden}]×[{vocab},{hidden}]^T: {logits_us:>8.0}µs"
     );
 
     // ── Summary ──
@@ -218,7 +214,7 @@ fn main() {
     print_pct("  GEGLU", geglu_us, layer_total);
     print_pct("  FFN down", ffn_down_us, layer_total);
     println!("  ──────────────── ──────────");
-    println!("  Layer total:     {:>8.0}µs", layer_total);
+    println!("  Layer total:     {layer_total:>8.0}µs");
     println!("  34-layer model:  {:>8.1}ms", full_model / 1000.0);
     println!("  Projected tok/s: {:.0}", 1_000_000.0 / full_model);
 

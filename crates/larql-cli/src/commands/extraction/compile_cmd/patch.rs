@@ -79,8 +79,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         let Some(b64) = gate_vector_b64 else {
             eprintln!(
-                "  skip: insert at L{}[{}] has no gate vector",
-                layer, feature
+                "  skip: insert at L{layer}[{feature}] has no gate vector"
             );
             continue;
         };
@@ -99,8 +98,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
                 let tid = dm.top_token_id as usize;
                 if tid >= weights.embed.shape()[0] {
                     eprintln!(
-                        "  skip: insert at L{}[{}] target token {} out of vocab",
-                        layer, feature, tid
+                        "  skip: insert at L{layer}[{feature}] target token {tid} out of vocab"
                     );
                     continue;
                 }
@@ -108,8 +106,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
             None => {
                 eprintln!(
-                    "  skip: insert at L{}[{}] has no down_meta target",
-                    layer, feature
+                    "  skip: insert at L{layer}[{feature}] has no down_meta target"
                 );
                 continue;
             }

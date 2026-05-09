@@ -170,7 +170,7 @@ fn main() {
                 let ds = d.shape();
                 let qs = q.shape();
                 if ds != qs {
-                    println!("{:55} SHAPE MISMATCH dense={:?} q4k={:?}", key, ds, qs);
+                    println!("{key:55} SHAPE MISMATCH dense={ds:?} q4k={qs:?}");
                     continue;
                 }
                 // Per-element diff across a sample window to keep cost bounded
@@ -201,13 +201,12 @@ fn main() {
                 let mean_abs = sum_abs / count as f64;
                 let cos = dot / (d_norm2.sqrt() * q_norm2.sqrt() + 1e-12);
                 println!(
-                    "{:55} {:>12} {:>14.6e} {:>14.6e} {:>10.6}",
-                    key, n_total, max_abs, mean_abs, cos
+                    "{key:55} {n_total:>12} {max_abs:>14.6e} {mean_abs:>14.6e} {cos:>10.6}"
                 );
             }
-            (Some(_), None) => println!("{:55} MISSING IN Q4K", key),
-            (None, Some(_)) => println!("{:55} MISSING IN DENSE", key),
-            (None, None) => println!("{:55} missing both sides", key),
+            (Some(_), None) => println!("{key:55} MISSING IN Q4K"),
+            (None, Some(_)) => println!("{key:55} MISSING IN DENSE"),
+            (None, None) => println!("{key:55} missing both sides"),
         }
     }
 }

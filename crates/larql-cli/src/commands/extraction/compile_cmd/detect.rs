@@ -43,7 +43,7 @@ pub fn detect_ffn_pattern(tensors: &HashMap<String, ArcArray2<f32>>, component: 
         }
     }
 
-    format!("model.layers.{{}}.mlp.{}_proj.weight", component)
+    format!("model.layers.{{}}.mlp.{component}_proj.weight")
 }
 
 pub fn ensure_cloned(

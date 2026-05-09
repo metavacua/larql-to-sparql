@@ -63,8 +63,7 @@ pub fn run(args: AttnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let kv_dim = num_kv * head_dim;
 
     eprintln!(
-        "Profiling attention layer {} — seq_len={}, hidden={}, heads={}q/{}kv, head_dim={}, iters={}",
-        layer, seq_len, hidden, num_q, num_kv, head_dim, iters
+        "Profiling attention layer {layer} — seq_len={seq_len}, hidden={hidden}, heads={num_q}q/{num_kv}kv, head_dim={head_dim}, iters={iters}"
     );
 
     // 0. Input layernorm
@@ -158,8 +157,7 @@ pub fn run(args: AttnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!(
-        "Attention Layer {} Bottleneck (seq_len={}, hidden={}, {}q/{}kv, head_dim={})",
-        layer, seq_len, hidden, num_q, num_kv, head_dim
+        "Attention Layer {layer} Bottleneck (seq_len={seq_len}, hidden={hidden}, {num_q}q/{num_kv}kv, head_dim={head_dim})"
     );
     println!("{}", "=".repeat(65));
     println!(

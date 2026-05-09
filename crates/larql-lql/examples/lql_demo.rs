@@ -160,7 +160,7 @@ SHOW MODELS;
 
     for (label, input) in &bad_inputs {
         match parse(input) {
-            Ok(stmt) => println!("  {label}: unexpected success → {:?}", stmt),
+            Ok(stmt) => println!("  {label}: unexpected success → {stmt:?}"),
             Err(e) => println!("  {label}: {e}"),
         }
     }
@@ -347,11 +347,11 @@ SHOW MODELS;
     for (label, input) in &all_statements {
         match parse(input) {
             Ok(_) => {
-                println!("  {:<20} OK", label);
+                println!("  {label:<20} OK");
                 ok += 1;
             }
             Err(e) => {
-                println!("  {:<20} FAIL — {}", label, e);
+                println!("  {label:<20} FAIL — {e}");
                 fail += 1;
             }
         }
@@ -366,7 +366,7 @@ SHOW MODELS;
 }
 
 fn section(name: &str) {
-    println!("\n── {} ──\n", name);
+    println!("\n── {name} ──\n");
 }
 
 fn demonstrate(session: &mut Session, input: &str, label: &str) {

@@ -26,9 +26,9 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) {
     let per_iter_us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     let per_iter_ms = per_iter_us / 1000.0;
     if per_iter_ms > 1.0 {
-        println!("  {:<35} {:>8.2} ms  ({} iters)", name, per_iter_ms, iters);
+        println!("  {name:<35} {per_iter_ms:>8.2} ms  ({iters} iters)");
     } else {
-        println!("  {:<35} {:>8.1} us  ({} iters)", name, per_iter_us, iters);
+        println!("  {name:<35} {per_iter_us:>8.1} us  ({iters} iters)");
     }
 }
 
@@ -137,7 +137,7 @@ fn main() {
     println!("\n--- Sequence Length Scaling ---\n");
     for seq in [1, 6, 12, 24] {
         let ids: Vec<u32> = token_ids.iter().copied().cycle().take(seq).collect();
-        let label = format!("predict (seq={})", seq);
+        let label = format!("predict (seq={seq})");
         bench(&label, 3, || {
             let _ = predict(model.weights(), model.tokenizer(), &ids, 5);
         });

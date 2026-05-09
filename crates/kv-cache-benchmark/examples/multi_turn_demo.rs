@@ -25,7 +25,7 @@ fn main() {
     let graph = GraphWalk::gemma_4b();
 
     println!("=== Multi-Turn Memory Simulation: {} ===", config.name);
-    println!("  {} turns, {} tokens/turn\n", num_turns, tokens_per_turn);
+    println!("  {num_turns} turns, {tokens_per_turn} tokens/turn\n");
 
     // Header
     println!(
@@ -56,8 +56,7 @@ fn main() {
     // Summary
     let final_tokens = num_turns * tokens_per_turn;
     println!(
-        "\n=== At {} tokens (turn {}) ===\n",
-        final_tokens, num_turns
+        "\n=== At {final_tokens} tokens (turn {num_turns}) ===\n"
     );
 
     let strategies: Vec<(&str, usize)> = vec![
@@ -104,8 +103,7 @@ fn main() {
         let mrk_mem = markov.memory_bytes(&config, tokens);
         if mrk_mem < std_mem {
             println!(
-                "\nMarkov RS < Standard KV at turn {} ({} tokens)",
-                turn, tokens
+                "\nMarkov RS < Standard KV at turn {turn} ({tokens} tokens)"
             );
             break;
         }
@@ -120,6 +118,6 @@ fn format_bytes(bytes: usize) -> String {
     } else if bytes >= 1_000 {
         format!("{:.1} KB", bytes as f64 / 1e3)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }

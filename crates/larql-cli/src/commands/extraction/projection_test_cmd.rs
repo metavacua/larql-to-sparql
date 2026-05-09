@@ -365,8 +365,7 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mean_cos: f32 = cosines.iter().sum::<f32>() / cosines.len() as f32;
     let min_cos: f32 = cosines.iter().copied().fold(f32::INFINITY, f32::min);
     eprintln!(
-        "  Cosine at L{}: mean={:.6}, min={:.6}",
-        inject_from, mean_cos, min_cos
+        "  Cosine at L{inject_from}: mean={mean_cos:.6}, min={min_cos:.6}"
     );
     eprintln!(
         "  Layers replaced: 0-{} ({} layers → rank-{} projection)",

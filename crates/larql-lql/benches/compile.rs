@@ -49,11 +49,11 @@ fn make_compile_bench_vindex(tag: &str, with_down_weights: bool) -> PathBuf {
         let metas: Vec<Option<FeatureMeta>> = (0..intermediate)
             .map(|i| {
                 Some(FeatureMeta {
-                    top_token: format!("tok{}_{}", layer, i),
+                    top_token: format!("tok{layer}_{i}"),
                     top_token_id: (layer * intermediate + i) as u32,
                     c_score: 0.5,
                     top_k: vec![TopKEntry {
-                        token: format!("tok{}_{}", layer, i),
+                        token: format!("tok{layer}_{i}"),
                         token_id: (layer * intermediate + i) as u32,
                         logit: 0.5,
                     }],

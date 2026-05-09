@@ -72,8 +72,7 @@ fn bench<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
     let us = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
     println!(
-        "  {:<48}  {:>8.2} µs/op   {:>10.0} ops/s   ({} iters)",
-        name, us, ops, iters,
+        "  {name:<48}  {us:>8.2} µs/op   {ops:>10.0} ops/s   ({iters} iters)",
     );
 }
 
@@ -89,8 +88,7 @@ fn bench_ns<F: Fn() -> R, R>(name: &str, warmup: usize, iters: usize, f: F) {
     let ns = elapsed.as_secs_f64() * 1_000_000_000.0 / iters as f64;
     let ops = iters as f64 / elapsed.as_secs_f64();
     println!(
-        "  {:<48}  {:>8.1} ns/op   {:>10.0} ops/s   ({} iters)",
-        name, ns, ops, iters,
+        "  {name:<48}  {ns:>8.1} ns/op   {ops:>10.0} ops/s   ({iters} iters)",
     );
 }
 
@@ -170,7 +168,7 @@ fn main() {
     let tokenizer = load_vindex_tokenizer(&vindex_path).expect("load tokenizer");
     let tok_ms = t0.elapsed().as_secs_f64() * 1000.0;
     let after_tok = checkpoint("after tokenizer load", started, baseline);
-    println!("  Tokenizer load: {tok_ms::.1}ms");
+    println!("  Tokenizer load: {tok_ms:.1}ms");
 
     // ── Load embeddings ───────────────────────────────────────────────────────
     println!();
@@ -253,7 +251,7 @@ fn main() {
     for prompt in &prompts {
         let words = prompt.split_whitespace().count();
         bench(
-            &format!("encode {words}w: {:.30}…", prompt),
+            &format!("encode {words}w: {prompt:.30}…"),
             1_000,
             50_000,
             || tokenizer.encode(*prompt, false).unwrap(),
@@ -381,7 +379,7 @@ fn main() {
         );
 
         println!();
-        println!("  Full-vocab projection ({}×{}):", vocab, hidden);
+        println!("  Full-vocab projection ({vocab}×{hidden}):");
         println!(
             "    CPU naive:  ~{:.0}ms",
             vocab as f64 * hidden as f64 * 2.0 / 4e9 * 1000.0
@@ -416,8 +414,7 @@ fn main() {
         drop(embeddings);
         let (rss_after_mmap, _) = mem_mb();
         println!(
-            "  mmap open (cold, no pages faulted):  {:.1}ms  RSS={} MB",
-            open_ms, rss_after_mmap
+            "  mmap open (cold, no pages faulted):  {open_ms:.1}ms  RSS={rss_after_mmap} MB"
         );
 
         // Touch 5000 tokens (L1 cache fill): fault exactly those pages.
@@ -442,8 +439,7 @@ fn main() {
         let fill_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let (rss_after_l1, _) = mem_mb();
         println!(
-            "  L1 cache fill ({l1_cap} tokens):          {:.1}ms  RSS={} MB",
-            fill_ms, rss_after_l1
+            "  L1 cache fill ({l1_cap} tokens):          {fill_ms:.1}ms  RSS={rss_after_l1} MB"
         );
 
         // Benchmark: L1 hit (hot token, already in HashMap)
@@ -517,12 +513,10 @@ fn main() {
         let tok_gb = 0.234f64;
         let l1_gb = l1_cap as f64 * hidden as f64 * 4.0 / 1e9;
         println!(
-            "  embeddings.bin on disk (f16):          {:.2} GB",
-            embed_f16_gb
+            "  embeddings.bin on disk (f16):          {embed_f16_gb:.2} GB"
         );
         println!(
-            "  f32 heap (eager decode):               {:.2} GB",
-            embed_f32_gb
+            "  f32 heap (eager decode):               {embed_f32_gb:.2} GB"
         );
         println!(
             "  f16 mmap + L1 cache ({l1_cap} tokens):   {:.2} GB  ({:.0} MB mmap + {:.0} MB L1)",
@@ -543,8 +537,7 @@ fn main() {
         let _ = f16_mmap;
     } else {
         println!(
-            "  embeddings.bin is f32 (size {} != f16 expected {}) — f16 bench skipped",
-            f16_file_size, expected_f16
+            "  embeddings.bin is f32 (size {f16_file_size} != f16 expected {expected_f16}) — f16 bench skipped"
         );
         let (final_rss, _) = mem_mb();
         println!("  RSS: {final_rss} MB");

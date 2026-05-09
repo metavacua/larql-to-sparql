@@ -137,8 +137,7 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
             if args.all || rank <= head_dim / 2 {
                 println!(
-                    "L{:<4} H{:<4} {:>5} {:>5} {:>8.1} {:>8.1} {:>8.1}  {}",
-                    layer, q_head, rank, head_dim, s_max, s_10, s_50, spectrum
+                    "L{layer:<4} H{q_head:<4} {rank:>5} {head_dim:>5} {s_max:>8.1} {s_10:>8.1} {s_50:>8.1}  {spectrum}"
                 );
             }
 

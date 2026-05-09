@@ -71,8 +71,7 @@ fn main() {
         .unwrap()
         .len();
     println!(
-        "── Synthetic vindex: {} layers × {} features × {} hidden ──",
-        num_layers, features, hidden
+        "── Synthetic vindex: {num_layers} layers × {features} features × {hidden} hidden ──"
     );
     println!(
         "  gate_vectors.bin: {:.1} MB on disk",
@@ -81,7 +80,7 @@ fn main() {
 
     // ── RSS measurements ──
     let rss_before = rss_mb();
-    println!("\n  RSS before load:  {:.1} MB", rss_before);
+    println!("\n  RSS before load:  {rss_before:.1} MB");
 
     let mut cb = larql_vindex::SilentLoadCallbacks;
     let loaded = VectorIndex::load_vindex(&dir, &mut cb).unwrap();

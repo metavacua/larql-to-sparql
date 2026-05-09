@@ -38,18 +38,16 @@ fn test_graph_walk_matches_forward_pass_detection() {
 
     for (tokens, expected_relation, expected_entity) in queries {
         let state = WalkState::from_tokens(&tokens);
-        assert_eq!(state.mode, WalkMode::Factual, "Query: {:?}", tokens);
+        assert_eq!(state.mode, WalkMode::Factual, "Query: {tokens:?}");
         assert_eq!(
             state.current_relation.as_deref(),
             Some(expected_relation),
-            "Query: {:?}",
-            tokens
+            "Query: {tokens:?}"
         );
         assert_eq!(
             state.last_entity.as_deref(),
             Some(expected_entity),
-            "Query: {:?}",
-            tokens
+            "Query: {tokens:?}"
         );
     }
 }
@@ -102,8 +100,7 @@ fn test_graph_walk_fallback_triggers() {
         assert_eq!(
             state.tier,
             WalkTier::MarkovFallback,
-            "Expected fallback for: {:?}",
-            tokens
+            "Expected fallback for: {tokens:?}"
         );
     }
 }

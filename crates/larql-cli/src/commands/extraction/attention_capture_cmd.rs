@@ -142,7 +142,7 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
                                     .and_then(|l| l.get(j))
                                     .map(|s| s.as_str())
                                     .unwrap_or("?");
-                                format!("{}={:.2}", label, w)
+                                format!("{label}={w:.2}")
                             })
                             .collect::<Vec<_>>()
                             .join("  ");
@@ -208,10 +208,7 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
                     "DIFFERENT (entity-sensitive)"
                 };
 
-                println!(
-                    "L{:<6} H{:<5} {:>7.3} {:>9.4}  {}",
-                    layer, head, max_attn, corr, classification
-                );
+                println!("L{layer:<6} H{head:<5} {max_attn:>7.3} {corr:>9.4}  {classification}");
             }
         }
 

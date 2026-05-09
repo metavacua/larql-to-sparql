@@ -278,7 +278,7 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
                         .get(&(hd.layer, *f))
                         .map(|s| s.as_str())
                         .unwrap_or("?");
-                    format!("F{}→{} ({:.2})", f, tok, c)
+                    format!("F{f}→{tok} ({c:.2})")
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -313,7 +313,7 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
                         .get(&(hd.layer, *f))
                         .map(|s| s.as_str())
                         .unwrap_or("?");
-                    println!("        F{:<6} coupling={:.3}  gate_hears={}", f, c, tok);
+                    println!("        F{f:<6} coupling={c:.3}  gate_hears={tok}");
                 }
             }
         }

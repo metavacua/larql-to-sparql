@@ -34,7 +34,7 @@ fn main() {
             );
             println!("First 5: {:?}", &d[..5]);
         }
-        Err(e) => println!("Dequantize FAILED: {}", e),
+        Err(e) => println!("Dequantize FAILED: {e}"),
     }
 
     // Also try dequantize_q6_k directly
@@ -45,6 +45,6 @@ fn main() {
             println!("dequantize_q6_k: {} values, nonzero={}", d.len(), nz);
             println!("First 5: {:?}", &d[..5]);
         }
-        Err(e) => println!("dequantize_q6_k FAILED: {}", e),
+        Err(e) => println!("dequantize_q6_k FAILED: {e}"),
     }
 }

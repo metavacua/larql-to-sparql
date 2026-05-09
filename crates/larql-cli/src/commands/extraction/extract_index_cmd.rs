@@ -336,10 +336,10 @@ Loading model for weights: {model_name}"
             if size_mb > 1024.0 {
                 eprintln!("  {name}: {:.2} GB", size_mb / 1024.0);
             } else if size_mb > 0.1 {
-                eprintln!("  {name}: {:.1} MB", size_mb);
+                eprintln!("  {name}: {size_mb:.1} MB");
             } else {
                 let size_kb = meta.len() as f64 / 1024.0;
-                eprintln!("  {name}: {:.1} KB", size_kb);
+                eprintln!("  {name}: {size_kb:.1} KB");
             }
         } else {
             eprintln!("  {name}: (not found)");

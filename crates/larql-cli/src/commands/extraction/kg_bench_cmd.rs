@@ -96,7 +96,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
                     .get(&(layer, feat_id))
                     .map(|s| s.as_str())
                     .unwrap_or("?");
-                display.push(format!("F{}→{}", feat_id, label));
+                display.push(format!("F{feat_id}→{label}"));
                 if label != "?" {
                     *token_votes.entry(label.to_string()).or_insert(0.0) += 1.0;
                 }
@@ -121,7 +121,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
             sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             print!("  → ");
             for (tok, score) in sorted.iter().take(8) {
-                print!("{:?}({:.0}) ", tok, score);
+                print!("{tok:?}({score:.0}) ");
             }
             println!();
         }
@@ -208,8 +208,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         "precomputed + labels", label_us, label_qps
     );
     println!(
-        "  (checksums: {} {} — prevents elimination)",
-        checksum, label_checksum
+        "  (checksums: {checksum} {label_checksum} — prevents elimination)"
     );
 
     Ok(())

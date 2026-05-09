@@ -124,7 +124,7 @@ fn main() {
         }
         let q4_us = t.elapsed().as_micros() as f64 / iters as f64;
 
-        println!("  f32 BLAS gate KNN:  {:>7.0}µs", f32_us);
+        println!("  f32 BLAS gate KNN:  {f32_us:>7.0}µs");
         if q4_hits.is_some() {
             println!(
                 "  Q4 gate KNN:        {:>7.0}µs  ({:.1}x faster)",
@@ -240,7 +240,7 @@ fn main() {
             norm_us / total * 100.0
         );
         println!("  ──────────────── ──────");
-        println!("  Total            {:>6.0}µs", total);
+        println!("  Total            {total:>6.0}µs");
         println!(
             "  Non-zero feats:  {}/{k}",
             activations.iter().filter(|a| a.abs() > 1e-10).count()

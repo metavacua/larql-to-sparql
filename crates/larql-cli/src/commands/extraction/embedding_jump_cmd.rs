@@ -400,8 +400,7 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         match_count as f64 / total.max(1) as f64 * 100.0
     );
     eprintln!(
-        "  Cosine at L{}: mean={:.6}, min={:.6}",
-        target, mean_cos, min_cos
+        "  Cosine at L{target}: mean={mean_cos:.6}, min={min_cos:.6}"
     );
     if args.source_layers > 0 {
         eprintln!(
@@ -425,13 +424,11 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
             num_layers - 1
         );
         eprintln!(
-            "  Zero encoder layers. Just embedding lookup + {} dot products.",
-            rank
+            "  Zero encoder layers. Just embedding lookup + {rank} dot products."
         );
     }
     eprintln!(
-        "  Zero matmul layers. Just an embedding lookup + {} dot products.",
-        rank
+        "  Zero matmul layers. Just an embedding lookup + {rank} dot products."
     );
 
     Ok(())

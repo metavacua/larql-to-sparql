@@ -250,7 +250,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let top1 = result
             .predictions
             .first()
-            .map(|(t, p)| format!("{t:?} {:.3}", p))
+            .map(|(t, p)| format!("{t:?} {p:.3}"))
             .unwrap_or_else(|| "?".into());
         let (rss, _) = mem_mb();
         let drss = rss as i64 - prev_rss as i64;
@@ -277,10 +277,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Baseline:       RSS={:>7} MB  VSZ={:>7} MB",
         baseline.0, baseline.1
     );
-    println!("  Peak:           RSS={:>7} MB", max_rss);
+    println!("  Peak:           RSS={max_rss:>7} MB");
     println!(
-        "  Final:          RSS={:>7} MB  VSZ={:>7} MB",
-        final_rss, final_vsz
+        "  Final:          RSS={final_rss:>7} MB  VSZ={final_vsz:>7} MB"
     );
     println!(
         "  RSS drift over {} iters: {:+} MB",

@@ -298,7 +298,7 @@ fn main() {
 }
 
 fn section(name: &str) {
-    println!("\n── {} ──\n", name);
+    println!("\n── {name} ──\n");
 }
 
 fn demo(label: &str, input: &str) {
@@ -306,7 +306,7 @@ fn demo(label: &str, input: &str) {
         Ok(stmt) => {
             println!("  {label}:");
             println!("    Input: {}", truncate(input, 80));
-            println!("    AST:   {:?}", stmt);
+            println!("    AST:   {stmt:?}");
             println!();
         }
         Err(e) => {
