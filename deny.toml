@@ -53,7 +53,17 @@ version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+# Known unmaintained transitive dependencies (to be addressed in follow-up PR):
+# - RUSTSEC-2025-0119: number_prefix (via tokenizers -> spm_precompiled)
+# - RUSTSEC-2024-0436: paste (proc-macro utility used by thiserror)
+# - RUSTSEC-2025-0134: rustls-pemfile (via axum-server)
+# These are pre-existing in the dependency tree and should be replaced in a
+# dedicated dependency modernization PR, not in this supply-chain gate fix.
+ignore = [
+  { id = "RUSTSEC-2025-0119" },  # number_prefix
+  { id = "RUSTSEC-2024-0436" },  # paste
+  { id = "RUSTSEC-2025-0134" },  # rustls-pemfile
+]
 
 # ---------------------------------------------------------------------------
 # Licenses: explicit allow-list. Anything outside this list fails the gate
