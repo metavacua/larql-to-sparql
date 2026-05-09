@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Inline format strings in describe.rs
 - Inline remaining format arguments in larql-inference
 - Inline variables in format strings (clippy uninlined_format_args)
+- Resolve clippy uninlined_format_args warnings across all crates
 - Resolve clippy warnings blocking CI
 - Resolve compilation failures with metal feature gating and wasmtime 36.0.7
 - Resolve remaining clippy uninlined_format_args errors
