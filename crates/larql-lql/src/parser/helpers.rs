@@ -440,9 +440,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError(format!(
-                "expected {expected:?}, got {tok:?}"
-            )))
+            Err(ParseError(format!("expected {expected:?}, got {tok:?}")))
         }
     }
 
