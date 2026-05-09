@@ -176,7 +176,10 @@ fn run_larql(
         }
         #[cfg(not(feature = "metal"))]
         {
-            return Err("Metal backend not compiled — rebuild with `--features metal` on an M-series Mac".into());
+            return Err(
+                "Metal backend not compiled — rebuild with `--features metal` on an M-series Mac"
+                    .into(),
+            );
         }
     } else {
         Box::new(larql_compute::CpuBackend)
