@@ -48,8 +48,7 @@ impl Kernel for ArithmeticKernel {
             evalexpr::Value::String(s) => s,
             other => {
                 return Err(KernelError::Unsupported(format!(
-                    "arithmetic returned non-scalar value: {:?}",
-                    other
+                    "arithmetic returned non-scalar value: {other:?}"
                 )))
             }
         })
@@ -60,7 +59,7 @@ fn format_float(f: f64) -> String {
     if f.fract() == 0.0 && f.abs() < 1e15 {
         format!("{}", f as i64)
     } else {
-        format!("{}", f)
+        format!("{f}")
     }
 }
 
