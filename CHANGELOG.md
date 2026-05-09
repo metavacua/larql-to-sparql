@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Format helpers.rs error message to single line
 - Inline additional format arguments and apply rustfmt
 - Inline additional format arguments in model-compute
 - Inline format arguments to resolve clippy warnings
