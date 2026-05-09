@@ -90,7 +90,7 @@ pub fn trace_residuals(
         h = h_post_ffn;
     }
 
-    let tokens: Vec<String> = token_ids.iter().map(|&id| format!("t{}", id)).collect();
+    let tokens: Vec<String> = token_ids.iter().map(|&id| format!("t{id}")).collect();
 
     ResidualTrace {
         prompt: String::new(),

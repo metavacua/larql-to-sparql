@@ -480,7 +480,7 @@ pub fn generate(
                         h_max,
                     );
                 }
-                None => eprintln!("[profile] step={} decode_token returned None", _step),
+                None => eprintln!("[profile] step={_step} decode_token returned None"),
             }
         }
 
@@ -508,12 +508,8 @@ pub fn generate(
                     .filter(|v| v.is_finite())
                     .fold(0.0f32, f32::max);
                 eprintln!(
-                    "[profile] step={} h_1d: len={} nan={} inf={} max_abs={:.3e}  hits.len()={}",
-                    _step,
+                    "[profile] step={_step} h_1d: len={} nan={h_nan} inf={h_inf} max_abs={h_max:.3e}  hits.len()={}",
                     h_1d.len(),
-                    h_nan,
-                    h_inf,
-                    h_max,
                     hits.len(),
                 );
             }
@@ -538,8 +534,7 @@ pub fn generate(
                 let is_eos = tok_str == "<eos>" || tok_str == "</s>" || tok_str == "<|endoftext|>";
                 if profile {
                     eprintln!(
-                        "[profile] step={} total={:.1}ms  embed={:.2}  gpu={:.1}  norm={:.2}  lm_head={:.1}  detok={:.2}",
-                        _step, step_ms, embed_ms, gpu_ms, norm_ms, lmhead_ms, detok_ms,
+                        "[profile] step={_step} total={step_ms:.1}ms  embed={embed_ms:.2}  gpu={gpu_ms:.1}  norm={norm_ms:.2}  lm_head={lmhead_ms:.1}  detok={detok_ms:.2}"
                     );
                 }
                 t_embed += embed_ms;
@@ -554,14 +549,14 @@ pub fn generate(
                 }
             } else {
                 if profile {
-                    eprintln!("[profile] step={} — lm_head returned empty; break", _step);
+                    eprintln!("[profile] step={_step} — lm_head returned empty; break");
                 }
                 break;
             }
         } else {
             // GPU failed — CPU fallback
             if profile {
-                eprintln!("[profile] step={} — GPU returned None, CPU fallback", _step);
+                eprintln!("[profile] step={_step} — GPU returned None, CPU fallback");
             }
             let mut h_dec = h_tok;
             for layer in 0..num_layers {

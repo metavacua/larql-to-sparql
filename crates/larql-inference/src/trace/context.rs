@@ -377,7 +377,7 @@ impl ContextWriter {
                 let delta = ffn_deltas.get(i).ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        format!("missing ffn_delta for critical layer {}", i),
+                        format!("missing ffn_delta for critical layer {i}"),
                     )
                 })?;
                 if delta.len() != hidden {
@@ -396,7 +396,7 @@ impl ContextWriter {
                 let delta = attn_deltas.get(i).ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        format!("missing attn_delta for critical layer {}", i),
+                        format!("missing attn_delta for critical layer {i}"),
                     )
                 })?;
                 if delta.len() != hidden {

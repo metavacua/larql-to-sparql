@@ -109,7 +109,7 @@ impl ExpertRegistry {
         for path in &paths {
             match load_one(&engine, path) {
                 Ok(handle) => handles.push(handle),
-                Err(e) => eprintln!("[experts] skipping {:?}: {}", path, e),
+                Err(e) => eprintln!("[experts] skipping {path:?}: {e}"),
             }
         }
 

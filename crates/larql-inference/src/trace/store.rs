@@ -251,7 +251,7 @@ impl TraceWriter {
             {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("vector size mismatch: expected {}", hidden),
+                    format!("vector size mismatch: expected {hidden}"),
                 ));
             }
             let r_bytes = unsafe {
