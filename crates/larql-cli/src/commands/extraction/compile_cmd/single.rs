@@ -35,8 +35,8 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     if !tokenizer_path.exists() {
         return Err(format!("tokenizer.json not found in {}", args.base.display()).into());
     }
-    let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
-        .map_err(|e| format!("tokenizer: {e}"))?;
+    let tokenizer =
+        tokenizers::Tokenizer::from_file(&tokenizer_path).map_err(|e| format!("tokenizer: {e}"))?;
 
     let (wrapped_prompt, template_source) = if args.no_chat_template {
         (prompt.clone(), "raw (--no-chat-template)".to_string())

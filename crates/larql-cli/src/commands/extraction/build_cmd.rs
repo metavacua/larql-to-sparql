@@ -95,8 +95,10 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Total: {total_modified} features modified from base");
 
     if let Some(format) = args.compile {
-        eprintln!("
-Compiling to {format} format...");
+        eprintln!(
+            "
+Compiling to {format} format..."
+        );
         eprintln!(
             "  (compile not yet implemented — built vindex saved at {})",
             output_dir.display()

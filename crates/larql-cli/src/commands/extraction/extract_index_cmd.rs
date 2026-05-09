@@ -214,8 +214,10 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             let model_name = args.model.as_deref().ok_or(
                 "--model required with --level inference/all (need model to extract weights)",
             )?;
-            eprintln!("
-Loading model for weights: {model_name}");
+            eprintln!(
+                "
+Loading model for weights: {model_name}"
+            );
             let model = InferenceModel::load(model_name)?;
             let weight_opts = larql_vindex::WriteWeightsOptions {
                 level,

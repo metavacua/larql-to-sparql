@@ -92,8 +92,10 @@ fn run_publish(vindex: &std::path::Path, repo: &str) -> Result<(), Box<dyn std::
     let mut callbacks = CliPublishCallbacks;
     let url = larql_vindex::publish_vindex(vindex, repo, &mut callbacks)?;
 
-    eprintln!("
-Published: {url}");
+    eprintln!(
+        "
+Published: {url}"
+    );
     eprintln!("\nUsage:");
     eprintln!("  larql repl");
     eprintln!("  larql> USE \"hf://{}\";", repo);
