@@ -8,7 +8,8 @@ use larql_vindex::{FeatureMeta, PatchOp, PatchedVindex, VectorIndex, VindexPatch
 use std::collections::HashMap;
 
 fn section(title: &str) {
-    println!("\n══ {} ══", title);
+    println!("
+══ {title} ══");
 }
 
 fn make_top_k(token: &str, id: u32, logit: f32) -> larql_models::TopKEntry {

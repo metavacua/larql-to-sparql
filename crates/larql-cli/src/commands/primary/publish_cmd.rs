@@ -597,7 +597,7 @@ fn truncate_msg(s: &str, max: usize) -> String {
 
 impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     fn on_start(&mut self, repo: &str) {
-        eprintln!("  Creating repo: {}", repo);
+        eprintln!("  Creating repo: {repo}");
     }
 
     fn on_file_start(&mut self, filename: &str, size: u64) {
@@ -635,7 +635,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     }
 
     fn on_complete(&mut self, url: &str) {
-        eprintln!("  URL: {}", url);
+        eprintln!("  URL: {url}");
     }
 }
 

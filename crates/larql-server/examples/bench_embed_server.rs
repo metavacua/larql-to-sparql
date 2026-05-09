@@ -170,7 +170,7 @@ fn main() {
     let tokenizer = load_vindex_tokenizer(&vindex_path).expect("load tokenizer");
     let tok_ms = t0.elapsed().as_secs_f64() * 1000.0;
     let after_tok = checkpoint("after tokenizer load", started, baseline);
-    println!("  Tokenizer load: {:.1}ms", tok_ms);
+    println!("  Tokenizer load: {tok_ms::.1}ms");
 
     // ── Load embeddings ───────────────────────────────────────────────────────
     println!();
@@ -507,7 +507,7 @@ fn main() {
         // Final RSS — all accessed pages now resident.
         let (rss_full, _) = mem_mb();
         println!();
-        println!("  RSS after prefill bench (pages faulted): {} MB", rss_full);
+        println!("  RSS after prefill bench (pages faulted): {rss_full} MB");
 
         // ── Memory comparison: f32 heap vs f16 mmap ──
         println!();
@@ -547,7 +547,7 @@ fn main() {
             f16_file_size, expected_f16
         );
         let (final_rss, _) = mem_mb();
-        println!("  RSS: {} MB", final_rss);
+        println!("  RSS: {final_rss} MB");
     }
 
     println!();

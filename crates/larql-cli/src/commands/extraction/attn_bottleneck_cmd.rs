@@ -200,7 +200,7 @@ pub fn run(args: AttnBottleneckArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "{:>30} {:>8.0}us {:>9.1}%",
-        format!("QK^T + softmax + V ({}h)", num_q),
+        format!("QK^T + softmax + V ({num_q}h)"),
         attn_core_us,
         attn_core_us / sum_parts * 100.0
     );

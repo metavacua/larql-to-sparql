@@ -148,8 +148,8 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Summary ──
     println!("\n═══ Summary ═══\n");
-    println!("  Total heads analyzed: {}", total_heads);
-    println!("  Head dimension: {}", head_dim);
+    println!("  Total heads analyzed: {total_heads}");
+    println!("  Head dimension: {head_dim}");
     println!(
         "  Threshold: {:.0}% of max singular value",
         args.threshold * 100.0
@@ -182,10 +182,10 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("\n  Rank statistics:");
-    println!("    min: {}", min_rank);
-    println!("    median: {}", median_rank);
-    println!("    mean: {:.1}", avg_rank);
-    println!("    max: {}", max_rank);
+    println!("    min: {min_rank}");
+    println!("    median: {median_rank}");
+    println!("    mean: {avg_rank::.1}");
+    println!("    max: {max_rank}");
 
     // Template capacity estimate
     // If median head has rank R, and heads are somewhat independent,

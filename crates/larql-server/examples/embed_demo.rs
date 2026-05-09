@@ -11,7 +11,7 @@
 use larql_vindex::ndarray::Array2;
 
 fn section(title: &str) {
-    println!("\n══ {} ══", title);
+    println!("\n══ {title} ══");
 }
 
 // ── Synthetic data ────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ fn token_name(id: u32) -> &'static str {
 
 fn demo_embed(embed: &Array2<f32>, scale: f32, token_ids: &[u32]) {
     let hidden = embed.shape()[1];
-    println!("Request:  {{ \"token_ids\": {:?} }}", token_ids);
+    println!("Request:  {{ \"token_ids\": {token_ids:?} }}");
     let start = std::time::Instant::now();
 
     let residual: Vec<Vec<f32>> = token_ids
@@ -76,12 +76,12 @@ fn demo_embed(embed: &Array2<f32>, scale: f32, token_ids: &[u32]) {
 
     println!("Response: {{");
     println!("  \"seq_len\": {},", token_ids.len());
-    println!("  \"hidden_size\": {},", hidden);
+    println!("  \"hidden_size\": {hidden},");
     for (i, row) in residual.iter().enumerate() {
-        let formatted: Vec<String> = row.iter().map(|v| format!("{:.2}", v)).collect();
+        let formatted: Vec<String> = row.iter().map(|v| format!("{v:.2}")).collect();
         println!("  \"residual[{}]\": [{}],", i, formatted.join(", "));
     }
-    println!("  \"latency_ms\": {:.4}", ms);
+    println!("  \"latency_ms\": {ms:.4}");
     println!("}}");
 }
 
@@ -92,14 +92,13 @@ fn demo_embed(embed: &Array2<f32>, scale: f32, token_ids: &[u32]) {
 fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
     let vocab = embed.shape()[0];
     println!(
-        "Request:  {{ \"residual\": [{}...], \"top_k\": {} }}",
+        "Request:  {{ \"residual\": [{}...], \"top_k\": {top_k} }}",
         residual
             .iter()
             .take(4)
-            .map(|v| format!("{:.2}", v))
+            .map(|v| format!("{v:.2}"))
             .collect::<Vec<_>>()
-            .join(", "),
-        top_k
+            .join(", ")
     );
     let start = std::time::Instant::now();
 
@@ -141,7 +140,7 @@ fn demo_logits(embed: &Array2<f32>, residual: &[f32], top_k: usize) {
         );
     }
     println!("  ],");
-    println!("  \"latency_ms\": {:.4}", ms);
+    println!("  \"latency_ms\": {ms:.4}");
     println!("}}");
 }
 
@@ -164,10 +163,9 @@ fn demo_token_encode(text: &str) {
         .filter_map(|w| mapping.iter().find(|(k, _)| *k == w).map(|(_, id)| *id))
         .collect();
 
-    println!("GET /v1/token/encode?text={:?}", text);
+    println!("GET /v1/token/encode?text={text:?}");
     println!(
-        "Response: {{ \"token_ids\": {:?}, \"text\": {:?} }}",
-        ids, text
+        "Response: {{ \"token_ids\": {ids:?}, \"text\": {text:?} }}"
     );
 }
 
@@ -182,8 +180,7 @@ fn demo_token_decode(ids: &[u32]) {
             .join(",")
     );
     println!(
-        "Response: {{ \"text\": {:?}, \"token_ids\": {:?} }}",
-        decoded, ids
+        "Response: {{ \"text\": {decoded:?}, \"token_ids\": {ids:?} }}"
     );
 }
 

@@ -54,10 +54,10 @@ fn run_download(
     let hf_path = if let Some(rev) = revision {
         format!("hf://{}@{}", repo, rev)
     } else {
-        format!("hf://{}", repo)
+        format!("hf://{repo}")
     };
 
-    eprintln!("Downloading vindex from HuggingFace: {}", hf_path);
+    eprintln!("Downloading vindex from HuggingFace: {hf_path}");
     let cached_path = larql_vindex::resolve_hf_vindex(&hf_path)?;
     eprintln!("  Cached at: {}", cached_path.display());
 
@@ -87,12 +87,13 @@ fn run_download(
 }
 
 fn run_publish(vindex: &std::path::Path, repo: &str) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Publishing vindex to HuggingFace: {}", repo);
+    eprintln!("Publishing vindex to HuggingFace: {repo}");
 
     let mut callbacks = CliPublishCallbacks;
     let url = larql_vindex::publish_vindex(vindex, repo, &mut callbacks)?;
 
-    eprintln!("\nPublished: {}", url);
+    eprintln!("
+Published: {url}");
     eprintln!("\nUsage:");
     eprintln!("  larql repl");
     eprintln!("  larql> USE \"hf://{}\";", repo);
@@ -104,7 +105,7 @@ struct CliPublishCallbacks;
 
 impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     fn on_start(&mut self, repo: &str) {
-        eprintln!("  Creating repo: {}", repo);
+        eprintln!("  Creating repo: {repo}");
     }
 
     fn on_file_start(&mut self, filename: &str, size: u64) {
@@ -138,7 +139,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
     }
 
     fn on_complete(&mut self, url: &str) {
-        eprintln!("  URL: {}", url);
+        eprintln!("  URL: {url}");
     }
 }
 

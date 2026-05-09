@@ -302,7 +302,7 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     print!("{:<14}", "");
     for name in &short_names {
-        print!("{:>12}", name);
+        print!("{name::>12}");
     }
     println!();
 
@@ -314,7 +314,7 @@ pub fn run(args: QkTemplatesArgs) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 let len = fingerprints[i].len().min(fingerprints[j].len());
                 let corr = cosine_similarity(&fingerprints[i][..len], &fingerprints[j][..len]);
-                print!("{:>11.4} ", corr);
+                print!("{corr::>11.4} ");
             }
         }
         println!();

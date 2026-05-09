@@ -78,7 +78,8 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
         let entity_tokens: Vec<(usize, f32)> =
             token_ids.iter().map(|&t| (t as usize, 1.0)).collect();
 
-        println!("\n{:?}", prompt);
+        println!("
+{prompt::?}");
 
         // Aggregate answer tokens across layers
         let mut token_votes: std::collections::HashMap<String, f32> =

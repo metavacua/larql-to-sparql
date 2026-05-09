@@ -295,8 +295,8 @@ fn main() {
 
     // Populate cache
     for i in 0..1000 {
-        let key = format!("model:entity{}:knowledge:20:5", i);
-        cache.insert(key, serde_json::json!({"entity": format!("entity{}", i)}));
+        let key = format!("model:entity{i}:knowledge:20:5");
+        cache.insert(key, serde_json::json!({"entity": format!("entity{i}")}));
     }
 
     bench("cache hit (HashMap lookup)", 1000, 100000, || {

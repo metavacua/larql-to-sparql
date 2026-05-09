@@ -229,7 +229,7 @@ pub fn run(args: BottleneckTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     eprintln!("\n── Summary ──");
-    eprintln!("  Prompts: {}", total);
+    eprintln!("  Prompts: {total}");
     eprintln!(
         "  Token match: {}/{} ({:.1}%)",
         match_count,

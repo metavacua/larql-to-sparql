@@ -137,7 +137,7 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // ── Fit rank-k projection: Y ≈ (X - Xm) @ Vt[:k]^T @ B + Ym ──
-    eprintln!("Fitting rank-{} projection...", rank);
+    eprintln!("Fitting rank-{rank} projection...");
 
     // Means
     let mut x_mean = vec![0.0f32; hidden];
@@ -392,7 +392,7 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     let min_cos: f32 = cosines.iter().copied().fold(f32::INFINITY, f32::min);
 
     eprintln!("\n── Summary ──");
-    eprintln!("  Prompts: {}", total);
+    eprintln!("  Prompts: {total}");
     eprintln!(
         "  Token match: {}/{} ({:.1}%)",
         match_count,

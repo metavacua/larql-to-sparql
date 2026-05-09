@@ -21,7 +21,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("LARQL AOT Compiler — single mode");
     eprintln!("  base:   {}", args.base.display());
     eprintln!("  prompt: {}...", &prompt[..prompt.len().min(60)]);
-    eprintln!("  answer: {}", answer);
+    eprintln!("  answer: {answer}");
     eprintln!("  layer:  {}", args.layer);
     eprintln!("  slot:   {}", args.slot);
     eprintln!("  output: {}", args.output.display());
@@ -36,7 +36,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("tokenizer.json not found in {}", args.base.display()).into());
     }
     let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
-        .map_err(|e| format!("tokenizer: {}", e))?;
+        .map_err(|e| format!("tokenizer: {e}"))?;
 
     let (wrapped_prompt, template_source) = if args.no_chat_template {
         (prompt.clone(), "raw (--no-chat-template)".to_string())
@@ -50,9 +50,9 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     // must come from the same sequence. See verify_compiled.py.
     let encoding = tokenizer
         .encode(wrapped_prompt.as_str(), true)
-        .map_err(|e| format!("tokenize: {}", e))?;
+        .map_err(|e| format!("tokenize: {e}"))?;
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
-    eprintln!("  chat wrap:    {}", template_source);
+    eprintln!("  chat wrap:    {template_source}");
     eprintln!("  prompt tokens: {}", token_ids.len());
 
     eprintln!("\nCapturing L{} residual...", args.layer);
@@ -64,11 +64,11 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("failed to capture residual")?;
 
     let trigger_norm: f32 = residual.iter().map(|x| x * x).sum::<f32>().sqrt();
-    eprintln!("  trigger norm: {:.2}", trigger_norm);
+    eprintln!("  trigger norm: {trigger_norm::.2}");
 
     let ans_encoding = tokenizer
         .encode(answer.as_str(), false)
-        .map_err(|e| format!("tokenize answer: {}", e))?;
+        .map_err(|e| format!("tokenize answer: {e}"))?;
     let ans_ids = ans_encoding.get_ids();
     if ans_ids.is_empty() {
         return Err("answer tokenizes to empty".into());
@@ -98,7 +98,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         let original = weights
             .tensors
             .get(key)
-            .ok_or_else(|| format!("tensor not found: {}", key))?;
+            .ok_or_else(|| format!("tensor not found: {key}"))?;
         modified.insert(key.clone(), original.to_owned().into());
     }
 

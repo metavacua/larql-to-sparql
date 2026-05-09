@@ -88,14 +88,15 @@ pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
     config.checksums = larql_vindex::format::checksums::compute_checksums(&output_dir).ok();
     larql_vindex::VectorIndex::save_config(&config, &output_dir)?;
 
-    eprintln!("  Features: {}", dm_count);
+    eprintln!("  Features: {dm_count}");
 
     // Total overrides
     let total_modified: usize = result.layers.iter().map(|l| l.features_modified).sum();
-    eprintln!("  Total: {} features modified from base", total_modified);
+    eprintln!("  Total: {total_modified} features modified from base");
 
     if let Some(format) = args.compile {
-        eprintln!("\nCompiling to {} format...", format);
+        eprintln!("
+Compiling to {format} format...");
         eprintln!(
             "  (compile not yet implemented — built vindex saved at {})",
             output_dir.display()

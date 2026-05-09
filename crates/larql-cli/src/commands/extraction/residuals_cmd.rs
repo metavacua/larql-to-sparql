@@ -108,7 +108,7 @@ fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
             .join(", "),
         entities.len()
     );
-    eprintln!("  layers: {:?}", layers);
+    eprintln!("  layers: {layers::?}");
     if args.activations {
         eprintln!("  activations: top-{}", args.activation_top_k);
     }

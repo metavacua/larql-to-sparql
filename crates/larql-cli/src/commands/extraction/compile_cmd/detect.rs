@@ -54,7 +54,7 @@ pub fn ensure_cloned(
     if !modified.contains_key(key) {
         let original = originals
             .get(key)
-            .ok_or_else(|| format!("tensor not found: {}", key))?;
+            .ok_or_else(|| format!("tensor not found: {key}"))?;
         modified.insert(key.to_string(), original.to_owned().into());
     }
     Ok(())

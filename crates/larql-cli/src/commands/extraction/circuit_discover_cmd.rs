@@ -426,7 +426,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
             circuit.heads.len(),
             heads_str
         );
-        println!("  Top tokens: {}", tokens_str);
+        println!("  Top tokens: {tokens_str}");
 
         // Show layer distribution
         let mut layer_counts: HashMap<usize, usize> = HashMap::new();
@@ -440,7 +440,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
             .map(|(l, c)| format!("L{}×{}", l, c))
             .collect::<Vec<_>>()
             .join(" ");
-        println!("  Layers: {}", dist_str);
+        println!("  Layers: {dist_str}");
         println!();
     }
 

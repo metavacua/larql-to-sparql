@@ -197,7 +197,7 @@ pub fn run(args: QkModesArgs) -> Result<(), Box<dyn std::error::Error>> {
         "  Specialized heads (rank <= {}): {}",
         args.max_rank, total_specialized
     );
-    println!("  Total modes: {}", total_modes);
+    println!("  Total modes: {total_modes}");
     println!(
         "  Average modes per head: {:.1}",
         if total_specialized > 0 {

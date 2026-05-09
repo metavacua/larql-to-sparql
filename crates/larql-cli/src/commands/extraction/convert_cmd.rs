@@ -83,10 +83,10 @@ fn run_gguf_to_vindex(
 
     // Show metadata summary
     if let Some(name) = gguf.metadata.get("general.name") {
-        eprintln!("  Model: {:?}", name);
+        eprintln!("  Model: {name::?}");
     }
     if let Some(arch) = gguf.metadata.get("general.architecture") {
-        eprintln!("  Architecture: {:?}", arch);
+        eprintln!("  Architecture: {arch::?}");
     }
 
     eprintln!("  Loading and dequantizing tensors...");

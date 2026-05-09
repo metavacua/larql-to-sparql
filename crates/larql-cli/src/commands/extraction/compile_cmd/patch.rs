@@ -134,7 +134,8 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    eprintln!("\n  {} edges compiled into weights", n_compiled);
+    eprintln!("
+  {n_compiled} edges compiled into weights");
 
     eprintln!("\nSaving compiled model...");
     std::fs::create_dir_all(&args.output)?;
