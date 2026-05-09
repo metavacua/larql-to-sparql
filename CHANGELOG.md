@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Inline additional format arguments and apply rustfmt
 - Inline additional format arguments in model-compute
 - Inline format arguments to resolve clippy warnings
+- Inline remaining format arguments in larql-inference
 - Resolve clippy warnings blocking CI
 - Resolve compilation failures with metal feature gating and wasmtime 36.0.7
 - Resolve three CI failures from Linux incompatibilities
