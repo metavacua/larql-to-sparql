@@ -553,7 +553,9 @@ impl Session {
         if let Some(loaded) = body.get("loaded") {
             let browse_val = loaded["browse"].as_bool().unwrap_or(false);
             let infer_val = loaded["inference"].as_bool().unwrap_or(false);
-            out.push(format!("Loaded: browse={browse_val}, inference={infer_val}"));
+            out.push(format!(
+                "Loaded: browse={browse_val}, inference={infer_val}"
+            ));
         }
 
         out.push(format!("Remote: {url}"));

@@ -107,17 +107,11 @@ impl Session {
                 out.push(String::new());
                 out.push("  By layer band:".into());
                 let syntax_fmt = format_number(syntax_features);
-                out.push(format!(
-                    "    Syntax (L0-13):     {syntax_fmt} features"
-                ));
+                out.push(format!("    Syntax (L0-13):     {syntax_fmt} features"));
                 let knowledge_fmt = format_number(knowledge_features);
-                out.push(format!(
-                    "    Knowledge (L14-27): {knowledge_fmt} features"
-                ));
+                out.push(format!("    Knowledge (L14-27): {knowledge_fmt} features"));
                 let output_fmt = format_number(output_features);
-                out.push(format!(
-                    "    Output (L28-33):    {output_fmt} features"
-                ));
+                out.push(format!("    Output (L28-33):    {output_fmt} features"));
 
                 // Coverage summary
                 if let Some(rc) = relation_classifier {
@@ -177,9 +171,7 @@ impl Session {
                 out.push(format!("Hidden size:     {}", weights.hidden_size));
                 out.push(format!("Intermediate:    {}", weights.intermediate_size));
                 let vocab_fmt = format_number(weights.vocab_size);
-                out.push(format!(
-                    "Vocab size:      {vocab_fmt}"
-                ));
+                out.push(format!("Vocab size:      {vocab_fmt}"));
                 out.push(String::new());
                 out.push("Supported:       INFER, EXPLAIN INFER, STATS".into());
                 out.push("For WALK/DESCRIBE/SELECT/INSERT: EXTRACT into a vindex first.".into());

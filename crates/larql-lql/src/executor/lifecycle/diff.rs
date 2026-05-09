@@ -94,9 +94,7 @@ impl Session {
         if diff_count == 0 {
             out.push("  (no differences found)".into());
         } else {
-            out.push(format!(
-                "\n{diff_count} differences shown (limit {limit})"
-            ));
+            out.push(format!("\n{diff_count} differences shown (limit {limit})"));
         }
 
         // If INTO PATCH specified, extract diff as a .vlp file
