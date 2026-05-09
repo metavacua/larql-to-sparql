@@ -151,8 +151,7 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!(
-            "Inserted: {} —[{}]→ {} at L{} (KNN store)",
-            entity, relation, target, install_layer,
+            "Inserted: {entity} —[{relation}]→ {target} at L{install_layer} (KNN store)"
         ));
         if has_weights {
             out.push("  mode: KNN — residual capture (Architecture B, retrieval-override)".into());

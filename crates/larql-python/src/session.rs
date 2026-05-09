@@ -64,7 +64,7 @@ impl PySession {
         let input = if lql.trim_end().ends_with(';') {
             lql.to_string()
         } else {
-            format!("{};", lql)
+            format!("{lql};")
         };
 
         let stmt = parse(&input)

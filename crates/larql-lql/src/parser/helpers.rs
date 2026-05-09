@@ -441,8 +441,7 @@ impl Parser {
             Ok(())
         } else {
             Err(ParseError(format!(
-                "expected {:?}, got {:?}",
-                expected, tok
+                "expected {expected:?}, got {tok:?}"
             )))
         }
     }

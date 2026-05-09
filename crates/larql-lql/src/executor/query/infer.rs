@@ -29,9 +29,11 @@ impl Session {
             let mut out = Vec::new();
             out.push("Predictions (dense — no vindex):".into());
             for (i, (tok, prob)) in result.predictions.iter().enumerate() {
-                out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
+                let idx = i + 1;
+                let pct = prob * 100.0;
+                out.push(format!("  {idx:2}. {tok:20} ({pct:.2}%)"));
             }
-            out.push(format!("  {:.0}ms", elapsed_ms));
+            out.push(format!("  {elapsed_ms:.0}ms"));
             if !compare {
                 out.push(String::new());
                 out.push(
@@ -173,9 +175,11 @@ impl Session {
             out.push(String::new());
             out.push("Predictions (dense):".into());
             for (i, (tok, prob)) in dense.predictions.iter().enumerate() {
-                out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
+                let idx = i + 1;
+                let pct = prob * 100.0;
+                out.push(format!("  {idx:2}. {tok:20} ({pct:.2}%)"));
             }
-            out.push(format!("  {:.0}ms", dense_ms));
+            out.push(format!("  {dense_ms:.0}ms"));
         }
 
         Ok(out)

@@ -162,12 +162,11 @@ fn format_insert_summary(
     let last_layer = installed.last().map(|s| s.layer);
     let layer_span = match (first_layer, last_layer) {
         (Some(lo), Some(hi)) if lo == hi => format!("L{lo}"),
-        (Some(lo), Some(hi)) => format!("L{lo}-L{hi} ({} layers)", inserted_count),
+        (Some(lo), Some(hi)) => format!("L{lo}-L{hi} ({inserted_count} layers)"),
         _ => String::from("(no layers)"),
     };
     out.push(format!(
-        "Inserted: {} —[{}]→ {} at {}{}",
-        entity, relation, target, layer_span, center_note,
+        "Inserted: {entity} —[{relation}]→ {target} at {layer_span}{center_note}"
     ));
     if plan.use_constellation {
         let alpha_note = if alpha_override.is_some() {

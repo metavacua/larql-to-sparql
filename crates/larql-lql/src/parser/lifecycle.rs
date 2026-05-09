@@ -111,8 +111,7 @@ impl Parser {
                 }
                 t => {
                     return Err(ParseError(format!(
-                    "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {:?}",
-                    t
+                    "expected LAST_WINS | HIGHEST_CONFIDENCE | FAIL after ON CONFLICT, got {t:?}"
                 )))
                 }
             };

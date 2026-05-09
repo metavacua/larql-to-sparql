@@ -547,8 +547,7 @@ impl PyVindex {
         let id = token_id as usize;
         if id >= self.embeddings.shape()[0] {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "Token ID {} out of range",
-                token_id
+                "Token ID {token_id} out of range"
             )));
         }
         Ok(self.embeddings.row(id).to_vec().into_pyarray(py))
@@ -587,8 +586,7 @@ impl PyVindex {
             .map(|v| v.into_pyarray(py))
             .ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(format!(
-                    "No gate vector at L{}:F{}",
-                    layer, feature
+                    "No gate vector at L{layer}:F{feature}"
                 ))
             })
     }
@@ -600,7 +598,7 @@ impl PyVindex {
         layer: usize,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
         let (data, rows, cols) = self.index.gate_vectors_flat(layer).ok_or_else(|| {
-            pyo3::exceptions::PyValueError::new_err(format!("No gate vectors at layer {}", layer))
+            pyo3::exceptions::PyValueError::new_err(format!("No gate vectors at layer {layer}"))
         })?;
         let arr = ndarray::Array2::from_shape_vec((rows, cols), data)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
@@ -1008,8 +1006,7 @@ impl PyVindex {
         // Find a free feature slot
         let feature = self.index.find_free_feature(target_layer).ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
-                "No free feature slot at layer {}",
-                target_layer
+                "No free feature slot at layer {target_layer}"
             ))
         })?;
 

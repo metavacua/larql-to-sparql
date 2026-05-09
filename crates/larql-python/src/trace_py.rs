@@ -66,7 +66,7 @@ impl PyResidualTrace {
     #[pyo3(signature = (token, layer, position=None))]
     fn rank_of(&self, token: &str, layer: i32, position: Option<usize>) -> u32 {
         let pos = position.unwrap_or_else(|| self.inner.tokens.len() - 1);
-        let tok_id = match self.tokenizer().encode(format!(" {}", token), true) {
+        let tok_id = match self.tokenizer().encode(format!(" {token}"), true) {
             Ok(enc) => *enc.get_ids().last().unwrap_or(&0),
             Err(_) => return u32::MAX,
         };
@@ -87,7 +87,7 @@ impl PyResidualTrace {
     fn answer_trajectory(&self, answer: &str) -> PyResult<Vec<PyAnswerWaypoint>> {
         let tok_id = self
             .tokenizer()
-            .encode(format!(" {}", answer), true)
+            .encode(format!(" {answer}"), true)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let id = *tok_id.get_ids().last().unwrap_or(&0);
         let traj = self.inner.answer_trajectory(self.weights(), id);
@@ -395,7 +395,7 @@ pub fn capture_trace(
         .map(|&id| {
             tokenizer
                 .decode(&[id], true)
-                .unwrap_or_else(|_| format!("t{}", id))
+                .unwrap_or_else(|_| format!("t{id}"))
         })
         .collect();
 

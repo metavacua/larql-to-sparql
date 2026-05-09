@@ -529,7 +529,7 @@ impl Session {
                     let also_display = if also.is_empty() {
                         String::new()
                     } else {
-                        format!("[{}]", also)
+                        format!("[{also}]")
                     };
                     let rel = classifier
                         .and_then(|rc| rc.label_for_feature(*layer, feat))

@@ -460,8 +460,7 @@ impl Session {
             let overlay_total = patched.num_overrides();
             if file_total > 0 || overlay_total > 0 {
                 out.push(format!(
-                    "  Total: {} from files, {} in session",
-                    file_total, overlay_total
+                    "  Total: {file_total} from files, {overlay_total} in session"
                 ));
             }
         }

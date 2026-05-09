@@ -85,8 +85,7 @@ impl Session {
             target_path.display()
         ));
         out.push(format!(
-            "  {} features merged, {} skipped (strategy: {:?})",
-            merged, skipped, strategy
+            "  {merged} features merged, {skipped} skipped (strategy: {strategy:?})"
         ));
         Ok(out)
     }
