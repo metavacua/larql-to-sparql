@@ -92,7 +92,7 @@ impl KnnStore {
             .read_exact(&mut magic)
             .map_err(|e| format!("read magic: {e}"))?;
         if &magic != MAGIC {
-            return Err(format!("bad magic: expected LKNN, got {:?}", magic));
+            return Err(format!("bad magic: expected LKNN, got {magic:?}"));
         }
 
         let version = read_u32(&mut cursor)?;

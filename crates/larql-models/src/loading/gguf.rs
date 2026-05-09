@@ -116,8 +116,7 @@ impl GgufFile {
         let magic = read_u32(&mut r)?;
         if magic != GGUF_MAGIC {
             return Err(ModelError::Parse(format!(
-                "not a GGUF file (magic: 0x{:08X}, expected 0x{:08X})",
-                magic, GGUF_MAGIC
+                "not a GGUF file (magic: 0x{magic:08X}, expected 0x{GGUF_MAGIC:08X})"
             )));
         }
 

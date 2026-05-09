@@ -86,7 +86,7 @@ pub fn build_from_vindexfile(
     let mut layers = Vec::new();
 
     layers.push(BuildLayer {
-        directive: format!("FROM {}", base_path),
+        directive: format!("FROM {base_path}"),
         features_modified: 0,
     });
 
@@ -101,7 +101,7 @@ pub fn build_from_vindexfile(
                 let op_count = patch.len();
                 patched.apply_patch(patch);
                 layers.push(BuildLayer {
-                    directive: format!("PATCH {}", path),
+                    directive: format!("PATCH {path}"),
                     features_modified: op_count,
                 });
             }
@@ -124,7 +124,7 @@ pub fn build_from_vindexfile(
                 };
                 patched.insert_feature(layer, feature, vec![], meta);
                 layers.push(BuildLayer {
-                    directive: format!("INSERT (\"{}\", \"{}\", \"{}\")", entity, relation, target),
+                    directive: format!("INSERT (\"{entity}\", \"{relation}\", \"{target}\")"),
                     features_modified: 1,
                 });
             }
@@ -143,8 +143,7 @@ pub fn build_from_vindexfile(
                 }
                 layers.push(BuildLayer {
                     directive: format!(
-                        "DELETE entity=\"{}\" relation=\"{}\" target=\"{}\"",
-                        entity, relation, target
+                        "DELETE entity=\"{entity}\" relation=\"{relation}\" target=\"{target}\""
                     ),
                     features_modified: matches.len(),
                 });
@@ -153,7 +152,7 @@ pub fn build_from_vindexfile(
             VindexfileDirective::Labels(path) => {
                 // Copy labels file to output during save
                 layers.push(BuildLayer {
-                    directive: format!("LABELS {}", path),
+                    directive: format!("LABELS {path}"),
                     features_modified: 0,
                 });
             }

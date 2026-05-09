@@ -155,15 +155,15 @@ fn format_bytes(bytes: usize) -> String {
     } else if bytes >= 1_000 {
         format!("{:.1} KB", bytes as f64 / 1e3)
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 
 fn format_tokens(tokens: usize) -> String {
     if tokens >= 1_000 {
-        format!("{}K tokens", tokens / 1000)
+        format!("{t}K tokens", t = tokens / 1000)
     } else {
-        format!("{} tokens", tokens)
+        format!("{tokens} tokens")
     }
 }
 

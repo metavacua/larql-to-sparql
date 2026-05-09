@@ -694,12 +694,11 @@ pub fn build_vindex_resume(
         }
         count += 1;
         if count.is_multiple_of(50000) {
-            eprint!("\r  Read {} features...", count);
+            eprint!("\r  Read {count} features...");
         }
     }
     eprintln!(
-        "\r  Read {} features, {} in knowledge layers",
-        count,
+        "\r  Read {count} features, {} in knowledge layers",
         cluster_features.len()
     );
 

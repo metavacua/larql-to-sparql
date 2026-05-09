@@ -353,8 +353,7 @@ pub fn format_accuracy_summary(results: &[AccuracyResult]) -> String {
         };
 
         out.push_str(&format!(
-            "{:<20} {:>9.1}% {:>10.4} {:>10}\n",
-            strategy, match_pct, mean_kl, needle_str,
+            "{strategy:<20} {match_pct:>9.1}% {mean_kl:>10.4} {needle_str:>10}\n"
         ));
     }
 

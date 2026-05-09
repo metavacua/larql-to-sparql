@@ -77,8 +77,7 @@ pub fn resolve_hf_vindex(hf_path: &str) -> Result<PathBuf, VindexError> {
     // Download index.json first (small, tells us what we need)
     let index_path = repo.get("index.json").map_err(|e| {
         VindexError::Parse(format!(
-            "failed to download index.json from hf://{}: {e}",
-            repo_id
+            "failed to download index.json from hf://{repo_id}: {e}"
         ))
     })?;
 

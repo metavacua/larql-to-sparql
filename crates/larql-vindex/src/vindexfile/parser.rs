@@ -129,8 +129,7 @@ fn parse_directive(line: &str, line_num: usize) -> Result<VindexfileDirective, V
         Ok(VindexfileDirective::Expose(levels))
     } else {
         Err(VindexError::Parse(format!(
-            "Vindexfile line {}: unknown directive: {}",
-            line_num, line
+            "Vindexfile line {line_num}: unknown directive: {line}"
         )))
     }
 }

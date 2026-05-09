@@ -84,8 +84,7 @@ pub(crate) fn build_whole_word_vocab(
     }
 
     eprintln!(
-        "    Whole-word vocab: {} tokens (of {})",
-        ww_count, vocab_size
+        "    Whole-word vocab: {ww_count} tokens (of {vocab_size})"
     );
     (ww_ids, ww_embed)
 }
@@ -248,8 +247,7 @@ pub(super) fn run_clustering_pipeline(
 
     let output_labeled = output_labels.iter().filter(|l| l.is_some()).count();
     eprintln!(
-        "  Wikidata output matching: {}/{} clusters labeled",
-        output_labeled, optimal_k
+        "  Wikidata output matching: {output_labeled}/{optimal_k} clusters labeled"
     );
 
     // Tier 2+3: embedding projection + pattern detection
@@ -305,8 +303,7 @@ pub(super) fn run_clustering_pipeline(
 
     callbacks.on_stage_done(
         &format!(
-            "relation_clusters (k={}, {} features)",
-            optimal_k, n_features
+            "relation_clusters (k={optimal_k}, {n_features} features)"
         ),
         0.0,
     );
