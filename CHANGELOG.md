@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Bump pinned versions and drop fmt CI duplication
 - Bump toolchain to 1.88 and unpin scanner-tool versions
 - Configure Android cross-compilation with linker and PATH setup
+- Continue inlining format string variables in larql-lql
 - Correct CHANGELOG.md structure and formatting
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
@@ -42,7 +43,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Inline additional format arguments and apply rustfmt
 - Inline additional format arguments in model-compute
 - Inline format arguments to resolve clippy warnings
+- Inline format strings in describe.rs
 - Inline remaining format arguments in larql-inference
+- Inline variables in format strings (clippy uninlined_format_args)
 - Resolve clippy warnings blocking CI
 - Resolve compilation failures with metal feature gating and wasmtime 36.0.7
 - Resolve three CI failures from Linux incompatibilities
