@@ -1,12 +1,12 @@
 //! Q8 matrix-vector multiply.
 //!
-//! scores[N] = Q8_weights[N, K] @ Q8_x[K]
+//! scores\[N\] = Q8_weights\[N, K\] @ Q8_x\[K\]
 //!
 //! Simpler than Q4 — no nibble unpacking. Each weight is one signed byte.
 //! Used for V projection where Q4 accuracy is insufficient.
 
 /// Quantize a weight matrix to Q8 format: int8 values + per-block f32 scales.
-/// Returns (int8_data[N*K], scales[N * K/32]).
+/// Returns (int8_data\[N*K\], scales\[N * K/32\]).
 pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (Vec<i8>, Vec<f32>) {
     assert_eq!(weights.len(), num_rows * hidden);
     assert!(hidden.is_multiple_of(32));
@@ -31,7 +31,7 @@ pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (
     (q8_data, scales)
 }
 
-/// Q8 matvec on CPU: scores[N] = Q8_w[N,K] @ Q8_x[K].
+/// Q8 matvec on CPU: scores\[N\] = Q8_w\[N,K\] @ Q8_x\[K\].
 pub fn dispatch(
     w_q8: &[i8],
     w_scales: &[f32],

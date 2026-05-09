@@ -27,8 +27,8 @@ pub struct TrajectoryTraceArgs {
     layers: Option<String>,
 
     /// Dump raw residual vectors to a numpy-compatible binary file (.npz-like).
-    /// Creates <output>.vectors.bin (f32, row-major: [prompt][layer][hidden_size])
-    /// and <output>.vectors.json (metadata: shapes, prompts, layers).
+    /// Creates \<output\>.vectors.bin (f32, row-major: \[prompt\]\[layer\]\[hidden_size\])
+    /// and \<output\>.vectors.json (metadata: shapes, prompts, layers).
     #[arg(long)]
     dump_vectors: bool,
 }
@@ -209,7 +209,7 @@ fn svd_singular_values(rows: &[Vec<f32>], n_rows: usize) -> Vec<f32> {
 }
 
 /// Compute top-k eigenvectors of an n×n Gram matrix.
-/// Returns (eigenvalues, eigenvectors) where eigenvectors[k] has length n.
+/// Returns (eigenvalues, eigenvectors) where eigenvectors\[k\] has length n.
 fn svd_eigenvectors(rows: &[Vec<f32>], n_rows: usize, top_k: usize) -> (Vec<f32>, Vec<Vec<f32>>) {
     let mut gram = vec![0.0f32; n_rows * n_rows];
     for i in 0..n_rows {

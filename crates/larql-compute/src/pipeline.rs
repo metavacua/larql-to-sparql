@@ -65,9 +65,9 @@ pub struct MoeLayerWeights<'a> {
     pub experts_down: &'a [u8],
     /// Router linear projection weight [num_experts, hidden_size].
     pub router_proj: &'a [f32],
-    /// Router learned input-scale [hidden_size].
+    /// Router learned input-scale \[hidden_size\].
     pub router_scale: &'a [f32],
-    /// Router per-expert output-scale [num_experts].
+    /// Router per-expert output-scale \[num_experts\].
     pub router_per_expert_scale: &'a [f32],
     /// Router's own RMS-norm weight applied to the router input before projection.
     /// Empty slice → fall back to parameter-free RMSNorm (if the flag below
@@ -80,11 +80,11 @@ pub struct MoeLayerWeights<'a> {
     /// Scalar multiplier on the router input after the norm and `router_scale`.
     /// HF Gemma 4: `hidden_size^-0.5`. Use `1.0` to disable.
     pub router_input_scalar: f32,
-    /// Pre-norm applied to the expert matmuls' input (not the router's). [hidden_size].
+    /// Pre-norm applied to the expert matmuls' input (not the router's). \[hidden_size\].
     pub pre_experts_norm: &'a [f32],
-    /// Post-norm for dense FFN output (replaces plain post_ffn_norm). [hidden_size].
+    /// Post-norm for dense FFN output (replaces plain post_ffn_norm). \[hidden_size\].
     pub post_ffn1_norm: &'a [f32],
-    /// Post-norm for expert block output. [hidden_size].
+    /// Post-norm for expert block output. \[hidden_size\].
     pub post_experts_norm: &'a [f32],
     /// Total number of routed experts.
     pub num_experts: usize,

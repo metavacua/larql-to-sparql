@@ -354,7 +354,7 @@ pub fn trace_forward_full(
     }
 }
 
-/// Calibrate scalar gains from a forward pass: norm[L+1] / norm[L] at each layer.
+/// Calibrate scalar gains from a forward pass: norm\[L+1\] / norm\[L\] at each layer.
 pub fn calibrate_scalar_gains(weights: &ModelWeights, token_ids: &[u32]) -> Vec<f32> {
     let all_layers: Vec<usize> = (0..weights.num_layers).collect();
     let trace = trace_forward(weights, token_ids, &all_layers, false, 0);

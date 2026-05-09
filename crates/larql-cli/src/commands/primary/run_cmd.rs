@@ -6,9 +6,9 @@
 //! line in, one forward pass out, repeat until EOF.
 //!
 //! Flag surface:
-//!   <model>         required; vindex directory, `hf://owner/name`, or a
+//!   \<model>         required; vindex directory, `hf://owner/name`, or a
 //!                   cache shorthand (e.g. `gemma-3-4b-it-vindex`).
-//!   [prompt]        optional; enters chat mode if omitted.
+//!   \[prompt\]        optional; enters chat mode if omitted.
 //!   -n, --top N     number of predictions to show (default 10).
 //!   --ffn URL       route FFN to a remote larql-server.
 //!   --experts       enable WASM-expert dispatch (gcd, base64, …).

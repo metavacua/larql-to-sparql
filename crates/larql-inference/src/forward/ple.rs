@@ -13,7 +13,7 @@ use ndarray::Array2;
 /// Combines two streams:
 ///   1. Model projection: main_embeds @ per_layer_model_projection.T * 1/sqrt(hidden)
 ///      → reshape to [seq, num_layers, ple_dim] → RMSNorm per layer
-///   2. Per-layer token embed: embed_tokens_per_layer[token_ids] * sqrt(ple_dim)
+///   2. Per-layer token embed: embed_tokens_per_layer\[token_ids\] * sqrt(ple_dim)
 ///      → reshape to [seq, num_layers, ple_dim]
 ///      Combined: (stream1 + stream2) * 1/sqrt(2)
 ///

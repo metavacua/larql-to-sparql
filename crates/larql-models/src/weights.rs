@@ -123,7 +123,7 @@ impl ModelWeights {
     /// Use on the **server side** of a decoupled-inference deployment
     /// (`larql serve --ffn-only`) where the client holds attention
     /// locally and only calls the FFN. Symmetric with
-    /// [`drop_ffn_weights`] which is used by the client.
+    /// [`Self::drop_ffn_weights`] which is used by the client.
     ///
     /// Typical savings: ~1 GB for 4B, ~8 GB for 31B.
     pub fn drop_attn_weights(&mut self) -> usize {

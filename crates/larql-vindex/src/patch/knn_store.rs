@@ -34,7 +34,7 @@ pub struct KnnEntry {
 /// no orthogonality constraint, no FFN-slot budget.
 #[derive(Debug)]
 pub struct KnnStore {
-    /// layer -> Vec<KnnEntry>
+    /// layer -> Vec\<KnnEntry\>
     entries: HashMap<usize, Vec<KnnEntry>>,
     /// Lazy-built L2-normalized key matrices for fast cosine GEMM.
     key_matrices: Mutex<HashMap<usize, Array2<f32>>>,

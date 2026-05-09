@@ -1,6 +1,6 @@
 //! Rotary Position Embeddings (RoPE) — position-dependent rotation of Q/K vectors.
 //!
-//! Split-half pairing: rotates (x[i], x[i + half_dim]) pairs.
+//! Split-half pairing: rotates (x\[i\], x\[i + half_dim\]) pairs.
 //! Matches HuggingFace default and MLX traditional=False.
 
 use ndarray::Array2;

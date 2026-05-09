@@ -217,8 +217,8 @@ pub fn is_end_of_turn(token: &str) -> bool {
 /// the produced token text matches [`is_end_of_turn`]. Per-step cost is
 /// O(N²) in context length (no KV cache) — the same trade-off
 /// `larql dev walk --predict --max-tokens N` makes for the CPU path. For
-/// long outputs use the Metal backend instead via
-/// [`crate::layer_graph::generate`].
+/// long outputs use the Metal backend instead via the `layer_graph::generate`
+/// function.
 ///
 /// Returns `(token_text, token_id)` pairs in generation order.
 pub fn generate_q4k_cpu(
@@ -310,7 +310,7 @@ where
 }
 
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
-/// [`FfnBackend`] — typically [`crate::ffn::RemoteWalkBackend`] for the
+/// [`crate::ffn::FfnBackend`] — typically [`crate::ffn::RemoteWalkBackend`] for the
 /// dense-remote demo where attention runs locally and each layer's FFN is
 /// one HTTP round trip to an `larql serve --ffn-only` server.
 ///

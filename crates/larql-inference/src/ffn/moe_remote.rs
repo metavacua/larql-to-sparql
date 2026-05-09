@@ -274,11 +274,11 @@ fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
 pub struct MoeRouterWeights<'a> {
     /// Router linear projection [num_experts × hidden_size].
     pub router_proj: &'a [f32],
-    /// Optional router input scale [hidden_size].
+    /// Optional router input scale \[hidden_size\].
     pub router_scale: &'a [f32],
-    /// Optional per-expert output scale [num_experts].
+    /// Optional per-expert output scale \[num_experts\].
     pub router_per_expert_scale: &'a [f32],
-    /// Optional router-specific RMSNorm weights [hidden_size]. When non-empty,
+    /// Optional router-specific RMSNorm weights \[hidden_size\]. When non-empty,
     /// the router input is `rms_norm(h, router_norm)`; when empty AND
     /// `router_norm_parameter_free` is true, it's parameter-free RMSNorm;
     /// otherwise falls back to `rms_norm(h, pre_experts_norm)`.
@@ -289,9 +289,9 @@ pub struct MoeRouterWeights<'a> {
     /// Scalar multiplier on the router input after the norm and `router_scale`.
     /// HF Gemma 4: `hidden_size^-0.5`. Use `1.0` for no scaling.
     pub router_input_scalar: f32,
-    /// Pre-experts RMSNorm weights [hidden_size].
+    /// Pre-experts RMSNorm weights \[hidden_size\].
     pub pre_experts_norm: &'a [f32],
-    /// Post-experts RMSNorm weights [hidden_size]. Applied to the summed output.
+    /// Post-experts RMSNorm weights \[hidden_size\]. Applied to the summed output.
     pub post_experts_norm: &'a [f32],
     pub num_experts: usize,
     pub top_k: usize,

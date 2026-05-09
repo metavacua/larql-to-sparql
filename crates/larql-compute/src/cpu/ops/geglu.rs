@@ -1,4 +1,4 @@
-//! GEGLU activation: out[i] = silu(gate[i]) × up[i].
+//! GEGLU activation: out\[i\] = silu(gate\[i\]) × up\[i\].
 //! Element-wise, pure Rust. 0.017ms for 10240 elements.
 
 /// SiLU (Swish) activation.

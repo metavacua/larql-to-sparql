@@ -333,7 +333,7 @@ pub fn resolve_ffn_weights<'a>(
     )
 }
 
-/// Build a complete Vec<FullPipelineLayer> for a range of layers.
+/// Build a complete Vec\<FullPipelineLayer\> for a range of layers.
 /// Single source of truth — used by both GPU decode and GPU prefill paths.
 #[allow(clippy::too_many_arguments)]
 pub fn build_pipeline_layers<'a>(

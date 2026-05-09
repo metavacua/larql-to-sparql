@@ -5,8 +5,8 @@
 //!
 //! 1. **HuggingFace hub cache** — `~/.cache/huggingface/hub/`, populated
 //!    by `larql pull` (and by `hf-hub` transitively). Layout:
-//!    ```
-//!    datasets--<owner>--<name>/snapshots/<sha>/{index.json,…}
+//!    ```text
+//!    datasets--<owner>--<name>/snapshots/<sha>/{index.json,...}
 //!    ```
 //! 2. **LARQL local cache** — `~/.cache/larql/local/`, populated by
 //!    `larql link <path>`. Each entry is a symlink (or directory) named

@@ -1,6 +1,6 @@
 //! Q4×Q8 matrix-vector multiply via C kernel.
 //!
-//! scores[N] = Q4[N, K] @ x[K]
+//! scores\[N\] = Q4\[N, K\] @ x\[K\]
 //!
 //! Internally quantizes x to Q8, then calls the C kernel with
 //! ARM vdotq_s32 intrinsics. 0.95ms on 14.7MB matrix (M3 Max).

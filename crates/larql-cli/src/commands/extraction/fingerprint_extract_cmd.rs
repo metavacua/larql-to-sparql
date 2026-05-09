@@ -10,7 +10,7 @@ use serde::Serialize;
 /// Extract OV fingerprint basis vectors from attention weights.
 /// For each head at each layer, compute what the head writes to the residual
 /// when it attends to each vocab token. This is the OV circuit:
-///   contribution = W_O × W_V × embedding[token]
+///   contribution = W_O × W_V × embedding\[token\]
 ///
 /// These vectors form the basis of all possible attention fingerprints.
 /// The fingerprint for any prompt = sum of these vectors weighted by attention.
@@ -81,7 +81,7 @@ struct TokenFingerprint {
     _type: String,
     token: String,
     token_id: u32,
-    /// Per-head OV contribution when attending to this token. [layer][head] = hidden_size vector norm
+    /// Per-head OV contribution when attending to this token. \[layer\]\[head\] = hidden_size vector norm
     head_contributions: Vec<HeadContribution>,
 }
 

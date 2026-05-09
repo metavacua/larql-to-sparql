@@ -642,7 +642,7 @@ pub fn generate(
 /// Differs from `generate` in two places only:
 ///
 ///   1. The LM-head step uses a **dense** vocabulary score vector
-///      ([`backend_lm_head_scores`]) rather than the sparse vindex KNN.
+///      (via `backend_lm_head_scores`) rather than the sparse vindex KNN.
 ///      Required because an arbitrary mask can disqualify tokens that
 ///      would otherwise have fallen outside the top-K.
 ///   2. After scoring, `mask_fn(generated_ids, &mut logits)` runs and the

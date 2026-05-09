@@ -56,7 +56,7 @@ fn unpack_scales_mins(sb_bytes: &[u8]) -> ([u8; 8], [u8; 8]) {
     (scales, mins)
 }
 
-/// CPU Q4_K matvec: out[N] = Q4_K[N, K] @ x[K].
+/// CPU Q4_K matvec: out\[N\] = Q4_K\[N, K\] @ x\[K\].
 ///
 /// Mirrors the Metal `q4k_matvec` shader: per-row dot product over
 /// super-blocks of the GGUF 144-byte layout.

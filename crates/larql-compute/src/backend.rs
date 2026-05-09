@@ -86,7 +86,7 @@ pub trait ComputeBackend: Send + Sync {
 
     // ── Q4 quantized operations (optional) ──
 
-    /// Q4 matrix-vector: scores[N] = Q4[N,K] @ Q8_x[K].
+    /// Q4 matrix-vector: scores\[N\] = Q4\[N,K\] @ Q8_x\[K\].
     /// Returns None if backend doesn't support Q4.
     fn q4_matvec(
         &self,
@@ -99,7 +99,7 @@ pub trait ComputeBackend: Send + Sync {
         None
     }
 
-    /// Q4 vector-matrix: out[K] = activation[N] @ Q4[N,K].
+    /// Q4 vector-matrix: out\[K\] = activation\[N\] @ Q4\[N,K\].
     fn q4_vecmat(
         &self,
         _activation: &[f32],
@@ -281,7 +281,7 @@ pub trait ComputeBackend: Send + Sync {
         )
     }
 
-    /// Q4_K matvec: scores[N] = Q4_K[N,K] @ f32_x[K]. Returns None if not supported.
+    /// Q4_K matvec: scores\[N\] = Q4_K\[N,K\] @ f32_x\[K\]. Returns None if not supported.
     fn q4k_matvec(
         &self,
         _q4k_data: &[u8],
@@ -292,7 +292,7 @@ pub trait ComputeBackend: Send + Sync {
         None
     }
 
-    /// Q6_K matvec: scores[N] = Q6_K[N,K] @ f32_x[K]. Returns None if not supported.
+    /// Q6_K matvec: scores\[N\] = Q6_K\[N,K\] @ f32_x\[K\]. Returns None if not supported.
     fn q6k_matvec(
         &self,
         _q6k_data: &[u8],

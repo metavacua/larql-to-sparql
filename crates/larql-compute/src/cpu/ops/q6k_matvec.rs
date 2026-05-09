@@ -37,7 +37,7 @@ fn f16_to_f32(bits: u16) -> f32 {
     }
 }
 
-/// CPU Q6_K matvec: out[N] = Q6_K[N, K] @ x[K].
+/// CPU Q6_K matvec: out\[N\] = Q6_K\[N, K\] @ x\[K\].
 ///
 /// Mirrors the Metal `q6k_matvec` shader: per-row dot product over super-blocks.
 pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {

@@ -162,7 +162,7 @@ fn decode_half(
 }
 
 /// Q4_0: block = f16 scale (2B) + 16 bytes of 4-bit quants. 32 elements per block.
-/// Each 4-bit value is unsigned [0,15], offset by -8 to give signed [-8, 7].
+/// Each 4-bit value is unsigned \[0,15\], offset by -8 to give signed \[-8, 7\].
 pub fn dequantize_q4_0(data: &[u8], n_elements: usize) -> Result<Vec<f32>, ModelError> {
     let block_size = 18;
     let n_blocks = check_block_input("Q4_0", data, n_elements, 32, block_size)?;
@@ -293,15 +293,15 @@ pub fn dequantize_q5_1(data: &[u8], n_elements: usize) -> Result<Vec<f32>, Model
 ///   bytes 16-143: 128 bytes of 4-bit quants (2 nibbles per byte = 256 values)
 ///
 /// The 6-bit scale/min unpacking follows llama.cpp's `get_scale_min_k4`:
-///   For j < 4: scales[j] = bytes[j] & 0x3F;       mins[j] = bytes[j+4] & 0x3F
-///   For j ≥ 4: scales[j] = (bytes[j+4] & 0x0F) | ((bytes[j-4] >> 6) << 4)
-///              mins[j]   = (bytes[j+4] >> 4)    | ((bytes[j]   >> 6) << 4)
+///   For \[j\] < 4: scales\[j\] = bytes\[j\] & 0x3F;       mins\[j\] = bytes\[j+4\] & 0x3F
+///   For \[j\] ≥ 4: scales\[j\] = (bytes\[j+4\] & 0x0F) | ((bytes\[j-4\] >> 6) << 4)
+///              mins\[j\]   = (bytes\[j+4\] >> 4)    | ((bytes\[j\]   >> 6) << 4)
 ///
 /// Each (scale, min) pair governs 32 elements within the 256-element super-block.
 /// Fused Q4_K decode + dot product — `dot(dequant(data), x)` without
 /// materialising the decoded row. Same math as
 /// `dequantize_q4_k(data, x.len())` followed by `a.dot(x)`, but skips the
-/// Vec<f32> allocation, the intermediate write, and the separate BLAS sdot
+/// Vec\<f32\> allocation, the intermediate write, and the separate BLAS sdot
 /// call. Hot path on very large models where we'd otherwise pay 2 decodes
 /// + 2 buffer copies + 2 BLAS dispatches per feature.
 #[inline(always)]

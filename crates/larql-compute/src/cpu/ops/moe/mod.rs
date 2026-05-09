@@ -4,9 +4,9 @@
 //! in parallel with the dense FFN and returns the expert contribution for summation.
 //!
 //! Module layout:
-//! - [`math`]    — numeric primitives (rms_norm, softmax, top-k, bf16 dequant, matmul)
-//! - [`expert`]  — per-expert gated-FFN execution (used by the remote-shard path)
-//! - [`forward`] — full block: router → top-k → weighted sum of expert outputs
+//! - `math`    — numeric primitives (rms_norm, softmax, top-k, bf16 dequant, matmul)
+//! - `expert`  — per-expert gated-FFN execution (used by the remote-shard path)
+//! - `forward` — full block: router → top-k → weighted sum of expert outputs
 //!
 //! Expert weights are stored as packed BF16: [num_experts, out_dim, in_dim].
 //! We dequantize only the selected top-k expert slices on demand.

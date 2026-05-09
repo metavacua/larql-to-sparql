@@ -1,6 +1,6 @@
 //! Q4 vector-matrix multiply via C kernel (scatter-accumulate).
 //!
-//! out[K] = activation[N] @ Q4[N, K]
+//! out\[K\] = activation\[N\] @ Q4\[N, K\]
 
 use super::q4_common::q4_0_vecmat_c;
 

@@ -230,7 +230,7 @@ impl GridState {
 pub struct GridServiceImpl {
     pub state: Arc<RwLock<GridState>>,
     next_id: AtomicU64,
-    /// If set, every incoming Join stream must present "Authorization: Bearer <key>".
+    /// If set, every incoming Join stream must present "Authorization: Bearer \<key>".
     grid_key: Option<String>,
 }
 

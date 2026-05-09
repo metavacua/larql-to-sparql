@@ -287,8 +287,8 @@ impl VectorIndex {
     }
 
     /// Batched gate walk: scores all features via a single BLAS `gemv`, then
-    /// extracts the top-K. Despite the name, this is batched matrix-vector —
-    /// see [`Self::gate_walk_pure`] for a true per-feature implementation.
+    /// extracts the top-K. This is a batched matrix-vector operation,
+    /// not per-feature scoring.
     pub fn gate_walk(
         &self,
         layer: usize,

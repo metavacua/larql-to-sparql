@@ -50,7 +50,7 @@ pub struct PredictArgs {
 
     /// Layer strategy with scalar bypass: "walk:0-8,scalar:9-14,walk:15-33".
     /// Scalar gains are auto-calibrated from a forward pass on the same prompt.
-    /// Supports: walk, sparse<K>, scalar.
+    /// Supports: walk, sparse\<K\>, scalar.
     #[arg(long)]
     mode: Option<String>,
 }

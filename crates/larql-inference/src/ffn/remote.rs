@@ -1,7 +1,7 @@
 //! RemoteWalkBackend — FFN backend that dispatches to a `larql-server` over
 //! HTTP instead of computing locally.
 //!
-//! Implements the same [`FfnBackend`] trait as [`WalkFfn`], so it slots into
+//! Implements the same [`FfnBackend`] trait as [`crate::vindex::WalkFfn`], so it slots into
 //! `predict_with_ffn` and the rest of the forward-pass code with zero
 //! changes.
 //!

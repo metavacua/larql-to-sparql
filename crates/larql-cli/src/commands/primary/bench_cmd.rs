@@ -11,7 +11,7 @@
 //! decode loop delivers on the vindex bytes shipped by `larql extract`.
 //!
 //! Flag surface:
-//!   <model>          vindex dir, `hf://owner/name`, or cache shorthand.
+//!   \<model>          vindex dir, `hf://owner/name`, or cache shorthand.
 //!   --prompt STR     prompt to time (default: "The capital of France is").
 //!   -n, --tokens N   decode steps to time (default: 50).
 //!   --warmup N       decode steps to run first and discard (default: 3).
