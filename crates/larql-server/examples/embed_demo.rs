@@ -164,9 +164,7 @@ fn demo_token_encode(text: &str) {
         .collect();
 
     println!("GET /v1/token/encode?text={text:?}");
-    println!(
-        "Response: {{ \"token_ids\": {ids:?}, \"text\": {text:?} }}"
-    );
+    println!("Response: {{ \"token_ids\": {ids:?}, \"text\": {text:?} }}");
 }
 
 fn demo_token_decode(ids: &[u32]) {
@@ -179,9 +177,7 @@ fn demo_token_decode(ids: &[u32]) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    println!(
-        "Response: {{ \"text\": {decoded:?}, \"token_ids\": {ids:?} }}"
-    );
+    println!("Response: {{ \"text\": {decoded:?}, \"token_ids\": {ids:?} }}");
 }
 
 // ── Binary wire format demonstration ─────────────────────────────────────────
