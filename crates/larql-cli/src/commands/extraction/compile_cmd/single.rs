@@ -64,7 +64,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("failed to capture residual")?;
 
     let trigger_norm: f32 = residual.iter().map(|x| x * x).sum::<f32>().sqrt();
-    eprintln!("  trigger norm: {trigger_norm::.2}");
+    eprintln!("  trigger norm: {trigger_norm:.2}");
 
     let ans_encoding = tokenizer
         .encode(answer.as_str(), false)

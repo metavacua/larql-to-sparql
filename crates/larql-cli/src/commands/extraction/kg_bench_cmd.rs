@@ -80,7 +80,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         println!(
             "
-{prompt::?}"
+{prompt:?}"
         );
 
         // Aggregate answer tokens across layers

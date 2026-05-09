@@ -184,7 +184,7 @@ pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n  Rank statistics:");
     println!("    min: {min_rank}");
     println!("    median: {median_rank}");
-    println!("    mean: {avg_rank::.1}");
+    println!("    mean: {avg_rank:.1}");
     println!("    max: {max_rank}");
 
     // Template capacity estimate

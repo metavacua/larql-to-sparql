@@ -235,7 +235,7 @@ fn run_larql(
             measured_n, args.tokens
         )
     } else if measured_n == 0 {
-        format!("no decode steps completed (wall {wall_ms::.0}ms)")
+        format!("no decode steps completed (wall {wall_ms:.0}ms)")
     } else {
         String::new()
     };

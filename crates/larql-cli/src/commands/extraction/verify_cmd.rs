@@ -40,7 +40,7 @@ pub fn run(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
                 if mb > 1024.0 {
                     format!("{:.2} GB", mb / 1024.0)
                 } else {
-                    format!("{mb::.1} MB")
+                    format!("{mb:.1} MB")
                 }
             })
             .unwrap_or_else(|_| "missing".into());
