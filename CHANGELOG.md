@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Inline additional format arguments in model-compute
 - Inline format arguments to resolve clippy warnings
 - Inline format string variables across CLI and server examples
+- Inline format string variables in embed_demo and server_demo examples
 - Inline format strings in describe.rs
 - Inline remaining format arguments in larql-inference
 - Inline variables in format strings (clippy uninlined_format_args)
