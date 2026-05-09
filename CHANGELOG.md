@@ -41,5 +41,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Resolve three CI failures from Linux incompatibilities
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
+- Upgrade rust-version to 1.91 to support wasmtime 43.0.2 security fixes
 
 
