@@ -45,9 +45,7 @@ pub fn probe_entities(
     let total = entities.len();
     for (ei, entity) in entities.iter().enumerate() {
         if ei % 1000 == 0 && ei > 0 {
-            eprint!(
-                "\r    Probed {ei}/{total} entities ({num_activations} activations)..."
-            );
+            eprint!("\r    Probed {ei}/{total} entities ({num_activations} activations)...");
         }
         // Encode entity → token IDs → averaged embedding
         let encoding = match tokenizer.encode(entity.as_str(), false) {
@@ -89,9 +87,7 @@ pub fn probe_entities(
     }
 
     if total > 1000 {
-        eprintln!(
-            "\r    Probed {total}/{total} entities ({num_activations} activations)    "
-        );
+        eprintln!("\r    Probed {total}/{total} entities ({num_activations} activations)    ");
     }
 
     ProbeResult {
@@ -171,9 +167,7 @@ pub fn build_confirmed_pairs(
     }
 
     if skipped_broad > 0 {
-        eprintln!(
-            "  Skipped {skipped_broad} broad features (>20 entities each)"
-        );
+        eprintln!("  Skipped {skipped_broad} broad features (>20 entities each)");
     }
 
     pairs

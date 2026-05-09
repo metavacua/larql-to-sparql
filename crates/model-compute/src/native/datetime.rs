@@ -67,8 +67,7 @@ impl Kernel for DateTimeKernel {
                 Ok(d.format("%Y-%m-%d").to_string())
             }
             _ => Err(KernelError::Unsupported(format!(
-                "datetime: unknown function {:?}",
-                head
+                "datetime: unknown function {head:?}"
             ))),
         }
     }
@@ -77,12 +76,11 @@ impl Kernel for DateTimeKernel {
 fn split_call(expr: &str) -> Result<(&str, &str), KernelError> {
     let expr = expr.trim();
     let open = expr.find('(').ok_or_else(|| {
-        KernelError::Parse(format!("datetime: expected `name(args)`, got {:?}", expr))
+        KernelError::Parse(format!("datetime: expected `name(args)`, got {expr:?}"))
     })?;
     if !expr.ends_with(')') {
         return Err(KernelError::Parse(format!(
-            "datetime: missing closing paren in {:?}",
-            expr
+            "datetime: missing closing paren in {expr:?}"
         )));
     }
     Ok((&expr[..open], &expr[open + 1..expr.len() - 1]))
@@ -110,7 +108,7 @@ fn expect_args(name: &str, args: &[&str], expected: usize) -> Result<(), KernelE
 
 fn parse_date(s: &str) -> Result<NaiveDate, KernelError> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
-        .map_err(|e| KernelError::Parse(format!("invalid date {:?}: {}", s, e)))
+        .map_err(|e| KernelError::Parse(format!("invalid date {s:?}: {e}")))
 }
 
 #[cfg(test)]
