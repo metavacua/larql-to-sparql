@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Continue inlining format string variables in larql-lql
 - Correct CHANGELOG.md structure and formatting
 - Correct cog.toml schema, workflow flags, and review feedback
+- Correct invalid format strings with double colons
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Format helpers.rs error message to single line
