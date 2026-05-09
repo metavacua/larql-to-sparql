@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
+- Acknowledge known pre-existing unmaintained dependency advisories
 - Add Android NDK setup to cross-platform-build workflow
 - Address PR #29 review feedback and surface known build issues
 - Address cargo deny failures with explicit path dependency versions and wasmtime upgrade
