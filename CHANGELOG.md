@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Inline variables in format strings (clippy uninlined_format_args)
 - Resolve clippy warnings blocking CI
 - Resolve compilation failures with metal feature gating and wasmtime 36.0.7
+- Resolve remaining clippy uninlined_format_args errors
 - Resolve three CI failures from Linux incompatibilities
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
 - Scope cron to advisory scanners and harden SARIF upload
