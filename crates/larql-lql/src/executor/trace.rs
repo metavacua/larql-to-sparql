@@ -90,18 +90,15 @@ impl super::Session {
             .map(|&id| {
                 tokenizer
                     .decode(&[id], true)
-                    .unwrap_or_else(|_| format!("t{}", id))
+                    .unwrap_or_else(|_| format!("t{id}"))
             })
             .collect();
 
         let mut out = Vec::new();
         let n_layers = trace.n_layers;
+        let num_tokens = trace.tokens.len();
         out.push(format!(
-            "Trace: \"{}\" ({} tokens, {} layers, {:.0}ms)",
-            prompt,
-            trace.tokens.len(),
-            n_layers,
-            elapsed_ms,
+            "Trace: \"{prompt}\" ({num_tokens} tokens, {n_layers} layers, {elapsed_ms:.0}ms)"
         ));
 
         // Determine layer range to display
@@ -113,14 +110,14 @@ impl super::Session {
         // If ANSWER specified: show answer trajectory
         if let Some(answer_str) = answer {
             let answer_tok = tokenizer
-                .encode(format!(" {}", answer_str), true)
+                .encode(format!(" {answer_str}"), true)
                 .map_err(|e| LqlError::exec("tokenize answer", e))?;
             let answer_id = *answer_tok.get_ids().last().unwrap_or(&0);
 
             let traj = trace.answer_trajectory(weights, answer_id);
 
             out.push(String::new());
-            out.push(format!("Answer trajectory for '{}':", answer_str));
+            out.push(format!("Answer trajectory for '{answer_str}':"));
             out.push(format!(
                 "  {:>5} {:>6} {:>8} {:>9} {:>9} {:>8}",
                 "Layer", "Rank", "Prob", "Attn", "FFN", "Who"
@@ -188,11 +185,10 @@ impl super::Session {
                 let layer_str = if layer == -1 {
                     "emb".to_string()
                 } else {
-                    format!("L{}", layer)
+                    format!("L{layer}")
                 };
                 out.push(format!(
-                    "  {:>5} {:>10.0} {:>10.0} {:>10.0} {:>9.0}%",
-                    layer_str, attn_norm, ffn_norm, res_norm, ratio,
+                    "  {layer_str:>5} {attn_norm:>10.0} {ffn_norm:>10.0} {res_norm:>10.0} {ratio:>9.0}%"
                 ));
             }
             return self.maybe_save_and_return(out, &trace, weights, save);
@@ -213,11 +209,15 @@ impl super::Session {
             let layer_str = if s.layer == -1 {
                 "emb".to_string()
             } else {
-                format!("L{}", s.layer)
+                let l = s.layer;
+                format!("L{l}")
             };
             out.push(format!(
-                "  {:>5} {:>12} {:>8.3} {:>10.0} {:>10.0}",
-                layer_str, s.top1_token, s.top1_prob, s.attn_delta_norm, s.ffn_delta_norm,
+                "  {layer_str:>5} {top1:<12} {prob:>8.3} {attn:>10.0} {ffn:>10.0}",
+                top1 = s.top1_token,
+                prob = s.top1_prob,
+                attn = s.attn_delta_norm,
+                ffn = s.ffn_delta_norm,
             ));
         }
 
@@ -247,7 +247,7 @@ impl super::Session {
                 .map_err(|e| LqlError::exec("finish trace", e))?;
 
             out.push(String::new());
-            out.push(format!("Saved {} token chains to {}", written, path));
+            out.push(format!("Saved {written} token chains to {path}"));
         }
         Ok(out)
     }

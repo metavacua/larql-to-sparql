@@ -307,6 +307,6 @@ pub async fn handle_describe_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     describe_with_cache(&state, model, &headers, params).await
 }

@@ -23,8 +23,8 @@ fn main() {
 
     for (kernel, expr) in cases {
         match registry.invoke(kernel, expr) {
-            Ok(out) => println!("{:12} {:40} → {}", kernel, expr, out),
-            Err(e) => println!("{:12} {:40} ERR: {}", kernel, expr, e),
+            Ok(out) => println!("{kernel:12} {expr:40} → {out}"),
+            Err(e) => println!("{kernel:12} {expr:40} ERR: {e}"),
         }
     }
 }

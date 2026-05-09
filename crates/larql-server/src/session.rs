@@ -140,14 +140,14 @@ impl SessionManager {
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(session_id)
-            .ok_or_else(|| format!("session '{}' not found", session_id))?;
+            .ok_or_else(|| format!("session '{session_id}' not found"))?;
 
         let idx = session
             .patched
             .patches
             .iter()
             .position(|p| p.description.as_deref().unwrap_or("unnamed") == name)
-            .ok_or_else(|| format!("patch '{}' not found in session", name))?;
+            .ok_or_else(|| format!("patch '{name}' not found in session"))?;
 
         session.patched.remove_patch(idx);
         Ok(session.patched.num_patches())

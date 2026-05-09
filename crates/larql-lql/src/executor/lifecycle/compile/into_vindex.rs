@@ -366,7 +366,7 @@ impl Session {
             source_path.display(),
             output_dir.display()
         ));
-        out.push(format!("Features: {}", dm_count));
+        out.push(format!("Features: {dm_count}"));
         if !collisions.is_empty() {
             let strategy = match on_conflict {
                 CompileConflict::LastWins => "LAST_WINS",
@@ -399,7 +399,7 @@ impl Session {
             ));
         }
         if knn_count > 0 {
-            out.push(format!("KNN store: {} entries", knn_count));
+            out.push(format!("KNN store: {knn_count} entries"));
         }
         out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
         Ok(out)

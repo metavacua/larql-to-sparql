@@ -68,22 +68,19 @@ impl Session {
                         0
                     };
 
-                    out.push(format!("  Clusters:          {}", num_clusters));
+                    out.push(format!("  Clusters:          {num_clusters}"));
                     if num_probes > 0 {
                         out.push(format!(
-                            "  Mapped relations:  {} features ({} types, probe-confirmed)",
-                            num_probes, probe_type_count,
+                            "  Mapped relations:  {num_probes} features ({probe_type_count} types, probe-confirmed)"
                         ));
                     }
                     if mapped_clusters > 0 {
                         out.push(format!(
-                            "  Partially mapped:  {} clusters (Wikidata/WordNet matched)",
-                            mapped_clusters,
+                            "  Partially mapped:  {mapped_clusters} clusters (Wikidata/WordNet matched)"
                         ));
                     }
                     out.push(format!(
-                        "  Unmapped:          {} clusters (model knows, we haven't identified yet)",
-                        unmapped_clusters,
+                        "  Unmapped:          {unmapped_clusters} clusters (model knows, we haven't identified yet)"
                     ));
                 } else {
                     out.push("  (no relation clusters found)".into());
@@ -109,17 +106,17 @@ impl Session {
 
                 out.push(String::new());
                 out.push("  By layer band:".into());
+                let syntax_fmt = format_number(syntax_features);
                 out.push(format!(
-                    "    Syntax (L0-13):     {} features",
-                    format_number(syntax_features),
+                    "    Syntax (L0-13):     {syntax_fmt} features"
                 ));
+                let knowledge_fmt = format_number(knowledge_features);
                 out.push(format!(
-                    "    Knowledge (L14-27): {} features",
-                    format_number(knowledge_features),
+                    "    Knowledge (L14-27): {knowledge_fmt} features"
                 ));
+                let output_fmt = format_number(output_features);
                 out.push(format!(
-                    "    Output (L28-33):    {} features",
-                    format_number(output_features),
+                    "    Output (L28-33):    {output_fmt} features"
                 ));
 
                 // Coverage summary
@@ -149,41 +146,39 @@ impl Session {
 
                         out.push(String::new());
                         out.push("  Coverage:".into());
+                        let total_fmt = format_number(total_features);
                         out.push(format!(
-                            "    Probe-confirmed:   {:.2}% of features ({} / {})",
-                            probe_pct,
-                            num_probes,
-                            format_number(total_features),
+                            "    Probe-confirmed:   {probe_pct:.2}% of features ({num_probes} / {total_fmt})"
                         ));
                         out.push(format!(
-                            "    Cluster-labelled:  {:.0}% of clusters ({} / {})",
-                            cluster_pct, mapped_clusters, num_clusters,
+                            "    Cluster-labelled:  {cluster_pct:.0}% of clusters ({mapped_clusters} / {num_clusters})"
                         ));
                         out.push(format!(
-                            "    Unmapped:          ~{:.0}% — the model knows more than we've labelled",
-                            unmapped_pct,
+                            "    Unmapped:          ~{unmapped_pct:.0}% — the model knows more than we've labelled"
                         ));
                     }
                 }
 
                 out.push(String::new());
-                out.push(format!("Index size:      {}", format_bytes(file_size)));
-                out.push(format!("Path:            {}", path.display()));
+                let size_bytes = format_bytes(file_size);
+                out.push(format!("Index size:      {size_bytes}"));
+                let path_str = path.display();
+                out.push(format!("Path:            {path_str}"));
                 Ok(out)
             }
             Backend::Weight {
                 model_id, weights, ..
             } => {
                 let mut out = Vec::new();
-                out.push(format!("Model:           {}", model_id));
+                out.push(format!("Model:           {model_id}"));
                 out.push("Backend:         live weights (no vindex)".to_string());
                 out.push(String::new());
                 out.push(format!("Layers:          {}", weights.num_layers));
                 out.push(format!("Hidden size:     {}", weights.hidden_size));
                 out.push(format!("Intermediate:    {}", weights.intermediate_size));
+                let vocab_fmt = format_number(weights.vocab_size);
                 out.push(format!(
-                    "Vocab size:      {}",
-                    format_number(weights.vocab_size)
+                    "Vocab size:      {vocab_fmt}"
                 ));
                 out.push(String::new());
                 out.push("Supported:       INFER, EXPLAIN INFER, STATS".into());

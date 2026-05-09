@@ -57,7 +57,8 @@ impl Kernel for ArithmeticKernel {
 
 fn format_float(f: f64) -> String {
     if f.fract() == 0.0 && f.abs() < 1e15 {
-        format!("{}", f as i64)
+        let i = f as i64;
+        format!("{i}")
     } else {
         format!("{f}")
     }
@@ -151,8 +152,7 @@ fn eval_aggregate(name: &str, args: &str) -> Result<String, KernelError> {
             let len = hi - lo;
             if !(0..=MAX_RANGE_LEN).contains(&len) {
                 return Err(KernelError::OutOfRange(format!(
-                    "{}({}): range length {} outside [0, {}]",
-                    name, args, len, MAX_RANGE_LEN
+                    "{name}({args}): range length {len} outside [0, {MAX_RANGE_LEN}]"
                 )));
             }
             let result: i128 = match name {
@@ -164,19 +164,18 @@ fn eval_aggregate(name: &str, args: &str) -> Result<String, KernelError> {
         }
         "factorial" => {
             let n: i64 = args.trim().parse().map_err(|_| {
-                KernelError::Parse(format!("factorial: expected integer, got {:?}", args))
+                KernelError::Parse(format!("factorial: expected integer, got {args:?}"))
             })?;
             if !(0..=MAX_FACTORIAL).contains(&n) {
                 return Err(KernelError::OutOfRange(format!(
-                    "factorial({}): must be in [0, {}]",
-                    n, MAX_FACTORIAL
+                    "factorial({n}): must be in [0, {MAX_FACTORIAL}]"
                 )));
             }
             let mut r: i64 = 1;
             for k in 2..=n {
                 r = r
                     .checked_mul(k)
-                    .ok_or_else(|| KernelError::OutOfRange(format!("factorial({}) overflow", n)))?;
+                    .ok_or_else(|| KernelError::OutOfRange(format!("factorial({n}) overflow")))?;
             }
             Ok(r.to_string())
         }
@@ -188,19 +187,18 @@ fn parse_range(args: &str) -> Result<(i64, i64), KernelError> {
     let trimmed = args.trim();
     let (lo, hi) = trimmed
         .split_once("..")
-        .ok_or_else(|| KernelError::Parse(format!("expected range 'lo..hi', got {:?}", trimmed)))?;
+        .ok_or_else(|| KernelError::Parse(format!("expected range 'lo..hi', got {trimmed:?}")))?;
     let lo: i64 = lo
         .trim()
         .parse()
-        .map_err(|_| KernelError::Parse(format!("range start not an integer: {:?}", lo)))?;
+        .map_err(|_| KernelError::Parse(format!("range start not an integer: {lo:?}")))?;
     let hi: i64 = hi
         .trim()
         .parse()
-        .map_err(|_| KernelError::Parse(format!("range end not an integer: {:?}", hi)))?;
+        .map_err(|_| KernelError::Parse(format!("range end not an integer: {hi:?}")))?;
     if hi < lo {
         return Err(KernelError::OutOfRange(format!(
-            "range end {} < start {}",
-            hi, lo
+            "range end {hi} < start {lo}"
         )));
     }
     Ok((lo, hi))

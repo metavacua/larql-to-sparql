@@ -189,7 +189,7 @@ impl Session {
 
                     let show_labels = mode != crate::ast::DescribeMode::Raw;
                     let label = if show_labels && !relation.is_empty() {
-                        format!("{:<12}", relation)
+                        format!("{relation:<12}")
                     } else {
                         format!("{:<12}", "")
                     };
@@ -217,15 +217,14 @@ impl Session {
                     };
 
                     out.push(format!(
-                        "    {} → {:20} {:>7.1}  L{:<3}{}{}",
-                        label, target, gate, layer, tag, also_str,
+                        "    {label} → {target:20} {gate:>7.1}  L{layer:<3}{tag}{also_str}"
                     ));
                 }
             }
         }
 
         if let Some(ms) = body["latency_ms"].as_f64() {
-            out.push(format!("\n{:.1}ms (remote)", ms));
+            out.push(format!("\n{ms:.1}ms (remote)"));
         }
 
         // Overlay local patch edges.
@@ -261,11 +260,10 @@ impl Session {
                         let label = if relation.is_empty() {
                             format!("{:<12}", "")
                         } else {
-                            format!("{:<12}", relation)
+                            format!("{relation:<12}")
                         };
                         out.push(format!(
-                            "    {} → {:20} {:>7.2}  L{:<3}  (local)",
-                            label, target, conf, layer,
+                            "    {label} → {target:20} {conf:>7.2}  L{layer:<3}  (local)"
                         ));
                     }
                 }
@@ -292,7 +290,7 @@ impl Session {
         let body = self.remote_get_json("/v1/walk", &params)?;
 
         let mut out = Vec::new();
-        out.push(format!("Feature scan for {:?}", prompt));
+        out.push(format!("Feature scan for {prompt:?}"));
         out.push(String::new());
 
         if let Some(hits) = body["hits"].as_array() {
@@ -303,14 +301,13 @@ impl Session {
                 let target = hit["target"].as_str().unwrap_or("?");
 
                 out.push(format!(
-                    "  L{:2}: F{:<5} gate={:+.1}  top={:?}",
-                    layer, feature, gate, target,
+                    "  L{layer:2}: F{feature:<5} gate={gate:+.1}  top={target:?}"
                 ));
             }
         }
 
         if let Some(ms) = body["latency_ms"].as_f64() {
-            out.push(format!("\n{:.1}ms (remote)", ms));
+            out.push(format!("\n{ms:.1}ms (remote)"));
         }
 
         Ok(out)
@@ -340,10 +337,12 @@ impl Session {
                     for (i, p) in preds.iter().enumerate() {
                         let tok = p["token"].as_str().unwrap_or("?");
                         let prob = p["probability"].as_f64().unwrap_or(0.0);
-                        out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
+                        let i_plus = i + 1;
+                        let pct = prob * 100.0;
+                        out.push(format!("  {i_plus:2}. {tok:20} ({pct:.2}%)"));
                     }
                     if let Some(ms) = result[format!("{mode}_ms")].as_f64() {
-                        out.push(format!("  {:.0}ms", ms));
+                        out.push(format!("  {ms:.0}ms"));
                     }
                     out.push(String::new());
                 }
@@ -353,12 +352,14 @@ impl Session {
             for (i, p) in preds.iter().enumerate() {
                 let tok = p["token"].as_str().unwrap_or("?");
                 let prob = p["probability"].as_f64().unwrap_or(0.0);
-                out.push(format!("  {:2}. {:20} ({:.2}%)", i + 1, tok, prob * 100.0));
+                let i_plus = i + 1;
+                let pct = prob * 100.0;
+                out.push(format!("  {i_plus:2}. {tok:20} ({pct:.2}%)"));
             }
         }
 
         if let Some(ms) = result["latency_ms"].as_f64() {
-            out.push(format!("{:.0}ms (remote)", ms));
+            out.push(format!("{ms:.0}ms (remote)"));
         }
 
         Ok(out)
@@ -400,13 +401,14 @@ impl Session {
         };
 
         let mut out = Vec::new();
-        out.push(format!("Inference trace for {:?}{}:", prompt, band_label));
+        out.push(format!("Inference trace for {prompt:?}{band_label}:"));
 
         if let Some(preds) = result["predictions"].as_array() {
             if let Some(first) = preds.first() {
                 let tok = first["token"].as_str().unwrap_or("?");
                 let prob = first["probability"].as_f64().unwrap_or(0.0);
-                out.push(format!("Prediction: {} ({:.2}%)", tok, prob * 100.0));
+                let pct = prob * 100.0;
+                out.push(format!("Prediction: {tok} ({pct:.2}%)"));
             }
         }
         out.push(String::new());
@@ -434,7 +436,7 @@ impl Session {
                             } else {
                                 top_token
                             };
-                            Some(format!("{:<14} {:+.1}", name, gate))
+                            Some(format!("{name:<14} {gate:+.1}"))
                         }
                     } else {
                         None
@@ -449,7 +451,8 @@ impl Session {
                         .and_then(|v| {
                             let tok = v["token"].as_str()?;
                             let w = v["weight"].as_f64()?;
-                            Some(format!("{}({:.0}%)", tok, w * 100.0))
+                            let w_pct = w * 100.0;
+                            Some(format!("{tok}({w_pct:.0}%)"))
                         })
                         .unwrap_or_default();
 
@@ -464,8 +467,7 @@ impl Session {
 
                     if feature_str.is_some() || !lens_part.is_empty() {
                         out.push(format!(
-                            "  L{:2}  {:<19}  {:<16} → {}",
-                            layer, feature_part, attn_part, lens_part,
+                            "  L{layer:2}  {feature_part:<19}  {attn_part:<16} → {lens_part}"
                         ));
                     }
                 } else {
@@ -482,9 +484,9 @@ impl Session {
                                 continue;
                             }
                             let label_str = if relation.is_empty() {
-                                format!("{:14}", "")
+                                format!("{:<14}", "")
                             } else {
-                                format!("{:<14}", relation)
+                                format!("{relation:<14}")
                             };
                             let top_token = feat["top_token"].as_str().unwrap_or("?");
                             let top_tokens: String = feat["top_tokens"]
@@ -497,8 +499,7 @@ impl Session {
                                 })
                                 .unwrap_or_default();
                             out.push(format!(
-                                "  L{:2}: {} F{:<5} gate={:+.1}  → {:15} [{}]",
-                                layer, label_str, feature, gate, top_token, top_tokens,
+                                "  L{layer:2}: {label_str} F{feature:<5} gate={gate:+.1}  → {top_token:15} [{top_tokens}]"
                             ));
                         }
                     }
@@ -507,7 +508,7 @@ impl Session {
         }
 
         if let Some(ms) = result["latency_ms"].as_f64() {
-            out.push(format!("\n{:.0}ms (remote)", ms));
+            out.push(format!("\n{ms:.0}ms (remote)"));
         }
 
         Ok(out)
@@ -521,25 +522,20 @@ impl Session {
         };
 
         let mut out = Vec::new();
-        out.push(format!("Model: {}", body["model"].as_str().unwrap_or("?")));
-        out.push(format!(
-            "Family: {}",
-            body["family"].as_str().unwrap_or("?")
-        ));
-        out.push(format!("Layers: {}", body["layers"].as_u64().unwrap_or(0)));
-        out.push(format!(
-            "Features: {}",
-            body["features"].as_u64().unwrap_or(0)
-        ));
-        out.push(format!(
-            "Hidden: {}",
-            body["hidden_size"].as_u64().unwrap_or(0)
-        ));
-        out.push(format!("Dtype: {}", body["dtype"].as_str().unwrap_or("?")));
-        out.push(format!(
-            "Extract level: {}",
-            body["extract_level"].as_str().unwrap_or("?")
-        ));
+        let model_str = body["model"].as_str().unwrap_or("?");
+        out.push(format!("Model: {model_str}"));
+        let family_str = body["family"].as_str().unwrap_or("?");
+        out.push(format!("Family: {family_str}"));
+        let layers_val = body["layers"].as_u64().unwrap_or(0);
+        out.push(format!("Layers: {layers_val}"));
+        let features_val = body["features"].as_u64().unwrap_or(0);
+        out.push(format!("Features: {features_val}"));
+        let hidden_val = body["hidden_size"].as_u64().unwrap_or(0);
+        out.push(format!("Hidden: {hidden_val}"));
+        let dtype_str = body["dtype"].as_str().unwrap_or("?");
+        out.push(format!("Dtype: {dtype_str}"));
+        let level_str = body["extract_level"].as_str().unwrap_or("?");
+        out.push(format!("Extract level: {level_str}"));
 
         if let Some(bands) = body.get("layer_bands") {
             if let (Some(s), Some(k), Some(o)) = (
@@ -555,11 +551,9 @@ impl Session {
         }
 
         if let Some(loaded) = body.get("loaded") {
-            out.push(format!(
-                "Loaded: browse={}, inference={}",
-                loaded["browse"].as_bool().unwrap_or(false),
-                loaded["inference"].as_bool().unwrap_or(false),
-            ));
+            let browse_val = loaded["browse"].as_bool().unwrap_or(false);
+            let infer_val = loaded["inference"].as_bool().unwrap_or(false);
+            out.push(format!("Loaded: browse={browse_val}, inference={infer_val}"));
         }
 
         out.push(format!("Remote: {url}"));
@@ -588,7 +582,7 @@ impl Session {
                     for rel in probes {
                         let name = rel["name"].as_str().unwrap_or("?");
                         let count = rel["count"].as_u64().unwrap_or(0);
-                        out.push(format!("{:<25} {:>8}", name, count));
+                        out.push(format!("{name:<25} {count:>8}"));
                     }
                     out.push(String::new());
                 }
@@ -619,7 +613,8 @@ impl Session {
                                 if ex.is_empty() {
                                     String::new()
                                 } else {
-                                    format!("  e.g. {}", ex.join(", "))
+                                    let ex_join = ex.join(", ");
+                                    format!("  e.g. {ex_join}")
                                 }
                             } else {
                                 String::new()
@@ -628,8 +623,7 @@ impl Session {
                             String::new()
                         };
                         out.push(format!(
-                            "{:<25} {:>8} {:>8.2} {:>5}-{}{}",
-                            name, count, score, min_l, max_l, examples_str,
+                            "{name:<25} {count:>8} {score:>8.2} {min_l:>5}-{max_l}{examples_str}"
                         ));
                     }
                 }

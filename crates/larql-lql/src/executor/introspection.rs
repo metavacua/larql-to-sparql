@@ -28,25 +28,21 @@ impl Session {
         let mut out = Vec::new();
         out.push(format!("Storage engine status (epoch {}):", self.epoch));
         out.push(format!(
-            "  L0 (WAL/KNN):    {} entries (0 tombstones)",
-            l0_entries,
+            "  L0 (WAL/KNN):    {l0_entries} entries (0 tombstones)"
         ));
+        let l1_len = l1_layers.len();
         out.push(format!(
-            "  L1 (arch-A):     {} edges across {} layers",
-            l1_edges,
-            l1_layers.len(),
+            "  L1 (arch-A):     {l1_edges} edges across {l1_len} layers"
         ));
         if memit_supported {
             out.push("  L2 (MEMIT):      0 facts across 0 cycles".to_string());
         } else {
             out.push(format!(
-                "  L2 (MEMIT):      not available (hidden_dim={} < 1024)",
-                hidden_dim,
+                "  L2 (MEMIT):      not available (hidden_dim={hidden_dim} < 1024)"
             ));
         }
         out.push(format!(
-            "  Base model:      {} layers × {} features",
-            n_layers, features_per_layer,
+            "  Base model:      {n_layers} layers × {features_per_layer} features"
         ));
         Ok(out)
     }
@@ -147,7 +143,7 @@ impl Session {
 
         let mut out = Vec::new();
         let layer_label = if let Some(l) = layer_filter {
-            format!("L{}", l)
+            format!("L{l}")
         } else {
             "L14-27".into()
         };
@@ -156,8 +152,7 @@ impl Session {
         if !probe_relations.is_empty() {
             let total_labels: usize = probe_relations.values().sum();
             out.push(format!(
-                "Probe-confirmed relations ({} labels):",
-                total_labels
+                "Probe-confirmed relations ({total_labels} labels):"
             ));
             out.push(format!("{:<25} {:>8}", "Relation", "Features"));
             out.push("-".repeat(35));
@@ -171,7 +166,7 @@ impl Session {
                 probe_sorted.len()
             };
             for (name, count) in probe_sorted.into_iter().take(limit) {
-                out.push(format!("{:<25} {:>8}", name, count));
+                out.push(format!("{name:<25} {count:>8}"));
             }
         }
 
@@ -194,7 +189,7 @@ impl Session {
             };
             sorted.truncate(limit);
 
-            out.push(format!("Top output tokens ({}):", layer_label));
+            out.push(format!("Top output tokens ({layer_label}):"));
             out.push(format!(
                 "{:<25} {:>8} {:>8} {:>10}",
                 "Token", "Count", "Score", "Layers"
@@ -425,7 +420,7 @@ impl Session {
         out.push("-".repeat(48));
 
         for (tok, count, max_score) in &entities {
-            out.push(format!("{:<24} {:>10} {:>10.4}", tok, count, max_score));
+            out.push(format!("{tok:<24} {count:>10} {max_score:>10.4}"));
         }
 
         if entities.is_empty() {

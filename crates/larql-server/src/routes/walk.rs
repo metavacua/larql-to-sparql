@@ -113,7 +113,7 @@ pub async fn handle_walk_multi(
     state.bump_requests();
     let model = state
         .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("model '{model_id}' not found")))?;
     let model = Arc::clone(model);
     let result = tokio::task::spawn_blocking(move || walk_prompt(&model, &params))
         .await

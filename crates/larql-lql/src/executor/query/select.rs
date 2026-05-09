@@ -657,7 +657,7 @@ impl Session {
         out.push("-".repeat(48));
 
         for (tok, count, max_score) in &entities {
-            out.push(format!("{:<24} {:>10} {:>10.4}", tok, count, max_score));
+            out.push(format!("{tok:<24} {count:>10} {max_score:>10.4}"));
         }
 
         if entities.is_empty() {

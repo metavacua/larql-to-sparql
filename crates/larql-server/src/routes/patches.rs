@@ -269,7 +269,7 @@ async fn remove_patch_from_model(
         .patches
         .iter()
         .position(|p| p.description.as_deref().unwrap_or("unnamed") == name)
-        .ok_or_else(|| ServerError::NotFound(format!("patch '{}' not found", name)))?;
+        .ok_or_else(|| ServerError::NotFound(format!("patch '{name}' not found")))?;
 
     patched.remove_patch(idx);
 

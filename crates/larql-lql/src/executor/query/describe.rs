@@ -555,7 +555,7 @@ fn format_describe_edge(edge: &FormattedEdge, mode: DescribeMode) -> String {
                 format!("{:<14}", "[—]")
             } else {
                 let tag = format!("[{}]", edge.label);
-                format!("{:<14}", tag)
+                format!("{tag:<14}")
             };
             let (min_l, max_l) = layer_range(&edge.layers);
             let layer_str = if min_l == max_l {

@@ -139,7 +139,7 @@ impl Session {
                 let label_str = if label.is_empty() {
                     String::new()
                 } else {
-                    format!("{:<14}", label)
+                    format!("{label:<14}")
                 };
                 let top_token = hit.meta.top_token.trim();
                 let down_top: String = hit

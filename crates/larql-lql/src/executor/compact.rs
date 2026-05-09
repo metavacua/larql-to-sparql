@@ -102,9 +102,8 @@ impl Session {
 
         if hidden_dim < 1024 {
             return Err(LqlError::Execution(format!(
-                "COMPACT MAJOR requires hidden_dim >= 1024 (model has {}). \
-                 Use COMPACT MINOR for arch-A compaction on this model.",
-                hidden_dim,
+                "COMPACT MAJOR requires hidden_dim >= 1024 (model has {hidden_dim}). \
+                 Use COMPACT MINOR for arch-A compaction on this model."
             )));
         }
 
