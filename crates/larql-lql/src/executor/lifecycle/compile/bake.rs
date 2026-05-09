@@ -169,8 +169,7 @@ pub(super) fn apply_memit_deltas_to_down_weights(
         let shape = result.delta_w.shape();
         if shape[0] != hidden || shape[1] != intermediate {
             return Err(LqlError::Execution(format!(
-                "MEMIT ΔW shape {:?} mismatches vindex shape [{hidden}, {intermediate}] at L{layer}",
-                shape
+                "MEMIT ΔW shape {shape:?} mismatches vindex shape [{hidden}, {intermediate}] at L{layer}"
             )));
         }
 

@@ -85,8 +85,7 @@ impl Session {
                 let tok_b = meta_b.map(|m| m.top_token.as_str()).unwrap_or("-");
 
                 out.push(format!(
-                    "L{:<7} F{:<7} {:<20} {:<20} {:>10}",
-                    layer, feat, tok_a, tok_b, status
+                    "L{layer:<7} F{feat:<7} {tok_a:<20} {tok_b:<20} {status:>10}"
                 ));
                 diff_count += 1;
             }
@@ -96,8 +95,7 @@ impl Session {
             out.push("  (no differences found)".into());
         } else {
             out.push(format!(
-                "\n{} differences shown (limit {})",
-                diff_count, limit
+                "\n{diff_count} differences shown (limit {limit})"
             ));
         }
 

@@ -659,10 +659,9 @@ impl Session {
 
         let mut out = Vec::new();
         out.push(format!(
-            "Inserted: {} —[{}]→ {} ({} layers, mode: {})",
-            entity, relation, target, inserted, mode,
+            "Inserted: {entity} —[{relation}]→ {target} ({inserted} layers, mode: {mode})"
         ));
-        out.push(format!("{:.0}ms (remote)", ms));
+        out.push(format!("{ms:.0}ms (remote)"));
 
         Ok(out)
     }
@@ -859,15 +858,14 @@ impl Session {
                     let score = edge["c_score"].as_f64().unwrap_or(0.0);
                     let relation = edge["relation"].as_str().unwrap_or("");
                     out.push(format!(
-                        "  {:<20} {:<15} {:>6.3}  L{:<5} F{}",
-                        target, relation, score, layer, feature
+                        "  {target:<20} {relation:<15} {score:>6.3}  L{layer:<5} F{feature}"
                     ));
                 }
             }
         }
 
         if let Some(total) = result["total"].as_u64() {
-            out.push(format!("\n{} total", total));
+            out.push(format!("\n{total} total"));
         }
 
         Ok(out)
