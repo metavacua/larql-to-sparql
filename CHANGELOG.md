@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
+- Resolve clippy warnings blocking CI
 - Resolve compilation failures with metal feature gating and wasmtime 36.0.7
 - Resolve three CI failures from Linux incompatibilities
 - Revert manual CHANGELOG edit; let git-cliff regenerate from commits
