@@ -164,9 +164,7 @@ mod tests {
         let standard_mem = config.kv_memory(370_000);
         assert!(
             mem_370k < standard_mem / 100,
-            "Markov RS at 370K ({}) should be <1% of standard KV ({})",
-            mem_370k,
-            standard_mem
+            "Markov RS at 370K ({mem_370k}) should be <1% of standard KV ({standard_mem})"
         );
     }
 

@@ -132,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         f32_data.to_vec()
     };
 
-    println!("  Quantising {} f32 → Q4_K …", expected);
+    println!("  Quantising {expected} f32 → Q4_K …");
     let t0 = std::time::Instant::now();
     let q4k_bytes = quantize_q4_k(&padded);
     println!(

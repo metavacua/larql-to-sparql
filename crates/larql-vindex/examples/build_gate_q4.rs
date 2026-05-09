@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_q4 as f64 / 1e6,
         ratio
     );
-    println!("  Time: {:.1}s", elapsed);
+    println!("  Time: {elapsed:.1}s");
     println!("=== Done ===");
 
     Ok(())

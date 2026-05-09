@@ -41,7 +41,7 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) {
     if per_iter > 10_000.0 {
         println!("  {name:<50} {:.2} ms  ({iters} iters)", per_iter / 1000.0);
     } else {
-        println!("  {name:<50} {:.1} us  ({iters} iters)", per_iter);
+        println!("  {name:<50} {per_iter:.1} us  ({iters} iters)");
     }
 }
 

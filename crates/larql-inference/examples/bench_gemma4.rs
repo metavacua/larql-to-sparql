@@ -31,7 +31,7 @@ fn bench<F: FnMut()>(name: &str, iters: usize, mut f: F) -> f64 {
             per_iter / 1000.0
         );
     } else {
-        println!("  {name:<50} {:>8.1} us  ({iters} iters)", per_iter);
+        println!("  {name:<50} {per_iter:>8.1} us  ({iters} iters)");
     }
     per_iter
 }

@@ -321,8 +321,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         println!(
-            "  {:>5}  {:>9.4}  {:>6.4}  {:>6.4}  {:>16.3}  {:>11.3}  {:>10}",
-            layer, mean_err, min_err, max_err, mean_ov, mean_top1, verdict
+            "  {layer:>5}  {mean_err:>9.4}  {min_err:>6.4}  {max_err:>6.4}  {mean_ov:>16.3}  {mean_top1:>11.3}  {verdict:>10}"
         );
     }
 

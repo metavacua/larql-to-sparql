@@ -224,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = predict_with_ffn(weights, tokenizer, &token_ids, 1, &capturing);
     let residuals = capturing.take();
     let seq_len = residuals[0].shape()[0];
-    println!("done, seq_len={}\n", seq_len);
+    println!("done, seq_len={seq_len}\n");
 
     // Pick a representative layer for detailed analysis
     let target_layer = num_layers / 2; // layer 17 on Gemma 3 4B

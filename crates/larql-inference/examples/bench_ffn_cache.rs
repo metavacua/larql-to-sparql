@@ -27,7 +27,7 @@ fn timed_iters<F: FnMut()>(name: &str, warmup: usize, iters: usize, mut f: F) ->
         f();
     }
     let ms = t.elapsed().as_secs_f64() * 1000.0 / iters as f64;
-    println!("  {:<45} {:>8.3} ms/iter", name, ms);
+    println!("  {name:<45} {ms:>8.3} ms/iter");
     ms
 }
 
