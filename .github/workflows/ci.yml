@@ -33,8 +33,12 @@
 #                                 see AGENTS.md "CI ordering rule")
 #   ↓
 #   S3   (Build & Test Matrix)   ubuntu-24.04 (containerized) ×
-#                                macos-15 × macos-13 + CodeQL
-#                                + python bindings
+#                                macos-15 × macos-13 + python bindings
+#                                CodeQL is handled separately by the
+#                                repo's default-setup configuration —
+#                                custom CodeQL invocations from this
+#                                workflow conflict with that and cause
+#                                GitHub to reject the workflow.
 #   ↓
 #   S5   (Post-Build Quality)    msrv-discovery, mutants
 #                                (informational, non-blocking)
@@ -42,10 +46,12 @@
 #                                (informational, non-blocking)
 #
 # The Linux build environment is defined by
-# .github/docker/linux-ci/Dockerfile and pinned by digest in
-# env.LINUX_CI_IMAGE below. Bumping the image: edit the Dockerfile, run
-# .github/workflows/publish-ci-image.yml, copy the resulting digest
-# here. See AGENTS.md "CI image bootstrap" for the procedure.
+# .github/docker/linux-ci/Dockerfile and pinned by digest in every
+# `container:` directive below. Workflow-level env interpolation in
+# `container:` is unreliable across GitHub Actions parser versions, so
+# the digest is hardcoded; bumping it is a find-and-replace on
+# `ghcr.io/metavacua/larql-ci-linux@sha256:`. See AGENTS.md
+# "CI image bootstrap" for the procedure.
 
 name: ci
 
@@ -63,8 +69,6 @@ permissions:
   contents: read
   pull-requests: write
   actions: read
-  # CodeQL analysis in S3 requires uploading SARIF to Code Scanning.
-  security-events: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -76,13 +80,6 @@ env:
   #   - .github/docker/linux-ci/Dockerfile (FROM rust:1.88.0-...)
   # Bumping requires coordinated changes to all three.
   RUST_TOOLCHAIN: "1.88.0"
-
-  # Linux CI base image, pinned by digest. The digest below is a BOOTSTRAP
-  # PLACEHOLDER — replace it after the first publish-ci-image run. While
-  # the placeholder is in place, all containerized Linux jobs will fail
-  # with "manifest unknown" against ghcr.io. See AGENTS.md
-  # "CI image bootstrap".
-  LINUX_CI_IMAGE: "ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
   REUSE_TOOL_VERSION: "6.2.0"
   COCOGITTO_VERSION: "7.0.0"
@@ -220,7 +217,7 @@ jobs:
   env-establishment-linux:
     name: env-establishment (linux)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     # Runs on schedule too: cargo-deny's weekly advisory refresh depends
     # on this job, and a fast container-pull smoke test on the schedule
     # cron is valuable in its own right (catches image-rotted ghcr.io).
@@ -314,7 +311,7 @@ jobs:
   cargo-deny:
     name: cargo-deny (licenses + advisories + bans + sources)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: env-establishment-linux
     steps:
       - name: Checkout
@@ -333,7 +330,7 @@ jobs:
   lockfile-consistency:
     name: lockfile-consistency (cargo metadata --locked)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: env-establishment-linux
     steps:
       - name: Checkout
@@ -358,7 +355,7 @@ jobs:
   uv-lock-check:
     name: uv-lock-check (uv lock verification)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: env-establishment-linux
     steps:
       - name: Checkout
@@ -385,7 +382,7 @@ jobs:
   cargo-msrv-verify:
     name: cargo-msrv-verify (declared MSRV)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: [cargo-deny, lockfile-consistency, uv-lock-check]
     if: github.event_name != 'schedule'
     steps:
@@ -419,7 +416,7 @@ jobs:
   rustfmt:
     name: rustfmt (cargo fmt --check)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: cargo-msrv-verify
     if: github.event_name != 'schedule'
     steps:
@@ -434,7 +431,7 @@ jobs:
   clippy:
     name: clippy (lint with -D warnings)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: cargo-msrv-verify
     if: github.event_name != 'schedule'
     steps:
@@ -454,7 +451,7 @@ jobs:
   rustdoc:
     name: rustdoc (cargo doc -D warnings)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     needs: cargo-msrv-verify
     if: github.event_name != 'schedule'
     steps:
@@ -474,61 +471,37 @@ jobs:
         run: cargo doc --workspace --no-deps --exclude larql-python
 
   # =========================================================================
-  # S3: Build & Test Matrix (Ubuntu × macOS, with CodeQL on Ubuntu)
+  # S3: Build & Test Matrix (Ubuntu × macOS)
   #
-  # Linux leg runs in the CI container (matrix.container set);
-  # macOS legs run on bare GitHub-hosted runners (matrix.container
-  # absent — `container: ${{ matrix.container }}` evaluates to no
-  # container). Don't try to "fix" this asymmetry — GitHub-hosted macOS
-  # runners do not support the container: directive.
+  # Split into two jobs because GitHub Actions rejects matrix-include
+  # entries with undefined keys when `container: ${{ matrix.container }}`
+  # is referenced at job level. Linux runs in the CI container; macOS
+  # runs natively (GitHub-hosted macOS runners do not support the
+  # container: directive — platform constraint, not a project
+  # decision).
+  #
+  # CodeQL is intentionally NOT invoked from this workflow. The repo
+  # uses CodeQL default setup, which forbids custom CodeQL workflows;
+  # adding `github/codeql-action/init` here causes GitHub to silently
+  # reject the entire ci.yml at validation time.
   # =========================================================================
 
-  build-test-matrix:
-    name: build-test-matrix (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+  build-test-linux:
+    name: build-test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     if: github.event_name != 'schedule'
     needs: cargo-msrv-verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: ubuntu
-            codeql: true
-            container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          - os: macos-15
-            platform: macos
-            arch: arm64
-            codeql: false
-          - os: macos-13
-            platform: macos
-            arch: intel
-            codeql: false
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain (macOS only)
-        if: matrix.platform == 'macos'
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-build-test-${{ matrix.os }}
-
-      - name: Initialize CodeQL (Ubuntu only)
-        if: matrix.codeql
-        uses: github/codeql-action/init@v3
-        with:
-          languages: cpp,python,rust
-          queries: security-and-quality
+          shared-key: ci-build-test-ubuntu-24.04
 
       - name: cargo build --locked --workspace
         run: cargo build --locked --workspace
@@ -539,20 +512,57 @@ jobs:
       - name: cargo test --doc --locked
         run: cargo test --doc --locked
 
-      - name: Perform CodeQL analysis (Ubuntu only)
-        if: matrix.codeql
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: /language/rust
+      - name: Build and test Python bindings (maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
 
-      - name: Setup Python (macOS only — Linux container ships python3)
-        if: matrix.platform == 'macos'
+      - name: cargo build --examples
+        run: cargo build --locked --examples --exclude larql-python
+
+  build-test-macos:
+    name: build-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    needs: cargo-msrv-verify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-13]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-build-test-${{ matrix.os }}
+
+      - name: cargo build --locked --workspace
+        run: cargo build --locked --workspace
+
+      - name: cargo test --locked --workspace
+        run: cargo test --locked --workspace --no-fail-fast
+
+      - name: cargo test --doc --locked
+        run: cargo test --doc --locked
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install uv (macOS only — Linux container ships uv)
-        if: matrix.platform == 'macos'
+      - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
@@ -574,9 +584,9 @@ jobs:
   msrv-discovery:
     name: msrv-discovery (cargo-msrv find)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     if: github.event_name != 'schedule'
-    needs: build-test-matrix
+    needs: [build-test-linux, build-test-macos]
     continue-on-error: true
     steps:
       - name: Checkout
@@ -600,9 +610,9 @@ jobs:
   mutants:
     name: mutants (cargo-mutants)
     runs-on: ubuntu-24.04
-    container: ${{ env.LINUX_CI_IMAGE }}
+    container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
     if: github.event_name != 'schedule'
-    needs: build-test-matrix
+    needs: [build-test-linux, build-test-macos]
     continue-on-error: true
     steps:
       - name: Checkout
@@ -660,7 +670,7 @@ jobs:
     name: distribution-notices (post-build validation)
     runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
-    needs: build-test-matrix
+    needs: [build-test-linux, build-test-macos]
     continue-on-error: true
     steps:
       - name: Checkout
@@ -693,7 +703,8 @@ jobs:
       - rustfmt
       - clippy
       - rustdoc
-      - build-test-matrix
+      - build-test-linux
+      - build-test-macos
     if: always() && !failure() && !cancelled()
     steps:
       - name: All required checks passed
@@ -726,7 +737,8 @@ jobs:
       - rustfmt
       - clippy
       - rustdoc
-      - build-test-matrix
+      - build-test-linux
+      - build-test-macos
     steps:
       - name: Post failure summary to PR
         uses: actions/github-script@v7
@@ -745,7 +757,8 @@ jobs:
           RUSTFMT_RESULT: ${{ needs.rustfmt.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           RUSTDOC_RESULT: ${{ needs.rustdoc.result }}
-          BUILD_TEST_MATRIX_RESULT: ${{ needs.build-test-matrix.result }}
+          BUILD_TEST_LINUX_RESULT: ${{ needs.build-test-linux.result }}
+          BUILD_TEST_MACOS_RESULT: ${{ needs.build-test-macos.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
@@ -764,7 +777,8 @@ jobs:
               "S2   rustfmt":                 process.env.RUSTFMT_RESULT,
               "S2   clippy":                  process.env.CLIPPY_RESULT,
               "S2   rustdoc":                 process.env.RUSTDOC_RESULT,
-              "S3   build-test-matrix":       process.env.BUILD_TEST_MATRIX_RESULT,
+              "S3   build-test-linux":        process.env.BUILD_TEST_LINUX_RESULT,
+              "S3   build-test-macos":        process.env.BUILD_TEST_MACOS_RESULT,
             };
             const rows = Object.entries(results)
               .map(([n, r]) => `| ${n} | ${r} |`)
