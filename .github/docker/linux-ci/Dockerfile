@@ -49,9 +49,10 @@ RUN rustup component add clippy rustfmt
 
 # uv (Astral) for the Python bindings job. Pinned-version installs are
 # the responsibility of the larql-python crate's uv.lock; this image just
-# provides a uv binary on PATH.
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && mv /root/.local/bin/uv /usr/local/bin/uv
+# provides a uv binary on PATH. Sourced from the upstream uv image rather
+# than a `curl | sh` shell pipeline so the binary's provenance is the
+# Astral container registry, not an unverified script execution.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Build-time smoke check. If any of these fail, the image build fails —
 # which is the correct moment to discover a broken environment, not when
