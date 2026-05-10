@@ -46,8 +46,8 @@ SPDX-License-Identifier: <Apache-2.0 | AGPL-3.0-or-later | CC-BY-SA-4.0>
 <!-- REUSE-IgnoreEnd -->
 
 Alternatively, add an explicit `[[annotations]]` block for the file in
-`REUSE.toml`. Either is sufficient; the `provenance` job in
-`.github/workflows/validate.yml` runs `reuse lint` and verifies coverage.
+`REUSE.toml`. Either is sufficient; the `reuse-lint` job in
+`.github/workflows/ci.yml` (S0) runs `reuse lint` and verifies coverage.
 
 ## Conventional Commits
 
@@ -93,8 +93,8 @@ pip install pre-commit && pre-commit install
 If a new direct dependency carries a license not already in
 `deny.toml :: [licenses] allow`, add an entry there with a one-line
 comment justifying it, and reference the supporting analysis in
-`audit/dependency-licenses.md`. The `deny` job in `.github/workflows/quality.yml`
-will reject the build otherwise.
+`audit/dependency-licenses.md`. The `cargo-deny` job in
+`.github/workflows/ci.yml` (S1) will reject the build otherwise.
 
 If the new license is copyleft (GPL/AGPL/LGPL), update `NOTICE` to
 record the obligation it creates.

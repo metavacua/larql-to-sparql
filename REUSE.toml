@@ -47,6 +47,7 @@ path = [
   "cog.toml",
   ".pre-commit-config.yaml",
   ".github/**",
+  "rust-toolchain.toml",
   "scripts/check_changelog.sh",
   "scripts/version_preflight.sh",
   "scripts/check_first_party_licenses.sh",
@@ -54,7 +55,6 @@ path = [
   "scripts/reuse-toml-guard.sh",
   "scripts/ci/**",
   "docs/specs/compliance-pipeline.md",
-  "docs/specs/code-quality-pipeline.md",
   "docs/ci-cd-local.md",
   "deny.toml",
 ]

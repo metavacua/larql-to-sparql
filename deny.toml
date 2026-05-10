@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # cargo-deny configuration. Owns the deterministic predicates that the
-# `deny` job in .github/workflows/quality.yml evaluates against the
-# transitive dependency closure:
+# `cargo-deny` job in .github/workflows/ci.yml (S1) evaluates against
+# the transitive dependency closure:
 #
 #   advisories  — RustSec advisory DB filter (vulnerabilities, unmaintained)
 #   bans        — duplicate-version and crate ban list

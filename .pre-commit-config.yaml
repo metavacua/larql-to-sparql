@@ -65,7 +65,9 @@ repos:
 
   # ---------------------------------------------------------------------
   # Rust toolchain hooks. Must mirror `make ci` exactly. Hooks shell out
-  # to the local cargo so the version matches rust-toolchain.
+  # to the local cargo so the version matches rust-toolchain.toml at the
+  # repo root (which pins the same channel as
+  # .github/workflows/ci.yml :: env.RUST_TOOLCHAIN).
   # ---------------------------------------------------------------------
   - repo: local
     hooks:

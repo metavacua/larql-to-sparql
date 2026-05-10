@@ -41,10 +41,10 @@ Each platform script runs:
 
 | Platform | Status | CI/CD Job | Local Script |
 |----------|--------|-----------|--------------|
-| Ubuntu 24.04 | ✓ Phase 1 | `.github/workflows/cross-platform-build.yml` → `build-ubuntu` | `./scripts/ci/build-ubuntu.sh` |
-| ChromeOS 24.04 | ✓ Phase 2a | `.github/workflows/cross-platform-build.yml` → `build-chromeos` | `./scripts/ci/build-chromeos.sh` |
-| Android (aarch64 + armv7) | ✓ Phase 2b | `.github/workflows/cross-platform-build.yml` → `build-android` | `./scripts/ci/build-android.sh` |
-| macOS (Intel + ARM) | ✓ Phase 3 | `.github/workflows/cross-platform-build.yml` → `build-macos` | `./scripts/ci/build-macos.sh` |
+| Ubuntu 24.04 | ✓ Phase 1 | `ci.yml :: build-test-matrix (ubuntu-24.04)` (containerized) | `./scripts/ci/build-ubuntu.sh` |
+| ChromeOS 24.04 | ✓ Phase 2a | (local-only — not wired into `ci.yml`) | `./scripts/ci/build-chromeos.sh` |
+| Android (aarch64 + armv7) | ✓ Phase 2b | (local-only — not wired into `ci.yml`) | `./scripts/ci/build-android.sh` |
+| macOS (Intel + ARM) | ✓ Phase 3 | `ci.yml :: build-test-matrix (macos-13 / macos-15)` | `./scripts/ci/build-macos.sh` |
 
 ## Prerequisites
 
@@ -303,18 +303,29 @@ sudo xcode-select --reset
 
 ### GitHub Actions workflows
 
-- **`.github/workflows/validate.yml`**: Deterministic checks (licenses, commits, changelog, SemVer)
-- **`.github/workflows/quality.yml`**: Code scanning (clippy, tests, audit, deny, doc, examples, python, proto-lint)
-- **`.github/workflows/cross-platform-build.yml`**: Cross-platform builds (Phase 1: Ubuntu; Phase 2+: Android/ChromeOS/macOS)
+- **`.github/workflows/ci.yml`**: Unified PR validation pipeline
+  (S0 license/provenance, S0.5 environment manifest, S1 dependency
+  audit, S1.5 MSRV, S2 static analysis, S3 build & test on
+  Ubuntu/macOS, S5/S6 informational). See
+  [`docs/specs/compliance-pipeline.md`](specs/compliance-pipeline.md)
+  for the architecture.
+- **`.github/workflows/publish-ci-image.yml`**: Manually-triggered
+  build & push of the Linux CI base image
+  (`ghcr.io/metavacua/larql-ci-linux`). Defined by
+  [`.github/docker/linux-ci/Dockerfile`](../.github/docker/linux-ci/Dockerfile).
+
+ChromeOS and Android cross-builds (`./scripts/ci/build-{chromeos,android}.sh`)
+are local-only and not wired into `ci.yml`. They are kept available
+for ad-hoc validation but are not part of the PR gate.
 
 ### Local Makefile targets
 
 | Target | Equivalent CI Job | Purpose |
 |--------|------------------|---------|
-| `make ci` | `quality.yml` (partial) | Format check, lint, test |
-| `make platform-test` | `cross-platform-build.yml` | Platform-specific build + test |
-| `make platform-test-ubuntu` | `cross-platform-build.yml::build-ubuntu` | Ubuntu-only build + test |
-| `make python-test` | `quality.yml::python` | Python bindings test |
+| `make ci` | `ci.yml :: rustfmt + clippy + build-test-matrix (subset)` | Format check, lint, test |
+| `make platform-test` | (none — local-only) | Platform-specific build + test |
+| `make platform-test-ubuntu` | `ci.yml :: build-test-matrix (ubuntu-24.04)` | Ubuntu-only build + test |
+| `make python-test` | `ci.yml :: build-test-matrix (Python bindings step)` | Python bindings test |
 
 ## Next Steps
 
@@ -322,22 +333,22 @@ sudo xcode-select --reset
 - Run `make platform-test` regularly before pushing
 - Scripts mirror GitHub Actions for consistency
 
-### Phase 2a (ChromeOS, complete)
+### Phase 2a (ChromeOS, complete — local-only)
 - ChromeOS build script implemented in `./scripts/ci/build-chromeos.sh`
-- GitHub Actions job enabled in `.github/workflows/cross-platform-build.yml`
+- Local-only; not wired into `ci.yml`
 - Targets x86_64-unknown-linux-gnu (Crostini Linux container)
 - Build process identical to Ubuntu since both target the same Linux environment
 
-### Phase 2b (Android, complete)
+### Phase 2b (Android, complete — local-only)
 - Android build script implemented in `./scripts/ci/build-android.sh`
-- GitHub Actions job enabled in `.github/workflows/cross-platform-build.yml`
+- Local-only; not wired into `ci.yml`
 - Cross-compiles for dual targets: aarch64-linux-android and armv7-linux-androideabi
 - Build-only validation; no runtime testing or Python bindings
 - Android NDK auto-detected or can be installed separately
 
 ### Phase 3 (macOS, complete)
 - macOS build script implemented in `./scripts/ci/build-macos.sh`
-- GitHub Actions jobs enabled in `.github/workflows/cross-platform-build.yml` for ARM and Intel
+- CI-enforced via `ci.yml :: build-test-matrix` for both `macos-13` (Intel) and `macos-15` (ARM)
 - Architecture-specific builds:
   * macOS 13 (Intel): Builds and tests without Metal
   * macOS 15 (Apple Silicon): Builds and tests both with and without Metal
@@ -366,8 +377,11 @@ git push
 make ci
 make platform-test
 
-# Or run validate.yml locally (deterministic checks)
-# (See docs/specs/compliance-pipeline.md for details)
+# Or run a faithful Linux CI reproduction via the pinned container:
+# docker run --rm -v "$PWD":/work -w /work \
+#   ghcr.io/metavacua/larql-ci-linux:1.88.0-latest \
+#   cargo clippy --workspace --all-targets -- -D warnings
+# (See docs/specs/compliance-pipeline.md for the full pipeline.)
 ```
 
 ## See Also

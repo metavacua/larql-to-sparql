@@ -1,31 +1,51 @@
-# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
-# SPDX-License-Identifier: Apache-2.0
-#
 # Unified CI/CD pipeline (ci.yml).
 #
-# This workflow consolidates validation, testing, and security scanning into a
-# single deterministic pipeline with explicit stages (S0–S6) that enforce a
-# strict dependency order. The pipeline implements the project's compliance
-# specification per docs/specs/compliance-pipeline.md.
+# Validation, testing, and security scanning in a single deterministic
+# pipeline with explicit stages (S0–S6) that enforce a strict dependency
+# order. The pipeline implements the project's compliance specification
+# per docs/specs/compliance-pipeline.md.
 #
 # ## Pipeline Architecture
 #
-# Dependency graph (strict sequential until S3; S5/S6 informational):
+# Dependency graph (strict sequential through S2; S5/S6 informational):
 #
-#   S0 (Meta & License)      → provenance, reuse-toml-guard, first-party-licenses,
-#                               conventional-commits, changelog-consistency
+#   S0   (Meta & License)        bare runner, OS-independent
+#                                provenance, reuse-toml-guard,
+#                                first-party-licenses,
+#                                conventional-commits, changelog
 #   ↓
-#   S1 (Dependency Audit)    → cargo-deny, lockfile-consistency, uv-lock-check
+#   S0.5 (Environment Manifest)  per OS (Linux containerized,
+#                                macOS native), records
+#                                rustc/cargo/system pkgs as artifact;
+#                                FIRST gate that proves the build
+#                                environment is sane.
 #   ↓
-#   S2 (Static Analysis)     → rustfmt, clippy, rustdoc, python-lint, proto-lint
+#   S1   (Dependency Audit)      cargo-deny, lockfile-consistency,
+#                                uv-lock-check
 #   ↓
-#   S2.5 (MSRV Verification) → cargo-msrv-verify (gates S3)
+#   S1.5 (MSRV Verification)     cargo-msrv-verify
+#                                (gates ALL static analysis;
+#                                 clippy/rustfmt/rustdoc must
+#                                 NEVER run before this)
 #   ↓
-#   S3 (Build & Test Matrix) → [Ubuntu × macOS] build + test + python + CodeQL
+#   S2   (Static Analysis)       rustfmt, clippy, rustdoc
+#                                (downstream of MSRV by design —
+#                                 see AGENTS.md "CI ordering rule")
 #   ↓
-#   S5 (Post-Build Quality)  → msrv-discovery, mutants, examples (informational)
+#   S3   (Build & Test Matrix)   ubuntu-24.04 (containerized) ×
+#                                macos-15 × macos-13 + CodeQL
+#                                + python bindings
 #   ↓
-#   S6 (Post-Build Security) → distribution-notices, optional cargo-vet
+#   S5   (Post-Build Quality)    msrv-discovery, mutants
+#                                (informational, non-blocking)
+#   S6   (Post-Build Validation) distribution-notices
+#                                (informational, non-blocking)
+#
+# The Linux build environment is defined by
+# .github/docker/linux-ci/Dockerfile and pinned by digest in
+# env.LINUX_CI_IMAGE below. Bumping the image: edit the Dockerfile, run
+# .github/workflows/publish-ci-image.yml, copy the resulting digest
+# here. See AGENTS.md "CI image bootstrap" for the procedure.
 
 name: ci
 
@@ -36,14 +56,14 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # Weekly advisory refresh for cargo-deny
+    # Weekly advisory refresh for cargo-deny.
     - cron: "0 6 * * 1"
 
 permissions:
   contents: read
   pull-requests: write
   actions: read
-  # CodeQL analysis in S3 requires uploading SARIF to Code Scanning
+  # CodeQL analysis in S3 requires uploading SARIF to Code Scanning.
   security-events: write
 
 concurrency:
@@ -51,18 +71,31 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned Rust toolchain. Must be kept in sync across all jobs.
-  # Current floor: 1.88.0 (required by home v0.5.12, cookie_store v0.22.1, time-* crates)
+  # Pinned Rust toolchain. Must match:
+  #   - rust-toolchain.toml (developer-side reproduction)
+  #   - .github/docker/linux-ci/Dockerfile (FROM rust:1.88.0-...)
+  # Bumping requires coordinated changes to all three.
   RUST_TOOLCHAIN: "1.88.0"
+
+  # Linux CI base image, pinned by digest. The digest below is a BOOTSTRAP
+  # PLACEHOLDER — replace it after the first publish-ci-image run. While
+  # the placeholder is in place, all containerized Linux jobs will fail
+  # with "manifest unknown" against ghcr.io. See AGENTS.md
+  # "CI image bootstrap".
+  LINUX_CI_IMAGE: "ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
   REUSE_TOOL_VERSION: "6.2.0"
   COCOGITTO_VERSION: "7.0.0"
   GIT_CLIFF_VERSION: "2.13.1"
-  CLIPPY_SARIF_VERSION: "0.7.0"
   CARGO_TERM_COLOR: always
 
 jobs:
   # =========================================================================
   # S0: Meta & License Gates
+  #
+  # OS-independent. Run on bare ubuntu-24.04 runners — they precede the
+  # environment-establishment step and would create a circular dependency
+  # if they themselves required the CI container.
   # =========================================================================
 
   reuse-lint:
@@ -175,52 +208,138 @@ jobs:
         run: bash scripts/check_changelog.sh
 
   # =========================================================================
+  # S0.5: Environment Manifest
+  #
+  # Records what the build environment actually contains, per OS, before
+  # any compile/lint/test step runs. The Linux job *also* validates that
+  # the pinned container image is reachable; if it is not, every later
+  # Linux job will fail identically — failing fast here turns "manifest
+  # unknown" cascades into a single, obvious failure point.
+  # =========================================================================
+
+  env-establishment-linux:
+    name: env-establishment (linux)
+    runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    # Runs on schedule too: cargo-deny's weekly advisory refresh depends
+    # on this job, and a fast container-pull smoke test on the schedule
+    # cron is valuable in its own right (catches image-rotted ghcr.io).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record environment manifest
+        run: |
+          {
+            echo "## Linux CI environment manifest"
+            echo
+            echo "Image: ${LINUX_CI_IMAGE}"
+            echo "Runner: $(uname -a)"
+            echo
+            echo "### Rust toolchain"
+            rustc --version
+            cargo --version
+            cargo clippy --version
+            cargo fmt --version
+            echo
+            echo "### System libraries (BLAS / link)"
+            pkg-config --modversion openblas
+            dpkg -l libopenblas-dev pkg-config build-essential | tail -n +6
+            echo
+            echo "### Python toolchain"
+            python3 --version
+            uv --version
+          } | tee env-manifest-linux.txt
+
+      - name: Upload environment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-manifest-linux
+          path: env-manifest-linux.txt
+          retention-days: 14
+
+  env-establishment-macos:
+    name: env-establishment (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-13]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Record environment manifest
+        run: |
+          {
+            echo "## macOS CI environment manifest (${{ matrix.os }})"
+            echo
+            echo "Note: GitHub-hosted macOS runners do not support the"
+            echo "container: directive. This manifest captures whatever"
+            echo "GitHub's runner image happens to provide at run time;"
+            echo "treat any macOS-only failure as potentially environmental"
+            echo "until proven otherwise. See AGENTS.md."
+            echo
+            echo "### Host"
+            sw_vers
+            uname -a
+            xcrun --show-sdk-version
+            echo
+            echo "### Rust toolchain"
+            rustc --version
+            cargo --version
+          } | tee "env-manifest-${{ matrix.os }}.txt"
+
+      - name: Upload environment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-manifest-${{ matrix.os }}
+          path: env-manifest-${{ matrix.os }}.txt
+          retention-days: 14
+
+  # =========================================================================
   # S1: Dependency Audit (licenses, advisories, lockfile integrity)
   # =========================================================================
 
   cargo-deny:
     name: cargo-deny (licenses + advisories + bans + sources)
     runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: env-establishment-linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
-      - name: Install cargo-deny (tracking latest)
+      - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
 
       - name: cargo deny check
-        run: |
-          if ! cargo deny check advisories bans licenses sources; then
-            echo "::error title=cargo-deny failure (supply-chain gate)::A dependency advisory, license, or ban check failed. This gate is intentionally blocking. Read the full error block above to identify the offending crate; then either pin the dependency to a compatible version, replace it, or — only if the audit justifies it — extend deny.toml allow/skip per the procedure in audit/dependency-licenses.md (D-1 through D-7). See AGENTS.md 'Known build issues' for context."
-            exit 1
-          fi
+        run: cargo deny check advisories bans licenses sources
 
   lockfile-consistency:
-    name: lockfile-consistency (cargo check --locked)
+    name: lockfile-consistency (cargo metadata --locked)
     runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: env-establishment-linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -228,144 +347,52 @@ jobs:
           shared-key: ci-lockfile
 
       - name: cargo metadata --locked (lockfile drift check, no compile)
-        # Use `cargo metadata` instead of `cargo check` here so the gate is
-        # ONLY about lockfile <-> Cargo.toml consistency. Compile errors are
-        # the responsibility of the S3 Build & Test Matrix; mixing them into
-        # this gate would mis-attribute a build problem as a lockfile problem
-        # and surface a misleading error to the coding agent.
+        # Use `cargo metadata` instead of `cargo check` here so the gate
+        # is ONLY about lockfile <-> Cargo.toml consistency. Compile
+        # errors are the responsibility of the S3 Build & Test Matrix.
         run: cargo metadata --locked --format-version 1 --no-deps > /dev/null
 
       - name: Verify no Cargo.lock drift
-        run: |
-          if ! git diff --exit-code Cargo.lock; then
-            echo "::error file=Cargo.lock,title=Cargo.lock drift::Cargo.lock changed during 'cargo metadata --locked'. The committed lockfile is inconsistent with Cargo.toml. Run 'cargo update' (intentional bump) or 'cargo generate-lockfile' (fresh resolution) and commit the result."
-            exit 1
-          fi
+        run: git diff --exit-code Cargo.lock
 
   uv-lock-check:
     name: uv-lock-check (uv lock verification)
     runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: env-establishment-linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
 
       - name: uv lock --locked
         run: uv lock --locked
         working-directory: crates/larql-python
 
       - name: Verify no uv.lock drift
-        run: git diff --exit-code crates/larql-python/uv.lock || { echo "uv.lock was modified by uv lock; run 'uv lock' in crates/larql-python and commit"; exit 1; }
+        run: git diff --exit-code crates/larql-python/uv.lock
 
   # =========================================================================
-  # S2: Static Analysis (linting, formatting, documentation)
-  # =========================================================================
-
-  rustfmt:
-    name: rustfmt (cargo fmt --check)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain with rustfmt
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --component rustfmt \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-          cargo fmt --version
-
-      - name: cargo fmt --check --all
-        run: cargo fmt --all -- --check
-
-  clippy:
-    name: clippy (lint with -D warnings)
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'schedule'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain with clippy
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --component clippy \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-          cargo clippy --version
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-clippy
-
-      - name: cargo clippy (static pass)
-        run: |
-          if ! cargo clippy --workspace --all-targets -- -D warnings; then
-            echo "::error title=Clippy failure (pre-existing)::Workspace clippy with -D warnings is failing. The two known causes are (1) ~35 compile errors in crates/larql-compute that block all clippy resolution, and (2) ~20+ unchecked .unwrap() calls in benches/tests under --all-targets. Both are documented in AGENTS.md 'Known build issues'. They are NOT acceptable long-term state and must be fixed in a dedicated PR. Do not suppress this gate."
-            exit 1
-          fi
-
-  rustdoc:
-    name: rustdoc (cargo doc -D warnings)
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'schedule'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-rustdoc
-
-      - name: cargo doc --no-deps -D warnings
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: |
-          if ! cargo doc --workspace --no-deps --exclude larql-python; then
-            echo "::error title=Rustdoc failure (pre-existing)::cargo doc -D warnings is failing because (a) crates/larql-compute has compile errors that block doc generation, and (b) doc-comment lint suppressions in crates/larql-vindex/src/lib.rs:1-2 indicate accumulated formatting violations across the workspace. Both are documented in AGENTS.md 'Known build issues'. Fix in dedicated PR; do not suppress this gate."
-            exit 1
-          fi
-
-  # =========================================================================
-  # S2.5: MSRV Verification (gates S3)
+  # S1.5: MSRV Verification
+  #
+  # Gates all static analysis and the build-test matrix. Static analysis
+  # (S2) MUST run downstream of MSRV — a clippy failure with unverified
+  # deps is not actionable, because the failure could be a real lint or
+  # a toolchain-vs-deps mismatch. See AGENTS.md "CI ordering rule".
   # =========================================================================
 
   cargo-msrv-verify:
     name: cargo-msrv-verify (declared MSRV)
     runs-on: ubuntu-24.04
-    needs: [rustfmt, clippy, rustdoc]
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: [cargo-deny, lockfile-consistency, uv-lock-check]
+    if: github.event_name != 'schedule'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Install rustup
-        run: rustup show
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -381,12 +408,85 @@ jobs:
         run: cargo msrv verify --manifest-path Cargo.toml
 
   # =========================================================================
+  # S2: Static Analysis (linting, formatting, documentation)
+  #
+  # Downstream of MSRV verification by design (see AGENTS.md
+  # "CI ordering rule"). Linux jobs run inside the CI container so the
+  # toolchain, clippy/rustfmt components, and apt deps all come from a
+  # single committed manifest (.github/docker/linux-ci/Dockerfile).
+  # =========================================================================
+
+  rustfmt:
+    name: rustfmt (cargo fmt --check)
+    runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: cargo-msrv-verify
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: cargo fmt --check --all
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (lint with -D warnings)
+    runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: cargo-msrv-verify
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-clippy
+
+      - name: cargo clippy (static pass)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rustdoc:
+    name: rustdoc (cargo doc -D warnings)
+    runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
+    needs: cargo-msrv-verify
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-rustdoc
+
+      - name: cargo doc --no-deps -D warnings
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps --exclude larql-python
+
+  # =========================================================================
   # S3: Build & Test Matrix (Ubuntu × macOS, with CodeQL on Ubuntu)
+  #
+  # Linux leg runs in the CI container (matrix.container set);
+  # macOS legs run on bare GitHub-hosted runners (matrix.container
+  # absent — `container: ${{ matrix.container }}` evaluates to no
+  # container). Don't try to "fix" this asymmetry — GitHub-hosted macOS
+  # runners do not support the container: directive.
   # =========================================================================
 
   build-test-matrix:
     name: build-test-matrix (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     if: github.event_name != 'schedule'
     needs: cargo-msrv-verify
     strategy:
@@ -396,6 +496,7 @@ jobs:
           - os: ubuntu-24.04
             platform: ubuntu
             codeql: true
+            container: ghcr.io/metavacua/larql-ci-linux@sha256:0000000000000000000000000000000000000000000000000000000000000000
           - os: macos-15
             platform: macos
             arch: arm64
@@ -411,14 +512,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain (macOS only)
+        if: matrix.platform == 'macos'
         run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
+          rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --no-self-update
           rustup default "${RUST_TOOLCHAIN}"
-          cargo --version
-          rustc --version
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -447,12 +545,14 @@ jobs:
         with:
           category: /language/rust
 
-      - name: Setup Python
+      - name: Setup Python (macOS only — Linux container ships python3)
+        if: matrix.platform == 'macos'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install uv
+      - name: Install uv (macOS only — Linux container ships uv)
+        if: matrix.platform == 'macos'
         uses: astral-sh/setup-uv@v3
         with:
           version: "latest"
@@ -474,6 +574,7 @@ jobs:
   msrv-discovery:
     name: msrv-discovery (cargo-msrv find)
     runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
     if: github.event_name != 'schedule'
     needs: build-test-matrix
     continue-on-error: true
@@ -482,9 +583,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Install rustup
-        run: rustup show
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -502,6 +600,7 @@ jobs:
   mutants:
     name: mutants (cargo-mutants)
     runs-on: ubuntu-24.04
+    container: ${{ env.LINUX_CI_IMAGE }}
     if: github.event_name != 'schedule'
     needs: build-test-matrix
     continue-on-error: true
@@ -511,13 +610,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
@@ -586,28 +678,55 @@ jobs:
   ci-passed:
     name: ci-passed (all required checks)
     runs-on: ubuntu-24.04
-    needs: [reuse-lint, reuse-toml-guard, first-party-licenses, conventional-commits,
-            changelog-consistency, cargo-deny, lockfile-consistency, uv-lock-check,
-            rustfmt, clippy, rustdoc, cargo-msrv-verify, build-test-matrix]
+    needs:
+      - reuse-lint
+      - reuse-toml-guard
+      - first-party-licenses
+      - conventional-commits
+      - changelog-consistency
+      - env-establishment-linux
+      - env-establishment-macos
+      - cargo-deny
+      - lockfile-consistency
+      - uv-lock-check
+      - cargo-msrv-verify
+      - rustfmt
+      - clippy
+      - rustdoc
+      - build-test-matrix
     if: always() && !failure() && !cancelled()
     steps:
       - name: All required checks passed
         run: |
-          echo "✓ S0 (Meta & License): All gates passed"
-          echo "✓ S1 (Dependency Audit): Lockfile and supply-chain verified"
-          echo "✓ S2 (Static Analysis): Linting and formatting clean"
-          echo "✓ S2.5 (MSRV): Declared minimum verified"
-          echo "✓ S3 (Build & Test): All platforms built and tested"
-          echo ""
+          echo "S0   (Meta & License):           passed"
+          echo "S0.5 (Environment Manifest):     passed"
+          echo "S1   (Dependency Audit):         passed"
+          echo "S1.5 (MSRV Verification):        passed"
+          echo "S2   (Static Analysis):          passed"
+          echo "S3   (Build & Test):             passed"
+          echo
           echo "Branch is a valid candidate extension of main."
 
   ci-report-failure:
     name: ci-report-failure (PR comment)
     runs-on: ubuntu-24.04
     if: always() && github.event_name == 'pull_request' && failure()
-    needs: [reuse-lint, reuse-toml-guard, first-party-licenses, conventional-commits,
-            changelog-consistency, cargo-deny, lockfile-consistency, uv-lock-check,
-            rustfmt, clippy, rustdoc, cargo-msrv-verify, build-test-matrix]
+    needs:
+      - reuse-lint
+      - reuse-toml-guard
+      - first-party-licenses
+      - conventional-commits
+      - changelog-consistency
+      - env-establishment-linux
+      - env-establishment-macos
+      - cargo-deny
+      - lockfile-consistency
+      - uv-lock-check
+      - cargo-msrv-verify
+      - rustfmt
+      - clippy
+      - rustdoc
+      - build-test-matrix
     steps:
       - name: Post failure summary to PR
         uses: actions/github-script@v7
@@ -617,31 +736,35 @@ jobs:
           FIRST_PARTY_LICENSES_RESULT: ${{ needs.first-party-licenses.result }}
           CONVENTIONAL_COMMITS_RESULT: ${{ needs.conventional-commits.result }}
           CHANGELOG_CONSISTENCY_RESULT: ${{ needs.changelog-consistency.result }}
+          ENV_LINUX_RESULT: ${{ needs.env-establishment-linux.result }}
+          ENV_MACOS_RESULT: ${{ needs.env-establishment-macos.result }}
           CARGO_DENY_RESULT: ${{ needs.cargo-deny.result }}
           LOCKFILE_CONSISTENCY_RESULT: ${{ needs.lockfile-consistency.result }}
           UV_LOCK_CHECK_RESULT: ${{ needs.uv-lock-check.result }}
+          CARGO_MSRV_VERIFY_RESULT: ${{ needs.cargo-msrv-verify.result }}
           RUSTFMT_RESULT: ${{ needs.rustfmt.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           RUSTDOC_RESULT: ${{ needs.rustdoc.result }}
-          CARGO_MSRV_VERIFY_RESULT: ${{ needs.cargo-msrv-verify.result }}
           BUILD_TEST_MATRIX_RESULT: ${{ needs.build-test-matrix.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const results = {
-              "S0: reuse-lint": process.env.REUSE_LINT_RESULT,
-              "S0: reuse-toml-guard": process.env.REUSE_TOML_GUARD_RESULT,
-              "S0: first-party-licenses": process.env.FIRST_PARTY_LICENSES_RESULT,
-              "S0: conventional-commits": process.env.CONVENTIONAL_COMMITS_RESULT,
-              "S0: changelog-consistency": process.env.CHANGELOG_CONSISTENCY_RESULT,
-              "S1: cargo-deny": process.env.CARGO_DENY_RESULT,
-              "S1: lockfile-consistency": process.env.LOCKFILE_CONSISTENCY_RESULT,
-              "S1: uv-lock-check": process.env.UV_LOCK_CHECK_RESULT,
-              "S2: rustfmt": process.env.RUSTFMT_RESULT,
-              "S2: clippy": process.env.CLIPPY_RESULT,
-              "S2: rustdoc": process.env.RUSTDOC_RESULT,
-              "S2.5: cargo-msrv-verify": process.env.CARGO_MSRV_VERIFY_RESULT,
-              "S3: build-test-matrix": process.env.BUILD_TEST_MATRIX_RESULT,
+              "S0   reuse-lint":              process.env.REUSE_LINT_RESULT,
+              "S0   reuse-toml-guard":        process.env.REUSE_TOML_GUARD_RESULT,
+              "S0   first-party-licenses":    process.env.FIRST_PARTY_LICENSES_RESULT,
+              "S0   conventional-commits":    process.env.CONVENTIONAL_COMMITS_RESULT,
+              "S0   changelog-consistency":   process.env.CHANGELOG_CONSISTENCY_RESULT,
+              "S0.5 env-establishment-linux": process.env.ENV_LINUX_RESULT,
+              "S0.5 env-establishment-macos": process.env.ENV_MACOS_RESULT,
+              "S1   cargo-deny":              process.env.CARGO_DENY_RESULT,
+              "S1   lockfile-consistency":    process.env.LOCKFILE_CONSISTENCY_RESULT,
+              "S1   uv-lock-check":           process.env.UV_LOCK_CHECK_RESULT,
+              "S1.5 cargo-msrv-verify":       process.env.CARGO_MSRV_VERIFY_RESULT,
+              "S2   rustfmt":                 process.env.RUSTFMT_RESULT,
+              "S2   clippy":                  process.env.CLIPPY_RESULT,
+              "S2   rustdoc":                 process.env.RUSTDOC_RESULT,
+              "S3   build-test-matrix":       process.env.BUILD_TEST_MATRIX_RESULT,
             };
             const rows = Object.entries(results)
               .map(([n, r]) => `| ${n} | ${r} |`)

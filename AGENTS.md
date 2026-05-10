@@ -84,61 +84,202 @@ Or via the Makefile: `make python-setup | python-build | python-test | python-cl
 - **Walk FFN is sparse-by-design and can beat dense** (517ms vs 535ms on Gemma 4B) because gate KNN (K≈10) skips most of the 10,240 features per layer. If you touch FFN code, preserve this invariant — see [docs/ffn-graph-layer.md](docs/ffn-graph-layer.md).
 - **MXFP4 quantized MoE (GPT-OSS) has degraded DESCRIBE/WALK** due to 4-bit precision; `INFER` is the supported path. Don't assume all model families are equivalent — see [docs/specs/vindex-operations-spec.md](docs/specs/vindex-operations-spec.md).
 
-## Known build issues
+## Cross-OS environment leaks (the actual cascade)
 
-These are pre-existing problems that the CI surfaces as failing checks. They
-are NOT acceptable long-term state — the CI gates them as failures so coding
-agents see them prominently and prioritise fixing them. Do NOT suppress these
-checks with `continue-on-error` or by removing assertions; the right response
-to a failing gate is to fix the underlying issue or, if the fix is genuinely
-out of scope for the current PR, to leave the failure visible and document it
-here so the next agent knows what to tackle.
+This codebase originated as a macOS-only project (upstream:
+<https://github.com/chrishayuk/larql>). Its CI exercises Linux primarily
+(containerized — see `.github/docker/linux-ci/Dockerfile`) and macOS
+secondarily (native `macos-15` and `macos-13` runners). Windows,
+ARM-Linux, Android, and ChromeOS are untested.
 
-### Workspace compile errors (blocks: S1 lockfile-consistency-via-compile, S2 clippy, S2 rustdoc, S3 build-test-matrix)
-- `crates/larql-compute` does not compile under the pinned 1.88.0 toolchain.
-  At the time of writing, `cargo check --workspace` reports ~35 errors
-  (`E0282` type annotation needed, `E0432` unresolved import, etc.).
-- These are real regressions — not lint nits. Fixing them is a prerequisite
-  for the entire S2/S3 stack to turn green.
-- Remediation: open a dedicated PR that compiles `larql-compute` cleanly
-  (start with `cargo check -p larql-compute`, fix one error at a time,
-  prefer narrow per-file commits so the diff is reviewable).
-- The `lockfile-consistency` job has been re-architected to use
-  `cargo metadata --locked` rather than `cargo check --locked`, so the
-  lockfile <-> Cargo.toml gate is independent of the compile-error stack.
+**Most CI failures on Linux are host-environment-assumption leaks, not
+source-code defects.** Earlier versions of this section, plus the
+now-removed `::error` annotations in `.github/workflows/ci.yml`,
+asserted that the clippy gate was blocked by "~35 compile errors in
+`larql-compute`" or "20+ unchecked `.unwrap()` calls in benches/tests."
+Both claims were misframed: clippy halts at layer 1 below and never
+reaches either, and `.unwrap()` is not lint-checked by this project's
+clippy config (`clippy::unwrap_used` is a `restriction` lint requiring
+explicit opt-in, and no `clippy.toml` or `#![warn(clippy::unwrap_used)]`
+exists in the tree). Removing every `.unwrap()` would not advance the
+gate by one step.
 
-### Clippy lint violations on benches/tests (blocks: S2 clippy)
-- `cargo clippy --workspace --all-targets -- -D warnings` includes benches
-  and tests; benches contain ~20+ unchecked `.unwrap()` calls
-  (e.g., `crates/larql-vindex/benches/vindex_ops.rs`,
-  `benches/q4k_vs_f32.rs`).
-- The `--all-targets` flag is intentional: benches/tests are first-class
-  CI surfaces and their `unwrap()` failures hide real correctness bugs.
-- Remediation: replace `.unwrap()` with `.expect("explanatory message")` or
-  `?`-propagation in benches/tests. Cleanup PR.
+Before "fixing" any failing CI step, run the OS-assumption checklist
+below; if any item applies, the source is probably fine and the
+*environment or build configuration* is what wants attention.
 
-### Rustdoc lint warnings (blocks: S2 rustdoc)
-- `crates/larql-vindex/src/lib.rs:1-2` carries
-  `#![allow(clippy::doc_overindented_list_items)]` and
-  `#![allow(clippy::doc_lazy_continuation)]`. These suppressions exist
-  because doc comments across multiple crates have indentation /
-  continuation issues that `cargo doc -D warnings` would otherwise reject.
-- Remediation: run `cargo doc -D warnings` locally, fix each warning,
-  remove the `#![allow(...)]` attributes once clean. Cleanup PR.
+### OS-assumption checklist (run BEFORE editing a `.rs` file)
 
-### cargo-deny failure (blocks: S1 cargo-deny)
-- `cargo deny check advisories bans licenses sources` exits with code 3
-  on the committed `Cargo.lock`. Prior to lockfile commitment the workflow
-  generated a fresh lockfile each run, so any new transitive dependency
-  with a license outside the allow-list (or any newly-disclosed advisory
-  affecting a current dep) is now caught at this gate where it would
-  previously have been masked.
-- Remediation: read the failing job log, identify the specific
-  `error[license-not-explicitly-allowed]`, `error[advisory]`, or
-  `error[ban]` annotation, then either pin the offending dependency to a
-  compatible version or — only if the audit justifies it — extend
-  `deny.toml :: [licenses] allow` per the procedure in
-  `audit/dependency-licenses.md` (D-1 through D-7 are the precedent).
+1. **Is this lint warn-by-default on Rust 1.88.0 only?** Some lints
+   (e.g. `clippy::uninlined_format_args`) were demoted to pedantic in
+   newer clippy. Reproduce against the pinned toolchain
+   (`rust-toolchain.toml` at repo root pins `1.88.0`), not your local
+   one. A "fixed for me / red in CI" cycle almost always means a
+   toolchain mismatch between dev machine and CI.
+2. **Is a default feature flag activating an optional dependency that
+   is target-cfg-gated to macOS?** `crates/larql-cli/Cargo.toml` sets
+   `default = ["metal"]`. Workspace feature unification propagates
+   `metal=true` to every dependent crate, including `larql-compute` on
+   Linux, where the optional `metal` external crate is gated to
+   `target_os = "macos"` (`crates/larql-compute/Cargo.toml`). Symptom:
+   ~35 compile errors under `cargo check --workspace` on Linux.
+3. **Is a system library required at link time?** `openblas-src` with
+   `features = ["system"]` (declared by `crates/larql-compute` and
+   `crates/larql-inference`) requires `libopenblas-dev` on the host.
+   The Linux CI container ships it; macOS uses Accelerate (bundled with
+   the OS). If you change Cargo features that affect linking, also
+   update `.github/docker/linux-ci/Dockerfile`.
+4. **Is the failure on a target nobody has tested?** Windows-specific
+   path-handling, ChromeOS-specific containerisation, and Android
+   cross-compilation gaps are not bugs in the Rust source — they are
+   unfilled platform-support work. Don't "fix" them by editing source
+   that compiles fine on Linux/macOS.
+
+### Reproduction recipe
+
+```bash
+# Local reproduction with the pinned toolchain (catches lint-set drift):
+rustup toolchain install 1.88.0
+cargo +1.88.0 clippy --workspace --all-targets -- -D warnings 2>&1 | head -50
+```
+
+If running on a newer toolchain shows no warnings — that divergence is
+itself the most common reason an agent reports "fixed" while CI stays
+red. For a fully faithful reproduction (matches CI's apt packages too):
+
+```bash
+docker run --rm -v "$PWD":/work -w /work \
+  ghcr.io/metavacua/larql-ci-linux:1.88.0-latest \
+  cargo clippy --workspace --all-targets -- -D warnings
+```
+
+### The Linux container is the manifest
+
+The Linux build environment is committed to the repo at
+`.github/docker/linux-ci/Dockerfile`. Reading that file answers "what
+apt packages, what Rust toolchain, what Python interpreter, what uv
+version does Linux CI assume?" There is no implicit assumption that
+`ubuntu-24.04`'s default runner image happens to have any particular
+package preinstalled.
+
+If CI fails with a linker or system-library error, check the Dockerfile
+*first*. If the symbol/library isn't installed there, that's the bug —
+the Rust source is fine.
+
+macOS has no equivalent. GitHub-hosted macOS runners do not support the
+`container:` directive, so macOS jobs run on the bare `macos-15` /
+`macos-13` runner; their environment is whatever GitHub's runner image
+provides at the time of the run. Treat any macOS-only failure as
+potentially environmental until proven otherwise. Do not try to "fix"
+this asymmetry — it's a GitHub Actions platform constraint.
+
+### CI ordering rule
+
+Static analysis (rustfmt, clippy, rustdoc) MUST run **downstream** of
+dependency audit and MSRV verification. A clippy failure with
+unverified deps is not actionable: the failure could be a real lint or
+a toolchain-vs-deps mismatch, and you cannot tell which without first
+establishing that the toolchain satisfies the dependency tree. The
+pipeline architecture in `.github/workflows/ci.yml` enforces this; do
+not weaken it. Specifically: `cargo-msrv-verify` is in the `needs:`
+graph of `clippy`, `rustfmt`, and `rustdoc` — not the other way around.
+
+### The current cascade (Rust 1.88.0 / Linux, in encounter order)
+
+Each layer documents file:line, the checklist category that explains
+*why* it's failing, the command to reproduce, and the *minimum
+fix-shape* (not the diff itself).
+
+1. **`clippy::uninlined_format_args` at
+   `crates/larql-models/src/loading/gguf.rs:118`** (and ~200 similar
+   sites repo-wide). **Category: checklist #1** (toolchain-version-
+   gated lint). Two routing options: bulk-inline via
+   `cargo +1.88.0 clippy --fix`, or move the toolchain pin off 1.88.0.
+   Cross-reference `Cargo.toml :: workspace.package.rust-version`
+   (`"1.80"`) and the MSRV pin in `.github/workflows/ci.yml ::
+   env.RUST_TOOLCHAIN` (`"1.88.0"`).
+2. **35 compile errors** in `crates/larql-compute/src/metal/**`. Only
+   surfaces *after* layer 1 is fixed (clippy doesn't reach this far
+   today). **Category: checklist #2** (feature-flag activates
+   macOS-cfg-gated optional dep). Cause: a 3-way name collision around
+   `metal` — the cargo feature
+   (`crates/larql-compute/Cargo.toml`), the optional external crate
+   gated to `target_os = "macos"` (same file), and the local
+   `crate::metal` module gated by the feature
+   (`crates/larql-compute/src/lib.rs`). Force-activated by
+   `crates/larql-cli/Cargo.toml`'s `default = ["metal"]`. Minimum fix:
+   change that default to `[]`. Verification:
+   `cargo check -p larql-compute` (no features) exits 0; with
+   `--features metal` on Linux it produces the same 35 errors.
+3. **`E0433` at `crates/larql-cli/src/commands/primary/bench_cmd.rs:170`**.
+   Only surfaces after layer 2. **Category: checklist #2** (same root,
+   second site). Reference `larql_compute::metal::MetalBackend::new()`
+   is gated by a runtime `if metal {}` boolean, not
+   `#[cfg(feature = "metal")]`. Minimum fix: wrap the metal arm in
+   `#[cfg]`, mirroring
+   `crates/larql-inference/src/layer_graph/hybrid.rs:63-65`.
+4. **5 actual clippy lints** (× 2 for lib + tests = 9 messages). Real
+   code-cleanup, only visible after layers 1-3 clear. **Category: none
+   — actual source nits.** Sites:
+   - `crates/larql-vindex/src/format/weights/write.rs:646`
+     — `clippy::manual_repeat_n`
+   - `crates/larql-inference/src/experts/mask.rs:131`
+     — `clippy::if_same_then_else`
+   - `crates/larql-inference/src/experts/mask.rs:145`
+     — `clippy::ptr_arg`
+   - `crates/larql-inference/src/experts/session.rs:205`
+     — `clippy::single_char_add_str`
+   - `crates/larql-inference/src/experts/mask.rs:278`
+     — `clippy::useless_vec`
+5. **OpenBLAS system-library — closed by the CI container.** The Linux
+   CI container ships `libopenblas-dev` and `pkg-config`. Cargo
+   declarations: `crates/larql-compute/Cargo.toml` and
+   `crates/larql-inference/Cargo.toml`. If a future PR removes
+   `libopenblas-dev` from the Dockerfile without auditing those Cargo
+   features, the build-test legs will break with linker errors — which
+   would be a Dockerfile bug, not a Rust source bug.
+
+### Rustdoc lint suppressions
+
+`crates/larql-vindex/src/lib.rs:1-2` carries
+`#![allow(clippy::doc_overindented_list_items)]` and
+`#![allow(clippy::doc_lazy_continuation)]`. These suppressions exist
+because doc comments across multiple crates have indentation /
+continuation issues that `cargo doc -D warnings` would otherwise reject.
+The same caveat as layer 1 applies: some doc lints are toolchain-
+version-gated, so reproduce against the pinned toolchain before
+deciding whether a fix is in scope. Cleanup PR.
+
+### cargo-deny
+
+`cargo deny check advisories bans licenses sources` runs in S1 against
+the committed `Cargo.lock`. If it fails, read the failing job log,
+identify the specific `error[license-not-explicitly-allowed]`,
+`error[advisory]`, or `error[ban]` annotation, then either pin the
+offending dependency to a compatible version or — only if the audit
+justifies it — extend `deny.toml :: [licenses] allow` per the procedure
+in `audit/dependency-licenses.md` (D-1 through D-7 are the precedent).
+
+### CI image bootstrap (one-time human step)
+
+The Linux CI container referenced by `env.LINUX_CI_IMAGE` in
+`.github/workflows/ci.yml` must exist on `ghcr.io` before that workflow
+can run. To bootstrap (or to bump the image after editing the
+Dockerfile):
+
+1. From the branch containing the desired Dockerfile, manually trigger
+   `.github/workflows/publish-ci-image.yml` (Actions tab → Run
+   workflow).
+2. Read the digest printed in the final step's notice.
+3. Update `env.LINUX_CI_IMAGE` in `ci.yml` to
+   `ghcr.io/metavacua/larql-ci-linux@sha256:<digest>`. The pin is by
+   digest, not tag, so retags on ghcr.io cannot silently change CI
+   inputs.
+4. Commit + push the `ci.yml` change.
+
+If a CI run fails with "manifest unknown" or "image not found" against
+ghcr.io, that's the bootstrap step missing — not a Dockerfile or
+ci.yml bug.
 
 ## CI/CD conventions for coding agents
 
