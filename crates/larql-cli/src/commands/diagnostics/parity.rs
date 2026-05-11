@@ -1,3 +1,10 @@
+// Many helpers in this module are only invoked from the metal-gated
+// `#[cfg(all(feature = "metal", target_os = "macos"))]` branches. Without
+// the metal feature, those call sites disappear and the helpers become
+// dead. They are kept in tree because v2 (planned) brings them back when
+// HF/Metal backends land; suppressing dead-code at the file level avoids
+// 30 individual #[cfg_attr] annotations.
+#![allow(dead_code)]
 //! `larql parity` — cross-backend numerical diff for inference components.
 //!
 //! Diffs the same input through multiple backends (slow naive reference,
