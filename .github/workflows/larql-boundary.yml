@@ -8,6 +8,9 @@
 
 name: larql-boundary
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
