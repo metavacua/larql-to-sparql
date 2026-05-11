@@ -131,9 +131,36 @@ jobs:
             echo "to="   >> "$GITHUB_OUTPUT"
           fi
 
-      - name: cog check (PR range)
+      - name: cog check (PR range, first-parent + no-merges)
         if: steps.range.outputs.from != ''
-        run: cog check "${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+        # Validate only commits added directly to the PR branch:
+        # `--first-parent` excludes the second-parent ancestry of any
+        # merge commits on the branch (e.g. upstream commits pulled in
+        # by a merge of an upstream fork into this fork), and
+        # `--no-merges` excludes the merge commits themselves
+        # (already covered by `ignore_merge_commits = true` in
+        # cog.toml; doubled here for explicitness). The net effect is
+        # that only fork-authored commits on the PR branch are gated
+        # against the Conventional Commits grammar. Pre-existing
+        # upstream history brought in via merges is grandfathered and
+        # not retroactively re-validated.
+        run: |
+          set -euo pipefail
+          range="${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+          mapfile -t commits < <(git rev-list --first-parent --no-merges --reverse "$range")
+          if [ "${#commits[@]}" -eq 0 ]; then
+            echo "No first-parent non-merge commits in $range; nothing to check."
+            exit 0
+          fi
+          failed=0
+          for sha in "${commits[@]}"; do
+            subject=$(git log -1 --format=%s "$sha")
+            echo "==> $sha: $subject"
+            if ! cog check "${sha}~..${sha}"; then
+              failed=1
+            fi
+          done
+          exit $failed
 
       - name: cog check (push to main, newest commit only)
         if: steps.range.outputs.from == ''
