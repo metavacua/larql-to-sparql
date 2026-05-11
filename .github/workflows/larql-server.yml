@@ -69,16 +69,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config
 
-      - name: Install protobuf-src (Windows)
-        if: runner.os == 'Windows'
-        # protobuf-src is a build-dependency of larql-server and
-        # larql-router-protocol; it bundles protoc so no system install is
-        # required on Linux/macOS, but on Windows it must be pre-fetched
-        # so the build.rs can find it.
-        uses: taiki-e/install-action@v2
-        with:
-          tool: protobuf-src
-
       - name: Install OpenBLAS (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -98,6 +88,33 @@ jobs:
           key: ${{ runner.os }}-cargo-server-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-server-
+
+      - name: Locate protoc from protobuf-src (Windows)
+        if: runner.os == 'Windows'
+        # protobuf-src is a build-dependency of larql-server and
+        # larql-router-protocol. Its build script exposes the path to its
+        # bundled protoc via protobuf_src::protoc(). On Windows we locate
+        # the protoc binary after cargo fetch and export PROTOC so the
+        # build.rs can find it.
+        id: protobuf-src
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Fetch protobuf-src so the registry entry exists.
+          cargo fetch --package protobuf-src --locked 2>$null; $null = $?
+
+          # Locate the protoc binary inside the registry.
+          $regPath = Resolve-Path "$env:CARGO_HOME\registry\src\*\protobuf-src-*"
+          if ($regPath) {
+            $protocExe = "$regPath\bin\protoc.exe"
+            if (Test-Path $protocExe) {
+              Write-Output "PROTOC=$protocExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Output "Found protoc at: $protocExe"
+            } else {
+              Write-Output "::warning::protobuf-src protoc binary not found in expected path, build may still succeed"
+            }
+          }
 
       - name: Format check
         run: cargo fmt -p larql-server -- --check
