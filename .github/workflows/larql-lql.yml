@@ -80,30 +80,35 @@ jobs:
             ${{ runner.os }}-cargo-lql-
 
       - name: Locate protoc from protobuf-src (Windows)
-        if: runner.os == 'Windows'
+        if: matrix.os == 'windows-latest'
         # larql-lql transitively depends on larql-server (via larql-vindex
         # and larql-inference) which uses protobuf-src as a build-dependency.
-        # Its build script exposes the path to its bundled protoc via
-        # protobuf_src::protoc(). On Windows we locate the protoc binary
-        # after cargo fetch and export PROTOC so the build.rs can find it.
+        # Its build.rs uses cmake to build protoc and exposes the path via
+        # protobuf_src::protoc(), which reads the INSTALL_DIR env var set
+        # during the build. On Windows we need to build the dependency
+        # first, then derive the PROTOC path from the install directory.
         id: protobuf-src
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Fetch protobuf-src so the registry entry exists.
-          cargo fetch --package protobuf-src --locked 2>$null; $null = $?
+          # Build protobuf-src so cmake runs and INSTALL_DIR is set.
+          cargo build --package protobuf-src 2>&1 | Out-Null
 
-          # Locate the protoc binary inside the registry.
-          $regPath = Resolve-Path "$env:CARGO_HOME\registry\src\*\protobuf-src-*"
-          if ($regPath) {
-            $protocExe = "$regPath\bin\protoc.exe"
+          # Extract INSTALL_DIR from JSON build output.
+          $json = cargo build --package protobuf-src --message-format=json 2>&1 | ConvertFrom-Json | Where-Object { $_.package_id -like "protobuf-src*" }
+          $installDir = $json.env | Where-Object { $_.name -eq "INSTALL_DIR" } | Select-Object -ExpandProperty value
+
+          if ($installDir) {
+            $protocExe = Join-Path $installDir "bin\protoc.exe"
             if (Test-Path $protocExe) {
               Write-Output "PROTOC=$protocExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
               Write-Output "Found protoc at: $protocExe"
             } else {
-              Write-Output "::warning::protobuf-src protoc binary not found in expected path, build may still succeed"
+              Write-Output "::warning::protoc.exe not found at $protocExe, build may still succeed"
             }
+          } else {
+            Write-Output "::warning::INSTALL_DIR not found in protobuf-src build output, build may still succeed"
           }
 
       - name: Format check
