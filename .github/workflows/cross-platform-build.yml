@@ -52,7 +52,7 @@ jobs:
             platform: ubuntu
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -77,12 +77,12 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
       - name: Setup Python (for Python bindings test)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -104,7 +104,7 @@ jobs:
   #     fail-fast: false
   #   steps:
   #     - name: Checkout
-  #       uses: actions/checkout@v4
+  #       uses: actions/checkout@v6
   #       with:
   #         persist-credentials: false
   #     # Android NDK setup and cross-compilation logic TBD
@@ -126,7 +126,7 @@ jobs:
             platform: chromeos
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -151,12 +151,12 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
       - name: Setup Python (for Python bindings test)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -189,7 +189,7 @@ jobs:
             android-target: armv7-linux-androideabi
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -252,7 +252,7 @@ jobs:
             arch: intel
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -285,12 +285,12 @@ jobs:
         run: cargo test --workspace --no-fail-fast --features metal
 
       - name: Setup Python (for Python bindings test)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
