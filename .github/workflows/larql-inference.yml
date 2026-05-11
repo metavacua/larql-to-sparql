@@ -84,6 +84,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-inference-
 
+      - name: Install Windows Build Tools
+        if: matrix.os == 'windows-latest'
+        # protobuf-src's cmake build needs a C++ compiler and cmake.
+        # Install VS Build Tools with VCTools workload and cmake/ninja.
+        shell: pwsh
+        run: |
+          choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools"
+          choco install -y cmake ninja
+
       - name: Locate protoc from protobuf-src (Windows)
         if: matrix.os == 'windows-latest'
         # larql-inference transitively depends on larql-router-protocol
