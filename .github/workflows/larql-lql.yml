@@ -59,6 +59,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config
 
+      - name: Install protobuf-src (Windows)
+        if: runner.os == 'Windows'
+        # larql-lql transitively depends on larql-server (via larql-vindex
+        # and larql-inference) which uses protobuf-src as a build-dependency.
+        # Pre-fetch it here so the build.rs can locate it.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: protobuf-src
+
       - name: Install OpenBLAS (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
