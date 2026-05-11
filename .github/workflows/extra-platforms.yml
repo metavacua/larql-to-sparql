@@ -147,7 +147,7 @@ jobs:
           shared-key: extra-platforms-android-${{ matrix.android-target }}
 
       - name: cargo build for ${{ matrix.android-target }}
-        run: cargo build --release --workspace --target ${{ matrix.android-target }} --no-fail-fast
+        run: cargo build --release --workspace --target ${{ matrix.android-target }}
 
   # -----------------------------------------------------------------------
   # Aggregate gate: All extra-platform builds passed
