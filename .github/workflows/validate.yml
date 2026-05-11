@@ -56,13 +56,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Run reuse lint
-        uses: fsfe/reuse-action@v5
+        uses: fsfe/reuse-action@v6
         with:
           args: --suppress-deprecation lint
 
@@ -80,7 +80,7 @@ jobs:
     needs: provenance
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -196,7 +196,7 @@ jobs:
     needs: commits
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -221,7 +221,7 @@ jobs:
     needs: commits
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -280,7 +280,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -424,13 +424,13 @@ jobs:
     needs: commits
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -519,7 +519,7 @@ jobs:
     needs: [provenance, first-party-licenses, commits, changelog, version-preflight, semver-surface, semantic-release-dry-run]
     steps:
       - name: Post failure summary to PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PROVENANCE_RESULT:        ${{ needs.provenance.result }}
           FIRST_PARTY_LICENSES_RESULT:    ${{ needs.first-party-licenses.result }}

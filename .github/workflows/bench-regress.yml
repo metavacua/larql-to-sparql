@@ -73,41 +73,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - name: Install Android NDK
-        if: matrix.platform == 'android'
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27
-          link-to-sdk: true
-
-      - name: Add Android NDK to PATH
-        if: matrix.platform == 'android'
-        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
-
-      - name: Add Android target
-        if: matrix.platform == 'android'
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install OpenBLAS (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
-
       # Cargo deps are big and stable across PRs — separate cache.
       - name: Cache cargo deps
         uses: actions/cache@v5
