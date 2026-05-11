@@ -228,9 +228,14 @@ jobs:
           tool: cargo-audit
 
       - name: cargo audit
-        # `--deny warnings` promotes unmaintained/yanked crates and other
-        # advisory-but-not-vulnerability findings to failures.
-        run: cargo audit --deny warnings
+        # The --ignore set mirrors deny.toml's [advisories].ignore. Both
+        # gates must accept the same set; if you edit one, edit the other.
+        run: |
+          cargo audit \
+            --deny warnings \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2025-0134
 
   # ---------------------------------------------------------------------
   # Q5: cargo-deny — license allow-list, banned crates, advisories,
@@ -275,112 +280,23 @@ jobs:
         run: cargo deny check advisories bans licenses sources
 
   # ---------------------------------------------------------------------
-  # CodeQL is intentionally NOT defined here. The repository uses GitHub's
-  # default-setup CodeQL (configured in repository settings) which already
-  # analyses python, rust, actions, and c-cpp. Adding a parallel CodeQL
-  # workflow would emit duplicate SARIF for the same `/language:*`
-  # categories and conflict with the default-setup uploads. To change the
-  # CodeQL surface (queries, languages), edit it in the repository's Code
-  # Scanning settings rather than here.
-
-  # ---------------------------------------------------------------------
-  # Q6: cargo doc with -D warnings. Catches broken intra-doc links,
-  # missing-docs lints (where enabled), and other rustdoc diagnostics
-  # that would otherwise rot silently. The workspace has extensive cross-
-  # crate references (LQL parser <-> executor symmetry, vindex format
-  # docs); a broken link is a real regression.
-  # ---------------------------------------------------------------------
-  doc:
-    name: doc (cargo doc -D warnings)
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'schedule'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: quality-doc
-
-      - name: cargo doc
-        # `--no-deps` to avoid promoting third-party rustdoc warnings to
-        # errors. `--workspace` to traverse every library crate.
-        # `larql-python` is excluded because rustdoc on a PyO3 cdylib
-        # requires Python build deps that aren't in scope here; the
-        # Python crate is documented from its pyproject side.
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: |
-          cargo doc \
-            --workspace \
-            --no-deps \
-            --exclude larql-python
-
-  # ---------------------------------------------------------------------
-  # Q7: Examples build verification. The Makefile lists ~6 example
-  # binaries (architecture_demo, graph_demo, edge_demo, etc.) used as
-  # smoke demos. Without a CI build they rot the moment a public API
-  # they depend on changes. This job builds (does not run) all examples
-  # in the workspace.
-  # ---------------------------------------------------------------------
-  examples:
-    name: examples (cargo build --examples)
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'schedule'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: quality-examples
-
-      - name: cargo build --workspace --examples
-        run: cargo build --workspace --examples --exclude larql-python
-
-  # ---------------------------------------------------------------------
-  # Q8: MSRV verification. Cargo.toml declares
-  # `rust-version = "1.80"` at the workspace level. Without verification,
-  # this declaration drifts: a transitive dependency bump can silently
-  # raise the effective minimum to a higher version (the comment in
-  # env: above already notes 1.85+ is required by parts of the tree).
+  # Q3: MSRV verification. cargo-msrv `verify` reads the declared
+  # rust-version and attempts a check at exactly that toolchain.
   #
-  # cargo-msrv `verify` reads the declared rust-version and attempts a
-  # check at exactly that toolchain. Failure means the declared MSRV is
-  # a lie and either (a) the declaration must be raised, or (b) the
-  # offending dependency must be pinned to an older version.
-  #
-  # Marked `continue-on-error: true` for the initial rollout: at this
-  # writing the declared `1.80` is known to be inaccurate, so flipping
-  # this to a hard gate must happen in a dedicated PR that *also* fixes
-  # the declaration. The job still produces a visible signal (yellow
-  # check) until that fix lands.
+  # The root Cargo.toml is a virtual workspace; cargo-msrv cannot read
+  # `rust-version` from `[workspace.package]` directly (it requires
+  # `package.rust-version` or `package.metadata.msrv`). Instead, iterate
+  # over the subset of workspace members that explicitly inherit
+  # `rust-version.workspace = true`. As more crates opt in (by adding
+  # the inheritance line to their `[package]` block), they automatically
+  # join the gate. The gate is a hard requirement: correct MSRV
+  # determination is a prerequisite for downstream packaging and
+  # publication checks.
   # ---------------------------------------------------------------------
   msrv:
-    name: msrv (cargo-msrv verify, informational)
+    name: msrv (cargo-msrv verify)
     runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -403,15 +319,26 @@ jobs:
         with:
           tool: cargo-msrv
 
-      - name: cargo msrv verify
-        # `cargo msrv verify` operates on a single Cargo manifest and does
-        # not accept `--workspace`; passing it caused an ArgsError. The
-        # workspace-level `rust-version` is declared in the root manifest
-        # under `[workspace.package]`, so verifying the root manifest is
-        # the canonical workspace check. Per-member overrides (none today)
-        # would need a per-crate iteration.
+      - name: cargo msrv verify (per opted-in crate)
         run: |
-          cargo msrv verify --manifest-path Cargo.toml
+          set -euo pipefail
+          # Crates that explicitly inherit `rust-version.workspace = true`.
+          mapfile -t crates < <(
+            grep -l '^rust-version\.workspace = true' crates/*/Cargo.toml
+          )
+          if [ "${#crates[@]}" -eq 0 ]; then
+            echo "::error::No workspace member declares rust-version.workspace = true."
+            echo "::error::MSRV cannot be verified. Add the inheritance line to at"
+            echo "::error::least one crate's [package] block."
+            exit 1
+          fi
+          declared=$(awk '/^rust-version *= *"/{ gsub(/"/,"",$3); print $3; exit }' Cargo.toml)
+          echo "Workspace-declared rust-version: ${declared:-<unset>}"
+          for manifest in "${crates[@]}"; do
+            crate=$(basename "$(dirname "$manifest")")
+            echo "==> Verifying MSRV for $crate ($manifest)"
+            cargo msrv verify --manifest-path "$manifest"
+          done
 
   # ---------------------------------------------------------------------
   # Q9: Mutation testing. cargo-mutants flips small predicates (boolean

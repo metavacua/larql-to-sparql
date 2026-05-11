@@ -53,7 +53,22 @@ version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+# Ignored advisories are deliberate, time-boxed admissions. Each entry must
+# carry a one-line justification; periodically prune as upstream maintenance
+# resumes or alternative crates are adopted.
+ignore = [
+  # paste - no longer maintained. Pulled transitively by wasmtime, tokenizers,
+  # metal, macro_rules_attribute. No actual CVE; no maintained drop-in
+  # replacement at scale. Revisit if any consumer migrates off paste.
+  "RUSTSEC-2024-0436",
+  # number_prefix - unmaintained. Pulled by indicatif progress-bar rendering.
+  # No CVE; tiny formatting utility. Revisit if indicatif drops the dep.
+  "RUSTSEC-2025-0119",
+  # rustls-pemfile - unmaintained. Pulled by axum-server. The replacement
+  # (rustls-pki-types PemObject) is not yet on axum-server's main. Revisit
+  # when axum-server picks up the upstream change.
+  "RUSTSEC-2025-0134",
+]
 
 # ---------------------------------------------------------------------------
 # Licenses: explicit allow-list. Anything outside this list fails the gate
