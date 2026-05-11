@@ -53,6 +53,13 @@ jobs:
           cargo --version
           rustc --version
 
+      - name: Install OpenBLAS
+        # ndarray's BLAS backend links against libopenblas. Needed for
+        # the workspace build and for the Python bindings link step.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
+
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
@@ -110,6 +117,13 @@ jobs:
           rustup default "${RUST_TOOLCHAIN}"
           cargo --version
           rustc --version
+
+      - name: Install OpenBLAS
+        # ndarray's BLAS backend links against libopenblas for the
+        # host-side build artefacts that precede cross-compilation.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
 
       - name: Install Android NDK
         uses: nttld/setup-ndk@v1

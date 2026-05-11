@@ -71,6 +71,14 @@ bump="none"
 # `-z` makes git emit a NUL between commits (NUL embedded in --format= would
 # be truncated at exec()). `%B` gives the full message including footers, so
 # multi-line bodies do not break the loop.
+#
+# `--first-parent --no-merges` restricts the scan to commits added directly
+# to the PR branch, excluding both merge commits themselves and any
+# upstream history pulled in by a merge. Pre-existing upstream commits
+# whose subjects do not satisfy Conventional Commits are grandfathered
+# and must not block this gate; only commits authored on this branch are
+# subject to the grammar check. Matches the equivalent narrowing applied
+# by the `commits (cocogitto check)` job in .github/workflows/validate.yml.
 while IFS= read -r -d '' commit; do
   header="$(printf '%s\n' "$commit" | head -n1)"
 
@@ -104,7 +112,7 @@ while IFS= read -r -d '' commit; do
       [[ "$bump" == "none" ]] && bump="patch"
       ;;
   esac
-done < <(git log --reverse -z --format='%B' "$range")
+done < <(git log --reverse -z --first-parent --no-merges --format='%B' "$range")
 
 case "$bump" in
   major) major=$((major + 1)); minor=0; patch=0 ;;
