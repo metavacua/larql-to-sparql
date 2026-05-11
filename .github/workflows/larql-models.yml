@@ -8,6 +8,9 @@
 
 name: larql-models
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
