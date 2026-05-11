@@ -1,8 +1,9 @@
-# Cargo configuration for cross-platform builds
-
-[build]
-# Use parallel jobs by default
-jobs = 0
+# Cargo configuration for cross-platform builds.
+#
+# [build] is intentionally absent: Cargo's default `jobs` setting (number
+# of logical CPUs) is the correct one. Earlier revisions of this file set
+# `jobs = 0` as a no-op placeholder, but Cargo rejects 0 (`error: jobs
+# may not be 0`) and the line silently broke every cargo invocation in CI.
 
 # Android cross-compilation configuration
 [target.aarch64-linux-android]

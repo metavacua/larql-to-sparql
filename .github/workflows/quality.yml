@@ -89,7 +89,14 @@ jobs:
           tool: cargo-audit
 
       - name: cargo audit
-        run: cargo audit --deny warnings
+        # The --ignore set mirrors deny.toml's [advisories].ignore. Both
+        # gates must accept the same set; if you edit one, edit the other.
+        run: |
+          cargo audit \
+            --deny warnings \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2025-0134
 
   # ---------------------------------------------------------------------
   # Q2: cargo-deny - license allow-list, banned crates, advisories,
@@ -125,12 +132,21 @@ jobs:
   # ---------------------------------------------------------------------
   # Q3: MSRV verification. cargo-msrv `verify` reads the declared
   # rust-version and attempts a check at exactly that toolchain.
+  #
+  # The root Cargo.toml is a virtual workspace; cargo-msrv cannot read
+  # `rust-version` from `[workspace.package]` directly (it requires
+  # `package.rust-version` or `package.metadata.msrv`). Instead, iterate
+  # over the subset of workspace members that explicitly inherit
+  # `rust-version.workspace = true`. As more crates opt in (by adding
+  # the inheritance line to their `[package]` block), they automatically
+  # join the gate. The gate is a hard requirement: correct MSRV
+  # determination is a prerequisite for downstream packaging and
+  # publication checks.
   # ---------------------------------------------------------------------
   msrv:
-    name: msrv (cargo-msrv verify, informational)
+    name: msrv (cargo-msrv verify)
     runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -151,9 +167,26 @@ jobs:
         with:
           tool: cargo-msrv
 
-      - name: cargo msrv verify
+      - name: cargo msrv verify (per opted-in crate)
         run: |
-          cargo msrv verify --manifest-path Cargo.toml
+          set -euo pipefail
+          # Crates that explicitly inherit `rust-version.workspace = true`.
+          mapfile -t crates < <(
+            grep -l '^rust-version\.workspace = true' crates/*/Cargo.toml
+          )
+          if [ "${#crates[@]}" -eq 0 ]; then
+            echo "::error::No workspace member declares rust-version.workspace = true."
+            echo "::error::MSRV cannot be verified. Add the inheritance line to at"
+            echo "::error::least one crate's [package] block."
+            exit 1
+          fi
+          declared=$(awk '/^rust-version *= *"/{ gsub(/"/,"",$3); print $3; exit }' Cargo.toml)
+          echo "Workspace-declared rust-version: ${declared:-<unset>}"
+          for manifest in "${crates[@]}"; do
+            crate=$(basename "$(dirname "$manifest")")
+            echo "==> Verifying MSRV for $crate ($manifest)"
+            cargo msrv verify --manifest-path "$manifest"
+          done
 
   # ---------------------------------------------------------------------
   # Q4: Mutation testing. cargo-mutants flips small predicates in source
