@@ -21,7 +21,7 @@ fn test_chain_stops_on_low_confidence() {
 
     let result = chain_tokens(&provider, "prompt", 5, 0.5, None).unwrap();
     assert!(result.answer.is_empty());
-    assert_eq!(result.num_passes, 0);
+    assert_eq!(result.num_passes, 1);
 }
 
 #[test]
@@ -30,7 +30,16 @@ fn test_chain_stops_on_empty_response() {
 
     let result = chain_tokens(&provider, "unknown prompt", 5, 0.1, None).unwrap();
     assert!(result.answer.is_empty());
-    assert_eq!(result.num_passes, 0);
+    assert_eq!(result.num_passes, 1);
+}
+
+#[test]
+fn test_chain_respects_custom_stop_tokens() {
+    let provider = MockProvider::with_knowledge(vec![("prompt".into(), "Paris|".into(), 0.9)]);
+
+    let result = chain_tokens(&provider, "prompt", 5, 0.1, Some(&['|'])).unwrap();
+    assert!(result.answer.is_empty());
+    assert_eq!(result.num_passes, 1);
 }
 
 #[test]

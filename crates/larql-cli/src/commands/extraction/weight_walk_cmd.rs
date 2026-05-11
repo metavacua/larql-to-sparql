@@ -6,9 +6,7 @@ use crate::utils::round4;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_core::*;
-use larql_inference::walker::weight_walker::{
-    LayerResult, WalkCallbacks, WalkConfig, WeightWalker,
-};
+use larql_vindex::walker::weight_walker::{LayerResult, WalkCallbacks, WalkConfig, WeightWalker};
 
 #[derive(Args)]
 pub struct WeightWalkArgs {

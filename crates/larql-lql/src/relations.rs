@@ -6,6 +6,9 @@
 use larql_inference::ndarray::{Array1, Array2};
 use larql_inference::tokenizers::Tokenizer;
 use larql_vindex::clustering::ClusterResult;
+use larql_vindex::format::filenames::{
+    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
+};
 
 /// Classifies edges into relation types using discovered clusters
 /// or embedding-space direction matching.
@@ -24,9 +27,9 @@ impl RelationClassifier {
     /// Build a classifier from discovered clusters + probe labels in a vindex directory.
     /// Returns Some even if only probe labels exist (no clusters needed).
     pub fn from_vindex(vindex_path: &std::path::Path) -> Option<Self> {
-        let clusters_path = vindex_path.join("relation_clusters.json");
-        let assignments_path = vindex_path.join("feature_clusters.jsonl");
-        let probe_labels_path = vindex_path.join("feature_labels.json");
+        let clusters_path = vindex_path.join(RELATION_CLUSTERS_JSON);
+        let assignments_path = vindex_path.join(FEATURE_CLUSTERS_JSONL);
+        let probe_labels_path = vindex_path.join(FEATURE_LABELS_JSON);
 
         // Clusters are optional — probe labels work without them
         let clusters: Option<ClusterResult> = std::fs::read_to_string(&clusters_path)
@@ -56,8 +59,12 @@ impl RelationClassifier {
                             let parts: Vec<&str> = key.split('_').collect();
                             if parts.len() == 2 {
                                 if let (Some(layer), Some(feat)) = (
-                                    parts[0].strip_prefix('L').and_then(|s| s.parse::<usize>().ok()),
-                                    parts[1].strip_prefix('F').and_then(|s| s.parse::<usize>().ok()),
+                                    parts[0]
+                                        .strip_prefix('L')
+                                        .and_then(|s| s.parse::<usize>().ok()),
+                                    parts[1]
+                                        .strip_prefix('F')
+                                        .and_then(|s| s.parse::<usize>().ok()),
                                 ) {
                                     probe_labels.insert((layer, feat), rel.to_string());
                                 }
@@ -106,7 +113,11 @@ impl RelationClassifier {
         let clusters = self.clusters.as_ref()?;
         let label = clusters.labels.get(cluster_id)?;
         let count = clusters.counts.get(cluster_id).copied().unwrap_or(0);
-        let tops = clusters.top_tokens.get(cluster_id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let tops = clusters
+            .top_tokens
+            .get(cluster_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
         Some((label, count, tops))
     }
 
@@ -136,7 +147,11 @@ impl RelationClassifier {
         let clusters = self.clusters.as_ref()?;
         let (cluster_id, sim) =
             larql_vindex::clustering::classify_direction(direction, &clusters.centres);
-        let label = clusters.labels.get(cluster_id).map(|s| s.as_str()).unwrap_or("unknown");
+        let label = clusters
+            .labels
+            .get(cluster_id)
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
         Some((cluster_id, label, sim))
     }
 
@@ -179,7 +194,8 @@ impl RelationClassifier {
     /// Returns the most common layer for features with this relation.
     pub fn typical_layer_for_relation(&self, relation: &str) -> Option<usize> {
         let norm = normalise_relation(relation);
-        let mut layer_counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut layer_counts: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
 
         // Check probe labels
         for (&(layer, _), label) in &self.probe_labels {
@@ -200,7 +216,10 @@ impl RelationClassifier {
             }
         }
 
-        layer_counts.into_iter().max_by_key(|(_, count)| *count).map(|(layer, _)| layer)
+        layer_counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(layer, _)| layer)
     }
 }
 
@@ -311,5 +330,338 @@ mod tests {
     fn from_nonexistent_vindex() {
         let rc = RelationClassifier::from_vindex(std::path::Path::new("/nonexistent"));
         assert!(rc.is_none());
+    }
+
+    // ── cluster_for_relation: exact / normalised / substring tiers ──
+
+    #[test]
+    fn cluster_for_relation_exact_match_case_insensitive() {
+        let rc = make_test_classifier();
+        assert_eq!(rc.cluster_for_relation("capital"), Some(0));
+        // Mixed-case should still match the exact-match arm via
+        // eq_ignore_ascii_case.
+        assert_eq!(rc.cluster_for_relation("CAPITAL"), Some(0));
+    }
+
+    #[test]
+    fn cluster_for_relation_normalised_match_for_hyphens() {
+        // Underscore/hyphen normalisation arm: query "official-language"
+        // should fall through to the normalised arm if the cluster
+        // label is "official_language" or "official language".
+        let mut rc = make_test_classifier();
+        if let Some(c) = rc.clusters.as_mut() {
+            c.labels.push("official_language".into());
+            c.centres.push(vec![0.7, 0.3]);
+            c.counts.push(50);
+            c.top_tokens.push(vec!["english".into()]);
+            c.k = c.labels.len();
+        }
+        assert_eq!(rc.cluster_for_relation("official-language"), Some(3));
+        assert_eq!(rc.cluster_for_relation("official language"), Some(3));
+    }
+
+    #[test]
+    fn cluster_for_relation_substring_match_fallback() {
+        // Substring arm: a query that's a substring of a label.
+        let rc = make_test_classifier();
+        // "capit" is a substring of "capital".
+        assert_eq!(rc.cluster_for_relation("capit"), Some(0));
+    }
+
+    #[test]
+    fn cluster_for_relation_returns_none_when_no_match() {
+        let rc = make_test_classifier();
+        assert_eq!(rc.cluster_for_relation("totally_unrelated_xyz"), None);
+    }
+
+    #[test]
+    fn cluster_for_relation_returns_none_without_clusters() {
+        // A classifier with only probe labels (no clusters at all)
+        // returns None for any relation lookup.
+        let rc = RelationClassifier {
+            clusters: None,
+            feature_assignments: std::collections::HashMap::new(),
+            probe_labels: std::collections::HashMap::new(),
+            probe_count: 0,
+        };
+        assert_eq!(rc.cluster_for_relation("anything"), None);
+    }
+
+    #[test]
+    fn cluster_centre_for_relation_round_trip() {
+        let rc = make_test_classifier();
+        let centre = rc.cluster_centre_for_relation("capital").unwrap();
+        assert_eq!(centre, vec![1.0, 0.0]);
+    }
+
+    #[test]
+    fn cluster_centre_for_relation_unknown_returns_none() {
+        let rc = make_test_classifier();
+        assert!(rc.cluster_centre_for_relation("xyz_nonexistent").is_none());
+    }
+
+    // ── typical_layer_for_relation ──
+
+    #[test]
+    fn typical_layer_for_relation_finds_via_cluster_assignments() {
+        let rc = make_test_classifier();
+        assert_eq!(rc.typical_layer_for_relation("capital"), Some(26));
+        assert_eq!(rc.typical_layer_for_relation("language"), Some(24));
+    }
+
+    #[test]
+    fn typical_layer_for_relation_uses_probe_labels_first() {
+        // Probe labels matching the queried relation should drive the
+        // layer pick over cluster assignments.
+        let mut rc = make_test_classifier();
+        rc.probe_labels.insert((10, 5), "capital".into());
+        rc.probe_labels.insert((10, 6), "capital".into());
+        rc.probe_labels.insert((11, 7), "capital".into());
+        rc.probe_count = rc.probe_labels.len();
+        // Layer 10 has 2 hits, layer 11 has 1 → pick layer 10.
+        assert_eq!(rc.typical_layer_for_relation("capital"), Some(10));
+    }
+
+    #[test]
+    fn typical_layer_for_unknown_relation_returns_none() {
+        let rc = make_test_classifier();
+        assert_eq!(rc.typical_layer_for_relation("totally_unknown_xyz"), None);
+    }
+
+    // ── classify_direction ──
+
+    #[test]
+    fn classify_direction_picks_nearest_centre() {
+        let rc = make_test_classifier();
+        // Vector pointing at [1, 0] should match centre 0 ("capital").
+        let dir = Array1::from(vec![0.99, 0.05]);
+        let (cluster_id, label, _sim) = rc.classify_direction(&dir).unwrap();
+        assert_eq!(cluster_id, 0);
+        assert_eq!(label, "capital");
+    }
+
+    #[test]
+    fn classify_direction_returns_none_without_clusters() {
+        let rc = RelationClassifier {
+            clusters: None,
+            feature_assignments: std::collections::HashMap::new(),
+            probe_labels: std::collections::HashMap::new(),
+            probe_count: 0,
+        };
+        let dir = Array1::from(vec![1.0, 0.0]);
+        assert!(rc.classify_direction(&dir).is_none());
+    }
+
+    // ── probe_labels accessors ──
+
+    #[test]
+    fn probe_label_priority_over_cluster_assignment() {
+        // (26, 9515) is in feature_assignments as cluster 0 ("capital");
+        // adding a probe label should override that lookup result.
+        let mut rc = make_test_classifier();
+        rc.probe_labels.insert((26, 9515), "manual_override".into());
+        rc.probe_count = rc.probe_labels.len();
+        assert_eq!(rc.label_for_feature(26, 9515), Some("manual_override"));
+        assert!(rc.is_probe_label(26, 9515));
+        assert!(!rc.is_probe_label(24, 4532));
+        assert_eq!(rc.num_probe_labels(), 1);
+    }
+
+    // ── normalise_relation ──
+
+    #[test]
+    fn normalise_collapses_separators_and_case() {
+        assert_eq!(normalise_relation("Country-Of-Origin"), "country of origin");
+        assert_eq!(normalise_relation("country_of_origin"), "country of origin");
+        assert_eq!(normalise_relation("country  of\tof"), "country of of");
+    }
+
+    // ── from_vindex with on-disk fixtures ──
+
+    fn write_fixture(dir: &std::path::Path, files: &[(&str, &str)]) {
+        std::fs::create_dir_all(dir).unwrap();
+        for (name, content) in files {
+            std::fs::write(dir.join(name), content).unwrap();
+        }
+    }
+
+    #[test]
+    fn from_vindex_loads_clusters_and_assignments() {
+        let dir = std::env::temp_dir().join(format!(
+            "larql_relations_clusters_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        write_fixture(
+            &dir,
+            &[
+                (
+                    RELATION_CLUSTERS_JSON,
+                    r#"{"k":2,"centres":[[1.0,0.0],[0.0,1.0]],"labels":["capital","language"],"counts":[10,5],"top_tokens":[["paris"],["english"]]}"#,
+                ),
+                (
+                    FEATURE_CLUSTERS_JSONL,
+                    "{\"l\":5,\"f\":12,\"c\":0}\n{\"l\":7,\"f\":3,\"c\":1}\n",
+                ),
+            ],
+        );
+        let rc = RelationClassifier::from_vindex(&dir).expect("classifier loads");
+        assert!(rc.has_clusters());
+        assert_eq!(rc.num_clusters(), 2);
+        assert_eq!(rc.cluster_for_feature(5, 12), Some(0));
+        assert_eq!(rc.cluster_for_feature(7, 3), Some(1));
+        assert_eq!(rc.label_for_feature(5, 12), Some("capital"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_vindex_with_only_probe_labels() {
+        // No clusters, no assignments — just probe labels keyed
+        // "L{layer}_F{feature}". from_vindex should return Some(rc)
+        // because probe_labels alone is sufficient.
+        let dir = std::env::temp_dir().join(format!(
+            "larql_relations_probe_only_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        write_fixture(
+            &dir,
+            &[(
+                FEATURE_LABELS_JSON,
+                r#"{"L26_F100":"capital","L24_F50":"language"}"#,
+            )],
+        );
+        let rc = RelationClassifier::from_vindex(&dir).expect("classifier with probe-only");
+        assert!(!rc.has_clusters());
+        assert_eq!(rc.num_probe_labels(), 2);
+        assert_eq!(rc.label_for_feature(26, 100), Some("capital"));
+        assert_eq!(rc.label_for_feature(24, 50), Some("language"));
+        assert!(rc.is_probe_label(26, 100));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_vindex_skips_malformed_jsonl_lines() {
+        // The assignments JSONL parser silently drops malformed lines —
+        // good lines still load, bad lines are ignored.
+        let dir = std::env::temp_dir().join(format!(
+            "larql_relations_malformed_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        write_fixture(
+            &dir,
+            &[
+                (
+                    RELATION_CLUSTERS_JSON,
+                    r#"{"k":1,"centres":[[1.0]],"labels":["x"],"counts":[1],"top_tokens":[["t"]]}"#,
+                ),
+                (
+                    FEATURE_CLUSTERS_JSONL,
+                    "this is not json\n{\"l\":3,\"f\":4,\"c\":0}\n",
+                ),
+            ],
+        );
+        let rc = RelationClassifier::from_vindex(&dir).expect("classifier");
+        assert_eq!(rc.cluster_for_feature(3, 4), Some(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_vindex_skips_malformed_probe_keys() {
+        // Keys that don't match "L{n}_F{m}" are silently dropped; the
+        // valid ones still load.
+        let dir = std::env::temp_dir().join(format!(
+            "larql_relations_bad_keys_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        write_fixture(
+            &dir,
+            &[(
+                FEATURE_LABELS_JSON,
+                // Bad keys: missing prefix, wrong prefix, non-numeric, malformed split count.
+                r#"{"L1_F2":"good","BAD_KEY":"x","L1F2":"x","Lx_Fy":"x","extra_underscore_key_here":"x"}"#,
+            )],
+        );
+        let rc = RelationClassifier::from_vindex(&dir).expect("classifier");
+        assert_eq!(rc.num_probe_labels(), 1);
+        assert_eq!(rc.label_for_feature(1, 2), Some("good"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_vindex_empty_dir_returns_none() {
+        let dir = std::env::temp_dir().join(format!(
+            "larql_relations_empty_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rc = RelationClassifier::from_vindex(&dir);
+        assert!(rc.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── token_embedding_pub ──
+
+    #[test]
+    fn token_embedding_returns_none_for_empty_tokens() {
+        let embed = Array2::<f32>::zeros((10, 4));
+        let tok = larql_inference::test_utils::make_test_tokenizer(10);
+        // Empty string tokenises to nothing meaningful — depending on
+        // the tokenizer, may return Some(zero-vec) or None. The
+        // contract is just that it doesn't panic.
+        let _ = token_embedding_pub("", &embed, 1.0, &tok);
+    }
+
+    #[test]
+    fn token_embedding_with_embed_scale_multiplies() {
+        // embed_scale should multiply each row before averaging — assert
+        // the scale factor is applied by feeding a large embed value
+        // and checking the output scales linearly with embed_scale.
+        let mut embed = Array2::<f32>::zeros((10, 4));
+        for i in 0..10 {
+            embed[[i, 0]] = 10.0;
+        }
+        let tok = larql_inference::test_utils::make_test_tokenizer(10);
+        let a = token_embedding_pub("[0]", &embed, 1.0, &tok);
+        let b = token_embedding_pub("[0]", &embed, 2.0, &tok);
+        // Either both Some (in which case b should be 2× a) or both
+        // None (tokenizer produced empty ids); in either case no panic.
+        if let (Some(av), Some(bv)) = (a, b) {
+            if av[0] > 0.0 {
+                assert!(
+                    (bv[0] / av[0] - 2.0).abs() < 1e-3,
+                    "embed_scale=2 should double output: a={}, b={}",
+                    av[0],
+                    bv[0]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn token_embedding_skips_out_of_range_ids() {
+        // id beyond embed.shape()[0] is filtered — the function
+        // doesn't panic and divides by ids.len() regardless.
+        let embed = Array2::<f32>::zeros((2, 4));
+        let tok = larql_inference::test_utils::make_test_tokenizer(10);
+        let _ = token_embedding_pub("[5] [6]", &embed, 1.0, &tok);
     }
 }

@@ -3,6 +3,9 @@ use reqwest::blocking::Client;
 
 use super::provider::*;
 
+#[cfg(feature = "http")]
+const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 60;
+
 /// Connects to any OpenAI-compatible completions API.
 /// Works with: ollama, vLLM, llama.cpp server, LM Studio.
 #[cfg(feature = "http")]
@@ -17,7 +20,7 @@ impl HttpProvider {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             client: Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
+                .timeout(std::time::Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                 .build()
                 .expect("http client"),
             base_url: base_url.into(),

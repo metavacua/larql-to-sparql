@@ -6,6 +6,21 @@
 //! This is the gate KNN step of the graph walk.
 //! At d=2560, K=8192 features: one dot product sweep per layer.
 //! CPU may be fast enough (~0.1ms), but GPU enables sub-0.01ms.
+//!
+//! ## Retention rationale (ADR-017)
+//!
+//! **Status**: experimental, diag-only. The shader is built into
+//! `all_shaders()` so `metal/diag/shader_bench.rs` can benchmark
+//! it, but the production graph-walk path in `larql-inference`
+//! runs the gate-KNN scoring step on CPU.
+//!
+//! Kept on disk because gate-KNN on GPU is a plausible future win
+//! when (a) the larql-inference walk runs all-GPU rather than the
+//! current hybrid CPU+GPU split, or (b) a feature-set with N≫10K
+//! pushes the CPU dot-product sweep above the GPU dispatch overhead.
+//!
+//! **Removal trigger**: if a year passes with no diag bench result
+//! showing >2× CPU on a representative N, demote.
 
 pub const SHADER: &str = r#"
 // Gate KNN: compute dot products between a query vector and all gate vectors,

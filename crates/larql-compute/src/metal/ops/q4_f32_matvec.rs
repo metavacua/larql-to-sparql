@@ -5,8 +5,8 @@
 //! Input is f32 (not Q8). Used for down projection with transposed weights
 //! where the activation is sparse and Q8 quantization loses precision.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 
@@ -37,7 +37,11 @@ pub fn dispatch(
     enc.set_bytes(4, 4, &k_val as *const u32 as *const c_void);
 
     let threads = MTLSize::new(num_rows as u64, 1, 1);
-    let tg = MTLSize::new(256.min(num_rows as u64), 1, 1);
+    let tg = MTLSize::new(
+        crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(num_rows as u64),
+        1,
+        1,
+    );
     enc.dispatch_threads(threads, tg);
     enc.end_encoding();
     cmd.commit();

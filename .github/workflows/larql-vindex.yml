@@ -1,0 +1,125 @@
+# larql-vindex cross-platform CI
+#
+# The crate checks here are model/model-architecture agnostic: no HuggingFace
+# downloads, no real model weights, and no platform-specific GPU backends.
+# Tests and examples use synthetic fixtures or compile-only checks so the same
+# surface runs on Linux, Windows, and macOS.
+
+name: larql-vindex
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
+      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-vindex.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
+      - 'crates/larql-compute/src/cpu/ops/q4k_q8k_dot.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-vindex.yml'
+  workflow_dispatch: {}
+
+env:
+  LARQL_VINDEX_COVERAGE_MIN: 71
+
+jobs:
+  test:
+    name: test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-vindex-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-vindex-
+
+      - name: Format check
+        run: cargo fmt -p larql-vindex -- --check
+
+      - name: Check all targets
+        run: cargo check -p larql-vindex --all-targets
+
+      - name: Check examples
+        run: cargo check -p larql-vindex --examples
+
+      - name: Clippy
+        run: cargo clippy -p larql-vindex --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test -p larql-vindex
+
+      - name: Benchmark compile/tests
+        run: cargo test -p larql-vindex --benches
+
+  coverage:
+    name: coverage - ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-vindex --summary-only --fail-under-lines "$LARQL_VINDEX_COVERAGE_MIN"
+
+      - name: Coverage policy
+        run: |
+          mkdir -p coverage/larql-vindex
+          cargo llvm-cov report --package larql-vindex --json --summary-only --output-path coverage/larql-vindex/summary.json
+          python3 scripts/check_coverage_policy.py coverage/larql-vindex/summary.json crates/larql-vindex/coverage-policy.json

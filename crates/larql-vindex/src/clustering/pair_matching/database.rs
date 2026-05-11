@@ -134,7 +134,9 @@ impl RelationDatabase {
     /// Used by `super::labeling` to build inverted indexes for
     /// output-only matching.
     pub fn relations_iter(&self) -> impl Iterator<Item = (&str, &[(String, String)])> {
-        self.relations.iter().map(|(k, v)| (k.as_str(), v.as_slice()))
+        self.relations
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_slice()))
     }
 }
 /// Loaded reference databases, separated by layer range.
@@ -191,3 +193,203 @@ pub fn load_reference_databases() -> ReferenceDatabases {
     result
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_triples(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    // ── add_relation + lookup + index ──
+
+    #[test]
+    fn add_relation_populates_lookup_index() {
+        let mut db = RelationDatabase::default();
+        db.add_relation(
+            "capital",
+            vec![
+                ("France".into(), "Paris".into()),
+                ("Germany".into(), "Berlin".into()),
+            ],
+        );
+        // lookup is case-insensitive — keys stored lowercased? Actually
+        // `add_relation` stores raw and `lookup` lowercases the query.
+        // Stored keys aren't lowercased here; lookup with original case
+        // will match because the stored key is `(France, Paris)` and the
+        // lookup key is `(france, paris)`. They WON'T match without
+        // case-insensitive storage, so confirm what the contract is.
+        // Looking at the impl: stored as-given, lookup lowercases query.
+        // So `lookup("france", "paris")` would NOT find the entry.
+        // The Wikidata/WordNet loaders do lowercase the storage; the
+        // direct add_relation path doesn't.
+        assert_eq!(db.num_relations(), 1);
+        assert_eq!(db.num_pairs(), 2);
+    }
+
+    #[test]
+    fn add_relation_rebuilds_pair_index() {
+        let mut db = RelationDatabase::default();
+        db.add_relation("rel1", vec![("a".into(), "b".into())]);
+        db.add_relation("rel2", vec![("a".into(), "b".into())]);
+        // Same (a, b) pair contributed by two relations — both names
+        // returned in the lookup.
+        let mut hits = db.lookup("a", "b");
+        hits.sort();
+        assert_eq!(hits, vec!["rel1", "rel2"]);
+    }
+
+    #[test]
+    fn lookup_returns_empty_for_unknown_pair() {
+        let mut db = RelationDatabase::default();
+        db.add_relation("r", vec![("x".into(), "y".into())]);
+        assert!(db.lookup("nope", "missing").is_empty());
+    }
+
+    #[test]
+    fn lookup_query_is_case_insensitive() {
+        // Wikidata/WordNet loaders lowercase storage; the direct
+        // add_relation path doesn't. Verify case-insensitive lookup
+        // against a loader-built db.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(
+            tmp.path(),
+            "wd.json",
+            r#"{"capital": {"pairs": [["France", "Paris"]]}}"#,
+        );
+        let db = RelationDatabase::load_wikidata(&path).expect("load ok");
+        // Loader lowercased the storage; lookup also lowercases the query.
+        let hits = db.lookup("FRANCE", "paris");
+        assert_eq!(hits, vec!["capital"]);
+    }
+
+    #[test]
+    fn relations_iter_yields_all_entries() {
+        let mut db = RelationDatabase::default();
+        db.add_relation("r1", vec![("a".into(), "b".into())]);
+        db.add_relation("r2", vec![("c".into(), "d".into())]);
+        let mut names: Vec<&str> = db.relations_iter().map(|(n, _)| n).collect();
+        names.sort();
+        assert_eq!(names, vec!["r1", "r2"]);
+        let r1: Vec<_> = db.relations_iter().filter(|(n, _)| *n == "r1").collect();
+        assert_eq!(r1[0].1, &[("a".into(), "b".into())]);
+    }
+
+    // ── load_wikidata ──
+
+    #[test]
+    fn load_wikidata_parses_pair_arrays() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(
+            tmp.path(),
+            "wd.json",
+            r#"{
+                "capital": {"pairs": [["France", "Paris"], ["Germany", "Berlin"]]},
+                "language": {"pairs": [["France", "French"]]}
+            }"#,
+        );
+        let db = RelationDatabase::load_wikidata(&path).expect("load ok");
+        assert_eq!(db.num_relations(), 2);
+        assert_eq!(db.num_pairs(), 3);
+        // Lookup with a lowercased pair (loader lowercases storage).
+        assert!(db.lookup("france", "paris").contains(&"capital"));
+        assert!(db.lookup("france", "french").contains(&"language"));
+    }
+
+    #[test]
+    fn load_wikidata_skips_short_pair_arrays_and_empty_strings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(
+            tmp.path(),
+            "wd_bad.json",
+            r#"{
+                "rel": {"pairs": [
+                    ["only_one"],
+                    ["", "empty_subject"],
+                    ["valid_subj", ""],
+                    ["a", "b"]
+                ]}
+            }"#,
+        );
+        let db = RelationDatabase::load_wikidata(&path).expect("load ok");
+        // Only the (a, b) pair survived all the filters.
+        assert_eq!(db.num_pairs(), 1);
+        assert!(db.lookup("a", "b").contains(&"rel"));
+    }
+
+    #[test]
+    fn load_wikidata_returns_none_for_missing_file() {
+        assert!(RelationDatabase::load_wikidata(Path::new("/tmp/_no_wd.json")).is_none());
+    }
+
+    #[test]
+    fn load_wikidata_returns_none_for_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(tmp.path(), "bad.json", "not json{");
+        assert!(RelationDatabase::load_wikidata(&path).is_none());
+    }
+
+    #[test]
+    fn load_wikidata_returns_none_for_non_object_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(tmp.path(), "arr.json", "[1, 2, 3]");
+        assert!(RelationDatabase::load_wikidata(&path).is_none());
+    }
+
+    #[test]
+    fn load_wikidata_skips_relations_without_pairs_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(
+            tmp.path(),
+            "no_pairs.json",
+            r#"{
+                "rel_with_pairs": {"pairs": [["a", "b"]]},
+                "rel_no_pairs": {"description": "missing pairs key"}
+            }"#,
+        );
+        let db = RelationDatabase::load_wikidata(&path).expect("load ok");
+        // The 'rel_no_pairs' relation isn't inserted because the inner
+        // `if let Some(pairs)` check fails.
+        assert_eq!(db.num_relations(), 1);
+    }
+
+    // ── load_wordnet ──
+
+    #[test]
+    fn load_wordnet_parses_pair_arrays() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(
+            tmp.path(),
+            "wn.json",
+            r#"{
+                "synonym": {"pairs": [["fast", "quick"], ["smart", "clever"]]},
+                "antonym": {"pairs": [["hot", "cold"]]}
+            }"#,
+        );
+        let db = RelationDatabase::load_wordnet(&path).expect("load ok");
+        assert_eq!(db.num_relations(), 2);
+        assert_eq!(db.num_pairs(), 3);
+        assert!(db.lookup("fast", "quick").contains(&"synonym"));
+    }
+
+    #[test]
+    fn load_wordnet_returns_none_for_missing_file() {
+        assert!(RelationDatabase::load_wordnet(Path::new("/tmp/_no_wn.json")).is_none());
+    }
+
+    #[test]
+    fn load_wordnet_returns_none_for_invalid_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_triples(tmp.path(), "wn_bad.json", "not json");
+        assert!(RelationDatabase::load_wordnet(&path).is_none());
+    }
+
+    // Note: `load_reference_databases` walks `./data/`, `../data/`,
+    // `../../data/` relative to cwd. Testing it would require
+    // mutating cwd which breaks parallel test isolation. The two
+    // loaders it dispatches to (`load_wikidata`, `load_wordnet`)
+    // are individually tested above; the wrapper itself is exercised
+    // implicitly when downstream callers invoke it from the binary.
+}

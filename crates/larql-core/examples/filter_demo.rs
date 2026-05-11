@@ -54,7 +54,7 @@ fn main() {
     let knowledge_layers = filter_graph(
         &graph,
         &FilterConfig {
-            min_layer: Some(20),
+            metadata: vec![MetadataPredicate::u64_min("layer", 20)],
             ..Default::default()
         },
     );
@@ -67,7 +67,7 @@ fn main() {
     let selective = filter_graph(
         &graph,
         &FilterConfig {
-            min_selectivity: Some(0.5),
+            metadata: vec![MetadataPredicate::f64_min("selectivity", 0.5)],
             ..Default::default()
         },
     );
@@ -84,10 +84,7 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "relation = capital-of:   {} edges",
-        capitals.edge_count()
-    );
+    println!("relation = capital-of:   {} edges", capitals.edge_count());
 
     // ── Exclude relation ──
     let no_located = filter_graph(
@@ -97,10 +94,7 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "exclude located-in:      {} edges",
-        no_located.edge_count()
-    );
+    println!("exclude located-in:      {} edges", no_located.edge_count());
 
     // ── Subject contains ──
     let france = filter_graph(
@@ -110,18 +104,17 @@ fn main() {
             ..Default::default()
         },
     );
-    println!(
-        "subject contains France: {} edges",
-        france.edge_count()
-    );
+    println!("subject contains France: {} edges", france.edge_count());
 
     // ── Combined filters ──
     let best = filter_graph(
         &graph,
         &FilterConfig {
             min_confidence: Some(0.8),
-            min_layer: Some(20),
-            min_selectivity: Some(0.7),
+            metadata: vec![
+                MetadataPredicate::u64_min("layer", 20),
+                MetadataPredicate::f64_min("selectivity", 0.7),
+            ],
             ..Default::default()
         },
     );

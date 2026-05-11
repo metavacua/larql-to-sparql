@@ -13,6 +13,39 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use larql_vindex::VectorIndex;
 use ndarray::{Array1, Array2};
 
+/// Refuse to run the scaling bench when known larql daemons share the
+/// host. The 2026-04-25 audit caught a 3× run-to-run swing on Gemma 4B
+/// caused by a background `larql-server` (6 GB RSS) saturating cores
+/// during the criterion sample window. This guard makes that misuse
+/// loud instead of silent. Bypass with `LARQL_BENCH_ALLOW_DAEMONS=1`.
+fn refuse_under_contention() {
+    if std::env::var_os("LARQL_BENCH_ALLOW_DAEMONS").is_some() {
+        return;
+    }
+    let out = match std::process::Command::new("pgrep")
+        .args(["-fl", "larql-(server|router)"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return, // no pgrep, can't check — don't block the bench
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let self_pid = std::process::id().to_string();
+    let offenders: Vec<&str> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !l.starts_with(&self_pid))
+        .collect();
+    if !offenders.is_empty() {
+        eprintln!(
+            "vindex_scaling refuses to run while these processes share the host:\n{}\n\
+             Stop them or set LARQL_BENCH_ALLOW_DAEMONS=1 to override.",
+            offenders.join("\n")
+        );
+        std::process::exit(2);
+    }
+}
+
 fn random_query(hidden: usize) -> Array1<f32> {
     let mut state = 0xdeadbeefu64;
     Array1::from_shape_fn(hidden, |_| {
@@ -32,6 +65,7 @@ fn synth_matrix(rows: usize, cols: usize) -> Array2<f32> {
 /// Single-layer gate KNN at production dimensions for the 4 representative
 /// model families.
 fn bench_production_knn(c: &mut Criterion) {
+    refuse_under_contention();
     let mut group = c.benchmark_group("production_knn_per_layer");
     // (label, intermediate_size, hidden_size)
     let configs: &[(&str, usize, usize)] = &[
@@ -60,6 +94,7 @@ fn bench_production_knn(c: &mut Criterion) {
 /// the regime where MoE models have many small experts vs dense models
 /// with one large feature bank.
 fn bench_moe_production(c: &mut Criterion) {
+    refuse_under_contention();
     let mut group = c.benchmark_group("moe_production_knn");
     let hidden = 2560;
     let configs: &[(&str, usize)] = &[

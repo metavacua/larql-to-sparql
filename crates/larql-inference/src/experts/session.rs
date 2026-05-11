@@ -47,7 +47,10 @@ pub trait Dispatcher {
 
 impl Dispatcher for ExpertRegistry {
     fn op_specs(&self) -> Vec<OpSpec> {
-        ExpertRegistry::op_specs(self).into_iter().cloned().collect()
+        ExpertRegistry::op_specs(self)
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
@@ -180,9 +183,7 @@ impl<D: Dispatcher> ExpertSession<D> {
         specs.sort_by(|a, b| a.name.cmp(&b.name));
 
         let mut out = String::new();
-        out.push_str(
-            "Respond with ONLY a JSON object {\"op\":\"...\",\"args\":{...}}.\n",
-        );
+        out.push_str("Respond with ONLY a JSON object {\"op\":\"...\",\"args\":{...}}.\n");
         out.push_str("ops: ");
 
         for (i, spec) in specs.iter().enumerate() {
@@ -201,7 +202,7 @@ impl<D: Dispatcher> ExpertSession<D> {
             }
             out.push('}');
         }
-        out.push_str("\n");
+        out.push('\n');
         out.push_str("No extra text.");
         out
     }
@@ -220,11 +221,7 @@ impl<D: Dispatcher> ExpertSession<D> {
     pub fn dispatch(&mut self, model_output: &str) -> Result<DispatchOutcome, DispatchSkip> {
         let call = parse_op_call(model_output).ok_or(DispatchSkip::NoOpCall)?;
 
-        let known = self
-            .registry
-            .op_specs()
-            .iter()
-            .any(|s| s.name == call.op);
+        let known = self.registry.op_specs().iter().any(|s| s.name == call.op);
         if !known {
             return Err(DispatchSkip::UnknownOp(call.op));
         }
@@ -260,7 +257,9 @@ mod tests {
 
     #[test]
     fn system_prompt_is_deterministic() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let session = ExpertSession::new(reg);
         let a = session.system_prompt();
         let b = session.system_prompt();
@@ -269,18 +268,28 @@ mod tests {
 
     #[test]
     fn system_prompt_lists_known_ops() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let session = ExpertSession::new(reg);
         let p = session.system_prompt();
         // Sample a handful of ops we know exist across the workspace.
         assert!(p.contains("gcd"), "system prompt missing 'gcd':\n{p}");
-        assert!(p.contains("is_prime"), "system prompt missing 'is_prime':\n{p}");
-        assert!(p.contains("base64_encode"), "system prompt missing 'base64_encode':\n{p}");
+        assert!(
+            p.contains("is_prime"),
+            "system prompt missing 'is_prime':\n{p}"
+        );
+        assert!(
+            p.contains("base64_encode"),
+            "system prompt missing 'base64_encode':\n{p}"
+        );
     }
 
     #[test]
     fn system_prompt_ops_are_sorted() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let session = ExpertSession::new(reg);
         let p = session.system_prompt();
 
@@ -305,7 +314,9 @@ mod tests {
 
     #[test]
     fn build_prompt_wraps_via_template() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let session = ExpertSession::new(reg);
         let wrapped = session.build_prompt("What is 2+2?", ChatTemplate::Gemma);
         assert!(wrapped.starts_with("<start_of_turn>user\n"));
@@ -316,7 +327,9 @@ mod tests {
 
     #[test]
     fn build_prompt_plain_template_passes_through_unwrapped() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let session = ExpertSession::new(reg);
         let wrapped = session.build_prompt("hi", ChatTemplate::Plain);
         // No template tags injected.
@@ -329,7 +342,9 @@ mod tests {
 
     #[test]
     fn dispatch_happy_path_returns_outcome() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let mut session = ExpertSession::new(reg);
         let out = session
             .dispatch(r#"{"op":"gcd","args":{"a":144,"b":60}}"#)
@@ -341,7 +356,9 @@ mod tests {
 
     #[test]
     fn dispatch_with_preamble_still_finds_call() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let mut session = ExpertSession::new(reg);
         let raw = "Sure, here is the call:\n{\"op\":\"is_prime\",\"args\":{\"n\":97}}\n";
         let out = session.dispatch(raw).expect("dispatch");
@@ -351,7 +368,9 @@ mod tests {
 
     #[test]
     fn dispatch_no_op_call_returns_no_op_call_skip() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let mut session = ExpertSession::new(reg);
         let err = session.dispatch("just a free-text answer").unwrap_err();
         assert_eq!(err, DispatchSkip::NoOpCall);
@@ -359,18 +378,25 @@ mod tests {
 
     #[test]
     fn dispatch_unknown_op_returns_unknown_op_skip() {
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let mut session = ExpertSession::new(reg);
         let err = session
             .dispatch(r#"{"op":"definitely_not_a_real_op","args":{}}"#)
             .unwrap_err();
-        assert_eq!(err, DispatchSkip::UnknownOp("definitely_not_a_real_op".into()));
+        assert_eq!(
+            err,
+            DispatchSkip::UnknownOp("definitely_not_a_real_op".into())
+        );
     }
 
     #[test]
     fn dispatch_expert_declined_returns_expert_declined_skip() {
         // arithmetic.gcd requires {a, b} — pass garbage to provoke a decline.
-        let Some(reg) = registry_or_skip() else { return };
+        let Some(reg) = registry_or_skip() else {
+            return;
+        };
         let mut session = ExpertSession::new(reg);
         let err = session
             .dispatch(r#"{"op":"gcd","args":{"unrelated":42}}"#)
@@ -466,7 +492,10 @@ mod mock_tests {
         let aaa = p.find("aaa").expect("aaa missing");
         let mmm = p.find("mmm").expect("mmm missing");
         let zzz = p.find("zzz").expect("zzz missing");
-        assert!(aaa < mmm && mmm < zzz, "ops should appear in alphabetical order");
+        assert!(
+            aaa < mmm && mmm < zzz,
+            "ops should appear in alphabetical order"
+        );
     }
 
     #[test]
@@ -476,8 +505,14 @@ mod mock_tests {
         let p = session.system_prompt();
         assert!(p.contains("ops: "), "header missing:\n{p}");
         // The ops line should be just the bare prefix (no entries).
-        let ops_line = p.lines().find(|l| l.starts_with("ops: ")).expect("ops line missing");
-        assert_eq!(ops_line, "ops: ", "expected empty ops list, got: {ops_line:?}");
+        let ops_line = p
+            .lines()
+            .find(|l| l.starts_with("ops: "))
+            .expect("ops line missing");
+        assert_eq!(
+            ops_line, "ops: ",
+            "expected empty ops list, got: {ops_line:?}"
+        );
     }
 
     #[test]
@@ -487,7 +522,10 @@ mod mock_tests {
         let p = session.system_prompt();
         // Compact form: `op_name{"arg1","arg2"}`.
         assert!(p.contains("gcd{\"a\",\"b\"}"), "missing gcd schema:\n{p}");
-        assert!(p.contains("is_prime{\"n\"}"), "missing is_prime schema:\n{p}");
+        assert!(
+            p.contains("is_prime{\"n\"}"),
+            "missing is_prime schema:\n{p}"
+        );
     }
 
     #[test]
@@ -524,14 +562,23 @@ mod mock_tests {
             ChatTemplate::Plain,
         ] {
             let wrapped = session.build_prompt("Q?", tpl);
-            assert!(wrapped.contains("Q?"), "template {} dropped user prompt", tpl.name());
-            assert!(wrapped.contains("x"), "template {} dropped op list", tpl.name());
+            assert!(
+                wrapped.contains("Q?"),
+                "template {} dropped user prompt",
+                tpl.name()
+            );
+            assert!(
+                wrapped.contains("x"),
+                "template {} dropped op list",
+                tpl.name()
+            );
         }
     }
 
     #[test]
     fn dispatch_happy_path_with_mock() {
-        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])]).with_response("gcd", serde_json::json!(12));
+        let mock = MockDispatcher::new(&[("gcd", &["a", "b"])])
+            .with_response("gcd", serde_json::json!(12));
         let mut session = ExpertSession::new(mock);
         let out = session
             .dispatch(r#"{"op":"gcd","args":{"a":144,"b":60}}"#)
@@ -576,7 +623,8 @@ mod mock_tests {
     fn dispatch_forwards_args_verbatim_to_dispatcher() {
         // Verify that whatever JSON args the parser produces are passed
         // through unchanged to the dispatcher.
-        let mock = MockDispatcher::new(&[("echo", &["s"])]).with_response("echo", serde_json::json!(true));
+        let mock =
+            MockDispatcher::new(&[("echo", &["s"])]).with_response("echo", serde_json::json!(true));
         let mut session = ExpertSession::new(mock);
         let _ = session
             .dispatch(r#"{"op":"echo","args":{"nested":{"k":[1,2,3]},"s":"日本語"}}"#)
@@ -588,5 +636,95 @@ mod mock_tests {
         assert_eq!(op, "echo");
         assert_eq!(args["nested"]["k"], serde_json::json!([1, 2, 3]));
         assert_eq!(args["s"], serde_json::json!("日本語"));
+    }
+
+    // ── ExpertSession accessors ───────────────────────────────────────────────
+
+    #[test]
+    fn registry_mut_grants_inner_access() {
+        let mock = MockDispatcher::new(&[("foo", &["x"])]);
+        let mut session = ExpertSession::new(mock);
+        // registry_mut returns &mut D; calling op_specs through it covers
+        // the accessor and verifies the inner state is reachable.
+        let specs = session.registry_mut().op_specs();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name, "foo");
+    }
+
+    #[test]
+    fn into_registry_returns_owned_dispatcher() {
+        let mock = MockDispatcher::new(&[("foo", &["x"])]);
+        let session = ExpertSession::new(mock);
+        let recovered = session.into_registry();
+        // Recovered dispatcher still functions as expected.
+        assert_eq!(recovered.op_specs().len(), 1);
+    }
+
+    // ── Box<dyn Dispatcher> forward impl ─────────────────────────────────────
+
+    #[test]
+    fn boxed_dispatcher_forwards_op_specs_and_call() {
+        // Cover the `impl Dispatcher for Box<dyn Dispatcher>` forwarding
+        // path used by the CLI to swap raw vs filtered dispatchers at runtime.
+        let mock =
+            MockDispatcher::new(&[("ping", &[])]).with_response("ping", serde_json::json!("pong"));
+        let mut boxed: Box<dyn Dispatcher> = Box::new(mock);
+        assert_eq!(boxed.op_specs().len(), 1);
+        let res = boxed
+            .call("ping", &serde_json::json!({}))
+            .expect("ping should dispatch");
+        assert_eq!(res.value, serde_json::json!("pong"));
+    }
+
+    // ── FilteredDispatcher ────────────────────────────────────────────────────
+
+    #[test]
+    fn filtered_dispatcher_op_specs_show_only_allowed() {
+        let mock = MockDispatcher::new(&[("a", &[]), ("b", &[]), ("c", &[])]);
+        let filtered = FilteredDispatcher::new(mock, ["a", "c"]);
+        let specs = filtered.op_specs();
+        let names: std::collections::HashSet<String> =
+            specs.iter().map(|s| s.name.clone()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains("a") && names.contains("c"));
+        assert!(!names.contains("b"));
+    }
+
+    #[test]
+    fn filtered_dispatcher_call_short_circuits_disallowed_ops() {
+        // Disallowed ops must not reach the inner dispatcher.
+        let mock = MockDispatcher::new(&[("a", &[]), ("b", &[])])
+            .with_response("a", serde_json::json!(1))
+            .with_response("b", serde_json::json!(2));
+        let mut filtered = FilteredDispatcher::new(mock, ["a"]);
+        // Allowed op flows through.
+        let allowed = filtered.call("a", &serde_json::json!({}));
+        assert_eq!(allowed.unwrap().value, serde_json::json!(1));
+        // Disallowed op short-circuits to None.
+        let disallowed = filtered.call("b", &serde_json::json!({}));
+        assert!(disallowed.is_none(), "disallowed op should return None");
+    }
+
+    #[test]
+    fn filtered_dispatcher_silently_ignores_unknown_op_in_allowed_set() {
+        // Allowed names that aren't advertised by the inner dispatcher
+        // are silently ignored — only the intersection is exposed.
+        let mock = MockDispatcher::new(&[("a", &[])]);
+        let filtered = FilteredDispatcher::new(mock, ["a", "ghost"]);
+        let names: Vec<String> = filtered.op_specs().iter().map(|s| s.name.clone()).collect();
+        assert_eq!(names, vec!["a"]);
+    }
+
+    #[test]
+    fn filtered_dispatcher_through_session_lists_only_allowed_in_prompt() {
+        // End-to-end: filtering composes with system_prompt rendering.
+        let mock = MockDispatcher::new(&[("alpha", &[]), ("beta", &[]), ("gamma", &[])]);
+        let filtered = FilteredDispatcher::new(mock, ["beta"]);
+        let session = ExpertSession::new(filtered);
+        let p = session.system_prompt();
+        let ops_line = p.lines().find(|l| l.starts_with("ops: ")).unwrap();
+        assert!(ops_line.contains("beta"));
+        assert!(!ops_line.contains("alpha"));
+        assert!(!ops_line.contains("gamma"));
     }
 }

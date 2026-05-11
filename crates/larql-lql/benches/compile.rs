@@ -16,10 +16,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use larql_lql::{parse, Session};
 use larql_models::TopKEntry;
-use larql_vindex::{
-    ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig,
-};
 use larql_vindex::ndarray::Array2;
+use larql_vindex::{ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig};
 use std::path::PathBuf;
 
 /// Build a synthetic vindex with the SHAPE of a real model (so the byte
@@ -90,13 +88,16 @@ fn make_compile_bench_vindex(tag: &str, with_down_weights: bool) -> PathBuf {
         down_top_k: 1,
         has_model_weights: with_down_weights,
         model_config: None,
+        fp4: None,
+        ffn_layout: None,
     };
     index.save_vindex(&dir, &mut config).unwrap();
 
     // Embeddings, tokenizer.
     let embed_bytes = vec![0u8; vocab_size * hidden * 4];
     std::fs::write(dir.join("embeddings.bin"), embed_bytes).unwrap();
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
 
     if with_down_weights {
@@ -131,8 +132,11 @@ fn bench_compile_no_patches(c: &mut Criterion) {
             let mut session = Session::new();
             let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
             session.execute(&use_stmt).unwrap();
-            let stmt = parse(&format!(r#"COMPILE CURRENT INTO VINDEX "{}";"#, dst.display()))
-                .unwrap();
+            let stmt = parse(&format!(
+                r#"COMPILE CURRENT INTO VINDEX "{}";"#,
+                dst.display()
+            ))
+            .unwrap();
             session.execute(&stmt).unwrap();
         });
         let _ = std::fs::remove_dir_all(&dst);
@@ -143,16 +147,9 @@ fn bench_compile_no_patches(c: &mut Criterion) {
 }
 
 /// `COMPILE INTO VINDEX` on a vindex that has model weights
-/// (`down_weights.bin` present). With no patch overlay this measures
-/// the structural cost of the bake — hard-link unchanging files,
-/// fresh-write `gate_vectors.bin`, and (if there were down overrides)
-/// the `patch_down_weights` copy + seek-write loop. With zero
-/// overrides the down_weights file is hardlinked from source instead.
-///
-/// The override-baking path itself (`patch_down_weights`) is unit-
-/// tested for correctness in `executor/lifecycle/compile/bake.rs`'s
-/// in-module tests. End-to-end exercise of the override path against
-/// a real Gemma 4B vindex lives in the `compile_demo` example.
+/// (`down_weights.bin` present). The first case measures the structural
+/// cost with zero overrides; the second injects a single down-vector
+/// override so the benchmark exercises the copy + seek-write bake path.
 fn bench_compile_with_weights(c: &mut Criterion) {
     let mut group = c.benchmark_group("compile_into_vindex");
     group.sample_size(20);
@@ -166,8 +163,47 @@ fn bench_compile_with_weights(c: &mut Criterion) {
             let mut session = Session::new();
             let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
             session.execute(&use_stmt).unwrap();
-            let stmt = parse(&format!(r#"COMPILE CURRENT INTO VINDEX "{}";"#, dst.display()))
-                .unwrap();
+            let stmt = parse(&format!(
+                r#"COMPILE CURRENT INTO VINDEX "{}";"#,
+                dst.display()
+            ))
+            .unwrap();
+            session.execute(&stmt).unwrap();
+        });
+        let _ = std::fs::remove_dir_all(&dst);
+    });
+
+    group.bench_function("with_weights_one_down_override", |b| {
+        let dst = std::env::temp_dir().join("larql_compile_bench_dst_one_override");
+        b.iter(|| {
+            let _ = std::fs::remove_dir_all(&dst);
+            let mut session = Session::new();
+            let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
+            session.execute(&use_stmt).unwrap();
+            {
+                let overlay = session.patched_overlay_mut().expect("vindex backend");
+                overlay.insert_feature(
+                    0,
+                    0,
+                    vec![1.0; 64],
+                    FeatureMeta {
+                        top_token: "patched".into(),
+                        top_token_id: 1,
+                        c_score: 0.9,
+                        top_k: vec![TopKEntry {
+                            token: "patched".into(),
+                            token_id: 1,
+                            logit: 0.9,
+                        }],
+                    },
+                );
+                overlay.set_down_vector(0, 0, vec![0.25; 64]);
+            }
+            let stmt = parse(&format!(
+                r#"COMPILE CURRENT INTO VINDEX "{}";"#,
+                dst.display()
+            ))
+            .unwrap();
             session.execute(&stmt).unwrap();
         });
         let _ = std::fs::remove_dir_all(&dst);

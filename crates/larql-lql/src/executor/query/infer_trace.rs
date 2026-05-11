@@ -3,6 +3,7 @@
 
 use crate::ast::LayerBand;
 use crate::error::LqlError;
+use crate::executor::helpers::format_knn_override_summary;
 use crate::executor::{Backend, Session};
 
 use super::resolve_bands;
@@ -35,9 +36,15 @@ impl Session {
                 "EXPLAIN INFER requires model weights. Rebuild with WITH INFERENCE.".into(),
             ));
         }
+        if with_attention && config.quant != larql_vindex::QuantFormat::None {
+            return Err(LqlError::Execution(
+                "EXPLAIN INFER WITH ATTENTION does not yet support quantised (q4k) vindexes — \
+                 attention capture requires f32 tensors in memory. Omit WITH ATTENTION or use \
+                 an f32 vindex."
+                    .into(),
+            ));
+        }
         let mut cb = larql_vindex::SilentLoadCallbacks;
-        let weights = larql_vindex::load_model_weights(path, &mut cb)
-            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
         let encoding = tokenizer
@@ -54,41 +61,64 @@ impl Session {
             Vec::new()
         };
 
-        // ── Phase 2: forward pass (with optional attention capture) ──
+        // ── Phase 2: forward pass ──
         //
-        // Unlimited top_k: EXPLAIN INFER shares the activation-sum config
-        // with `exec_infer` so running INFER then EXPLAIN INFER on the
-        // same prompt gives the same baseline. The attention-capture path
-        // is an optional second-channel for logit lens display; the
-        // KNN override path below uses WalkFfn residuals either way,
-        // matching the canonical `infer_patched` pipeline (ADR 0001).
-        let walk_ffn =
-            larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
-        let start = std::time::Instant::now();
-        let (predictions_raw, attention_captures, lens_residuals) = if with_attention {
-            let r = larql_inference::predict_with_ffn_attention(
-                &weights, &tokenizer, &token_ids, top_k, &walk_ffn,
-            );
-            (r.predictions, r.attention, r.residuals)
-        } else {
-            let r = larql_inference::predict_with_ffn(
-                &weights, &tokenizer, &token_ids, top_k, &walk_ffn,
-            );
-            (r.predictions, Vec::new(), Vec::new())
-        };
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        // For the standard path (no attention), `InferenceWeights` handles format
+        // dispatch so EXPLAIN INFER works on both f32 and q4k vindexes.
+        // The attention-capture path is f32-only (guarded above); it keeps its
+        // own dense forward call and derives residuals from the same WalkFfn.
+        let mut iw = larql_inference::InferenceWeights::load(path, config, &mut cb)
+            .map_err(|e| LqlError::exec("failed to load model weights", e))?;
 
-        let residuals = walk_ffn.take_residuals();
-        let (predictions, knn_override) = larql_inference::apply_knn_override(
-            predictions_raw,
-            &residuals,
-            Some(&patched.knn_store),
-            top_k,
-        );
+        let start = std::time::Instant::now();
+        // Three groups of output, both branches must assign all of them.
+        let (predictions, knn_override, model_top1, residuals, attention_captures, lens_residuals);
+
+        if with_attention {
+            // f32-only path (q4k guarded above): dense forward with attention + logit lens.
+            let weights = iw.as_weights();
+            let walk_ffn =
+                larql_inference::vindex::WalkFfn::new_unlimited_with_trace(weights, patched);
+            let r = larql_inference::predict_with_ffn_attention(
+                weights, &tokenizer, &token_ids, top_k, &walk_ffn,
+            );
+            let walk_res = walk_ffn.take_residuals();
+            let raw_top1 = r.predictions.first().cloned();
+            let (preds, knn_ovr) = larql_inference::apply_knn_override(
+                r.predictions,
+                &walk_res,
+                Some(&patched.knn_store),
+                top_k,
+            );
+            predictions = preds;
+            knn_override = knn_ovr;
+            model_top1 = raw_top1;
+            residuals = walk_res;
+            attention_captures = r.attention;
+            lens_residuals = r.residuals;
+        } else {
+            // Format-agnostic path: `InferenceWeights` dispatches to f32 or q4k.
+            // `infer_patched` already applies the KNN override internally, so
+            // `infer.predictions` is the final post-override top-k.
+            let infer = iw.infer_patched(
+                &tokenizer,
+                patched,
+                Some(&patched.knn_store),
+                &token_ids,
+                top_k,
+            );
+            predictions = infer.predictions;
+            knn_override = infer.knn_override;
+            model_top1 = infer.model_top1;
+            residuals = infer.residuals;
+            attention_captures = Vec::new();
+            lens_residuals = Vec::new();
+        }
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
         // ── Phase 3: side-tables for the rendering loop ──
         let attention_map = build_attention_map(&attention_captures, &token_strs, with_attention);
-        let lens_map = build_lens_map(&lens_residuals, &weights, &tokenizer, with_attention);
+        let lens_map = build_lens_map(&lens_residuals, iw.as_weights(), &tokenizer, with_attention);
 
         let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, patched);
         let classifier = self.relation_classifier();
@@ -107,9 +137,15 @@ impl Session {
         out.push(format!("Inference trace for {:?}{}:", prompt, band_label));
         if let Some(ovr) = &knn_override {
             out.push(format!(
-                "Prediction: {} (KNN override, cos={:.2}, L{}) in {:.0}ms",
-                ovr.token, ovr.cosine, ovr.layer, elapsed_ms
+                "Prediction: {} ({}) in {:.0}ms",
+                ovr.token,
+                format_knn_override_summary(ovr, model_top1.as_ref()),
+                elapsed_ms
             ));
+            out.push(
+                "Pending retrieval override: not part of the residual/FFN trace until materialized."
+                    .into(),
+            );
         } else {
             out.push(format!(
                 "Prediction: {} ({:.2}%) in {:.0}ms",

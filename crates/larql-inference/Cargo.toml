@@ -16,9 +16,12 @@ larql-vindex = { path = "../larql-vindex" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+zip = { version = "2", default-features = false }
+rand = "0.8"
+rand_distr = "0.4"
 
 # Model weights
-safetensors = "0.5"
+safetensors = "0.7"
 memmap2 = "0.9"
 
 # System
@@ -33,8 +36,29 @@ rayon = "1.10"
 # Tokenizer
 tokenizers = "0.21"
 
+# Used by `residual_diff::capture` to drive the backend-side per-layer
+# dump hooks into a private dir per call. dev-only would force every
+# crate consumer to pull tempfile in just to use the in-memory diff API.
+tempfile = "3"
+
+# Chat-template rendering (HF `tokenizer_config.json::chat_template` is Jinja).
+# `minijinja-contrib` ships `pycompat::unknown_method_callback` which gives us
+# Python-style method calls (`.get()`, `.items()`, `.startswith()`, …) that
+# Gemma 4 / Qwen / Llama-3 chat templates rely on.
+minijinja = { version = "2", features = ["loader"] }
+minijinja-contrib = { version = "2", features = ["pycompat"] }
+
 # Remote FFN backend (RemoteWalkBackend → POST /v1/walk-ffn)
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+half = "2"
+
+# gRPC expert client (RemoteMoeBackend → ExpertService via tonic)
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
+tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
+prost = "0.13"
+larql-router-protocol = { path = "../larql-router-protocol" }
+async-stream = "0.3"
+futures = "0.3"
 
 # WASM expert registry
 wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
@@ -42,17 +66,43 @@ wasmtime-wasi = "29"
 anyhow = "1"
 
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 blas-src = { version = "0.10", features = ["accelerate"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
 [features]
 default = []
 metal = ["larql-compute/metal"]
 
+[[example]]
+name = "cpu_gpu_diag"
+required-features = ["metal"]
+
+[[example]]
+name = "decode_vs_prefill"
+required-features = ["metal"]
+
+[[example]]
+name = "residual_diff"
+required-features = ["metal"]
+
+[[example]]
+name = "stage_bisect"
+required-features = ["metal"]
+
 [dev-dependencies]
 assert_approx_eq = "1"
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+larql-kv = { path = "../larql-kv" }
+
+[[bench]]
+name = "wire_codec"
+harness = false

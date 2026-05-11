@@ -12,24 +12,22 @@
 
 #![cfg(feature = "real-model")]
 
-use kv_cache_benchmark::real_model::*;
 use kv_cache_benchmark::real_model::runner::*;
+use kv_cache_benchmark::real_model::*;
 
 /// Helper to load model + vindex for tests. Returns None if model not available.
 /// Set LARQL_MODEL_PATH and LARQL_VINDEX_PATH env vars, or uses default HF paths.
-fn load_test_model() -> Option<(
-    larql_inference::InferenceModel,
-    larql_vindex::VectorIndex,
-)> {
-    let model_path = std::env::var("LARQL_MODEL_PATH")
-        .unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
+fn load_test_model() -> Option<(larql_inference::InferenceModel, larql_vindex::VectorIndex)> {
+    let model_path =
+        std::env::var("LARQL_MODEL_PATH").unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
     let model = larql_inference::InferenceModel::load(&model_path).ok()?;
 
     let vindex_path = std::env::var("LARQL_VINDEX_PATH").ok()?;
     let index = larql_vindex::VectorIndex::load_vindex(
         std::path::Path::new(&vindex_path),
         &mut larql_vindex::SilentLoadCallbacks,
-    ).ok()?;
+    )
+    .ok()?;
 
     Some((model, index))
 }
@@ -40,9 +38,8 @@ fn test_all_strategies_produce_paris() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
 
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     let results = run_all_strategies(&bench, "The capital of France is", 5, 512);
 
@@ -74,8 +71,7 @@ fn test_all_strategies_produce_paris() {
     assert!(
         results[2].top1_match,
         "Markov RS top-1 didn't match baseline: got '{}', expected '{}'",
-        results[2].top1_token,
-        results[0].top1_token,
+        results[2].top1_token, results[0].top1_token,
     );
 
     // Graph Walk
@@ -91,9 +87,8 @@ fn test_markov_rs_bit_perfect() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
 
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     let prompts = default_prompts();
     for prompt in &prompts {
@@ -122,7 +117,10 @@ fn test_markov_rs_bit_perfect() {
 fn test_turboquant_compression_on_real_vectors() {
     let (model, _index) = load_test_model().expect("Model not available");
 
-    let encoding = model.tokenizer().encode("The capital of France is", true).unwrap();
+    let encoding = model
+        .tokenizer()
+        .encode("The capital of France is", true)
+        .unwrap();
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
     let kv = kv_capture::capture_kv(model.weights(), &token_ids);
@@ -139,8 +137,16 @@ fn test_turboquant_compression_on_real_vectors() {
     // Cosine is the meaningful metric (scale-invariant).
     // Paper MSE target (0.009) is for unit-norm vectors; raw K/V have larger norms.
     // Cosine 0.991 on real vectors = near-lossless.
-    assert!(result.cosine_sim > 0.98, "Cosine too low: {}", result.cosine_sim);
-    assert!(result.compression_ratio > 3.0, "Compression too low: {}", result.compression_ratio);
+    assert!(
+        result.cosine_sim > 0.98,
+        "Cosine too low: {}",
+        result.cosine_sim
+    );
+    assert!(
+        result.compression_ratio > 3.0,
+        "Compression too low: {}",
+        result.compression_ratio
+    );
     println!("  Note: MSE is on raw vectors (not unit-norm). Cosine is the fair metric.");
 }
 
@@ -150,9 +156,8 @@ fn test_multi_turn_memory_bounded() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
 
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     // Simulate growing context
     let base_prompt = "The capital of France is Paris. The capital of Germany is Berlin. ";
@@ -187,9 +192,8 @@ fn test_graph_walk_factual_accuracy() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
 
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     let prompts = default_prompts();
     let mut matches = 0;
@@ -218,9 +222,8 @@ fn test_graph_walk_factual_accuracy() {
 fn test_accuracy_top1_factual_20() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     let prompts = kv_cache_benchmark::accuracy::factual_prompts();
     let total = prompts.len();
@@ -271,11 +274,14 @@ fn test_accuracy_top1_factual_20() {
 fn test_accuracy_markov_rs_bitperfect() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
-    for prompt in &["The capital of France is", "Mozart was born in", "Water freezes at"] {
+    for prompt in &[
+        "The capital of France is",
+        "Mozart was born in",
+        "Water freezes at",
+    ] {
         let results = runner::run_all_strategies(&bench, prompt, 5, 512);
         let markov = &results[2];
 
@@ -301,9 +307,8 @@ fn test_accuracy_markov_rs_bitperfect() {
 fn test_needle_short_512() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     // Plant a fact early, query it at the end
     let prompt = "The secret code is AURORA-7749. Remember this. Now, some filler text about various topics. The weather is nice today. The sky is blue. What is the secret code?";
@@ -311,8 +316,16 @@ fn test_needle_short_512() {
 
     // All strategies should find AURORA or 7749 in their predictions
     for r in &results {
-        let top5_text: String = r.top5.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
-        println!("{}: top-1='{}', top-5=[{}]", r.strategy, r.top1_token, top5_text);
+        let top5_text: String = r
+            .top5
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!(
+            "{}: top-1='{}', top-5=[{}]",
+            r.strategy, r.top1_token, top5_text
+        );
     }
 }
 
@@ -323,9 +336,8 @@ fn test_needle_short_512() {
 fn test_adversarial_entity_confusion() {
     let (model, index) = load_test_model().expect("Model not available");
     let backend = larql_inference::default_backend();
-    let bench = RealModelBenchmark::new(
-        model.weights(), model.tokenizer(), &index, backend.as_ref(),
-    );
+    let bench =
+        RealModelBenchmark::new(model.weights(), model.tokenizer(), &index, backend.as_ref());
 
     // Same template, different entities — must give different answers
     let pairs = vec![
@@ -354,7 +366,8 @@ fn test_needle_scaling_context() {
 
     let needle = "The secret project code name is AURORA-7749.";
     let query = " What is the secret project code name?";
-    let filler_sentence = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
+    let filler_sentence =
+        "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
 
     // Test at increasing context lengths
     for target_tokens in [512, 1024, 2048, 4096] {
@@ -375,7 +388,10 @@ fn test_needle_scaling_context() {
         context.push_str(query);
 
         // Tokenize and check actual length
-        let encoding = model.tokenizer().encode(context.as_str(), true).expect("tokenize");
+        let encoding = model
+            .tokenizer()
+            .encode(context.as_str(), true)
+            .expect("tokenize");
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let actual_tokens = token_ids.len();
 
@@ -385,19 +401,31 @@ fn test_needle_scaling_context() {
         let elapsed = t0.elapsed();
 
         // Check if AURORA or 7749 appears in top-10
-        let top10_text: String = result.predictions.iter()
+        let top10_text: String = result
+            .predictions
+            .iter()
             .map(|(t, _)| t.as_str())
             .collect::<Vec<_>>()
             .join(" ");
-        let needle_found = top10_text.contains("AUR") || top10_text.contains("7749") || top10_text.contains("AURORA");
+        let needle_found = top10_text.contains("AUR")
+            || top10_text.contains("7749")
+            || top10_text.contains("AURORA");
 
-        let top1 = result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?");
+        let top1 = result
+            .predictions
+            .first()
+            .map(|(t, _)| t.as_str())
+            .unwrap_or("?");
         let found_mark = if needle_found { "FOUND" } else { "MISSED" };
 
         println!(
             "  {:>6} tokens (actual {:>5}): top-1='{}' needle={} [{:.1}s] top-10=[{}]",
-            target_tokens, actual_tokens, top1, found_mark,
-            elapsed.as_secs_f64(), top10_text,
+            target_tokens,
+            actual_tokens,
+            top1,
+            found_mark,
+            elapsed.as_secs_f64(),
+            top10_text,
         );
     }
 }
@@ -411,12 +439,15 @@ fn test_needle_bounded_window_vs_full() {
 
     let needle = "The secret project code name is AURORA-7749.";
     let query = " What is the secret project code name?";
-    let filler_sentence = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
+    let filler_sentence =
+        "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
     let window_size = 512;
 
     println!("\n=== Needle: Standard KV (full context) vs Markov RS (bounded window) ===\n");
-    println!("{:>8} {:>8}  {:>12} {:>12}  {:>12} {:>12}",
-        "Target", "Actual", "StdKV top-1", "StdKV needle", "MarkovRS t1", "MarkovRS ndl");
+    println!(
+        "{:>8} {:>8}  {:>12} {:>12}  {:>12} {:>12}",
+        "Target", "Actual", "StdKV top-1", "StdKV needle", "MarkovRS t1", "MarkovRS ndl"
+    );
     println!("{}", "-".repeat(75));
 
     for target_tokens in [512, 1024, 2048, 4096] {
@@ -438,21 +469,36 @@ fn test_needle_bounded_window_vs_full() {
         context.push_str(query);
 
         // === Standard KV: full context forward pass ===
-        let full_encoding = model.tokenizer().encode(context.as_str(), true).expect("tokenize");
+        let full_encoding = model
+            .tokenizer()
+            .encode(context.as_str(), true)
+            .expect("tokenize");
         let full_ids: Vec<u32> = full_encoding.get_ids().to_vec();
         let full_len = full_ids.len();
 
-        let full_result = larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
-        let full_top10: String = full_result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
-        let full_found = full_top10.contains("AUR") || full_top10.contains("7749") || full_top10.contains("AURORA");
-        let full_top1 = full_result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?");
+        let full_result =
+            larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
+        let full_top10: String = full_result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full_found = full_top10.contains("AUR")
+            || full_top10.contains("7749")
+            || full_top10.contains("AURORA");
+        let full_top1 = full_result
+            .predictions
+            .first()
+            .map(|(t, _)| t.as_str())
+            .unwrap_or("?");
 
         // === Markov RS: bounded window around needle + query ===
         // Find which token position the needle is at
-        let needle_encoding = model.tokenizer().encode(
-            &context[..needle_char_pos + needle.len()], true
-        ).expect("tokenize needle prefix");
+        let needle_encoding = model
+            .tokenizer()
+            .encode(&context[..needle_char_pos + needle.len()], true)
+            .expect("tokenize needle prefix");
         let needle_token_pos = needle_encoding.get_ids().len();
 
         // Window: 256 tokens before needle, needle tokens, then skip to query
@@ -460,7 +506,10 @@ fn test_needle_bounded_window_vs_full() {
         let needle_end = needle_token_pos + 20; // needle is ~15 tokens
 
         // Build windowed token sequence: [window around needle] + [query tokens]
-        let query_encoding = model.tokenizer().encode(query, false).expect("tokenize query");
+        let query_encoding = model
+            .tokenizer()
+            .encode(query, false)
+            .expect("tokenize query");
         let query_ids: Vec<u32> = query_encoding.get_ids().to_vec();
 
         let mut windowed_ids: Vec<u32> = Vec::new();
@@ -474,17 +523,29 @@ fn test_needle_bounded_window_vs_full() {
 
         let windowed_len = windowed_ids.len();
 
-        let win_result = larql_inference::predict(model.weights(), model.tokenizer(), &windowed_ids, 10);
-        let win_top10: String = win_result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
-        let win_found = win_top10.contains("AUR") || win_top10.contains("7749") || win_top10.contains("AURORA");
-        let win_top1 = win_result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?");
+        let win_result =
+            larql_inference::predict(model.weights(), model.tokenizer(), &windowed_ids, 10);
+        let win_top10: String = win_result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let win_found =
+            win_top10.contains("AUR") || win_top10.contains("7749") || win_top10.contains("AURORA");
+        let win_top1 = win_result
+            .predictions
+            .first()
+            .map(|(t, _)| t.as_str())
+            .unwrap_or("?");
 
         let full_mark = if full_found { "FOUND" } else { "MISSED" };
         let win_mark = if win_found { "FOUND" } else { "MISSED" };
 
-        println!("{:>8} {:>8}  {:>12} {:>12}  {:>12} {:>12}  (window={}tok)",
-            target_tokens, full_len, full_top1, full_mark, win_top1, win_mark, windowed_len);
+        println!(
+            "{:>8} {:>8}  {:>12} {:>12}  {:>12} {:>12}  (window={}tok)",
+            target_tokens, full_len, full_top1, full_mark, win_top1, win_mark, windowed_len
+        );
     }
 
     println!("\nStandard KV = full forward pass over all tokens (softmax over full context)");
@@ -504,8 +565,14 @@ fn test_multi_turn_fact_retention() {
     // Establish facts then query them after filler turns
     let facts = [
         ("My name is Alice and I work at Anthropic.", "Alice"),
-        ("I live in San Francisco near the Golden Gate Bridge.", "San Francisco"),
-        ("My current project is called Lighthouse and it launches in March.", "Lighthouse"),
+        (
+            "I live in San Francisco near the Golden Gate Bridge.",
+            "San Francisco",
+        ),
+        (
+            "My current project is called Lighthouse and it launches in March.",
+            "Lighthouse",
+        ),
     ];
 
     let filler_turns = vec![
@@ -528,7 +595,7 @@ fn test_multi_turn_fact_retention() {
     // Build the full conversation as a single prompt
     // (simulates multi-turn by concatenating with turn markers)
     let mut conversation = String::new();
-    
+
     // Establish facts (turns 1-3)
     for (fact, _) in facts.iter() {
         conversation.push_str(&format!("User: {fact}\nAssistant: I'll remember that.\n\n"));
@@ -536,7 +603,9 @@ fn test_multi_turn_fact_retention() {
 
     // Filler turns (turns 4-11)
     for filler in &filler_turns {
-        conversation.push_str(&format!("User: {filler}\nAssistant: Sure, let me explain briefly.\n\n"));
+        conversation.push_str(&format!(
+            "User: {filler}\nAssistant: Sure, let me explain briefly.\n\n"
+        ));
     }
 
     // Query turn
@@ -544,19 +613,32 @@ fn test_multi_turn_fact_retention() {
         let mut prompt = conversation.clone();
         prompt.push_str(&format!("User: {query}\nAssistant:"));
 
-        let encoding = model.tokenizer().encode(prompt.as_str(), true).expect("tokenize");
+        let encoding = model
+            .tokenizer()
+            .encode(prompt.as_str(), true)
+            .expect("tokenize");
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let num_tokens = token_ids.len();
 
         let result = larql_inference::predict(model.weights(), model.tokenizer(), &token_ids, 10);
-        let top10: String = result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("|");
-        let top1 = result.predictions.first().map(|(t, _)| t.as_str()).unwrap_or("?");
-        
+        let top10: String = result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("|");
+        let top1 = result
+            .predictions
+            .first()
+            .map(|(t, _)| t.as_str())
+            .unwrap_or("?");
+
         let found = top10.to_lowercase().contains(&expected.to_lowercase());
         let mark = if found { "FOUND" } else { "MISSED" };
 
-        println!("  Q: {query:<40} top-1='{top1}' {mark} (expected '{expected}', {num_tokens} tokens)");
+        println!(
+            "  Q: {query:<40} top-1='{top1}' {mark} (expected '{expected}', {num_tokens} tokens)"
+        );
         println!("    top-10: [{top10}]");
     }
 }
@@ -607,9 +689,17 @@ fn test_generation_stability_50_tokens() {
         }
 
         let generated_text = generated_tokens.join("");
-        let short_prompt = if prompt.len() > 60 { &prompt[..60] } else { prompt };
+        let short_prompt = if prompt.len() > 60 {
+            &prompt[..60]
+        } else {
+            prompt
+        };
         println!("  Prompt: \"{short_prompt}...\"");
-        println!("  Generated ({} tokens): \"{}\"", generated_tokens.len(), generated_text);
+        println!(
+            "  Generated ({} tokens): \"{}\"",
+            generated_tokens.len(),
+            generated_text
+        );
         println!("  Coherent: {}\n", !generated_text.is_empty());
     }
 
@@ -631,7 +721,10 @@ fn test_needle_position_sweep() {
     let target_tokens = 2048; // Context length where StdKV fails
 
     println!("\n=== Needle Position Sweep at ~{target_tokens} tokens ===\n");
-    println!("{:>10} {:>8} {:>12} {:>12}", "Position", "Actual", "Full ctx", "Window");
+    println!(
+        "{:>10} {:>8} {:>12} {:>12}",
+        "Position", "Actual", "Full ctx", "Window"
+    );
     println!("{}", "-".repeat(50));
 
     // Test needle at 10%, 25%, 50%, 75%, 90% of context
@@ -652,17 +745,30 @@ fn test_needle_position_sweep() {
         }
         context.push_str(query);
 
-        let full_enc = model.tokenizer().encode(context.as_str(), true).expect("tokenize");
+        let full_enc = model
+            .tokenizer()
+            .encode(context.as_str(), true)
+            .expect("tokenize");
         let full_ids: Vec<u32> = full_enc.get_ids().to_vec();
 
         // Full context
-        let full_result = larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
-        let full_top10: String = full_result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
-        let full_found = full_top10.contains("AUR") || full_top10.contains("7749") || full_top10.contains("AURORA");
+        let full_result =
+            larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
+        let full_top10: String = full_result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full_found = full_top10.contains("AUR")
+            || full_top10.contains("7749")
+            || full_top10.contains("AURORA");
 
         // Bounded window around needle
-        let needle_enc = model.tokenizer().encode(&context[..needle_char_start + needle.len()], true).expect("tok");
+        let needle_enc = model
+            .tokenizer()
+            .encode(&context[..needle_char_start + needle.len()], true)
+            .expect("tok");
         let needle_tok_pos = needle_enc.get_ids().len();
         let win_start = needle_tok_pos.saturating_sub(64);
         let win_end = (needle_tok_pos + 20).min(full_ids.len());
@@ -671,13 +777,24 @@ fn test_needle_position_sweep() {
         win_ids.extend_from_slice(query_enc.get_ids());
 
         let win_result = larql_inference::predict(model.weights(), model.tokenizer(), &win_ids, 10);
-        let win_top10: String = win_result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
-        let win_found = win_top10.contains("AUR") || win_top10.contains("7749") || win_top10.contains("AURORA");
+        let win_top10: String = win_result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let win_found =
+            win_top10.contains("AUR") || win_top10.contains("7749") || win_top10.contains("AURORA");
 
         let full_mark = if full_found { "FOUND" } else { "MISSED" };
         let win_mark = if win_found { "FOUND" } else { "MISSED" };
-        println!("{:>9}% {:>8} {:>12} {:>12}", pct, full_ids.len(), full_mark, win_mark);
+        println!(
+            "{:>9}% {:>8} {:>12} {:>12}",
+            pct,
+            full_ids.len(),
+            full_mark,
+            win_mark
+        );
     }
 }
 
@@ -690,11 +807,31 @@ fn test_multifact_5_facts_at_2k() {
 
     let filler = "The quick brown fox jumps over the lazy dog near the old oak tree by the river. ";
     let facts = vec![
-        ("Agent Alpha code name is FALCON.", "FALCON", "What is Agent Alpha's code name?"),
-        ("The launch date is March 15th.", "March", "What is the launch date?"),
-        ("Budget allocation is 4.7 million dollars.", "4.7", "What is the budget?"),
-        ("The target city is Reykjavik.", "Reykjavik", "What is the target city?"),
-        ("Project sponsor is Dr. Kimura.", "Kimura", "Who is the project sponsor?"),
+        (
+            "Agent Alpha code name is FALCON.",
+            "FALCON",
+            "What is Agent Alpha's code name?",
+        ),
+        (
+            "The launch date is March 15th.",
+            "March",
+            "What is the launch date?",
+        ),
+        (
+            "Budget allocation is 4.7 million dollars.",
+            "4.7",
+            "What is the budget?",
+        ),
+        (
+            "The target city is Reykjavik.",
+            "Reykjavik",
+            "What is the target city?",
+        ),
+        (
+            "Project sponsor is Dr. Kimura.",
+            "Kimura",
+            "Who is the project sponsor?",
+        ),
     ];
 
     println!("\n=== Multi-Fact Retrieval: 5 facts in ~2K context ===\n");
@@ -725,32 +862,53 @@ fn test_multifact_5_facts_at_2k() {
         let mut prompt = context.clone();
         prompt.push_str(&format!(" {query}"));
 
-        let enc = model.tokenizer().encode(prompt.as_str(), true).expect("tok");
+        let enc = model
+            .tokenizer()
+            .encode(prompt.as_str(), true)
+            .expect("tok");
         let full_ids: Vec<u32> = enc.get_ids().to_vec();
 
         // Full context
         let result = larql_inference::predict(model.weights(), model.tokenizer(), &full_ids, 10);
-        let top10: String = result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let top10: String = result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
         let found_full = top10.to_lowercase().contains(&answer.to_lowercase());
-        if found_full { full_found += 1; }
+        if found_full {
+            full_found += 1;
+        }
 
         // Window: find fact position, extract window around it
         let fact_pos = context.find(*fact).unwrap_or(0);
-        let fact_enc = model.tokenizer().encode(&context[..fact_pos + fact.len()], true).expect("tok");
+        let fact_enc = model
+            .tokenizer()
+            .encode(&context[..fact_pos + fact.len()], true)
+            .expect("tok");
         let fact_tok = fact_enc.get_ids().len();
         let ws = fact_tok.saturating_sub(32);
         let we = (fact_tok + 20).min(full_ids.len());
         let q_str = format!(" {query}");
-        let query_enc = model.tokenizer().encode(q_str.as_str(), false).expect("tok");
+        let query_enc = model
+            .tokenizer()
+            .encode(q_str.as_str(), false)
+            .expect("tok");
         let mut win_ids: Vec<u32> = full_ids[ws..we].to_vec();
         win_ids.extend_from_slice(query_enc.get_ids());
 
         let win_result = larql_inference::predict(model.weights(), model.tokenizer(), &win_ids, 10);
-        let win_top10: String = win_result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let win_top10: String = win_result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
         let found_win = win_top10.to_lowercase().contains(&answer.to_lowercase());
-        if found_win { win_found += 1; }
+        if found_win {
+            win_found += 1;
+        }
 
         let fm = if found_full { "FOUND" } else { "MISSED" };
         let wm = if found_win { "FOUND" } else { "MISSED" };
@@ -790,7 +948,10 @@ fn test_conflict_context_overrides_parametric() {
         ),
     ];
 
-    println!("{:<25} {:>12} {:>12} {:>15}", "Test", "Top-1", "Context?", "Parametric?");
+    println!(
+        "{:<25} {:>12} {:>12} {:>15}",
+        "Test", "Top-1", "Context?", "Parametric?"
+    );
     println!("{}", "-".repeat(70));
 
     for (prompt, context_answer, parametric_answer, label) in &tests {
@@ -798,20 +959,123 @@ fn test_conflict_context_overrides_parametric() {
         let ids: Vec<u32> = enc.get_ids().to_vec();
 
         let result = larql_inference::predict(model.weights(), model.tokenizer(), &ids, 10);
-        let top1 = result.predictions.first().map(|(t, _)| t.clone()).unwrap_or_default();
-        let top10: String = result.predictions.iter()
-            .map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" ");
+        let top1 = result
+            .predictions
+            .first()
+            .map(|(t, _)| t.clone())
+            .unwrap_or_default();
+        let top10: String = result
+            .predictions
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
 
-        let follows_context = top10.to_lowercase().contains(&context_answer.to_lowercase());
-        let follows_parametric = top10.to_lowercase().contains(&parametric_answer.to_lowercase());
+        let follows_context = top10
+            .to_lowercase()
+            .contains(&context_answer.to_lowercase());
+        let follows_parametric = top10
+            .to_lowercase()
+            .contains(&parametric_answer.to_lowercase());
 
         let ctx_mark = if follows_context { "YES" } else { "no" };
         let par_mark = if follows_parametric { "YES" } else { "no" };
 
-        println!("{:<25} {:>12} {:>12} {:>15}", label, top1, ctx_mark, par_mark);
+        println!(
+            "{:<25} {:>12} {:>12} {:>15}",
+            label, top1, ctx_mark, par_mark
+        );
     }
 
     println!("\nNote: Standard KV should follow context (full attention sees it).");
     println!("Markov RS follows context IF in bounded window, parametric if outside.");
     println!("Graph Walk always follows parametric (graph is weights, not context).");
+}
+
+/// Engine performance benchmark: times each KvEngine on a suite of prompts,
+/// reports prefill ms, memory breakdown, compression ratio vs Standard KV.
+///
+/// Run with:
+///   cargo test --features real-model -p kv-cache-benchmark \
+///       --test test_real_model test_engine_performance -- --ignored --nocapture
+#[test]
+#[ignore]
+fn test_engine_performance() {
+    let (model, _index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+
+    let prompts = [
+        "The capital of France is",
+        "The population of Tokyo is approximately",
+        "In the beginning God created the heavens and the",
+    ];
+
+    for prompt in &prompts {
+        let results = kv_cache_benchmark::real_model::runner::run_all_engines_bench(
+            model.weights(),
+            model.tokenizer(),
+            prompt,
+            512,
+            backend.as_ref(),
+        );
+        println!(
+            "{}",
+            kv_cache_benchmark::real_model::runner::format_engine_results(&results)
+        );
+
+        for r in &results {
+            // Accuracy: hidden cosine must be high (same forward path as Standard KV)
+            assert!(
+                r.hidden_cosine > 0.99,
+                "{}: cosine {:.4} < 0.99 for {:?}",
+                r.engine,
+                r.hidden_cosine,
+                prompt,
+            );
+            // Memory: engine state should be smaller than Standard KV reference
+            assert!(
+                r.total_bytes < r.kv_ref_bytes,
+                "{}: engine mem {}B >= kv_ref {}B",
+                r.engine,
+                r.total_bytes,
+                r.kv_ref_bytes,
+            );
+        }
+    }
+}
+
+/// Side-by-side prefill timing: Standard KV (via run_all_strategies) vs all KvEngines.
+/// Useful for measuring the cost of the residual-recompute path vs straight KV capture.
+#[test]
+#[ignore]
+fn test_prefill_timing_comparison() {
+    let (model, index) = load_test_model().expect("Model not available");
+    let backend = larql_inference::default_backend();
+    let bench = kv_cache_benchmark::real_model::runner::RealModelBenchmark::new(
+        model.weights(),
+        model.tokenizer(),
+        &index,
+        backend.as_ref(),
+    );
+
+    let prompt = "The capital of France is";
+
+    let strategies =
+        kv_cache_benchmark::real_model::runner::run_all_strategies(&bench, prompt, 5, 512);
+    println!(
+        "{}",
+        kv_cache_benchmark::real_model::runner::format_results(&strategies)
+    );
+
+    let engines = kv_cache_benchmark::real_model::runner::run_all_engines_bench(
+        model.weights(),
+        model.tokenizer(),
+        prompt,
+        512,
+        backend.as_ref(),
+    );
+    println!(
+        "{}",
+        kv_cache_benchmark::real_model::runner::format_engine_results(&engines)
+    );
 }

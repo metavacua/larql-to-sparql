@@ -83,7 +83,7 @@ Every call runs in a fresh `Store` with explicit fuel + memory caps.
 Exceeding either errors rather than wedges the host. This is what makes
 unbounded-complexity solvers safe to embed.
 
-**End-to-end demo:** the CP-SAT solver from `experiments/07_wasm_compute/solver/`
+**End-to-end demo:** the CP-SAT solver from `~/chris-source/chris-experiments/foundations/07_wasm_compute/solver/`
 is a 26 KB constraint solver that runs through `SolverRuntime`:
 
 ```

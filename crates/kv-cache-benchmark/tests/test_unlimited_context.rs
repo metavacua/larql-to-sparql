@@ -9,13 +9,11 @@
 
 #![cfg(feature = "real-model")]
 
-use kv_cache_benchmark::unlimited_context::{
-    rs_extend_from_checkpoint, UnlimitedContextEngine,
-};
+use kv_cache_benchmark::unlimited_context::{rs_extend_from_checkpoint, UnlimitedContextEngine};
 
 fn load_model() -> Option<larql_inference::InferenceModel> {
-    let model_path = std::env::var("LARQL_MODEL_PATH")
-        .unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
+    let model_path =
+        std::env::var("LARQL_MODEL_PATH").unwrap_or_else(|_| "google/gemma-3-4b-it".to_string());
     larql_inference::InferenceModel::load(&model_path).ok()
 }
 
@@ -54,9 +52,7 @@ fn test_window0_replay_bit_exact() {
     assert_eq!(engine.archive.len(), 1, "expected 1 archived window");
 
     // Replay window 0
-    let (replay_kv, _abs_end) = engine
-        .replay_window(weights, 0)
-        .expect("replay failed");
+    let (replay_kv, _abs_end) = engine.replay_window(weights, 0).expect("replay failed");
 
     // Independent fresh forward with empty prior
     let empty_prior = kv_cache_benchmark::unlimited_context::rs_extend_from_checkpoint(
@@ -68,7 +64,11 @@ fn test_window0_replay_bit_exact() {
     .expect("fresh extend failed");
 
     // Per-layer K cos should be 1.0 to float precision
-    for (li, ((k_r, v_r), (k_f, v_f))) in replay_kv.iter().zip(empty_prior.kv_cache.iter()).enumerate() {
+    for (li, ((k_r, v_r), (k_f, v_f))) in replay_kv
+        .iter()
+        .zip(empty_prior.kv_cache.iter())
+        .enumerate()
+    {
         let ck = cos(k_r, k_f);
         let cv = cos(v_r, v_f);
         assert!(ck > 0.99999, "layer {li}: K cos {ck:.6} < 0.99999");
@@ -102,13 +102,21 @@ fn test_replay_is_deterministic() {
 
     // Replay window 1 twice
     let (kv_a, _) = engine.replay_window(weights, 1).expect("replay 1 failed");
-    let (kv_b, _) = engine.replay_window(weights, 1).expect("replay 1 failed (2nd)");
+    let (kv_b, _) = engine
+        .replay_window(weights, 1)
+        .expect("replay 1 failed (2nd)");
 
     for (li, ((k_a, v_a), (k_b, v_b))) in kv_a.iter().zip(kv_b.iter()).enumerate() {
         let ck = cos(k_a, k_b);
         let cv = cos(v_a, v_b);
-        assert!(ck > 0.999999, "layer {li}: K not deterministic, cos {ck:.8}");
-        assert!(cv > 0.999999, "layer {li}: V not deterministic, cos {cv:.8}");
+        assert!(
+            ck > 0.999999,
+            "layer {li}: K not deterministic, cos {ck:.8}"
+        );
+        assert!(
+            cv > 0.999999,
+            "layer {li}: V not deterministic, cos {cv:.8}"
+        );
     }
     println!("replay is deterministic");
 }
@@ -125,7 +133,9 @@ fn test_compression_ratio() {
 
     // Build a ~256-token sequence
     let long = "The capital of France is Paris. ".repeat(32);
-    let enc = tokenizer.encode(long.as_str(), true).expect("tokenize failed");
+    let enc = tokenizer
+        .encode(long.as_str(), true)
+        .expect("tokenize failed");
     let tokens: Vec<u32> = enc.get_ids().to_vec();
 
     let window_size = 64;
@@ -162,12 +172,13 @@ fn test_extend_output_shapes() {
     let weights = model.weights();
     let tokenizer = model.tokenizer();
 
-    let enc = tokenizer.encode("Hello world.", true).expect("tokenize failed");
+    let enc = tokenizer
+        .encode("Hello world.", true)
+        .expect("tokenize failed");
     let tokens: Vec<u32> = enc.get_ids().to_vec();
     let empty = kv_cache_benchmark::unlimited_context::__empty_prior_for_test(weights);
 
-    let out = rs_extend_from_checkpoint(weights, &tokens, &empty, 0)
-        .expect("extend failed");
+    let out = rs_extend_from_checkpoint(weights, &tokens, &empty, 0).expect("extend failed");
 
     assert_eq!(out.last_hidden.shape()[0], 1, "last_hidden should be 1 row");
     assert_eq!(out.kv_cache.len(), weights.num_layers);

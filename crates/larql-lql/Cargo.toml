@@ -19,8 +19,20 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+default = []
+# Enable Metal-accelerated paths in `larql-compute` / `larql-inference`.
+# Mirrors the features in those crates so workspace tests can be built
+# with `--features metal` from this package.
+metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
+
 [dev-dependencies]
 criterion = "0.5"
+# Mocked HTTP server for testing the Remote backend's forwarders
+# without spinning up a real `larql-server`. Each test wires a
+# `mockito::Server`, points the session at it via `USE "<url>"`, and
+# asserts on the canned response.
+mockito = "1.7"
 
 [[bench]]
 name = "parser"

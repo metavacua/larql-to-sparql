@@ -48,7 +48,7 @@ fn find_q4k_vindex() -> Option<PathBuf> {
         if candidate.is_dir() {
             // Verify it's actually Q4_K — non-Q4 vindexes would fail downstream.
             if let Ok(cfg) = load_vindex_config(candidate) {
-                if cfg.quant == QuantFormat::Q4k {
+                if cfg.quant == QuantFormat::Q4K {
                     return Some(candidate.clone());
                 }
             }
@@ -61,9 +61,7 @@ fn find_q4k_vindex() -> Option<PathBuf> {
 #[ignore = "loads a 4B model; ~minutes per token on CPU. Run with --ignored."]
 fn generate_q4k_cpu_produces_tokens_against_real_vindex() {
     let Some(vindex_path) = find_q4k_vindex() else {
-        eprintln!(
-            "skip: no Q4_K vindex found. Set LARQL_TEST_VINDEX=<path> to override.",
-        );
+        eprintln!("skip: no Q4_K vindex found. Set LARQL_TEST_VINDEX=<path> to override.",);
         return;
     };
     eprintln!("vindex: {}", vindex_path.display());
@@ -74,25 +72,21 @@ fn generate_q4k_cpu_produces_tokens_against_real_vindex() {
     let tokenizer = load_vindex_tokenizer(&vindex_path).expect("load tokenizer");
     let mut q4_index = VectorIndex::load_vindex(&vindex_path, &mut cb).expect("load index");
     q4_index.load_attn_q4k(&vindex_path).expect("load attn Q4K");
-    q4_index.load_interleaved_q4k(&vindex_path).expect("load FFN Q4K");
+    q4_index
+        .load_interleaved_q4k(&vindex_path)
+        .expect("load FFN Q4K");
     let _ = q4_index.load_lm_head_q4(&vindex_path);
 
     // ── Tokenise a tiny prompt ──
     let prompt = "The capital of France is";
-    let prompt_ids = larql_inference::encode_prompt(&tokenizer, &*weights.arch, prompt)
-        .expect("tokenize");
+    let prompt_ids =
+        larql_inference::encode_prompt(&tokenizer, &*weights.arch, prompt).expect("tokenize");
     eprintln!("prompt: {prompt:?} → {} tokens", prompt_ids.len());
 
     // ── Generate a handful of tokens ──
     let max_tokens = 4;
     let t0 = Instant::now();
-    let tokens = generate_q4k_cpu(
-        &mut weights,
-        &tokenizer,
-        &prompt_ids,
-        max_tokens,
-        &q4_index,
-    );
+    let tokens = generate_q4k_cpu(&mut weights, &tokenizer, &prompt_ids, max_tokens, &q4_index);
     let elapsed = t0.elapsed();
 
     eprintln!(

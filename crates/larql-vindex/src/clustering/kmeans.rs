@@ -24,7 +24,7 @@ pub fn kmeans(
     for _iter in 0..max_iterations {
         // BLAS: similarities = data @ centres.T → (n, k)
         let cpu = larql_compute::CpuBackend;
-        use larql_compute::ComputeBackend;
+        use larql_compute::MatMul;
         let sims = cpu.matmul_transb(data.view(), centres.view());
 
         let mut changed = false;
@@ -107,7 +107,7 @@ fn kmeans_pp_init(data: &Array2<f32>, k: usize) -> Array2<f32> {
         let dim = prev.len();
         let prev_2d = prev.view().into_shape_with_order((dim, 1)).unwrap();
         let cpu = larql_compute::CpuBackend;
-        use larql_compute::ComputeBackend;
+        use larql_compute::MatMul;
         let sims_2d = cpu.matmul(data.view(), prev_2d.view()); // [n, 1]
         let sims = ndarray::Array1::from_vec(sims_2d.into_raw_vec_and_offset().0);
         for i in 0..n {
@@ -140,10 +140,7 @@ mod tests {
     fn kmeans_basic() {
         let data = Array2::from_shape_vec(
             (6, 2),
-            vec![
-                1.0, 0.0, 0.9, 0.1, 0.8, 0.2,
-                0.0, 1.0, 0.1, 0.9, 0.2, 0.8,
-            ],
+            vec![1.0, 0.0, 0.9, 0.1, 0.8, 0.2, 0.0, 1.0, 0.1, 0.9, 0.2, 0.8],
         )
         .unwrap();
 
@@ -158,11 +155,7 @@ mod tests {
 
     #[test]
     fn kmeans_single_cluster() {
-        let data = Array2::from_shape_vec(
-            (3, 2),
-            vec![1.0, 0.0, 0.9, 0.1, 0.95, 0.05],
-        )
-        .unwrap();
+        let data = Array2::from_shape_vec((3, 2), vec![1.0, 0.0, 0.9, 0.1, 0.95, 0.05]).unwrap();
 
         let (centres, assignments, _) = kmeans(&data, 1, 50);
         assert_eq!(centres.shape(), &[1, 2]);

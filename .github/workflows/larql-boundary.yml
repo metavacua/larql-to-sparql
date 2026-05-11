@@ -1,0 +1,93 @@
+# larql-boundary cross-platform CI
+#
+# Runs fmt + check + clippy + tests + bench test-mode on Linux, Windows, and macOS.
+# No model weights or MLX required — the crate is pure Rust.
+#   - Linux   (x86_64-unknown-linux-gnu)
+#   - Windows (x86_64-pc-windows-msvc)
+#   - macOS   (aarch64-apple-darwin)
+
+name: larql-boundary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-boundary/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-boundary.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-boundary/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-boundary.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-boundary-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-boundary-
+
+      - name: Format check
+        run: cargo fmt -p larql-boundary -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-boundary --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-boundary --all-targets -- -D warnings
+
+      - name: Unit + integration tests
+        run: cargo test -p larql-boundary
+
+      - name: Test benchmarks (compile + smoke)
+        run: cargo test -p larql-boundary --benches
+
+      - name: Run examples
+        run: |
+          cargo run -p larql-boundary --example encode_decode
+          cargo run -p larql-boundary --example gate_decision
+
+  coverage:
+    name: coverage · ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-boundary --summary-only

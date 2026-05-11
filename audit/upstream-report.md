@@ -183,7 +183,7 @@ in the downstream fork are designed to be portable upstream:
 - `cog.toml`, `cliff.toml`, `CHANGELOG.md`, `scripts/check_changelog.sh`,
   `scripts/version_preflight.sh` — Conventional Commits + Keep a Changelog
   + SemVer preflight, axiomatically described in
-  `docs/specs/compliance-pipeline.md`.
+  `crates/larql-vindex/docs/compliance-pipeline.md`.
 - `deny.toml` — drop our additions for `AGPL-3.0-or-later` /
   `CC-BY-SA-4.0` if upstream stays Apache-2.0-only; otherwise the file is a
   reasonable starting allow-list for the resolved tree.

@@ -26,3 +26,26 @@ msgpack = ["dep:rmp-serde"]
 
 [dev-dependencies]
 assert_approx_eq = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "graph"
+harness = false
+
+[[example]]
+name = "algorithm_demo"
+
+[[example]]
+name = "bench_graph"
+
+[[example]]
+name = "edge_demo"
+
+[[example]]
+name = "filter_demo"
+
+[[example]]
+name = "graph_demo"
+
+[[example]]
+name = "serialization_demo"

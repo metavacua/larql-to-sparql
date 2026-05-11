@@ -1,0 +1,50 @@
+[package]
+name = "larql-kv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pluggable KV-cache engines for larql-inference (markov-rs, unlimited-context, turbo-quant, apollo)"
+
+[dependencies]
+larql-inference = { path = "../larql-inference" }
+larql-compute = { path = "../larql-compute" }
+larql-vindex = { path = "../larql-vindex" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+ndarray = { version = "0.16", features = ["blas"] }
+zip = { version = "2", default-features = false }
+
+rand = "0.8"
+rand_distr = "0.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+blas-src = { version = "0.10", features = ["accelerate"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
+
+[features]
+default = []
+metal = ["larql-compute/metal", "larql-inference/metal"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "engine_decode"
+harness = false
+
+[[example]]
+name = "engine_ladder"

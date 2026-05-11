@@ -37,16 +37,25 @@ impl Parser {
 
     pub fn parse(&mut self) -> Result<Statement, ParseError> {
         let stmt = self.parse_statement()?;
-        if self.check_pipe() {
+        let stmt = if self.check_pipe() {
             self.advance();
             let right = self.parse_statement()?;
-            Ok(Statement::Pipe {
+            Statement::Pipe {
                 left: Box::new(stmt),
                 right: Box::new(right),
-            })
+            }
         } else {
-            Ok(stmt)
+            stmt
+        };
+
+        if !matches!(self.peek(), Token::Eof) {
+            return Err(ParseError(format!(
+                "unexpected trailing token: {:?}",
+                self.peek()
+            )));
         }
+
+        Ok(stmt)
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {

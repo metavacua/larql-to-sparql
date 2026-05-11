@@ -6,11 +6,14 @@
 
 pub mod bench_cmd;
 pub mod cache;
+pub mod diag_cmd;
 pub mod link_cmd;
 pub mod list_cmd;
+pub mod model_cmd;
+pub mod publish_cmd;
 pub mod pull_cmd;
 pub mod rm_cmd;
 pub mod run_cmd;
-pub mod publish_cmd;
+pub mod shannon_cmd;
 pub mod show_cmd;
 pub mod slice_cmd;

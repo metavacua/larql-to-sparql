@@ -17,6 +17,8 @@ pub const SHADER: &str = r#"
 // Output: out[seq, num_q * head_dim]
 //
 // One threadgroup per (head, query_position). Threads cooperate on key-dimension dot products.
+constant uint MAX_FUSED_ATTENTION_SEQ_LEN = 4096;
+
 kernel void fused_attention(
     device const float* Q       [[buffer(0)]],
     device const float* K       [[buffer(1)]],
@@ -46,36 +48,43 @@ kernel void fused_attention(
 
     // ── Local Q with optional RoPE (partial rotation support) ──
     // Only the first rdim dimensions are rotated; the rest pass through.
+    //
+    // Strided load: when head_dim > tg_sz (Gemma 4 global layers have
+    // head_dim=512 with a 256-thread TG), each thread covers multiple
+    // slots so every tg_q[d] is populated. Previously this was gated on
+    // `if (tid < head_dim)`, which silently zeroed tg_q[256..512] and
+    // gave ~6% magnitude loss in attention output on global layers.
     threadgroup float tg_q[512];   // max head_dim = 512
-    if (tid < head_dim) {
-        uint q_idx = qi * num_q * head_dim + head * head_dim + tid;
+    for (uint d = tid; d < head_dim; d += tg_sz) {
+        uint q_idx = qi * num_q * head_dim + head * head_dim + d;
         float q_val = Q[q_idx];
 
-        if (skip_rope == 0 && tid < rdim) {
+        if (skip_rope == 0 && d < rdim) {
             // RoPE: split-half rotation within rotary dims
-            float freq = 1.0f / pow(rope_base, float(2 * (tid % hdim)) / float(rdim));
+            float freq = 1.0f / pow(rope_base, float(2 * (d % hdim)) / float(rdim));
             float angle = float(qi) * freq;
             float cos_a = cos(angle);
             float sin_a = sin(angle);
 
-            uint pair_tid = (tid < hdim) ? tid + hdim : tid - hdim;
-            uint pair_idx = qi * num_q * head_dim + head * head_dim + pair_tid;
+            uint pair_d = (d < hdim) ? d + hdim : d - hdim;
+            uint pair_idx = qi * num_q * head_dim + head * head_dim + pair_d;
             float pair_val = Q[pair_idx];
 
             float rotated;
-            if (tid < hdim) {
+            if (d < hdim) {
                 rotated = q_val * cos_a - pair_val * sin_a;
             } else {
                 rotated = pair_val * sin_a + q_val * cos_a;
             }
-            tg_q[tid] = rotated;
+            tg_q[d] = rotated;
         } else {
-            tg_q[tid] = q_val;
+            tg_q[d] = q_val;
         }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // Optional QK-norm: normalize Q vector
+    // Optional QK-norm: normalize Q vector.
+    // Strided write so head_dim > tg_sz works (Gemma 4 global: 512).
     if (use_qk_norm != 0) {
         threadgroup float tg_norm_sum;
         if (tid == 0) {
@@ -84,14 +93,14 @@ kernel void fused_attention(
             tg_norm_sum = rsqrt(s + 1e-6f);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (tid < head_dim) {
-            tg_q[tid] *= tg_norm_sum;
+        for (uint d = tid; d < head_dim; d += tg_sz) {
+            tg_q[d] *= tg_norm_sum;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
     // ── Attention scores: Q · K^T for all k ≤ qi ──
-    threadgroup float tg_scores[4096]; // max seq_len
+    threadgroup float tg_scores[MAX_FUSED_ATTENTION_SEQ_LEN];
     threadgroup float tg_max = 0.0f;
     threadgroup float tg_sum = 0.0f;
 
@@ -186,3 +195,8 @@ kernel void fused_attention(
     }
 }
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "fused_attention";
+}

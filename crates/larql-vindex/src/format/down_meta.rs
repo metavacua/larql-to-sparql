@@ -13,10 +13,18 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use crate::error::VindexError;
+use crate::format::filenames::*;
 use crate::index::FeatureMeta;
 
 const MAGIC: u32 = 0x444D4554; // "DMET"
+const LEGACY_LITERAL_MAGIC: u32 = 0x54454D44; // bytes written as b"DMET"
 const FORMAT_VERSION: u32 = 1;
+const U32_BYTES: usize = std::mem::size_of::<u32>();
+const F32_BYTES: usize = std::mem::size_of::<f32>();
+const HEADER_FIELDS: usize = 4;
+const HEADER_BYTES: usize = HEADER_FIELDS * U32_BYTES;
+const RECORD_FIXED_BYTES: usize = U32_BYTES + F32_BYTES;
+const TOP_K_RECORD_BYTES: usize = U32_BYTES + F32_BYTES;
 
 /// Write down_meta in binary format.
 pub fn write_binary(
@@ -24,7 +32,7 @@ pub fn write_binary(
     down_meta: &[Option<Vec<Option<FeatureMeta>>>],
     top_k_count: usize,
 ) -> Result<usize, VindexError> {
-    let path = dir.join("down_meta.bin");
+    let path = dir.join(DOWN_META_BIN);
     let file = std::fs::File::create(&path)?;
     let mut w = BufWriter::new(file);
     let mut total = 0usize;
@@ -91,13 +99,13 @@ pub fn read_binary(
     dir: &Path,
     tokenizer: &tokenizers::Tokenizer,
 ) -> Result<(Vec<Option<Vec<Option<FeatureMeta>>>>, usize), VindexError> {
-    let path = dir.join("down_meta.bin");
+    let path = dir.join(DOWN_META_BIN);
     let file = std::fs::File::open(&path)?;
     let mut r = BufReader::new(file);
 
     // Header
     let magic = read_u32(&mut r)?;
-    if magic != MAGIC {
+    if magic != MAGIC && magic != LEGACY_LITERAL_MAGIC {
         return Err(VindexError::Parse(format!(
             "invalid down_meta.bin magic: expected 0x{MAGIC:08X}, got 0x{magic:08X}"
         )));
@@ -170,7 +178,7 @@ pub fn read_binary(
 
 /// Check if a binary down_meta.bin exists in the directory.
 pub fn has_binary(dir: &Path) -> bool {
-    dir.join("down_meta.bin").exists()
+    dir.join(DOWN_META_BIN).exists()
 }
 
 /// Mmap down_meta.bin and build a lazy reader (zero heap for feature data).
@@ -179,39 +187,64 @@ pub fn mmap_binary(
     dir: &Path,
     tokenizer: std::sync::Arc<tokenizers::Tokenizer>,
 ) -> Result<crate::index::core::DownMetaMmap, VindexError> {
-    let path = dir.join("down_meta.bin");
+    let path = dir.join(DOWN_META_BIN);
     let file = std::fs::File::open(&path)?;
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
-    if mmap.len() < 16 {
+    if mmap.len() < HEADER_BYTES {
         return Err(VindexError::Parse("down_meta.bin too small".into()));
     }
 
     // Read header
     let magic = u32::from_le_bytes([mmap[0], mmap[1], mmap[2], mmap[3]]);
-    if magic != MAGIC {
+    if magic != MAGIC && magic != LEGACY_LITERAL_MAGIC {
         return Err(VindexError::Parse(format!(
             "invalid down_meta.bin magic: 0x{magic:08X}"
         )));
     }
-    let _version = u32::from_le_bytes([mmap[4], mmap[5], mmap[6], mmap[7]]);
+    let version = u32::from_le_bytes([mmap[4], mmap[5], mmap[6], mmap[7]]);
+    if version != FORMAT_VERSION {
+        return Err(VindexError::Parse(format!(
+            "unsupported down_meta.bin version: {version}"
+        )));
+    }
     let num_layers = u32::from_le_bytes([mmap[8], mmap[9], mmap[10], mmap[11]]) as usize;
     let top_k_count = u32::from_le_bytes([mmap[12], mmap[13], mmap[14], mmap[15]]) as usize;
 
-    let record_size = 8 + top_k_count * 8; // top_token_id(4) + c_score(4) + top_k*(tid(4)+logit(4))
+    let record_size = top_k_count
+        .checked_mul(TOP_K_RECORD_BYTES)
+        .and_then(|n| n.checked_add(RECORD_FIXED_BYTES))
+        .ok_or_else(|| VindexError::Parse("down_meta.bin record size overflow".into()))?;
 
     // Build offset table by scanning per-layer num_features headers
     let mut layer_offsets = Vec::with_capacity(num_layers);
     let mut layer_num_features = Vec::with_capacity(num_layers);
-    let mut pos = 16usize; // after header
+    let mut pos = HEADER_BYTES;
 
     for _ in 0..num_layers {
-        if pos + 4 > mmap.len() { break; }
-        let nf = u32::from_le_bytes([mmap[pos], mmap[pos+1], mmap[pos+2], mmap[pos+3]]) as usize;
-        pos += 4; // skip num_features u32
+        if pos + U32_BYTES > mmap.len() {
+            return Err(VindexError::Parse(
+                "truncated down_meta.bin layer header".into(),
+            ));
+        }
+        let nf =
+            u32::from_le_bytes([mmap[pos], mmap[pos + 1], mmap[pos + 2], mmap[pos + 3]]) as usize;
+        pos += U32_BYTES;
         layer_offsets.push(pos); // records start here
         layer_num_features.push(nf);
-        pos += nf * record_size; // skip all records
+        let layer_bytes = nf
+            .checked_mul(record_size)
+            .ok_or_else(|| VindexError::Parse("down_meta.bin layer size overflow".into()))?;
+        let layer_end = pos
+            .checked_add(layer_bytes)
+            .ok_or_else(|| VindexError::Parse("down_meta.bin layer end overflow".into()))?;
+        if layer_end > mmap.len() {
+            return Err(VindexError::Parse(format!(
+                "truncated down_meta.bin records for layer {}",
+                layer_offsets.len() - 1
+            )));
+        }
+        pos = layer_end; // skip all records
     }
 
     Ok(crate::index::core::DownMetaMmap {

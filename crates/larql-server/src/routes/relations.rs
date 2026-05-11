@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
-use crate::state::{AppState, LoadedModel};
+use crate::state::{elapsed_ms, AppState, LoadedModel};
 
 /// Content-word filter matching the local executor's `is_content_token`.
 fn is_content_token(tok: &str) -> bool {
@@ -17,9 +17,17 @@ fn is_content_token(tok: &str) -> bool {
         return false;
     }
     // is_readable_token inline
-    let readable = tok.chars().filter(|c| {
-        c.is_ascii_alphanumeric() || *c == ' ' || *c == '-' || *c == '\'' || *c == '.' || *c == ','
-    }).count();
+    let readable = tok
+        .chars()
+        .filter(|c| {
+            c.is_ascii_alphanumeric()
+                || *c == ' '
+                || *c == '-'
+                || *c == '\''
+                || *c == '.'
+                || *c == ','
+        })
+        .count();
     let total = tok.chars().count();
     if readable * 2 < total || total == 0 {
         return false;
@@ -43,22 +51,93 @@ fn is_content_token(tok: &str) -> bool {
     let lower = tok.to_lowercase();
     !matches!(
         lower.as_str(),
-        "the" | "and" | "for" | "but" | "not" | "you" | "all" | "can"
-        | "her" | "was" | "one" | "our" | "out" | "are" | "has" | "his"
-        | "how" | "its" | "may" | "new" | "now" | "old" | "see" | "way"
-        | "who" | "did" | "get" | "let" | "say" | "she" | "too" | "use"
-        | "from" | "have" | "been" | "will" | "with" | "this" | "that"
-        | "they" | "were" | "some" | "them" | "than" | "when"
-        | "what" | "your" | "each" | "make" | "like" | "just" | "over"
-        | "such" | "take" | "also" | "into" | "only" | "very" | "more"
-        | "does" | "most" | "about" | "which" | "their" | "would" | "there"
-        | "could" | "other" | "after" | "being" | "where" | "these" | "those"
-        | "first" | "should" | "because" | "through" | "before"
-        | "par" | "aux" | "che" | "del"
+        "the"
+            | "and"
+            | "for"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "her"
+            | "was"
+            | "one"
+            | "our"
+            | "out"
+            | "are"
+            | "has"
+            | "his"
+            | "how"
+            | "its"
+            | "may"
+            | "new"
+            | "now"
+            | "old"
+            | "see"
+            | "way"
+            | "who"
+            | "did"
+            | "get"
+            | "let"
+            | "say"
+            | "she"
+            | "too"
+            | "use"
+            | "from"
+            | "have"
+            | "been"
+            | "will"
+            | "with"
+            | "this"
+            | "that"
+            | "they"
+            | "were"
+            | "some"
+            | "them"
+            | "than"
+            | "when"
+            | "what"
+            | "your"
+            | "each"
+            | "make"
+            | "like"
+            | "just"
+            | "over"
+            | "such"
+            | "take"
+            | "also"
+            | "into"
+            | "only"
+            | "very"
+            | "more"
+            | "does"
+            | "most"
+            | "about"
+            | "which"
+            | "their"
+            | "would"
+            | "there"
+            | "could"
+            | "other"
+            | "after"
+            | "being"
+            | "where"
+            | "these"
+            | "those"
+            | "first"
+            | "should"
+            | "because"
+            | "through"
+            | "before"
+            | "par"
+            | "aux"
+            | "che"
+            | "del"
     )
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RelationsParams {
     /// Filter by label source (future use).
     #[serde(default)]
@@ -66,26 +145,14 @@ pub struct RelationsParams {
     pub source: Option<String>,
 }
 
-fn list_relations(
-    model: &LoadedModel,
-) -> Result<serde_json::Value, ServerError> {
+fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
 
     // Scan knowledge band layers (14-27 for Gemma, or use config).
-    let config = &model.config;
-    let last = config.num_layers.saturating_sub(1);
-    let bands = config
-        .layer_bands
-        .clone()
-        .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
-        .unwrap_or(larql_vindex::LayerBands {
-            syntax: (0, last),
-            knowledge: (0, last),
-            output: (0, last),
-        });
+    let bands = crate::band_utils::get_layer_bands(model);
 
     let scan_layers: Vec<usize> = all_layers
         .iter()
@@ -116,7 +183,9 @@ fn list_relations(
                     continue;
                 }
                 let key = tok.to_lowercase();
-                let examples: Vec<String> = meta.top_k.iter()
+                let examples: Vec<String> = meta
+                    .top_k
+                    .iter()
                     .filter(|t| t.token.trim() != tok && is_content_token(t.token.trim()))
                     .take(3)
                     .map(|t| t.token.trim().to_string())
@@ -168,46 +237,63 @@ fn list_relations(
     }
     let mut probe_sorted: Vec<(&String, &usize)> = probe_relations.iter().collect();
     probe_sorted.sort_by(|a, b| b.1.cmp(a.1));
-    let probe_list: Vec<serde_json::Value> = probe_sorted.iter()
+    let probe_list: Vec<serde_json::Value> = probe_sorted
+        .iter()
         .map(|(name, count)| serde_json::json!({"name": name, "count": count}))
         .collect();
-
-    let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     Ok(serde_json::json!({
         "relations": relations,
         "probe_relations": probe_list,
         "probe_count": model.probe_labels.len(),
         "total": tokens.len(),
-        "latency_ms": (latency_ms * 10.0).round() / 10.0,
+        "latency_ms": elapsed_ms(start),
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/relations",
+    tag = "browse",
+    params(RelationsParams),
+    responses(
+        (status = 200, description = "Known relation types across the knowledge band", body = crate::openapi::schemas::RelationsResponse),
+        (status = 500, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_relations(
     State(state): State<Arc<AppState>>,
     Query(_params): Query<RelationsParams>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     state.bump_requests();
-    let model = state
-        .model(None)
-        .ok_or_else(|| ServerError::NotFound("no model loaded".into()))?;
-    let model = Arc::clone(model);
+    let model = state.model_or_err(None)?.clone();
     let result = tokio::task::spawn_blocking(move || list_relations(&model))
         .await
         .map_err(|e| ServerError::Internal(e.to_string()))??;
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/{model_id}/relations",
+    tag = "browse",
+    params(
+        ("model_id" = String, Path, description = "Id of a loaded vindex."),
+        RelationsParams,
+    ),
+    responses(
+        (status = 200, body = crate::openapi::schemas::RelationsResponse),
+        (status = 404, body = crate::error::ErrorBody),
+        (status = 500, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_relations_multi(
     State(state): State<Arc<AppState>>,
     Path(model_id): Path<String>,
     Query(_params): Query<RelationsParams>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     state.bump_requests();
-    let model = state
-        .model(Some(&model_id))
-        .ok_or_else(|| ServerError::NotFound(format!("model '{}' not found", model_id)))?;
-    let model = Arc::clone(model);
+    let model = state.model_or_err(Some(&model_id))?.clone();
     let result = tokio::task::spawn_blocking(move || list_relations(&model))
         .await
         .map_err(|e| ServerError::Internal(e.to_string()))??;

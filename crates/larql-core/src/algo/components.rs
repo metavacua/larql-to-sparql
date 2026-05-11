@@ -11,15 +11,12 @@ pub fn connected_components(graph: &Graph) -> Vec<Vec<String>> {
     let mut visited = std::collections::HashSet::new();
     let mut components = Vec::new();
 
-    // Collect all node names
-    let mut all_nodes = std::collections::HashSet::new();
-    for edge in graph.edges() {
-        all_nodes.insert(edge.subject.clone());
-        all_nodes.insert(edge.object.clone());
-    }
+    let all_nodes = graph.list_entities();
 
-    for node in &all_nodes {
-        if visited.contains(node) { continue; }
+    for node in all_nodes {
+        if visited.contains(&node) {
+            continue;
+        }
 
         // BFS from this node
         let mut component = Vec::new();
@@ -50,7 +47,7 @@ pub fn connected_components(graph: &Graph) -> Vec<Vec<String>> {
         components.push(component);
     }
 
-    components.sort_by_key(|c| std::cmp::Reverse(c.len()));
+    components.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
     components
 }
 
@@ -62,7 +59,9 @@ pub fn are_connected(graph: &Graph, a: &str, b: &str) -> bool {
     visited.insert(a.to_string());
 
     while let Some(current) = queue.pop_front() {
-        if current == b { return true; }
+        if current == b {
+            return true;
+        }
         for edge in graph.select(&current, None) {
             if !visited.contains(&edge.object) {
                 visited.insert(edge.object.clone());

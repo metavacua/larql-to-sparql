@@ -15,7 +15,7 @@
 //!   the model's FFN slots. Vindex-driven; many edges per run.
 //!
 //! The install primitive in [`edge::install_edge`] mirrors the convention
-//! described in `experiments/07_wasm_compute/WASM_GATE_ARCHITECTURE.md` §3.1.2.
+//! described in `~/chris-source/chris-experiments/foundations/07_wasm_compute/WASM_GATE_ARCHITECTURE.md` §3.1.2.
 
 use std::path::PathBuf;
 
@@ -45,7 +45,7 @@ pub struct CompileArgs {
     /// Gate scale for compiled edges (default: 1.0).
     /// Previous default 30.0 saturated silu on every question prompt and
     /// leaked the edge into unrelated queries; 1.0 keeps natural usage
-    /// clean on Gemma 3 4B. See experiments/07_wasm_compute/RESULTS.md.
+    /// clean on Gemma 3 4B. See ~/chris-source/chris-experiments/foundations/07_wasm_compute/RESULTS.md.
     #[arg(long, default_value = "1.0")]
     pub gate_scale: f32,
 

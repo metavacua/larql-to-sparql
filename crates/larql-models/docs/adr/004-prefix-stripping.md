@@ -23,9 +23,15 @@ fn key_prefixes_to_strip(&self) -> &[&str] {
 
 The loader tries each prefix in order; first match wins. After stripping, all architectures use the same canonical key format: `layers.{N}.self_attn.q_proj.weight`.
 
+GGUF uses a separate normalization table in `loading/gguf.rs` because its keys
+are not only prefixed but structurally different (`blk.N.attn_q.weight`,
+`token_embd.weight`, etc.). Both safetensors prefix stripping and GGUF key
+normalization produce the same canonical keys before filtering or insertion.
+
 ## Consequences
 
 - **Good**: Architecture-specific key patterns centralized in one method.
 - **Good**: Loader is architecture-agnostic — just calls `key_prefixes_to_strip()`.
 - **Good**: Order matters: longer prefixes tried first, preventing partial matches.
+- **Good**: Walk-only filtering runs against canonical keys, including GGUF keys before dequantization.
 - **Trade-off**: If a new wrapper nesting is encountered, must add a prefix. Low risk — prefixes are model-family-level, not per-checkpoint.

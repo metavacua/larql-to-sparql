@@ -515,7 +515,7 @@ jobs:
               `Per Axiom A5 this does not block merge mechanically; it ` +
               `signals that the branch is not yet a valid candidate ` +
               `extension of the development branch. Remediate per the ` +
-              `contract in \`docs/specs/compliance-pipeline.md\` and push.`,
+              `contract in \`crates/larql-vindex/docs/compliance-pipeline.md\` and push.`,
             ].join("\n");
             await github.rest.issues.createComment({
               owner: context.repo.owner,

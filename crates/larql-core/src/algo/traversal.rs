@@ -21,6 +21,7 @@ pub struct TraversalResult {
 /// Breadth-first search from a source entity.
 pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
     let mut visited: HashSet<String> = HashSet::new();
+    let mut discovered: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
@@ -28,6 +29,7 @@ pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
     let mut max_depth_reached = 0;
 
     queue.push_back((source.to_string(), 0));
+    discovered.insert(source.to_string());
 
     while let Some((node, depth)) = queue.pop_front() {
         if visited.contains(&node) || depth > max_depth {
@@ -41,8 +43,8 @@ pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
         }
 
         for edge in graph.select(&node, None) {
-            edges.push(edge.clone());
-            if !visited.contains(&edge.object) && depth < max_depth {
+            if depth < max_depth && discovered.insert(edge.object.clone()) {
+                edges.push(edge.clone());
                 queue.push_back((edge.object.clone(), depth + 1));
             }
         }
@@ -59,11 +61,13 @@ pub fn bfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
 /// Depth-first search from a source entity.
 pub fn dfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
     let mut visited: HashSet<String> = HashSet::new();
+    let mut discovered: HashSet<String> = HashSet::new();
     let mut stack: Vec<(String, usize)> = vec![(source.to_string(), 0)];
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut depths = HashMap::new();
     let mut max_depth_reached = 0;
+    discovered.insert(source.to_string());
 
     while let Some((node, depth)) = stack.pop() {
         if visited.contains(&node) || depth > max_depth {
@@ -77,8 +81,8 @@ pub fn dfs(graph: &Graph, source: &str, max_depth: usize) -> TraversalResult {
         }
 
         for edge in graph.select(&node, None) {
-            edges.push(edge.clone());
-            if !visited.contains(&edge.object) && depth < max_depth {
+            if depth < max_depth && discovered.insert(edge.object.clone()) {
+                edges.push(edge.clone());
                 stack.push((edge.object.clone(), depth + 1));
             }
         }

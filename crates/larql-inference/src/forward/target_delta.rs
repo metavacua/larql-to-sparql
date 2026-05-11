@@ -6,7 +6,7 @@
 //! with a KL regulariser keeping the distribution close to baseline.
 //!
 //! This is the per-fact pre-compute that the Python reference at
-//! `experiments/15_v11_model/vindex_compile_rome_v11.py::optimise_target_delta`
+//! `~/chris-source/chris-experiments/compilation/15_v11_model/vindex_compile_rome_v11.py::optimise_target_delta`
 //! runs before MEMIT's closed-form W-edit. Without it, MEMIT's V*
 //! defaults to `target_alpha × embed(target)` — a rough direction
 //! that doesn't account for how downstream layers transform the
@@ -114,7 +114,10 @@ pub struct TargetDelta {
 /// Softmax cross-entropy loss for a 1-D logits vector and a single
 /// target id. Returns `(loss, dlogits)` where `dlogits[j] = softmax[j] - onehot[target][j]`.
 /// Used at the output end — no tape needed since this is the loss itself.
-pub(crate) fn cross_entropy_and_grad(logits: ArrayView1<f32>, target_id: u32) -> (f32, Array1<f32>) {
+pub(crate) fn cross_entropy_and_grad(
+    logits: ArrayView1<f32>,
+    target_id: u32,
+) -> (f32, Array1<f32>) {
     // Numerically stable log-softmax
     let max = logits.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
     let shifted: Array1<f32> = logits.map(|&v| v - max);
@@ -133,7 +136,7 @@ pub(crate) fn cross_entropy_and_grad(logits: ArrayView1<f32>, target_id: u32) ->
 /// `lm_head.weight == embed.weight`, so we use the same matrix.
 pub(crate) fn lm_head_backward(
     embed_weight: ArrayView2<f32>, // (vocab, hidden)
-    dlogits: ArrayView1<f32>,       // (vocab,)
+    dlogits: ArrayView1<f32>,      // (vocab,)
 ) -> Array1<f32> {
     // ∂loss/∂h[i] = Σ_v dlogits[v] · embed[v, i]
     // = embed.T @ dlogits  →  shape (hidden,)
@@ -235,7 +238,11 @@ pub(crate) fn gated_ffn_backward(
     }
     // silu and σ
     let sigma: Array1<f32> = g_pre.map(|&z| 1.0 / (1.0 + (-z).exp()));
-    let g: Array1<f32> = g_pre.iter().zip(sigma.iter()).map(|(&z, &s)| z * s).collect();
+    let g: Array1<f32> = g_pre
+        .iter()
+        .zip(sigma.iter())
+        .map(|(&z, &s)| z * s)
+        .collect();
 
     // d_act = down_w.T @ d_out → shape ffn_dim
     let mut d_act = Array1::<f32>::zeros(ffn_dim);
@@ -309,6 +316,8 @@ pub fn optimise_target_delta(
     install_layer: usize,
     opts: TargetDeltaOpts,
 ) -> Result<TargetDelta, String> {
+    validate_target_delta_inputs(weights, tokens, target_id)?;
+
     let n_layers = weights.arch.config().num_layers;
     if install_layer >= n_layers {
         return Err(format!(
@@ -341,9 +350,7 @@ pub fn optimise_target_delta(
     let norm_weight = Array1::from(norm_weight_vec);
     let inv_scale = 1.0 / weights.arch.logits_scaling();
     if weights.arch.final_logit_softcapping().is_some() {
-        return Err(
-            "target-delta opt doesn't yet handle logit softcap — port required".into(),
-        );
+        return Err("target-delta opt doesn't yet handle logit softcap — port required".into());
     }
 
     // Baseline forward (no perturbation) for KL regulariser.
@@ -418,8 +425,12 @@ pub fn optimise_target_delta(
         // RMSNorm backward at the last position:
         // h_pre_norm[-1] is input; norm_weight is scale; d_h_final is upstream grad.
         let last_pre = out.h_pre_norm.row(out.h_pre_norm.nrows() - 1).to_owned();
-        let d_h_pre_norm =
-            rmsnorm_backward_pos(last_pre.view(), norm_weight.view(), d_h_final.view(), RMS_EPS);
+        let d_h_pre_norm = rmsnorm_backward_pos(
+            last_pre.view(),
+            norm_weight.view(),
+            d_h_final.view(),
+            RMS_EPS,
+        );
 
         // For install_layer = n_layers - 1, δ is added directly to
         // h[-1] after the last block. So ∂loss/∂δ = d_h_pre_norm.
@@ -456,6 +467,101 @@ pub fn optimise_target_delta(
     })
 }
 
+fn validate_target_delta_inputs(
+    weights: &ModelWeights,
+    tokens: &[u32],
+    target_id: u32,
+) -> Result<(), String> {
+    if tokens.is_empty() {
+        return Err("optimise_target_delta: prompt tokens may not be empty".into());
+    }
+
+    let cfg = weights.arch.config();
+    let hidden = cfg.hidden_size;
+    let vocab = weights.vocab_size;
+
+    if cfg.num_layers == 0 {
+        return Err("optimise_target_delta: model has zero layers".into());
+    }
+    if hidden == 0 {
+        return Err("optimise_target_delta: hidden_size may not be zero".into());
+    }
+    if vocab == 0 {
+        return Err("optimise_target_delta: vocab_size may not be zero".into());
+    }
+    if weights.hidden_size != hidden {
+        return Err(format!(
+            "optimise_target_delta: cached hidden_size {} != architecture hidden_size {hidden}",
+            weights.hidden_size
+        ));
+    }
+    if let Some(arch_vocab) = cfg.vocab_size {
+        if arch_vocab != vocab {
+            return Err(format!(
+                "optimise_target_delta: cached vocab_size {vocab} != architecture vocab_size {arch_vocab}",
+            ));
+        }
+    }
+
+    if weights.embed.nrows() != vocab || weights.lm_head.nrows() != vocab {
+        return Err(format!(
+            "optimise_target_delta: vocab_size {vocab} does not match embed/lm_head rows ({}/{})",
+            weights.embed.nrows(),
+            weights.lm_head.nrows()
+        ));
+    }
+
+    let target = target_id as usize;
+    if target >= vocab {
+        return Err(format!(
+            "optimise_target_delta: target_id {target_id} outside vocab size {vocab}"
+        ));
+    }
+
+    if let Some(&bad) = tokens.iter().find(|&&id| id as usize >= vocab) {
+        return Err(format!(
+            "optimise_target_delta: token id {bad} outside vocab size {vocab}"
+        ));
+    }
+
+    let embed_shape = weights.embed.shape();
+    if embed_shape != [vocab, hidden] {
+        return Err(format!(
+            "optimise_target_delta: embed shape {:?} != [{vocab}, {hidden}]",
+            embed_shape
+        ));
+    }
+
+    let lm_shape = weights.lm_head.shape();
+    if lm_shape != [vocab, hidden] {
+        return Err(format!(
+            "optimise_target_delta: lm_head shape {:?} != [{vocab}, {hidden}]",
+            lm_shape
+        ));
+    }
+
+    let final_norm_key = weights.arch.final_norm_key();
+    let norm_len = weights
+        .vectors
+        .get(final_norm_key)
+        .map(|v| v.len())
+        .ok_or_else(|| format!("missing final norm weight key: {final_norm_key}"))?;
+    if norm_len != hidden {
+        return Err(format!(
+            "optimise_target_delta: final norm weight len {norm_len} != hidden_size {hidden}"
+        ));
+    }
+
+    let logits_scaling = weights.arch.logits_scaling();
+    if !logits_scaling.is_finite() || logits_scaling == 0.0 {
+        return Err(format!(
+            "optimise_target_delta: invalid logits scaling {logits_scaling}"
+        ));
+    }
+
+    Ok(())
+}
+
 /// Softmax over a 1-D vector (numerically stable).
 fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
     let max = logits.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
@@ -467,8 +573,82 @@ fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::make_test_weights;
     use ndarray::arr1;
     use ndarray::arr2;
+    use ndarray::Array2;
+
+    fn assert_opt_err_contains(tokens: &[u32], target_id: u32, needle: &str) {
+        let weights = make_test_weights();
+        let err = optimise_target_delta(
+            &weights,
+            tokens,
+            target_id,
+            weights.num_layers - 1,
+            TargetDeltaOpts {
+                steps: 0,
+                ..TargetDeltaOpts::default()
+            },
+        )
+        .expect_err("invalid input should return Err");
+        assert!(
+            err.contains(needle),
+            "expected error to contain {needle:?}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_empty_prompt() {
+        assert_opt_err_contains(&[], 0, "prompt tokens may not be empty");
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_target_outside_vocab() {
+        let weights = make_test_weights();
+        assert_opt_err_contains(&[0], weights.vocab_size as u32, "target_id");
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_token_outside_vocab() {
+        let weights = make_test_weights();
+        assert_opt_err_contains(&[weights.vocab_size as u32], 0, "token id");
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_bad_lm_head_shape() {
+        let mut weights = make_test_weights();
+        weights.lm_head =
+            Array2::<f32>::zeros((weights.vocab_size, weights.hidden_size + 1)).into_shared();
+
+        let err = optimise_target_delta(
+            &weights,
+            &[0],
+            0,
+            weights.num_layers - 1,
+            TargetDeltaOpts::default(),
+        )
+        .expect_err("bad lm_head shape should return Err");
+        assert!(err.contains("lm_head shape"), "{err}");
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_bad_final_norm_shape() {
+        let mut weights = make_test_weights();
+        let key = weights.arch.final_norm_key().to_string();
+        weights
+            .vectors
+            .insert(key, vec![1.0; weights.hidden_size + 1]);
+
+        let err = optimise_target_delta(
+            &weights,
+            &[0],
+            0,
+            weights.num_layers - 1,
+            TargetDeltaOpts::default(),
+        )
+        .expect_err("bad final norm shape should return Err");
+        assert!(err.contains("final norm weight len"), "{err}");
+    }
 
     #[test]
     fn cross_entropy_and_grad_matches_numerical() {
@@ -537,17 +717,18 @@ mod tests {
             let g: Array1<f32> = g_pre.map(|&z| z / (1.0 + (-z).exp()));
             let act: Array1<f32> = g.iter().zip(u.iter()).map(|(&a, &b)| a * b).collect();
             (0..down_w.nrows())
-                .map(|k| {
-                    (0..down_w.ncols())
-                        .map(|i| down_w[[k, i]] * act[i])
-                        .sum()
-                })
+                .map(|k| (0..down_w.ncols()).map(|i| down_w[[k, i]] * act[i]).sum())
                 .collect()
         };
         // Loss = sum(out) so d_out = ones
         let d_out = Array1::from_elem(3, 1.0_f32);
-        let dx_analytical =
-            gated_ffn_backward(x.view(), gate_w.view(), up_w.view(), down_w.view(), d_out.view());
+        let dx_analytical = gated_ffn_backward(
+            x.view(),
+            gate_w.view(),
+            up_w.view(),
+            down_w.view(),
+            d_out.view(),
+        );
         let h = 1e-4_f32;
         for i in 0..x.len() {
             let mut xp = x.clone();
@@ -558,8 +739,119 @@ mod tests {
             let lm: f32 = fwd(&xm).iter().sum();
             let num = (lp - lm) / (2.0 * h);
             let err = (dx_analytical[i] - num).abs();
-            assert!(err < 1e-2, "dx[{i}]: analytical {} vs numerical {num}", dx_analytical[i]);
+            assert!(
+                err < 1e-2,
+                "dx[{i}]: analytical {} vs numerical {num}",
+                dx_analytical[i]
+            );
         }
+    }
+
+    #[test]
+    fn target_delta_opts_default_matches_python_reference() {
+        let d = TargetDeltaOpts::default();
+        assert_eq!(d.steps, 60);
+        assert!((d.lr - 0.5).abs() < 1e-6);
+        assert!((d.kl_weight - 0.0625).abs() < 1e-6);
+        assert!(!d.normalise);
+    }
+
+    #[test]
+    fn optimise_target_delta_happy_path_returns_finite_delta() {
+        // Drive the actual Adam loop with tiny steps so we touch every
+        // line of the optimisation body without burning CPU.
+        let weights = make_test_weights();
+        let opts = TargetDeltaOpts {
+            steps: 2,
+            lr: 0.1,
+            kl_weight: 0.0,
+            normalise: false,
+        };
+        let install_layer = weights.num_layers - 1;
+        let result = optimise_target_delta(&weights, &[0u32], 1, install_layer, opts)
+            .expect("happy path must succeed");
+        assert_eq!(result.layer, install_layer);
+        assert_eq!(result.delta.len(), weights.hidden_size);
+        assert!(result.delta.iter().all(|v| v.is_finite()));
+        assert!(result.final_loss.is_finite());
+        assert!(result.baseline_loss.is_finite());
+    }
+
+    #[test]
+    fn optimise_target_delta_with_kl_weight_runs_kl_branch() {
+        // kl_weight != 0.0 → triggers the `dlogits += kl * (cur - base)`
+        // and `kl_val` accumulation branches.
+        let weights = make_test_weights();
+        let opts = TargetDeltaOpts {
+            steps: 1,
+            lr: 0.1,
+            kl_weight: 0.05,
+            normalise: false,
+        };
+        let install_layer = weights.num_layers - 1;
+        let result = optimise_target_delta(&weights, &[0u32], 1, install_layer, opts)
+            .expect("kl-weighted opt must succeed");
+        assert!(result.final_loss.is_finite());
+    }
+
+    #[test]
+    fn optimise_target_delta_with_normalise_returns_unit_norm_delta() {
+        let weights = make_test_weights();
+        let opts = TargetDeltaOpts {
+            steps: 2,
+            lr: 0.5,
+            kl_weight: 0.0,
+            normalise: true,
+        };
+        let install_layer = weights.num_layers - 1;
+        let result = optimise_target_delta(&weights, &[0u32, 1], 2, install_layer, opts)
+            .expect("normalise must succeed");
+        let norm: f32 = result.delta.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Either zero (degenerate optimization) or unit norm.
+        assert!(
+            norm == 0.0 || (norm - 1.0).abs() < 1e-4,
+            "normalised delta should have unit norm or be zero, got {norm}"
+        );
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_mid_layer() {
+        let weights = make_test_weights();
+        // num_layers=2 in test fixture, so install_layer=0 is mid-layer.
+        let err = optimise_target_delta(&weights, &[0u32], 0, 0, TargetDeltaOpts::default())
+            .expect_err("mid-layer install must error");
+        assert!(
+            err.contains("only install_layer = n_layers-1"),
+            "expected mid-layer rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn optimise_target_delta_rejects_layer_out_of_range() {
+        let weights = make_test_weights();
+        let err = optimise_target_delta(
+            &weights,
+            &[0u32],
+            0,
+            weights.num_layers + 5,
+            TargetDeltaOpts::default(),
+        )
+        .expect_err("install_layer >= n_layers must error");
+        assert!(err.contains("≥ n_layers"), "got: {err}");
+    }
+
+    #[test]
+    fn softmax_1d_sums_to_one_and_handles_extreme_logits() {
+        // Tiny + huge logits exercise the numerical-stability shift.
+        let logits = arr1(&[100.0f32, 100.5, 99.0, -1000.0]);
+        let probs = softmax_1d(&logits);
+        let sum: f32 = probs.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5, "softmax sum: {sum}");
+        // The smallest logit should produce ~0 probability.
+        assert!(probs[3] < 1e-30 || probs[3] == 0.0);
+        // Max-logit index should hold the largest probability.
+        assert!(probs[1] > probs[0]);
+        assert!(probs[1] > probs[2]);
     }
 
     #[test]
@@ -595,7 +887,11 @@ mod tests {
             let loss_m: f32 = fwd(&xm).iter().sum();
             let num = (loss_p - loss_m) / (2.0 * h);
             let err = (dx_analytical[i] - num).abs();
-            assert!(err < 1e-2, "dx[{i}]: analytical {} vs numerical {num} (err {err})", dx_analytical[i]);
+            assert!(
+                err < 1e-2,
+                "dx[{i}]: analytical {} vs numerical {num} (err {err})",
+                dx_analytical[i]
+            );
         }
     }
 }

@@ -20,7 +20,7 @@ pub struct ChangedEdge {
 
 /// Compute the diff between two graphs.
 /// `added` = in `new` but not `old`, `removed` = in `old` but not `new`,
-/// `changed` = same triple but different confidence.
+/// `changed` = same triple but different confidence, source, metadata, or injection.
 pub fn diff(old: &Graph, new: &Graph) -> GraphDiff {
     let mut added = Vec::new();
     let mut removed = Vec::new();
@@ -31,10 +31,10 @@ pub fn diff(old: &Graph, new: &Graph) -> GraphDiff {
         if !old.exists(&edge.subject, &edge.relation, &edge.object) {
             added.push(edge.clone());
         } else {
-            // Same triple exists — check if confidence changed
+            // Same triple exists — check if edge attributes changed.
             let old_edges = old.select(&edge.subject, Some(&edge.relation));
             if let Some(old_edge) = old_edges.iter().find(|e| e.object == edge.object) {
-                if (old_edge.confidence - edge.confidence).abs() > f64::EPSILON {
+                if edge_changed(old_edge, edge) {
                     changed.push(ChangedEdge {
                         old: (*old_edge).clone(),
                         new: edge.clone(),
@@ -56,4 +56,11 @@ pub fn diff(old: &Graph, new: &Graph) -> GraphDiff {
         removed,
         changed,
     }
+}
+
+fn edge_changed(old: &Edge, new: &Edge) -> bool {
+    (old.confidence - new.confidence).abs() > f64::EPSILON
+        || old.source != new.source
+        || old.metadata != new.metadata
+        || old.injection != new.injection
 }

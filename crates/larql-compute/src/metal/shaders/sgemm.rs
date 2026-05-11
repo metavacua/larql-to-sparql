@@ -32,3 +32,8 @@ kernel void sgemm(
     if (row < M && col < N) C[row * N + col] = acc;
 }
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "sgemm";
+}

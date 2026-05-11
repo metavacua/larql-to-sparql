@@ -1,8 +1,13 @@
 # ADR-003: Fused Q+K+V Projection Kernel
 
-**Status**: Accepted  
-**Date**: 2026-04-06  
+**Status**: Accepted (base fusion — Q, K, V combined into one matvec)
+**Date**: 2026-04-06
 **Context**: Separate Q, K, V dispatches incur 3x encoder overhead. Need single-dispatch QKV.
+
+> **Note (2026-05-09)**: a *further* fusion that rolled RMS norm into Phase 1
+> of this kernel (`q4k_q6k_qkv_proj_normed`) was reverted as a net regression
+> on Gemma 3 4B — see [ADR-016](016-defused-rms-norm-qkv.md). The base
+> Q+K+V fusion documented here is unaffected and remains production.
 
 ## Decision
 

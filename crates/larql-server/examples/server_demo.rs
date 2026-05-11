@@ -3,7 +3,7 @@
 //! Run: cargo run -p larql-server --example server_demo
 
 use larql_vindex::ndarray::Array2;
-use larql_vindex::{FeatureMeta, PatchedVindex, VectorIndex, VindexPatch, PatchOp};
+use larql_vindex::{FeatureMeta, PatchOp, PatchedVindex, VectorIndex, VindexPatch};
 
 use std::collections::HashMap;
 
@@ -61,9 +61,24 @@ fn demo_index() -> (VectorIndex, Array2<f32>) {
         Some(make_meta("to", 9, 0.20, &[])),
     ];
     let meta1 = vec![
-        Some(make_meta("Paris", 100, 0.95, &[("Berlin", 101, 0.8), ("Tokyo", 102, 0.7)])),
-        Some(make_meta("French", 110, 0.88, &[("German", 111, 0.75), ("Spanish", 112, 0.6)])),
-        Some(make_meta("Europe", 120, 0.75, &[("Asia", 121, 0.65), ("Africa", 122, 0.5)])),
+        Some(make_meta(
+            "Paris",
+            100,
+            0.95,
+            &[("Berlin", 101, 0.8), ("Tokyo", 102, 0.7)],
+        )),
+        Some(make_meta(
+            "French",
+            110,
+            0.88,
+            &[("German", 111, 0.75), ("Spanish", 112, 0.6)],
+        )),
+        Some(make_meta(
+            "Europe",
+            120,
+            0.75,
+            &[("Asia", 121, 0.65), ("Africa", 122, 0.5)],
+        )),
         Some(make_meta("Republic", 130, 0.60, &[("Kingdom", 131, 0.5)])),
         Some(make_meta("Napoleon", 140, 0.70, &[("Caesar", 141, 0.55)])),
     ];
@@ -132,7 +147,10 @@ fn main() {
     println!("  \"edges\": [");
     for (i, (target, score, layer)) in edges.iter().enumerate() {
         let comma = if i < edges.len() - 1 { "," } else { "" };
-        println!("    {{\"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}}}{}", target, score, layer, comma);
+        println!(
+            "    {{\"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}}}{}",
+            target, score, layer, comma
+        );
     }
     println!("  ]");
     println!("}}");
@@ -154,7 +172,11 @@ fn main() {
         let comma = if i < all_hits.len() - 1 { "," } else { "" };
         println!(
             "    {{\"layer\": {}, \"feature\": {}, \"gate_score\": {:.1}, \"target\": \"{}\"}}{}",
-            layer, hit.feature, hit.gate_score, hit.meta.top_token.trim(), comma
+            layer,
+            hit.feature,
+            hit.gate_score,
+            hit.meta.top_token.trim(),
+            comma
         );
     }
     println!("  ]");
@@ -201,8 +223,15 @@ fn main() {
     println!("{{");
     println!("  \"relations\": [");
     for (i, (name, count)) in sorted.iter().take(10).enumerate() {
-        let comma = if i < sorted.len().min(10) - 1 { "," } else { "" };
-        println!("    {{\"name\": \"{}\", \"count\": {}}}{}", name, count, comma);
+        let comma = if i < sorted.len().min(10) - 1 {
+            ","
+        } else {
+            ""
+        };
+        println!(
+            "    {{\"name\": \"{}\", \"count\": {}}}{}",
+            name, count, comma
+        );
     }
     println!("  ],");
     println!("  \"total\": {}", token_counts.len());
@@ -211,7 +240,10 @@ fn main() {
     // ── 5. STATS (GET /v1/stats) ──
     section("GET /v1/stats");
 
-    let total_features = all_layers.iter().map(|l| patched.num_features(*l)).sum::<usize>();
+    let total_features = all_layers
+        .iter()
+        .map(|l| patched.num_features(*l))
+        .sum::<usize>();
     println!("{{");
     println!("  \"model\": \"demo/test-model\",");
     println!("  \"layers\": {},", all_layers.len());
@@ -241,18 +273,18 @@ fn main() {
         description: Some("medical-facts".into()),
         author: Some("demo".into()),
         tags: vec!["medical".into()],
-        operations: vec![
-            PatchOp::Update {
-                layer: 1,
-                feature: 0,
-                gate_vector_b64: None,
-                down_meta: Some(larql_vindex::patch::core::PatchDownMeta {
-                    top_token: "Aspirin".into(),
-                    top_token_id: 500,
-                    c_score: 0.99,
-                }),
-            },
-        ],
+        operations: vec![PatchOp::Update {
+            layer: 1,
+            feature: 0,
+            gate_vector_b64: None,
+            up_vector_b64: None,
+            down_vector_b64: None,
+            down_meta: Some(larql_vindex::patch::core::PatchDownMeta {
+                top_token: "Aspirin".into(),
+                top_token_id: 500,
+                c_score: 0.99,
+            }),
+        }],
     };
 
     patched_mut.apply_patch(patch);
@@ -280,26 +312,29 @@ fn main() {
     println!("  \"edges\": [");
 
     let trace = patched.walk(&query, &[1, 2], 3);
-    let mut edge_idx = 0;
+    let mut edge_lines = Vec::new();
     for (layer, hits) in &trace.layers {
         for hit in hits.iter().take(2) {
             let tok = hit.meta.top_token.trim();
-            if tok.len() < 2 { continue; }
-            #[allow(clippy::if_same_then_else)]
-            let comma = if edge_idx > 0 { "" } else { "" };
-            if let Some(label) = probe_labels.get(&(*layer, hit.feature)) {
-                println!(
-                    "    {{\"relation\": \"{}\", \"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}, \"source\": \"probe\"}}{}",
-                    label, tok, hit.gate_score, layer, comma
-                );
-            } else {
-                println!(
-                    "    {{\"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}}}{}",
-                    tok, hit.gate_score, layer, comma
-                );
+            if tok.len() < 2 {
+                continue;
             }
-            edge_idx += 1;
+            if let Some(label) = probe_labels.get(&(*layer, hit.feature)) {
+                edge_lines.push(format!(
+                    "    {{\"relation\": \"{}\", \"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}, \"source\": \"probe\"}}",
+                    label, tok, hit.gate_score, layer
+                ));
+            } else {
+                edge_lines.push(format!(
+                    "    {{\"target\": \"{}\", \"gate_score\": {:.1}, \"layer\": {}}}",
+                    tok, hit.gate_score, layer
+                ));
+            }
         }
+    }
+    for (idx, line) in edge_lines.iter().enumerate() {
+        let comma = if idx + 1 < edge_lines.len() { "," } else { "" };
+        println!("{line}{comma}");
     }
     println!("  ]");
     println!("}}");
@@ -327,9 +362,15 @@ fn main() {
     session_a.delete_feature(1, 0); // Session A removes Paris
 
     println!("Session A (removed feature L1:F0):");
-    println!("  L1:F0 = {:?}", session_a.feature_meta(1, 0).map(|m| m.top_token.clone()));
+    println!(
+        "  L1:F0 = {:?}",
+        session_a.feature_meta(1, 0).map(|m| m.top_token.clone())
+    );
     println!("Session B (untouched):");
-    println!("  L1:F0 = {:?}", session_b.feature_meta(1, 0).map(|m| m.top_token.clone()));
+    println!(
+        "  L1:F0 = {:?}",
+        session_b.feature_meta(1, 0).map(|m| m.top_token.clone())
+    );
     println!("\nSessions are isolated — patches don't leak between clients.");
 
     // ── 10. DESCRIBE CACHE ──
@@ -347,7 +388,7 @@ fn main() {
     println!("With --rate-limit \"100/min\":");
     println!("  Per-IP token bucket — 100 requests/min burst, 1.67/sec refill");
     println!("  /v1/health is exempt from rate limiting");
-    println!("  X-Forwarded-For respected for proxied clients");
+    println!("  X-Forwarded-For is trusted only with --trust-forwarded-for");
     println!("  Excess requests → 429 Too Many Requests");
 
     // ── 12. BAND FILTERING ──
@@ -379,14 +420,21 @@ fn main() {
     // ── 13. WALK-FFN (decoupled inference) ──
     section("POST /v1/walk-ffn (decoupled inference)");
 
-    let residual = larql_vindex::ndarray::Array1::from_vec(vec![1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let residual =
+        larql_vindex::ndarray::Array1::from_vec(vec![1.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     let hits = patched.gate_knn(1, &residual, 5);
     let features: Vec<usize> = hits.iter().map(|(f, _)| *f).collect();
-    let scores: Vec<f32> = hits.iter().map(|(_, s)| (s * 100.0).round() / 100.0).collect();
+    let scores: Vec<f32> = hits
+        .iter()
+        .map(|(_, s)| (s * 100.0).round() / 100.0)
+        .collect();
 
     println!("Single layer request:");
     println!("  POST /v1/walk-ffn {{\"layer\": 1, \"residual\": [1.0, 0.2, ...]}}");
-    println!("  → {{\"layer\": 1, \"features\": {:?}, \"scores\": {:?}}}", features, scores);
+    println!(
+        "  → {{\"layer\": 1, \"features\": {:?}, \"scores\": {:?}}}",
+        features, scores
+    );
     println!();
     println!("Batched request (all layers in one round-trip):");
     println!("  POST /v1/walk-ffn {{\"layers\": [0,1,2,3], \"residual\": [...]}}");

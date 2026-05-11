@@ -64,4 +64,57 @@ kernel void qk_norm(
         out[base + d] = (x[base + d] / rms) * (offset + weight[d]);
     }
 }
+
+// Fused Q+K norm — applies per-head RMSNorm to both Q and K in one dispatch.
+// Grid: (num_q_heads + num_kv_heads, 1, 1). Each TG handles one head.
+// Q heads (h_idx < num_q) use Q buffer and q_weight; K heads use K + k_weight.
+// Saves one dispatch_thread_groups call per layer × 34 = 34 dispatches/token.
+kernel void qk_norm_qk(
+    device float*       Q          [[buffer(0)]],   // [num_q * head_dim] in-place
+    device float*       K          [[buffer(1)]],   // [num_kv * head_dim] in-place
+    device const float* q_weight   [[buffer(2)]],
+    device const float* k_weight   [[buffer(3)]],
+    constant uint&      head_dim   [[buffer(4)]],
+    constant uint&      num_q      [[buffer(5)]],   // q heads count
+    constant float&     eps        [[buffer(6)]],
+    constant float&     offset     [[buffer(7)]],
+    uint h_idx [[threadgroup_position_in_grid]],
+    uint tid   [[thread_position_in_threadgroup]],
+    uint tg_w  [[threads_per_threadgroup]])
+{
+    bool is_q = (h_idx < num_q);
+    uint local_head = is_q ? h_idx : (h_idx - num_q);
+    device float*       buf    = is_q ? Q : K;
+    device const float* weight = is_q ? q_weight : k_weight;
+    uint base = local_head * head_dim;
+
+    float partial = 0.0f;
+    for (uint i = tid; i < head_dim; i += tg_w) {
+        float v = buf[base + i];
+        partial += v * v;
+    }
+
+    threadgroup float tg_partial[512];
+    tg_partial[tid] = partial;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = tg_w / 2u; stride > 0u; stride >>= 1u) {
+        if (tid < stride) tg_partial[tid] += tg_partial[tid + stride];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    float rms = sqrt(tg_partial[0] / float(head_dim) + eps);
+
+    for (uint d = tid; d < head_dim; d += tg_w) {
+        buf[base + d] = (buf[base + d] / rms) * (offset + weight[d]);
+    }
+}
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "qk_norm";
+}
+
+pub struct QkKernel;
+impl crate::metal::kernel::ShaderKernel for QkKernel {
+    const KERNEL_NAME: &'static str = "qk_norm_qk";
+}

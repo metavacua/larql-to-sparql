@@ -1,0 +1,43 @@
+app = "larql-expert-d"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  VINDEX_PATH = "/data/vindex"
+  HF_REPO = "chrishayuk/gemma-4-26b-a4b-it-vindex-expert-server"
+  GRPC_PORT = "8081"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.http_options]
+    h2_backend = true
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[services]]
+  internal_port = 8081
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 50051
+    handlers = ["tls"]
+
+[[vm]]
+  size = "performance-8x"
+  memory = "16gb"
+
+[[mounts]]
+  source = "expert_data"
+  destination = "/data"
+  initial_size = "25gb"

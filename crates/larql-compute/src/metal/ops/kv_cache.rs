@@ -3,15 +3,43 @@
 //! Per-layer Metal buffers for cached K/V vectors. Grows with generation.
 //! At decode time: append new K/V, then attend Q against full cache.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 
+pub const SHORT_ATTENTION_SPAN: u32 = 1024;
+
+/// Maximum head_dim supported by kernels that dispatch exactly one simdgroup
+/// per head (32 lanes × 8 elements = 256). Layers with head_dim above this
+/// must use the two-simdgroup path or the unfused fallback.
+pub const MAX_HEAD_DIM_SINGLE_SG: usize = 256;
+
+/// Maximum head_dim supported by the two-simdgroup kernel path (32 lanes × 16 = 512).
+/// Used as the tg_w ceiling when rounding up to the next power of two for
+/// kernels that can span two simdgroups.
+pub const MAX_HEAD_DIM_DOUBLE_SG: usize = 512;
+
+fn shape_pairs_have_mismatch(existing: &[(usize, usize)], expected: &[(usize, usize)]) -> bool {
+    existing.iter().zip(expected.iter()).any(
+        |(&(actual_num_kv, actual_head_dim), &(expected_num_kv, expected_head_dim))| {
+            actual_num_kv != expected_num_kv || actual_head_dim != expected_head_dim
+        },
+    )
+}
+
+pub fn attention_span(t: u32, window_size: u32) -> u32 {
+    if window_size > 0 && t > window_size {
+        window_size
+    } else {
+        t
+    }
+}
+
 /// KV cache for one layer — pre-allocated Metal buffers.
 pub struct LayerKVCache {
-    pub k_cache: Buffer,  // [max_seq, num_kv_heads, head_dim] f32
-    pub v_cache: Buffer,  // same
+    pub k_cache: Buffer, // [max_seq, num_kv_heads, head_dim] f32
+    pub v_cache: Buffer, // same
     pub current_len: usize,
     pub max_seq: usize,
     pub num_kv_heads: usize,
@@ -46,7 +74,13 @@ pub struct KVCache {
 impl KVCache {
     /// Allocate a KV cache with uniform per-layer dims — the Llama / Mistral
     /// / Gemma 3 case where every layer shares num_kv_heads and head_dim.
-    pub fn new(bufs: &BufferCache, num_layers: usize, max_seq: usize, num_kv_heads: usize, head_dim: usize) -> Self {
+    pub fn new(
+        bufs: &BufferCache,
+        num_layers: usize,
+        max_seq: usize,
+        num_kv_heads: usize,
+        head_dim: usize,
+    ) -> Self {
         let layers = (0..num_layers)
             .map(|_| LayerKVCache::new(bufs, max_seq, num_kv_heads, head_dim))
             .collect();
@@ -67,8 +101,35 @@ impl KVCache {
         Self { layers }
     }
 
+    /// Return true if any already-allocated layer disagrees with the
+    /// corresponding expected `(num_kv_heads, head_dim)` shape.
+    pub fn has_shape_mismatch(&self, shapes: &[(usize, usize)]) -> bool {
+        let existing: Vec<(usize, usize)> = self
+            .layers
+            .iter()
+            .map(|layer| (layer.num_kv_heads, layer.head_dim))
+            .collect();
+        shape_pairs_have_mismatch(&existing, shapes)
+    }
+
+    /// Grow the cache to cover `shapes`, preserving existing matching layers.
+    pub fn grow_to_shapes(
+        &mut self,
+        bufs: &BufferCache,
+        shapes: &[(usize, usize)],
+        max_seq: usize,
+    ) {
+        while self.layers.len() < shapes.len() {
+            let (num_kv_heads, head_dim) = shapes[self.layers.len()];
+            self.layers
+                .push(LayerKVCache::new(bufs, max_seq, num_kv_heads, head_dim));
+        }
+    }
+
     pub fn clear(&mut self) {
-        for layer in &mut self.layers { layer.clear(); }
+        for layer in &mut self.layers {
+            layer.clear();
+        }
     }
 
     pub fn current_len(&self) -> usize {
@@ -101,7 +162,11 @@ pub fn encode_kv_append(
     enc.set_bytes(6, 4, &hd as *const u32 as *const c_void);
     enc.dispatch_threads(
         MTLSize::new(total as u64, 1, 1),
-        MTLSize::new(256.min(total as u64), 1, 1),
+        MTLSize::new(
+            crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(total as u64),
+            1,
+            1,
+        ),
     );
 }
 
@@ -112,6 +177,7 @@ pub fn encode_kv_attend(
     enc: &ComputeCommandEncoderRef,
     cache: &LayerKVCache,
     attend_pipeline: &ComputePipelineState,
+    attend_long_pipeline: Option<&ComputePipelineState>,
     q: &Buffer,
     out: &Buffer,
     num_q_heads: usize,
@@ -122,8 +188,14 @@ pub fn encode_kv_attend(
     let hd = cache.head_dim as u32;
     let num_q_val = num_q_heads as u32;
     let num_kv = cache.num_kv_heads as u32;
+    let span = attention_span(t_val, window_size);
+    let pipeline = if span > SHORT_ATTENTION_SPAN {
+        attend_long_pipeline.unwrap_or(attend_pipeline)
+    } else {
+        attend_pipeline
+    };
 
-    enc.set_compute_pipeline_state(attend_pipeline);
+    enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(q), 0);
     enc.set_buffer(1, Some(&cache.k_cache), 0);
     enc.set_buffer(2, Some(&cache.v_cache), 0);
@@ -136,7 +208,11 @@ pub fn encode_kv_attend(
     enc.set_bytes(9, 4, &window_size as *const u32 as *const c_void);
     enc.dispatch_thread_groups(
         MTLSize::new(num_q_heads as u64, 1, 1),
-        MTLSize::new(256.min(cache.head_dim as u64), 1, 1),
+        MTLSize::new(
+            crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(cache.head_dim as u64),
+            1,
+            1,
+        ),
     );
 }
 
@@ -167,9 +243,37 @@ pub fn append_and_attend(
     // Attend in its own encoder (reads from cache written by append)
     {
         let enc = cmd.new_compute_command_encoder();
-        encode_kv_attend(enc, cache, attend_pipeline, q, out, num_q_heads, scale, 0);
+        encode_kv_attend(
+            enc,
+            cache,
+            attend_pipeline,
+            None,
+            q,
+            out,
+            num_q_heads,
+            scale,
+            0,
+        );
         enc.end_encoding();
     }
 
     cache.current_len += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    const SHAPE_SMALL: (usize, usize) = (2, 64);
+    const SHAPE_LARGE: (usize, usize) = (4, 128);
+
+    #[test]
+    fn shape_mismatch_detects_conflicting_existing_layer() {
+        assert!(!super::shape_pairs_have_mismatch(
+            &[SHAPE_SMALL],
+            &[SHAPE_SMALL, SHAPE_LARGE]
+        ));
+        assert!(super::shape_pairs_have_mismatch(
+            &[SHAPE_SMALL],
+            &[SHAPE_LARGE]
+        ));
+    }
 }

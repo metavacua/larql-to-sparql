@@ -56,7 +56,8 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     let num_layers = weights.num_layers;
     eprintln!(
         "  {} layers, hidden_size={} ({:.1}s)",
-        num_layers, hidden,
+        num_layers,
+        hidden,
         start.elapsed().as_secs_f64()
     );
 
@@ -72,9 +73,15 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Source = L0, target = inject_layer
-    let src_idx = meta.layers.iter().position(|&l| l == 0)
+    let src_idx = meta
+        .layers
+        .iter()
+        .position(|&l| l == 0)
         .ok_or("L0 not in trajectory data")?;
-    let tgt_idx = meta.layers.iter().position(|&l| l == args.inject_layer)
+    let tgt_idx = meta
+        .layers
+        .iter()
+        .position(|&l| l == args.inject_layer)
         .ok_or_else(|| format!("L{} not in trajectory data", args.inject_layer))?;
 
     eprintln!(
@@ -139,7 +146,9 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     for _ in 0..rank {
         let mut v = vec![1.0f32; n_train];
         let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        for x in v.iter_mut() { *x /= n; }
+        for x in v.iter_mut() {
+            *x /= n;
+        }
 
         let mut ev = 0.0f32;
         for _ in 0..100 {
@@ -153,10 +162,16 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
             ev = mv.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
             let n: f32 = mv.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if n < 1e-12 { break; }
-            for (x, m) in v.iter_mut().zip(mv.iter()) { *x = m / n; }
+            if n < 1e-12 {
+                break;
+            }
+            for (x, m) in v.iter_mut().zip(mv.iter()) {
+                *x = m / n;
+            }
         }
-        if ev < 1e-8 { break; }
+        if ev < 1e-8 {
+            break;
+        }
 
         eigenvalues.push(ev.sqrt());
         eigenvectors.push(v.clone());
@@ -177,29 +192,44 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
         let mut dir = vec![0.0f32; hidden];
         for i in 0..n_train {
             let c = eigenvectors[k][i] / eigenvalues[k];
-            for j in 0..hidden { dir[j] += c * xc[i][j]; }
+            for j in 0..hidden {
+                dir[j] += c * xc[i][j];
+            }
         }
         let n: f32 = dir.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if n > 1e-12 { for x in dir.iter_mut() { *x /= n; } }
+        if n > 1e-12 {
+            for x in dir.iter_mut() {
+                *x /= n;
+            }
+        }
         vt_rows.push(dir);
 
         // beta[k] = Y projected by same weights
         let mut beta = vec![0.0f32; hidden];
         for i in 0..n_train {
             let c = eigenvectors[k][i] / eigenvalues[k];
-            for j in 0..hidden { beta[j] += c * yc[i][j]; }
+            for j in 0..hidden {
+                beta[j] += c * yc[i][j];
+            }
         }
         betas.push(beta);
     }
 
-    eprintln!("  Fitted in {:.0}ms", fit_start.elapsed().as_secs_f64() * 1000.0);
+    eprintln!(
+        "  Fitted in {:.0}ms",
+        fit_start.elapsed().as_secs_f64() * 1000.0
+    );
 
     // ── Project function: L0 last-token residual → predicted inject_layer residual ──
     let project = |x: &[f32]| -> Vec<f32> {
         let mut result = y_mean.clone();
         for k in 0..eigenvalues.len() {
-            let score: f32 = (0..hidden).map(|j| (x[j] - x_mean[j]) * vt_rows[k][j]).sum();
-            for j in 0..hidden { result[j] += score * betas[k][j]; }
+            let score: f32 = (0..hidden)
+                .map(|j| (x[j] - x_mean[j]) * vt_rows[k][j])
+                .sum();
+            for j in 0..hidden {
+                result[j] += score * betas[k][j];
+            }
         }
         result
     };
@@ -207,7 +237,10 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     // ── Load test prompts ──
     let test_prompts: Vec<String> = if let Some(ref file) = args.prompts_file {
         std::fs::read_to_string(file)?
-            .lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
     } else if let Some(ref p) = args.prompts {
         p.split(',').map(|s| s.trim().to_string()).collect()
     } else {
@@ -215,8 +248,12 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // ── Run end-to-end tests ──
-    eprintln!("\n── End-to-end: project L0→L{}, run L{}→L{} dense ──\n",
-        args.inject_layer, args.inject_layer, num_layers - 1);
+    eprintln!(
+        "\n── End-to-end: project L0→L{}, run L{}→L{} dense ──\n",
+        args.inject_layer,
+        args.inject_layer,
+        num_layers - 1
+    );
 
     println!(
         "{:<45} {:>12} {:>12} {:>8} {:>8} {:>8}",
@@ -230,17 +267,23 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cosines = Vec::new();
 
     for prompt in &test_prompts {
-        let encoding = model.tokenizer()
+        let encoding = model
+            .tokenizer()
             .encode(prompt.as_str(), true)
             .map_err(|e| format!("tokenize error: {e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let seq_len = token_ids.len();
-        if seq_len < 3 { continue; }
+        if seq_len < 3 {
+            continue;
+        }
 
         // Baseline
         let baseline = predict(weights, model.tokenizer(), &token_ids, args.top_k);
-        let (base_tok, base_conf) = baseline.predictions.first()
-            .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+        let (base_tok, base_conf) = baseline
+            .predictions
+            .first()
+            .map(|(t, p)| (t.clone(), *p))
+            .unwrap_or_default();
 
         // Get real hidden state at inject_layer (full sequence)
         // Run forward pass through layers 0..inject_layer-1
@@ -256,10 +299,18 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
         // Cosine between projected and real at inject_layer
         let real_last_row = h_real.row(seq_len - 1);
         let cos: f32 = {
-            let dot: f32 = projected.iter().zip(real_last_row.iter()).map(|(a, b)| a * b).sum();
+            let dot: f32 = projected
+                .iter()
+                .zip(real_last_row.iter())
+                .map(|(a, b)| a * b)
+                .sum();
             let na: f32 = projected.iter().map(|x| x * x).sum::<f32>().sqrt();
             let nb: f32 = real_last_row.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if na > 1e-12 && nb > 1e-12 { dot / (na * nb) } else { 0.0 }
+            if na > 1e-12 && nb > 1e-12 {
+                dot / (na * nb)
+            } else {
+                0.0
+            }
         };
         cosines.push(cos);
 
@@ -271,34 +322,64 @@ pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // Run from inject_layer to end
         let proj_result = predict_from_hidden(
-            weights, model.tokenizer(), &h_hybrid, inject_from, args.top_k,
+            weights,
+            model.tokenizer(),
+            &h_hybrid,
+            inject_from,
+            args.top_k,
         );
-        let (proj_tok, proj_conf) = proj_result.predictions.first()
-            .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+        let (proj_tok, proj_conf) = proj_result
+            .predictions
+            .first()
+            .map(|(t, p)| (t.clone(), *p))
+            .unwrap_or_default();
 
         let matched = proj_tok == base_tok;
-        if matched { match_count += 1; }
+        if matched {
+            match_count += 1;
+        }
         total += 1;
 
         let match_str = if matched { "=" } else { "X" };
         println!(
             "{:<45} {:>12} {:>12} {:>7.2}% {:>7.2}% {:>7.4} {:>3}",
             &prompt[..prompt.len().min(44)],
-            base_tok, proj_tok,
-            base_conf * 100.0, proj_conf * 100.0,
-            cos, match_str,
+            base_tok,
+            proj_tok,
+            base_conf * 100.0,
+            proj_conf * 100.0,
+            cos,
+            match_str,
         );
     }
 
     // ── Summary ──
     eprintln!("\n── Summary ──");
     eprintln!("  Prompts: {}", total);
-    eprintln!("  Token match: {}/{} ({:.1}%)", match_count, total, match_count as f64 / total as f64 * 100.0);
+    eprintln!(
+        "  Token match: {}/{} ({:.1}%)",
+        match_count,
+        total,
+        match_count as f64 / total as f64 * 100.0
+    );
     let mean_cos: f32 = cosines.iter().sum::<f32>() / cosines.len() as f32;
     let min_cos: f32 = cosines.iter().copied().fold(f32::INFINITY, f32::min);
-    eprintln!("  Cosine at L{}: mean={:.6}, min={:.6}", inject_from, mean_cos, min_cos);
-    eprintln!("  Layers replaced: 0-{} ({} layers → rank-{} projection)", inject_from - 1, inject_from, args.rank);
-    eprintln!("  Layers computed: {}-{} ({} layers dense)", inject_from, num_layers - 1, num_layers - inject_from);
+    eprintln!(
+        "  Cosine at L{}: mean={:.6}, min={:.6}",
+        inject_from, mean_cos, min_cos
+    );
+    eprintln!(
+        "  Layers replaced: 0-{} ({} layers → rank-{} projection)",
+        inject_from - 1,
+        inject_from,
+        args.rank
+    );
+    eprintln!(
+        "  Layers computed: {}-{} ({} layers dense)",
+        inject_from,
+        num_layers - 1,
+        num_layers - inject_from
+    );
 
     Ok(())
 }

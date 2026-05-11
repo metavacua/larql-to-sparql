@@ -13,10 +13,59 @@
 //! All paths are per-position single-vector dispatches. Multi-position
 //! prefill is achieved by looping over positions with buffer offsets.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 use super::quant_matvec;
+use crate::QuantFormat;
+
+/// Which fused-QKV strategy a given `(q, k, v)` format triple maps to.
+///
+/// Pure data — independent of any pipeline. Use [`pick_qkv_route`] to
+/// translate a layer's three projection formats into the dispatch
+/// strategy. New format combinations land as one match arm in
+/// `pick_qkv_route` plus one branch in the dispatcher, instead of
+/// editing 2–3 hard-coded boolean expressions across the encoders.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum QkvFormatRoute {
+    /// All three projections are uniform Q4_K → `q4k_qkv_proj` shader
+    /// ([`FusedQkvKernel::Q4k`]).
+    UniformQ4K,
+    /// All three projections are uniform Q4_KF → `q4kf_qkv_proj`
+    /// shader ([`FusedQkvKernel::Q4kf`]).
+    UniformQ4Kf,
+    /// Q4_K Q + Q4_K K + Q6_K V (Gemma 3 / Gemma 4 with Ollama-convention
+    /// extracts) → `q4k_q6k_qkv_proj` shader.
+    MixedQ4kQ6kV,
+    /// Anything else: per-projection dispatch through `quant_matvec`.
+    /// Slower but covers Q4_KF + Q6_K V, mixed legacy Q4_0, etc.
+    PerProjection,
+}
+
+impl QkvFormatRoute {
+    /// `true` for any single-dispatch fused path. Useful when the
+    /// caller wants to short-circuit per-projection scratch setup that
+    /// the fused path doesn't need.
+    pub fn is_fused(self) -> bool {
+        !matches!(self, Self::PerProjection)
+    }
+}
+
+/// Pick the fused-QKV route for a `(q, k, v)` format triple.
+///
+/// This is the single source of truth for which Metal QKV pipeline
+/// handles which weight-format combination. Adding a new combo (e.g.
+/// Q4_KF Q/K + Q6_K V, or a future FP4 family) is a one-line addition
+/// here — encode_qkv.rs and decode_hybrid.rs read the route through
+/// this helper and route dispatch via `match` on the result.
+pub fn pick_qkv_route(q: QuantFormat, k: QuantFormat, v: QuantFormat) -> QkvFormatRoute {
+    match (q, k, v) {
+        (QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q4_K) => QkvFormatRoute::UniformQ4K,
+        (QuantFormat::Q4_KF, QuantFormat::Q4_KF, QuantFormat::Q4_KF) => QkvFormatRoute::UniformQ4Kf,
+        (QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q6_K) => QkvFormatRoute::MixedQ4kQ6kV,
+        _ => QkvFormatRoute::PerProjection,
+    }
+}
 
 /// Per-projection format + weight tuple used by the mixed-format path.
 pub struct Proj<'a> {
@@ -27,32 +76,74 @@ pub struct Proj<'a> {
     pub rows: usize,
 }
 
+/// Threadgroup geometry for a fused-QKV f32-input kernel.
+///
+/// The two kernels we dispatch from [`encode_fused_f32`] use different
+/// per-TG row counts and thread counts:
+///
+/// - `q4k_qkv_proj` (the simple Q4_K shader): 8 rows/TG, 256 threads/TG.
+/// - `q4kf_qkv_proj` (llama.cpp-exact Q4_KF shader): 4 rows/TG, 64 threads/TG.
+///
+/// Both shaders' constants are exported as `ROWS_PER_TG`/`THREADS_PER_TG`
+/// from their respective Rust modules. Dispatching with the wrong
+/// geometry silently leaves rows unwritten (the kernel's `if (global_row
+/// >= total_rows) return` guard hides the under-coverage). Pass the
+/// matching `FusedQkvKernel` so the row check on the host stays in sync.
+#[derive(Clone, Copy)]
+pub enum FusedQkvKernel {
+    /// `shaders::q4k_qkv_proj::QkvKernel` — Q4_K simple (8 rows/TG, 256 threads).
+    Q4k,
+    /// `shaders::q4kf_qkv_proj::Kernel` — Q4_KF llama.cpp-port (4 rows/TG, 64 threads).
+    Q4kf,
+}
+
+impl FusedQkvKernel {
+    fn rows_per_tg(self) -> u64 {
+        match self {
+            Self::Q4k => crate::metal::shaders::q4k_qkv_proj::ROWS_PER_TG,
+            Self::Q4kf => crate::metal::shaders::q4kf_qkv_proj::ROWS_PER_TG,
+        }
+    }
+    fn threads_per_tg(self) -> u64 {
+        match self {
+            Self::Q4k => crate::metal::shaders::q4k_qkv_proj::THREADS_PER_TG,
+            Self::Q4kf => crate::metal::shaders::q4kf_qkv_proj::THREADS_PER_TG,
+        }
+    }
+}
+
 /// Fused Q4_K / Q4_KF QKV — all three projections same format.
 ///
-/// Dispatches `q4kf_qkv_proj` (preferred, 144-byte GGUF) or its legacy
-/// 148-byte fallback if only that's available. Writes Q / K / V outputs
-/// at their respective byte offsets.
+/// Dispatches the kernel referenced by `pipeline`. The `kernel`
+/// discriminant must match — see [`FusedQkvKernel`] — because the two
+/// kernels have different per-TG geometries that must agree on the host
+/// or rows go unwritten.
 #[allow(clippy::too_many_arguments)]
 pub fn encode_fused_f32(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
+    kernel: FusedQkvKernel,
     wq_buf: &Buffer,
     wk_buf: &Buffer,
     wv_buf: &Buffer,
     f32_in: &Buffer,
     f32_in_off: u64,
-    q_out: &Buffer, q_off: u64,
-    k_out: &Buffer, k_off: u64,
-    v_out: &Buffer, v_off: u64,
-    q_rows: usize, kv_rows: usize, hidden: usize,
+    q_out: &Buffer,
+    q_off: u64,
+    k_out: &Buffer,
+    k_off: u64,
+    v_out: &Buffer,
+    v_off: u64,
+    q_rows: usize,
+    kv_rows: usize,
+    hidden: usize,
 ) {
-    use crate::metal::shaders::q4kf_qkv_proj as q4kf_qkv;
     let total_rows = (q_rows + kv_rows + kv_rows) as u32;
     let q_rows_val = q_rows as u32;
     let k_rows_val = kv_rows as u32;
     let v_rows_val = kv_rows as u32;
     let k_val = hidden as u32;
-    let num_tgs = (total_rows as u64).div_ceil(q4kf_qkv::ROWS_PER_TG);
+    let num_tgs = (total_rows as u64).div_ceil(kernel.rows_per_tg());
     enc.set_compute_pipeline_state(pipeline);
     enc.set_buffer(0, Some(wq_buf), 0);
     enc.set_buffer(1, Some(wk_buf), 0);
@@ -67,7 +158,7 @@ pub fn encode_fused_f32(
     enc.set_bytes(10, 4, &k_val as *const u32 as *const c_void);
     enc.dispatch_thread_groups(
         MTLSize::new(num_tgs, 1, 1),
-        MTLSize::new(q4kf_qkv::THREADS_PER_TG, 1, 1),
+        MTLSize::new(kernel.threads_per_tg(), 1, 1),
     );
 }
 
@@ -92,12 +183,8 @@ pub fn encode_per_proj(
 ) {
     for p in projections {
         quant_matvec::encode(
-            enc, p.format, p.w_buf,
-            f32_in, f32_in_off,
-            q8_in, q8_in_off, q8s_in, q8s_in_off,
-            p.out_buf, p.out_off,
-            pipes,
-            p.rows, hidden,
+            enc, p.format, p.w_buf, f32_in, f32_in_off, q8_in, q8_in_off, q8s_in, q8s_in_off,
+            p.out_buf, p.out_off, pipes, p.rows, hidden,
         );
     }
 }
@@ -110,15 +197,25 @@ pub fn encode_per_proj(
 pub fn encode_fused_q8(
     enc: &ComputeCommandEncoderRef,
     pipeline: &ComputePipelineState,
-    wq_buf: &Buffer, wq_scale: &Buffer,
-    wk_buf: &Buffer, wk_scale: &Buffer,
-    wv_buf: &Buffer, wv_scale: &Buffer,
-    q8_in: &Buffer, q8_in_off: u64,
-    q8s_in: &Buffer, q8s_in_off: u64,
-    q_out: &Buffer, q_off: u64,
-    k_out: &Buffer, k_off: u64,
-    v_out: &Buffer, v_off: u64,
-    q_rows: usize, kv_rows: usize, hidden: usize,
+    wq_buf: &Buffer,
+    wq_scale: &Buffer,
+    wk_buf: &Buffer,
+    wk_scale: &Buffer,
+    wv_buf: &Buffer,
+    wv_scale: &Buffer,
+    q8_in: &Buffer,
+    q8_in_off: u64,
+    q8s_in: &Buffer,
+    q8s_in_off: u64,
+    q_out: &Buffer,
+    q_off: u64,
+    k_out: &Buffer,
+    k_off: u64,
+    v_out: &Buffer,
+    v_off: u64,
+    q_rows: usize,
+    kv_rows: usize,
+    hidden: usize,
 ) {
     let q_rows_val = q_rows as u32;
     let k_rows_val = kv_rows as u32;
@@ -141,8 +238,69 @@ pub fn encode_fused_q8(
     enc.set_bytes(12, 4, &k_rows_val as *const u32 as *const c_void);
     enc.set_bytes(13, 4, &v_rows_val as *const u32 as *const c_void);
     enc.set_bytes(14, 4, &k_val as *const u32 as *const c_void);
-    enc.dispatch_thread_groups(
-        MTLSize::new(total_rows, 1, 1),
-        MTLSize::new(256, 1, 1),
-    );
+    enc.dispatch_thread_groups(MTLSize::new(total_rows, 1, 1), MTLSize::new(256, 1, 1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::QuantFormat;
+
+    /// The four production triples must each map to a distinct fused
+    /// route. Anything else falls through to per-projection.
+    #[test]
+    fn pick_qkv_route_recognises_supported_triples() {
+        // Uniform Q4_K (Llama 2 / Mistral / Qwen with all-Q4_K extracts).
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q4_K),
+            QkvFormatRoute::UniformQ4K,
+        );
+        // Uniform Q4_KF (llama.cpp-exact pre-baked-scales fast path).
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q4_KF, QuantFormat::Q4_KF, QuantFormat::Q4_KF),
+            QkvFormatRoute::UniformQ4Kf,
+        );
+        // Gemma 3 / Gemma 4 Ollama convention: Q4_K Q+K, Q6_K V.
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q4_K, QuantFormat::Q4_K, QuantFormat::Q6_K),
+            QkvFormatRoute::MixedQ4kQ6kV,
+        );
+    }
+
+    /// Anything outside the table falls back to per-projection. Pin a
+    /// few representative misses so a future "we now support X" change
+    /// is forced to update this test (and therefore the table).
+    #[test]
+    fn pick_qkv_route_falls_back_to_per_projection() {
+        // Q4_KF Q/K + Q6_K V — plausible future combo, not yet wired.
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q4_KF, QuantFormat::Q4_KF, QuantFormat::Q6_K),
+            QkvFormatRoute::PerProjection,
+        );
+        // Mixed legacy Q4_0.
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q4_0, QuantFormat::Q4_0, QuantFormat::Q4_0),
+            QkvFormatRoute::PerProjection,
+        );
+        // Pure Q6_K (no fused kernel exists).
+        assert_eq!(
+            pick_qkv_route(QuantFormat::Q6_K, QuantFormat::Q6_K, QuantFormat::Q6_K),
+            QkvFormatRoute::PerProjection,
+        );
+        // f32 input — fused QKV is f32-input-only on the kernel side
+        // but the dispatcher still routes through the format-aware
+        // helper for raw float weights.
+        assert_eq!(
+            pick_qkv_route(QuantFormat::F32, QuantFormat::F32, QuantFormat::F32),
+            QkvFormatRoute::PerProjection,
+        );
+    }
+
+    #[test]
+    fn is_fused_marks_per_projection_as_not_fused() {
+        assert!(QkvFormatRoute::UniformQ4K.is_fused());
+        assert!(QkvFormatRoute::UniformQ4Kf.is_fused());
+        assert!(QkvFormatRoute::MixedQ4kQ6kV.is_fused());
+        assert!(!QkvFormatRoute::PerProjection.is_fused());
+    }
 }

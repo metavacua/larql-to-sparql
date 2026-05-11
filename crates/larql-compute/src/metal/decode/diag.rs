@@ -10,7 +10,7 @@
 //! - A per-layer NaN/Inf stat dump used by the caller when a `diag_stop_layer`
 //!   is supplied; see [`dump_layer_buffers`].
 
-use crate::FullPipelineLayer;
+use crate::{options, FullPipelineLayer};
 
 /// Print the one-line `DECODE_DEBUG` entry for the Nth decode call. No-op
 /// unless the env var is set and `call_n < 3` (caller's contract).
@@ -21,12 +21,17 @@ pub(super) fn log_decode_entry(
     inter: usize,
     layers: &[FullPipelineLayer],
 ) {
-    if std::env::var("DECODE_DEBUG").is_err() || call_n >= 3 { return; }
+    if !options::env_flag(options::ENV_DECODE_DEBUG) || call_n >= 3 {
+        return;
+    }
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
     let has_moe = layers.iter().any(|l| l.moe.is_some());
     let has_combined = layers.iter().any(|l| l.moe_combined_output_norm);
     let n = layers.len();
-    let outer_loaded = layers.iter().filter(|l| l.moe_outer_post_norm.is_some()).count();
+    let outer_loaded = layers
+        .iter()
+        .filter(|l| l.moe_outer_post_norm.is_some())
+        .count();
     let post1_loaded = layers.iter().filter(|l| l.post_ffn_norm.is_some()).count();
     eprintln!(
         "[decode_token call={call_n}] x_rms={rms:.4} hidden={hidden} inter={inter} has_moe={has_moe} moe_combined_norm={has_combined} outer_post_norm={outer_loaded}/{n} post_ffn_norm_1={post1_loaded}/{n}"
@@ -54,6 +59,107 @@ pub(super) struct LayerDiagBufs<'a> {
     pub inter: usize,
     pub layer_q_dim: usize,
     pub layer_kv_dim: usize,
+}
+
+/// L0-only Gemma-4-MoE intermediate dump for HF-Python diffs.
+///
+/// Activated by `LARQL_DUMP_L0=<dir>`. Captures every buffer we'd want to
+/// compare against the HF reference's `Gemma4TextDecoderLayer.forward`
+/// internals at layer 0: the post-attention residual, both halves of
+/// the hybrid FFN+MoE, and the geglu intermediates. Writes to
+/// `{dir}/<name>.bin` as raw f32-LE.
+///
+/// Caller must have committed the encoder and waited so the buffer
+/// reads are consistent. `moe_out` is the freshly-computed CPU MoE
+/// output (already on host); `dense_post_norm` is the new_h
+/// **before** `apply_outer_combine` runs — i.e. it currently holds
+/// `h_post_attn + _1(dense) + moe_out`. `h1 = _1(dense)` is derived
+/// here so the dump matches HF's convention without the caller
+/// keeping a separate buffer.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dump_l0_moe_intermediates(
+    dir: &str,
+    h_post_attn: &metal::Buffer,
+    ffn_norm_out: &metal::Buffer,
+    gate_out_scratch: &metal::Buffer,
+    up_out: &metal::Buffer,
+    act_buf: &metal::Buffer,
+    down_out: &metal::Buffer,
+    new_h: &metal::Buffer,
+    moe_out: &[f32],
+    hidden: usize,
+    inter: usize,
+) {
+    use std::io::Write;
+    let ha_vec = crate::metal::buffers::read_buffer_f32(h_post_attn, hidden);
+    let new_h_vec = crate::metal::buffers::read_buffer_f32(new_h, hidden);
+    let down_raw = crate::metal::buffers::read_buffer_f32(down_out, hidden);
+    let ffn_norm_in = crate::metal::buffers::read_buffer_f32(ffn_norm_out, hidden);
+    // new_h currently = h_post_attn + _1(dense) + moe_out.
+    // Derive h1 = _1(dense) and keep raw moe_out separately.
+    let h1: Vec<f32> = new_h_vec
+        .iter()
+        .zip(ha_vec.iter())
+        .zip(moe_out.iter())
+        .map(|((&n, &a), &m)| n - a - m)
+        .collect();
+    let write = |name: &str, data: &[f32]| {
+        let path = format!("{dir}/{name}.bin");
+        if let Ok(mut f) = std::fs::File::create(&path) {
+            let bytes =
+                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+            let _ = f.write_all(bytes);
+            eprintln!("[l0-dump] wrote {path} ({} f32)", data.len());
+        }
+    };
+    let gate_raw = crate::metal::buffers::read_buffer_f32(gate_out_scratch, inter);
+    let up_raw = crate::metal::buffers::read_buffer_f32(up_out, inter);
+    let act_raw = crate::metal::buffers::read_buffer_f32(act_buf, inter);
+    write("l0_h_post_attn", &ha_vec);
+    write("l0_ffn_norm_out_pre_mlp", &ffn_norm_in);
+    write("l0_gate_out", &gate_raw);
+    write("l0_up_out", &up_raw);
+    write("l0_act_geglu", &act_raw);
+    write("l0_down_out_dense_raw", &down_raw);
+    write("l0_h1_post_ffn_norm1_dense", &h1);
+    write("l0_moe_out", moe_out);
+}
+
+/// Write every per-stage scratch buffer in `bufs` to disk under
+/// `{dir}/decode_layer_{LL}_{stage}.f32` as little-endian f32 blobs.
+///
+/// Mirrors the Metal-prefill stage dump in `metal/ops/full_pipeline.rs`
+/// — same set of buffer reads, same on-disk format, same suffix names.
+/// The pairing exists so a per-stage diff between `decode_layer_NN_*`
+/// and `metal_layer_NN_*` files can localise prefill/decode divergence
+/// to the first stage where it appears.
+///
+/// Caller must have committed the encoder and waited (the
+/// `LARQL_DECODE_DUMP_LAYERS` end-of-layer commit is what makes these
+/// reads consistent — scratch buffers persist across layers, so
+/// without the per-layer flush we'd be reading the *last* layer's
+/// values).
+pub(super) fn dump_decode_stage_files(dir: &str, l: usize, bufs: &LayerDiagBufs<'_>) {
+    let write_buf = |name: &str, buf: &metal::Buffer, n: usize| {
+        let v = crate::metal::buffers::read_buffer_f32(buf, n);
+        let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let path = format!("{dir}/decode_layer_{l:02}_{name}.f32");
+        if let Err(e) = std::fs::write(&path, &bytes) {
+            eprintln!("[decode-stage-dump] failed to write {path}: {e}");
+        }
+    };
+    write_buf("norm_out", bufs.norm_f32_buf, bufs.hidden);
+    write_buf("q_out", bufs.q_out, bufs.layer_q_dim);
+    write_buf("k_out", bufs.k_out, bufs.layer_kv_dim);
+    write_buf("v_out", bufs.v_out, bufs.layer_kv_dim);
+    write_buf("attn_out", bufs.attn_out_buf, bufs.layer_q_dim);
+    write_buf("o_out", bufs.o_out_buf, bufs.hidden);
+    write_buf("h_post_attn", bufs.h_post_attn, bufs.hidden);
+    write_buf("ffn_norm_out", bufs.ffn_norm_out, bufs.hidden);
+    write_buf("gate_out", bufs.gate_out_scratch, bufs.inter);
+    write_buf("up_out", bufs.up_out, bufs.inter);
+    write_buf("act_buf", bufs.act_buf, bufs.inter);
+    write_buf("down_out", bufs.down_out, bufs.hidden);
 }
 
 /// Dump NaN/Inf counts and max-abs for every buffer in `bufs`, tagged with
@@ -119,9 +225,8 @@ pub(super) struct ResidualDump {
 impl ResidualDump {
     /// Create a dump sink if `LARQL_DUMP_RESIDUALS` is set, otherwise a no-op.
     pub(super) fn from_env() -> Self {
-        let path = match std::env::var("LARQL_DUMP_RESIDUALS") {
-            Ok(p) if !p.is_empty() => p,
-            _ => return Self { file: None },
+        let Some(path) = options::env_nonempty_value(options::ENV_DUMP_RESIDUALS) else {
+            return Self { file: None };
         };
         use std::io::Write;
         let mut f = match std::fs::File::create(&path) {
@@ -154,7 +259,9 @@ impl ResidualDump {
         h_post_attn: &[f32],
         layer_out: &[f32],
     ) {
-        let Some(file) = self.file.as_mut() else { return };
+        let Some(file) = self.file.as_mut() else {
+            return;
+        };
         use std::io::Write;
         debug_assert_eq!(layer_in.len(), layer_out.len());
         debug_assert_eq!(layer_in.len(), h_post_attn.len());

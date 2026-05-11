@@ -2,6 +2,72 @@
 
 Machine: M3 Max, macOS. Gemma 3 4B (34 layers, hidden=2560, vocab=262K).
 
+## Real-vindex headline (2026-05-02)
+
+`larql bench output/gemma3-4b-q4k-v2.vindex --tokens 30 --warmup 8`:
+
+```
+Backend       prefill    ms/tok    tok/s    steps
+larql-metal   ~67 ms    13.5–13.9   72–75     29
+Ollama        ~10 ms/tok = 96–104 tok/s (reference, same model)
+```
+
+Per-stage breakdown of one decode step (with all five fusions default-on):
+
+| Stage | ms/tok | % | What runs |
+|---|---:|---:|---|
+| GPU forward | 11.5–12.0 | 79% | `dispatch_full_pipeline` per-token Metal compute (Q4_K matvecs, fused QKV proj + input_norm, fused QK_norm + RoPE, fused KV append + attend, fused post_attn norm + residual + store, fused gate + up, fused GEGLU + down, fused post_ffn norm + residual_add) |
+| LM head    | 2.9–3.0 | 20% | Q4 matvec on `lm_head_q4.bin` + GPU argmax reduction (256K vocab) — stride-32 reduction tree (lm_head v5) |
+| Embed / final norm / detok / sample / EOS |  0.05 | <1% | Per-step CPU work outside the Metal compute path |
+| **Total** | **13.5–14.0** | **100%** | **= 72–75 tok/s** |
+
+### Shipped Metal dispatch fusions (2026-05-01 → 2026-05-02)
+
+Five default-on fusions; `LARQL_FUSED_*=0` opt-out flags wired for diagnostics.
+Cumulative GPU forward saving ~0.99 ms vs. unfused baseline (10.45 ms → 9.46 ms
+isolated kernel time; end-to-end 71.5 → 72–75 tok/s).
+
+| Fusion | Δ GPU | Mechanic |
+|---|---:|---|
+| `qk_norm_rope_fused` | -0.10 ms | One TG/head does RMS-norm + RoPE in one pass; replaces qk_norm_qk + rope_at_pos_batched_qk |
+| `residual_norm_store` (always-on) | -0.38 ms | Single 1-TG kernel writes both `ffn_norm_out` and `h_post_attn` |
+| `post_attn_residual_norm_store_pipeline` | -0.43 ms | Triple-fused post_attn norm + residual + h_post_attn store + ffn_norm; replaces a 3-dispatch chain on the `has_post_norms` path |
+| `post_ffn_norm_residual_add_pipeline` | -0.78 ms | 1-TG kernel: RMS over down_out + residual sum into `new_h` (next-layer input) in one pass |
+| `kv_append_attend_fused_pipeline` | -0.99 ms | Per-Q-head TG cooperatively writes new K/V row at pos, `mem_device` barrier, then standard attention |
+
+### Failed fusion attempt — `attn_fused` (kept opt-in)
+
+Merging `qk_norm_rope_fused` (12 TGs) + `kv_append_attend_fused` (8 TGs) into one
+kernel regressed 74 → 64 tok/s (-1.45 ms). Diagnosis: collapsing to 8 TGs lost
+parallelism that 12 TGs had given the standalone kernel; dispatch-overhead saving
+(~30 µs) was dwarfed by the parallelism cost. Kernel registered as opt-in
+`LARQL_FUSED_ATTN=1` for any future multi-TG-per-head retry that preserves
+parallelism. **Lesson**: dispatch fusions only win when they don't reduce TG
+count for an already parallelism-bound stage. See `crates/larql-inference/ROADMAP.md`.
+
+### Headline-vs-reality reading guide
+
+The number you measure depends on **how the run is timed**:
+
+| Run shape | tok/s | Why |
+|---|---:|---|
+| `larql bench --warmup 8 --tokens 30` (steady-state, post-fusion) | **72–75** | Drops the 54-ms cold token, averages over enough steps for variance to wash out. **Use this for any speed comparison.** Variance is ~3 tok/s between cold/warm GPU; multi-run average is the honest number. |
+| Short bench (`--max-tokens 20`, no warmup) | ~67 | Cold token 1 (54 ms) dragged into the average; the per-token decode after warmup is still ~13 ms (= 75 tok/s) but the average reports higher. |
+| Compute `PERFORMANCE.md` 78.7 tok/s claim | 78.7 | Pre-correctness-fix snapshot, on the buggy Q4_K → Q4_KF dispatch path. **Not a real reference** — see `project_metal_decode_81_was_buggy` memory. |
+
+## LM head path matters
+
+Four lm_head paths exist; which one fires is determined by what the loader finds:
+
+| Path | When it fires | ms/tok | Note |
+|---|---|---:|---|
+| **Q4 matvec (Metal)** | `lm_head_q4.bin` present + `vocab_size > 0` | **~1.9** | Production fast path. Saves the 1MB readback + 262K-element CPU sort by computing argmax on the GPU. |
+| f16 gemv (tied embed) | Tied-embedding model + embeddings adopted as lm_head | ~3-5 | Half the bandwidth of f32, 2× of Q4. |
+| f32 KNN (`lm_head.bin`) | Separate untied lm_head shipped at f32 | ~2 | Untied models only. |
+| f32 BLAS gemv (slow) | None of the above — falls back to `weights.lm_head` full gemv | ~8 | What you hit when `vocab_size = 0` silently bails the Q4 path. |
+
+`larql diag <vindex>` prints which path will fire and surfaces the silent-slowdown classes (stale 148-byte stride, `vocab_size = 0`) at a glance.
+
 ## Production Benchmark: "The capital of France is"
 
 Real vindex (`output/gemma3-4b-v2.vindex`), 6-token prompt.
@@ -37,23 +103,27 @@ predict_honest("The capital of France is"):
 | Ollama (34L) | 10.3ms | 98 | |
 | **vs Ollama (synthetic)** | **0.83x** | — | **17% faster** |
 
-### Real vindex (larql bench, gemma3-4b-q4k-v2.vindex, 2026-04-19)
+### Real vindex (larql bench, gemma3-4b-q4k-v2.vindex, 2026-05-02)
 
-Prompt: "The capital of France is" (5 tokens), 50 tok, 3 warmup.
+Prompt: "The capital of France is" (5 tokens), 30 tok, 8 warmup, all
+five Metal dispatch fusions default-on.
 
 | Engine | prefill | ms/tok | tok/s | Notes |
 |--------|---------|--------|-------|-------|
-| **LARQL Metal** | **67.7ms** | **15.6ms** | **64.1** | |
-| Ollama gemma3:4b | ~15ms | ~10ms | ~100 | |
-| **vs Ollama (real)** | — | 1.56x slower | — | GPU forward 86% of decode |
+| **LARQL Metal** | **~67ms** | **13.5–13.9ms** | **72–75** | Five default-on fusions; lm_head v5 stride-32 reduction tree |
+| Ollama gemma3:4b | ~15ms | ~10ms | ~96–104 | |
+| **vs Ollama (real)** | — | ~1.40x slower | — | GPU fwd 79% of decode; lm_head 20% |
 
-Per-stage: embed 0.002ms · GPU fwd 14.1ms · final_norm 0.007ms · lm_head 2.0ms · detok 0.008ms
+Per-stage: embed 0.002ms · GPU fwd 11.5–12.0ms · final_norm 0.006ms · lm_head 2.9–3.0ms · detok 0.04ms
 
 Progress:
 - 2026-04-07: 28.0ms / 36 tok/s (34L synthetic) = 2.84x Ollama
 - 2026-04-08: 18.3ms / 55 tok/s (34L synthetic) = 1.79x Ollama
 - 2026-04-09: 8.5ms / 117 tok/s (34L synthetic) = 0.83x Ollama (synthetic ceiling)
 - 2026-04-19: 15.6ms / 64 tok/s (34L real vindex) — lm_head Q4 synthesis, KV cache fix
+- 2026-05-01: 13.6ms / 73 tok/s (34L real vindex) — 4 dispatch fusions default-on (qk_norm+rope, residual_norm_store, post_attn_norm, post_ffn_norm)
+- 2026-05-01: 13.4ms / 74 tok/s — 5th fusion default-on (kv_append + kv_attend)
+- 2026-05-02: 13.5–13.9ms / 72–75 tok/s — `attn_fused` merger attempt regressed and was reverted to opt-in; lm_head v5 stride-32 holds. Path-to-80 lever search documented in ROADMAP G-3
 
 ## Layer Graph Strategies
 
@@ -148,3 +218,46 @@ All measurements on M3 Max, Gemma 3 4B (34 layers, hidden=2560).
 | **Vindex** | Gate KNN (Q4 Metal) | vindex | 0.5ms/layer | 6x faster |
 | **Vindex** | Walk (14 layers) | vindex | 14ms | Mmap zero-copy |
 | **Ollama** | Full layer | external | 0.30ms/layer | Metal GPU, merged dispatches |
+
+## Sampling Overhead (2026-04-26)
+
+Per-call cost of `Sampler::sample` over realistic vocab sizes. Measured
+1000 iterations after 50 warmup, M3 Max release build. Reference: Metal
+Q4K decode budget ≈ 10ms/tok = 10,000 µs.
+
+### Sparse top-K path — `sample_from_topk` (production hot path)
+
+`generate_with_sampling` requests `K=5` for greedy or `K=64` for sampling
+from the LM-head KNN, then calls `sample_from_topk`. This is the only
+sampling path that runs per generated token in the inference loop.
+
+| Config | Hits | µs/call | % of decode budget |
+|--------|-----:|--------:|-------------------:|
+| greedy | 5 | <0.01 | 0.00% |
+| temperature=0.8 | 64 | 0.28 | 0.003% |
+| temperature=1.0 + top_p=0.9 | 64 | 1.67 | 0.017% |
+| temperature=1.0 + top_k=40 | 64 | 0.63 | 0.006% |
+
+Sparse-path sampling is effectively free — well below the per-step decode
+budget across every config. Switching from greedy to non-greedy moves the
+needle on tok/s by less than 0.02%.
+
+### Full-vocab path — `sample` (reserved for OpenAI-API logprobs)
+
+Sampling from a dense logit vector. Not on the inference hot path today
+— used by the planned OpenAI-compatible HTTP API for `logprobs` and
+likelihood-class evals (HellaSwag, MMLU, ARC).
+
+| Config | Vocab=32K | Vocab=128K | Vocab=256K |
+|--------|----------:|-----------:|-----------:|
+| greedy | 181 µs | 748 µs | 1.5 ms |
+| temperature=0.8 | 134 µs | 572 µs | 1.2 ms |
+| temperature=1.0 + top_p=0.9 | 2.5 ms | 5.4 ms | 8.0 ms |
+| temperature=1.0 + top_k=40 | 104 µs | 423 µs | 820 µs |
+
+The top-p path is ~10× slower than the others at 256K vocab — it does a
+full sort + HashSet membership rather than a partial nth-element. Not
+hot-path-relevant today; revisit if/when full-vocab sampling moves to
+the decode loop.
+
+Reproduce with `cargo run --release -p larql-inference --example bench_sampling`.

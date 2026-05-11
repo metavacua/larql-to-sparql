@@ -51,3 +51,59 @@ pub struct DescribeEdge {
     /// Additional output tokens from the strongest feature (for context).
     pub also_tokens: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_source_display_all_variants() {
+        assert_eq!(LabelSource::Probe.to_string(), "probe");
+        assert_eq!(LabelSource::Cluster.to_string(), "cluster");
+        assert_eq!(LabelSource::Pattern.to_string(), "pattern");
+        assert_eq!(LabelSource::None.to_string(), "");
+        assert_eq!(LabelSource::KnnStore.to_string(), "knn");
+    }
+
+    #[test]
+    fn label_source_equality() {
+        assert_eq!(LabelSource::Probe, LabelSource::Probe);
+        assert_ne!(LabelSource::Probe, LabelSource::Cluster);
+    }
+
+    #[test]
+    fn describe_edge_fields_accessible() {
+        let edge = DescribeEdge {
+            relation: Some("capital".into()),
+            source: LabelSource::Cluster,
+            target: "Paris".into(),
+            gate_score: 0.95,
+            layer_min: 14,
+            layer_max: 20,
+            count: 3,
+            also_tokens: vec!["city".into()],
+        };
+        assert_eq!(edge.relation.as_deref(), Some("capital"));
+        assert_eq!(edge.target, "Paris");
+        assert_eq!(edge.layer_min, 14);
+        assert_eq!(edge.layer_max, 20);
+        assert_eq!(edge.count, 3);
+        assert_eq!(edge.also_tokens.len(), 1);
+    }
+
+    #[test]
+    fn describe_edge_none_relation() {
+        let edge = DescribeEdge {
+            relation: None,
+            source: LabelSource::None,
+            target: "the".into(),
+            gate_score: 0.1,
+            layer_min: 0,
+            layer_max: 0,
+            count: 1,
+            also_tokens: vec![],
+        };
+        assert!(edge.relation.is_none());
+        assert_eq!(edge.source, LabelSource::None);
+    }
+}

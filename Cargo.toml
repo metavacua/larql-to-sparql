@@ -7,6 +7,7 @@ members = [
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-inference",
+    "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
@@ -14,6 +15,8 @@ members = [
     "crates/larql-router-protocol",
     "crates/larql-python",
     "crates/kv-cache-benchmark",
+    # boundary codec (Phase 1-3 of BOUNDARY_REF_PROTOCOL)
+    "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
 ]
@@ -23,11 +26,13 @@ default-members = [
     "crates/larql-core",
     "crates/larql-vindex",
     "crates/larql-inference",
+    "crates/larql-kv",
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
     "crates/larql-router",
     "crates/larql-router-protocol",
+    "crates/larql-boundary",
     "crates/kv-cache-benchmark",
     "crates/model-compute",
 ]
@@ -44,3 +49,16 @@ repository = "https://github.com/chrishayuk/chuk-larql-rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false

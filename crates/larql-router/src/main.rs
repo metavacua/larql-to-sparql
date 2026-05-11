@@ -17,15 +17,16 @@
 //! is supported for JSON only; binary multi-shard requests are rejected with
 //! HTTP 400 (use the batched JSON format or route per-shard manually).
 
-mod grid;
+use larql_router::grid;
+use larql_router::rebalancer;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::State;
 use axum::body::Bytes;
-use axum::http::{StatusCode, header};
+use axum::extract::State;
+use axum::http::{header, StatusCode};
 use axum::response::Response;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -46,7 +47,11 @@ const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
-#[command(name = "larql-router", version, about = "Layer-sharding proxy for larql-server")]
+#[command(
+    name = "larql-router",
+    version,
+    about = "Layer-sharding proxy for larql-server"
+)]
 struct Cli {
     /// Static shard map: comma-separated "START-END=URL" entries (inclusive bounds).
     /// Example: "0-16=http://host-a:8080,17-33=http://host-b:8081"
@@ -80,6 +85,17 @@ struct Cli {
     /// If not set, the grid port is open to any server (development only).
     #[arg(long, env = "LARQL_GRID_KEY")]
     grid_key: Option<String>,
+
+    /// GT6: seconds between rebalancer checks (default: 30).
+    /// Set to 0 to disable dynamic rebalancing.
+    #[arg(long, default_value = "30")]
+    rebalance_interval: u64,
+
+    /// GT6: latency ratio threshold to trigger rebalancing (default: 2.0).
+    /// The slowest replica must be this many times slower than the fastest
+    /// for the same layer before the rebalancer acts.
+    #[arg(long, default_value = "2.0")]
+    rebalance_threshold: f32,
 }
 
 // ── Static shard map ───────────────────────────────────────────────────────────
@@ -153,9 +169,7 @@ pub(crate) fn peek_binary(body: &[u8]) -> Option<Vec<usize>> {
             return None;
         }
         let layers = (0..n)
-            .map(|i| {
-                u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize
-            })
+            .map(|i| u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize)
             .collect();
         Some(layers)
     } else {
@@ -263,19 +277,18 @@ async fn handle_walk_ffn_inner(
     } else {
         let peek: Value = serde_json::from_slice(&body_bytes)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")))?;
-        let layers: Vec<usize> =
-            if let Some(arr) = peek.get("layers").and_then(|v| v.as_array()) {
-                arr.iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as usize))
-                    .collect()
-            } else if let Some(n) = peek.get("layer").and_then(|v| v.as_u64()) {
-                vec![n as usize]
-            } else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "must provide 'layer' or 'layers'".to_string(),
-                ));
-            };
+        let layers: Vec<usize> = if let Some(arr) = peek.get("layers").and_then(|v| v.as_array()) {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect()
+        } else if let Some(n) = peek.get("layer").and_then(|v| v.as_u64()) {
+            vec![n as usize]
+        } else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "must provide 'layer' or 'layers'".to_string(),
+            ));
+        };
         let model_id = peek
             .get("model_id")
             .and_then(|v| v.as_str())
@@ -301,7 +314,11 @@ async fn handle_walk_ffn_inner(
     if unique_urls.len() == 1 || layers.len() == 1 {
         // All layers on the same shard — proxy raw bytes unchanged.
         let url = layer_urls.values().next().unwrap();
-        let ct = if is_binary { BINARY_CT } else { "application/json" };
+        let ct = if is_binary {
+            BINARY_CT
+        } else {
+            "application/json"
+        };
         return proxy_raw(&state.client, url, body_bytes, ct).await;
     }
 
@@ -425,6 +442,45 @@ async fn handle_health() -> Json<Value> {
     Json(serde_json::json!({"status": "ok"}))
 }
 
+/// Proxy /v1/stats to the first reachable shard so that clients connecting
+/// via RemoteWalkBackend (which reads hidden_size from /v1/stats) work
+/// transparently through the router.
+async fn handle_stats(State(state): State<Arc<AppState>>) -> Response {
+    // Collect candidate shard URLs: grid shards first, then static.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(grid) = &state.grid {
+        let guard = grid.read().await;
+        for url in guard.all_shard_urls() {
+            candidates.push(url);
+        }
+    }
+    for shard in &state.static_shards {
+        if !candidates.contains(&shard.url) {
+            candidates.push(shard.url.clone());
+        }
+    }
+    for url in candidates {
+        let stats_url = format!("{url}/v1/stats");
+        if let Ok(resp) = state.client.get(&stats_url).send().await {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes().await {
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(axum::body::Body::from(bytes))
+                        .unwrap();
+                }
+            }
+        }
+    }
+    // No shard reachable — return minimal synthetic stats so callers don't fail hard.
+    Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(r#"{"error":"no shard reachable"}"#))
+        .unwrap()
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -503,10 +559,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let grpc_addr: SocketAddr = format!("{}:{}", cli.host, grid_port).parse()?;
         info!("Grid gRPC server listening: {grpc_addr}");
         tokio::spawn(async move {
-            if let Err(e) = GrpcServer::builder().add_service(svc).serve(grpc_addr).await {
+            if let Err(e) = GrpcServer::builder()
+                .add_service(svc)
+                .serve(grpc_addr)
+                .await
+            {
                 tracing::error!("gRPC server error: {e}");
             }
         });
+
+        // GT6: spawn dynamic rebalancer (disabled when interval == 0).
+        if cli.rebalance_interval > 0 {
+            let rebalance_cfg = rebalancer::RebalancerConfig::from_cli(
+                cli.rebalance_interval,
+                cli.rebalance_threshold,
+            );
+            info!(
+                interval_s = cli.rebalance_interval,
+                threshold = cli.rebalance_threshold,
+                "Rebalancer: enabled"
+            );
+            rebalancer::spawn(state.clone(), rebalance_cfg);
+        }
     }
 
     let state = Arc::new(AppState {
@@ -517,6 +591,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let app = Router::new()
         .route("/v1/walk-ffn", post(handle_walk_ffn))
+        .route("/v1/stats", axum::routing::get(handle_stats))
         .route("/v1/health", axum::routing::get(handle_health))
         .with_state(state);
 
@@ -620,8 +695,7 @@ mod tests {
 
     #[test]
     fn parse_shards_two_entries() {
-        let shards =
-            parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
+        let shards = parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
         assert_eq!(shards.len(), 2);
         assert!(shards[0].owns(0));
         assert!(shards[0].owns(16));

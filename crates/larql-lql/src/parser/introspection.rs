@@ -1,8 +1,8 @@
 //! Introspection statement parsers: SHOW (RELATIONS, LAYERS, FEATURES, MODELS), STATS.
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-use super::{Parser, ParseError};
 
 impl Parser {
     pub(crate) fn parse_show(&mut self) -> Result<Statement, ParseError> {

@@ -1,8 +1,8 @@
 use ndarray::Array2;
 
+use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-use super::{LayerGraph, LayerOutput, DenseLayerGraph, PerLayerGraph};
 
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 
@@ -30,7 +30,12 @@ impl CachedLayerGraph {
         let max_layer = *layers.iter().max().unwrap_or(&0);
 
         for layer in 0..=max_layer.min(weights.num_layers - 1) {
-            let graph = DenseLayerGraph { ffn, backend: None, capture_activation: false, capture_attention: false };
+            let graph = DenseLayerGraph {
+                ffn,
+                backend: None,
+                capture_activation: false,
+                capture_attention: false,
+            };
             if let Some(output) = graph.forward_layer(weights, &h, layer) {
                 h = output.residual;
                 if layers.contains(&layer) {
@@ -43,7 +48,9 @@ impl CachedLayerGraph {
 
     /// Build from an existing residual (e.g., from a previous forward pass).
     pub fn from_residuals(residuals: Vec<(usize, Array2<f32>)>) -> Self {
-        Self { cache: residuals.into_iter().collect() }
+        Self {
+            cache: residuals.into_iter().collect(),
+        }
     }
 
     pub fn has_layer(&self, layer: usize) -> bool {
@@ -63,10 +70,16 @@ impl LayerGraph for CachedLayerGraph {
         layer: usize,
     ) -> Option<LayerOutput> {
         let residual = self.cache.get(&layer)?.clone();
-        Some(LayerOutput { residual, activation: None, attention: None })
+        Some(LayerOutput {
+            residual,
+            activation: None,
+            attention: None,
+        })
     }
 
-    fn name(&self) -> &str { "cached" }
+    fn name(&self) -> &str {
+        "cached"
+    }
 }
 
 /// Build a PerLayerGraph with cached layers for a detected template.
@@ -130,8 +143,7 @@ impl AttentionCache {
         for layer in layer_range {
             // Attention (exact)
             let (h_post_attn, _, _) =
-                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None)
-                    .unwrap();
+                crate::attention::run_attention_block_gpu(weights, &h, layer, false, None).unwrap();
 
             // Capture FFN-normed input (last token)
             let pre_ffn_key = if arch.has_post_norms() {
@@ -150,6 +162,162 @@ impl AttentionCache {
             h = h_out;
         }
 
-        AttentionCache { ffn_inputs, final_residual: h }
+        AttentionCache {
+            ffn_inputs,
+            final_residual: h,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffn::WeightFfn;
+    use crate::test_utils::make_test_weights;
+    use ndarray::Array2;
+
+    #[test]
+    fn from_residuals_empty() {
+        let g = CachedLayerGraph::from_residuals(vec![]);
+        assert_eq!(g.num_cached(), 0);
+        assert!(!g.has_layer(0));
+    }
+
+    #[test]
+    fn from_residuals_single() {
+        let arr = Array2::zeros((3, 4));
+        let g = CachedLayerGraph::from_residuals(vec![(0, arr.clone())]);
+        assert_eq!(g.num_cached(), 1);
+        assert!(g.has_layer(0));
+        assert!(!g.has_layer(1));
+    }
+
+    #[test]
+    fn from_residuals_multiple() {
+        let arr = Array2::ones((2, 8));
+        let g =
+            CachedLayerGraph::from_residuals(vec![(0, arr.clone()), (3, arr.clone()), (5, arr)]);
+        assert_eq!(g.num_cached(), 3);
+        assert!(g.has_layer(0));
+        assert!(g.has_layer(3));
+        assert!(g.has_layer(5));
+        assert!(!g.has_layer(1));
+    }
+
+    #[test]
+    fn forward_layer_returns_cached() {
+        let weights = make_test_weights();
+        let h = Array2::from_elem((2, weights.hidden_size), 0.5f32);
+        let g = CachedLayerGraph::from_residuals(vec![(0, h.clone())]);
+        let out = g
+            .forward_layer(&weights, &h, 0)
+            .expect("should return cached");
+        assert_eq!(out.residual.shape(), &[2, weights.hidden_size]);
+    }
+
+    #[test]
+    fn forward_layer_none_for_uncached() {
+        let weights = make_test_weights();
+        let h = Array2::zeros((1, weights.hidden_size));
+        let g = CachedLayerGraph::from_residuals(vec![]);
+        assert!(
+            g.forward_layer(&weights, &h, 0).is_none(),
+            "uncached layer should return None"
+        );
+    }
+
+    #[test]
+    fn build_caches_specified_layers() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let g = CachedLayerGraph::build(&weights, &[0u32, 1], &[0], &ffn);
+        assert!(g.has_layer(0), "layer 0 should be cached");
+        assert!(!g.has_layer(1), "layer 1 was not in the build list");
+    }
+
+    #[test]
+    fn cached_layer_graph_name() {
+        let g = CachedLayerGraph::from_residuals(vec![]);
+        assert_eq!(g.name(), "cached");
+    }
+
+    #[test]
+    fn build_caches_multiple_layers() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let g = CachedLayerGraph::build(&weights, &[0u32, 1, 2], &[0, 1], &ffn);
+        assert!(g.has_layer(0));
+        assert!(g.has_layer(1));
+        assert_eq!(g.num_cached(), 2);
+    }
+
+    #[test]
+    fn build_with_empty_layer_list_caches_nothing() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let g = CachedLayerGraph::build(&weights, &[0u32], &[], &ffn);
+        assert_eq!(g.num_cached(), 0);
+    }
+
+    #[test]
+    fn build_adaptive_graph_routes_layers_through_cache_or_fallback() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let cache =
+            CachedLayerGraph::from_residuals(vec![(0, Array2::zeros((1, weights.hidden_size)))]);
+        let fallback = DenseLayerGraph {
+            ffn: &ffn,
+            backend: None,
+            capture_activation: false,
+            capture_attention: false,
+        };
+        let _adaptive = build_adaptive_graph(&cache, &fallback, weights.num_layers, &(0..=0));
+        // Just exercise the constructor — verifying routing requires the
+        // PerLayerGraph dispatch surface which is covered elsewhere.
+    }
+
+    #[test]
+    fn build_adaptive_graph_skips_cache_when_layer_outside_range() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let cache = CachedLayerGraph::from_residuals(vec![]);
+        let fallback = DenseLayerGraph {
+            ffn: &ffn,
+            backend: None,
+            capture_activation: false,
+            capture_attention: false,
+        };
+        let _ = build_adaptive_graph(
+            &cache,
+            &fallback,
+            weights.num_layers,
+            &(weights.num_layers..=weights.num_layers + 5),
+        );
+    }
+
+    #[test]
+    fn attention_cache_build_captures_one_ffn_input_per_layer() {
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let cache = CachedLayerGraph::from_residuals(vec![]);
+        let layer_range = 0..weights.num_layers;
+        let ac = AttentionCache::build(&weights, &[0u32, 1, 2], &cache, &ffn, layer_range);
+        assert_eq!(ac.ffn_inputs.len(), weights.num_layers);
+        for input in &ac.ffn_inputs {
+            assert_eq!(input.len(), weights.hidden_size);
+            assert!(input.iter().all(|v| v.is_finite()));
+        }
+        assert_eq!(ac.final_residual.shape(), &[3, weights.hidden_size]);
+    }
+
+    #[test]
+    fn attention_cache_build_partial_range_skips_layers() {
+        // Layer range starting > 0 should still produce per-walk-layer
+        // FFN inputs, just for the walked subset.
+        let weights = make_test_weights();
+        let ffn = WeightFfn { weights: &weights };
+        let cache = CachedLayerGraph::from_residuals(vec![]);
+        let ac = AttentionCache::build(&weights, &[0u32, 1], &cache, &ffn, 1..weights.num_layers);
+        assert_eq!(ac.ffn_inputs.len(), weights.num_layers - 1);
     }
 }

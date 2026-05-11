@@ -1,0 +1,107 @@
+# larql-core cross-platform CI
+#
+# Runs fmt + feature matrix + clippy + tests + examples + bench test-mode on
+# Linux, Windows, and macOS. The crate is model-architecture agnostic and these
+# checks require no model weights or platform-specific backends.
+
+name: larql-core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-core.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-core.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-core-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-core-
+
+      - name: Format check
+        run: cargo fmt -p larql-core -- --check
+
+      - name: Check default features
+        run: cargo check -p larql-core --all-targets
+
+      - name: Check no default features
+        run: cargo check -p larql-core --no-default-features --all-targets
+
+      - name: Check msgpack-only feature
+        run: cargo check -p larql-core --no-default-features --features msgpack --all-targets
+
+      - name: Clippy default features
+        run: cargo clippy -p larql-core --all-targets -- -D warnings
+
+      - name: Unit + integration tests
+        run: cargo test -p larql-core
+
+      - name: Feature matrix tests
+        run: |
+          cargo test -p larql-core --no-default-features
+          cargo test -p larql-core --no-default-features --features msgpack
+
+      - name: Test benchmarks
+        run: cargo test -p larql-core --benches
+
+      - name: Run examples
+        run: |
+          cargo run -p larql-core --example edge_demo
+          cargo run -p larql-core --example graph_demo
+          cargo run -p larql-core --example algorithm_demo
+          cargo run -p larql-core --example filter_demo
+          cargo run -p larql-core --example serialization_demo
+
+  coverage:
+    name: coverage · ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-core --summary-only

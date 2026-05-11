@@ -50,8 +50,8 @@ path = [
   "scripts/version_preflight.sh",
   "scripts/check_first_party_licenses.sh",
   "scripts/ci/**",
-  "docs/specs/compliance-pipeline.md",
-  "docs/specs/code-quality-pipeline.md",
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
   "docs/ci-cd-local.md",
   "deny.toml",
 ]

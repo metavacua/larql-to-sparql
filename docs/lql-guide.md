@@ -95,17 +95,18 @@ EXPLAIN INFER "The capital of France is" TOP 5;
 ### 5. Edit knowledge
 
 ```sql
--- Insert a fact (multi-layer constellation install, alpha=0.25 default)
+-- Insert a fact (default KNN retrieval override)
 INSERT INTO EDGES (entity, relation, target)
     VALUES ("John Coyle", "lives-in", "Colchester");
 
--- Insert with all knobs: center the span on a specific layer, set
--- confidence, dial the override strength
+-- Insert with all COMPOSE knobs: choose the layer, set confidence,
+-- and dial the down-vector override strength
 INSERT INTO EDGES (entity, relation, target)
     VALUES ("Atlantis", "capital-of", "Poseidon")
     AT LAYER 24
     CONFIDENCE 0.95
-    ALPHA 0.30;
+    ALPHA 0.30
+    MODE COMPOSE;
 
 -- Verify
 DESCRIBE "John Coyle";
@@ -122,10 +123,12 @@ UPDATE EDGES SET target = "London", confidence = 0.95
     WHERE layer = 26 AND feature = 8821;
 ```
 
-INSERT is a multi-layer constellation install (8 layers × `alpha=0.25` is the
-validated regime — see `docs/training-free-insert.md`). The defaults are
-deliberately conservative; raise `ALPHA` for stubborn facts at the cost of
-nudging neighbouring facts.
+INSERT defaults to `MODE KNN`, which records a retrieval override and ignores
+`ALPHA`. Use `MODE COMPOSE` when you want an FFN overlay that participates in
+inference and can be compiled into vindex/model bytes; its default `ALPHA` is
+0.10, with the validated range around 0.05-0.30. Relation predicates on
+DELETE/UPDATE require relation labels in the active vindex; otherwise target
+by `(layer, feature)` or omit `relation`.
 
 ### 6. Patches
 

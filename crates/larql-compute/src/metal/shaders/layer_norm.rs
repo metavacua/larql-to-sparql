@@ -66,3 +66,13 @@ kernel void layer_norm_no_bias(
     out[tid] = (x[tid] - mean) * inv_std * (weight[tid] + offset);
 }
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "layer_norm";
+}
+
+pub struct NoBiasKernel;
+impl crate::metal::kernel::ShaderKernel for NoBiasKernel {
+    const KERNEL_NAME: &'static str = "layer_norm_no_bias";
+}

@@ -9,10 +9,7 @@ use crate::ast::*;
 
 #[test]
 fn parse_extract_minimal() {
-    let stmt = parse(
-        r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex";"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex";"#).unwrap();
     match stmt {
         Statement::Extract {
             model,
@@ -39,7 +36,10 @@ fn parse_extract_with_components_and_layers() {
     .unwrap();
     match stmt {
         Statement::Extract {
-            components, layers, extract_level, ..
+            components,
+            layers,
+            extract_level,
+            ..
         } => {
             let c = components.unwrap();
             assert_eq!(c.len(), 4);
@@ -58,10 +58,7 @@ fn parse_extract_with_components_and_layers() {
 
 #[test]
 fn parse_extract_attn_components() {
-    let stmt = parse(
-        r#"EXTRACT MODEL "m" INTO "o" COMPONENTS ATTN_OV, ATTN_QK;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"EXTRACT MODEL "m" INTO "o" COMPONENTS ATTN_OV, ATTN_QK;"#).unwrap();
     match stmt {
         Statement::Extract { components, .. } => {
             let c = components.unwrap();
@@ -75,10 +72,9 @@ fn parse_extract_attn_components() {
 
 #[test]
 fn parse_extract_with_inference() {
-    let stmt = parse(
-        r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex" WITH INFERENCE;"#,
-    )
-    .unwrap();
+    let stmt =
+        parse(r#"EXTRACT MODEL "google/gemma-3-4b-it" INTO "gemma3-4b.vindex" WITH INFERENCE;"#)
+            .unwrap();
     match stmt {
         Statement::Extract { extract_level, .. } => {
             assert_eq!(extract_level, ExtractLevel::Inference);
@@ -89,10 +85,7 @@ fn parse_extract_with_inference() {
 
 #[test]
 fn parse_extract_with_all() {
-    let stmt = parse(
-        r#"EXTRACT MODEL "m" INTO "o" WITH ALL;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"EXTRACT MODEL "m" INTO "o" WITH ALL;"#).unwrap();
     match stmt {
         Statement::Extract { extract_level, .. } => {
             assert_eq!(extract_level, ExtractLevel::All);
@@ -104,10 +97,7 @@ fn parse_extract_with_all() {
 #[test]
 fn parse_extract_with_weights_legacy() {
     // WITH WEIGHTS is legacy syntax, maps to Inference
-    let stmt = parse(
-        r#"EXTRACT MODEL "m" INTO "o" WITH WEIGHTS;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"EXTRACT MODEL "m" INTO "o" WITH WEIGHTS;"#).unwrap();
     match stmt {
         Statement::Extract { extract_level, .. } => {
             assert_eq!(extract_level, ExtractLevel::Inference);
@@ -118,12 +108,13 @@ fn parse_extract_with_weights_legacy() {
 
 #[test]
 fn parse_extract_with_all_and_components() {
-    let stmt = parse(
-        r#"EXTRACT MODEL "m" INTO "o" COMPONENTS FFN_GATE WITH ALL;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"EXTRACT MODEL "m" INTO "o" COMPONENTS FFN_GATE WITH ALL;"#).unwrap();
     match stmt {
-        Statement::Extract { components, extract_level, .. } => {
+        Statement::Extract {
+            components,
+            extract_level,
+            ..
+        } => {
             assert_eq!(extract_level, ExtractLevel::All);
             assert_eq!(components.unwrap().len(), 1);
         }
@@ -135,12 +126,14 @@ fn parse_extract_with_all_and_components() {
 
 #[test]
 fn parse_compile_current_safetensors() {
-    let stmt = parse(
-        r#"COMPILE CURRENT INTO MODEL "edited/" FORMAT safetensors;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"COMPILE CURRENT INTO MODEL "edited/" FORMAT safetensors;"#).unwrap();
     match stmt {
-        Statement::Compile { vindex, output, format, .. } => {
+        Statement::Compile {
+            vindex,
+            output,
+            format,
+            ..
+        } => {
             assert!(matches!(vindex, VindexRef::Current));
             assert_eq!(output, "edited/");
             assert_eq!(format, Some(OutputFormat::Safetensors));
@@ -151,12 +144,14 @@ fn parse_compile_current_safetensors() {
 
 #[test]
 fn parse_compile_path_gguf() {
-    let stmt = parse(
-        r#"COMPILE "gemma3.vindex" INTO MODEL "out/" FORMAT gguf;"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"COMPILE "gemma3.vindex" INTO MODEL "out/" FORMAT gguf;"#).unwrap();
     match stmt {
-        Statement::Compile { vindex, output, format, .. } => {
+        Statement::Compile {
+            vindex,
+            output,
+            format,
+            ..
+        } => {
             assert!(matches!(vindex, VindexRef::Path(ref p) if p == "gemma3.vindex"));
             assert_eq!(output, "out/");
             assert_eq!(format, Some(OutputFormat::Gguf));
@@ -167,10 +162,7 @@ fn parse_compile_path_gguf() {
 
 #[test]
 fn parse_compile_no_format() {
-    let stmt = parse(
-        r#"COMPILE CURRENT INTO MODEL "out/";"#,
-    )
-    .unwrap();
+    let stmt = parse(r#"COMPILE CURRENT INTO MODEL "out/";"#).unwrap();
     match stmt {
         Statement::Compile { format, .. } => assert!(format.is_none()),
         _ => panic!("expected Compile"),
@@ -242,12 +234,13 @@ fn parse_diff_with_relations_plural() {
 
 #[test]
 fn parse_diff_with_relation_and_limit() {
-    let stmt = parse(
-        r#"DIFF "gemma3-4b.vindex" "gemma3-4b-edited.vindex" RELATION "capital" LIMIT 20;"#,
-    )
-    .unwrap();
+    let stmt =
+        parse(r#"DIFF "gemma3-4b.vindex" "gemma3-4b-edited.vindex" RELATION "capital" LIMIT 20;"#)
+            .unwrap();
     match stmt {
-        Statement::Diff { relation, limit, .. } => {
+        Statement::Diff {
+            relation, limit, ..
+        } => {
             assert_eq!(relation.as_deref(), Some("capital"));
             assert_eq!(limit, Some(20));
         }
@@ -261,7 +254,9 @@ fn parse_diff_with_relation_and_limit() {
 fn parse_use_vindex() {
     let stmt = parse(r#"USE "gemma3-4b.vindex";"#).unwrap();
     match stmt {
-        Statement::Use { target: UseTarget::Vindex(path) } => assert_eq!(path, "gemma3-4b.vindex"),
+        Statement::Use {
+            target: UseTarget::Vindex(path),
+        } => assert_eq!(path, "gemma3-4b.vindex"),
         _ => panic!("expected Use Vindex"),
     }
 }
@@ -270,7 +265,9 @@ fn parse_use_vindex() {
 fn parse_use_model() {
     let stmt = parse(r#"USE MODEL "google/gemma-3-4b-it";"#).unwrap();
     match stmt {
-        Statement::Use { target: UseTarget::Model { id, auto_extract } } => {
+        Statement::Use {
+            target: UseTarget::Model { id, auto_extract },
+        } => {
             assert_eq!(id, "google/gemma-3-4b-it");
             assert!(!auto_extract);
         }
@@ -282,7 +279,9 @@ fn parse_use_model() {
 fn parse_use_model_auto_extract() {
     let stmt = parse(r#"USE MODEL "google/gemma-3-4b-it" AUTO_EXTRACT;"#).unwrap();
     match stmt {
-        Statement::Use { target: UseTarget::Model { auto_extract, .. } } => assert!(auto_extract),
+        Statement::Use {
+            target: UseTarget::Model { auto_extract, .. },
+        } => assert!(auto_extract),
         _ => panic!("expected Use Model AUTO_EXTRACT"),
     }
 }
@@ -297,7 +296,13 @@ fn parse_use_model_auto_extract() {
 fn parse_walk_minimal() {
     let stmt = parse(r#"WALK "The capital of France is";"#).unwrap();
     match stmt {
-        Statement::Walk { prompt, top, layers, mode, compare } => {
+        Statement::Walk {
+            prompt,
+            top,
+            layers,
+            mode,
+            compare,
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert!(top.is_none());
             assert!(layers.is_none());
@@ -321,7 +326,13 @@ fn parse_walk_with_top() {
 fn parse_walk_full_options() {
     let stmt = parse(r#"WALK "prompt" TOP 5 LAYERS 25-33 MODE hybrid COMPARE;"#).unwrap();
     match stmt {
-        Statement::Walk { top, layers, mode, compare, .. } => {
+        Statement::Walk {
+            top,
+            layers,
+            mode,
+            compare,
+            ..
+        } => {
             assert_eq!(top, Some(5));
             let l = layers.unwrap();
             assert_eq!(l.start, 25);
@@ -380,7 +391,13 @@ fn parse_select_named_fields() {
         r#"SELECT entity, relation, target, confidence FROM EDGES WHERE entity = "France" ORDER BY confidence DESC LIMIT 10;"#,
     ).unwrap();
     match stmt {
-        Statement::Select { fields, conditions, order, limit, .. } => {
+        Statement::Select {
+            fields,
+            conditions,
+            order,
+            limit,
+            ..
+        } => {
             assert_eq!(fields.len(), 4);
             assert_eq!(conditions.len(), 1);
             let ord = order.unwrap();
@@ -393,9 +410,8 @@ fn parse_select_named_fields() {
 
 #[test]
 fn parse_select_multiple_conditions() {
-    let stmt = parse(
-        r#"SELECT * FROM EDGES WHERE relation = "capital-of" AND confidence > 0.5;"#,
-    ).unwrap();
+    let stmt = parse(r#"SELECT * FROM EDGES WHERE relation = "capital-of" AND confidence > 0.5;"#)
+        .unwrap();
     match stmt {
         Statement::Select { conditions, .. } => {
             assert_eq!(conditions.len(), 2);
@@ -423,7 +439,8 @@ fn parse_select_by_layer_and_feature() {
 fn parse_select_nearest() {
     let stmt = parse(
         r#"SELECT entity, target, distance FROM EDGES NEAREST TO "Mozart" AT LAYER 26 LIMIT 20;"#,
-    ).unwrap();
+    )
+    .unwrap();
     match stmt {
         Statement::Select { nearest, limit, .. } => {
             let n = nearest.unwrap();
@@ -439,7 +456,9 @@ fn parse_select_nearest() {
 fn parse_select_no_where() {
     let stmt = parse("SELECT * FROM EDGES LIMIT 5;").unwrap();
     match stmt {
-        Statement::Select { conditions, limit, .. } => {
+        Statement::Select {
+            conditions, limit, ..
+        } => {
             assert!(conditions.is_empty());
             assert_eq!(limit, Some(5));
         }
@@ -471,7 +490,13 @@ fn parse_select_order_default_asc() {
 fn parse_describe_minimal() {
     let stmt = parse(r#"DESCRIBE "France";"#).unwrap();
     match stmt {
-        Statement::Describe { entity, band, layer, relations_only, mode } => {
+        Statement::Describe {
+            entity,
+            band,
+            layer,
+            relations_only,
+            mode,
+        } => {
             assert_eq!(entity, "France");
             assert!(band.is_none());
             assert!(layer.is_none());
@@ -486,7 +511,12 @@ fn parse_describe_minimal() {
 fn parse_describe_at_layer() {
     let stmt = parse(r#"DESCRIBE "Mozart" AT LAYER 26;"#).unwrap();
     match stmt {
-        Statement::Describe { entity, band, layer, .. } => {
+        Statement::Describe {
+            entity,
+            band,
+            layer,
+            ..
+        } => {
             assert_eq!(entity, "Mozart");
             assert!(band.is_none());
             assert_eq!(layer, Some(26));
@@ -508,7 +538,11 @@ fn parse_describe_relations_only() {
 fn parse_describe_layer_and_relations_only() {
     let stmt = parse(r#"DESCRIBE "France" AT LAYER 26 RELATIONS ONLY;"#).unwrap();
     match stmt {
-        Statement::Describe { layer, relations_only, .. } => {
+        Statement::Describe {
+            layer,
+            relations_only,
+            ..
+        } => {
             assert_eq!(layer, Some(26));
             assert!(relations_only);
         }
@@ -565,7 +599,11 @@ fn parse_describe_all_layers() {
 fn parse_describe_band_with_relations_only() {
     let stmt = parse(r#"DESCRIBE "France" KNOWLEDGE RELATIONS ONLY;"#).unwrap();
     match stmt {
-        Statement::Describe { band, relations_only, .. } => {
+        Statement::Describe {
+            band,
+            relations_only,
+            ..
+        } => {
             assert_eq!(band, Some(LayerBand::Knowledge));
             assert!(relations_only);
         }
@@ -618,7 +656,13 @@ fn parse_describe_band_verbose() {
 fn parse_explain_walk_minimal() {
     let stmt = parse(r#"EXPLAIN WALK "The capital of France is";"#).unwrap();
     match stmt {
-        Statement::Explain { prompt, mode, layers, verbose, .. } => {
+        Statement::Explain {
+            prompt,
+            mode,
+            layers,
+            verbose,
+            ..
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert_eq!(mode, ExplainMode::Walk);
             assert!(layers.is_none());
@@ -632,7 +676,9 @@ fn parse_explain_walk_minimal() {
 fn parse_explain_walk_with_layers_and_verbose() {
     let stmt = parse(r#"EXPLAIN WALK "prompt" LAYERS 24-33 VERBOSE;"#).unwrap();
     match stmt {
-        Statement::Explain { layers, verbose, .. } => {
+        Statement::Explain {
+            layers, verbose, ..
+        } => {
             let l = layers.unwrap();
             assert_eq!(l.start, 24);
             assert_eq!(l.end, 33);
@@ -646,7 +692,16 @@ fn parse_explain_walk_with_layers_and_verbose() {
 fn parse_explain_infer_minimal() {
     let stmt = parse(r#"EXPLAIN INFER "The capital of France is";"#).unwrap();
     match stmt {
-        Statement::Explain { prompt, mode, layers, band, verbose, top, relations_only, with_attention } => {
+        Statement::Explain {
+            prompt,
+            mode,
+            layers,
+            band,
+            verbose,
+            top,
+            relations_only,
+            with_attention,
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert_eq!(mode, ExplainMode::Infer);
             assert!(layers.is_none());
@@ -664,7 +719,13 @@ fn parse_explain_infer_minimal() {
 fn parse_explain_infer_with_options() {
     let stmt = parse(r#"EXPLAIN INFER "test prompt" LAYERS 20-30 VERBOSE TOP 10;"#).unwrap();
     match stmt {
-        Statement::Explain { mode, layers, verbose, top, .. } => {
+        Statement::Explain {
+            mode,
+            layers,
+            verbose,
+            top,
+            ..
+        } => {
             assert_eq!(mode, ExplainMode::Infer);
             let l = layers.unwrap();
             assert_eq!(l.start, 20);
@@ -704,7 +765,11 @@ fn parse_explain_infer_with_band() {
 fn parse_explain_infer_relations_only() {
     let stmt = parse(r#"EXPLAIN INFER "test" RELATIONS ONLY;"#).unwrap();
     match stmt {
-        Statement::Explain { mode, relations_only, .. } => {
+        Statement::Explain {
+            mode,
+            relations_only,
+            ..
+        } => {
             assert_eq!(mode, ExplainMode::Infer);
             assert!(relations_only);
         }
@@ -716,7 +781,11 @@ fn parse_explain_infer_relations_only() {
 fn parse_explain_infer_with_attention() {
     let stmt = parse(r#"EXPLAIN INFER "test" WITH ATTENTION;"#).unwrap();
     match stmt {
-        Statement::Explain { mode, with_attention, .. } => {
+        Statement::Explain {
+            mode,
+            with_attention,
+            ..
+        } => {
             assert_eq!(mode, ExplainMode::Infer);
             assert!(with_attention);
         }
@@ -726,9 +795,17 @@ fn parse_explain_infer_with_attention() {
 
 #[test]
 fn parse_explain_infer_all_options() {
-    let stmt = parse(r#"EXPLAIN INFER "test" KNOWLEDGE TOP 1 RELATIONS ONLY WITH ATTENTION;"#).unwrap();
+    let stmt =
+        parse(r#"EXPLAIN INFER "test" KNOWLEDGE TOP 1 RELATIONS ONLY WITH ATTENTION;"#).unwrap();
     match stmt {
-        Statement::Explain { mode, band, top, relations_only, with_attention, .. } => {
+        Statement::Explain {
+            mode,
+            band,
+            top,
+            relations_only,
+            with_attention,
+            ..
+        } => {
             assert_eq!(mode, ExplainMode::Infer);
             assert_eq!(band, Some(LayerBand::Knowledge));
             assert_eq!(top, Some(1));
@@ -751,7 +828,15 @@ fn parse_insert_minimal() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John Coyle", "lives-in", "Colchester");"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { entity, relation, target, layer, confidence, alpha, mode } => {
+        Statement::Insert {
+            entity,
+            relation,
+            target,
+            layer,
+            confidence,
+            alpha,
+            mode,
+        } => {
             assert_eq!(entity, "John Coyle");
             assert_eq!(relation, "lives-in");
             assert_eq!(target, "Colchester");
@@ -770,7 +855,12 @@ fn parse_insert_with_layer_and_confidence() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("John", "occupation", "engineer") AT LAYER 26 CONFIDENCE 0.8;"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { layer, confidence, alpha, .. } => {
+        Statement::Insert {
+            layer,
+            confidence,
+            alpha,
+            ..
+        } => {
             assert_eq!(layer, Some(26));
             assert!((confidence.unwrap() - 0.8).abs() < 0.01);
             assert!(alpha.is_none());
@@ -785,7 +875,12 @@ fn parse_insert_with_alpha() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") ALPHA 0.5;"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { alpha, layer, confidence, .. } => {
+        Statement::Insert {
+            alpha,
+            layer,
+            confidence,
+            ..
+        } => {
             assert!((alpha.unwrap() - 0.5).abs() < 1e-6);
             assert!(layer.is_none());
             assert!(confidence.is_none());
@@ -801,7 +896,12 @@ fn parse_insert_with_layer_confidence_alpha() {
         r#"INSERT INTO EDGES (entity, relation, target) VALUES ("Atlantis", "capital-of", "Poseidon") AT LAYER 24 CONFIDENCE 0.95 ALPHA 0.3;"#,
     ).unwrap();
     match stmt {
-        Statement::Insert { layer, confidence, alpha, .. } => {
+        Statement::Insert {
+            layer,
+            confidence,
+            alpha,
+            ..
+        } => {
             assert_eq!(layer, Some(24));
             assert!((confidence.unwrap() - 0.95).abs() < 1e-6);
             assert!((alpha.unwrap() - 0.3).abs() < 1e-6);
@@ -826,9 +926,8 @@ fn parse_delete_single_condition() {
 
 #[test]
 fn parse_delete_multiple_conditions() {
-    let stmt = parse(
-        r#"DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";"#,
-    ).unwrap();
+    let stmt = parse(r#"DELETE FROM EDGES WHERE entity = "John Coyle" AND relation = "lives-in";"#)
+        .unwrap();
     match stmt {
         Statement::Delete { conditions } => assert_eq!(conditions.len(), 2),
         _ => panic!("expected Delete"),
@@ -868,7 +967,8 @@ fn parse_update_single_set() {
 fn parse_update_multiple_assignments() {
     let stmt = parse(
         r#"UPDATE EDGES SET target = "London", confidence = 0.9 WHERE entity = "John Coyle";"#,
-    ).unwrap();
+    )
+    .unwrap();
     match stmt {
         Statement::Update { set, conditions } => {
             assert_eq!(set.len(), 2);
@@ -884,7 +984,11 @@ fn parse_update_multiple_assignments() {
 fn parse_merge_minimal() {
     let stmt = parse(r#"MERGE "source.vindex";"#).unwrap();
     match stmt {
-        Statement::Merge { source, target, conflict } => {
+        Statement::Merge {
+            source,
+            target,
+            conflict,
+        } => {
             assert_eq!(source, "source.vindex");
             assert!(target.is_none());
             assert!(conflict.is_none());
@@ -897,7 +1001,11 @@ fn parse_merge_minimal() {
 fn parse_merge_into_no_conflict() {
     let stmt = parse(r#"MERGE "source.vindex" INTO "target.vindex";"#).unwrap();
     match stmt {
-        Statement::Merge { source, target, conflict } => {
+        Statement::Merge {
+            source,
+            target,
+            conflict,
+        } => {
             assert_eq!(source, "source.vindex");
             assert_eq!(target.as_deref(), Some("target.vindex"));
             assert!(conflict.is_none());
@@ -908,11 +1016,15 @@ fn parse_merge_into_no_conflict() {
 
 #[test]
 fn parse_merge_into_with_conflict() {
-    let stmt = parse(
-        r#"MERGE "medical.vindex" INTO "gemma3.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#,
-    ).unwrap();
+    let stmt =
+        parse(r#"MERGE "medical.vindex" INTO "gemma3.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#)
+            .unwrap();
     match stmt {
-        Statement::Merge { source, target, conflict } => {
+        Statement::Merge {
+            source,
+            target,
+            conflict,
+        } => {
             assert_eq!(source, "medical.vindex");
             assert_eq!(target.as_deref(), Some("gemma3.vindex"));
             assert_eq!(conflict, Some(ConflictStrategy::HighestConfidence));
@@ -925,7 +1037,9 @@ fn parse_merge_into_with_conflict() {
 fn parse_merge_keep_source() {
     let stmt = parse(r#"MERGE "a.vindex" INTO "b.vindex" ON CONFLICT KEEP_SOURCE;"#).unwrap();
     match stmt {
-        Statement::Merge { conflict, .. } => assert_eq!(conflict, Some(ConflictStrategy::KeepSource)),
+        Statement::Merge { conflict, .. } => {
+            assert_eq!(conflict, Some(ConflictStrategy::KeepSource))
+        }
         _ => panic!("expected Merge"),
     }
 }
@@ -934,7 +1048,9 @@ fn parse_merge_keep_source() {
 fn parse_merge_keep_target() {
     let stmt = parse(r#"MERGE "a.vindex" INTO "b.vindex" ON CONFLICT KEEP_TARGET;"#).unwrap();
     match stmt {
-        Statement::Merge { conflict, .. } => assert_eq!(conflict, Some(ConflictStrategy::KeepTarget)),
+        Statement::Merge { conflict, .. } => {
+            assert_eq!(conflict, Some(ConflictStrategy::KeepTarget))
+        }
         _ => panic!("expected Merge"),
     }
 }
@@ -947,7 +1063,11 @@ fn parse_merge_keep_target() {
 fn parse_show_relations_minimal() {
     let stmt = parse("SHOW RELATIONS;").unwrap();
     match stmt {
-        Statement::ShowRelations { layer, with_examples, mode } => {
+        Statement::ShowRelations {
+            layer,
+            with_examples,
+            mode,
+        } => {
             assert!(layer.is_none());
             assert!(!with_examples);
             assert_eq!(mode, DescribeMode::Brief); // Brief is the default
@@ -996,7 +1116,11 @@ fn parse_show_relations_raw() {
 fn parse_show_relations_verbose_with_examples() {
     let stmt = parse("SHOW RELATIONS VERBOSE WITH EXAMPLES;").unwrap();
     match stmt {
-        Statement::ShowRelations { mode, with_examples, .. } => {
+        Statement::ShowRelations {
+            mode,
+            with_examples,
+            ..
+        } => {
             assert_eq!(mode, DescribeMode::Verbose);
             assert!(with_examples);
         }
@@ -1043,7 +1167,11 @@ fn parse_show_layers_bare_range() {
 fn parse_show_features_minimal() {
     let stmt = parse("SHOW FEATURES 26;").unwrap();
     match stmt {
-        Statement::ShowFeatures { layer, conditions, limit } => {
+        Statement::ShowFeatures {
+            layer,
+            conditions,
+            limit,
+        } => {
             assert_eq!(layer, 26);
             assert!(conditions.is_empty());
             assert!(limit.is_none());
@@ -1056,7 +1184,11 @@ fn parse_show_features_minimal() {
 fn parse_show_features_with_where_and_limit() {
     let stmt = parse(r#"SHOW FEATURES 26 WHERE relation = "capital-of" LIMIT 5;"#).unwrap();
     match stmt {
-        Statement::ShowFeatures { layer, conditions, limit } => {
+        Statement::ShowFeatures {
+            layer,
+            conditions,
+            limit,
+        } => {
             assert_eq!(layer, 26);
             assert_eq!(conditions.len(), 1);
             assert_eq!(limit, Some(5));
@@ -1127,7 +1259,11 @@ fn parse_show_entities_limit_only() {
 fn parse_rebalance_minimal() {
     let stmt = parse("REBALANCE;").unwrap();
     match stmt {
-        Statement::Rebalance { max_iters, floor, ceiling } => {
+        Statement::Rebalance {
+            max_iters,
+            floor,
+            ceiling,
+        } => {
             assert!(max_iters.is_none());
             assert!(floor.is_none());
             assert!(ceiling.is_none());
@@ -1167,7 +1303,11 @@ fn parse_rebalance_floor_ceiling() {
 fn parse_rebalance_all_clauses() {
     let stmt = parse("REBALANCE UNTIL CONVERGED MAX 16 FLOOR = 0.25 CEILING = 0.95;").unwrap();
     match stmt {
-        Statement::Rebalance { max_iters, floor, ceiling } => {
+        Statement::Rebalance {
+            max_iters,
+            floor,
+            ceiling,
+        } => {
             assert_eq!(max_iters, Some(16));
             assert!((floor.unwrap() - 0.25).abs() < 1e-6);
             assert!((ceiling.unwrap() - 0.95).abs() < 1e-6);
@@ -1201,13 +1341,25 @@ fn parse_compact_minor() {
 #[test]
 fn parse_compact_major() {
     let stmt = parse("COMPACT MAJOR;").unwrap();
-    assert!(matches!(stmt, Statement::CompactMajor { full: false, lambda: None }));
+    assert!(matches!(
+        stmt,
+        Statement::CompactMajor {
+            full: false,
+            lambda: None
+        }
+    ));
 }
 
 #[test]
 fn parse_compact_major_full() {
     let stmt = parse("COMPACT MAJOR FULL;").unwrap();
-    assert!(matches!(stmt, Statement::CompactMajor { full: true, lambda: None }));
+    assert!(matches!(
+        stmt,
+        Statement::CompactMajor {
+            full: true,
+            lambda: None
+        }
+    ));
 }
 
 #[test]
@@ -1253,7 +1405,8 @@ fn parse_stats_no_semicolon() {
 fn parse_pipe_walk_to_explain() {
     let stmt = parse(
         r#"WALK "The capital of France is" TOP 5 |> EXPLAIN WALK "The capital of France is";"#,
-    ).unwrap();
+    )
+    .unwrap();
     match stmt {
         Statement::Pipe { left, right } => {
             assert!(matches!(*left, Statement::Walk { .. }));
@@ -1292,7 +1445,9 @@ fn parse_select_gte_lte() {
 fn parse_select_like() {
     let stmt = parse(r#"SELECT * FROM EDGES WHERE entity LIKE "Fran%";"#).unwrap();
     match stmt {
-        Statement::Select { conditions, .. } => assert!(matches!(conditions[0].op, CompareOp::Like)),
+        Statement::Select { conditions, .. } => {
+            assert!(matches!(conditions[0].op, CompareOp::Like))
+        }
         _ => panic!("expected Select"),
     }
 }
@@ -1333,7 +1488,9 @@ fn parse_with_trailing_comment() {
 fn parse_multiline_statement() {
     let stmt = parse("SELECT *\n  FROM EDGES\n  WHERE layer = 26\n  LIMIT 5;").unwrap();
     match stmt {
-        Statement::Select { conditions, limit, .. } => {
+        Statement::Select {
+            conditions, limit, ..
+        } => {
             assert_eq!(conditions.len(), 1);
             assert_eq!(limit, Some(5));
         }
@@ -1346,25 +1503,39 @@ fn parse_multiline_statement() {
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-fn parse_error_unknown_statement() { assert!(parse("FOOBAR;").is_err()); }
+fn parse_error_unknown_statement() {
+    assert!(parse("FOOBAR;").is_err());
+}
 
 #[test]
-fn parse_error_walk_missing_prompt() { assert!(parse("WALK TOP 5;").is_err()); }
+fn parse_error_walk_missing_prompt() {
+    assert!(parse("WALK TOP 5;").is_err());
+}
 
 #[test]
-fn parse_error_select_missing_from() { assert!(parse(r#"SELECT * WHERE entity = "x";"#).is_err()); }
+fn parse_error_select_missing_from() {
+    assert!(parse(r#"SELECT * WHERE entity = "x";"#).is_err());
+}
 
 #[test]
-fn parse_error_insert_missing_values() { assert!(parse("INSERT INTO EDGES (entity, relation, target);").is_err()); }
+fn parse_error_insert_missing_values() {
+    assert!(parse("INSERT INTO EDGES (entity, relation, target);").is_err());
+}
 
 #[test]
-fn parse_error_show_invalid_noun() { assert!(parse("SHOW FOOBAR;").is_err()); }
+fn parse_error_show_invalid_noun() {
+    assert!(parse("SHOW FOOBAR;").is_err());
+}
 
 #[test]
-fn parse_error_empty_input() { assert!(parse("").is_err()); }
+fn parse_error_empty_input() {
+    assert!(parse("").is_err());
+}
 
 #[test]
-fn parse_error_comment_only() { assert!(parse("-- just a comment").is_err()); }
+fn parse_error_comment_only() {
+    assert!(parse("-- just a comment").is_err());
+}
 
 // ══════════════════════════════════════════════════════════════
 // FULL DEMO SCRIPT FROM SPEC v0.3 — every statement parses
@@ -1415,7 +1586,11 @@ fn parse_demo_script_act5() {
 fn parse_infer_minimal() {
     let stmt = parse(r#"INFER "The capital of France is" TOP 5;"#).unwrap();
     match stmt {
-        Statement::Infer { prompt, top, compare } => {
+        Statement::Infer {
+            prompt,
+            top,
+            compare,
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert_eq!(top, Some(5));
             assert!(!compare);
@@ -1428,7 +1603,11 @@ fn parse_infer_minimal() {
 fn parse_infer_with_compare() {
     let stmt = parse(r#"INFER "test prompt" TOP 3 COMPARE;"#).unwrap();
     match stmt {
-        Statement::Infer { prompt, top, compare } => {
+        Statement::Infer {
+            prompt,
+            top,
+            compare,
+        } => {
             assert_eq!(prompt, "test prompt");
             assert_eq!(top, Some(3));
             assert!(compare);
@@ -1504,9 +1683,12 @@ fn parse_patch_workflow() {
 fn parse_diff_into_patch() {
     let stmt = parse(
         r#"DIFF "gemma3-4b.vindex" "gemma3-4b-medical.vindex" INTO PATCH "medical-changes.vlp";"#,
-    ).unwrap();
+    )
+    .unwrap();
     match stmt {
-        Statement::Diff { a, b, into_patch, .. } => {
+        Statement::Diff {
+            a, b, into_patch, ..
+        } => {
             assert!(matches!(a, VindexRef::Path(ref p) if p == "gemma3-4b.vindex"));
             assert!(matches!(b, VindexRef::Path(ref p) if p == "gemma3-4b-medical.vindex"));
             assert_eq!(into_patch.as_deref(), Some("medical-changes.vlp"));
@@ -1519,7 +1701,9 @@ fn parse_diff_into_patch() {
 fn parse_diff_without_into_patch() {
     let stmt = parse(r#"DIFF "a.vindex" "b.vindex" LIMIT 10;"#).unwrap();
     match stmt {
-        Statement::Diff { into_patch, limit, .. } => {
+        Statement::Diff {
+            into_patch, limit, ..
+        } => {
             assert!(into_patch.is_none());
             assert_eq!(limit, Some(10));
         }
@@ -1541,11 +1725,13 @@ fn parse_compile_into_vindex() {
 
 #[test]
 fn parse_compile_into_vindex_on_conflict_last_wins() {
-    let stmt = parse(
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT LAST_WINS;"#,
-    ).unwrap();
+    let stmt = parse(r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT LAST_WINS;"#).unwrap();
     match stmt {
-        Statement::Compile { target, on_conflict, .. } => {
+        Statement::Compile {
+            target,
+            on_conflict,
+            ..
+        } => {
             assert_eq!(target, CompileTarget::Vindex);
             assert_eq!(on_conflict, Some(CompileConflict::LastWins));
         }
@@ -1555,9 +1741,8 @@ fn parse_compile_into_vindex_on_conflict_last_wins() {
 
 #[test]
 fn parse_compile_into_vindex_on_conflict_highest_confidence() {
-    let stmt = parse(
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#,
-    ).unwrap();
+    let stmt = parse(r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT HIGHEST_CONFIDENCE;"#)
+        .unwrap();
     match stmt {
         Statement::Compile { on_conflict, .. } => {
             assert_eq!(on_conflict, Some(CompileConflict::HighestConfidence));
@@ -1568,9 +1753,7 @@ fn parse_compile_into_vindex_on_conflict_highest_confidence() {
 
 #[test]
 fn parse_compile_into_vindex_on_conflict_fail() {
-    let stmt = parse(
-        r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;"#,
-    ).unwrap();
+    let stmt = parse(r#"COMPILE CURRENT INTO VINDEX "out.vindex" ON CONFLICT FAIL;"#).unwrap();
     match stmt {
         Statement::Compile { on_conflict, .. } => {
             assert_eq!(on_conflict, Some(CompileConflict::Fail));
@@ -1581,10 +1764,11 @@ fn parse_compile_into_vindex_on_conflict_fail() {
 
 #[test]
 fn parse_compile_into_model_with_on_conflict_errors() {
-    let result = parse(
-        r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors ON CONFLICT FAIL;"#,
+    let result = parse(r#"COMPILE CURRENT INTO MODEL "out/" FORMAT safetensors ON CONFLICT FAIL;"#);
+    assert!(
+        result.is_err(),
+        "ON CONFLICT must reject COMPILE INTO MODEL"
     );
-    assert!(result.is_err(), "ON CONFLICT must reject COMPILE INTO MODEL");
 }
 
 #[test]
@@ -1606,7 +1790,14 @@ fn parse_compile_into_model_explicit() {
 fn parse_trace_minimal() {
     let stmt = parse(r#"TRACE "The capital of France is";"#).unwrap();
     match stmt {
-        Statement::Trace { prompt, answer, decompose, layers, positions, save } => {
+        Statement::Trace {
+            prompt,
+            answer,
+            decompose,
+            layers,
+            positions,
+            save,
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert!(answer.is_none());
             assert!(!decompose);
@@ -1634,7 +1825,9 @@ fn parse_trace_with_for_token() {
 fn parse_trace_decompose_with_layers() {
     let stmt = parse(r#"TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;"#).unwrap();
     match stmt {
-        Statement::Trace { decompose, layers, .. } => {
+        Statement::Trace {
+            decompose, layers, ..
+        } => {
             assert!(decompose);
             let r = layers.unwrap();
             assert_eq!(r.start, 22);
@@ -1667,12 +1860,31 @@ fn parse_trace_positions_all() {
 }
 
 #[test]
+fn parse_trace_positions_last() {
+    let stmt = parse(r#"TRACE "The capital of France is" POSITIONS LAST;"#).unwrap();
+    match stmt {
+        Statement::Trace { positions, .. } => {
+            assert_eq!(positions.unwrap(), TracePositionMode::Last);
+        }
+        _ => panic!("expected Trace"),
+    }
+}
+
+#[test]
 fn parse_trace_full() {
     let stmt = parse(
         r#"TRACE "The capital of France is" FOR "Paris" DECOMPOSE LAYERS 22-27 SAVE "out.trace";"#,
-    ).unwrap();
+    )
+    .unwrap();
     match stmt {
-        Statement::Trace { prompt, answer, decompose, layers, save, .. } => {
+        Statement::Trace {
+            prompt,
+            answer,
+            decompose,
+            layers,
+            save,
+            ..
+        } => {
             assert_eq!(prompt, "The capital of France is");
             assert_eq!(answer.unwrap(), "Paris");
             assert!(decompose);
@@ -1721,4 +1933,16 @@ fn keyword_field_names_consistent() {
     assert_eq!(Keyword::FfnDown.as_field_name(), "ffn_down");
     assert_eq!(Keyword::AttnOv.as_field_name(), "attn_ov");
     assert_eq!(Keyword::AutoExtract.as_field_name(), "auto_extract");
+}
+
+#[test]
+fn parser_rejects_trailing_tokens_after_semicolon() {
+    let result = parse(r#"STATS; SELECT * FROM EDGES;"#);
+    assert!(result.is_err(), "single-statement parser must reject tails");
+}
+
+#[test]
+fn parser_rejects_trailing_identifier_without_semicolon() {
+    let result = parse(r#"STATS unexpected"#);
+    assert!(result.is_err(), "single-statement parser must consume EOF");
 }

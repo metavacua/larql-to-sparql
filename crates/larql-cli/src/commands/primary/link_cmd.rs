@@ -17,6 +17,7 @@
 //! - Otherwise the basename of `<path>`, with a trailing `.vindex`
 //!   stripped (so `output/gemma3-4b-f16.vindex` → `gemma3-4b-f16`).
 
+use larql_vindex::format::filenames::*;
 use std::path::PathBuf;
 
 use clap::Args;
@@ -42,18 +43,13 @@ pub struct LinkArgs {
 pub fn run(args: LinkArgs) -> Result<(), Box<dyn std::error::Error>> {
     // Resolve target to an absolute path — symlinks without absolute
     // targets break the moment you cd elsewhere.
-    let target = std::fs::canonicalize(&args.path).map_err(|e| {
-        format!("could not resolve path `{}`: {e}", args.path.display())
-    })?;
+    let target = std::fs::canonicalize(&args.path)
+        .map_err(|e| format!("could not resolve path `{}`: {e}", args.path.display()))?;
     if !target.is_dir() {
         return Err(format!("not a directory: {}", target.display()).into());
     }
-    if !target.join("index.json").exists() {
-        return Err(format!(
-            "not a vindex: {} (no index.json)",
-            target.display()
-        )
-        .into());
+    if !target.join(INDEX_JSON).exists() {
+        return Err(format!("not a vindex: {} (no index.json)", target.display()).into());
     }
 
     let name = match &args.as_name {
@@ -80,8 +76,7 @@ pub fn run(args: LinkArgs) -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        std::fs::remove_file(&link_path)
-            .or_else(|_| std::fs::remove_dir_all(&link_path))?;
+        std::fs::remove_file(&link_path).or_else(|_| std::fs::remove_dir_all(&link_path))?;
     }
 
     #[cfg(unix)]

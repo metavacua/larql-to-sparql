@@ -92,7 +92,7 @@ fn search_internal(
     heuristic: fn(&str, &str) -> f64,
 ) -> PathResult {
     let mut dist: HashMap<String, f64> = HashMap::new();
-    let mut prev: HashMap<String, String> = HashMap::new();
+    let mut prev: HashMap<String, Edge> = HashMap::new();
     let mut heap = BinaryHeap::new();
     let mut nodes_explored = 0;
 
@@ -109,12 +109,9 @@ fn search_internal(
             // Reconstruct path
             let mut path = Vec::new();
             let mut current = to.to_string();
-            while let Some(prev_node) = prev.get(&current) {
-                let edges = graph.select(prev_node, None);
-                if let Some(edge) = edges.iter().find(|e| e.object == current) {
-                    path.push((*edge).clone());
-                }
-                current = prev_node.clone();
+            while let Some(edge) = prev.get(&current) {
+                path.push(edge.clone());
+                current = edge.subject.clone();
             }
             path.reverse();
             return PathResult {
@@ -133,7 +130,7 @@ fn search_internal(
 
             if next_cost < *dist.get(&edge.object).unwrap_or(&f64::INFINITY) {
                 dist.insert(edge.object.clone(), next_cost);
-                prev.insert(edge.object.clone(), node.clone());
+                prev.insert(edge.object.clone(), edge.clone());
                 heap.push(State {
                     cost: next_cost + heuristic(&edge.object, to),
                     node: edge.object.clone(),

@@ -6,6 +6,12 @@ use super::enums::{MergeStrategy, SourceType};
 use super::node::Node;
 use super::schema::Schema;
 
+const LARQL_JSON_VERSION: &str = "0.1.0";
+const JSON_KEY_VERSION: &str = "larql_version";
+const JSON_KEY_METADATA: &str = "metadata";
+const JSON_KEY_SCHEMA: &str = "schema";
+const JSON_KEY_EDGES: &str = "edges";
+
 /// Graph statistics.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GraphStats {
@@ -16,6 +22,17 @@ pub struct GraphStats {
     pub avg_confidence: f64,
     pub connected_components: usize,
     pub avg_degree: f64,
+}
+
+/// Result of an explicit edge insertion attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeInsertResult {
+    /// The triple was not present and the edge was added.
+    Inserted,
+    /// The triple was already present and the stored edge was unchanged.
+    Duplicate,
+    /// The triple was already present and the stored edge payload was replaced.
+    Replaced,
 }
 
 /// A directed labeled multigraph for knowledge storage and querying.
@@ -57,29 +74,45 @@ impl Graph {
     // ── Construction ──
 
     /// Add an edge. Silently skips exact (s,r,o) duplicates.
+    ///
+    /// Use `try_add_edge()` for explicit duplicate reporting or `insert_edge()`
+    /// for upsert behavior.
     pub fn add_edge(&mut self, edge: Edge) {
+        let _ = self.try_add_edge(edge);
+    }
+
+    /// Try to add an edge without replacing an existing exact triple.
+    ///
+    /// This has the same mutation behavior as `add_edge()`, but returns whether
+    /// the edge was inserted or skipped as a duplicate.
+    pub fn try_add_edge(&mut self, edge: Edge) -> EdgeInsertResult {
         let triple = edge.triple();
         if self.edge_set.contains(&triple) {
-            return;
+            return EdgeInsertResult::Duplicate;
         }
 
-        let idx = self.edges.len();
-        self.edge_set.insert(triple);
+        self.push_edge(edge);
+        EdgeInsertResult::Inserted
+    }
 
-        self.adjacency
-            .entry(edge.subject.clone())
-            .or_default()
-            .push((edge.relation.clone(), edge.object.clone(), idx));
+    /// Insert or replace an edge by its exact (subject, relation, object) triple.
+    ///
+    /// If the triple already exists with identical edge payload, returns
+    /// `Duplicate`. If the triple exists with different confidence, source,
+    /// metadata, or injection fields, replaces the stored edge and returns
+    /// `Replaced`.
+    pub fn insert_edge(&mut self, edge: Edge) -> EdgeInsertResult {
+        let idx = self.find_edge_index(&edge.subject, &edge.relation, &edge.object);
+        if let Some(idx) = idx {
+            if same_edge_payload(&self.edges[idx], &edge) {
+                return EdgeInsertResult::Duplicate;
+            }
+            self.edges[idx] = edge;
+            return EdgeInsertResult::Replaced;
+        }
 
-        self.reverse.entry(edge.object.clone()).or_default().push((
-            edge.relation.clone(),
-            edge.subject.clone(),
-            idx,
-        ));
-
-        self.index_keywords(&edge, idx);
-        self.edges.push(edge);
-        *self.nodes.borrow_mut() = None;
+        self.push_edge(edge);
+        EdgeInsertResult::Inserted
     }
 
     pub fn add_edges(&mut self, edges: impl IntoIterator<Item = Edge>) {
@@ -180,6 +213,53 @@ impl Graph {
             .contains(&Triple(subject.into(), relation.into(), object.into()))
     }
 
+    /// Get an edge by its exact (subject, relation, object) triple.
+    pub fn get_edge(&self, subject: &str, relation: &str, object: &str) -> Option<&Edge> {
+        self.find_edge_index(subject, relation, object)
+            .map(|idx| &self.edges[idx])
+    }
+
+    /// Select all outgoing edges from `subject` to `object`, across relations.
+    ///
+    /// Useful for directed multiedges where the same pair of entities can be
+    /// connected by several relation labels.
+    pub fn edges_between(&self, subject: &str, object: &str) -> Vec<&Edge> {
+        self.adjacency
+            .get(subject)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|(_, obj, _)| obj == object)
+                    .map(|(_, _, idx)| &self.edges[*idx])
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// List relation names used by outgoing edges from `subject`.
+    pub fn outgoing_relations(&self, subject: &str) -> Vec<&str> {
+        let mut relations: Vec<&str> = self
+            .adjacency
+            .get(subject)
+            .map(|entries| entries.iter().map(|(rel, _, _)| rel.as_str()).collect())
+            .unwrap_or_default();
+        relations.sort_unstable();
+        relations.dedup();
+        relations
+    }
+
+    /// List relation names used by incoming edges to `object`.
+    pub fn incoming_relations(&self, object: &str) -> Vec<&str> {
+        let mut relations: Vec<&str> = self
+            .reverse
+            .get(object)
+            .map(|entries| entries.iter().map(|(rel, _, _)| rel.as_str()).collect())
+            .unwrap_or_default();
+        relations.sort_unstable();
+        relations.dedup();
+        relations
+    }
+
     /// Multi-hop walk following a chain of relations.
     ///
     /// At each hop, picks the edge with the **highest confidence** when multiple
@@ -218,7 +298,7 @@ impl Graph {
         }
 
         let mut ranked: Vec<(usize, usize)> = scores.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         ranked.truncate(max_results);
         ranked.iter().map(|(idx, _)| &self.edges[*idx]).collect()
     }
@@ -265,29 +345,38 @@ impl Graph {
 
     pub fn nodes(&self) -> Vec<Node> {
         self.ensure_nodes();
-        self.nodes
+        let mut nodes: Vec<Node> = self
+            .nodes
             .borrow()
             .as_ref()
             .map(|n| n.values().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        nodes.sort_by(|a, b| a.name.cmp(&b.name));
+        nodes
     }
 
     pub fn list_relations(&self) -> Vec<String> {
-        self.edges
+        let mut relations: Vec<String> = self
+            .edges
             .iter()
             .map(|e| e.relation.clone())
             .collect::<HashSet<_>>()
             .into_iter()
-            .collect()
+            .collect();
+        relations.sort();
+        relations
     }
 
     pub fn list_entities(&self) -> Vec<String> {
         self.ensure_nodes();
-        self.nodes
+        let mut entities: Vec<String> = self
+            .nodes
             .borrow()
             .as_ref()
             .map(|n| n.keys().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        entities.sort();
+        entities
     }
 
     /// Count edges, optionally filtered by relation and/or source.
@@ -352,32 +441,44 @@ impl Graph {
 
     /// Serialize to .larql.json format — matches Python exactly.
     pub fn to_json_value(&self) -> serde_json::Value {
-        serde_json::json!({
-            "larql_version": "0.1.0",
-            "metadata": self.metadata,
-            "schema": self.schema.to_json_value(),
-            "edges": self.edges.iter()
-                .map(|e| serde_json::to_value(CompactEdge::from(e)).unwrap())
-                .collect::<Vec<_>>(),
-        })
+        let mut value = serde_json::Map::new();
+        value.insert(
+            JSON_KEY_VERSION.to_string(),
+            serde_json::Value::String(LARQL_JSON_VERSION.to_string()),
+        );
+        value.insert(
+            JSON_KEY_METADATA.to_string(),
+            serde_json::Value::Object(self.metadata.clone().into_iter().collect()),
+        );
+        value.insert(JSON_KEY_SCHEMA.to_string(), self.schema.to_json_value());
+        value.insert(
+            JSON_KEY_EDGES.to_string(),
+            serde_json::Value::Array(
+                self.edges
+                    .iter()
+                    .map(|e| serde_json::to_value(CompactEdge::from(e)).unwrap())
+                    .collect(),
+            ),
+        );
+        serde_json::Value::Object(value)
     }
 
     /// Deserialize from .larql.json format.
     pub fn from_json_value(v: &serde_json::Value) -> Result<Self, GraphError> {
         let schema = v
-            .get("schema")
+            .get(JSON_KEY_SCHEMA)
             .map(Schema::from_json_value)
             .unwrap_or_default();
 
         let metadata: HashMap<String, serde_json::Value> = v
-            .get("metadata")
+            .get(JSON_KEY_METADATA)
             .and_then(|m| serde_json::from_value(m.clone()).ok())
             .unwrap_or_default();
 
         let mut graph = Graph::new().with_schema(schema);
         graph.metadata = metadata;
 
-        if let Some(edges) = v.get("edges").and_then(|e| e.as_array()) {
+        if let Some(edges) = v.get(JSON_KEY_EDGES).and_then(|e| e.as_array()) {
             for edge_val in edges {
                 let compact: CompactEdge = serde_json::from_value(edge_val.clone())
                     .map_err(|e| GraphError::Deserialize(e.to_string()))?;
@@ -400,6 +501,35 @@ impl Graph {
         for token in tokens {
             self.keyword_index.entry(token).or_default().push(idx);
         }
+    }
+
+    fn push_edge(&mut self, edge: Edge) {
+        let triple = edge.triple();
+        let idx = self.edges.len();
+        self.edge_set.insert(triple);
+
+        self.adjacency
+            .entry(edge.subject.clone())
+            .or_default()
+            .push((edge.relation.clone(), edge.object.clone(), idx));
+
+        self.reverse.entry(edge.object.clone()).or_default().push((
+            edge.relation.clone(),
+            edge.subject.clone(),
+            idx,
+        ));
+
+        self.index_keywords(&edge, idx);
+        self.edges.push(edge);
+        *self.nodes.borrow_mut() = None;
+    }
+
+    fn find_edge_index(&self, subject: &str, relation: &str, object: &str) -> Option<usize> {
+        self.adjacency
+            .get(subject)?
+            .iter()
+            .find(|(rel, obj, _)| rel == relation && obj == object)
+            .map(|(_, _, idx)| *idx)
     }
 
     fn rebuild_indexes(&mut self, edges: Vec<Edge>) {
@@ -492,6 +622,16 @@ impl Graph {
         }
         components
     }
+}
+
+fn same_edge_payload(a: &Edge, b: &Edge) -> bool {
+    a.subject == b.subject
+        && a.relation == b.relation
+        && a.object == b.object
+        && a.confidence == b.confidence
+        && a.source == b.source
+        && a.metadata == b.metadata
+        && a.injection == b.injection
 }
 
 impl Default for Graph {

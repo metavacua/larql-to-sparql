@@ -183,6 +183,45 @@ fn test_bfs_respects_min_confidence() {
 }
 
 #[test]
+fn test_bfs_respects_template_stop_tokens() {
+    let provider = MockProvider::with_knowledge(vec![(
+        "The capital of France is".into(),
+        "Paris|".into(),
+        0.9,
+    )]);
+    let mut templates = TemplateRegistry::new();
+    templates.register(PromptTemplate {
+        relation: "capital-of".to_string(),
+        template: "The capital of {subject} is".to_string(),
+        reverse_template: None,
+        multi_token: true,
+        stop_tokens: vec!['|'],
+    });
+    let seeds = vec!["France".to_string()];
+    let config = BfsConfig {
+        max_depth: 0,
+        max_entities: 100,
+        min_confidence: 0.3,
+        ..Default::default()
+    };
+
+    let mut graph = Graph::new();
+    let mut callbacks = larql_core::engine::bfs::SilentCallbacks;
+    let result = extract_bfs(
+        &provider,
+        &templates,
+        &seeds,
+        &config,
+        &mut graph,
+        &mut callbacks,
+    );
+
+    assert_eq!(result.edges_added, 0);
+    assert_eq!(result.total_forward_passes, 1);
+    assert!(!graph.exists("France", "capital-of", "Paris|"));
+}
+
+#[test]
 fn test_bfs_empty_provider() {
     let provider = MockProvider::new(); // no knowledge
     let templates = geo_templates();
@@ -259,6 +298,35 @@ fn test_bfs_edges_have_source_parametric() {
 
     for edge in graph.edges() {
         assert_eq!(edge.source, SourceType::Parametric);
+    }
+}
+
+#[test]
+fn test_bfs_edges_use_configured_source() {
+    let provider = geo_provider();
+    let templates = geo_templates();
+    let seeds = vec!["France".to_string()];
+    let config = BfsConfig {
+        max_depth: 0,
+        max_entities: 100,
+        min_confidence: 0.3,
+        edge_source: SourceType::Document,
+        ..Default::default()
+    };
+
+    let mut graph = Graph::new();
+    let mut callbacks = larql_core::engine::bfs::SilentCallbacks;
+    extract_bfs(
+        &provider,
+        &templates,
+        &seeds,
+        &config,
+        &mut graph,
+        &mut callbacks,
+    );
+
+    for edge in graph.edges() {
+        assert_eq!(edge.source, SourceType::Document);
     }
 }
 

@@ -29,11 +29,11 @@ pub(super) struct InstalledSlot {
     pub patch_op: larql_vindex::PatchOp,
 }
 
-// Gate scale matching the Python install: `gate = gate_dir * g_ref * 30`.
-// Without this multiplier the slot's silu(gate · x) is too small to
-// push the activation past the trained competition. Validated by
-// exp 14 — see `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
-pub(super) const GATE_SCALE: f32 = 30.0;
+// `GATE_SCALE` lives in `executor::tuning`. Re-exported as a `pub(super)`
+// alias so the existing tests at the bottom of this file (and the code
+// above it) keep their short, scoped name without depending on the
+// tuning module path directly.
+pub(super) use crate::executor::tuning::GATE_SCALE;
 
 impl Session {
     /// Walk the plan's layers, insert a slot per layer, and run the
@@ -108,7 +108,7 @@ impl Session {
             // ── Gate / up / down synthesis (install_compiled_slot port) ──
             //
             // Direct Rust port of `install_compiled_slot` from
-            // `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+            // `~/chris-source/chris-experiments/compilation/14_vindex_compilation/experiment_vindex_compilation.py`.
             // The validated Python pipeline computes three layer-typical
             // norms by sampling existing features at this layer:
             //
@@ -142,28 +142,20 @@ impl Session {
             // Gate direction = unit-normalised captured residual.
             // Falls back to the entity embedding direction if the
             // residual capture couldn't run (browse-only vindex).
-            let gate_dir: Vec<f32> = if let Some((_, ref residual)) =
-                captured.iter().find(|(l, _)| *l == layer)
-            {
-                unit_vector(residual)
-            } else {
-                let entity_encoding = tokenizer
-                    .encode(entity, false)
-                    .map_err(|e| LqlError::exec("tokenize error", e))?;
-                let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
-                let mut ev = vec![0.0f32; plan.hidden];
-                for &tok in &entity_ids {
-                    let row = embed.row(tok as usize);
-                    for j in 0..plan.hidden {
-                        ev[j] += row[j] * embed_scale;
-                    }
-                }
-                let n = entity_ids.len().max(1) as f32;
-                for v in &mut ev {
-                    *v /= n;
-                }
-                unit_vector(&ev)
-            };
+            let gate_dir: Vec<f32> =
+                if let Some((_, ref residual)) = captured.iter().find(|(l, _)| *l == layer) {
+                    unit_vector(residual)
+                } else {
+                    let ev = crate::executor::helpers::entity_query_vec(
+                        &tokenizer,
+                        &embed,
+                        embed_scale,
+                        entity,
+                    )?
+                    .map(|a| a.to_vec())
+                    .unwrap_or_else(|| vec![0.0f32; plan.hidden]);
+                    unit_vector(&ev)
+                };
 
             // gate = gate_dir * g_ref * 30
             let gate_vec: Vec<f32> = gate_dir
@@ -201,8 +193,8 @@ impl Session {
             };
 
             patched.insert_feature(layer, feature, gate_vec.clone(), meta);
-            patched.set_up_vector(layer, feature, up_vec);
-            patched.set_down_vector(layer, feature, down_vec);
+            patched.set_up_vector(layer, feature, up_vec.clone());
+            patched.set_down_vector(layer, feature, down_vec.clone());
 
             // ── Batch refine from raw captured residuals ──
             //
@@ -250,13 +242,29 @@ impl Session {
                 median_norms.up,
             );
 
-            // Re-read the final (post-refine) gate for the patch file.
+            // Re-read the final (post-refine) gate / up / down for the patch
+            // file. Refine mutates gate + up via `set_gate_override` /
+            // `set_up_vector`; down isn't touched by the refine pass but is
+            // serialised for the same reason — re-applying the .vlp must
+            // restore every override compose wrote, not just the gate
+            // (otherwise `COMPILE INTO VINDEX` after a save/load round-trip
+            // bakes a gate-only constellation and silently drops the install).
             let final_gate = patched
                 .overrides_gate_at(layer, feature)
                 .map(|g| g.to_vec())
                 .unwrap_or(gate_vec);
+            let final_up = patched
+                .up_override_at(layer, feature)
+                .map(|u| u.to_vec())
+                .unwrap_or(up_vec);
+            let final_down = patched
+                .down_override_at(layer, feature)
+                .map(|d| d.to_vec())
+                .unwrap_or(down_vec);
 
             let gate_b64 = larql_vindex::patch::core::encode_gate_vector(&final_gate);
+            let up_b64 = larql_vindex::patch::core::encode_gate_vector(&final_up);
+            let down_b64 = larql_vindex::patch::core::encode_gate_vector(&final_down);
             let patch_op = larql_vindex::PatchOp::Insert {
                 layer,
                 feature,
@@ -265,6 +273,8 @@ impl Session {
                 target: target.to_string(),
                 confidence: Some(c_score),
                 gate_vector_b64: Some(gate_b64),
+                up_vector_b64: Some(up_b64),
+                down_vector_b64: Some(down_b64),
                 down_meta: Some(larql_vindex::patch::core::PatchDownMeta {
                     top_token: target.to_string(),
                     top_token_id: plan.target_id,
@@ -593,16 +603,16 @@ mod install_helpers_tests {
     #[test]
     fn should_refine_single_input_needs_a_decoy() {
         assert!(!should_refine(1, 0), "lone input has no suppressor");
-        assert!(should_refine(1, 1), "input + one decoy: project against decoy");
+        assert!(
+            should_refine(1, 1),
+            "input + one decoy: project against decoy"
+        );
         assert!(should_refine(1, 5));
     }
 
     #[test]
     fn should_refine_two_plus_inputs_runs_without_decoys() {
-        assert!(
-            should_refine(2, 0),
-            "peers orthogonalize among themselves"
-        );
+        assert!(should_refine(2, 0), "peers orthogonalize among themselves");
         assert!(should_refine(5, 0));
         assert!(should_refine(10, 0));
     }

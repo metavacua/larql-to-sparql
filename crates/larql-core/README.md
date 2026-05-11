@@ -19,9 +19,24 @@ graph.add_edge(
     Edge::new("Paris", "river", "Seine")
         .with_confidence(0.88)
 );
+assert_eq!(
+    graph.try_add_edge(Edge::new("France", "capital", "Paris")),
+    EdgeInsertResult::Duplicate
+);
+assert_eq!(
+    graph.insert_edge(
+        Edge::new("France", "capital", "Paris")
+            .with_confidence(0.97)
+            .with_source(SourceType::Parametric)
+    ),
+    EdgeInsertResult::Replaced
+);
 
 // Query
 let capitals = graph.select("France", Some("capital"));
+let capital = graph.get_edge("France", "capital", "Paris").unwrap();
+let edges_to_paris = graph.edges_between("France", "Paris");
+let outgoing_relations = graph.outgoing_relations("France");
 let (dest, path) = graph.walk("France", &["capital", "river"]).unwrap();
 assert_eq!(dest, "Seine");
 
@@ -40,9 +55,20 @@ save_json(&graph, "knowledge.larql.json").unwrap();
 |------|---------|
 | `Graph` | Indexed edge collection with adjacency, reverse, keyword indexes |
 | `Edge` | Directed fact: subject --relation--> object, with confidence and metadata |
+| `EdgeInsertResult` | Explicit mutation result: Inserted, Duplicate, or Replaced |
 | `Schema` | Optional relation type registry and node type inference rules |
 | `Node` | Computed entity with degree info and inferred type |
 | `SourceType` | Edge origin: Parametric, Document, Installed, Wikidata, Manual, Unknown |
+
+`list_entities()`, `list_relations()`, `nodes()`, search tie-breaks, and
+connected components are deterministic. Exact triple lookup is available via
+`get_edge(subject, relation, object)`, and multiedge pair lookup is available
+via `edges_between(subject, object)`.
+
+`add_edge()` preserves the legacy behavior of silently skipping duplicate
+triples. `try_add_edge()` reports `Inserted` or `Duplicate` without replacing,
+while `insert_edge()` upserts by exact triple and can return `Replaced` when
+confidence, source, metadata, or injection changes.
 
 ## Algorithms
 
@@ -58,6 +84,32 @@ save_json(&graph, "knowledge.larql.json").unwrap();
 | Diff | `diff()` | O(E) |
 | Subgraph | `graph.subgraph()` | O(E within depth) |
 
+Shortest path stores the exact edge chosen during Dijkstra/A*, so returned paths
+and costs stay consistent for multiedges with different relations or weights.
+`TraversalResult.edges` contains edges actually traversed to newly discovered
+nodes. `diff()` reports same-triple changes to confidence, source, metadata,
+and injection.
+
+`filter_graph()` is metadata-key agnostic. Use `MetadataPredicate` for any
+domain-specific edge metadata instead of relying on model-specific field names:
+
+```rust
+let filtered = filter_graph(
+    &graph,
+    &FilterConfig {
+        metadata: vec![
+            MetadataPredicate::u64_min("layer", 20),
+            MetadataPredicate::f64_min("selectivity", 0.7),
+        ],
+        ..Default::default()
+    },
+);
+```
+
+`MergeStrategy::SourcePriority` uses `default_source_priority()` for backward
+compatibility. Call `merge_graphs_with_source_priority()` when a product,
+dataset, or import pipeline needs a different source ordering.
+
 ## LLM Integration
 
 | Component | Purpose |
@@ -68,6 +120,12 @@ save_json(&graph, "knowledge.larql.json").unwrap();
 | `chain_tokens()` | Multi-token answer extraction |
 | `extract_bfs()` | BFS knowledge graph extraction from LLM |
 | `TemplateRegistry` | Relation-specific prompt templates |
+
+The engine layer is model-architecture agnostic. `ModelProvider` exposes token
+predictions only; it has no dependency on model families, tensor shapes,
+vindex internals, or GPU backends. Extraction policy that is domain-specific,
+such as edge provenance and whether a generated entity should be followed,
+lives in `BfsConfig` and can be replaced by callers.
 
 ## Serialization
 
@@ -80,6 +138,13 @@ save_json(&graph, "knowledge.larql.json").unwrap();
 | Checkpoint | (append-only) | (crash-safe log) | - | - |
 
 Packed binary uses string interning — repeated relation names stored once.
+Packed decoding validates header offsets, record bounds, string indexes, and
+metadata ranges before reading. It also rejects invalid source tags, malformed
+metadata JSON, and inconsistent metadata/injection flags instead of silently
+dropping flagged data. Packed encoding rejects values that cannot fit in the
+on-disk u32 fields instead of truncating them. CSV import/export supports
+quoted commas, quotes, CRLF/LF newlines, and multiline fields for the five graph
+columns: `subject,relation,object,confidence,source`.
 
 ## Crate Structure
 
@@ -103,7 +168,7 @@ larql-core/src/
 │   └── diff.rs             Graph diffing (added, removed, changed)
 ├── engine/
 │   ├── provider.rs         ModelProvider trait, PredictionResult
-│   ├─�� http_provider.rs    OpenAI-compatible HTTP provider (feature-gated)
+│   ├── http_provider.rs    OpenAI-compatible HTTP provider (feature-gated)
 │   ├── mock_provider.rs    Mock provider for testing
 │   ├── bfs.rs              BFS knowledge extraction from LLM
 │   ├── chain.rs            Multi-token chaining
@@ -112,53 +177,98 @@ larql-core/src/
     ├── format.rs           Format enum, auto-detection from extension
     ├── json.rs             JSON serialization (Python-compatible)
     ├── msgpack.rs          MessagePack (feature-gated)
-    ├── packed.rs           String-interned binary format
-    ├── csv.rs              Simple CSV import/export
+    ├── packed.rs           String-interned binary format with corrupt-input checks
+    ├── csv.rs              CSV import/export with quoted-field support
     └── checkpoint.rs       Append-only crash-safe log
 ```
 
 ## Testing
 
 ```bash
-cargo test -p larql-core                                  # 167 tests
-cargo run --release -p larql-core --example bench_graph   # Benchmark
-cargo run -p larql-core --example graph_demo              # Feature showcase
-cargo run -p larql-core --example algorithm_demo          # Algorithm examples
+make larql-core-ci             # fmt + clippy + tests + feature matrix + benches + examples
+make larql-core-test           # default feature tests
+make larql-core-feature-test   # no-default and msgpack-only tests
+make larql-core-lint           # clippy --all-targets -D warnings
+make larql-core-coverage       # cargo-llvm-cov summary
+make larql-core-bench-test     # compile/smoke benchmark harness
+make larql-core-bench          # Criterion benchmark
+make larql-core-examples       # run callable examples
 ```
 
-### Benchmarks (100K edges, M3 Max)
+Equivalent cargo commands:
+
+```bash
+cargo test -p larql-core
+cargo test -p larql-core --no-default-features
+cargo test -p larql-core --no-default-features --features msgpack
+cargo clippy -p larql-core --all-targets -- -D warnings
+cargo llvm-cov --package larql-core --summary-only
+cargo test -p larql-core --benches
+cargo bench -p larql-core --bench graph
+```
+
+GitHub Actions runs the same core checks on Ubuntu, Windows, and macOS via
+`.github/workflows/larql-core.yml`. The workflow is cargo-native rather than
+Makefile-driven so it works with the default shell on every runner.
+
+### Benchmarks (release build)
 
 | Operation | Latency |
 |-----------|---------|
-| Insert (100K edges) | 152ms (1.5us/edge) |
-| select(entity, relation) | 0.1us |
-| exists(s, r, o) | 0.1us |
-| search(keyword, 10) | 0.5us |
-| shortest_path (1K nodes) | 14us |
-| connected_components (1K nodes) | 478us |
-| are_connected (1K nodes) | 14us |
-| walk_all_paths (3 hops) | 1.1us |
-| bfs_traversal (depth=5) | 11us |
-| pagerank (1K nodes) | 12ms |
-| filter (100K, confidence) | 56ms |
-| Packed binary serialize (100K) | 22ms |
+| select subject + relation (25K edges) | 55.85 ns |
+| exists exact triple (25K edges) | 113.23 ns |
+| keyword search (25K edges) | 584.95 ns |
+| shortest path ring (1K nodes) | 282.92 us |
+| connected components ring (1K nodes) | 410.96 us |
+| BFS traversal depth 5 (1K nodes) | 3.07 us |
+| JSON encode / decode (1K edges) | 635.08 us / 2.49 ms |
+| Packed encode / decode (1K edges) | 209.41 us / 1.68 ms |
+| JSON encode / decode (25K edges) | 20.94 ms / 93.62 ms |
+| Packed encode / decode (25K edges) | 6.55 ms / 50.58 ms |
 
-### Test Coverage (167 tests)
+Criterion reports changes relative to the runner's local baseline under
+`target/criterion`; those relative “improved/regressed” labels are not a CI
+failure unless a separate regression gate is added. The benchmark harness uses
+a longer measurement window for serialization so larger decode cases complete
+without noisy sample warnings.
+
+### Test Coverage
 
 - Graph: construction, queries, walk, search, subgraph, stats, dedupe
+- Accessors: deterministic entities, relations, nodes, search tie-breaks, exact edge and multiedge lookup
+- Mutation: legacy duplicate skipping, explicit duplicate reporting, upsert replacement
 - Edge: builder pattern, equality, hashing, compact serialization
 - Schema: type rules, inference, JSON roundtrip
-- Algorithms: shortest path, PageRank, BFS/DFS, merge, diff, filter
+- Algorithms: shortest path, multiedge reconstruction, PageRank, BFS/DFS, merge, diff, filter
 - Components: enumeration, connectivity, disconnected graphs, edge cases
 - Walk: highest-confidence selection, multi-path, all-paths, limits
 - Remove edge: index rebuild correctness
 - Search: empty query, no match, case insensitive
-- Serialization: JSON/MsgPack/Packed roundtrips, metadata preservation
-- BFS extraction: mock provider, depth, multi-seed, max_entities
-- Token chaining: multi-token, stop tokens, probability threshold
+- Serialization: JSON/MsgPack/Packed roundtrips, metadata preservation, corrupt packed input
+- CSV: quoted commas, escaped quotes, multiline fields, confidence/source roundtrips
+- Diff: confidence, source, metadata, and injection changes
+- BFS extraction: mock provider, depth, multi-seed, max_entities, template stop tokens
+- Token chaining: multi-token, stop tokens, probability threshold, model-call accounting
 - Templates: registry, JSON load/save
 - Checkpoint: append, replay, persistence
 - Python compatibility: format interop
+- Feature matrix: default features, no default features, msgpack-only
+- Examples: edge, graph, algorithm, filter, serialization
+- Benches: Criterion graph/query/algorithm/serialization harness compile-smoke
+
+Current default coverage:
+
+| Command | Line coverage | Region coverage |
+|---------|---------------|-----------------|
+| `cargo llvm-cov --package larql-core --summary-only` | 89.33% | 90.41% |
+
+Coverage should stay high for `larql-core` because the crate is pure Rust and
+does not require model weights. Use `make larql-core-coverage` for the current
+summary and `make larql-core-coverage-html` for a browsable report.
+
+The default coverage profile includes the optional HTTP provider. The
+no-default/msgpack profile is a useful second signal for the graph and
+serialization surface when HTTP is intentionally excluded.
 
 ## Design Principles
 
@@ -169,6 +279,8 @@ cargo run -p larql-core --example algorithm_demo          # Algorithm examples
 5. **Multi-format** — JSON (human), MsgPack (compact), Packed (fast), CSV (interchange)
 6. **Crash-safe** — CheckpointLog for long-running extractions
 7. **Zero unsafe** — all safe Rust, minimal dependencies
+8. **Platform-neutral** — little-endian on-disk formats, standard filesystem APIs, CI on Linux/Windows/macOS
+9. **No hidden model assumptions** — graph algorithms and serialization never depend on model architecture, tensor layout, or fixed metadata keys
 
 ## Features
 

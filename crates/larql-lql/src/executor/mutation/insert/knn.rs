@@ -29,7 +29,9 @@ impl Session {
         let (install_layer, has_weights);
         {
             let (_path, config, _patched) = self.require_vindex()?;
-            let bands = config.layer_bands.clone()
+            let bands = config
+                .layer_bands
+                .clone()
                 .or_else(|| larql_vindex::LayerBands::for_family(&config.family, config.num_layers))
                 .unwrap_or(larql_vindex::LayerBands {
                     syntax: (0, config.num_layers.saturating_sub(1)),
@@ -39,7 +41,10 @@ impl Session {
             install_layer = if let Some(l) = layer_hint {
                 (l as usize).min(config.num_layers.saturating_sub(1))
             } else {
-                bands.knowledge.1.saturating_sub(1)
+                bands
+                    .knowledge
+                    .1
+                    .saturating_sub(1)
                     .min(config.num_layers.saturating_sub(1))
             };
             has_weights = config.has_model_weights;
@@ -49,37 +54,39 @@ impl Session {
         let residual_key: Vec<f32>;
         let target_id: u32;
         if has_weights {
-            let (path, _config, patched) = self.require_vindex()?;
+            let (path, config, patched) = self.require_vindex()?;
             let mut cb = larql_vindex::SilentLoadCallbacks;
-            let weights = larql_vindex::load_model_weights(path, &mut cb)
-                .map_err(|e| LqlError::exec("failed to load weights", e))?;
             let tokenizer = larql_vindex::load_vindex_tokenizer(path)
                 .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
 
             let spaced_target = format!(" {target}");
-            let target_encoding = tokenizer.encode(spaced_target.as_str(), false)
+            let target_encoding = tokenizer
+                .encode(spaced_target.as_str(), false)
                 .map_err(|e| LqlError::exec("tokenize error", e))?;
             target_id = target_encoding.get_ids().first().copied().unwrap_or(0);
 
             let rel_words = relation.replace(['-', '_'], " ");
             let prompt = format!("The {rel_words} of {entity} is");
-            let encoding = tokenizer.encode(prompt.as_str(), true)
+            let encoding = tokenizer
+                .encode(prompt.as_str(), true)
                 .map_err(|e| LqlError::exec("tokenize error", e))?;
             let token_ids: Vec<u32> = encoding.get_ids().to_vec();
 
-            let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-                &weights, patched.base(),
-            );
-            let _result = larql_inference::predict_with_ffn(
-                &weights, &tokenizer, &token_ids, 1, &walk_ffn,
-            );
-            let residuals = walk_ffn.take_residuals();
-            residual_key = residuals.into_iter()
+            // `InferenceWeights::load` branches on `config.quant` — callers
+            // do not need to know the on-disk format.
+            let mut iw = larql_inference::InferenceWeights::load(path, config, &mut cb)
+                .map_err(|e| LqlError::exec("failed to load model weights", e))?;
+            let residuals = iw
+                .infer_patched(&tokenizer, patched, None, &token_ids, 1)
+                .residuals;
+
+            residual_key = residuals
+                .into_iter()
                 .find(|(l, _)| *l == install_layer)
                 .map(|(_, r)| r)
-                .ok_or_else(|| LqlError::Execution(format!(
-                    "no residual captured at layer {install_layer}"
-                )))?;
+                .ok_or_else(|| {
+                    LqlError::Execution(format!("no residual captured at layer {install_layer}"))
+                })?;
         } else {
             let (path, _config, _patched) = self.require_vindex()?;
             let (embed, embed_scale) = larql_vindex::load_vindex_embeddings(path)
@@ -88,21 +95,19 @@ impl Session {
                 .map_err(|e| LqlError::exec("failed to load tokenizer", e))?;
             let hidden = embed.shape()[1];
             let spaced_target = format!(" {target}");
-            let target_encoding = tokenizer.encode(spaced_target.as_str(), false)
+            let target_encoding = tokenizer
+                .encode(spaced_target.as_str(), false)
                 .map_err(|e| LqlError::exec("tokenize error", e))?;
             target_id = target_encoding.get_ids().first().copied().unwrap_or(0);
 
-            let entity_encoding = tokenizer.encode(entity, false)
-                .map_err(|e| LqlError::exec("tokenize error", e))?;
-            let entity_ids: Vec<u32> = entity_encoding.get_ids().to_vec();
-            let mut ev = vec![0.0f32; hidden];
-            for &tok in &entity_ids {
-                let row = embed.row(tok as usize);
-                for j in 0..hidden { ev[j] += row[j] * embed_scale; }
-            }
-            let n = entity_ids.len().max(1) as f32;
-            for v in &mut ev { *v /= n; }
-            residual_key = ev;
+            residual_key = crate::executor::helpers::entity_query_vec(
+                &tokenizer,
+                &embed,
+                embed_scale,
+                entity,
+            )?
+            .map(|a| a.to_vec())
+            .unwrap_or_else(|| vec![0.0f32; hidden]);
         }
 
         // ── Phase 3: Store in KnnStore ──

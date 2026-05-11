@@ -1,0 +1,134 @@
+# larql-cli cross-platform CI
+#
+# Top-level `larql` binary. Default features enable Metal on every
+# member crate, which only resolves on macOS. Linux/Windows runs use
+# `--no-default-features` so the CPU-only surface is exercised. macOS
+# runs include defaults so the Metal feature path is checked too.
+#
+# `convert_moe_to_per_layer` example currently doesn't build against
+# the post-refactor `larql-inference` API; CI checks bins + tests
+# instead of `--all-targets` until that example is repaired.
+
+name: larql-cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-kv/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-models/**'
+      - 'crates/larql-inference/src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-cli.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-kv/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-models/**'
+      - 'crates/larql-inference/src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-cli.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cli-
+
+      - name: Format check
+        run: cargo fmt -p larql-cli -- --check
+
+      - name: Check (CPU only) on Linux/Windows
+        if: runner.os != 'macOS'
+        run: cargo check -p larql-cli --bins --tests --no-default-features
+
+      - name: Check (default features incl. metal) on macOS
+        if: runner.os == 'macOS'
+        run: cargo check -p larql-cli --bins --tests
+
+      # Clippy is intentionally skipped: as of 2026-05-10 `larql-cli`
+      # carries ~82 pre-existing errors under default features and ~112
+      # under `--no-default-features` (mostly `large_enum_variant` and
+      # `dead_code` on metal-only paths). Re-enable once that backlog
+      # is cleared; the other crates' workflows already enforce
+      # `clippy -- -D warnings`.
+
+      - name: Tests (CPU only) on Linux/Windows
+        if: runner.os != 'macOS'
+        run: cargo test -p larql-cli --no-default-features
+
+      - name: Tests (default features) on macOS
+        if: runner.os == 'macOS'
+        run: cargo test -p larql-cli
+
+  coverage:
+    name: coverage - ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-cli --no-default-features --summary-only

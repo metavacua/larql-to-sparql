@@ -27,8 +27,9 @@ use crate::attention::{
     run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
 };
 use crate::ffn::FfnBackend;
-use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
+use crate::forward::hooks::{LayerHook, NoopHook};
 use crate::forward::predict::hidden_to_raw_logits;
+use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
 use crate::model::ModelWeights;
 
 /// Stream autoregressive generation with a KV cache.
@@ -51,7 +52,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, None, None, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        None,
+        None,
+        &mut on_token,
     )
 }
 
@@ -72,7 +80,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, backend, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        backend,
+        &mut on_token,
     )
 }
 
@@ -95,7 +110,14 @@ where
     F: FnMut(u32, &str),
 {
     generate_cached_bounded(
-        weights, tokenizer, ffn, prompt_ids, max_new_tokens, window, None, &mut on_token,
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        None,
+        &mut on_token,
     )
 }
 
@@ -108,6 +130,84 @@ fn generate_cached_bounded(
     max_new_tokens: usize,
     window: Option<usize>,
     backend: Option<&dyn larql_compute::ComputeBackend>,
+    on_token: &mut dyn FnMut(u32, &str),
+) -> Vec<u32> {
+    generate_cached_hooked_inner(
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        backend,
+        &mut NoopHook,
+        on_token,
+    )
+}
+
+/// Hook-aware autoregressive generation on the CPU KV-cache path.
+///
+/// Same prefill + decode loop as [`generate_cached`], but fires
+/// [`LayerHook`] callbacks at every layer of every step (prefill **and**
+/// every decode step):
+///
+/// - `on_pre_layer` — residual entering the layer.
+/// - `on_post_attention(&mut h)` — post-attention residual; mutating it
+///   here changes what the layer's FFN sees.
+/// - `on_post_layer(&mut h)` — full-layer output; mutating it here
+///   changes what the **next** layer sees.
+///
+/// The Metal-fast `layer_graph::generate::gpu::generate*` path is
+/// hook-free by design (the kernel pipeline is fused; threading hooks
+/// through it would force per-layer kernel splits even when no hook is
+/// registered, so we keep the fast path fast). When you need hooks
+/// during multi-token generation use this CPU path instead — typically
+/// 5–20× slower than the Metal path on the same model, but every
+/// primitive in [`crate::forward::hooks`] works end-to-end.
+///
+/// The `on_attention_weights` and `on_ffn_activation` callbacks do
+/// **not** fire on this path — the production decode kernels don't
+/// capture those intermediates. Use
+/// [`crate::forward::trace::trace_forward_full_hooked`] for a single
+/// forward pass when you need them.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_cached_hooked<F>(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    max_new_tokens: usize,
+    window: Option<usize>,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+    hook: &mut dyn LayerHook,
+    mut on_token: F,
+) -> Vec<u32>
+where
+    F: FnMut(u32, &str),
+{
+    generate_cached_hooked_inner(
+        weights,
+        tokenizer,
+        ffn,
+        prompt_ids,
+        max_new_tokens,
+        window,
+        backend,
+        hook,
+        &mut on_token,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_cached_hooked_inner(
+    weights: &ModelWeights,
+    tokenizer: &tokenizers::Tokenizer,
+    ffn: &dyn FfnBackend,
+    prompt_ids: &[u32],
+    max_new_tokens: usize,
+    window: Option<usize>,
+    backend: Option<&dyn larql_compute::ComputeBackend>,
+    hook: &mut dyn LayerHook,
     on_token: &mut dyn FnMut(u32, &str),
 ) -> Vec<u32> {
     if max_new_tokens == 0 || prompt_ids.is_empty() {
@@ -123,7 +223,9 @@ fn generate_cached_bounded(
 
     let mut h = embed_tokens_pub(weights, prompt_ids);
     for layer in 0..num_layers {
-        let (h_post_attn, k_rope, v) =
+        hook.on_pre_layer(layer, &h);
+
+        let (mut h_post_attn, k_rope, v) =
             match run_attention_with_kv_backend(weights, &h, layer, backend) {
                 Some(t) => t,
                 None => return Vec::new(),
@@ -133,7 +235,12 @@ fn generate_cached_bounded(
         // than the window, attention during later decode steps only
         // sees the last W positions of the prompt.
         cache.clip_layer(layer);
-        let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+
+        hook.on_post_attention(layer, &mut h_post_attn);
+
+        let (mut h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+
+        hook.on_post_layer(layer, &mut h_out);
         h = h_out;
     }
     // After prefill, the "next" absolute position is prompt_len.
@@ -167,9 +274,16 @@ fn generate_cached_bounded(
         let abs_position = cache.next_position;
         let mut h_step = h_new;
         for layer in 0..num_layers {
+            hook.on_pre_layer(layer, &h_step);
+
             let kv_entry = cache.layers[layer].as_ref();
-            let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
-                weights, &h_step, layer, kv_entry, abs_position, backend,
+            let (mut h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
+                weights,
+                &h_step,
+                layer,
+                kv_entry,
+                abs_position,
+                backend,
             ) {
                 Some(t) => t,
                 None => return generated,
@@ -178,7 +292,12 @@ fn generate_cached_bounded(
             // Sliding window — evict the oldest row(s) if we've
             // exceeded `max_window`. No-op when unbounded.
             cache.clip_layer(layer);
-            let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+
+            hook.on_post_attention(layer, &mut h_post_attn);
+
+            let (mut h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
+
+            hook.on_post_layer(layer, &mut h_out);
             h_step = h_out;
         }
         // Increment absolute position for the next iteration.
@@ -265,11 +384,11 @@ where
     // ── Prefill ──
     let mut h = embed_tokens_pub(weights, prompt_ids);
     for layer in 0..num_layers {
-        let (h_post_attn, k_rope, v) =
-            match run_attention_with_kv_backend(weights, &h, layer, None) {
-                Some(t) => t,
-                None => return Vec::new(),
-            };
+        let (h_post_attn, k_rope, v) = match run_attention_with_kv_backend(weights, &h, layer, None)
+        {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
         cache.layers[layer] = Some((k_rope, v));
         let (h_out, _) = run_ffn(weights, &h_post_attn, layer, ffn, false);
         h = h_out;
@@ -300,7 +419,12 @@ where
         for layer in 0..num_layers {
             let kv_entry = cache.layers[layer].as_ref();
             let (h_post_attn, new_kv) = match run_attention_block_decode_step_backend(
-                weights, &h_step, layer, kv_entry, abs_position, None,
+                weights,
+                &h_step,
+                layer,
+                kv_entry,
+                abs_position,
+                None,
             ) {
                 Some(t) => t,
                 None => return generated,
@@ -338,4 +462,224 @@ fn masked_argmax(logits: &[f32], tokenizer: &tokenizers::Tokenizer) -> Option<(u
     let id = idx as u32;
     let decoded = tokenizer.decode(&[id], true).ok()?;
     Some((id, decoded))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffn::WeightFfn;
+    use crate::test_utils::{make_test_tokenizer, make_test_weights};
+
+    #[test]
+    fn generate_cached_returns_token_ids() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let mut decoded_tokens: Vec<String> = Vec::new();
+        let ids = generate_cached(&weights, &tokenizer, &ffn, &[0u32, 1], 3, |_id, text| {
+            decoded_tokens.push(text.to_string())
+        });
+        assert!(ids.len() <= 3, "should generate at most 3 tokens");
+        assert_eq!(
+            ids.len(),
+            decoded_tokens.len(),
+            "callback called once per token"
+        );
+    }
+
+    #[test]
+    fn generate_cached_with_window_limits_cache() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let ids = generate_cached_with_window(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32],
+            4,
+            Some(2), // sliding window of 2
+            |_, _| {},
+        );
+        assert!(ids.len() <= 4);
+    }
+
+    #[test]
+    fn generate_cached_backend_cpu() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let ids = generate_cached_backend(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[2u32, 3],
+            2,
+            None,
+            None, // no backend override, no window
+            |_, _| {},
+        );
+        assert!(ids.len() <= 2);
+    }
+
+    #[test]
+    fn generate_cached_constrained_restricts_tokens() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        // Allow only tokens 0..8 by masking the rest to NEG_INFINITY
+        let allowed: std::collections::HashSet<u32> = (0u32..8).collect();
+        let ids = generate_cached_constrained(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32],
+            3,
+            |_generated, logits| {
+                for (id, logit) in logits.iter_mut().enumerate() {
+                    if !allowed.contains(&(id as u32)) {
+                        *logit = f32::NEG_INFINITY;
+                    }
+                }
+            },
+            |_, _| {},
+        );
+        // All generated tokens should be in the allowed set (or empty if all masked)
+        for &id in &ids {
+            assert!(
+                allowed.contains(&id),
+                "generated token {id} outside allowed set"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_cached_empty_prompt() {
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        // Empty prompt still generates (starts from embed of nothing → zeros)
+        let ids = generate_cached(&weights, &tokenizer, &ffn, &[], 2, |_, _| {});
+        assert!(ids.len() <= 2);
+    }
+
+    // ── generate_cached_hooked ────────────────────────────────────────────────
+
+    #[test]
+    fn generate_cached_hooked_with_noop_matches_baseline() {
+        // Hook-aware generation with a NoopHook should produce the same
+        // tokens as the unhooked path.
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+
+        let baseline = generate_cached(&weights, &tokenizer, &ffn, &[0u32, 1, 2], 4, |_, _| {});
+
+        let hooked = generate_cached_hooked(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1, 2],
+            4,
+            None,
+            None,
+            &mut crate::forward::NoopHook,
+            |_, _| {},
+        );
+
+        assert_eq!(baseline, hooked, "noop hook must not change generated ids");
+    }
+
+    #[test]
+    fn generate_cached_hooked_record_fires_during_prefill_and_decode() {
+        // RecordHook should fire on every layer of every step (prefill +
+        // each decode step). Test by counting on_post_layer calls.
+        struct CountHook {
+            calls: std::collections::HashMap<usize, usize>,
+        }
+        impl LayerHook for CountHook {
+            fn on_post_layer(&mut self, layer: usize, _h: &mut Array2<f32>) {
+                *self.calls.entry(layer).or_insert(0) += 1;
+            }
+        }
+
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let max_new = 3usize;
+        let mut hook = CountHook {
+            calls: std::collections::HashMap::new(),
+        };
+
+        let _ = generate_cached_hooked(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &[0u32, 1],
+            max_new,
+            None,
+            None,
+            &mut hook,
+            |_, _| {},
+        );
+
+        // Prefill = 1 pass through all layers; decode = (max_new - 1) more.
+        // First token comes out of prefill; subsequent tokens each run
+        // their own decode step. So expected per-layer calls ≈ 1 + (max_new - 1) = max_new.
+        for layer in 0..weights.num_layers {
+            let count = *hook.calls.get(&layer).unwrap_or(&0);
+            assert!(
+                count >= 1,
+                "hook should fire at least once per layer (got {count} for layer {layer})"
+            );
+            assert!(
+                count <= max_new,
+                "hook fires at most max_new times per layer (got {count} for layer {layer})"
+            );
+        }
+    }
+
+    #[test]
+    fn generate_cached_hooked_steer_changes_output() {
+        // A non-trivial steering vector applied at every layer should
+        // shift at least one generated token vs the unsteered baseline.
+        use crate::forward::SteerHook;
+        use ndarray::Array1;
+
+        let weights = make_test_weights();
+        let tokenizer = make_test_tokenizer(weights.vocab_size);
+        let ffn = WeightFfn { weights: &weights };
+        let prompt = vec![1u32, 2, 3];
+
+        let baseline = generate_cached(&weights, &tokenizer, &ffn, &prompt, 4, |_, _| {});
+
+        // Big steering vector (5.0 * uniform-ish ramp) at the first layer.
+        let v = Array1::from_vec(
+            (0..weights.hidden_size)
+                .map(|i| (i as f32 + 1.0) * 0.1)
+                .collect(),
+        );
+        let mut steer = SteerHook::new().add(0, v, 5.0);
+
+        let steered = generate_cached_hooked(
+            &weights,
+            &tokenizer,
+            &ffn,
+            &prompt,
+            4,
+            None,
+            None,
+            &mut steer,
+            |_, _| {},
+        );
+
+        // Generation may stop early due to EOS — only require divergence
+        // when both paths produced tokens.
+        if !baseline.is_empty() && !steered.is_empty() {
+            assert_ne!(
+                baseline, steered,
+                "steering with α=5 must change generated tokens"
+            );
+        }
+    }
 }

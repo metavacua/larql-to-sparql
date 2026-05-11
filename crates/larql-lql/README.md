@@ -88,9 +88,11 @@ greedy and breaks past N ≈ 5 on template-shared prompts.
 ## COMPILE INTO VINDEX
 
 `COMPILE CURRENT INTO VINDEX "out.vindex"` produces a real standalone vindex
-with the inserted facts baked into the canonical `down_weights.bin`. No
-sidecar, no overlay, no special loader code — `USE "out.vindex"` and
-`INFER` works like any other vindex.
+with the inserted facts baked into the canonical `down_weights.bin`. Path form
+(`COMPILE "source.vindex" INTO VINDEX "out.vindex"`) loads that source from
+disk as-is; use `CURRENT` when you need the active session's unsaved or applied
+overlays. No sidecar, no special loader code — `USE "out.vindex"` and `INFER`
+works like any other vindex.
 
 End-to-end on Gemma 4B (COMPOSE mode install):
 
@@ -123,7 +125,7 @@ COMPILE CURRENT INTO VINDEX "out.vindex"
 | `HIGHEST_CONFIDENCE` | Accepted for forward compatibility. Currently resolves like `LAST_WINS` for down vectors — see spec §3.5. |
 | `FAIL` | Abort if any slot has a conflicting write. |
 
-> **Status:** validated end-to-end on Gemma 3 4B in `experiments/14_vindex_compilation`.
+> **Status:** validated end-to-end on Gemma 3 4B in `~/chris-source/chris-experiments/compilation/14_vindex_compilation`.
 > 10/10 retrieval, 0/4 regression bleed, standalone baked vindex (no overlay needed at runtime).
 > The online refine pass (Gram-Schmidt against cached decoy residuals) runs at INSERT time, so
 > no compile-time refine step is needed — INSERT already handles bleed defense.
@@ -168,7 +170,7 @@ across N consecutive layers).
 ## Building & Testing
 
 ```bash
-cargo test -p larql-lql                                       # 317 tests
+cargo test -p larql-lql                                       # full LQL suite
 cargo test -p larql-lql --lib executor::tests                 # executor suite
 cargo test -p larql-lql --lib parser::tests                   # parser unit tests
 
@@ -188,10 +190,11 @@ cargo bench  -p larql-lql --bench executor                     # SELECT, SHOW, D
 cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VINDEX bake cost
 ```
 
-### Test coverage (313 tests)
+### Test Coverage
 
-- **Parser** (`parser/tests.rs`, 146 tests): every `Statement` variant,
-  every clause combination, plus negative tests for malformed input.
+- **Parser** (`parser/tests.rs`): every `Statement` variant, every clause
+  combination, strict trailing-input rejection, plus negative tests for
+  malformed input.
 - **Executor — no-backend errors** (`executor/tests.rs`): every variant
   that needs a vindex returns `LqlError::NoBackend` cleanly when no
   `USE` has run. Includes `TRACE`, `REBALANCE`, `COMPACT {MINOR,MAJOR}`,
@@ -203,14 +206,15 @@ cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VI
   disk, runs `USE` against it, exercises `DELETE`, `UPDATE`,
   `BEGIN PATCH`, `SAVE PATCH`, auto-patch lifecycle, `MERGE`,
   `SHOW ENTITIES`, `SHOW COMPACT STATUS`, `COMPACT MINOR` (empty-L0
-  path), `REBALANCE` (empty-installs no-op), `REMOVE PATCH` error
-  handling, `PIPE` concatenation, and the `TRACE` model-weights-hint
-  error.
+  path), `REBALANCE` (empty-installs no-op), relation-predicate
+  mutation guards, patch-vector refresh, `REMOVE PATCH` error handling,
+  `PIPE` concatenation, and the `TRACE` model-weights-hint error.
 - **Executor — COMPILE INTO VINDEX**: conflict detection (`ON CONFLICT
   FAIL`/`LAST_WINS`), down override baking, structural compile with no
-  patches, plus 6 unit tests for `patch_down_weights` covering f32/f16
-  dtypes, multiple-feature/multiple-layer overrides, shape mismatch
-  errors, and missing-source error paths (live in
+  patches, path-form source loading, plus 6 unit tests for
+  `patch_down_weights` covering f32/f16 dtypes,
+  multiple-feature/multiple-layer overrides, shape mismatch errors, and
+  missing-source error paths (live in
   `executor/lifecycle/compile/bake.rs`).
 - **Executor — MEMIT + balance**: fact collection from patches,
   deduplication, template-matched decoys, relation template generation,
@@ -234,6 +238,7 @@ cargo bench  -p larql-lql --bench compile                      # COMPILE INTO VI
 | `executor` | `BEGIN PATCH → DELETE → SAVE PATCH` | 136 µs |
 | `compile` | `COMPILE INTO VINDEX` (no patches) | **1.84 ms** |
 | `compile` | `COMPILE INTO VINDEX` (with `down_weights.bin`) | **2.41 ms** |
+| `compile` | `COMPILE INTO VINDEX` (one down override) | benchmarked in-suite |
 
 Run `cargo bench -p larql-lql` (without `--quick`) for the full criterion
 sample sizes — HTML reports go to `target/criterion/`.

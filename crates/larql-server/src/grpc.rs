@@ -5,6 +5,9 @@ use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+use crate::band_utils::{
+    HEALTH_STATUS_OK, INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK, PROBE_RELATION_SOURCE,
+};
 use crate::state::AppState;
 
 pub mod proto {
@@ -31,7 +34,7 @@ impl VindexService for VindexGrpcService {
             .requests_served
             .load(std::sync::atomic::Ordering::Relaxed);
         Ok(Response::new(HealthResponse {
-            status: "ok".into(),
+            status: HEALTH_STATUS_OK.into(),
             uptime_seconds: uptime,
             requests_served: served,
         }))
@@ -91,19 +94,14 @@ impl VindexService for VindexGrpcService {
             .ok_or_else(|| Status::not_found("no model loaded"))?;
         let model = Arc::clone(model);
 
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_describe(&model, &req)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_describe(&model, &req))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
 
-    async fn walk(
-        &self,
-        request: Request<WalkRequest>,
-    ) -> Result<Response<WalkResponse>, Status> {
+    async fn walk(&self, request: Request<WalkRequest>) -> Result<Response<WalkResponse>, Status> {
         self.state.bump_requests();
         let req = request.into_inner();
         let model = self
@@ -112,11 +110,9 @@ impl VindexService for VindexGrpcService {
             .ok_or_else(|| Status::not_found("no model loaded"))?;
         let model = Arc::clone(model);
 
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_walk(&model, &req)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_walk(&model, &req))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
@@ -133,11 +129,9 @@ impl VindexService for VindexGrpcService {
             .ok_or_else(|| Status::not_found("no model loaded"))?;
         let model = Arc::clone(model);
 
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_select(&model, &req)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_select(&model, &req))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
@@ -158,11 +152,9 @@ impl VindexService for VindexGrpcService {
         }
 
         let model = Arc::clone(model);
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_infer(&model, &req)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_infer(&model, &req))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
@@ -178,11 +170,9 @@ impl VindexService for VindexGrpcService {
             .ok_or_else(|| Status::not_found("no model loaded"))?;
         let model = Arc::clone(model);
 
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_relations(&model)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_relations(&model))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
@@ -199,11 +189,9 @@ impl VindexService for VindexGrpcService {
             .ok_or_else(|| Status::not_found("no model loaded"))?;
         let model = Arc::clone(model);
 
-        let result = tokio::task::spawn_blocking(move || {
-            grpc_walk_ffn(&model, &req)
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))??;
+        let result = tokio::task::spawn_blocking(move || grpc_walk_ffn(&model, &req))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
 
         Ok(Response::new(result))
     }
@@ -232,6 +220,14 @@ impl VindexService for VindexGrpcService {
     }
 }
 
+/// Compare two f32 scores in **descending** order. NaN compares as `Equal`
+/// rather than panicking — corrupted vindex data or future patched scoring
+/// paths must not be able to take a gRPC worker down via `sort_by`.
+#[inline]
+fn cmp_score_desc(a: f32, b: f32) -> std::cmp::Ordering {
+    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+}
+
 // ── Blocking handler implementations ──
 
 fn grpc_describe(
@@ -257,11 +253,17 @@ fn grpc_describe(
 
     let hidden = model.embeddings.shape()[1];
     let query = if token_ids.len() == 1 {
-        model.embeddings.row(token_ids[0] as usize).mapv(|v| v * model.embed_scale)
+        model
+            .embeddings
+            .row(token_ids[0] as usize)
+            .mapv(|v| v * model.embed_scale)
     } else {
         let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
         for &tok in &token_ids {
-            avg += &model.embeddings.row(tok as usize).mapv(|v| v * model.embed_scale);
+            avg += &model
+                .embeddings
+                .row(tok as usize)
+                .mapv(|v| v * model.embed_scale);
         }
         avg /= token_ids.len() as f32;
         avg
@@ -269,8 +271,16 @@ fn grpc_describe(
 
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
-    let limit = if req.limit > 0 { req.limit as usize } else { 20 };
-    let min_score = if req.min_score > 0.0 { req.min_score } else { 5.0 };
+    let limit = if req.limit > 0 {
+        req.limit as usize
+    } else {
+        20
+    };
+    let min_score = if req.min_score > 0.0 {
+        req.min_score
+    } else {
+        5.0
+    };
 
     let trace = patched.walk(&query, &all_layers, limit);
     let entity_lower = req.entity.to_lowercase();
@@ -278,14 +288,18 @@ fn grpc_describe(
     let mut edges = Vec::new();
     for (layer, hits) in &trace.layers {
         for hit in hits {
-            if hit.gate_score < min_score { continue; }
+            if hit.gate_score < min_score {
+                continue;
+            }
             let tok = hit.meta.top_token.trim();
-            if tok.is_empty() || tok.len() < 2 || tok.to_lowercase() == entity_lower { continue; }
+            if tok.is_empty() || tok.len() < 2 || tok.to_lowercase() == entity_lower {
+                continue;
+            }
 
             let (relation, source) = model
                 .probe_labels
                 .get(&(*layer, hit.feature))
-                .map(|r| (r.clone(), "probe".to_string()))
+                .map(|r| (r.clone(), PROBE_RELATION_SOURCE.to_string()))
                 .unwrap_or_default();
 
             edges.push(DescribeEdge {
@@ -302,7 +316,7 @@ fn grpc_describe(
         }
     }
 
-    edges.sort_by(|a, b| b.gate_score.partial_cmp(&a.gate_score).unwrap());
+    edges.sort_by(|a, b| cmp_score_desc(a.gate_score, b.gate_score));
     edges.truncate(limit);
 
     Ok(DescribeResponse {
@@ -313,10 +327,7 @@ fn grpc_describe(
     })
 }
 
-fn grpc_walk(
-    model: &crate::state::LoadedModel,
-    req: &WalkRequest,
-) -> Result<WalkResponse, Status> {
+fn grpc_walk(model: &crate::state::LoadedModel, req: &WalkRequest) -> Result<WalkResponse, Status> {
     let start = std::time::Instant::now();
     let top_k = if req.top > 0 { req.top as usize } else { 5 };
 
@@ -330,7 +341,10 @@ fn grpc_walk(
     }
 
     let last_tok = *token_ids.last().unwrap();
-    let query = model.embeddings.row(last_tok as usize).mapv(|v| v * model.embed_scale);
+    let query = model
+        .embeddings
+        .row(last_tok as usize)
+        .mapv(|v| v * model.embed_scale);
 
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
@@ -371,7 +385,11 @@ fn grpc_select(
     let start = std::time::Instant::now();
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
-    let limit = if req.limit > 0 { req.limit as usize } else { 20 };
+    let limit = if req.limit > 0 {
+        req.limit as usize
+    } else {
+        20
+    };
 
     let scan_layers: Vec<usize> = if req.layer > 0 {
         vec![req.layer as usize]
@@ -385,7 +403,10 @@ fn grpc_select(
             for (feat_idx, meta_opt) in metas.iter().enumerate() {
                 if let Some(meta) = meta_opt {
                     if !req.entity.is_empty()
-                        && !meta.top_token.to_lowercase().contains(&req.entity.to_lowercase())
+                        && !meta
+                            .top_token
+                            .to_lowercase()
+                            .contains(&req.entity.to_lowercase())
                     {
                         continue;
                     }
@@ -397,7 +418,11 @@ fn grpc_select(
                         .get(&(layer, feat_idx))
                         .cloned()
                         .unwrap_or_default();
-                    if !req.relation.is_empty() && !relation.to_lowercase().contains(&req.relation.to_lowercase()) {
+                    if !req.relation.is_empty()
+                        && !relation
+                            .to_lowercase()
+                            .contains(&req.relation.to_lowercase())
+                    {
                         continue;
                     }
                     edges.push(SelectEdge {
@@ -412,7 +437,7 @@ fn grpc_select(
         }
     }
 
-    edges.sort_by(|a, b| b.c_score.partial_cmp(&a.c_score).unwrap());
+    edges.sort_by(|a, b| cmp_score_desc(a.c_score, b.c_score));
     let total = edges.len() as u32;
     edges.truncate(limit);
 
@@ -427,9 +452,8 @@ fn grpc_infer(
     model: &crate::state::LoadedModel,
     req: &InferRequest,
 ) -> Result<InferResponse, Status> {
-    let weights = model
-        .get_or_load_weights()
-        .map_err(Status::unavailable)?;
+    let weights_guard = model.get_or_load_weights().map_err(Status::unavailable)?;
+    let weights: &larql_inference::ModelWeights = &weights_guard;
 
     let encoding = model
         .tokenizer
@@ -442,18 +466,32 @@ fn grpc_infer(
 
     let top_k = if req.top > 0 { req.top as usize } else { 5 };
     let start = std::time::Instant::now();
-    let mode = if req.mode.is_empty() { "walk" } else { &req.mode };
+    let mode = if req.mode.is_empty() {
+        INFER_MODE_WALK
+    } else {
+        &req.mode
+    };
 
     let to_preds = |preds: &[(String, f64)]| -> Vec<Prediction> {
-        preds.iter().map(|(t, p)| Prediction { token: t.clone(), probability: *p }).collect()
+        preds
+            .iter()
+            .map(|(t, p)| Prediction {
+                token: t.clone(),
+                probability: *p,
+            })
+            .collect()
     };
 
     match mode {
-        "compare" => {
+        INFER_MODE_COMPARE => {
             let patched = model.patched.blocking_read();
             let walk_pred = larql_inference::infer_patched(
-                weights, &model.tokenizer, &*patched,
-                Some(&patched.knn_store), &token_ids, top_k,
+                weights,
+                &model.tokenizer,
+                &*patched,
+                Some(&patched.knn_store),
+                &token_ids,
+                top_k,
             );
             let walk_ms = walk_pred.walk_ms as f32;
 
@@ -464,7 +502,7 @@ fn grpc_infer(
             Ok(InferResponse {
                 prompt: req.prompt.clone(),
                 predictions: vec![],
-                mode: "compare".into(),
+                mode: INFER_MODE_COMPARE.into(),
                 walk_predictions: to_preds(&walk_pred.predictions),
                 dense_predictions: to_preds(&dense_pred.predictions),
                 walk_ms,
@@ -472,12 +510,12 @@ fn grpc_infer(
                 latency_ms: start.elapsed().as_secs_f64() as f32 * 1000.0,
             })
         }
-        "dense" => {
+        INFER_MODE_DENSE => {
             let pred = larql_inference::predict(weights, &model.tokenizer, &token_ids, top_k);
             Ok(InferResponse {
                 prompt: req.prompt.clone(),
                 predictions: to_preds(&pred.predictions),
-                mode: "dense".into(),
+                mode: INFER_MODE_DENSE.into(),
                 walk_predictions: vec![],
                 dense_predictions: vec![],
                 walk_ms: 0.0,
@@ -488,13 +526,17 @@ fn grpc_infer(
         _ => {
             let patched = model.patched.blocking_read();
             let pred = larql_inference::infer_patched(
-                weights, &model.tokenizer, &*patched,
-                Some(&patched.knn_store), &token_ids, top_k,
+                weights,
+                &model.tokenizer,
+                &*patched,
+                Some(&patched.knn_store),
+                &token_ids,
+                top_k,
             );
             Ok(InferResponse {
                 prompt: req.prompt.clone(),
                 predictions: to_preds(&pred.predictions),
-                mode: "walk".into(),
+                mode: INFER_MODE_WALK.into(),
                 walk_predictions: vec![],
                 dense_predictions: vec![],
                 walk_ms: 0.0,
@@ -505,20 +547,23 @@ fn grpc_infer(
     }
 }
 
-fn grpc_relations(
-    model: &crate::state::LoadedModel,
-) -> Result<RelationsResponse, Status> {
+fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse, Status> {
     let start = std::time::Instant::now();
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
 
-    let mut counts: std::collections::HashMap<String, (usize, String)> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<String, (usize, String)> =
+        std::collections::HashMap::new();
     for &layer in &all_layers {
         if let Some(metas) = patched.down_meta_at(layer) {
             for meta in metas.iter().flatten() {
                 let tok = meta.top_token.trim();
                 if tok.len() >= 2 && meta.c_score >= 0.2 {
-                    let example = meta.top_k.first().map(|t| t.token.trim().to_string()).unwrap_or_default();
+                    let example = meta
+                        .top_k
+                        .first()
+                        .map(|t| t.token.trim().to_string())
+                        .unwrap_or_default();
                     let entry = counts.entry(tok.to_string()).or_insert((0, example));
                     entry.0 += 1;
                 }
@@ -528,7 +573,11 @@ fn grpc_relations(
 
     let mut relations: Vec<RelationInfo> = counts
         .into_iter()
-        .map(|(name, (count, example))| RelationInfo { name, count: count as u32, example })
+        .map(|(name, (count, example))| RelationInfo {
+            name,
+            count: count as u32,
+            example,
+        })
         .collect();
     relations.sort_by(|a, b| b.count.cmp(&a.count));
     let total = relations.len() as u32;
@@ -547,7 +596,11 @@ fn grpc_walk_ffn(
 ) -> Result<WalkFfnResponse, Status> {
     let start = std::time::Instant::now();
     let hidden = model.config.hidden_size;
-    let seq_len = if req.seq_len == 0 { 1 } else { req.seq_len as usize };
+    let seq_len = if req.seq_len == 0 {
+        1
+    } else {
+        req.seq_len as usize
+    };
 
     let expected_len = if req.full_output {
         seq_len
@@ -589,7 +642,11 @@ fn grpc_walk_ffn_features_only(
     top_k_req: u32,
 ) -> Vec<WalkFfnLayerResult> {
     let patched = model.patched.blocking_read();
-    let top_k = if top_k_req > 0 { top_k_req as usize } else { 8092 };
+    let top_k = if top_k_req > 0 {
+        top_k_req as usize
+    } else {
+        8092
+    };
     let query = larql_vindex::ndarray::Array1::from_vec(residual.to_vec());
 
     scan_layers
@@ -617,9 +674,10 @@ fn grpc_walk_ffn_full_output(
     use larql_inference::ffn::FfnBackend;
     use larql_vindex::ndarray::Array2;
 
-    let weights = model
+    let weights_guard = model
         .get_or_load_weights()
         .map_err(Status::failed_precondition)?;
+    let weights: &larql_inference::ModelWeights = &weights_guard;
 
     let patched = model.patched.blocking_read();
     let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited(weights, &*patched);
@@ -661,18 +719,28 @@ fn grpc_stream_describe(
     let token_ids: Vec<u32> = encoding.get_ids().to_vec();
     if token_ids.is_empty() {
         let _ = tx.blocking_send(Ok(DescribeLayerEvent {
-            layer: 0, edges: vec![], done: true, total_edges: 0, latency_ms: 0.0,
+            layer: 0,
+            edges: vec![],
+            done: true,
+            total_edges: 0,
+            latency_ms: 0.0,
         }));
         return;
     }
 
     let hidden = model.embeddings.shape()[1];
     let query = if token_ids.len() == 1 {
-        model.embeddings.row(token_ids[0] as usize).mapv(|v| v * model.embed_scale)
+        model
+            .embeddings
+            .row(token_ids[0] as usize)
+            .mapv(|v| v * model.embed_scale)
     } else {
         let mut avg = larql_vindex::ndarray::Array1::<f32>::zeros(hidden);
         for &tok in &token_ids {
-            avg += &model.embeddings.row(tok as usize).mapv(|v| v * model.embed_scale);
+            avg += &model
+                .embeddings
+                .row(tok as usize)
+                .mapv(|v| v * model.embed_scale);
         }
         avg /= token_ids.len() as f32;
         avg
@@ -689,14 +757,18 @@ fn grpc_stream_describe(
         let mut edges = Vec::new();
 
         for (feature, gate_score) in &hits {
-            if *gate_score < 5.0 { continue; }
+            if *gate_score < 5.0 {
+                continue;
+            }
             if let Some(meta) = patched.feature_meta(layer, *feature) {
                 let tok = meta.top_token.trim();
-                if tok.is_empty() || tok.len() < 2 || tok.to_lowercase() == entity_lower { continue; }
+                if tok.is_empty() || tok.len() < 2 || tok.to_lowercase() == entity_lower {
+                    continue;
+                }
                 let (relation, source) = model
                     .probe_labels
                     .get(&(layer, *feature))
-                    .map(|r| (r.clone(), "probe".to_string()))
+                    .map(|r| (r.clone(), PROBE_RELATION_SOURCE.to_string()))
                     .unwrap_or_default();
                 edges.push(DescribeEdge {
                     target: tok.to_string(),
@@ -714,13 +786,16 @@ fn grpc_stream_describe(
 
         total_edges += edges.len() as u32;
 
-        if tx.blocking_send(Ok(DescribeLayerEvent {
-            layer: layer as u32,
-            edges,
-            done: false,
-            total_edges: 0,
-            latency_ms: 0.0,
-        })).is_err() {
+        if tx
+            .blocking_send(Ok(DescribeLayerEvent {
+                layer: layer as u32,
+                edges,
+                done: false,
+                total_edges: 0,
+                latency_ms: 0.0,
+            }))
+            .is_err()
+        {
             return;
         }
     }
@@ -732,4 +807,56 @@ fn grpc_stream_describe(
         total_edges,
         latency_ms: start.elapsed().as_secs_f64() as f32 * 1000.0,
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmp_score_desc;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn cmp_score_desc_orders_descending() {
+        assert_eq!(cmp_score_desc(1.0, 2.0), Ordering::Greater);
+        assert_eq!(cmp_score_desc(2.0, 1.0), Ordering::Less);
+        assert_eq!(cmp_score_desc(1.0, 1.0), Ordering::Equal);
+    }
+
+    #[test]
+    fn cmp_score_desc_treats_nan_as_equal() {
+        assert_eq!(cmp_score_desc(f32::NAN, 1.0), Ordering::Equal);
+        assert_eq!(cmp_score_desc(1.0, f32::NAN), Ordering::Equal);
+        assert_eq!(cmp_score_desc(f32::NAN, f32::NAN), Ordering::Equal);
+    }
+
+    #[test]
+    fn sort_with_nan_does_not_panic() {
+        // Reproduces the REV1 hazard: a single NaN in the score vector
+        // would have panicked the gRPC worker via `partial_cmp().unwrap()`.
+        // After the fix, sort completes; we don't claim a total order
+        // (NaN-as-Equal breaks strict weak ordering, so the finite values
+        // around NaNs may not be globally descending), only that the call
+        // is safe and preserves length and finite/NaN counts.
+        let mut scores = [3.0f32, f32::NAN, 1.0, 5.0, f32::NAN, 2.0];
+        scores.sort_by(|a, b| cmp_score_desc(*a, *b));
+
+        assert_eq!(scores.len(), 6);
+        assert_eq!(scores.iter().filter(|s| s.is_nan()).count(), 2);
+        let finite: Vec<f32> = scores.iter().copied().filter(|s| !s.is_nan()).collect();
+        assert_eq!(finite.len(), 4);
+        assert!(finite.contains(&5.0) && finite.contains(&3.0));
+    }
+
+    #[test]
+    fn sort_descending_when_all_finite() {
+        let mut scores = [3.0f32, 1.0, 5.0, 2.0, 4.0];
+        scores.sort_by(|a, b| cmp_score_desc(*a, *b));
+        assert_eq!(scores, [5.0, 4.0, 3.0, 2.0, 1.0]);
+    }
+
+    #[test]
+    fn sort_with_infinities_is_well_defined() {
+        let mut scores = [1.0f32, f32::INFINITY, -1.0, f32::NEG_INFINITY, 0.0];
+        scores.sort_by(|a, b| cmp_score_desc(*a, *b));
+        assert_eq!(scores, [f32::INFINITY, 1.0, 0.0, -1.0, f32::NEG_INFINITY]);
+    }
 }

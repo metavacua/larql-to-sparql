@@ -14,7 +14,12 @@ pub fn rms_norm(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32) -> Arra
 }
 
 /// RMS norm with explicit epsilon.
-pub fn rms_norm_eps(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32, eps: f64) -> Array2<f32> {
+pub fn rms_norm_eps(
+    x: &Array2<f32>,
+    weight: Option<&Vec<f32>>,
+    offset: f32,
+    eps: f64,
+) -> Array2<f32> {
     let (rows, cols) = (x.shape()[0], x.shape()[1]);
     let mut out = Array2::zeros((rows, cols));
 
@@ -56,10 +61,14 @@ pub fn layer_norm_eps(
     for i in 0..rows {
         let row = x.row(i);
         let mean: f64 = row.iter().map(|&v| v as f64).sum::<f64>() / cols as f64;
-        let var: f64 = row.iter().map(|&v| {
-            let d = v as f64 - mean;
-            d * d
-        }).sum::<f64>() / cols as f64;
+        let var: f64 = row
+            .iter()
+            .map(|&v| {
+                let d = v as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / cols as f64;
         let std = (var + eps).sqrt() as f32;
         let mean_f = mean as f32;
         for j in 0..cols {
@@ -74,11 +83,7 @@ pub fn layer_norm_eps(
 
 /// Per-head RMS norm without learned weights (parameter-free normalization).
 /// Used for V-norm in Gemma 4: just normalizes, no scaling.
-pub fn rms_norm_heads_no_weight(
-    x: &Array2<f32>,
-    num_heads: usize,
-    head_dim: usize,
-) -> Array2<f32> {
+pub fn rms_norm_heads_no_weight(x: &Array2<f32>, num_heads: usize, head_dim: usize) -> Array2<f32> {
     rms_norm_heads_no_weight_eps(x, num_heads, head_dim, DEFAULT_EPS)
 }
 
@@ -148,4 +153,123 @@ pub fn rms_norm_heads_eps(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── rms_norm ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rms_norm_shape_preserved() {
+        let x = Array2::from_shape_vec((3, 4), vec![1.0f32; 12]).unwrap();
+        let out = rms_norm(&x, None, 0.0);
+        assert_eq!(out.shape(), x.shape());
+    }
+
+    #[test]
+    fn rms_norm_output_is_finite() {
+        let x = Array2::from_shape_vec((2, 8), (0..16).map(|i| i as f32 * 0.1).collect()).unwrap();
+        let out = rms_norm(&x, None, 0.0);
+        assert!(
+            out.iter().all(|v| v.is_finite()),
+            "rms_norm produced non-finite values"
+        );
+    }
+
+    #[test]
+    fn rms_norm_with_ones_weight_and_offset_one() {
+        // weight=ones, offset=1.0 → Gemma-style: weight = 1.0 + learned (learned=0 here)
+        let x = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let w = vec![0.0f32; 4]; // learned weight = zeros
+        let out = rms_norm(&x, Some(&w), 1.0); // effective weight = 1.0 + 0.0 = 1.0
+        let out_no_w = rms_norm(&x, None, 0.0);
+        // Both paths should give the same result since effective weight=1 for both
+        for (a, b) in out.iter().zip(out_no_w.iter()) {
+            assert!(
+                (a - b).abs() < 1e-5,
+                "offset=1 with zero weight should match no-weight norm"
+            );
+        }
+    }
+
+    #[test]
+    fn rms_norm_zero_row_is_finite() {
+        // Zero input → norm = 0 → eps prevents div-by-zero
+        let x = Array2::zeros((1, 4));
+        let out = rms_norm(&x, None, 0.0);
+        assert!(out.iter().all(|v| v.is_finite()));
+    }
+
+    // ── layer_norm ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn layer_norm_shape_and_finite() {
+        let x = Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32).collect()).unwrap();
+        let w = vec![1.0f32; 4];
+        let b = vec![0.0f32; 4];
+        let out = layer_norm(&x, Some(&w), Some(&b));
+        assert_eq!(out.shape(), x.shape());
+        assert!(out.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn layer_norm_zero_mean_unit_var() {
+        let x = Array2::from_shape_vec((1, 8), (0..8).map(|i| i as f32).collect()).unwrap();
+        let w = vec![1.0f32; 8];
+        let b = vec![0.0f32; 8];
+        let out = layer_norm(&x, Some(&w), Some(&b));
+        let mean: f32 = out.row(0).iter().sum::<f32>() / 8.0;
+        let var: f32 = out.row(0).iter().map(|v| (v - mean).powi(2)).sum::<f32>() / 8.0;
+        assert!(mean.abs() < 1e-5, "mean should be ~0, got {mean}");
+        assert!((var - 1.0).abs() < 0.1, "var should be ~1, got {var}");
+    }
+
+    // ── rms_norm_heads ────────────────────────────────────────────────────────
+
+    #[test]
+    fn rms_norm_heads_no_weight_shape() {
+        // [seq, num_heads * head_dim]
+        let x = Array2::from_shape_vec((3, 8), (0..24).map(|i| i as f32 * 0.1).collect()).unwrap();
+        let out = rms_norm_heads_no_weight(&x, 2, 4);
+        assert_eq!(out.shape(), &[3, 8]);
+        assert!(out.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn rms_norm_heads_normalises_each_head_independently() {
+        // Two heads with very different magnitudes → both normalised
+        let mut data = vec![0.0f32; 8];
+        for (i, slot) in data.iter_mut().enumerate().take(4) {
+            *slot = (i + 1) as f32;
+        } // head 0: [1,2,3,4]
+        for (i, slot) in data.iter_mut().enumerate().skip(4).take(4) {
+            *slot = 100.0 * (i - 4 + 1) as f32;
+        } // head 1: [100,200,300,400]
+        let x = Array2::from_shape_vec((1, 8), data).unwrap();
+        let out = rms_norm_heads_no_weight(&x, 2, 4);
+        // Both heads should have similar L2 norm after per-head normalisation
+        let h0_norm: f32 = out.row(0).iter().take(4).map(|v| v * v).sum::<f32>().sqrt();
+        let h1_norm: f32 = out.row(0).iter().skip(4).map(|v| v * v).sum::<f32>().sqrt();
+        assert!(
+            (h0_norm - h1_norm).abs() < 0.1,
+            "both heads should have similar L2 norm"
+        );
+    }
+
+    #[test]
+    fn rms_norm_heads_with_weight_scales() {
+        let x = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
+        let w = vec![2.0f32, 2.0, 2.0, 2.0]; // scale by 2
+        let out_scaled = rms_norm_heads(&x, &w, 1, 4, 0.0);
+        let out_unscaled = rms_norm_heads_no_weight(&x, 1, 4);
+        // Scaled output should be ~2× the unscaled
+        for (s, u) in out_scaled.iter().zip(out_unscaled.iter()) {
+            assert!(
+                (s - 2.0 * u).abs() < 1e-5,
+                "weight=2 should double the output"
+            );
+        }
+    }
 }

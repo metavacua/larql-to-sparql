@@ -11,20 +11,20 @@ pub enum Token {
     IntegerLit(i64),
 
     // Punctuation
-    Star,        // *
-    Comma,       // ,
-    Semicolon,   // ;
-    LParen,      // (
-    RParen,      // )
-    Dot,         // .
-    Pipe,        // |>
-    Eq,          // =
-    Neq,         // !=
-    Gt,          // >
-    Lt,          // <
-    Gte,         // >=
-    Lte,         // <=
-    Dash,        // -  (inside ranges like 0-33)
+    Star,      // *
+    Comma,     // ,
+    Semicolon, // ;
+    LParen,    // (
+    RParen,    // )
+    Dot,       // .
+    Pipe,      // |>
+    Eq,        // =
+    Neq,       // !=
+    Gt,        // >
+    Lt,        // <
+    Gte,       // >=
+    Lte,       // <=
+    Dash,      // -  (inside ranges like 0-33)
 
     // Identifiers (column names, unquoted entity names, etc.)
     Ident(String),
@@ -143,28 +143,24 @@ pub enum Keyword {
 
 impl Keyword {
     /// Map a keyword to its lowercase field name for use in conditions/assignments.
-    /// Only keywords that commonly appear as column names are mapped.
+    /// Single exhaustive match — the compiler refuses to compile if a `Keyword`
+    /// variant is added without a string here, so this can't panic at runtime.
     pub(crate) fn as_field_name(&self) -> &'static str {
         match self {
-            Self::Layer => "layer",
-            Self::Layers => "layers",
-            Self::Confidence => "confidence",
-            Self::Relation => "relation",
-            Self::Relations => "relations",
-            Self::Entities => "entities",
-            Self::Features => "features",
-            Self::Model => "model",
-            Self::Mode => "mode",
-            Self::Format => "format",
-            Self::Output => "output",
-            Self::Range => "range",
-            Self::Set => "set",
-            Self::Order => "order",
-            Self::Limit => "limit",
-            Self::Top => "top",
-            Self::All => "all",
-            Self::Desc => "desc",
-            Self::Asc => "asc",
+            Self::Extract => "extract",
+            Self::Compile => "compile",
+            Self::Diff => "diff",
+            Self::Use => "use",
+            Self::Walk => "walk",
+            Self::Select => "select",
+            Self::Describe => "describe",
+            Self::Explain => "explain",
+            Self::Insert => "insert",
+            Self::Delete => "delete",
+            Self::Update => "update",
+            Self::Merge => "merge",
+            Self::Show => "show",
+            Self::Stats => "stats",
             Self::From => "from",
             Self::Into => "into",
             Self::Where => "where",
@@ -174,57 +170,88 @@ impl Keyword {
             Self::In => "in",
             Self::Like => "like",
             Self::Between => "between",
+            Self::Order => "order",
             Self::By => "by",
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+            Self::Limit => "limit",
+            Self::Top => "top",
+            Self::Layers => "layers",
+            Self::Mode => "mode",
+            Self::Compare => "compare",
             Self::At => "at",
-            Self::On => "on",
-            Self::With => "with",
-            Self::To => "to",
-            Self::Current => "current",
-            Self::Values => "values",
+            Self::Layer => "layer",
+            Self::Confidence => "confidence",
+            Self::Model => "model",
             Self::Edges => "edges",
-            // Statement keywords — unlikely as field names but cover all cases
-            _ => match self {
-                Self::Extract => "extract", Self::Compile => "compile",
-                Self::Diff => "diff", Self::Use => "use",
-                Self::Walk => "walk", Self::Select => "select",
-                Self::Describe => "describe", Self::Explain => "explain",
-                Self::Insert => "insert", Self::Delete => "delete",
-                Self::Update => "update", Self::Merge => "merge",
-                Self::Show => "show", Self::Stats => "stats",
-                Self::Infer => "infer", Self::Trace => "trace",
-                Self::Compare => "compare", Self::Models => "models",
-                Self::Components => "components", Self::Conflict => "conflict",
-                Self::KeepSource => "keepsource", Self::KeepTarget => "keeptarget",
-                Self::HighestConfidence => "highestconfidence",
-                Self::LastWins => "lastwins", Self::Fail => "fail",
-                Self::Examples => "examples", Self::Only => "only",
-                Self::Verbose => "verbose", Self::Brief => "brief", Self::Raw => "raw",
-                Self::Nearest => "nearest", Self::Pure => "pure",
-                Self::Hybrid => "hybrid", Self::Dense => "dense",
-                Self::Safetensors => "safetensors", Self::Gguf => "gguf",
-                Self::AutoExtract => "auto_extract",
-                Self::FfnGate => "ffn_gate", Self::FfnDown => "ffn_down",
-                Self::FfnUp => "ffn_up", Self::Embeddings => "embeddings",
-                Self::AttnOv => "attn_ov", Self::AttnQk => "attn_qk",
-                Self::Syntax => "syntax", Self::Knowledge => "knowledge",
-                Self::Weights => "weights", Self::Inference => "inference",
-                Self::Begin => "begin", Self::Save => "save",
-                Self::Apply => "apply", Self::Remove => "remove",
-                Self::Patch => "patch", Self::Patches => "patches",
-                Self::Remote => "remote", Self::For => "for",
-                Self::Decompose => "decompose", Self::Positions => "positions",
-                Self::Attention => "attention",
-                Self::Alpha => "alpha",
-                Self::Knn => "knn",
-                Self::Compose => "compose",
-                Self::Rebalance => "rebalance",
-                Self::Floor => "floor",
-                Self::Ceiling => "ceiling",
-                Self::Max => "max",
-                Self::Until => "until",
-                Self::Converged => "converged",
-                _ => unreachable!(),
-            }
+            Self::Entities => "entities",
+            Self::Relation => "relation",
+            Self::Relations => "relations",
+            Self::Features => "features",
+            Self::Models => "models",
+            Self::Format => "format",
+            Self::Components => "components",
+            Self::On => "on",
+            Self::Conflict => "conflict",
+            Self::KeepSource => "keepsource",
+            Self::KeepTarget => "keeptarget",
+            Self::HighestConfidence => "highestconfidence",
+            Self::LastWins => "lastwins",
+            Self::Fail => "fail",
+            Self::Set => "set",
+            Self::Values => "values",
+            Self::Current => "current",
+            Self::With => "with",
+            Self::Examples => "examples",
+            Self::Only => "only",
+            Self::Verbose => "verbose",
+            Self::Range => "range",
+            Self::All => "all",
+            Self::Nearest => "nearest",
+            Self::To => "to",
+            Self::Pure => "pure",
+            Self::Hybrid => "hybrid",
+            Self::Dense => "dense",
+            Self::Safetensors => "safetensors",
+            Self::Gguf => "gguf",
+            Self::AutoExtract => "auto_extract",
+            Self::FfnGate => "ffn_gate",
+            Self::FfnDown => "ffn_down",
+            Self::FfnUp => "ffn_up",
+            Self::Embeddings => "embeddings",
+            Self::AttnOv => "attn_ov",
+            Self::AttnQk => "attn_qk",
+            Self::Infer => "infer",
+            Self::Syntax => "syntax",
+            Self::Knowledge => "knowledge",
+            Self::Output => "output",
+            Self::Weights => "weights",
+            Self::Inference => "inference",
+            Self::Begin => "begin",
+            Self::Save => "save",
+            Self::Apply => "apply",
+            Self::Remove => "remove",
+            Self::Patch => "patch",
+            Self::Patches => "patches",
+            Self::Remote => "remote",
+            Self::Trace => "trace",
+            Self::For => "for",
+            Self::Decompose => "decompose",
+            Self::Positions => "positions",
+            Self::Brief => "brief",
+            Self::Raw => "raw",
+            Self::Attention => "attention",
+            Self::Alpha => "alpha",
+            Self::Knn => "knn",
+            Self::Compose => "compose",
+            Self::Rebalance => "rebalance",
+            Self::Floor => "floor",
+            Self::Ceiling => "ceiling",
+            Self::Max => "max",
+            Self::Until => "until",
+            Self::Converged => "converged",
+            Self::Compact => "compact",
+            Self::Status => "status",
         }
     }
 
@@ -376,29 +403,56 @@ impl<'a> Lexer<'a> {
         let ch = self.input[self.pos] as char;
 
         match ch {
-            '*' => { self.pos += 1; Ok(Token::Star) }
-            ',' => { self.pos += 1; Ok(Token::Comma) }
-            ';' => { self.pos += 1; Ok(Token::Semicolon) }
-            '(' => { self.pos += 1; Ok(Token::LParen) }
-            ')' => { self.pos += 1; Ok(Token::RParen) }
-            '.' => { self.pos += 1; Ok(Token::Dot) }
+            '*' => {
+                self.pos += 1;
+                Ok(Token::Star)
+            }
+            ',' => {
+                self.pos += 1;
+                Ok(Token::Comma)
+            }
+            ';' => {
+                self.pos += 1;
+                Ok(Token::Semicolon)
+            }
+            '(' => {
+                self.pos += 1;
+                Ok(Token::LParen)
+            }
+            ')' => {
+                self.pos += 1;
+                Ok(Token::RParen)
+            }
+            '.' => {
+                self.pos += 1;
+                Ok(Token::Dot)
+            }
             '|' => {
                 self.pos += 1;
                 if self.pos < self.input.len() && self.input[self.pos] == b'>' {
                     self.pos += 1;
                     Ok(Token::Pipe)
                 } else {
-                    Err(LexError(format!("expected '>' after '|' at position {}", self.pos)))
+                    Err(LexError(format!(
+                        "expected '>' after '|' at position {}",
+                        self.pos
+                    )))
                 }
             }
-            '=' => { self.pos += 1; Ok(Token::Eq) }
+            '=' => {
+                self.pos += 1;
+                Ok(Token::Eq)
+            }
             '!' => {
                 self.pos += 1;
                 if self.pos < self.input.len() && self.input[self.pos] == b'=' {
                     self.pos += 1;
                     Ok(Token::Neq)
                 } else {
-                    Err(LexError(format!("expected '=' after '!' at position {}", self.pos)))
+                    Err(LexError(format!(
+                        "expected '=' after '!' at position {}",
+                        self.pos
+                    )))
                 }
             }
             '>' => {
@@ -430,7 +484,10 @@ impl<'a> Lexer<'a> {
                 Ok(Token::Dash)
             }
             _ if ch.is_ascii_alphabetic() || ch == '_' => self.read_word(),
-            _ => Err(LexError(format!("unexpected character '{}' at position {}", ch, self.pos))),
+            _ => Err(LexError(format!(
+                "unexpected character '{}' at position {}",
+                ch, self.pos
+            ))),
         }
     }
 
@@ -439,7 +496,10 @@ impl<'a> Lexer<'a> {
             let ch = self.input[self.pos] as char;
             if ch.is_ascii_whitespace() {
                 self.pos += 1;
-            } else if ch == '-' && self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'-' {
+            } else if ch == '-'
+                && self.pos + 1 < self.input.len()
+                && self.input[self.pos + 1] == b'-'
+            {
                 // Line comment: -- ...
                 self.pos += 2;
                 while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
@@ -452,37 +512,60 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_string(&mut self) -> Result<Token, LexError> {
-        self.pos += 1; // skip opening "
-        let start = self.pos;
-        while self.pos < self.input.len() && self.input[self.pos] != b'"' {
-            if self.input[self.pos] == b'\\' {
-                self.pos += 1; // skip escape
-            }
-            self.pos += 1;
-        }
-        if self.pos >= self.input.len() {
-            return Err(LexError("unterminated string literal".into()));
-        }
-        let s = String::from_utf8_lossy(&self.input[start..self.pos]).into_owned();
-        self.pos += 1; // skip closing "
-        Ok(Token::StringLit(s))
+        self.read_quoted(b'"')
     }
 
     fn read_string_single(&mut self) -> Result<Token, LexError> {
-        self.pos += 1; // skip opening '
-        let start = self.pos;
-        while self.pos < self.input.len() && self.input[self.pos] != b'\'' {
+        self.read_quoted(b'\'')
+    }
+
+    /// Scan a quoted string literal, decoding standard escape sequences
+    /// (\\, \", \', \n, \t, \r). Unknown escapes pass through as the literal
+    /// escapee (e.g. `\x` → `x`).
+    fn read_quoted(&mut self, quote: u8) -> Result<Token, LexError> {
+        self.pos += 1; // skip opening quote
+        let mut out = String::new();
+        // Track segments of unescaped bytes so we can copy them in bulk.
+        let mut segment_start = self.pos;
+        while self.pos < self.input.len() && self.input[self.pos] != quote {
             if self.input[self.pos] == b'\\' {
+                // Flush the unescaped segment, then decode the escape.
+                if segment_start < self.pos {
+                    out.push_str(&String::from_utf8_lossy(
+                        &self.input[segment_start..self.pos],
+                    ));
+                }
+                self.pos += 1;
+                if self.pos >= self.input.len() {
+                    return Err(LexError("unterminated string literal".into()));
+                }
+                let decoded = match self.input[self.pos] {
+                    b'\\' => '\\',
+                    b'"' => '"',
+                    b'\'' => '\'',
+                    b'n' => '\n',
+                    b't' => '\t',
+                    b'r' => '\r',
+                    b'0' => '\0',
+                    other => other as char,
+                };
+                out.push(decoded);
+                self.pos += 1;
+                segment_start = self.pos;
+            } else {
                 self.pos += 1;
             }
-            self.pos += 1;
         }
         if self.pos >= self.input.len() {
             return Err(LexError("unterminated string literal".into()));
         }
-        let s = String::from_utf8_lossy(&self.input[start..self.pos]).into_owned();
-        self.pos += 1; // skip closing '
-        Ok(Token::StringLit(s))
+        if segment_start < self.pos {
+            out.push_str(&String::from_utf8_lossy(
+                &self.input[segment_start..self.pos],
+            ));
+        }
+        self.pos += 1; // skip closing quote
+        Ok(Token::StringLit(out))
     }
 
     fn read_number(&mut self) -> Result<Token, LexError> {
@@ -493,10 +576,13 @@ impl<'a> Lexer<'a> {
         let mut is_float = false;
         if self.pos < self.input.len() && self.input[self.pos] == b'.' {
             // Peek: if next char is a digit, it's a float. Otherwise it's an int followed by dot.
-            if self.pos + 1 < self.input.len() && (self.input[self.pos + 1] as char).is_ascii_digit() {
+            if self.pos + 1 < self.input.len()
+                && (self.input[self.pos + 1] as char).is_ascii_digit()
+            {
                 is_float = true;
                 self.pos += 1;
-                while self.pos < self.input.len() && (self.input[self.pos] as char).is_ascii_digit() {
+                while self.pos < self.input.len() && (self.input[self.pos] as char).is_ascii_digit()
+                {
                     self.pos += 1;
                 }
             }
@@ -508,10 +594,14 @@ impl<'a> Lexer<'a> {
         let text = std::str::from_utf8(&self.input[start..self.pos])
             .map_err(|e| LexError(format!("invalid UTF-8 in numeric literal: {e}")))?;
         if is_float {
-            let val: f64 = text.parse().map_err(|_| LexError(format!("invalid number: {text}")))?;
+            let val: f64 = text
+                .parse()
+                .map_err(|_| LexError(format!("invalid number: {text}")))?;
             Ok(Token::NumberLit(val))
         } else {
-            let val: i64 = text.parse().map_err(|_| LexError(format!("invalid integer: {text}")))?;
+            let val: i64 = text
+                .parse()
+                .map_err(|_| LexError(format!("invalid integer: {text}")))?;
             Ok(Token::IntegerLit(val))
         }
     }
@@ -578,9 +668,8 @@ mod tests {
 
     #[test]
     fn select_with_conditions() {
-        let mut lex = Lexer::new(
-            r#"SELECT entity, relation FROM EDGES WHERE entity = "France" LIMIT 10;"#,
-        );
+        let mut lex =
+            Lexer::new(r#"SELECT entity, relation FROM EDGES WHERE entity = "France" LIMIT 10;"#);
         let tokens = lex.tokenise().unwrap();
         assert!(matches!(tokens[0], Token::Keyword(Keyword::Select)));
         assert!(matches!(tokens[1], Token::Ident(ref s) if s == "entity"));
@@ -664,10 +753,53 @@ mod tests {
     }
 
     #[test]
-    fn string_with_escape() {
+    fn string_with_escaped_quote_decodes() {
         let mut lex = Lexer::new(r#""hello \"world\"""#);
         let tokens = lex.tokenise().unwrap();
-        assert!(matches!(tokens[0], Token::StringLit(ref s) if s.contains('\\')));
+        assert!(matches!(tokens[0], Token::StringLit(ref s) if s == r#"hello "world""#));
+    }
+
+    #[test]
+    fn string_with_escaped_backslash_decodes() {
+        let mut lex = Lexer::new(r#""C:\\path""#);
+        let tokens = lex.tokenise().unwrap();
+        assert!(matches!(tokens[0], Token::StringLit(ref s) if s == r"C:\path"));
+    }
+
+    #[test]
+    fn string_with_control_escapes_decodes() {
+        let mut lex = Lexer::new(r#""a\nb\tc\rd\0e""#);
+        let tokens = lex.tokenise().unwrap();
+        assert!(matches!(tokens[0], Token::StringLit(ref s) if s == "a\nb\tc\rd\0e"));
+    }
+
+    #[test]
+    fn single_quoted_string_with_escape() {
+        let mut lex = Lexer::new(r"'it\'s'");
+        let tokens = lex.tokenise().unwrap();
+        assert!(matches!(tokens[0], Token::StringLit(ref s) if s == "it's"));
+    }
+
+    #[test]
+    fn unknown_escape_passes_through() {
+        let mut lex = Lexer::new(r#""\x""#);
+        let tokens = lex.tokenise().unwrap();
+        assert!(matches!(tokens[0], Token::StringLit(ref s) if s == "x"));
+    }
+
+    #[test]
+    fn unterminated_string_after_backslash() {
+        let mut lex = Lexer::new(r#""abc\"#);
+        assert!(lex.tokenise().is_err());
+    }
+
+    #[test]
+    fn keyword_as_field_name_covers_compact_and_status() {
+        // Regression: prior implementation routed Compact / Status through an
+        // `unreachable!()` and panicked when they appeared as identifiers in
+        // WHERE / SET / ORDER BY clauses.
+        assert_eq!(Keyword::Compact.as_field_name(), "compact");
+        assert_eq!(Keyword::Status.as_field_name(), "status");
     }
 
     #[test]
@@ -787,7 +919,10 @@ mod tests {
         let tokens = lex.tokenise().unwrap();
         assert!(matches!(tokens[0], Token::Keyword(Keyword::KeepSource)));
         assert!(matches!(tokens[1], Token::Keyword(Keyword::KeepTarget)));
-        assert!(matches!(tokens[2], Token::Keyword(Keyword::HighestConfidence)));
+        assert!(matches!(
+            tokens[2],
+            Token::Keyword(Keyword::HighestConfidence)
+        ));
     }
 
     #[test]

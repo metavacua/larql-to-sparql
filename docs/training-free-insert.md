@@ -160,7 +160,7 @@ Orthogonal down vectors (removing the Paris component) did not help — degradat
 
 ## Experiment series
 
-All experiments in `experiments/04_constellation_insert/`:
+All experiments in `~/chris-source/chris-experiments/foundations/04_constellation_insert/`:
 
 | File | What | Key finding |
 |---|---|---|
@@ -173,7 +173,7 @@ All experiments in `experiments/04_constellation_insert/`:
 | `fine_sweep.py` | Fine alpha between 1.0-5.0 | France breaks at alpha=2.0, Atlantis needs alpha=3.5 |
 | `multilayer.py` | **8 layers × alpha=0.25** | **Atlantis 94.6%, France 60.5%** |
 
-Results saved in `experiments/results/04{a-h}_*.json`.
+Results saved in `~/chris-source/chris-experiments/results/04{a-h}_*.json`.
 
 ## Implementation
 
@@ -225,7 +225,7 @@ cargo run -p larql-cli --release -- repl
 
 # Run the full experiment
 pip install -e crates/larql-python
-python experiments/04_constellation_insert/multilayer.py
+python ~/chris-source/chris-experiments/foundations/04_constellation_insert/multilayer.py
 ```
 
 Or from the REPL:

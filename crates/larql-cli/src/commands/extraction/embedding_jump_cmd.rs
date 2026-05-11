@@ -60,7 +60,9 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!(
         "  {} layers, hidden={}, embed_scale={:.1} ({:.1}s)",
-        num_layers, hidden, embed_scale,
+        num_layers,
+        hidden,
+        embed_scale,
         start.elapsed().as_secs_f64()
     );
 
@@ -71,7 +73,10 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         .filter(|l| !l.is_empty())
         .collect();
 
-    eprintln!("Fitting projection from {} training prompts...", train_prompts.len());
+    eprintln!(
+        "Fitting projection from {} training prompts...",
+        train_prompts.len()
+    );
     let fit_start = Instant::now();
 
     // ── For each training prompt: compute raw embedding AND real L_target ──
@@ -83,12 +88,15 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut y_vecs: Vec<Vec<f32>> = Vec::new(); // real L_target last-token
 
     for (i, prompt) in train_prompts.iter().enumerate() {
-        let encoding = model.tokenizer()
+        let encoding = model
+            .tokenizer()
             .encode(prompt.as_str(), true)
             .map_err(|e| format!("tokenize: {e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let seq_len = token_ids.len();
-        if seq_len < 3 { continue; }
+        if seq_len < 3 {
+            continue;
+        }
 
         // Compute input vector
         let input_vec: Vec<f32> = if args.source_layers > 0 {
@@ -99,7 +107,9 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
             let mut sum = vec![0.0f32; hidden];
             for &tid in &token_ids {
                 let row = weights.embed.row(tid as usize);
-                for j in 0..hidden { sum[j] += row[j] * embed_scale; }
+                for j in 0..hidden {
+                    sum[j] += row[j] * embed_scale;
+                }
             }
             sum
         } else {
@@ -144,10 +154,12 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Center X
-    let xc: Vec<Vec<f32>> = x_vecs.iter()
+    let xc: Vec<Vec<f32>> = x_vecs
+        .iter()
         .map(|x| x.iter().zip(x_mean.iter()).map(|(a, m)| a - m).collect())
         .collect();
-    let yc: Vec<Vec<f32>> = y_vecs.iter()
+    let yc: Vec<Vec<f32>> = y_vecs
+        .iter()
         .map(|y| y.iter().zip(y_mean.iter()).map(|(a, m)| a - m).collect())
         .collect();
 
@@ -169,7 +181,9 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     for _ in 0..r {
         let mut v = vec![1.0f32; n_train];
         let n: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        for x in v.iter_mut() { *x /= n; }
+        for x in v.iter_mut() {
+            *x /= n;
+        }
 
         let mut ev = 0.0f32;
         for _ in 0..100 {
@@ -183,10 +197,16 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
             ev = mv.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
             let n: f32 = mv.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if n < 1e-12 { break; }
-            for (x, m) in v.iter_mut().zip(mv.iter()) { *x = m / n; }
+            if n < 1e-12 {
+                break;
+            }
+            for (x, m) in v.iter_mut().zip(mv.iter()) {
+                *x = m / n;
+            }
         }
-        if ev < 1e-8 { break; }
+        if ev < 1e-8 {
+            break;
+        }
 
         eigenvalues.push(ev.sqrt());
         eigenvectors.push(v.clone());
@@ -207,17 +227,25 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         let mut dir = vec![0.0f32; hidden];
         for i in 0..n_train {
             let c = eigenvectors[k][i] / eigenvalues[k];
-            for j in 0..hidden { dir[j] += c * xc[i][j]; }
+            for j in 0..hidden {
+                dir[j] += c * xc[i][j];
+            }
         }
         let n: f32 = dir.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if n > 1e-12 { for x in dir.iter_mut() { *x /= n; } }
+        if n > 1e-12 {
+            for x in dir.iter_mut() {
+                *x /= n;
+            }
+        }
         vt_rows.push(dir);
 
         // Beta
         let mut beta = vec![0.0f32; hidden];
         for i in 0..n_train {
             let c = eigenvectors[k][i] / eigenvalues[k];
-            for j in 0..hidden { beta[j] += c * yc[i][j]; }
+            for j in 0..hidden {
+                beta[j] += c * yc[i][j];
+            }
         }
         betas.push(beta);
     }
@@ -227,7 +255,10 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     // ── Load test prompts ──
     let test_prompts: Vec<String> = if let Some(ref file) = args.prompts_file {
         std::fs::read_to_string(file)?
-            .lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
     } else if let Some(ref p) = args.prompts {
         p.split(',').map(|s| s.trim().to_string()).collect()
     } else {
@@ -237,7 +268,10 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     // ── End-to-end test ──
     eprintln!(
         "\n── Embedding Jump: raw embed → rank-{} project → L{} → L{}-L{} dense ──\n",
-        rank, target, inject_at, num_layers - 1
+        rank,
+        target,
+        inject_at,
+        num_layers - 1
     );
 
     println!(
@@ -251,17 +285,23 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     let mut cosines = Vec::new();
 
     for prompt in &test_prompts {
-        let encoding = model.tokenizer()
+        let encoding = model
+            .tokenizer()
             .encode(prompt.as_str(), true)
             .map_err(|e| format!("tokenize: {e}"))?;
         let token_ids: Vec<u32> = encoding.get_ids().to_vec();
         let seq_len = token_ids.len();
-        if seq_len < 3 { continue; }
+        if seq_len < 3 {
+            continue;
+        }
 
         // Baseline
         let baseline = predict(weights, model.tokenizer(), &token_ids, args.top_k);
-        let (base_tok, base_conf) = baseline.predictions.first()
-            .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+        let (base_tok, base_conf) = baseline
+            .predictions
+            .first()
+            .map(|(t, p)| (t.clone(), *p))
+            .unwrap_or_default();
 
         // Compute input (same method as training)
         let input_vec: Vec<f32> = if args.source_layers > 0 {
@@ -271,7 +311,9 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
             let mut sum = vec![0.0f32; hidden];
             for &tid in &token_ids {
                 let row = weights.embed.row(tid as usize);
-                for j in 0..hidden { sum[j] += row[j] * embed_scale; }
+                for j in 0..hidden {
+                    sum[j] += row[j] * embed_scale;
+                }
             }
             sum
         } else {
@@ -297,10 +339,18 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         // Cosine between projected and real at target layer
         let real_last: Vec<f32> = h_real.row(seq_len - 1).to_vec();
         let cos: f32 = {
-            let dot: f32 = projected.iter().zip(real_last.iter()).map(|(a, b)| a * b).sum();
+            let dot: f32 = projected
+                .iter()
+                .zip(real_last.iter())
+                .map(|(a, b)| a * b)
+                .sum();
             let na: f32 = projected.iter().map(|x| x * x).sum::<f32>().sqrt();
             let nb: f32 = real_last.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if na > 1e-12 && nb > 1e-12 { dot / (na * nb) } else { 0.0 }
+            if na > 1e-12 && nb > 1e-12 {
+                dot / (na * nb)
+            } else {
+                0.0
+            }
         };
         cosines.push(cos);
 
@@ -311,22 +361,29 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Run decoder
-        let jump_result = predict_from_hidden(
-            weights, model.tokenizer(), &h_hybrid, inject_at, args.top_k,
-        );
-        let (jump_tok, jump_conf) = jump_result.predictions.first()
-            .map(|(t, p)| (t.clone(), *p)).unwrap_or_default();
+        let jump_result =
+            predict_from_hidden(weights, model.tokenizer(), &h_hybrid, inject_at, args.top_k);
+        let (jump_tok, jump_conf) = jump_result
+            .predictions
+            .first()
+            .map(|(t, p)| (t.clone(), *p))
+            .unwrap_or_default();
 
         let matched = jump_tok == base_tok;
-        if matched { match_count += 1; }
+        if matched {
+            match_count += 1;
+        }
         total += 1;
 
         let m = if matched { "=" } else { "X" };
         println!(
             "{:<45} {:>12} {:>12} {:>7.2}% {:>7.2}% {:>3}",
             &prompt[..prompt.len().min(44)],
-            base_tok, jump_tok,
-            base_conf * 100.0, jump_conf * 100.0, m,
+            base_tok,
+            jump_tok,
+            base_conf * 100.0,
+            jump_conf * 100.0,
+            m,
         );
     }
 
@@ -338,21 +395,44 @@ pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Prompts: {}", total);
     eprintln!(
         "  Token match: {}/{} ({:.1}%)",
-        match_count, total,
+        match_count,
+        total,
         match_count as f64 / total.max(1) as f64 * 100.0
     );
-    eprintln!("  Cosine at L{}: mean={:.6}, min={:.6}", target, mean_cos, min_cos);
+    eprintln!(
+        "  Cosine at L{}: mean={:.6}, min={:.6}",
+        target, mean_cos, min_cos
+    );
     if args.source_layers > 0 {
-        eprintln!("  Method: {} real layers → rank-{} projection → L{}-L{} dense",
-            args.source_layers, rank, inject_at, num_layers - 1);
-        eprintln!("  {} real layers + {} dot products → {} decoder layers.",
-            args.source_layers, rank, num_layers - inject_at);
+        eprintln!(
+            "  Method: {} real layers → rank-{} projection → L{}-L{} dense",
+            args.source_layers,
+            rank,
+            inject_at,
+            num_layers - 1
+        );
+        eprintln!(
+            "  {} real layers + {} dot products → {} decoder layers.",
+            args.source_layers,
+            rank,
+            num_layers - inject_at
+        );
     } else {
-        eprintln!("  Method: raw embedding → rank-{} projection → L{}-L{} dense",
-            rank, inject_at, num_layers - 1);
-        eprintln!("  Zero encoder layers. Just embedding lookup + {} dot products.", rank);
+        eprintln!(
+            "  Method: raw embedding → rank-{} projection → L{}-L{} dense",
+            rank,
+            inject_at,
+            num_layers - 1
+        );
+        eprintln!(
+            "  Zero encoder layers. Just embedding lookup + {} dot products.",
+            rank
+        );
     }
-    eprintln!("  Zero matmul layers. Just an embedding lookup + {} dot products.", rank);
+    eprintln!(
+        "  Zero matmul layers. Just an embedding lookup + {} dot products.",
+        rank
+    );
 
     Ok(())
 }

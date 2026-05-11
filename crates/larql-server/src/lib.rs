@@ -6,13 +6,22 @@
 
 pub mod announce;
 pub mod auth;
+pub mod band_utils;
+pub mod bootstrap;
 pub mod cache;
 pub mod embed_store;
+pub mod env_flags;
 pub mod error;
 pub mod etag;
 pub mod ffn_l2_cache;
 pub mod grpc;
+pub mod grpc_expert;
+pub mod http;
+pub mod metrics;
+pub mod openapi;
 pub mod ratelimit;
 pub mod routes;
 pub mod session;
+pub mod shard_loader;
 pub mod state;
+pub mod wire;

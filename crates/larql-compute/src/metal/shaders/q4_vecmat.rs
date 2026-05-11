@@ -36,3 +36,8 @@ kernel void q4_vecmat(
     out[tid] = acc;
 }
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "q4_vecmat";
+}

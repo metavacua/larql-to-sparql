@@ -24,7 +24,7 @@ ignore_merge_commits = true
 # Disabled by policy: cocogitto's optional bump-on-branch and pre-bump hooks
 # would introduce non-deterministic side effects that are out of scope for the
 # PR validation workflow. Version bumping is a separate, repository-local
-# release concern (see docs/specs/compliance-pipeline.md).
+# release concern (see crates/larql-vindex/docs/compliance-pipeline.md).
 pre_bump_hooks  = []
 post_bump_hooks = []
 
