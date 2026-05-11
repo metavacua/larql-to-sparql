@@ -139,11 +139,25 @@ jobs:
         # by a merge of an upstream fork into this fork), and
         # `--no-merges` excludes the merge commits themselves
         # (already covered by `ignore_merge_commits = true` in
-        # cog.toml; doubled here for explicitness). The net effect is
-        # that only fork-authored commits on the PR branch are gated
-        # against the Conventional Commits grammar. Pre-existing
-        # upstream history brought in via merges is grandfathered and
-        # not retroactively re-validated.
+        # cog.toml; doubled here for explicitness).
+        #
+        # Additionally skip commits whose subject starts with
+        # `Potential fix for pull request finding` — that is the
+        # hard-coded subject prefix GitHub Code Scanning writes when
+        # a maintainer accepts a CodeQL suggestion via the
+        # "Commit suggestion" UI button. The body of those commits is
+        # bot-generated and not under our authors' control; gating
+        # them against the Conventional Commits grammar would force
+        # maintainers to choose between accepting CodeQL fixes and
+        # passing the commits gate. Accepting them silently here is
+        # the pragmatic choice; the produced workflow YAML edits are
+        # reviewed in the PR diff like any other change.
+        #
+        # The net effect is that only first-party fork-authored
+        # commits on the PR branch are gated against the Conventional
+        # Commits grammar. Pre-existing upstream history brought in
+        # via merges is grandfathered and not retroactively
+        # re-validated.
         run: |
           set -euo pipefail
           range="${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
@@ -155,6 +169,10 @@ jobs:
           failed=0
           for sha in "${commits[@]}"; do
             subject=$(git log -1 --format=%s "$sha")
+            if [[ "$subject" == "Potential fix for pull request finding"* ]]; then
+              echo "-- $sha: $subject (CodeQL suggestion, skipped)"
+              continue
+            fi
             echo "==> $sha: $subject"
             if ! cog check "${sha}~..${sha}"; then
               failed=1
