@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dn_bytes = get_bytes(&dn_file, dn_off, dn_len, &mut open_mmaps)?;
 
         let entries =
-            quantize_moe_entries(&gu_bytes, &dn_bytes, num_experts, moe_inter, hidden, fmt);
+            quantize_moe_entries(&gu_bytes, &dn_bytes, num_experts, moe_inter, hidden, fmt)?;
         write_layer_weights(vindex_path, layer, fmt, &entries, moe_inter, hidden)?;
 
         let elapsed = t_start.elapsed().as_secs_f64();

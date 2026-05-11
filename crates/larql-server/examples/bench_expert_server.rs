@@ -32,9 +32,8 @@ use std::time::{Duration, Instant};
 
 use tokio::net::TcpListener;
 
-use larql_inference::{
-    cpu_moe_forward, MoeLayerWeights, MoeRouterWeights, RemoteMoeBackend, ShardConfig,
-};
+use larql_compute::{cpu_moe_forward, MoeLayerWeights};
+use larql_inference::{MoeRouterWeights, RemoteMoeBackend, ShardConfig};
 use larql_server::{
     bootstrap::{load_single_vindex, LoadVindexOptions},
     cache::DescribeCache,
