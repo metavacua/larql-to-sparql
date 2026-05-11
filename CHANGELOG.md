@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
+- MSRV truth, OpenBLAS, version-preflight, changelog
 - Add Android NDK setup to cross-platform-build workflow
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
