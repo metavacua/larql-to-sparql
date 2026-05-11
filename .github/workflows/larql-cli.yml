@@ -11,6 +11,9 @@
 
 name: larql-cli
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
