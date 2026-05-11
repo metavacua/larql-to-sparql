@@ -137,6 +137,7 @@ fn test_json_format_structure() {
 // ── MessagePack roundtrip ──
 
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_msgpack_bytes_roundtrip() {
     let g = sample_graph();
     let bytes = to_bytes(&g, Format::MessagePack).unwrap();
@@ -145,6 +146,7 @@ fn test_msgpack_bytes_roundtrip() {
 }
 
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_msgpack_file_roundtrip() {
     let g = sample_graph();
     let path = std::env::temp_dir().join("test_roundtrip.larql.bin");
@@ -155,6 +157,7 @@ fn test_msgpack_file_roundtrip() {
 }
 
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_msgpack_preserves_confidence() {
     let g = sample_graph();
     let bytes = to_bytes(&g, Format::MessagePack).unwrap();
@@ -174,6 +177,7 @@ fn test_msgpack_preserves_confidence() {
 }
 
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_msgpack_smaller_than_json() {
     let g = sample_graph();
     let json_bytes = to_bytes(&g, Format::Json).unwrap();
@@ -189,6 +193,7 @@ fn test_msgpack_smaller_than_json() {
 // ── Cross-format ──
 
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_json_to_msgpack_roundtrip() {
     let g = sample_graph();
     let json_bytes = to_bytes(&g, Format::Json).unwrap();
@@ -204,15 +209,24 @@ fn test_json_to_msgpack_roundtrip() {
 fn test_format_from_path() {
     assert_eq!(Format::from_path("graph.larql.json"), Some(Format::Json));
     assert_eq!(Format::from_path("graph.json"), Some(Format::Json));
+    #[cfg(feature = "msgpack")]
     assert_eq!(
         Format::from_path("graph.larql.bin"),
         Some(Format::MessagePack)
     );
+    #[cfg(feature = "msgpack")]
     assert_eq!(Format::from_path("graph.bin"), Some(Format::MessagePack));
+    #[cfg(feature = "msgpack")]
     assert_eq!(
         Format::from_path("graph.msgpack"),
         Some(Format::MessagePack)
     );
+    #[cfg(not(feature = "msgpack"))]
+    assert_eq!(Format::from_path("graph.larql.bin"), None);
+    #[cfg(not(feature = "msgpack"))]
+    assert_eq!(Format::from_path("graph.bin"), None);
+    #[cfg(not(feature = "msgpack"))]
+    assert_eq!(Format::from_path("graph.msgpack"), None);
     assert_eq!(Format::from_path("graph.txt"), None);
 }
 

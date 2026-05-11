@@ -7,14 +7,18 @@ use std::path::PathBuf;
 
 use crate::ast::CompileConflict;
 use crate::error::LqlError;
+use crate::executor::helpers::{dir_size, format_bytes};
+use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
 use crate::executor::Session;
-use crate::executor::helpers::{format_bytes, dir_size};
+use larql_vindex::format::filenames::{
+    ATTN_WEIGHTS_BIN, DOWN_FEATURES_BIN, DOWN_META_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN,
+    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, KNN_STORE_BIN, NORMS_BIN, RELATION_CLUSTERS_JSON,
+    TOKENIZER_JSON, UP_FEATURES_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
+};
 
+use super::atomic::run_atomic_compile;
 use super::bake::{
-    apply_memit_deltas_to_down_weights,
-    patch_down_weights,
-    patch_gate_vectors,
-    patch_up_weights,
+    apply_memit_deltas_to_down_weights, patch_down_weights, patch_gate_vectors, patch_up_weights,
 };
 use super::collect_memit_facts_with_recording;
 
@@ -49,11 +53,25 @@ impl Session {
         output: &str,
         on_conflict: CompileConflict,
     ) -> Result<Vec<String>, LqlError> {
+        // Snapshot the source path before we hand control to the atomic
+        // wrapper so the inner closure can re-borrow `self` without aliasing.
         let _ = source_path; // accepted for symmetry; current vindex is the source
-        let output_dir = PathBuf::from(output);
-        std::fs::create_dir_all(&output_dir)
-            .map_err(|e| LqlError::exec("failed to create output dir", e))?;
+        let final_dir = PathBuf::from(output);
+        let source_path_owned = {
+            let (path, _, _) = self.require_vindex()?;
+            path.to_path_buf()
+        };
 
+        run_atomic_compile(&final_dir, &source_path_owned, |output_dir| {
+            self.bake_compile_into_vindex(output_dir, on_conflict)
+        })
+    }
+
+    fn bake_compile_into_vindex(
+        &mut self,
+        output_dir: &std::path::Path,
+        on_conflict: CompileConflict,
+    ) -> Result<Vec<String>, LqlError> {
         // Load the current vindex with patches applied
         let (path, config, patched) = self.require_vindex()?;
 
@@ -68,14 +86,16 @@ impl Session {
             CompileConflict::LastWins => {}
             CompileConflict::Fail => {
                 if !collisions.is_empty() {
-                    let preview = collisions.iter()
+                    let preview = collisions
+                        .iter()
                         .take(5)
                         .map(|((l, f), n)| format!("L{l}/F{f} ({n} writes)"))
                         .collect::<Vec<_>>()
                         .join(", ");
                     return Err(LqlError::Execution(format!(
                         "COMPILE INTO VINDEX ON CONFLICT FAIL: {} colliding slot(s): {}",
-                        collisions.len(), preview
+                        collisions.len(),
+                        preview
                     )));
                 }
             }
@@ -109,8 +129,9 @@ impl Session {
             .as_ref()
             .map(|r| r.operations.clone())
             .unwrap_or_default();
-        let memit_facts =
-            collect_memit_facts_with_recording(patched, path, &recording_ops)?;
+        let collected = collect_memit_facts_with_recording(patched, path, &recording_ops)?;
+        let memit_facts = collected.facts;
+        let memit_warnings = collected.warnings;
         // Only run MEMIT when model weights are present. Without weights
         // (browse-only vindexes) the compile falls back to the legacy
         // column-replace bake of gate/up/down overlays, matching the
@@ -127,7 +148,8 @@ impl Session {
             .ok()
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        let memit_results = if !memit_facts.is_empty() && config.has_model_weights && memit_enabled {
+        let memit_results = if !memit_facts.is_empty() && config.has_model_weights && memit_enabled
+        {
             let mut cb = larql_vindex::SilentLoadCallbacks;
             let weights = larql_vindex::load_model_weights(path, &mut cb)
                 .map_err(|e| LqlError::exec("load weights for MEMIT", e))?;
@@ -151,7 +173,7 @@ impl Session {
             let ridge = std::env::var("LARQL_MEMIT_RIDGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
-                .unwrap_or(0.1);
+                .unwrap_or(MEMIT_DEFAULT_RIDGE);
             let results = if use_target_delta {
                 larql_inference::forward::memit::run_memit_with_target_opt_multi(
                     &weights,
@@ -166,12 +188,12 @@ impl Session {
                     &weights,
                     &memit_facts,
                     ridge,
-                    5.0, // target_alpha
+                    MEMIT_TARGET_ALPHA,
                     &tokenizer,
                 )
             };
-            let results = results
-                .map_err(|e| LqlError::Execution(format!("MEMIT solve failed: {e}")))?;
+            let results =
+                results.map_err(|e| LqlError::Execution(format!("MEMIT solve failed: {e}")))?;
             Some(results)
         } else {
             None
@@ -184,18 +206,15 @@ impl Session {
         // layers, and we deliberately do NOT bake any inserted gate
         // vectors into gate_vectors.bin (see comment further down).
         let baked = patched.base().clone();
-        let layer_infos = baked.save_gate_vectors(&output_dir)
+        let layer_infos = baked
+            .save_gate_vectors_with_config(output_dir, config)
             .map_err(|e| LqlError::exec("failed to save gate vectors", e))?;
         // We hard-link down_meta.bin from source (in the unchanging-file
         // loop below) rather than calling save_down_meta, because the
         // cloned base is in mmap mode and its heap-side `down_meta` is
         // empty — saving it would produce a 152-byte file with zero
         // features and break WALK / DESCRIBE / SHOW.
-        let dm_count: usize = config
-            .layers
-            .iter()
-            .map(|l| l.num_features)
-            .sum();
+        let dm_count: usize = config.layers.iter().map(|l| l.num_features).sum();
 
         // ── Step 2: hard-link unchanging weight files from the source ──
         //
@@ -223,15 +242,15 @@ impl Session {
         // which is the exact behaviour the runtime patch overlay
         // produces.
         const UNCHANGING: &[&str] = &[
-            "attn_weights.bin",
-            "up_weights.bin",
-            "norms.bin",
-            "weight_manifest.json",
-            "embeddings.bin",
-            "tokenizer.json",
-            "up_features.bin",
-            "down_meta.bin",
-            "down_features.bin",
+            ATTN_WEIGHTS_BIN,
+            UP_WEIGHTS_BIN,
+            NORMS_BIN,
+            WEIGHT_MANIFEST_JSON,
+            EMBEDDINGS_BIN,
+            TOKENIZER_JSON,
+            UP_FEATURES_BIN,
+            DOWN_META_BIN,
+            DOWN_FEATURES_BIN,
         ];
         for name in UNCHANGING {
             let src = path.join(name);
@@ -247,7 +266,11 @@ impl Session {
         }
 
         // Label files (small, copy is fine).
-        for name in &["relation_clusters.json", "feature_clusters.jsonl", "feature_labels.json"] {
+        for name in &[
+            RELATION_CLUSTERS_JSON,
+            FEATURE_CLUSTERS_JSONL,
+            FEATURE_LABELS_JSON,
+        ] {
             let src = path.join(name);
             let dst = output_dir.join(name);
             if src.exists() {
@@ -290,8 +313,8 @@ impl Session {
         // by default because on Gemma it corrupts template-sharing
         // natives; it remains opt-in for v11 where it is validated.
         if down_overrides.is_empty() {
-            let src = path.join("down_weights.bin");
-            let dst = output_dir.join("down_weights.bin");
+            let src = path.join(DOWN_WEIGHTS_BIN);
+            let dst = output_dir.join(DOWN_WEIGHTS_BIN);
             if src.exists() {
                 let _ = std::fs::remove_file(&dst);
                 // Copy (not hard-link) when MEMIT will edit bytes.
@@ -304,7 +327,7 @@ impl Session {
                 }
             }
         } else {
-            patch_down_weights(path, &output_dir, config, down_overrides)?;
+            patch_down_weights(path, output_dir, config, down_overrides)?;
             overrides_applied = down_overrides.len();
         }
 
@@ -326,14 +349,14 @@ impl Session {
         // copy of the patched state. Validated by `refine_demo`:
         // patched session = 10/10; compiled = 8/10 pre-fix because
         // gate/up were never baked.
-        patch_gate_vectors(path, &output_dir, config, &gate_overrides)?;
-        patch_up_weights(path, &output_dir, config, up_overrides)?;
+        patch_gate_vectors(path, output_dir, config, &gate_overrides)?;
+        patch_up_weights(path, output_dir, config, up_overrides)?;
 
         // ── Step 4: write updated config ──
         let mut new_config = config.clone();
         new_config.layers = layer_infos;
-        new_config.checksums = larql_vindex::format::checksums::compute_checksums(&output_dir).ok();
-        larql_vindex::VectorIndex::save_config(&new_config, &output_dir)
+        new_config.checksums = larql_vindex::format::checksums::compute_checksums(output_dir).ok();
+        larql_vindex::VectorIndex::save_config(&new_config, output_dir)
             .map_err(|e| LqlError::exec("failed to save config", e))?;
 
         // ── Step 4.5: apply MEMIT ΔW_down to baked down_weights.bin ──
@@ -347,36 +370,50 @@ impl Session {
         // may have sneaked in via older patches.
         let mut memit_layers_touched = 0usize;
         if let Some(ref results) = memit_results {
-            apply_memit_deltas_to_down_weights(&output_dir, config, results)?;
+            apply_memit_deltas_to_down_weights(output_dir, config, results)?;
             memit_layers_touched = results.len();
         }
 
         // ── Step 5: serialize KNN store (Architecture B) ──
         let knn_count = patched.knn_store.len();
         if knn_count > 0 {
-            patched.knn_store.save(&output_dir.join("knn_store.bin"))
+            patched
+                .knn_store
+                .save(&output_dir.join(KNN_STORE_BIN))
                 .map_err(|e| LqlError::exec("failed to save knn_store", e))?;
         }
 
         let mut out = Vec::new();
-        out.push(format!("Compiled {} → {}", source_path.display(), output_dir.display()));
+        out.push(format!(
+            "Compiled {} → {}",
+            path.display(),
+            output_dir.display()
+        ));
         out.push(format!("Features: {}", dm_count));
+        out.extend(memit_warnings);
         if !collisions.is_empty() {
             let strategy = match on_conflict {
                 CompileConflict::LastWins => "LAST_WINS",
-                CompileConflict::HighestConfidence => "HIGHEST_CONFIDENCE (resolves like LAST_WINS for down vectors — see docs)",
+                CompileConflict::HighestConfidence => {
+                    "HIGHEST_CONFIDENCE (resolves like LAST_WINS for down vectors — see docs)"
+                }
                 CompileConflict::Fail => "FAIL",
             };
             out.push(format!(
                 "Conflicts: {} slot(s) touched by multiple patches — strategy: {}",
-                collisions.len(), strategy,
+                collisions.len(),
+                strategy,
             ));
         }
         if overrides_applied > 0 {
             out.push(format!(
                 "Down overrides baked: {} ({} layers touched)",
                 overrides_applied,
-                down_overrides.keys().map(|(l, _)| *l).collect::<std::collections::HashSet<_>>().len(),
+                down_overrides
+                    .keys()
+                    .map(|(l, _)| *l)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
             ));
         }
         if let Some(ref results) = memit_results {
@@ -388,7 +425,7 @@ impl Session {
         if knn_count > 0 {
             out.push(format!("KNN store: {} entries", knn_count));
         }
-        out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
+        out.push(format!("Size: {}", format_bytes(dir_size(output_dir))));
         Ok(out)
     }
 }
@@ -421,6 +458,8 @@ mod tests {
             target: "t".into(),
             confidence: Some(0.9),
             gate_vector_b64: None,
+            up_vector_b64: None,
+            down_vector_b64: None,
             down_meta: None,
         }
     }
@@ -446,9 +485,7 @@ mod tests {
 
     #[test]
     fn collisions_ignore_repeats_within_one_patch() {
-        let patches = vec![
-            make_patch(vec![insert_op(1, 10), insert_op(1, 10)]),
-        ];
+        let patches = vec![make_patch(vec![insert_op(1, 10), insert_op(1, 10)])];
         assert!(collect_compile_collisions(&patches).is_empty());
     }
 }

@@ -205,10 +205,10 @@ The fused attention and backend changes are exercised by every inference codepat
 | Routed inference | `predict_with_router()` | fused GQA | per-layer |
 | Strategy inference | `predict_with_strategy()` | fused GQA | per-layer mode |
 | Residual trace | `trace_forward()` | fused GQA | WeightFfn |
-| Decomposed trace | `trace_residuals()` | fused GQA (capture) | WeightFfn |
+| Decomposed trace | `trace_residuals()` | fused GQA (capture) | caller-provided FfnBackend |
 | CachedFfn calibration | `run_attention_public()` | fused GQA | (calibration only) |
 | Server /v1/infer | `predict_with_ffn()` | fused GQA | WalkFfn or dense |
-| Python trace | `trace_residuals()` | fused GQA (capture) | WeightFfn |
+| Python `WalkModel.trace()` | `trace_residuals()` | fused GQA (capture) | WalkFfn |
 | CLI commands | `predict*()` variants | fused GQA | depends on command |
 
 Sparse FFN, WalkFfn, streaming extraction, and vindex operations do not call attention directly — they only implement FfnBackend. Attention always runs through the same `gqa_attention_with_weights()` path.

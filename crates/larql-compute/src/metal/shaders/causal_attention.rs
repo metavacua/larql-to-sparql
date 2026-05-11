@@ -40,3 +40,8 @@ kernel void causal_attention(
     out[q * head_dim + d] = weighted_v / sum_exp;
 }
 "#;
+
+pub struct Kernel;
+impl crate::metal::kernel::ShaderKernel for Kernel {
+    const KERNEL_NAME: &'static str = "causal_attention";
+}

@@ -1,0 +1,143 @@
+# larql-kv cross-platform CI
+#
+# Pluggable KV-cache engines (markov-rs, unlimited-context, turbo-quant,
+# apollo). The crate is model-architecture agnostic: tests use synthetic
+# `larql_inference::test_utils` fixtures, no real model weights, no
+# platform-specific GPU backends. Same surface runs on Linux, Windows,
+# and macOS.
+
+name: larql-kv
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/src/test_utils.rs'
+      - 'crates/larql-inference/src/forward/**'
+      - 'crates/larql-inference/src/attention/**'
+      - 'crates/larql-inference/src/ffn/**'
+      - 'crates/larql-inference/src/residual.rs'
+      - 'crates/larql-inference/src/vindex/**'
+      - 'crates/larql-inference/src/model.rs'
+      - 'crates/larql-inference/src/layer_graph/pipeline_layer.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-kv.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/src/test_utils.rs'
+      - 'crates/larql-inference/src/forward/**'
+      - 'crates/larql-inference/src/attention/**'
+      - 'crates/larql-inference/src/ffn/**'
+      - 'crates/larql-inference/src/residual.rs'
+      - 'crates/larql-inference/src/vindex/**'
+      - 'crates/larql-inference/src/model.rs'
+      - 'crates/larql-inference/src/layer_graph/pipeline_layer.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-kv.yml'
+  workflow_dispatch: {}
+
+env:
+  LARQL_KV_COVERAGE_MIN: 85
+
+jobs:
+  test:
+    name: test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install OpenBLAS (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-kv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-kv-
+
+      - name: Format check
+        run: cargo fmt -p larql-kv -- --check
+
+      - name: Check all targets
+        run: cargo check -p larql-kv --all-targets
+
+      - name: Check examples
+        run: cargo check -p larql-kv --examples
+
+      - name: Clippy
+        # `--no-deps` keeps lints scoped to larql-kv itself; otherwise
+        # any pre-existing clippy debt in larql-inference (a transitive
+        # dep) would surface here even though it's not this crate's
+        # concern. Other crates' workflows don't need this because they
+        # don't depend on larql-inference.
+        run: cargo clippy -p larql-kv --all-targets --no-deps -- -D warnings
+
+      - name: Tests
+        run: cargo test -p larql-kv
+
+      - name: Benchmark compile/tests
+        run: cargo test -p larql-kv --benches
+
+  coverage:
+    name: coverage - ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-kv --summary-only --fail-under-lines "$LARQL_KV_COVERAGE_MIN"
+
+      - name: Coverage policy
+        run: |
+          mkdir -p coverage/larql-kv
+          cargo llvm-cov report --package larql-kv --json --summary-only --output-path coverage/larql-kv/summary.json
+          python3 scripts/check_coverage_policy.py coverage/larql-kv/summary.json crates/larql-kv/coverage-policy.json

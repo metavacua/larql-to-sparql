@@ -41,3 +41,13 @@ kernel void geglu_gelu_tanh(
     out[tid] = (0.5f * g * (1.0f + t)) * up[tid];
 }
 "#;
+
+pub struct SiluKernel;
+impl crate::metal::kernel::ShaderKernel for SiluKernel {
+    const KERNEL_NAME: &'static str = "geglu_silu";
+}
+
+pub struct GeluTanhKernel;
+impl crate::metal::kernel::ShaderKernel for GeluTanhKernel {
+    const KERNEL_NAME: &'static str = "geglu_gelu_tanh";
+}

@@ -12,6 +12,13 @@
 //!   6. Rescale by stored norm
 //!
 //! One threadgroup per vector. Threadgroup size = d.
+//!
+//! ## Retention rationale (ADR-017)
+//!
+//! **Status**: experimental — paired with `turboquant_encode`. Same
+//! retention story: built into `all_shaders()` for diag, not wired
+//! into production. See `turboquant_encode.rs` for the full rationale
+//! and removal trigger; the two ship together.
 
 pub const SHADER: &str = r#"
 // TurboQuant 4-bit decode: unpack → centroids → sign flip → WHT → sign flip → rescale.

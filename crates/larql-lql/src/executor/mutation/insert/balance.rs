@@ -12,6 +12,11 @@
 //!     until priors recover, capped at CROSS_ITERS.
 
 use crate::error::LqlError;
+use crate::executor::helpers::{target_prefix, TARGET_PREFIX_CHARS};
+use crate::executor::tuning::{
+    canonical_prompt, BALANCE_ITERS, BALANCE_PROBE_TOP_K, CROSS_ITERS, DOWN_SCALE,
+    MAX_PRIORS_CHECKED, MAX_STALE, PRIOR_FLOOR, PROB_CEILING, PROB_FLOOR, UP_SCALE,
+};
 use crate::executor::Session;
 
 use super::compose::InstalledSlot;
@@ -34,28 +39,10 @@ impl Session {
             return Ok(());
         }
 
-        const BALANCE_ITERS: usize = 16;
-        // Target probability band: installed fact should be top-1
-        // with comfortable margin, but not so dominant that it
-        // hijacks template-matched prompts. Python α_eff range
-        // 0.009–0.12 on Gemma 4B produces 60-85%; we accept
-        // anything in [PROB_FLOOR, PROB_CEILING] as converged.
-        const PROB_CEILING: f64 = 0.95;
-        // Floor: below this we amplify. 0.30 is the lowest
-        // "unambiguous top-1" band — targets in 30-95% on the
-        // canonical prompt are fine; below 30% (including the
-        // "not in top-5 at all" case) needs more weight.
-        const PROB_FLOOR: f64 = 0.30;
-        // Widen the top-k probe so we can measure the target even
-        // before it's a strong prediction — amplification decisions
-        // need prob information, not just "not in top-5".
-        const PROBE_TOP_K: usize = 200;
-        const DOWN_SCALE: f32 = 0.7; // shrink when prob > ceiling
-        const UP_SCALE: f32 = 1.6; // grow when prob < floor
-                                   // (≈ 1/DOWN_SCALE + margin so
-                                   //  amplify converges faster than
-                                   //  it over-shoots into ceiling)
-        const MAX_STALE: usize = 2;
+        // All tuning constants — including the [PROB_FLOOR, PROB_CEILING]
+        // band and the per-iter scales — live in `executor::tuning` so
+        // every magic number has a single home with its measurement-link
+        // comment.
 
         let (path, _config, _patched) = self.require_vindex()?;
         let mut cb = larql_vindex::SilentLoadCallbacks;
@@ -64,10 +51,9 @@ impl Session {
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("balance: load tokenizer", e))?;
 
-        let rel_words = relation.replace(['-', '_'], " ");
-        let canonical_prompt = format!("The {rel_words} of {entity} is");
+        let prompt = canonical_prompt(relation, entity);
         let enc = tokenizer
-            .encode(canonical_prompt.as_str(), true)
+            .encode(prompt.as_str(), true)
             .map_err(|e| LqlError::exec("balance: tokenize", e))?;
         let prompt_ids: Vec<u32> = enc.get_ids().to_vec();
 
@@ -90,15 +76,15 @@ impl Session {
                 &weights,
                 &tokenizer,
                 &prompt_ids,
-                PROBE_TOP_K,
+                BALANCE_PROBE_TOP_K,
                 &walk_ffn,
             );
 
-            let target_prefix = &target[..target.len().min(3)];
+            let prefix = target_prefix(target, TARGET_PREFIX_CHARS);
             let target_prob: f64 = result
                 .predictions
                 .iter()
-                .find(|(tok, _)| tok.contains(target) || tok.starts_with(target_prefix))
+                .find(|(tok, _)| tok.contains(target) || tok.starts_with(prefix))
                 .map(|(_, prob)| *prob)
                 .unwrap_or(0.0);
 
@@ -184,16 +170,10 @@ impl Session {
         // shrinking would drop our own target below the floor
         // (fixed-point: both constraints can't be satisfied;
         // accept the state with best joint coverage).
-        const CROSS_ITERS: usize = 8;
-        const PRIOR_FLOOR: f64 = 0.20;
-        // Cost control for N>>10: only check the top-K priors
-        // most likely to be affected (those whose canonical
-        // prompts share template structure). We approximate that
-        // with the K most recent installs — strong template
-        // siblings tend to cluster by install order in typical
-        // usage. For rigorous correctness at large N, this could
-        // be upgraded to a gate-cosine pre-filter.
-        const MAX_PRIORS_CHECKED: usize = 16;
+        //
+        // CROSS_ITERS, PRIOR_FLOOR, MAX_PRIORS_CHECKED live in
+        // `executor::tuning` — see the regression-pass section of
+        // that module for the empirical justification.
 
         if installed.is_empty() || self.installed_edges.is_empty() {
             return Ok(());
@@ -221,17 +201,16 @@ impl Session {
                     .map_err(|e| LqlError::exec("cross-balance: tokenize", e))?;
                 let fact_ids: Vec<u32> = enc.get_ids().to_vec();
                 let (_, _, patched) = self.require_vindex()?;
-                let walk = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-                    &weights, patched,
-                );
+                let walk =
+                    larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched);
                 let r = larql_inference::predict_with_ffn(
                     &weights,
                     &tokenizer,
                     &fact_ids,
-                    200,
+                    BALANCE_PROBE_TOP_K,
                     &walk,
                 );
-                let prefix = &fact.target[..fact.target.len().min(3)];
+                let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
                 let p: f64 = r
                     .predictions
                     .iter()

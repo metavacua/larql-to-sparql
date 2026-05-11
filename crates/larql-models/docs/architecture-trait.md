@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ModelArchitecture` is the core abstraction in `larql-models`. It has 82 methods that describe *what a model is* — tensor key patterns, norm behavior, activation functions, scaling — without any compute dependencies.
+`ModelArchitecture` is the core abstraction in `larql-models`. It has 83 methods that describe *what a model is* — tensor key patterns, norm behavior, activation functions, scaling, and config invariants — without any compute dependencies.
 
 Every model family (Gemma, Llama, DeepSeek, ...) implements this trait. The rest of LARQL (inference, compute, vindex) only interacts with models through this trait.
 
@@ -52,6 +52,10 @@ fn head_dim_for_layer(&self, layer: usize) -> usize {
 
 Tensor keys are returned as `String`, not an enum. This keeps the trait open to new tensor patterns without modifying central types. Component names (`ffn_down`, `attn_ov`, ...) are `&str` constants for the same reason.
 
+### 5. Permissive detection, explicit validation
+
+`detect_from_json` constructs an architecture even for incomplete or inconsistent configs so callers can inspect what was parsed. Use `detect_from_json_validated`, `detect_architecture_validated`, or validated loading entry points before inference or extraction to catch bad dimensions and cross-field mismatches early. Validation internals live in `src/validation.rs`, with field-name constants used for diagnostics and tests.
+
 ## Method Categories
 
 ### Tensor Keys (~20 methods)
@@ -62,7 +66,9 @@ Key pattern methods:
 - `layer_prefix(layer)` → `"layers.5."` (base for all layer keys)
 - `key_prefixes_to_strip()` → `&["model."]` (stripped during loading)
 - `embed_key()`, `final_norm_key()` → embedding and final norm
+- `position_embed_key()` → learned absolute positional embedding (`Some("wpe.weight")` for GPT-2; `None` for rotary models). When present the loader populates `ModelWeights::position_embed`.
 - `attn_q_key(layer)`, `attn_k_key(layer)`, ... → attention projections
+- `fused_qkv_key(layer)`, `fused_qkv_bias_key(layer)` → fused Conv1D-style QKV (`Some(...)` for GPT-2; the loader splits this into the per-projection q/k/v keys above so downstream code stays family-agnostic)
 - `ffn_gate_key(layer)`, `ffn_up_key(layer)`, `ffn_down_key(layer)` → FFN
 - `input_layernorm_key(layer)`, `post_attention_layernorm_key(layer)` → norms
 
@@ -79,6 +85,17 @@ Control how attention is computed at each layer:
 - `v_shares_k(layer)` — K=V sharing (Gemma 4)
 - `kv_shared_source_layer(layer)` — cross-layer KV reuse
 
+### Config Validation
+
+`validate()` returns `Result<(), Vec<ConfigValidationError>>` and checks invariants that otherwise fail later in inference or extraction:
+- Core dimensions are positive
+- `head_dim` divides `hidden_size`
+- KV heads do not exceed Q heads and Q heads divide evenly by KV heads
+- RoPE bases, scaling factors, partial rotary fractions, and softcapping/scaling values are finite and valid
+- Explicit `layer_types` length matches `num_layers`, and KV sharing leaves at least one source layer
+- MoE configs provide both expert count and experts-per-token, and top-k does not exceed total experts
+- Hybrid MoE configs include `moe_intermediate_size`
+
 ### Normalization (~8 methods)
 
 - `norm_type()` — RMSNorm vs LayerNorm
@@ -86,6 +103,15 @@ Control how attention is computed at each layer:
 - `qk_norm_weight_offset()` — same for QK norms (Gemma 2/3: 1.0, Gemma 4: 0.0)
 - `has_post_norms()` — 4 norms per layer (Gemma 2/3/4) vs 2 (Llama)
 - `attn_q_norm_key(layer)`, `attn_k_norm_key(layer)` — QK norm weights (None if unused)
+
+### Biases
+
+GPT-2 / StarCoder2 carry a bias on every projection; RMSNorm-family models
+generally don't. Override these to surface the bias keys; loaders use them to
+populate `ModelWeights::vectors` and inference reads them post-matmul.
+
+- `attn_q_bias_key(layer)`, `attn_k_bias_key(layer)`, `attn_v_bias_key(layer)`, `attn_o_bias_key(layer)`
+- `ffn_up_bias_key(layer)`, `ffn_down_bias_key(layer)`
 
 ### MoE (~12 methods)
 

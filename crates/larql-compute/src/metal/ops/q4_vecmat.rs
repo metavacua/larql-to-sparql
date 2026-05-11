@@ -5,8 +5,8 @@
 //! One thread per output element. GPU-hostile pattern but
 //! parallelised across K output elements.
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
 use crate::metal::buffers::BufferCache;
 
@@ -37,7 +37,11 @@ pub fn dispatch(
     enc.set_bytes(4, 4, &k_val as *const u32 as *const c_void);
 
     let threads = MTLSize::new(hidden as u64, 1, 1);
-    let tg = MTLSize::new(256.min(hidden as u64), 1, 1);
+    let tg = MTLSize::new(
+        crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(hidden as u64),
+        1,
+        1,
+    );
     enc.dispatch_threads(threads, tg);
     enc.end_encoding();
     cmd.commit();

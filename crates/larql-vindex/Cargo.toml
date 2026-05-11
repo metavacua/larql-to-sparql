@@ -9,6 +9,7 @@ keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
 
 [dependencies]
+larql-core = { path = "../larql-core", default-features = false }
 larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
 serde = { workspace = true }
@@ -21,6 +22,9 @@ ndarray = "0.16"
 # Parallelism for the direct-Q4K matmul kernel (feature walk).
 rayon = "1.10"
 
+# RNG for randomized SVD (per-expert MoE summary tier in extract/moe_svd.rs).
+rand = "0.8"
+
 # Tokenizer (for embeddings loading + token resolution)
 tokenizers = "0.21"
 
@@ -31,16 +35,22 @@ sha2 = "0.10"
 base64 = "0.22"
 
 # Model weights (for safetensors loading during extract)
-safetensors = "0.5"
+safetensors = "0.7"
 memmap2 = "0.9"
+
+# Refcounted, slice-cheap byte handle returned by the `VindexStorage`
+# trait. `Bytes::from_owner(Arc<Mmap>)` is zero-copy from the existing
+# mmap path and Redis / S3 backends can return owned bytes without
+# lifetime contortions. Already transitive via reqwest / hf-hub.
+bytes = "1"
+
+# HuggingFace Hub integration
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 # OS-level mmap hints (madvise)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-# HuggingFace Hub integration
-hf-hub = "0.5"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 [features]
 default = []
@@ -48,6 +58,13 @@ metal = ["larql-compute/metal"]
 
 [dev-dependencies]
 criterion = "0.5"
+tempfile = "3"
+# HTTP mocking for the publish trio (lfs / remote / upload).
+# `serial_test` because the tests set the LARQL_HF_TEST_BASE env var to
+# point at a per-test mockito server; env vars are process-global, so
+# parallel runs would race.
+mockito = "1.7"
+serial_test = "3.2"
 
 [[bench]]
 name = "vindex_ops"
@@ -67,4 +84,28 @@ harness = false
 
 [[bench]]
 name = "q4k_vs_f32"
+harness = false
+
+[[bench]]
+name = "hnsw_decode"
+harness = false
+
+[[bench]]
+name = "q4k_cache"
+harness = false
+
+[[bench]]
+name = "cpu_vs_gpu"
+harness = false
+
+[[bench]]
+name = "walker_throughput"
+harness = false
+
+# Step 3 of the VindexStorage migration — perf gate before any
+# substore migration in step 4. Compares direct vs trait-static vs
+# trait-dyn dispatch on `interleaved_q4k_layer_data`. See the bench
+# file for the acceptance bar.
+[[bench]]
+name = "vindex_storage_dispatch"
 harness = false

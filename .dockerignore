@@ -1,0 +1,9 @@
+target/
+output/
+.git/
+.claude/
+knowledge/
+experiments/
+docs/
+*.vindex
+/tmp/

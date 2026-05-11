@@ -7,7 +7,10 @@ use std::sync::Arc;
 use crate::embed_store::EmbedStoreF16;
 
 use larql_models::ModelWeights;
-use larql_vindex::{PatchedVindex, VindexConfig, ndarray::Array2, tokenizers};
+use larql_vindex::{
+    format::filenames::FEATURE_LABELS_JSON, ndarray::Array2, tokenizers, PatchedVindex,
+    VindexConfig,
+};
 use tokio::sync::RwLock;
 
 use crate::cache::DescribeCache;
@@ -51,16 +54,65 @@ pub struct LoadedModel {
     /// `--layers START-END` sharding when available.
     pub release_mmap_after_request: bool,
     /// Model weights, lazy-loaded on first INFER request.
-    pub weights: std::sync::OnceLock<ModelWeights>,
+    ///
+    /// Wrapped in `RwLock` so the OpenAI generation path (which calls
+    /// `larql_inference::layer_graph::generate` and friends, all of
+    /// which take `&mut ModelWeights` to mutate the per-layer Q4_K
+    /// dequant cache) can take a write guard while every other read
+    /// path concurrently holds read guards. Read access is the common
+    /// case; write access is one-at-a-time per model.
+    ///
+    /// `OnceLock<RwLock<...>>` rather than `RwLock<Option<...>>` so
+    /// the lazy-init logic stays lock-free until first use.
+    pub weights: std::sync::OnceLock<std::sync::RwLock<ModelWeights>>,
     /// Probe-confirmed feature labels: (layer, feature) → relation name.
     /// Loaded from feature_labels.json if present.
     pub probe_labels: HashMap<(usize, usize), String>,
     /// L2 FFN output cache — shared across all clients, persists for server lifetime.
     pub ffn_l2_cache: FfnL2Cache,
+    /// Per-layer latency tracker — records compute time per walk-ffn layer.
+    /// Snapshots are sent to the router in HeartbeatMsg.layer_stats (GT3).
+    pub layer_latency_tracker: std::sync::Arc<crate::metrics::LayerLatencyTracker>,
+    /// Active walk-ffn request counter — incremented on request entry,
+    /// decremented on return. Used by GT6 drain to know when it is safe
+    /// to send DroppingMsg(reason="reassigned").
+    pub requests_in_flight: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Expert ID range this server owns (from `--experts START-END`).
     /// `None` = serve all experts. Used by the expert endpoint to reject
     /// requests for experts this shard doesn't hold.
+    /// Layer-uniform: same range applies to every layer.
     pub expert_filter: Option<(usize, usize)>,
+    /// Fine-grained per-(layer, expert) ownership (from `--units PATH`).
+    /// When `Some`, takes precedence over `expert_filter` — `run_expert`
+    /// rejects any (layer, expert_id) not in this set.  Designed for the
+    /// architecture where each shard hosts a tight set of (layer, expert)
+    /// units rather than a contiguous expert range.
+    pub unit_filter: Option<Arc<std::collections::HashSet<(usize, usize)>>>,
+    /// Remote MoE expert backend wired via `--moe-shards` or `--moe-units-manifest`.
+    /// When `Some`, the walk-ffn handler uses this for MoE layers instead of local dispatch.
+    pub moe_remote: Option<Arc<larql_inference::ffn::RemoteMoeBackend>>,
+
+    /// Lazy-initialised Metal backend for GPU expert dispatch.
+    /// `Some(Some(backend))` = initialised, available; `Some(None)` =
+    /// initialised, Metal not available; `None` = not yet initialised.
+    /// Only present under `--features metal-experts`.
+    #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+    pub metal_backend: std::sync::OnceLock<Option<larql_compute::MetalBackend>>,
+    /// Cached MoE scratch per `(top_k, hidden, inter)` shape — one entry
+    /// per architecture in practice.  `MoeScratch` contains mutable Metal
+    /// staging buffers, so Metal expert dispatch holds this mutex while
+    /// using a scratch entry.
+    #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+    pub moe_scratches: std::sync::Mutex<
+        std::collections::HashMap<(usize, usize, usize), Arc<larql_compute::MoeScratch>>,
+    >,
+    /// Per-layer pre-loaded Q4K weight buffers for Metal dense FFN dispatch.
+    /// `[gate_buf, up_buf, down_buf]` for each layer. Lazily populated on first
+    /// Metal FFN request from the interleaved Q4K mmap (zero-copy via
+    /// `new_buffer_with_bytes_no_copy` for page-aligned mmap data).
+    /// Only populated when the server has interleaved Q4K data loaded.
+    #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+    pub metal_ffn_layer_bufs: std::sync::OnceLock<Vec<[larql_compute::MetalBuffer; 3]>>,
 }
 
 impl LoadedModel {
@@ -70,23 +122,49 @@ impl LoadedModel {
     /// + embed entries from the weight manifest before mmap/decode,
     ///   so peak RSS during load reflects only what the walk-ffn
     ///   endpoint actually needs.
-    pub fn get_or_load_weights(&self) -> Result<&ModelWeights, String> {
-        if let Some(w) = self.weights.get() {
-            return Ok(w);
+    pub fn get_or_load_weights(
+        &self,
+    ) -> Result<std::sync::RwLockReadGuard<'_, ModelWeights>, String> {
+        let cell = self.ensure_weights_cell()?;
+        cell.read()
+            .map_err(|e| format!("weights RwLock poisoned: {e}"))
+    }
+
+    /// Acquire an exclusive write guard on the loaded weights.
+    ///
+    /// Used by the OpenAI generation path (`/v1/completions`,
+    /// `/v1/chat/completions`) — `larql_inference::layer_graph::generate`
+    /// and its variants take `&mut ModelWeights` because the per-layer
+    /// Q4_K dequant cache inside `weights.tensors` is mutated as layers
+    /// are decoded. Concurrent reads block while a generation is in
+    /// flight, but generation requests are typically rare and bounded;
+    /// the read fast path (walk-ffn / browse / embed) sees no
+    /// contention in steady state.
+    pub fn lock_weights_for_gen(
+        &self,
+    ) -> Result<std::sync::RwLockWriteGuard<'_, ModelWeights>, String> {
+        let cell = self.ensure_weights_cell()?;
+        cell.write()
+            .map_err(|e| format!("weights RwLock poisoned: {e}"))
+    }
+
+    fn ensure_weights_cell(&self) -> Result<&std::sync::RwLock<ModelWeights>, String> {
+        if let Some(cell) = self.weights.get() {
+            return Ok(cell);
         }
         let mut cb = larql_vindex::SilentLoadCallbacks;
 
         // Q4_K vindexes take a dedicated loader that produces a ModelWeights
         // with empty attn/FFN tensors (those live in the Q4K mmap files).
         // The walk-ffn endpoint dequantises FFN per layer on demand.
-        let weights = if self.config.quant == larql_vindex::QuantFormat::Q4k {
+        let weights = if self.config.quant == larql_vindex::QuantFormat::Q4K {
             if self.ffn_only {
                 tracing::info!(
                     "ffn-only (q4k): loading norms + lm_head + embed only; \
                      FFN dequantises per layer from interleaved_q4k.bin on request"
                 );
             }
-            larql_vindex::load_model_weights_q4k(&self.path, &mut cb)
+            larql_vindex::load_model_weights_q4k_shard(&self.path, &mut cb, self.expert_filter)
                 .map_err(|e| format!("failed to load q4k model weights: {e}"))?
         } else {
             let opts = if self.embed_only {
@@ -104,12 +182,6 @@ impl LoadedModel {
                     skip_ffn: true,
                 }
             } else {
-                // --ffn-only server: skip the f32 hidden-major FFN tensors
-                // (up_weights.bin / down_weights.bin). The walk-ffn endpoint uses
-                // `WalkFfn::walk_ffn_full_mmap` which reads from the feature-major
-                // mmap (up_features.bin / down_features.bin via VectorIndex), not
-                // from `weights.tensors`. Decoding up_weights.bin into f32 heap
-                // costs ~3.4 GB on 4B / ~14 GB on 31B for zero benefit.
                 if self.ffn_only {
                     tracing::info!(
                         "ffn-only: skipping attn + ffn + lm_head + embed at load \
@@ -126,7 +198,7 @@ impl LoadedModel {
             larql_vindex::load_model_weights_with_opts(&self.path, &mut cb, opts)
                 .map_err(|e| format!("failed to load model weights: {e}"))?
         };
-        let _ = self.weights.set(weights);
+        let _ = self.weights.set(std::sync::RwLock::new(weights));
         Ok(self.weights.get().unwrap())
     }
 }
@@ -166,12 +238,35 @@ impl AppState {
         self.requests_served
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
+
+    /// Get a model by ID, or return a `NotFound` error.
+    ///
+    /// Consolidates the 23+ identical `state.model(...).ok_or_else(|| ...)` call
+    /// sites scattered across the route handlers.
+    pub fn model_or_err(
+        &self,
+        id: Option<&str>,
+    ) -> Result<&Arc<LoadedModel>, crate::error::ServerError> {
+        self.model(id).ok_or_else(|| {
+            let msg = match id {
+                Some(mid) => format!("model '{}' not found", mid),
+                None => "no model loaded".into(),
+            };
+            crate::error::ServerError::NotFound(msg)
+        })
+    }
+}
+
+/// Compute elapsed milliseconds from `start`, rounded to one decimal place.
+pub fn elapsed_ms(start: std::time::Instant) -> f64 {
+    let ms = start.elapsed().as_secs_f64() * 1000.0;
+    (ms * 10.0).round() / 10.0
 }
 
 /// Load probe-confirmed feature labels from feature_labels.json.
 /// Format: {"L{layer}_F{feature}": "relation_name", ...}
 pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize), String> {
-    let path = vindex_path.join("feature_labels.json");
+    let path = vindex_path.join(FEATURE_LABELS_JSON);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => return HashMap::new(),
@@ -191,8 +286,12 @@ pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize
             let parts: Vec<&str> = key.split('_').collect();
             if parts.len() == 2 {
                 if let (Some(layer), Some(feat)) = (
-                    parts[0].strip_prefix('L').and_then(|s| s.parse::<usize>().ok()),
-                    parts[1].strip_prefix('F').and_then(|s| s.parse::<usize>().ok()),
+                    parts[0]
+                        .strip_prefix('L')
+                        .and_then(|s| s.parse::<usize>().ok()),
+                    parts[1]
+                        .strip_prefix('F')
+                        .and_then(|s| s.parse::<usize>().ok()),
                 ) {
                     labels.insert((layer, feat), rel.to_string());
                 }
@@ -213,7 +312,7 @@ mod loaded_model_tests {
     //! Unit tests for `LoadedModel` field/flag plumbing.
     //!
     //! The q4k / f32 branch in `get_or_load_weights` keys off
-    //! `config.quant == QuantFormat::Q4k`, and `run_full_output` in
+    //! `config.quant == QuantFormat::Q4K`, and `run_full_output` in
     //! `routes/walk_ffn.rs` keys off the same check to decide between
     //! `WalkFfn::new_unlimited` and `q4k_ffn_forward_layer`. Running
     //! either branch end-to-end needs a real on-disk vindex (GBs of
@@ -221,10 +320,10 @@ mod loaded_model_tests {
     //! expression here; the end-to-end walk is validated by the
     //! `larql bench <model>` example script.
     use super::*;
+    use larql_vindex::ndarray::Array2;
     use larql_vindex::{
         ExtractLevel, LayerBands, QuantFormat, VectorIndex, VindexConfig, VindexLayerInfo,
     };
-    use larql_vindex::ndarray::Array2;
 
     fn tiny_config(quant: QuantFormat) -> VindexConfig {
         VindexConfig {
@@ -247,12 +346,18 @@ mod loaded_model_tests {
                 output: (0, 0),
             }),
             layers: vec![VindexLayerInfo {
-                layer: 0, num_features: 2, offset: 0, length: 32,
-                num_experts: None, num_features_per_expert: None,
+                layer: 0,
+                num_features: 2,
+                offset: 0,
+                length: 32,
+                num_experts: None,
+                num_features_per_expert: None,
             }],
             down_top_k: 1,
             has_model_weights: false,
             model_config: None,
+            fp4: None,
+            ffn_layout: None,
         }
     }
 
@@ -262,7 +367,8 @@ mod loaded_model_tests {
         let index = VectorIndex::new(vec![Some(gate)], vec![None], 1, hidden);
         let patched = larql_vindex::PatchedVindex::new(index);
 
-        let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+        let tok_json =
+            r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
         let tokenizer = larql_vindex::tokenizers::Tokenizer::from_bytes(tok_json).unwrap();
 
         LoadedModel {
@@ -281,7 +387,17 @@ mod loaded_model_tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: HashMap::new(),
             ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(1),
+            layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+            requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             expert_filter: None,
+            unit_filter: None,
+            moe_remote: None,
+            #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+            metal_backend: std::sync::OnceLock::new(),
+            #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+            moe_scratches: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+            metal_ffn_layer_bufs: std::sync::OnceLock::new(),
         }
     }
 
@@ -305,15 +421,15 @@ mod loaded_model_tests {
     fn quant_format_selects_q4k_branch() {
         // Exact selector used in both `get_or_load_weights` and
         // `run_full_output` to pick the q4k path.
-        let q4k_model = tiny_loaded_model(QuantFormat::Q4k, false);
+        let q4k_model = tiny_loaded_model(QuantFormat::Q4K, false);
         let f32_model = tiny_loaded_model(QuantFormat::None, false);
 
         assert!(
-            q4k_model.config.quant == QuantFormat::Q4k,
-            "Q4k config → q4k branch (load_model_weights_q4k + q4k_ffn_forward_layer)"
+            q4k_model.config.quant == QuantFormat::Q4K,
+            "Q4K config → q4k branch (load_model_weights_q4k + q4k_ffn_forward_layer)"
         );
         assert!(
-            f32_model.config.quant != QuantFormat::Q4k,
+            f32_model.config.quant != QuantFormat::Q4K,
             "None config → f32 branch (load_model_weights_with_opts + WalkFfn::new_unlimited)"
         );
     }

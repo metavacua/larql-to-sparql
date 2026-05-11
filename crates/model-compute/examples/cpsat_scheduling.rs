@@ -1,4 +1,4 @@
-//! Rust-native port of `experiments/07_wasm_compute/wasm_solver_demo_v11.py`
+//! Rust-native port of `~/chris-source/chris-experiments/foundations/07_wasm_compute/wasm_solver_demo_v11.py`
 //! scheduling benchmark, using `model-compute::wasm` as the host runtime.
 //!
 //! Problem: assign N tasks to distinct time slots in [0, max_time-1],
@@ -6,7 +6,7 @@
 //! makespan = 4 (tasks go to slots 0..4).
 //!
 //! The WASM guest is the CP-SAT solver from
-//! `experiments/07_wasm_compute/solver/` — the same 22 KB module that
+//! `~/chris-source/chris-experiments/foundations/07_wasm_compute/solver/` — the same 22 KB module that
 //! demonstrated "constraint solving inside a transformer forward pass".
 //! This example shows the host-side path in Rust: load module, encode
 //! problem bytes, call solve, decode result.
@@ -15,9 +15,9 @@
 //!   cargo run --example cpsat_scheduling -p model-compute --features wasm
 //!
 //! The example auto-discovers the prebuilt .wasm at
-//! `experiments/07_wasm_compute/solver/target/wasm32-unknown-unknown/release/larql_wasm_solver.wasm`.
+//! `~/chris-source/chris-experiments/foundations/07_wasm_compute/solver/target/wasm32-unknown-unknown/release/larql_wasm_solver.wasm`.
 //! To rebuild the module:
-//!   (cd experiments/07_wasm_compute/solver && cargo build --release --target wasm32-unknown-unknown)
+//!   (cd ~/chris-source/chris-experiments/foundations/07_wasm_compute/solver && cargo build --release --target wasm32-unknown-unknown)
 
 #[cfg(not(feature = "wasm"))]
 fn main() {
@@ -38,15 +38,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = SolverRuntime::new()?;
     let compile_start = Instant::now();
     let module = runtime.compile(&wasm_bytes)?;
-    println!("  compile time: {:.2} ms", compile_start.elapsed().as_secs_f64() * 1e3);
+    println!(
+        "  compile time: {:.2} ms",
+        compile_start.elapsed().as_secs_f64() * 1e3
+    );
 
     // ── Problem: 5 tasks, each needs a distinct time slot in [0, 9] ──
     let n_tasks = 5;
     let max_time = 10;
     let problem = encode_scheduling_problem(n_tasks, max_time);
-    println!("\nProblem: schedule {} tasks into distinct slots in [0, {}]", n_tasks, max_time - 1);
+    println!(
+        "\nProblem: schedule {} tasks into distinct slots in [0, {}]",
+        n_tasks,
+        max_time - 1
+    );
     println!("  payload size: {} bytes", problem.len());
-    println!("  expected: all-different assignment, optimal makespan = {}", n_tasks - 1);
+    println!(
+        "  expected: all-different assignment, optimal makespan = {}",
+        n_tasks - 1
+    );
 
     // ── Solve ──
     let mut session = runtime.session(&module)?;
@@ -77,7 +87,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     print!("  assignment: [");
     for (i, slot) in assignment.iter().enumerate() {
-        if i > 0 { print!(", "); }
+        if i > 0 {
+            print!(", ");
+        }
         print!("task{}→slot{}", i, slot);
     }
     println!("]");
@@ -92,8 +104,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all_different = distinct.len() == assignment.len();
     let optimal = makespan == (n_tasks as i32 - 1);
     println!("\nVerification:");
-    println!("  all-different:   {}", if all_different { "PASS" } else { "FAIL" });
-    println!("  optimal:         {}", if optimal { "PASS" } else { "FAIL" });
+    println!(
+        "  all-different:   {}",
+        if all_different { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "  optimal:         {}",
+        if optimal { "PASS" } else { "FAIL" }
+    );
 
     Ok(())
 }
@@ -108,12 +126,12 @@ fn find_wasm() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
         .and_then(|p| p.parent())
         .ok_or("failed to locate workspace root")?;
     let wasm = workspace.join(
-        "experiments/07_wasm_compute/solver/target/wasm32-unknown-unknown/release/larql_wasm_solver.wasm",
+        "~/chris-source/chris-experiments/foundations/07_wasm_compute/solver/target/wasm32-unknown-unknown/release/larql_wasm_solver.wasm",
     );
     if !wasm.exists() {
         return Err(format!(
             "WASM module not found at {}\n\
-             Build it first:\n  (cd experiments/07_wasm_compute/solver && \\\n  \
+             Build it first:\n  (cd ~/chris-source/chris-experiments/foundations/07_wasm_compute/solver && \\\n  \
              cargo build --release --target wasm32-unknown-unknown)",
             wasm.display()
         )
@@ -173,7 +191,9 @@ fn decode_solution(buf: &[u8], n_tasks: usize) -> (u8, Vec<i32>) {
     let mut assignment = Vec::with_capacity(n_tasks);
     let mut off = 1;
     for _ in 0..n_tasks {
-        if off + 4 > buf.len() { break; }
+        if off + 4 > buf.len() {
+            break;
+        }
         let v = i32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
         assignment.push(v);
         off += 4;

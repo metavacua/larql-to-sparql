@@ -46,10 +46,17 @@ message ReadyMsg {
   string listen_url  = 4;
 }
 
+message LayerLatency {
+  uint32 layer  = 1;  // layer index
+  float  avg_ms = 2;  // EMA (α=0.1) of compute latency
+  float  p99_ms = 3;  // p99 over the last 100 requests
+}
+
 message HeartbeatMsg {
   float  cpu_pct            = 1;
   uint64 ram_used           = 2;
   uint32 requests_in_flight = 3;
+  repeated LayerLatency layer_stats = 4;
 }
 
 message DroppingMsg {
@@ -139,4 +146,5 @@ message ServerInfo {
   uint64 ram_used           = 8;
   uint32 requests_in_flight = 9;
   uint32 rtt_ms             = 10;
+  repeated LayerLatency layer_stats = 11;
 }

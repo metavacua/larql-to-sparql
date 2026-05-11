@@ -28,6 +28,11 @@ fn kv_shared_source_layer(&self, layer: usize) -> Option<usize> {
 }
 ```
 
+`from_config` also tolerates malformed-but-parseable configs so validation can
+report the issue instead of construction panicking. A short `layer_types` array
+defaults missing layers to sliding attention, and a zero
+`sliding_window_pattern` falls back to the default pattern.
+
 ## Source Priority for Layer Types
 
 1. Explicit `layer_types` array in config.json (Gemma 4 provides this)
@@ -47,4 +52,5 @@ For `num_kv_shared_layers = 20` with 35 layers:
 - **Good**: O(1) per-layer queries — no conditionals, no pattern arithmetic.
 - **Good**: KV sharing sources computed once, correctly handling mixed sliding/global.
 - **Good**: Out-of-bounds access returns safe default (false / None).
+- **Good**: Invalid layer metadata is surfaced by `validate()` rather than an indexing panic.
 - **Trade-off**: O(num_layers) allocation at construction. Negligible — 35 bools + 35 Options.

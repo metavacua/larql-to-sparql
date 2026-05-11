@@ -14,9 +14,9 @@
 //! `FOR <token>` selects a target token to track through the residual stream
 //! (rank, attn delta, ffn delta per layer).
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-use super::{Parser, ParseError};
 
 impl Parser {
     pub(crate) fn parse_trace(&mut self) -> Result<Statement, ParseError> {
@@ -49,6 +49,10 @@ impl Parser {
                         Token::Keyword(Keyword::All) => {
                             self.advance();
                             positions = Some(TracePositionMode::All);
+                        }
+                        Token::Ident(s) if s.eq_ignore_ascii_case("last") => {
+                            self.advance();
+                            positions = Some(TracePositionMode::Last);
                         }
                         _ => {
                             positions = Some(TracePositionMode::Last);

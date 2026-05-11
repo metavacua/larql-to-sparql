@@ -13,8 +13,8 @@
 //! caller loops over positions. The caller owns the encoder lifecycle —
 //! these helpers only issue dispatches.
 
-use std::ffi::c_void;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 /// f32-output input RMS norm.
 ///
@@ -43,7 +43,11 @@ pub fn encode_f32(
     enc.set_bytes(5, 4, &norm_offset as *const f32 as *const c_void);
     enc.dispatch_thread_groups(
         MTLSize::new(1, 1, 1),
-        MTLSize::new(256.min(hidden as u64), 1, 1),
+        MTLSize::new(
+            crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(hidden as u64),
+            1,
+            1,
+        ),
     );
 }
 
@@ -74,6 +78,10 @@ pub fn encode_q8(
     enc.set_bytes(6, 4, &norm_offset as *const f32 as *const c_void);
     enc.dispatch_thread_groups(
         MTLSize::new(1, 1, 1),
-        MTLSize::new(256.min(hidden as u64), 1, 1),
+        MTLSize::new(
+            crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(hidden as u64),
+            1,
+            1,
+        ),
     );
 }

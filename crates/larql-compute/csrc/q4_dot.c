@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 // Helper: decode f16 to f32
 static inline float decode_f16(uint16_t h) {
@@ -15,7 +16,7 @@ static inline float decode_f16(uint16_t h) {
         if (mantissa == 0) {
             uint32_t result = sign;
             float f;
-            __builtin_memcpy(&f, &result, 4);
+            memcpy(&f, &result, sizeof(f));
             return f;
         }
         exponent = 1;
@@ -30,7 +31,7 @@ static inline float decode_f16(uint16_t h) {
 
     uint32_t result = sign | (exponent << 23) | (mantissa << 13);
     float f;
-    __builtin_memcpy(&f, &result, 4);
+    memcpy(&f, &result, sizeof(f));
     return f;
 }
 

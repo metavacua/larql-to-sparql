@@ -11,13 +11,13 @@
 //! golden-value tests one place to aim at when a shader/layout change
 //! moves a stage's output.
 
-pub mod quant_matvec;
-pub mod input_norm;
-pub mod qkv_proj;
-pub mod qk_norm;
-pub mod rope;
 pub mod attention;
-pub mod o_proj;
 pub mod ffn;
-pub mod residual;
+pub mod input_norm;
 pub mod layer_scalar;
+pub mod o_proj;
+pub mod qk_norm;
+pub mod qkv_proj;
+pub mod quant_matvec;
+pub mod residual;
+pub mod rope;

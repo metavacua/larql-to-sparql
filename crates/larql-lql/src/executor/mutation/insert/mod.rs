@@ -25,7 +25,13 @@ mod plan;
 
 use crate::ast::InsertMode;
 use crate::error::LqlError;
+use crate::executor::tuning::DEFAULT_INSERT_ALPHA_MUL;
 use crate::executor::Session;
+
+/// Default `c_score` (confidence) for an INSERT without an explicit
+/// `CONFIDENCE` clause. 0.9 lands above the retrieval floor for both
+/// KNN and compose-mode installs.
+const DEFAULT_INSERT_CONFIDENCE: f32 = 0.9;
 
 impl Session {
     // Arg count mirrors the `Statement::Insert` AST variant 1:1 — each
@@ -52,14 +58,10 @@ impl Session {
 
         // ALPHA is the dimensionless multiplier on the layer's median
         // down-vector norm — the actual down vector written into the
-        // overlay is `target_embed_unit * d_ref * alpha_mul`. Default
-        // 0.1 matches the validated Python `install_compiled_slot`
-        // pipeline (`experiments/14_vindex_compilation`). Larger values
-        // push the new fact harder but dilute neighbours; smaller values
-        // reduce neighbour degradation. Validated range ~0.05–0.30.
-        const DEFAULT_ALPHA_MUL: f32 = 0.1;
-        let alpha_mul = alpha_override.unwrap_or(DEFAULT_ALPHA_MUL);
-        let c_score = confidence.unwrap_or(0.9);
+        // overlay is `target_embed_unit * d_ref * alpha_mul`. The
+        // default lives in `executor::tuning` (DEFAULT_INSERT_ALPHA_MUL).
+        let alpha_mul = alpha_override.unwrap_or(DEFAULT_INSERT_ALPHA_MUL);
+        let c_score = confidence.unwrap_or(DEFAULT_INSERT_CONFIDENCE);
 
         // ── Phase 1: plan ──
         let plan = self.plan_install(target, layer_hint)?;
@@ -75,7 +77,7 @@ impl Session {
         }
 
         // ── Phase 2: install slots ──
-        let installed = self.install_slots(
+        let mut installed = self.install_slots(
             &plan,
             &captured.per_layer,
             alpha_mul,
@@ -106,6 +108,7 @@ impl Session {
         if plan.use_constellation {
             self.balance_installed(&installed, entity, relation, target)?;
             self.cross_fact_regression_check(&installed)?;
+            self.refresh_installed_patch_ops_from_overlay(&mut installed)?;
 
             // Register THIS fact for future cross-balance passes.
             let rel_words = relation.replace(['-', '_'], " ");
@@ -138,6 +141,40 @@ impl Session {
             alpha_override,
             alpha_mul,
         ))
+    }
+}
+
+impl Session {
+    fn refresh_installed_patch_ops_from_overlay(
+        &self,
+        installed: &mut [compose::InstalledSlot],
+    ) -> Result<(), LqlError> {
+        if installed.is_empty() {
+            return Ok(());
+        }
+
+        let (_, _, patched) = self.require_vindex()?;
+        for slot in installed {
+            if let larql_vindex::PatchOp::Insert {
+                gate_vector_b64,
+                up_vector_b64,
+                down_vector_b64,
+                ..
+            } = &mut slot.patch_op
+            {
+                if let Some(gate) = patched.overrides_gate_at(slot.layer, slot.feature) {
+                    *gate_vector_b64 = Some(larql_vindex::patch::core::encode_gate_vector(gate));
+                }
+                if let Some(up) = patched.up_override_at(slot.layer, slot.feature) {
+                    *up_vector_b64 = Some(larql_vindex::patch::core::encode_gate_vector(up));
+                }
+                if let Some(down) = patched.down_override_at(slot.layer, slot.feature) {
+                    *down_vector_b64 = Some(larql_vindex::patch::core::encode_gate_vector(down));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

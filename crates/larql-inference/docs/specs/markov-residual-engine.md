@@ -35,8 +35,9 @@ claims to support:
 
 > For any prompt `P` and any decode step `t`, the next-token distribution
 > produced by `MarkovResidualEngine` is bit-identical to the distribution
-> produced by the reference Standard KV decode path on the same
-> `(model, prompt, sampling_config)` tuple.
+> produced by the reference Standard KV decode path **on the same model
+> at the same quantisation tier**, given the same `(prompt,
+> sampling_config)` tuple.
 
 "Bit-identical" is stated at the level of the post-`final_norm`,
 post-`lm_head` logits. Equivalently: hidden-state cosine vs the reference
@@ -44,9 +45,19 @@ path is exactly `1.000000` (cos = 1 forces logit identity under
 deterministic final norm + lm_head, which is strictly stronger than
 `KL = 0.0` on the output distribution).
 
+The "same quantisation tier" qualification is load-bearing. Running the
+engine against a quantised model (Q4_K, FP8, etc.) is a supported
+configuration; the comparison target is *that quantised model's own
+Standard KV path*, not an FP16 dequantised reference. The engine does
+not promise bit-identity across quantisation tiers — that would require
+a quantisation-invariant residual representation, which is not part of
+this contract and is not measured by the experiments backing it.
+
 The contract is established by the `#[ignore]`'d real-model test suite in
 `kv-cache-benchmark::tests::test_real_model`. Any implementation claiming
-to satisfy this spec must pass an equivalent suite.
+to satisfy this spec must pass an equivalent suite. New quantisation
+tiers join the supported set by adding a same-tier comparison fixture;
+they do not inherit support from FP16 validation alone.
 
 ### 2.2 State-sufficiency contract
 
@@ -76,10 +87,16 @@ dim `d`:
   representation. Transient K/V during `recompute_kv` is permitted and
   expected.
 
-For Gemma 3 4B at `W=512`: hot ceiling ≈ 178 MB (512 × 34 × 2560 × 4),
-193 MB with bookkeeping. For any other supported architecture, the
-ceiling is computed from that architecture's `L` and `d` and must be
-reported by the implementation.
+For Gemma 3 4B at `W=512`: bare-tensor floor = `512 × 34 × 2560 × 4 =
+178 257 920` bytes ≈ **170 MiB**. This is the f32 residual storage
+footprint only. The user-visible total ceiling — including per-layer
+alignment, cold tier index structures, and any auxiliary state — is
+reported by the implementation, not this spec. Do not anchor on
+"170 MiB ± a few percent" as the deployable footprint; the formula
+gives the floor, the implementation gives the ceiling.
+
+For any other supported architecture, the bare-tensor floor is computed
+from that architecture's `L` and `d`.
 
 ### 2.4 Determinism contract
 
@@ -145,10 +162,15 @@ a precondition violation.
 **Known compliant:** Gemma 3 4B, Gemma 4 E2B, Gemma 4 E4B (subject to
 4.3), Llama 3 family (subject to 4.3).
 
-**Known non-compliant:** architectures with explicit memory modules
-(e.g. Memformer-style persistent slots), retrieval-augmented decoders
-reading from an external KB between layers, and models using attention
-sinks implemented as non-residual-stream state.
+**Known non-compliant (illustrative, not exhaustive):** architectures
+with explicit memory modules (e.g. Memformer-style persistent slots),
+retrieval-augmented decoders reading from an external KB between layers,
+models using attention sinks implemented as non-residual-stream state,
+and any architecture that maintains a learned global summary token whose
+state updates *during* decode (some recent long-context schemes). The
+general rule is in the precondition itself: any read from persistent
+state outside `(residual_in, token_id, model_weights)` is non-compliant,
+regardless of whether the specific architecture appears in the list above.
 
 ### 4.2 Deterministic RMSNorm / LayerNorm placement
 
@@ -253,9 +275,31 @@ Validates §4 against a given model. Required entry point; see §4.5.
 
 If implemented, serialized state must round-trip through the correctness
 contract: `decode_step` on deserialized state must produce identical
-logits to `decode_step` on pre-serialization state. Format is the
-implementer's call; stability across engine versions is a separate
-contract to be specified if/when serialization ships.
+logits to `decode_step` on pre-serialization state.
+
+The two tiers have very different serialisation profiles:
+
+- **Cold tier** is trivial — append-only `u32` token IDs, no model
+  fingerprint required (token IDs are vocab-keyed but not residual-
+  geometry-keyed). Stable across engine versions for a given tokenizer.
+- **Hot window** is the harder case. Residuals are model-specific
+  `f32` (or BF16, per §2.1) and are not interpretable against another
+  model. If hot-window serialisation ships, the format **must** carry a
+  model fingerprint (vindex hash + arch identifier + `residual_dtype`)
+  and the loader **must** refuse to load hot-window state whose
+  fingerprint does not match the live model. Cross-model loads are a
+  hard refuse, not a warning.
+
+  `residual_dtype` is the on-disk dtype of the *serialised residual
+  tensor*, not the model weights' quantisation tier. The two can
+  differ (e.g. residuals serialised in BF16 from a Q4_K model). Both
+  are part of the fingerprint contract; the model's quantisation tier
+  appears via the vindex hash, the residual dtype appears as its own
+  field.
+
+Format is the implementer's call; stability across engine versions for
+the hot window is a separate contract to be specified if/when
+serialization ships.
 
 ## 7. Configuration
 
@@ -322,12 +366,11 @@ Not blocking the migration, but worth tracking:
   GQA; the reference implementation handles it. Worth confirming that
   the cold-replay path continues to work under MQA (single K/V head) and
   under more aggressive GQA ratios than Gemma's.
-- **Quantization interaction.** The current validation is against an
-  FP16 baseline. Running the engine against a quantized model should
-  still produce bit-perfect output *vs that quantized model's own
-  Standard KV path*, but this has not been explicitly tested and the
-  correctness contract does not currently say so. Decide whether to
-  extend §2.1 to cover this or leave it as caller's responsibility.
+- **Quantization interaction.** §2.1 now states the contract: bit-
+  identical vs the same model's own Standard KV path *at the same
+  quantisation tier*. The remaining open work is fixturing — the current
+  measured tier is FP16; Q4_K and FP8 same-tier comparison fixtures need
+  to land before those tiers can be claimed as supported.
 - **Interaction with Tier 2 / Tier 3 engines.** `UnlimitedContextEngine`
   and `ApolloEngine` build on the same residual-stream machinery. Worth
   deciding whether they share a common trait / base engine with

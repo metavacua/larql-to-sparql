@@ -72,37 +72,70 @@ fn main() {
     println!("  Has V-norm:      {}", arch.has_v_norm());
     println!("  Has PLE:         {}", arch.has_per_layer_embeddings());
     if arch.is_moe() {
-        println!("  MoE:             {} experts, {} per token",
-            arch.num_experts(), arch.num_experts_per_token());
+        println!(
+            "  MoE:             {} experts, {} per token",
+            arch.num_experts(),
+            arch.num_experts_per_token()
+        );
     }
     if arch.uses_mla() {
-        println!("  MLA:             KV rank={}, Q rank={}",
-            arch.kv_lora_rank(), arch.q_lora_rank());
+        println!(
+            "  MLA:             KV rank={}, Q rank={}",
+            arch.kv_lora_rank(),
+            arch.q_lora_rank()
+        );
     }
 
     // Tensor summary
     println!("\n--- Tensors ---");
-    println!("  2D tensors:      {} (weight matrices)", weights.tensors.len());
-    println!("  1D vectors:      {} (norms, biases)", weights.vectors.len());
+    println!(
+        "  2D tensors:      {} (weight matrices)",
+        weights.tensors.len()
+    );
+    println!(
+        "  1D vectors:      {} (norms, biases)",
+        weights.vectors.len()
+    );
     println!("  Embed shape:     {:?}", weights.embed.shape());
     println!("  LM head shape:   {:?}", weights.lm_head.shape());
 
     // Memory usage
-    let tensor_bytes: usize = weights.tensors.values()
+    let tensor_bytes: usize = weights
+        .tensors
+        .values()
         .map(|t| t.len() * std::mem::size_of::<f32>())
         .sum();
-    let vector_bytes: usize = weights.vectors.values()
+    let vector_bytes: usize = weights
+        .vectors
+        .values()
         .map(|v| v.len() * std::mem::size_of::<f32>())
         .sum();
     let embed_bytes = weights.embed.len() * std::mem::size_of::<f32>();
     let lm_head_bytes = weights.lm_head.len() * std::mem::size_of::<f32>();
-    let total = tensor_bytes + vector_bytes + embed_bytes + lm_head_bytes;
+    let raw_bytes: usize = weights.raw_bytes.values().map(Vec::len).sum();
+    let packed_range_bytes: usize = weights
+        .packed_byte_ranges
+        .values()
+        .map(|(_, _, len)| *len)
+        .sum();
+    let total =
+        tensor_bytes + vector_bytes + embed_bytes + lm_head_bytes + raw_bytes + packed_range_bytes;
 
     println!("\n--- Memory ---");
     println!("  Tensors:         {:.1} MB", tensor_bytes as f64 / 1e6);
     println!("  Vectors:         {:.1} MB", vector_bytes as f64 / 1e6);
     println!("  Embed:           {:.1} MB", embed_bytes as f64 / 1e6);
     println!("  LM head:         {:.1} MB", lm_head_bytes as f64 / 1e6);
+    if raw_bytes > 0 {
+        println!("  Raw bytes:       {:.1} MB", raw_bytes as f64 / 1e6);
+    }
+    if packed_range_bytes > 0 {
+        println!(
+            "  Packed mmaps:    {:.1} MB across {} mmap(s)",
+            packed_range_bytes as f64 / 1e6,
+            weights.packed_mmaps.len()
+        );
+    }
     println!("  Total:           {:.1} GB", total as f64 / 1e9);
 
     // Sample tensor keys
@@ -134,16 +167,33 @@ fn main() {
     println!("\n--- Walk-Only Mode (drop FFN weights) ---");
     println!("  Before: {} tensors", weights.tensors.len());
     // Don't actually drop — just show what would happen
-    let ffn_patterns = ["gate_proj", "up_proj", "down_proj", "mlp.experts",
-                       "packed_gate_up_blocks", "packed_down_blocks"];
-    let ffn_count = weights.tensors.keys()
+    let ffn_patterns = [
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+        "mlp.experts",
+        "packed_gate_up_blocks",
+        "packed_down_blocks",
+    ];
+    let ffn_count = weights
+        .tensors
+        .keys()
         .filter(|k| ffn_patterns.iter().any(|p| k.contains(p)))
         .count();
-    let ffn_bytes: usize = weights.tensors.iter()
+    let ffn_bytes: usize = weights
+        .tensors
+        .iter()
         .filter(|(k, _)| ffn_patterns.iter().any(|p| k.contains(p)))
         .map(|(_, v)| v.len() * 4)
         .sum();
-    println!("  FFN tensors:     {} ({:.1} GB)", ffn_count, ffn_bytes as f64 / 1e9);
-    println!("  After drop:      {} tensors ({:.1} GB freed)",
-        weights.tensors.len() - ffn_count, ffn_bytes as f64 / 1e9);
+    println!(
+        "  FFN tensors:     {} ({:.1} GB)",
+        ffn_count,
+        ffn_bytes as f64 / 1e9
+    );
+    println!(
+        "  After drop:      {} tensors ({:.1} GB freed)",
+        weights.tensors.len() - ffn_count,
+        ffn_bytes as f64 / 1e9
+    );
 }

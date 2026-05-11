@@ -1,27 +1,57 @@
 # Roadmap — larql-models
 
-## Current: 12 architectures, 130 tests, safetensors + GGUF loading
+## Current: 12 architectures, 286 tests, safetensors + GGUF loading, 77.86% line / 78.30% function coverage
 
-## P0: Complete Gemma 4 Support
+## Roadmap Review 2026-04-26
 
-### Wire v_shares_k into inference forward pass
-**Impact**: Correct K=V handling without runtime tensor probing  
-**Effort**: Low  
-**Status**: Trait method done (returns `config.attention_k_eq_v`), inference wiring pending
+The 2026-04-26 quality pass closed the known P0 items for `larql-models`: walk-only filtering, silent dtype reporting, quant test gaps, loader string constants, MXFP4 consolidation, config validation adoption, clippy, examples, benchmark coverage, and coverage refresh are complete. The 2026-04-30 follow-up fixed packed BF16 expert ownership, GGUF matrix layout/config-default handling, and refreshed coverage to the current baseline.
 
-Currently the inference crate detects K=V by checking for missing v_proj tensors at runtime. Now that `v_shares_k()` exposes the config flag, the forward pass should use it directly.
+The 2026-05-07 follow-up fixed small-vocab GGUF handling, explicit embedding
+orientation, missing GGUF attention metadata defaults, and checked mmap packed
+byte ranges. It also added targeted regression coverage and refreshed CI to
+run rustfmt plus a crate-scoped coverage summary.
 
-### Validate PLE (per-layer embeddings) end-to-end
-**Impact**: Correct Gemma 4 E2B inference  
+Recommended next sequence:
+- Add Phi-3 / Phi-4 architecture support first. It is low effort, exercises the new validation path, and expands coverage without changing the trait.
+- Use validated loading/detection APIs at downstream inference/extraction boundaries.
+- Defer large loading changes until after architecture coverage. ADR-008 defines the additive lazy/quantized weight API shape.
+
+## P0: Code Quality
+
+### Downstream validation rollout
+**Effort**: Medium
+**Status**: Not started
+
+`larql-models` now exposes validated APIs. Update downstream inference, vindex extraction, CLI, and server entry points to use `detect_*_validated` or `load_*_validated` where invalid configs should fail fast.
+
+### Deterministic HuggingFace cache resolution
+**Effort**: Low
+**Status**: Not started
+
+`loading/safetensors.rs::resolve_model_path` scans cached snapshot
+directories and returns the first snapshot with safetensors. `read_dir` order
+is not stable and the resolver ignores `refs/main`, so the same model ID can
+resolve to an old or arbitrary cached revision. Prefer the commit recorded in
+`models--.../refs/main` when no explicit revision is provided, then fall back
+to a deterministic snapshot ordering.
+
+### Architecture capability contracts
 **Effort**: Medium  
-**Status**: Keys and config parsed, forward pass not yet wired
+**Status**: Not started
 
-PLE adds a gated embedding lookup per layer. Keys (`per_layer_embed_key`, `per_layer_input_gate_key`, `per_layer_projection_key`, `post_per_layer_input_norm_key`) are all implemented. Need to wire into inference and verify against HuggingFace reference outputs.
+Detection currently says which family a config belongs to, but it does not
+state which downstream surfaces are actually implemented for that family.
+Add an explicit capability contract so extraction, vindex weight writing,
+inference, trace, and prompt rendering can fail loudly instead of accepting an
+architecture whose tensors are not consumed by the active path.
 
-### KV layer sharing in inference
-**Impact**: Memory savings for Gemma 4 (20 shared layers = 20 fewer KV caches)  
-**Effort**: Medium  
-**Status**: `kv_shared_source_layer()` returns correct sources, KV cache not yet shared
+Immediate driver: DeepSeek is correctly detected as MoE + MLA and exposes
+`mla_*` tensor keys, but vindex writers and inference paths currently consume
+standard Q/K/V/O attention tensors only. Either implement the MLA extraction
+and forward contract, or report it as unsupported at the boundary.
+
+### Note on quant/dequant crate split
+**Decision**: `larql-models/quant/` is **format deserialization** (GGUF/safetensors → f32). `larql-compute` has **compute operations** (quantized matvec, Metal shaders). The split is correct. The `f16_to_f32` copies in `larql-compute/cpu/ops/q4k_matvec.rs` and `q6k_matvec.rs` are intentional — CPU reference impls for Metal shader testing, isolated by design. `larql-compute` is dev-only dep; don't flip that direction.
 
 ## P1: Architecture Coverage
 
@@ -49,13 +79,17 @@ Would require extending the trait beyond transformer assumptions (no attention k
 **Effort**: Medium  
 **Status**: Not started
 
-Current loader reads all shards into memory. For 70B+ models, streaming with per-layer loading would reduce peak memory. Already have mmap infrastructure — extend to lazy loading with `Arc<Mmap>` references.
+Current loader mmaps shards but eagerly converts retained dense tensors into f32 `ModelWeights`; packed BF16 expert tensors are already retained as mmap byte ranges. For 70B+ models, per-layer/lazy loading would reduce peak memory further. Already have mmap infrastructure — extend to lazy loading with `Arc<Mmap>` references and explicit tensor lifetimes.
+
+Design direction: ADR-008 proposes additive `LazyModelWeights` / `load_model_dir_lazy(_validated)` APIs rather than overloading eager `ModelWeights`.
 
 ### GGUF quantized inference (skip dequant)
 **Effort**: Large  
 **Status**: Not started
 
-Currently GGUF tensors are dequantized to f32 during loading. For Q4_K/Q6_K formats, keep data in quantized form and pass directly to `larql-compute` Q4_K shaders. Requires a `QuantizedWeights` variant alongside `ModelWeights`.
+Currently GGUF tensors are dequantized to f32 during loading. For Q4_K/Q6_K formats, keep data in quantized form and pass directly to `larql-compute` quantized kernels. Requires a `QuantizedWeights` variant alongside `ModelWeights`.
+
+Design direction: ADR-008 proposes additive `QuantizedModelWeights` / `load_gguf_quantized(_validated)` APIs that preserve GGML type ids and byte ranges.
 
 ### MLX npz/safetensors hybrid
 **Effort**: Low  
@@ -77,17 +111,11 @@ Some models (e.g., future MoE variants) may have different FFN types per layer (
 
 Current sliding window is boolean per layer. Future models may have more complex patterns (local + global hybrid, dilated attention, prefix caching hints). Consider a richer `AttentionPattern` enum.
 
-### Config validation
-**Effort**: Low  
-**Status**: Not started
-
-Add a `validate()` method to `ModelArchitecture` that checks for inconsistencies (e.g., head_dim doesn't divide hidden_size, num_experts set but not num_experts_per_token). Currently these fail silently at inference time.
-
 ## Completed
 
 | Item | Date | Impact |
 |------|------|--------|
-| ModelArchitecture trait | 2026-03 | Foundation — 82 methods with defaults |
+| ModelArchitecture trait | 2026-03 | Foundation — 83 methods with defaults |
 | Gemma 2/3 support | 2026-03 | QK-norm, softcapping, sliding window |
 | Llama/Mistral/Qwen/DeepSeek | 2026-03 | Core architecture coverage |
 | Mixtral MoE (PerExpert) | 2026-03 | Expert key patterns |
@@ -102,7 +130,25 @@ Add a `validate()` method to `ModelArchitecture` that checks for inconsistencies
 | Gemma4Arch re-export | 2026-04-07 | Public API complete |
 | v_shares_k from config | 2026-04-07 | Uses attention_k_eq_v flag instead of hardcoded false |
 | Gemma 3 qk_norm_weight_offset | 2026-04-07 | Was missing (Gemma 2 had it, Gemma 3 didn't) |
-| Full test coverage (130 tests) | 2026-04-07 | All 12 architectures tested: Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, DeepSeek, GPT-OSS, Granite, StarCoder2, Generic |
-| Clippy clean (zero warnings) | 2026-04-07 | lib + examples + tests all pass `-D warnings` |
-| Documentation suite | 2026-04-07 | README, ROADMAP, PERFORMANCE, 3 docs, 6 ADRs |
+| Architecture coverage milestone | 2026-04-07 | All 12 architectures tested: Gemma 2/3/4, Llama, Mistral, Mixtral, Qwen, DeepSeek, GPT-OSS, Granite, StarCoder2, Generic |
+| GGML quant test gaps closed (51 tests) | 2026-04-26 | q4k_row_dot NEON≡scalar, q4k/q6k scaled_add correctness, Q4_K known nonzero values |
+| Silent dtype skip fixed | 2026-04-26 | `skipped_tensors` field on ModelWeights; UnsupportedDtype collected, other errors bubbled |
+| normalize_key_pub removed | 2026-04-26 | Dead wrapper gone; `normalize_key` is `pub(crate)` |
+| Config alias constants | 2026-04-26 | `NUM_EXPERTS_KEYS`, `NUM_EXPERTS_PER_TOK_KEYS`, `field_u64` helper in `detect.rs` |
+| MXFP4 consolidation | 2026-04-26 | `split_gate_up_experts` in `quant/mxfp4.rs`; loader thinned + renamed |
+| Walk-only loader fixes | 2026-04-26 | GGUF filtering, GPT-OSS MXFP4 predicate-aware expansion, StarCoder2 c_fc/c_proj classification |
+| Loader magic-string cleanup | 2026-04-26 | Centralized GGUF metadata/key rewrites, MXFP4 suffixes, HF cache path fragments, packed expert keys |
+| Config validation | 2026-04-26 | `ModelArchitecture::validate()` with centralized diagnostic fields; catches dimensions, head geometry, RoPE values, per-layer metadata, KV sharing, and MoE inconsistencies |
+| Validation adoption in larql-models APIs | 2026-04-26 | Added `detect_*_validated`, `load_model_dir*_validated`, and `load_gguf_validated` while preserving permissive inspection APIs |
+| Detection hardening for invalid configs | 2026-04-26 | Malformed zero-head configs and short Gemma 4 `layer_types` no longer panic before validation |
+| Lazy/quantized weight API design | 2026-04-26 | ADR-008 defines additive `LazyModelWeights` and `QuantizedModelWeights` direction for larger loading work |
+| Coverage baseline refresh | 2026-04-26 | 274 tests; 88.02% line / 86.29% function coverage |
+| Clippy clean (zero warnings) | 2026-04-26 | lib + examples + tests all pass `-D warnings` |
+| Criterion benchmark suite | 2026-04-26 | `cargo bench -p larql-models --bench models` covers detection, validation, key mapping, FFN classification, synthetic loading, and GGML dequant |
+| Documentation refresh | 2026-04-26 | README, roadmap, performance notes, loading/quant docs, and ADRs updated for validation and current metrics |
 | Example suite (3 demos) | 2026-04-07 | architecture_demo (all 12), demo_tensor_keys (all 12), demo_loading |
+| Packed BF16 mmap retention | 2026-04-30 | Gemma 4 A4B packed BF16 expert tensors are retained as mmap byte ranges instead of heap-cloned raw bytes |
+| GGUF loader correctness fixes | 2026-04-30 | 2D tensors load as standard `[rows, cols]`; absent optional RoPE/vocab metadata falls back through architecture/tokenizer defaults |
+| Coverage baseline refresh | 2026-04-30 | 282 tests; 81.41% line / 82.06% function coverage |
+| GGUF loader regression fixes | 2026-05-07 | Small vocab metadata, shape-derived vocab fallback, missing KV/head-dim defaults, checked packed mmap ranges |
+| Coverage baseline refresh | 2026-05-07 | 286 tests; 77.86% line / 78.30% function coverage |

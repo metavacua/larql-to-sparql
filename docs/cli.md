@@ -15,9 +15,15 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `run <model> [prompt]` | Run inference. One-shot if prompt given; chat loop if not. |
 | `chat <model>` | Alias for `run <model>` with no prompt. |
 | `pull <model>` | Download a vindex from HuggingFace and cache locally. |
+| `model <subcmd>` | Manage HuggingFace **model** repos (companion to `pull`, which is vindex-only). |
+| `link <path>` | Register a local vindex directory with the cache so `run` / `list` / `show` find it by shorthand. |
 | `list` | Show cached vindexes (model, size, layers, hidden). |
 | `show <model>` | Vindex metadata and file inventory. |
+| `slice <source>` | Carve a subset of a vindex (`client` / `attn` / `embed` / `server` / `browse` / `router` / `expert-server`). |
+| `publish <source>` | Publish a vindex to HuggingFace — full + slice siblings + collections. |
 | `rm <model>` | Evict a cached vindex. |
+| `bench <model>` | Benchmark decode throughput on a real vindex (Metal / CPU / Ollama). |
+| `shannon <subcmd>` | Next-token bit scoring, slot probes, repetition probes, layer lens, demo arithmetic coding. |
 | `serve <model>` | Serve a vindex over HTTP + gRPC. |
 
 ## Build / extract
@@ -28,9 +34,11 @@ a local directory path — see [Model resolution](#model-resolution) below.
 | `extract-index` | Backwards-compat alias of `extract`. |
 | `build` | Build a custom vindex from a Vindexfile (FROM + PATCH + INSERT). |
 | `compile` | Compile vindex patches into model weights (AOT). |
-| `convert` | Convert between formats (GGUF ↔ vindex, safetensors → vindex). |
-| `hf` | HuggingFace Hub: publish a vindex. |
+| `convert` | Convert between formats (GGUF ↔ vindex, safetensors → vindex; `quantize` for FP4/Q4_K_M). |
+| `hf` | HuggingFace Hub: download / publish a vindex. |
 | `verify` | Verify vindex file integrity (SHA256 checksums). |
+| `diag` | Engine diagnostic — print which kernel paths fire for a vindex, validate Q4_K/Q6_K strides, optional `--probe` runs a real forward pass. |
+| `parity` | Cross-backend numerical diff (`reference` / `cpu` / `metal`) at well-known checkpoints. |
 
 ## LQL
 
@@ -82,9 +90,23 @@ larql run <MODEL> [PROMPT] [OPTIONS]
 |---|---|---|
 | `<MODEL>` | Vindex dir, `hf://owner/name`, `owner/name`, or cache shorthand | — |
 | `[PROMPT]` | Prompt text; omit to enter chat mode | — |
-| `-n, --top <N>` | Number of predictions to show | 10 |
-| `--ffn <URL>` | Route FFN to a remote `larql-server` (`http://host:port`). Attention stays local, each layer's FFN call lands on the server. | — |
+| `-n, --max-tokens <N>` | Max tokens to generate autoregressively | 64 |
+| `--top <N>` | Show the top-K prediction table per step instead of just the argmax (implied by `--verbose`) | 1 |
+| `--kv-cache <KIND>` | KV cache strategy: `standard` (full FP32, unbounded), `markov-bounded` (sliding window), `none` (no cache, O(N²)) | standard |
+| `--context-window <N>` | Sliding-window size when `--kv-cache markov-bounded`; `0` = unbounded | 0 |
+| `--metal` | Force the Metal GPU path (macOS only). Default is CPU on non-macOS, Metal on macOS when available | auto |
+| `--ffn <URL>` | Route dense FFN to a remote larql-server. Attention runs locally; each layer's FFN is a round trip | — |
 | `--ffn-timeout-secs <N>` | HTTP timeout for `--ffn` | 60 |
+| `--ffn-dispatch <streaming\|batch>` | Dense FFN dispatch when `--ffn` is set. `streaming` runs N sequential round-trips per token; `batch` predispatches all layers in parallel and refines in a second Metal pass | streaming |
+| `--ffn-predispatch-iters <N>` | Refinement iterations for `--ffn-dispatch batch`. Higher = more accurate, slower | 1 |
+| `--moe-shards <SPEC>` | MoE expert dispatch: `"0-63=URL1,64-127=URL2"`. Client runs the router locally; expert calls fan out | — |
+| `--moe-units-manifest <PATH>` | Fine-grained per-(layer,expert) shard map from JSON. Mutually exclusive with `--moe-shards` | — |
+| `--moe-dispatch <streaming\|batch>` | Same shape as `--ffn-dispatch`, applied to MoE expert calls | streaming |
+| `--moe-predispatch-iters <N>` | Refinement iterations for `--moe-dispatch batch` | 1 |
+| `--experts` | Enable WASM-expert dispatch (gcd, base64, …) at FFN slots | false |
+| `--experts-dir <PATH>` | Directory of `.wasm` experts (overrides default lookup) | — |
+| `--ops <NAME[,…]>` | Restrict `--experts` to a comma-separated subset of op names | all |
+| `--constrained` | Run constrained-decoding mode (require all generated tokens to satisfy declared ops) | false |
 | `-v, --verbose` | Verbose load / timing output | false |
 
 Examples:
@@ -104,7 +126,123 @@ Interactive chat. Alias for `run <model>` with no prompt.
 larql chat <MODEL> [OPTIONS]
 ```
 
-Same flag set as `run`, minus the positional prompt.
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `-n, --max-tokens <N>` | Max tokens per chat response | 64 |
+| `--ffn <URL>` | Route FFN to a remote larql-server | — |
+| `--ffn-timeout-secs <N>` | HTTP timeout for `--ffn` | 60 |
+| `-v, --verbose` | Verbose load / timing output | false |
+
+`larql chat` is a thin shim — under the hood it constructs the same `RunArgs`
+as `larql run` (with `prompt: None`) and the chat-loop UX is implemented in
+`run_cmd::run`. The richer flag surface above (sampling, KV cache, MoE) is
+available via `larql run <model>` with no prompt.
+
+### `larql bench`
+
+Benchmark decode throughput on a real vindex. Reports tok/s for each backend
+(default `metal`) and optionally a side-by-side against a local Ollama server
+or a remote larql-server FFN grid.
+
+```
+larql bench <MODEL> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, or cache shorthand | — |
+| `--prompt <TEXT>` | Prompt to time (kept short to keep prefill consistent across runs) | "The capital of France is" |
+| `-n, --tokens <N>` | Number of decode steps to measure | 50 |
+| `--warmup <N>` | Discarded warmup steps before measurement (smooths first-call allocation effects) | 3 |
+| `--backends <LIST>` | Comma-separated backend list. Supported: `metal`, `cpu` | metal |
+| `--ollama <MODEL>` | Also query a local Ollama server with this model name (e.g. `gemma3:4b`). Requires `ollama serve` running | — |
+| `--engine <LIST>` | Comma-separated KV engines to bench alongside the GPU path. Supported: `markov-rs`, `unlimited-context` | — |
+| `--ffn <URL>` | Bench the grid path: route FFN to a remote larql-server | — |
+| `--ffn-dispatch <streaming\|batch>` | Same shape as `larql run --ffn-dispatch` | streaming |
+| `--moe-shards <SPEC>` | Bench the remote MoE expert path | — |
+| `--moe-dispatch <streaming\|batch>` | Same shape as `larql run --moe-dispatch` | streaming |
+| `--moe-predispatch-iters <N>` | Refinement iterations for batch dispatch | 2 |
+| `--profile` | Print per-stage timing breakdown for each engine (markov-rs only for now) | false |
+| `--wire <f32,f16,i8>` | Comma-separated wire formats to compare end-to-end. Requires `--ffn` | — |
+| `--bench-grid` | Shard-count scaling sweep: with `--moe-shards`, reruns with 1..N shards from the provided map | false |
+| `--concurrent <N>` | Simulate N concurrent clients; reports aggregate tok/s and per-client p99 | 1 |
+| `--output <json>` | Emit machine-readable JSON alongside the table output | — |
+| `--output-file <PATH>` | Write JSON output to this file instead of stdout | — |
+
+Examples:
+
+```bash
+larql bench gemma3-4b-it-vindex --backends metal,cpu
+larql bench gemma3-4b-it-vindex --ollama gemma3:4b
+larql bench gemma4-26b-a4b.vindex --moe-shards "0-63=http://a:8081,64-127=http://b:8082"
+```
+
+### `larql model`
+
+Manage HuggingFace **model** repos (raw safetensors + tokenizer + config).
+Companion to `pull`, which is vindex-only.
+
+```
+larql model pull <model-id> [OPTIONS]
+```
+
+| Subcommand | Description |
+|---|---|
+| `pull <model-id>` | Download a HuggingFace model repo. Stages a raw HF model on disk for `convert safetensors-to-vindex` (or for any non-LARQL tool that wants the original weights). |
+
+Use `larql pull` for vindex artifacts; use `larql model pull` to get the
+upstream HF safetensors that an extraction would consume.
+
+### `larql link`
+
+Register a local vindex directory with the cache so `run` / `list` / `show`
+can find it by shorthand.
+
+```
+larql link <PATH> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<PATH>` | Path to a vindex directory (must contain `index.json`) | — |
+| `--as <NAME>` | Override the registered name (defaults to the directory basename with any `.vindex` suffix stripped) | basename |
+| `-f, --force` | Replace an existing link of the same name | false |
+
+### `larql shannon`
+
+Shannon-style measurement tools for scripted demos. These use the dense
+transformer forward pass to score the actual next token as
+`-log2 p(token | context)`. They are measurement tools, not production
+compressors.
+
+```bash
+larql shannon score google/gemma-3-4b-it --corpus frankenstein.txt --bytes 50000
+larql shannon slot google/gemma-3-4b-it --prefix "The capital of France is " --answer Paris
+larql shannon repeat google/gemma-3-4b-it --text frankenstein.txt --needle "created"
+larql shannon encode google/gemma-3-4b-it --in frankenstein_4kb.txt --out compressed.lsc
+larql shannon decode google/gemma-3-4b-it --in compressed.lsc --out recovered.txt
+larql shannon encode google/gemma-3-4b-it --vindex ./gemma-q4k.vindex --metal --in frankenstein_4kb.txt --out compressed.lsc
+larql shannon decode google/gemma-3-4b-it --vindex ./gemma-q4k.vindex --metal --in compressed.lsc --out recovered.txt
+```
+
+| Subcommand | Description |
+|---|---|
+| `score` | Score a corpus and print bits/token, bits/char, bits/byte, and total bits. |
+| `slot` | Score an answer span after a prefix and show top predictions before the slot. |
+| `repeat` | Score each occurrence of a string in its real preceding context. |
+| `layers` | Per-layer Shannon bits via the final-norm logit lens. At every layer L (embed plus each post-block residual), project through `final_norm + lm_head` and report bits/token, KL-to-final, and adjacent `bits_saved[L]` deltas. |
+| `encode` | Write a real arithmetic-coded bitstream driven by model probabilities. Intended for short excerpts. |
+| `decode` | Reconstruct text from `encode` output using the same model. |
+
+Without `--vindex`, `encode` / `decode` rerun the dense model for each
+recovered token and are intended only for short excerpts. With `--vindex
+--metal`, Q4K vindexes use the Metal KV-cache path and a full-vocabulary
+LM-head query for each forced token. The vindex codec is segmented into
+512-token arithmetic blocks so encode/decode stay byte-exact despite tiny GPU
+float drift. The payload is real entropy-coded data; the file also includes a
+small header with the first token, token count, original byte count, context
+size, and payload length.
 
 ### `larql pull`
 
@@ -171,9 +309,24 @@ larql serve --dir <DIR> [OPTIONS]
 | `--cors` | Enable CORS headers for browser access | false |
 | `--api-key <KEY>` | Require Bearer token auth (health exempt) | — |
 | `--rate-limit <SPEC>` | Per-IP rate limit (e.g., "100/min", "10/sec") | — |
+| `--trust-forwarded-for` | Use the first `X-Forwarded-For` IP for rate limiting. Enable only behind a trusted proxy. | false |
 | `--max-concurrent <N>` | Max concurrent requests | 100 |
 | `--cache-ttl <SECS>` | Cache TTL for DESCRIBE results (0 = disabled) | 0 |
+| `--layers <START-END>` | Only load and serve layers in this range (e.g. `0-14`). Pages outside the range are never faulted in; RSS scales with shard size. | — |
+| `--experts <START-END>` | Only serve expert IDs in this range (e.g. `0-63`). MoE shard filter. Mutually exclusive with `--units`. | — |
+| `--units <PATH>` | Fine-grained per-(layer,expert) ownership manifest (JSON). Mutually exclusive with `--experts`. | — |
+| `--moe-shards <SPEC>` | Server-side MoE expert dispatch: `"0-63=URL1,64-127=URL2"`. When set, the `walk-ffn` handler fans out MoE expert calls to remote shard servers. Combine with `--layers` for 2D layer × expert sharding. | — |
+| `--moe-units-manifest <PATH>` | Fine-grained per-(layer,expert) server-side shard map. Mutually exclusive with `--moe-shards`. | — |
+| `--join <ADDRS>` | Join one or more router grids (comma-separated gRPC addresses, e.g. `grpc://router:50052`). Self-assembling grid. Requires `--public-url`. | — |
+| `--public-url <URL>` | Public HTTP URL for this server (used with `--join`). | — |
+| `--grid-key <SECRET>` | Shared secret for grid auth (also `LARQL_GRID_KEY` env var). | — |
+| `--max-gate-cache-layers <N>` | LRU cap on decoded f16 gate layers (0 = unlimited). | 0 |
+| `--release-mmap-after-request` | `madvise(DONTNEED)` on all mmaps post-request. Linux: strict. Darwin: advisory. | false |
+| `--embed-only` | Load only embeddings + lm_head (embed-server mode, ADR-0008). | false |
 | `--grpc-port <PORT>` | Enable gRPC server on this port | — |
+| `--uds-path <PATH>` | Bind a Unix domain socket alongside TCP for same-host MoE shard clients. | — |
+| `--warmup-hnsw` | Eager-build HNSW index for every owned layer at startup. Requires `--hnsw`. | false |
+| `--warmup-walk-ffn` | Pre-load inference weights and prefetch all owned layer mmap pages at boot. | false |
 | `--tls-cert <PATH>` | TLS certificate for HTTPS | — |
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
 | `--log-level <LEVEL>` | Logging level | info |
@@ -248,6 +401,9 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 
 # With rate limiting + DESCRIBE cache
 larql serve output/gemma3-4b.vindex --rate-limit "100/min" --cache-ttl 300
+
+# With rate limiting behind a trusted reverse proxy
+larql serve output/gemma3-4b.vindex --rate-limit "100/min" --trust-forwarded-for
 
 # Query from the REPL
 larql repl
@@ -441,30 +597,6 @@ larql dev index-gates <MODEL> --output <OUTPUT> [OPTIONS]
 ```bash
 larql dev index-gates google/gemma-3-4b-it -o gates.gate-index.jsonl
 larql dev index-gates google/gemma-3-4b-it -o gates.gate-index.jsonl --layers 24-33
-```
-
-### `larql dev extract-routes`
-
-Extract attention routing patterns from forward passes. Captures which FFN features activate for each entity/relation combination.
-
-```
-larql dev extract-routes <MODEL> --output <OUTPUT> [OPTIONS]
-```
-
-| Flag | Description |
-|---|---|
-| `<MODEL>` | Model path or HuggingFace model ID |
-| `-o, --output <OUTPUT>` | Output JSON file for the routing table |
-| `--top-k <N>` | Top features to capture per layer per forward pass [default: 50] |
-| `--min-activation <F>` | Minimum absolute activation to record [default: 1.0] |
-| `-e, --entities <ENTITIES>` | Comma-separated entities (overrides defaults) |
-| `--layers <LAYERS>` | Comma-separated layers to capture. Default: all |
-
-**Examples:**
-
-```bash
-larql dev extract-routes google/gemma-3-4b-it -o routes.json
-larql dev extract-routes google/gemma-3-4b-it -o routes.json --entities "France,Germany,Japan" --layers 25,26,27
 ```
 
 ### `larql dev walk`
@@ -713,6 +845,33 @@ larql dev bfs \
     -o knowledge.larql.json
 ```
 
+### Other `larql dev` subcommands
+
+The following research subcommands exist and respond to `--help` but are
+not documented in detail above. They are stable enough to use but are
+mostly driven by the comments in their args structs and the experiment
+write-ups in `experiments/`.
+
+| Subcommand | One-line summary |
+|---|---|
+| `qk-rank` | SVD rank analysis of attention QK products. |
+| `qk-modes` | Extract interpretable modes from low-rank QK heads via SVD → gate projection. |
+| `ov-rd` | OV rate-distortion + residual-table attention compilation experiments. |
+| `circuit-discover` | Discover attention → FFN circuits from weight decomposition. |
+| `attn-bottleneck` | Bottleneck analysis of attention components. |
+| `ffn-bottleneck` | Bottleneck analysis of FFN components. |
+| `ffn-overlap` | Measure overlap between entity-routed and ground-truth gate features. |
+| `kg-bench` | Knowledge graph retrieval benchmark. |
+| `trajectory-trace` | Trace residual stream trajectories on the sphere across layers. |
+| `projection-test` | Test rank-k projection through the residual stream. |
+| `fingerprint-extract` | Extract OV fingerprint basis from attention weights. |
+| `bottleneck-test` | Test rule-based bottleneck — if-else rules replace early layers. |
+| `embedding-jump` | Embedding jump — raw token embeddings → projected L13 → decoder. |
+| `ffn-latency` | Measure round-trip latency breakdown against a remote FFN server. |
+
+Run `larql dev <subcmd> --help` for the full flag surface of any of
+these.
+
 ## Build commands
 
 Top-level verbs for producing, converting, and publishing vindexes.
@@ -854,6 +1013,8 @@ larql convert <SUBCOMMAND>
 | `gguf-to-vindex` | Convert a GGUF model to a vindex (dequantized to f32) |
 | `safetensors-to-vindex` | Convert safetensors model to a vindex |
 | `gguf-info` | Show GGUF file metadata and detected architecture |
+| `quantize fp4` | Quantise an existing f32/f16 vindex to the LARQL FP4/FP8 format |
+| `quantize q4k` | Quantise an existing f32/f16 vindex to GGML Q4_K_M (Ollama-compatible) |
 
 **Examples:**
 
@@ -866,9 +1027,27 @@ larql convert gguf-info model-Q4_K_M.gguf
 
 # Convert safetensors to vindex
 larql convert safetensors-to-vindex ./model/ -o model.vindex --level inference --f16
+
+# Quantise an existing f16 vindex to FP4 (Option B: source-dtype gate + FP4 up + FP8 down)
+larql convert quantize fp4 \
+    --input  output/gemma3-4b-f16.vindex \
+    --output output/gemma3-4b-fp4.vindex
+
+# Quantise an existing f16 vindex to Q4_K_M (attn Q/K/O + FFN gate/up at Q4_K, V + FFN down at Q6_K)
+larql convert quantize q4k \
+    --input  output/gemma3-4b-f16.vindex \
+    --output output/gemma3-4b-q4k.vindex
+
+# Q4_K_M with FFN down also at Q4_K (saves ~30 MB/layer on 31B at modest precision cost)
+larql convert quantize q4k \
+    --input  output/gemma4-31b-f16.vindex \
+    --output output/gemma4-31b-q4k.vindex \
+    --down-q4k
 ```
 
 Supported GGUF quantization types for reading: F32, F16, BF16, Q4_0, Q4_1, Q8_0. All tensors are dequantized to f32 during conversion.
+
+**`quantize` family** — see [`docs/specs/quantize-cli-spec.md`](specs/quantize-cli-spec.md) for the full surface (flags, exit codes, output layout, atomic-rename semantics). Both subcommands require the source vindex to carry full model weights (`--level inference` or `--level all`); browse-only sources are rejected with a clear error.
 
 ### `larql hf`
 
@@ -924,6 +1103,118 @@ larql verify gemma3-4b.vindex
 # embeddings.bin ... OK (1.25 GB)
 # down_meta.bin ... OK (2.0 MB)
 # All 3 files verified.
+```
+
+### `larql compile`
+
+Compile vindex patches into model weights (AOT — bake patches at install
+time so live inference doesn't need to consult the patches). Used to
+materialise compiled fact / passage edges into a deployable model.
+
+```
+larql compile --base <BASE> --output <OUTPUT> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--base <PATH>` | Path to the base model (directory with safetensors, or HF model ID) | — |
+| `--vindex <PATH>` | Path to the vindex with patches to compile (not needed for fact mode) | — |
+| `-o, --output <PATH>` | Output directory for the compiled model safetensors | — |
+| `--gate-scale <F>` | Gate scale for compiled edges (1.0 keeps natural usage clean on Gemma 3 4B; previous default 30.0 saturated silu and leaked the edge into unrelated queries) | 1.0 |
+| `--alpha <F>` | Initial write-magnitude multiplier; the balancer refines this after install | 0.3 |
+| `--floor <F>` | Minimum target-token probability before the balancer stops scaling up | 0.40 |
+| `--ceiling <F>` | Maximum target-token probability before the balancer scales down | 0.85 |
+| `--max-iters <N>` | Balancer iterations (`0` = opt-out, install at `--alpha` / `--gate-scale` and trust the caller's defaults) | 0 |
+| `--no-chat-template` | Skip applying the base model's chat template before tokenising. Default behaviour wraps the prompt so the captured trigger residual matches a chat-wrapped deployment | off |
+| `--prompt <TEXT>` | Prompt whose residual becomes the trigger direction | — |
+| `--answer <TEXT>` | Correct answer token to compile into the weights | — |
+| `--layer <N>` | Layer to install the compiled edge at | 30 |
+| `--slot <N>` | FFN slot to install the compiled edge at | 9000 |
+
+The balancer is opt-in (`--max-iters 0` by default) because
+`larql_inference::forward::predict` is systematically peakier than HF's
+`forward` on the same weights — leaving the balancer off installs at the
+hand-tuned `g=1.0, α=0.3` sweet spot from the paraphrase sweep.
+
+### `larql diag`
+
+Engine diagnostic. Loads a vindex through the production path and prints
+which kernel paths the loader picks (lm_head fast/slow, attn fused/per-proj),
+validates Q4_K/Q6_K manifest strides against the canonical 144-byte GGUF
+layout, and surfaces silent-slowdown classes (stale 148-byte stride,
+`vocab_size=0`) at a glance.
+
+```
+larql diag <MODEL> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://owner/name`, `owner/name`, or cache shorthand | — |
+| `--probe` | Run a real forward pass and print per-stage timings | off |
+| `--probe-tokens <N>` | Token count for `--probe` (caps at 100 to keep the diagnostic snappy) | 5 |
+
+**Examples:**
+
+```bash
+# Static check only — no forward pass
+larql diag gemma3-4b-q4k-v2.vindex
+
+# Static check + 50-token probe with per-stage timing breakdown
+larql diag gemma3-4b-q4k-v2.vindex --probe --probe-tokens 50
+```
+
+Two-pass output:
+1. **Static** — config (`hidden_size`, `vocab_size`, dtype), file inventory,
+   stride validation. Doesn't load the vindex; safe for huge models.
+2. **Loaded** — opens via `open_inference_vindex`, reports which kernels
+   would actually fire (lm_head fast path, attention fused/per-proj, etc.).
+
+### `larql parity`
+
+Cross-backend numerical parity diff. Runs the same input through multiple
+backends (`reference`, `cpu`, `metal`) and reports the first checkpoint where
+they diverge beyond `--tolerance`. Catches "I refactored quantization /
+activation / norm and silently broke something" regressions that latency
+benches and synthetic-weight unit tests miss.
+
+```
+larql parity <MODEL> --component <C> [OPTIONS]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `<MODEL>` | Vindex dir, `hf://` URL, or cache shorthand | — |
+| `--component <C>` | Inference checkpoint to diff: `moe-expert`, `moe-block`, `lm-head`, `layer` | moe-block |
+| `--layer <N>` | Layer index | 0 |
+| `--expert <N>` | Expert index (used when `--component moe-expert`) | 0 |
+| `--backends <LIST>` | Comma-separated backends. First is the reference; others are diffed against it | reference,cpu |
+| `--prompt <TEXT>` | Prompt for `--component layer` (drives the actual forward pass). For `moe-*`, seeds a synthetic residual; otherwise a deterministic sin pattern is used | — |
+| `--seed <N>` | Random-ish seed for the synthetic residual. Ignored when `--prompt` is set | 0 |
+| `--tolerance <F>` | Max element-wise abs diff before declaring divergence (per-expert ≈ 1e-3; full forward needs more headroom for accumulated f32 noise) | 1e-3 |
+| `-v, --verbose` | Print intermediate values at each checkpoint, not just diffs | off |
+
+**Components:**
+
+| Component | What it diffs |
+|---|---|
+| `moe-expert` | Single expert forward (gate matmul, up matmul, gelu_tanh, down matmul) |
+| `moe-block` | Full MoE block, one layer (router → top-K → K experts → weighted sum → post-norm) |
+| `lm-head` | Final projection parity (Q4_K vs f32 reference). Backend-agnostic; works on any vindex with an lm_head |
+| `layer` | Full transformer layer end-to-end. Reads per-layer `metal_layer_NN_h_out.f32` / `metal_layer_NN_h_post_attn.f32` dumps; works on dense models too |
+
+Requires the `metal` feature on macOS — Metal is the reference backend the
+CPU output is compared against.
+
+```bash
+# Smoke-test MoE block on layer 0
+larql parity gemma4-26b-a4b.vindex --component moe-block --layer 0
+
+# Diff lm_head Q4_K against f32 reference on a dense vindex
+larql parity gemma3-4b-q4k.vindex --component lm-head
+
+# Per-layer residual diff between CPU and Metal across a real prompt
+larql parity gemma4-31b.vindex --component layer --prompt "The capital of France is"
 ```
 
 ## Graph-file commands
@@ -1058,21 +1349,26 @@ rewrite — no re-extract.
 |---|---|---|
 | `<SRC>` | Source vindex: directory, `hf://owner/name`, cache shorthand | — |
 | `-o, --output <DST>` | Destination directory. Must not exist unless `--force`. | — |
-| `--preset <NAME>` | `client`, `attn`, `embed`, `server`, `browse`, `router`, `all` | — |
-| `--parts <list>` | Explicit parts (embed, norms, attn, gate, down_meta, ffn, lm_head, router, tokenizer, manifest, labels, readme). `index.json` is always copied. | — |
+| `--preset <NAME>` | `client`, `attn`, `embed`, `server`, `browse`, `router`, `expert-server`, `all` | — |
+| `--parts <list>` | Explicit parts (embed, norms, attn, gate, down_meta, ffn, expert_layers, lm_head, router, tokenizer, manifest, labels, readme). `index.json` is always copied. | — |
 | `--force` | Overwrite `<DST>` if it exists | false |
 | `--dry-run` | Preview what would be copied | false |
 
 **Preset sizes (Gemma 3 4B Q4_K measured; 31B figures scaled):**
 
-| Preset | Topology | 4B | 31B Q4K | Pairs with |
-|---|---|---|---|---|
-| `client` | 2-tier | 3.0 GB | 7.4 GB | `larql run --ffn URL` |
-| `attn` | 3-tier | 310 MB | 4.8 GB | `larql run --embed URL --ffn URL` (ADR-0008) |
-| `embed` | 3-tier | 1.28 GB | 2.6 GB | `larql serve --embed-only` (ADR-0008) |
-| `server` | either | 1.8 GB | 27 GB | `larql serve --ffn-only` |
-| `browse` | — | 1.3 GB | 16 GB | DESCRIBE/WALK only |
-| full | — | 1.3 GB | 32 GB | everything |
+| Preset | Topology | 4B | 31B Q4K | 26B MoE | Pairs with |
+|---|---|---|---|---|---|
+| `client` | 2-tier | 3.0 GB | 7.4 GB | 2.1 GB | `larql run --ffn URL` |
+| `attn` | 3-tier | 310 MB | 4.8 GB | — | `larql run --embed URL --ffn URL` (ADR-0008) |
+| `embed` | 3-tier | 1.28 GB | 2.6 GB | — | `larql serve --embed-only` (ADR-0008) |
+| `server` | either | 1.8 GB | 27 GB | — | `larql serve --ffn-only` |
+| `browse` | — | 1.3 GB | 16 GB | — | DESCRIBE/WALK only |
+| `expert-server` | MoE | — | — | 14.1 GB | `larql serve --experts START-END` |
+| `full` | — | 1.3 GB | 32 GB | 16 GB | everything |
+
+`expert-server` includes embed, norms, dense FFN (`interleaved_q4k.bin`),
+and the per-layer expert weights (`layers/`). Everything `larql serve` needs
+to boot and serve `POST /v1/expert/batch` calls on a CPU-only machine.
 
 Use `attn` + `embed` when laptop RAM matters and you can run an embed
 server alongside the FFN server. `attn` alone is 10× smaller than
@@ -1122,6 +1418,7 @@ internally.
 | `--all-slices` | Full + every default sibling (`-client`, `-attn`, `-embed`, `-server`, `-browse`). Missing siblings warn, don't fail. | false |
 | `--collection <SLUG\|URL>` | Pull every dataset in an HF collection. | — |
 | `--sibling-template <T>` | Must match `publish --slice-repo-template`. | `{repo}-{preset}` |
+| `--output <PATH>` | Download to this path instead of the default local cache. Idempotent: skips if `index.json` already present. Use in container startup scripts. | cache |
 
 After a plain `pull <repo>`, `larql` HEAD-probes for standard siblings
 and prints an "also available" hint if any exist — so the sliced layout

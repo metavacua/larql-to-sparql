@@ -22,6 +22,7 @@
 //! vindex this repo produces. See `docs/adr/0006-q4k-remote-ffn.md` for the
 //! dense-remote topology these presets were cut to serve.
 
+use larql_vindex::format::filenames::*;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,9 @@ pub enum Part {
     Gate,
     DownMeta,
     Ffn,
+    /// Per-layer Q4K expert weight directory (`layers/layer_XX.weights`).
+    /// Required for MoE expert-server deployment.
+    ExpertLayers,
     LmHead,
     Router,
     Tokenizer,
@@ -60,6 +64,9 @@ impl Part {
             "gate" | "gate_vectors" | "gates" => Some(Self::Gate),
             "down_meta" | "meta" => Some(Self::DownMeta),
             "ffn" | "interleaved" | "up_down" => Some(Self::Ffn),
+            "expert_layers" | "expert-layers" | "layers" | "expert_weights" => {
+                Some(Self::ExpertLayers)
+            }
             "lm_head" | "lmhead" => Some(Self::LmHead),
             "router" | "router_weights" => Some(Self::Router),
             "tokenizer" | "tok" => Some(Self::Tokenizer),
@@ -75,28 +82,27 @@ impl Part {
     /// `attn_weights_` etc. pick up quantisation variants (q4, q4k, q8).
     fn matches(self, filename: &str) -> bool {
         match self {
-            Self::Embed => filename == "embeddings.bin",
-            Self::Norms => filename == "norms.bin",
+            Self::Embed => filename == EMBEDDINGS_BIN,
+            Self::Norms => filename == NORMS_BIN,
             Self::Attn => filename.starts_with("attn_weights"),
-            Self::Gate => {
-                filename == "gate_vectors.bin" || filename.starts_with("gate_vectors_")
-            }
-            Self::DownMeta => filename == "down_meta.bin" || filename == "down_meta.jsonl",
+            Self::Gate => filename == GATE_VECTORS_BIN || filename.starts_with("gate_vectors_"),
+            Self::DownMeta => filename == DOWN_META_BIN || filename == "down_meta.jsonl",
             Self::Ffn => {
-                filename.starts_with("interleaved")
-                    || filename == "up_weights.bin"
-                    || filename == "down_weights.bin"
-                    || filename == "up_features.bin"
-                    || filename == "down_features.bin"
+                (filename.starts_with("interleaved") && !is_backup(filename))
+                    || filename == UP_WEIGHTS_BIN
+                    || filename == DOWN_WEIGHTS_BIN
+                    || filename == UP_FEATURES_BIN
+                    || filename == DOWN_FEATURES_BIN
             }
+            Self::ExpertLayers => false, // directory, handled by slice_vindex directly
             Self::LmHead => filename.starts_with("lm_head"),
             Self::Router => filename == "router_weights.bin",
-            Self::Tokenizer => filename == "tokenizer.json",
-            Self::Manifest => filename == "weight_manifest.json",
+            Self::Tokenizer => filename == TOKENIZER_JSON,
+            Self::Manifest => filename == WEIGHT_MANIFEST_JSON,
             Self::Labels => {
-                filename == "feature_labels.json"
-                    || filename == "feature_clusters.jsonl"
-                    || filename == "relation_clusters.json"
+                filename == FEATURE_LABELS_JSON
+                    || filename == FEATURE_CLUSTERS_JSONL
+                    || filename == RELATION_CLUSTERS_JSON
             }
             Self::Readme => filename == "README.md",
         }
@@ -127,18 +133,35 @@ pub fn preset_parts(preset: &str) -> Result<BTreeSet<Part>, String> {
         // + tokenizer. Memory-bound service; one server can fan out to
         // many attention workers.
         "embed" | "embed-server" => &[Embed, Tokenizer, Labels],
-        "server" | "ffn" | "ffn-service" => {
-            &[Embed, Norms, Gate, DownMeta, Ffn, Tokenizer, Manifest, Labels]
-        }
+        "server" | "ffn" | "ffn-service" => &[
+            Embed, Norms, Gate, DownMeta, Ffn, Tokenizer, Manifest, Labels,
+        ],
         "browse" => &[Embed, Gate, DownMeta, Tokenizer, Labels, Readme],
         "router" => &[Router, Tokenizer, Manifest, Labels, Readme],
+        "expert-server" | "expert_server" | "moe-server" => {
+            // Embed + Norms + Ffn required: load_single_vindex opens embeddings.bin
+            // and norms.bin unconditionally; get_or_load_weights (called by the expert
+            // endpoint) needs interleaved_q4k.bin for architecture params + dense FFN.
+            &[Embed, Norms, Ffn, ExpertLayers, Tokenizer, Manifest]
+        }
         "all" => &[
-            Embed, Norms, Attn, Gate, DownMeta, Ffn, LmHead, Router, Tokenizer,
-            Manifest, Labels, Readme,
+            Embed,
+            Norms,
+            Attn,
+            Gate,
+            DownMeta,
+            Ffn,
+            ExpertLayers,
+            LmHead,
+            Router,
+            Tokenizer,
+            Manifest,
+            Labels,
+            Readme,
         ],
         other => {
             return Err(format!(
-                "unknown preset '{other}'. Expected: client, attn, embed, server, browse, router, all"
+                "unknown preset '{other}'. Expected: client, attn, embed, server, browse, router, expert-server, all"
             ));
         }
     };
@@ -159,7 +182,8 @@ pub struct SliceArgs {
     /// Comma-separated parts to include.
     ///
     /// Valid names: `embed`, `norms`, `attn`, `gate`, `down_meta`, `ffn`,
-    /// `lm_head`, `router`, `tokenizer`, `manifest`, `labels`, `readme`.
+    /// `expert_layers` / `layers`, `lm_head`, `router`, `tokenizer`,
+    /// `manifest`, `labels`, `readme`.
     /// `index.json` is always copied.
     ///
     /// Mutually compatible with `--preset` (the union is taken).
@@ -167,13 +191,14 @@ pub struct SliceArgs {
     pub parts: Vec<String>,
 
     /// Preset that expands to a part list:
-    ///   * `client`  — attn + embed + norms + tokenizer (2-tier; pairs with `larql run --ffn URL`)
-    ///   * `attn`    — attn + norms only (3-tier; pairs with `larql run --embed URL --ffn URL`, ADR-0008)
-    ///   * `embed`   — embed + tokenizer (embed-server slice; pairs with `larql serve --embed-only`)
-    ///   * `server`  — gate + ffn + down_meta + embed + norms + tokenizer (pairs with `larql serve --ffn-only`)
-    ///   * `browse`  — gate + embed + down_meta (no forward pass)
-    ///   * `router`  — router_weights + tokenizer (MoE router; dense models error out)
-    ///   * `all`     — every part (full vindex, useful for `--force` clones)
+    ///   * `client`         — attn + embed + norms + tokenizer (2-tier; pairs with `larql run --ffn URL`)
+    ///   * `attn`           — attn + norms only (3-tier; pairs with `larql run --embed URL --ffn URL`, ADR-0008)
+    ///   * `embed`          — embed + tokenizer (embed-server slice; pairs with `larql serve --embed-only`)
+    ///   * `server`         — gate + ffn + down_meta + embed + norms + tokenizer (pairs with `larql serve --ffn-only`)
+    ///   * `browse`         — gate + embed + down_meta (no forward pass)
+    ///   * `router`         — router_weights + tokenizer (MoE router; dense models error out)
+    ///   * `expert-server`  — norms + expert_layers (layers/) + tokenizer + manifest (CPU MoE expert server; fly.io deploy)
+    ///   * `all`            — every part (full vindex, useful for `--force` clones)
     #[arg(long)]
     pub preset: Option<String>,
 
@@ -218,12 +243,8 @@ pub fn slice_vindex(
     if !src.is_dir() {
         return Err(format!("source vindex not a directory: {}", src.display()).into());
     }
-    if !src.join("index.json").exists() {
-        return Err(format!(
-            "source vindex missing index.json: {}",
-            src.display()
-        )
-        .into());
+    if !src.join(INDEX_JSON).exists() {
+        return Err(format!("source vindex missing index.json: {}", src.display()).into());
     }
     if parts.is_empty() {
         return Err("no parts selected".into());
@@ -239,7 +260,7 @@ pub fn slice_vindex(
         return Err("--output must differ from source vindex".into());
     }
 
-    // Enumerate source files.
+    // Enumerate source files (flat files only; layers/ handled separately below).
     let mut copied: Vec<(String, u64)> = Vec::new();
     let mut copy_paths: Vec<PathBuf> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -254,7 +275,7 @@ pub fn slice_vindex(
             Some(s) => s.to_string(),
             None => continue,
         };
-        let kept = name == "index.json" || parts.iter().any(|p| p.matches(&name));
+        let kept = name == INDEX_JSON || parts.iter().any(|p| p.matches(&name));
         if kept {
             copy_paths.push(entry.path());
             copied.push((name, meta.len()));
@@ -262,6 +283,29 @@ pub fn slice_vindex(
             skipped.push(name);
         }
     }
+
+    // Enumerate layers/ entries so they appear in copied / total_bytes
+    // and are included in the dry-run report.
+    let want_expert_layers = parts.contains(&Part::ExpertLayers);
+    let mut layer_copy_pairs: Vec<(PathBuf, PathBuf)> = Vec::new(); // (src, dst)
+    if want_expert_layers {
+        let layers_src = src.join("layers");
+        if layers_src.is_dir() {
+            for entry in std::fs::read_dir(&layers_src)? {
+                let entry = entry?;
+                let meta = entry.metadata()?;
+                if !meta.is_file() {
+                    continue;
+                }
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy().to_string();
+                let dst_path = dst.join("layers").join(&name);
+                copied.push((format!("layers/{name_str}"), meta.len()));
+                layer_copy_pairs.push((entry.path(), dst_path));
+            }
+        }
+    }
+
     copied.sort_by(|a, b| a.0.cmp(&b.0));
     copy_paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     skipped.sort();
@@ -303,7 +347,7 @@ pub fn slice_vindex(
     for src_path in &copy_paths {
         let name = src_path.file_name().unwrap();
         let dst_path = dst.join(name);
-        if name == std::ffi::OsStr::new("index.json") {
+        if name == std::ffi::OsStr::new(INDEX_JSON) {
             let mut new_cfg = cfg.clone();
             new_cfg.extract_level = new_level;
             new_cfg.has_model_weights = new_has_weights;
@@ -311,6 +355,14 @@ pub fn slice_vindex(
             std::fs::write(&dst_path, json)?;
         } else {
             std::fs::copy(src_path, &dst_path)?;
+        }
+    }
+
+    // Copy layers/ directory if ExpertLayers part is requested.
+    if !layer_copy_pairs.is_empty() {
+        std::fs::create_dir_all(dst.join("layers"))?;
+        for (src_path, dst_path) in &layer_copy_pairs {
+            std::fs::copy(src_path, dst_path)?;
         }
     }
 
@@ -331,10 +383,12 @@ pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
             Some(p) => {
                 wanted.insert(p);
             }
-            None => return Err(format!(
-                "unknown part '{raw}'. Run `larql slice --help` for valid names."
-            )
-            .into()),
+            None => {
+                return Err(format!(
+                    "unknown part '{raw}'. Run `larql slice --help` for valid names."
+                )
+                .into())
+            }
         }
     }
     if wanted.is_empty() {
@@ -359,7 +413,11 @@ pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "FFN weights:    {}",
-        if outcome.new_has_weights { "present" } else { "absent" }
+        if outcome.new_has_weights {
+            "present"
+        } else {
+            "absent"
+        }
     );
 
     println!(
@@ -410,6 +468,10 @@ fn effective_level(
     candidate.min(source_level)
 }
 
+fn is_backup(filename: &str) -> bool {
+    filename.ends_with(".bak") || filename.ends_with(".tmp") || filename.ends_with(".orig")
+}
+
 fn part_name(p: &Part) -> &'static str {
     match p {
         Part::Embed => "embed",
@@ -418,6 +480,7 @@ fn part_name(p: &Part) -> &'static str {
         Part::Gate => "gate",
         Part::DownMeta => "down_meta",
         Part::Ffn => "ffn",
+        Part::ExpertLayers => "expert_layers",
         Part::LmHead => "lm_head",
         Part::Router => "router",
         Part::Tokenizer => "tokenizer",
@@ -458,21 +521,21 @@ mod tests {
 
     #[test]
     fn attn_matches_quant_variants() {
-        assert!(Part::Attn.matches("attn_weights.bin"));
-        assert!(Part::Attn.matches("attn_weights_q4.bin"));
-        assert!(Part::Attn.matches("attn_weights_q4k.bin"));
-        assert!(Part::Attn.matches("attn_weights_q4k_manifest.json"));
-        assert!(!Part::Attn.matches("gate_vectors.bin"));
+        assert!(Part::Attn.matches(ATTN_WEIGHTS_BIN));
+        assert!(Part::Attn.matches(ATTN_WEIGHTS_Q4_BIN));
+        assert!(Part::Attn.matches(ATTN_WEIGHTS_Q4K_BIN));
+        assert!(Part::Attn.matches(ATTN_WEIGHTS_Q4K_MANIFEST_JSON));
+        assert!(!Part::Attn.matches(GATE_VECTORS_BIN));
     }
 
     #[test]
     fn ffn_matches_interleaved_and_hidden_major() {
-        assert!(Part::Ffn.matches("interleaved.bin"));
-        assert!(Part::Ffn.matches("interleaved_q4k.bin"));
+        assert!(Part::Ffn.matches(INTERLEAVED_BIN));
+        assert!(Part::Ffn.matches(INTERLEAVED_Q4K_BIN));
         assert!(Part::Ffn.matches("up_weights.bin"));
-        assert!(Part::Ffn.matches("down_features.bin"));
+        assert!(Part::Ffn.matches(DOWN_FEATURES_BIN));
         // Gate vectors are their own part even though they share the FFN role.
-        assert!(!Part::Ffn.matches("gate_vectors.bin"));
+        assert!(!Part::Ffn.matches(GATE_VECTORS_BIN));
     }
 
     #[test]
@@ -518,7 +581,10 @@ mod tests {
         assert!(!parts.contains(&Part::Embed), "attn preset must drop embed");
         assert!(!parts.contains(&Part::Gate));
         assert!(!parts.contains(&Part::Ffn));
-        assert!(!parts.contains(&Part::Tokenizer), "tokenizer lives with embed server");
+        assert!(
+            !parts.contains(&Part::Tokenizer),
+            "tokenizer lives with embed server"
+        );
     }
 
     #[test]
@@ -540,7 +606,10 @@ mod tests {
         assert!(!parts.contains(&Part::Attn));
         assert!(!parts.contains(&Part::Gate));
         assert!(!parts.contains(&Part::Ffn));
-        assert!(!parts.contains(&Part::Norms), "embed server doesn't run attention — no norms");
+        assert!(
+            !parts.contains(&Part::Norms),
+            "embed server doesn't run attention — no norms"
+        );
     }
 
     #[test]
@@ -595,8 +664,14 @@ mod tests {
     fn effective_level_capped_by_source() {
         // Even a full parts set can't claim a higher tier than the source.
         let parts: BTreeSet<Part> = [
-            Part::Attn, Part::Norms, Part::Embed, Part::Ffn, Part::Gate,
-            Part::DownMeta, Part::LmHead, Part::Tokenizer,
+            Part::Attn,
+            Part::Norms,
+            Part::Embed,
+            Part::Ffn,
+            Part::Gate,
+            Part::DownMeta,
+            Part::LmHead,
+            Part::Tokenizer,
         ]
         .into_iter()
         .collect();

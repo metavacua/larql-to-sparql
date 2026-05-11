@@ -144,4 +144,63 @@ kernel void residual_norm_q8(
         q8_out[i] = char(clamp(q, -128, 127));
     }
 }
+
+// residual_norm_store: like residual_norm but ALSO stores the raw sum.
+// Replaces the residual_norm + residual_add two-dispatch pair (Q4_K hot path).
+// Single dispatch writes both ffn_norm_out (normed, for FFN input) and
+// h_post_attn (raw sum, for post-FFN residual add). Saves 34 dispatches/token.
+kernel void residual_norm_store(
+    device const float* a         [[buffer(0)]],  // h (pre-attn residual)
+    device const float* b         [[buffer(1)]],  // o (attn output)
+    device const float* weight    [[buffer(2)]],  // norm weights
+    device float*       norm_out  [[buffer(3)]],  // normed (FFN input)
+    device float*       sum_out   [[buffer(4)]],  // raw sum (h_post_attn)
+    constant uint&      len       [[buffer(5)]],
+    constant float&     eps       [[buffer(6)]],
+    constant float&     offset    [[buffer(7)]],
+    uint tid   [[thread_index_in_threadgroup]],
+    uint tg_sz [[threads_per_threadgroup]],
+    uint lane  [[thread_index_in_simdgroup]],
+    uint sg_id [[simdgroup_index_in_threadgroup]])
+{
+    float partial = 0.0f;
+    for (uint i = tid; i < len; i += tg_sz) {
+        float hi = a[i] + b[i];
+        partial += hi * hi;
+    }
+    float sg_sum = simd_sum(partial);
+    threadgroup float tg_p[8];
+    if (lane == 0) tg_p[sg_id] = sg_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float sum_sq = tg_p[0];
+    uint n_sg = (tg_sz + 31u) / 32u;
+    for (uint i = 1u; i < n_sg; i++) sum_sq += tg_p[i];
+    float rms = 1.0f / sqrt(sum_sq / float(len) + eps);
+
+    for (uint i = tid; i < len; i += tg_sz) {
+        float h = a[i] + b[i];
+        sum_out[i]  = h;
+        norm_out[i] = h * (weight[i] + offset) * rms;
+    }
+}
 "#;
+
+pub struct RmsNormQ8Kernel;
+impl crate::metal::kernel::ShaderKernel for RmsNormQ8Kernel {
+    const KERNEL_NAME: &'static str = "rms_norm_q8";
+}
+
+pub struct ResidualNormKernel;
+impl crate::metal::kernel::ShaderKernel for ResidualNormKernel {
+    const KERNEL_NAME: &'static str = "residual_norm";
+}
+
+pub struct ResidualNormQ8Kernel;
+impl crate::metal::kernel::ShaderKernel for ResidualNormQ8Kernel {
+    const KERNEL_NAME: &'static str = "residual_norm_q8";
+}
+
+pub struct ResidualNormStoreKernel;
+impl crate::metal::kernel::ShaderKernel for ResidualNormStoreKernel {
+    const KERNEL_NAME: &'static str = "residual_norm_store";
+}

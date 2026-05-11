@@ -6,12 +6,12 @@
 //! - `pair_batch`: gate+up for all seq positions in one submission
 //! - `multi_layer_ffn`: 21 layers × (gate+up+GEGLU+down+Q8) in one submission
 
-use std::ffi::c_void;
 use metal::*;
+use std::ffi::c_void;
 
+use super::q4_common::{quantize_to_q8, Q4Pipelines};
 use crate::metal::buffers::BufferCache;
-use crate::metal::shaders::q4_matvec as shader;
-use super::q4_common::{Q4Pipelines, quantize_to_q8};
+use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 
 /// Batched gate+up for ALL seq positions in ONE GPU submission.
 /// Encodes 2×seq_len Q4 matvec dispatches in a single command buffer.
@@ -29,9 +29,13 @@ pub fn pair_batch(
 ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let n_val = num_rows as u32;
     let k_val = hidden as u32;
-    let num_tgs = (num_rows as u64).div_ceil(shader::ROWS_PER_TG);
+    // Geometry travels with the kernel — read both sides from the
+    // same `KernelHandle` to guarantee num_tgs and threads_per_tg
+    // agree with what the kernel was compiled for.
+    let kernel = &pipelines.matvec;
+    let num_tgs = (num_rows as u64).div_ceil(kernel.rows_per_tg);
     let grid = MTLSize::new(num_tgs, 1, 1);
-    let tg_size = MTLSize::new(shader::THREADS_PER_TG, 1, 1);
+    let tg_size = MTLSize::new(kernel.threads_per_tg, 1, 1);
     let out_bytes = (num_rows * 4) as u64;
 
     let buf_gate = bufs.get_bytes(gate_q4);
@@ -52,7 +56,7 @@ pub fn pair_batch(
 
         // Gate
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&pipelines.matvec);
+        enc.set_compute_pipeline_state(&kernel.state);
         enc.set_buffer(0, Some(&buf_gate), 0);
         enc.set_buffer(1, Some(&buf_q8), 0);
         enc.set_buffer(2, Some(&buf_scales), 0);
@@ -64,7 +68,7 @@ pub fn pair_batch(
 
         // Up
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&pipelines.matvec);
+        enc.set_compute_pipeline_state(&kernel.state);
         enc.set_buffer(0, Some(&buf_up), 0);
         enc.set_buffer(1, Some(&buf_q8), 0);
         enc.set_buffer(2, Some(&buf_scales), 0);
@@ -84,8 +88,14 @@ pub fn pair_batch(
     let mut gate_results = Vec::with_capacity(seq_len);
     let mut up_results = Vec::with_capacity(seq_len);
     for s in 0..seq_len {
-        gate_results.push(crate::metal::buffers::read_buffer_f32(&gate_bufs[s], num_rows));
-        up_results.push(crate::metal::buffers::read_buffer_f32(&up_bufs[s], num_rows));
+        gate_results.push(crate::metal::buffers::read_buffer_f32(
+            &gate_bufs[s],
+            num_rows,
+        ));
+        up_results.push(crate::metal::buffers::read_buffer_f32(
+            &up_bufs[s],
+            num_rows,
+        ));
     }
     (gate_results, up_results)
 }
@@ -110,15 +120,26 @@ pub fn multi_layer_ffn(
     let k_val = hidden as u32;
     let inter_val = inter as u32;
     let hidden_val = hidden as u32;
-    let num_tgs = (inter as u64).div_ceil(shader::ROWS_PER_TG);
-    let n_blocks = (hidden / 32) as u32;
+    let kernel = &pipelines.matvec;
+    let num_tgs = (inter as u64).div_ceil(kernel.rows_per_tg);
+    let tg_size = MTLSize::new(kernel.threads_per_tg, 1, 1);
+    let n_blocks = (hidden / LEGACY_BLOCK_ELEMS) as u32;
 
     let (q8_init, q8s_init) = quantize_to_q8(x);
 
     // Pre-cache weight buffers
-    let gate_bufs: Vec<_> = layers_q4.iter().map(|(g, _, _)| bufs.get_bytes(g)).collect();
-    let up_bufs: Vec<_> = layers_q4.iter().map(|(_, u, _)| bufs.get_bytes(u)).collect();
-    let down_bufs: Vec<_> = layers_q4.iter().map(|(_, _, d)| bufs.get_bytes(d)).collect();
+    let gate_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(g, _, _)| bufs.get_bytes(g))
+        .collect();
+    let up_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(_, u, _)| bufs.get_bytes(u))
+        .collect();
+    let down_bufs: Vec<_> = layers_q4
+        .iter()
+        .map(|(_, _, d)| bufs.get_bytes(d))
+        .collect();
 
     // Pre-allocate ALL intermediate buffers
     let mut q8_bufs = Vec::with_capacity(num_layers + 1);
@@ -137,7 +158,7 @@ pub fn multi_layer_ffn(
         act_bufs_vec.push(bufs.output((inter * 4) as u64));
         down_outs.push(bufs.output((hidden * 4) as u64));
         q8_bufs.push(bufs.output(hidden as u64));
-        q8s_bufs.push(bufs.output((hidden / 32 * 4) as u64));
+        q8s_bufs.push(bufs.output((hidden / LEGACY_BLOCK_ELEMS * 4) as u64));
     }
 
     let cmd = queue.new_command_buffer();
@@ -145,26 +166,26 @@ pub fn multi_layer_ffn(
     for l in 0..num_layers {
         // Gate
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&pipelines.matvec);
+        enc.set_compute_pipeline_state(&kernel.state);
         enc.set_buffer(0, Some(&gate_bufs[l]), 0);
         enc.set_buffer(1, Some(&q8_bufs[l]), 0);
         enc.set_buffer(2, Some(&q8s_bufs[l]), 0);
         enc.set_buffer(3, Some(&gate_outs[l]), 0);
         enc.set_bytes(4, 4, &n_val as *const u32 as *const c_void);
         enc.set_bytes(5, 4, &k_val as *const u32 as *const c_void);
-        enc.dispatch_thread_groups(MTLSize::new(num_tgs, 1, 1), MTLSize::new(256, 1, 1));
+        enc.dispatch_thread_groups(MTLSize::new(num_tgs, 1, 1), tg_size);
         enc.end_encoding();
 
         // Up
         let enc = cmd.new_compute_command_encoder();
-        enc.set_compute_pipeline_state(&pipelines.matvec);
+        enc.set_compute_pipeline_state(&kernel.state);
         enc.set_buffer(0, Some(&up_bufs[l]), 0);
         enc.set_buffer(1, Some(&q8_bufs[l]), 0);
         enc.set_buffer(2, Some(&q8s_bufs[l]), 0);
         enc.set_buffer(3, Some(&up_outs[l]), 0);
         enc.set_bytes(4, 4, &n_val as *const u32 as *const c_void);
         enc.set_bytes(5, 4, &k_val as *const u32 as *const c_void);
-        enc.dispatch_thread_groups(MTLSize::new(num_tgs, 1, 1), MTLSize::new(256, 1, 1));
+        enc.dispatch_thread_groups(MTLSize::new(num_tgs, 1, 1), tg_size);
         enc.end_encoding();
 
         // GEGLU
@@ -198,7 +219,11 @@ pub fn multi_layer_ffn(
             enc.set_bytes(3, 4, &hidden_val as *const u32 as *const c_void);
             enc.dispatch_threads(
                 MTLSize::new(n_blocks as u64, 1, 1),
-                MTLSize::new(256.min(n_blocks as u64), 1, 1),
+                MTLSize::new(
+                    crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(n_blocks as u64),
+                    1,
+                    1,
+                ),
             );
             enc.end_encoding();
         }

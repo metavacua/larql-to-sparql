@@ -38,12 +38,14 @@ Inference time (larql-compute reads from vindex):
 | `lm_head_q4_data()` | `&[u8]` Q4_0 bytes | `backend.q4_matvec()` for logits |
 | `down_layer_matrix(layer)` | `ArrayView2<f32>` | Walk FFN, zero-copy |
 | `up_layer_matrix(layer)` | `ArrayView2<f32>` | Walk FFN, zero-copy |
+| `down_features_q4k_layer_data(layer)` | `(&[u8], &str, padded_w)` | W2 per-feature down decode (skips cache) |
+| `q4k_down_feature_scaled_add(...)` | fused row decode | `ffn_row_scaled_add` for component=2 |
 
 ### Compute → Vindex (format contracts)
 
 | Compute Shader | Expects From Vindex | Block Size |
 |----------------|-------------------|------------|
-| `q4k_qkv_proj` | Q4_K bytes (148B blocks) | 256 values |
+| `q4k_qkv_proj` | Q4_K bytes (144B blocks, GGUF-canonical) | 256 values |
 | `q6k_matvec` | Q6_K bytes (210B blocks) | 256 values |
 | `q4_matvec_v4` | Q4_0 bytes (18B blocks) | 32 values |
 | `q8_qkv_proj` | Q8_0 int8 + f32 scales | 32 values |

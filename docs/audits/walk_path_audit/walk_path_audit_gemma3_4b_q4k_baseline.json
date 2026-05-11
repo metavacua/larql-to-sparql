@@ -1,0 +1,1382 @@
+{
+  "model": "google/gemma-3-4b-it",
+  "paths": [
+    {
+      "aggregate": {
+        "assertion": {
+          "max_rel_l2": 0.09562012553215027,
+          "min_cos": 0.9963064193725586,
+          "worst_rel_l2_layer": 14,
+          "worst_rel_l2_pos": 1,
+          "worst_rel_l2_prompt": "paris"
+        },
+        "diagnostic": {
+          "max_abs": 22.9107666015625,
+          "max_abs_l2": 156.15037536621094,
+          "mean_abs_l2": 7.069067001342773,
+          "worst_layer": 11,
+          "worst_pos": 1,
+          "worst_prompt": "code"
+        },
+        "n_obs": 1326
+      },
+      "bound": {
+        "kind": "quantized",
+        "min_cos": 0.9900000095367432,
+        "rel_l2": 0.5
+      },
+      "dispatch_counts": {
+        "sparse:gemv_full_k": 102
+      },
+      "fail_reasons": [],
+      "fallthrough_layers": [],
+      "mask": {
+        "hide_down_features": false,
+        "hide_fp4": false,
+        "hide_full_mmap": false,
+        "hide_interleaved": false,
+        "hide_q4": false,
+        "hide_q4k": false
+      },
+      "name": "sparse",
+      "per_layer": [
+        {
+          "assertion": {
+            "max_rel_l2": 0.06161149963736534,
+            "min_cos": 0.9981251358985901,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.23182213306427002,
+            "max_abs_l2": 2.054856061935425,
+            "worst_pos": 17,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 0,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.0792270228266716,
+            "min_cos": 0.9968869686126709,
+            "worst_rel_l2_pos": 24,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.1854410171508789,
+            "max_abs_l2": 0.7787362933158875,
+            "worst_pos": 3,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 1,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05836261436343193,
+            "min_cos": 0.9983468651771545,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.2878103256225586,
+            "max_abs_l2": 0.9176316261291504,
+            "worst_pos": 3,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 2,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05528051406145096,
+            "min_cos": 0.9985448122024536,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.1938190460205078,
+            "max_abs_l2": 1.2898728847503662,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 3,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07143649458885193,
+            "min_cos": 0.9974448084831238,
+            "worst_rel_l2_pos": 3,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.0863012969493866,
+            "max_abs_l2": 0.7284458875656128,
+            "worst_pos": 4,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 4,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05053529888391495,
+            "min_cos": 0.9987214207649231,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.07857656478881836,
+            "max_abs_l2": 0.5748969316482544,
+            "worst_pos": 2,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 5,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.060199834406375885,
+            "min_cos": 0.9981935620307922,
+            "worst_rel_l2_pos": 20,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.07581567764282227,
+            "max_abs_l2": 0.7745044231414795,
+            "worst_pos": 2,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 6,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07201220095157623,
+            "min_cos": 0.9974300861358643,
+            "worst_rel_l2_pos": 10,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.11027121543884277,
+            "max_abs_l2": 0.7751677632331848,
+            "worst_pos": 2,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 7,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07903225719928741,
+            "min_cos": 0.9968936443328857,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.1452188491821289,
+            "max_abs_l2": 1.8579128980636597,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 8,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08122627437114716,
+            "min_cos": 0.996698796749115,
+            "worst_rel_l2_pos": 21,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.5926262140274048,
+            "max_abs_l2": 4.604851722717285,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 9,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07933241128921509,
+            "min_cos": 0.9968621134757996,
+            "worst_rel_l2_pos": 21,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 2.7759833335876465,
+            "max_abs_l2": 31.96272850036621,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 10,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.0775318592786789,
+            "min_cos": 0.9969920516014099,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 22.9107666015625,
+            "max_abs_l2": 156.15037536621094,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 11,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06889928132295609,
+            "min_cos": 0.99763023853302,
+            "worst_rel_l2_pos": 21,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.14138031005859375,
+            "max_abs_l2": 1.1334123611450195,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 12,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06844566017389297,
+            "min_cos": 0.9976620674133301,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.4339752197265625,
+            "max_abs_l2": 1.3108924627304077,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 13,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09562012553215027,
+            "min_cos": 0.997381329536438,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 1.3735427856445312,
+            "max_abs_l2": 2.626542568206787,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 14,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06106621026992798,
+            "min_cos": 0.9981377124786377,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.4893684387207031,
+            "max_abs_l2": 1.6289925575256348,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 15,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07402990758419037,
+            "min_cos": 0.997572124004364,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 1.9199168682098389,
+            "max_abs_l2": 6.925309658050537,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 16,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06374505162239075,
+            "min_cos": 0.9983786940574646,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.38433837890625,
+            "max_abs_l2": 3.629559278488159,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 17,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05644509196281433,
+            "min_cos": 0.9984655380249023,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.3272533416748047,
+            "max_abs_l2": 1.555700421333313,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 18,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.053936004638671875,
+            "min_cos": 0.9985440373420715,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.534724235534668,
+            "max_abs_l2": 1.4876710176467896,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 19,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05732910707592964,
+            "min_cos": 0.9983620047569275,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.1709461361169815,
+            "max_abs_l2": 1.635400414466858,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 20,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.059863898903131485,
+            "min_cos": 0.9982072710990906,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.4122314453125,
+            "max_abs_l2": 1.5542234182357788,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 21,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07229552417993546,
+            "min_cos": 0.9973818063735962,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.256563663482666,
+            "max_abs_l2": 1.8357468843460083,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 22,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06231606379151344,
+            "min_cos": 0.9980579018592834,
+            "worst_rel_l2_pos": 6,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.4069385528564453,
+            "max_abs_l2": 1.4094504117965698,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 23,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06507163494825363,
+            "min_cos": 0.9979011416435242,
+            "worst_rel_l2_pos": 14,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.14963626861572266,
+            "max_abs_l2": 0.6699255704879761,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 24,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06743759661912918,
+            "min_cos": 0.9977297782897949,
+            "worst_rel_l2_pos": 6,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.09483528137207031,
+            "max_abs_l2": 1.1212422847747803,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 25,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.0811963602900505,
+            "min_cos": 0.996704638004303,
+            "worst_rel_l2_pos": 14,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.061119675636291504,
+            "max_abs_l2": 0.7821827530860901,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 26,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.0777137279510498,
+            "min_cos": 0.9974048137664795,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.19088101387023926,
+            "max_abs_l2": 1.0643666982650757,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 27,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07340474426746368,
+            "min_cos": 0.9973130822181702,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.2052927017211914,
+            "max_abs_l2": 0.7851517200469971,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 28,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05931868404150009,
+            "min_cos": 0.9982385039329529,
+            "worst_rel_l2_pos": 25,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.047878265380859375,
+            "max_abs_l2": 0.39404618740081787,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 29,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.0860029011964798,
+            "min_cos": 0.9963064193725586,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.22788763046264648,
+            "max_abs_l2": 1.0239427089691162,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 30,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06197287514805794,
+            "min_cos": 0.9986097812652588,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.21204042434692383,
+            "max_abs_l2": 1.4768849611282349,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 31,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.06148277968168259,
+            "min_cos": 0.998156726360321,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.20219802856445312,
+            "max_abs_l2": 0.9520875811576843,
+            "worst_pos": 18,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 32,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.05124562606215477,
+            "min_cos": 0.9986931085586548,
+            "worst_rel_l2_pos": 18,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.2781105041503906,
+            "max_abs_l2": 2.8755738735198975,
+            "worst_pos": 18,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "sparse:gemv_full_k",
+          "fallthrough": false,
+          "layer": 33,
+          "n_obs": 39
+        }
+      ],
+      "per_prompt": {
+        "apollo": {
+          "dense_top1_prob": 0.9996875524520874,
+          "dense_top1_token": " Neil",
+          "prob_delta": 0.000017881393432617188,
+          "top1_match": true,
+          "walk_top1_prob": 0.99970543384552,
+          "walk_top1_token": " Neil"
+        },
+        "code": {
+          "dense_top1_prob": 0.9982932806015015,
+          "dense_top1_token": "\n",
+          "prob_delta": 0.000041425228118896484,
+          "top1_match": true,
+          "walk_top1_prob": 0.9983347058296204,
+          "walk_top1_token": "\n"
+        },
+        "paris": {
+          "dense_top1_prob": 0.8065804839134216,
+          "dense_top1_token": " Paris",
+          "prob_delta": 0.004170775413513184,
+          "top1_match": true,
+          "walk_top1_prob": 0.8024097084999084,
+          "walk_top1_token": " Paris"
+        }
+      },
+      "sparse_k": -1,
+      "verdict": "pass"
+    },
+    {
+      "aggregate": {
+        "assertion": {
+          "max_rel_l2": 0.12052087485790253,
+          "min_cos": 0.992737352848053,
+          "worst_rel_l2_layer": 10,
+          "worst_rel_l2_pos": 1,
+          "worst_rel_l2_prompt": "code"
+        },
+        "diagnostic": {
+          "max_abs": 18.424686431884766,
+          "max_abs_l2": 230.47567749023438,
+          "mean_abs_l2": 10.403247833251953,
+          "worst_layer": 11,
+          "worst_pos": 1,
+          "worst_prompt": "code"
+        },
+        "n_obs": 1326
+      },
+      "bound": {
+        "kind": "quantized",
+        "min_cos": 0.9900000095367432,
+        "rel_l2": 0.5
+      },
+      "dispatch_counts": {
+        "interleaved_q4k:dequant": 102
+      },
+      "fail_reasons": [],
+      "fallthrough_layers": [],
+      "mask": {
+        "hide_down_features": false,
+        "hide_fp4": true,
+        "hide_full_mmap": true,
+        "hide_interleaved": true,
+        "hide_q4": true,
+        "hide_q4k": false
+      },
+      "name": "interleaved_q4k",
+      "per_layer": [
+        {
+          "assertion": {
+            "max_rel_l2": 0.08382727205753326,
+            "min_cos": 0.9968209266662598,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.33014488220214844,
+            "max_abs_l2": 2.445359468460083,
+            "worst_pos": 2,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 0,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10175193101167679,
+            "min_cos": 0.9951077699661255,
+            "worst_rel_l2_pos": 24,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.14711999893188477,
+            "max_abs_l2": 1.0458481311798096,
+            "worst_pos": 3,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 1,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07596727460622787,
+            "min_cos": 0.9971314072608948,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.40933847427368164,
+            "max_abs_l2": 1.3357285261154175,
+            "worst_pos": 3,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 2,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08747555315494537,
+            "min_cos": 0.9963182210922241,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.29318904876708984,
+            "max_abs_l2": 1.731970191001892,
+            "worst_pos": 3,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 3,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09892137348651886,
+            "min_cos": 0.9950985908508301,
+            "worst_rel_l2_pos": 3,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.10100722312927246,
+            "max_abs_l2": 1.0736956596374512,
+            "worst_pos": 4,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 4,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08735992014408112,
+            "min_cos": 0.9970213174819946,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.09131047129631042,
+            "max_abs_l2": 0.8401163220405579,
+            "worst_pos": 2,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 5,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08957886695861816,
+            "min_cos": 0.996034562587738,
+            "worst_rel_l2_pos": 3,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.0990290641784668,
+            "max_abs_l2": 1.2944037914276123,
+            "worst_pos": 2,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 6,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10237058252096176,
+            "min_cos": 0.9948495626449585,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.25498008728027344,
+            "max_abs_l2": 1.1611474752426147,
+            "worst_pos": 2,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 7,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.11355500668287277,
+            "min_cos": 0.993649959564209,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.13630390167236328,
+            "max_abs_l2": 1.940434455871582,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 8,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10657794773578644,
+            "min_cos": 0.9943947792053223,
+            "worst_rel_l2_pos": 21,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.567629873752594,
+            "max_abs_l2": 4.916694641113281,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 9,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.12052087485790253,
+            "min_cos": 0.992737352848053,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 4.524543762207031,
+            "max_abs_l2": 54.71119689941406,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 10,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10874314606189728,
+            "min_cos": 0.9940694570541382,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 18.424686431884766,
+            "max_abs_l2": 230.47567749023438,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 11,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09357040375471115,
+            "min_cos": 0.995629608631134,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.13529951870441437,
+            "max_abs_l2": 1.514798879623413,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 12,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09490133076906204,
+            "min_cos": 0.9955059885978699,
+            "worst_rel_l2_pos": 15,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.5590543746948242,
+            "max_abs_l2": 1.7141507863998413,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 13,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.11032184213399887,
+            "min_cos": 0.9955042004585266,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 1.374664306640625,
+            "max_abs_l2": 3.01648211479187,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 14,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08480347692966461,
+            "min_cos": 0.9964326620101929,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.3794092833995819,
+            "max_abs_l2": 2.3216257095336914,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 15,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10138384252786636,
+            "min_cos": 0.9953679442405701,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 2.4095778465270996,
+            "max_abs_l2": 9.484200477600098,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 16,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07863544672727585,
+            "min_cos": 0.9971880912780762,
+            "worst_rel_l2_pos": 1,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.7362232208251953,
+            "max_abs_l2": 4.477398872375488,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 17,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07273519039154053,
+            "min_cos": 0.9973499178886414,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.3204689025878906,
+            "max_abs_l2": 2.480128765106201,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 18,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07512817531824112,
+            "min_cos": 0.9971906542778015,
+            "worst_rel_l2_pos": 5,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.5496664047241211,
+            "max_abs_l2": 1.8513906002044678,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 19,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07433190196752548,
+            "min_cos": 0.9973690509796143,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.24104928970336914,
+            "max_abs_l2": 2.3135428428649902,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 20,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07856924831867218,
+            "min_cos": 0.9969331622123718,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.3264303207397461,
+            "max_abs_l2": 2.1294240951538086,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 21,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08836369216442108,
+            "min_cos": 0.9961116313934326,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.3420596122741699,
+            "max_abs_l2": 2.3741862773895264,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 22,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08363626897335052,
+            "min_cos": 0.996525228023529,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.6035366058349609,
+            "max_abs_l2": 2.3472847938537598,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 23,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09702768176794052,
+            "min_cos": 0.9953310489654541,
+            "worst_rel_l2_pos": 14,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.179426908493042,
+            "max_abs_l2": 0.8891174793243408,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 24,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.09813638776540756,
+            "min_cos": 0.9951795339584351,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.10034851729869843,
+            "max_abs_l2": 1.3207706212997437,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 25,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.1175672709941864,
+            "min_cos": 0.9930648803710938,
+            "worst_rel_l2_pos": 14,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.1012258529663086,
+            "max_abs_l2": 0.9883925914764404,
+            "worst_pos": 1,
+            "worst_prompt": "paris"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 26,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10762187093496323,
+            "min_cos": 0.9943230152130127,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.19305872917175293,
+            "max_abs_l2": 1.49873685836792,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 27,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10950963199138641,
+            "min_cos": 0.9939893484115601,
+            "worst_rel_l2_pos": 4,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.2188119888305664,
+            "max_abs_l2": 1.145831823348999,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 28,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08381243050098419,
+            "min_cos": 0.9964982271194458,
+            "worst_rel_l2_pos": 9,
+            "worst_rel_l2_prompt": "apollo"
+          },
+          "diagnostic": {
+            "max_abs": 0.0515904426574707,
+            "max_abs_l2": 0.5736281275749207,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 29,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.10929009318351746,
+            "min_cos": 0.9941908717155457,
+            "worst_rel_l2_pos": 0,
+            "worst_rel_l2_prompt": "paris"
+          },
+          "diagnostic": {
+            "max_abs": 0.32585620880126953,
+            "max_abs_l2": 1.298559546470642,
+            "worst_pos": 1,
+            "worst_prompt": "code"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 30,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07755684852600098,
+            "min_cos": 0.9970059394836426,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.13676834106445312,
+            "max_abs_l2": 1.6771206855773926,
+            "worst_pos": 13,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 31,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.08304347842931747,
+            "min_cos": 0.9965980052947998,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.33451104164123535,
+            "max_abs_l2": 1.3126921653747559,
+            "worst_pos": 18,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 32,
+          "n_obs": 39
+        },
+        {
+          "assertion": {
+            "max_rel_l2": 0.07993486523628235,
+            "min_cos": 0.9968185424804688,
+            "worst_rel_l2_pos": 2,
+            "worst_rel_l2_prompt": "code"
+          },
+          "diagnostic": {
+            "max_abs": 0.4478902816772461,
+            "max_abs_l2": 4.008695125579834,
+            "worst_pos": 18,
+            "worst_prompt": "apollo"
+          },
+          "dispatch": "interleaved_q4k:dequant",
+          "fallthrough": false,
+          "layer": 33,
+          "n_obs": 39
+        }
+      ],
+      "per_prompt": {
+        "apollo": {
+          "dense_top1_prob": 0.9996875524520874,
+          "dense_top1_token": " Neil",
+          "prob_delta": 0.00011259317398071289,
+          "top1_match": true,
+          "walk_top1_prob": 0.9995749592781067,
+          "walk_top1_token": " Neil"
+        },
+        "code": {
+          "dense_top1_prob": 0.9982932806015015,
+          "dense_top1_token": "\n",
+          "prob_delta": 0.00008863210678100586,
+          "top1_match": true,
+          "walk_top1_prob": 0.9982046484947205,
+          "walk_top1_token": "\n"
+        },
+        "paris": {
+          "dense_top1_prob": 0.8065804839134216,
+          "dense_top1_token": " Paris",
+          "prob_delta": 0.025761008262634277,
+          "top1_match": true,
+          "walk_top1_prob": 0.8323414921760559,
+          "walk_top1_token": " Paris"
+        }
+      },
+      "sparse_k": null,
+      "verdict": "pass"
+    }
+  ],
+  "prompts": [
+    {
+      "key": "paris",
+      "text": "The capital of France is"
+    },
+    {
+      "key": "apollo",
+      "text": "The Apollo 11 mission landed on the Moon on July 20, 1969. The commander was"
+    },
+    {
+      "key": "code",
+      "text": "def fibonacci(n):"
+    }
+  ],
+  "vindex": "/Users/christopherhay/chris-source/larql/output/gemma3-4b-q4k-v2.vindex"
+}

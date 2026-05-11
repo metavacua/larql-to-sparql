@@ -1,7 +1,12 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use larql_core::{filter_graph, FilterConfig, SourceType};
+use larql_core::{filter_graph, FilterConfig, MetadataPredicate, SourceType};
+
+const METADATA_LAYER: &str = "layer";
+const METADATA_SELECTIVITY: &str = "selectivity";
+const METADATA_C_IN: &str = "c_in";
+const METADATA_C_OUT: &str = "c_out";
 
 #[derive(Args)]
 pub struct FilterArgs {
@@ -68,14 +73,36 @@ fn parse_source(s: &str) -> Option<SourceType> {
 pub fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
 
+    let mut metadata = Vec::new();
+    if let Some(min_layer) = args.min_layer {
+        metadata.push(MetadataPredicate::u64_min(
+            METADATA_LAYER,
+            u64::try_from(min_layer)?,
+        ));
+    }
+    if let Some(max_layer) = args.max_layer {
+        metadata.push(MetadataPredicate::u64_max(
+            METADATA_LAYER,
+            u64::try_from(max_layer)?,
+        ));
+    }
+    if let Some(min_selectivity) = args.min_selectivity {
+        metadata.push(MetadataPredicate::f64_min(
+            METADATA_SELECTIVITY,
+            min_selectivity,
+        ));
+    }
+    if let Some(min_c_in) = args.min_c_in {
+        metadata.push(MetadataPredicate::f64_min(METADATA_C_IN, min_c_in));
+    }
+    if let Some(min_c_out) = args.min_c_out {
+        metadata.push(MetadataPredicate::f64_min(METADATA_C_OUT, min_c_out));
+    }
+
     let config = FilterConfig {
         min_confidence: args.min_confidence,
         max_confidence: args.max_confidence,
-        min_layer: args.min_layer,
-        max_layer: args.max_layer,
-        min_selectivity: args.min_selectivity,
-        min_c_in: args.min_c_in,
-        min_c_out: args.min_c_out,
+        metadata,
         relations: if args.relations.is_empty() {
             None
         } else {
@@ -89,7 +116,11 @@ pub fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
         sources: if args.sources.is_empty() {
             None
         } else {
-            let parsed: Vec<SourceType> = args.sources.iter().filter_map(|s| parse_source(s)).collect();
+            let parsed: Vec<SourceType> = args
+                .sources
+                .iter()
+                .filter_map(|s| parse_source(s))
+                .collect();
             if parsed.is_empty() {
                 None
             } else {

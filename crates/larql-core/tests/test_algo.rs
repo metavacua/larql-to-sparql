@@ -41,6 +41,19 @@ fn test_shortest_path_prefers_high_confidence() {
 }
 
 #[test]
+fn test_shortest_path_returns_selected_multiedge() {
+    let mut g = Graph::new();
+    // Both edges reach B, but the first inserted edge is more expensive.
+    g.add_edge(Edge::new("A", "slow", "B").with_confidence(0.2));
+    g.add_edge(Edge::new("A", "fast", "B").with_confidence(0.9));
+
+    let (cost, path) = shortest_path(&g, "A", "B").unwrap();
+    assert!((cost - 0.1).abs() < 0.001);
+    assert_eq!(path.len(), 1);
+    assert_eq!(path[0].relation, "fast");
+}
+
+#[test]
 fn test_shortest_path_no_route() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));

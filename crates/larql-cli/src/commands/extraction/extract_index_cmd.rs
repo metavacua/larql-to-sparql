@@ -1,10 +1,11 @@
+use larql_vindex::format::filenames::*;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
+use larql_inference::InferenceModel;
 use larql_vindex::IndexBuildCallbacks;
-use larql_inference::{ InferenceModel};
 
 #[derive(Args)]
 pub struct ExtractIndexArgs {
@@ -24,6 +25,16 @@ pub struct ExtractIndexArgs {
     /// Top-K tokens to store per feature in down metadata (only for model extraction).
     #[arg(long, default_value = "10")]
     down_top_k: usize,
+
+    /// Per-expert top-K right singular vectors of `gate_proj` to store
+    /// instead of the full per-expert gate matrix. Default `0` = disabled
+    /// (write full per-expert gate, original behaviour). Set e.g. `64` to
+    /// produce a tractable summary vindex for many-experts MoE models
+    /// (DeepSeek-V4-Pro at 384 experts/layer would otherwise need ~370 GB
+    /// of gate_vectors; with `--summary-features-per-expert 64` it shrinks
+    /// to ~11 GB).
+    #[arg(long, default_value = "0")]
+    summary_features_per_expert: usize,
 
     /// How much of the model to include in the vindex. Each tier is a
     /// strict superset of the previous:
@@ -87,6 +98,14 @@ pub struct ExtractIndexArgs {
     #[arg(long)]
     down_q4k: bool,
 
+    /// Emit `down_features_q4k.bin` (W2 feature-major down) so per-feature
+    /// row decode can skip the `q4k_ffn_layer` cache. Adds ~14 MB / layer
+    /// at Gemma 4B dims; eliminates the ~840 MB heap cache ceiling on
+    /// CPU sparse walk and frees the same headroom across all grid shards.
+    /// Requires `--quant q4k`.
+    #[arg(long)]
+    feature_major_down: bool,
+
     /// Skip stages that already have output files (resume interrupted builds).
     #[arg(long)]
     resume: bool,
@@ -95,7 +114,7 @@ pub struct ExtractIndexArgs {
 fn parse_quant(s: &str) -> Result<larql_vindex::QuantFormat, String> {
     match s.to_lowercase().as_str() {
         "none" | "" => Ok(larql_vindex::QuantFormat::None),
-        "q4k" | "q4_k" => Ok(larql_vindex::QuantFormat::Q4k),
+        "q4k" | "q4_k" => Ok(larql_vindex::QuantFormat::Q4K),
         _ => Err(format!("unknown quant format: {s} (expected: none, q4k)")),
     }
 }
@@ -149,13 +168,7 @@ impl IndexBuildCallbacks for CliBuildCallbacks {
             .set_message(format!("{component} L{layer} ({}/{})", layer + 1, total));
     }
 
-    fn on_feature_progress(
-        &mut self,
-        component: &str,
-        _layer: usize,
-        done: usize,
-        total: usize,
-    ) {
+    fn on_feature_progress(&mut self, component: &str, _layer: usize, done: usize, total: usize) {
         if total > 0 {
             self.feature_bar.set_length(total as u64);
         }
@@ -200,7 +213,7 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     //   default              → F32
     // f16 is the default now; --f32 opts out. `--quant q4k` always
     // forces f16 on the side-channel tensors.
-    let dtype = if args.f32 && args.quant != larql_vindex::QuantFormat::Q4k {
+    let dtype = if args.f32 && args.quant != larql_vindex::QuantFormat::Q4K {
         larql_vindex::StorageDtype::F32
     } else {
         larql_vindex::StorageDtype::F16
@@ -213,7 +226,10 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         larql_vindex::build_vindex_from_vectors(vectors_dir, &args.output, &mut callbacks)?;
 
-        if matches!(level, larql_vindex::ExtractLevel::Inference | larql_vindex::ExtractLevel::All) {
+        if matches!(
+            level,
+            larql_vindex::ExtractLevel::Inference | larql_vindex::ExtractLevel::All
+        ) {
             let model_name = args.model.as_deref().ok_or(
                 "--model required with --level inference/all (need model to extract weights)",
             )?;
@@ -224,7 +240,10 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
                 ffn_compact: args.compact,
             };
             larql_vindex::write_model_weights_with_opts(
-                model.weights(), &args.output, &mut callbacks, weight_opts,
+                model.weights(),
+                &args.output,
+                &mut callbacks,
+                weight_opts,
             )?;
         }
     } else {
@@ -246,13 +265,19 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             larql_vindex::StorageDtype::F32 => "f32",
             larql_vindex::StorageDtype::F16 => "f16",
         };
-        eprintln!("Extracting: {} → {} (level={}, dtype={}, quant={})",
-            model_path.display(), args.output.display(), level_str, dtype_str, args.quant);
+        eprintln!(
+            "Extracting: {} → {} (level={}, dtype={}, quant={})",
+            model_path.display(),
+            args.output.display(),
+            level_str,
+            dtype_str,
+            args.quant
+        );
 
         let output = &args.output;
 
         // Find or create tokenizer
-        let tok_path = model_path.join("tokenizer.json");
+        let tok_path = model_path.join(TOKENIZER_JSON);
         let tokenizer = if tok_path.exists() {
             larql_vindex::tokenizers::Tokenizer::from_file(&tok_path)
                 .map_err(|e| format!("failed to load tokenizer: {e}"))?
@@ -264,18 +289,37 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             level,
             ffn_compact: args.compact,
         };
-        if args.drop_gate_vectors && args.quant != larql_vindex::QuantFormat::Q4k {
+        if args.drop_gate_vectors && args.quant != larql_vindex::QuantFormat::Q4K {
             return Err(
                 "--drop-gate-vectors requires --quant q4k (gate is rebuilt from Q4K at load)"
                     .into(),
             );
         }
-        if args.down_q4k && args.quant != larql_vindex::QuantFormat::Q4k {
+        if args.down_q4k && args.quant != larql_vindex::QuantFormat::Q4K {
             return Err(
                 "--down-q4k requires --quant q4k (only the Q4K writer honours this flag)".into(),
             );
         }
-        let q4k_opts = larql_vindex::Q4kWriteOptions { down_q4k: args.down_q4k };
+        if args.feature_major_down && args.quant != larql_vindex::QuantFormat::Q4K {
+            return Err(
+                "--feature-major-down requires --quant q4k (only the Q4K writer honours this flag)"
+                    .into(),
+            );
+        }
+        let q4k_opts = larql_vindex::Q4kWriteOptions {
+            down_q4k: args.down_q4k,
+            feature_major_down: args.feature_major_down,
+        };
+
+        // Per-expert SVD-summary tier — opt-in via flag. Threaded as env var
+        // so the streaming gate path can read it without an API break.
+        if args.summary_features_per_expert > 0 {
+            std::env::set_var(
+                "LARQL_SUMMARY_FEATURES_PER_EXPERT",
+                args.summary_features_per_expert.to_string(),
+            );
+        }
+
         larql_vindex::build_vindex_streaming(
             &model_path,
             &tokenizer,
@@ -290,6 +334,15 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.drop_gate_vectors,
             &mut callbacks,
         )?;
+
+        // Opportunistically copy HF metadata (tokenizer_config.json,
+        // special_tokens_map.json, generation_config.json) from the source
+        // directory into the vindex. Chat-template-aware runtimes read
+        // `tokenizer_config.json::chat_template` from here; missing files
+        // are silently skipped.
+        if let Err(e) = larql_vindex::snapshot_hf_metadata(&model_path, output) {
+            eprintln!("  warning: failed to snapshot HF metadata: {e}");
+        }
     }
 
     callbacks.feature_bar.finish_and_clear();
@@ -300,27 +353,24 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Output: {}", args.output.display());
 
     if build_elapsed.as_secs() >= 60 {
-        eprintln!(
-            "  Build time: {:.1}min",
-            build_elapsed.as_secs_f64() / 60.0
-        );
+        eprintln!("  Build time: {:.1}min", build_elapsed.as_secs_f64() / 60.0);
     } else {
         eprintln!("  Build time: {:.1}s", build_elapsed.as_secs_f64());
     }
 
     for name in &[
-        "index.json",
-        "gate_vectors.bin",
-        "embeddings.bin",
+        INDEX_JSON,
+        GATE_VECTORS_BIN,
+        EMBEDDINGS_BIN,
         "down_meta.jsonl",
-        "down_meta.bin",
-        "tokenizer.json",
-        "attn_weights.bin",
-        "up_weights.bin",
-        "down_weights.bin",
-        "norms.bin",
-        "lm_head.bin",
-        "weight_manifest.json",
+        DOWN_META_BIN,
+        TOKENIZER_JSON,
+        ATTN_WEIGHTS_BIN,
+        UP_WEIGHTS_BIN,
+        DOWN_WEIGHTS_BIN,
+        NORMS_BIN,
+        LM_HEAD_BIN,
+        WEIGHT_MANIFEST_JSON,
     ] {
         let path = args.output.join(name);
         if let Ok(meta) = std::fs::metadata(&path) {
@@ -342,7 +392,8 @@ pub fn run(args: ExtractIndexArgs) -> Result<(), Box<dyn std::error::Error>> {
     let total_size: u64 = std::fs::read_dir(&args.output)
         .ok()
         .map(|entries| {
-            entries.filter_map(|e| e.ok())
+            entries
+                .filter_map(|e| e.ok())
                 .filter_map(|e| e.metadata().ok())
                 .map(|m| m.len())
                 .sum()

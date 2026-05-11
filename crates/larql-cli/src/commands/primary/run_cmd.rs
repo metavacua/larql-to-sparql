@@ -18,6 +18,7 @@
 //! All other walk tuning (top-K, layers, compare, metal opt-in) lives
 //! under `larql dev walk` for power users.
 
+use larql_vindex::format::filenames::*;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -45,9 +46,7 @@ pub enum KvCacheKind {
 pub fn parse_kv_cache(s: &str) -> Result<KvCacheKind, String> {
     match s.to_lowercase().as_str() {
         "standard" | "full" | "fp32" => Ok(KvCacheKind::Standard),
-        "markov-bounded" | "markov" | "bounded" | "sliding" => {
-            Ok(KvCacheKind::MarkovBounded)
-        }
+        "markov-bounded" | "markov" | "bounded" | "sliding" => Ok(KvCacheKind::MarkovBounded),
         "none" | "off" => Ok(KvCacheKind::None),
         _ => Err(format!(
             "unknown kv-cache strategy: {s} \
@@ -111,6 +110,26 @@ pub struct RunArgs {
     #[arg(long, default_value = "60")]
     pub ffn_timeout_secs: u64,
 
+    /// Dense FFN dispatch strategy when `--ffn` is set.
+    ///
+    ///   streaming  (default) — 60 sequential round-trips per decode token,
+    ///              one per layer.  Exact: each layer's FFN input uses the
+    ///              correct h_post_attn from the previous layer.
+    ///
+    ///   batch      — parallel predispatch: all 60 layers fired in parallel
+    ///              threads, then injected in a second Metal pass.
+    ///              Approximate but much faster: wall time ≈ one HTTP round
+    ///              trip instead of 60.  Combine with
+    ///              `--ffn-predispatch-iters 2` for better accuracy.
+    #[arg(long, default_value = "streaming", value_name = "streaming|batch")]
+    pub ffn_dispatch: String,
+
+    /// Number of predispatch iterations per token when `--ffn-dispatch batch`
+    /// is set.  1 (default) = one parallel dispatch + two Metal passes;
+    /// 2 = two dispatches + three passes, more accurate.
+    #[arg(long, default_value = "1", value_name = "N")]
+    pub ffn_predispatch_iters: usize,
+
     /// Use Metal GPU backend for Q4K inference (macOS only).
     #[arg(long)]
     pub metal: bool,
@@ -147,6 +166,62 @@ pub struct RunArgs {
     /// Slightly slower per token; large reliability win on small Q4K models.
     #[arg(long)]
     pub constrained: bool,
+
+    /// MoE expert shard map: `"START-END=URL,START-END=URL,..."`
+    ///
+    /// Enables remote expert dispatch for hybrid-MoE models (e.g. Gemma 4 26B-A4B).
+    /// Each segment maps an inclusive expert-ID range to a shard server URL.
+    ///
+    ///   larql serve output/gemma4-26b-a4b-q4k.vindex --experts 0-63 --port 8081
+    ///   larql serve output/gemma4-26b-a4b-q4k.vindex --experts 64-127 --port 8082
+    ///   larql run   output/gemma4-26b-a4b-q4k.vindex \
+    ///               --moe-shards "0-63=http://localhost:8081,64-127=http://localhost:8082" \
+    ///               "The capital of France is"
+    ///
+    /// Client loads attention + dense-FFN + router weights locally (~2 GB).
+    /// Expert weights (4 MB × experts_owned × layers) stay on the shard servers.
+    /// Router runs locally per layer; top-K expert residuals are dispatched in
+    /// parallel to the owning shard(s) via `POST /v1/expert/batch`.
+    #[arg(long, value_name = "SHARDS")]
+    pub moe_shards: Option<String>,
+
+    /// Path to a JSON manifest for fine-grained per-(layer, expert) shard
+    /// ownership.  Format:
+    ///
+    /// ```json
+    /// { "shards": [
+    ///     { "url": "grpc://hostA:9081",
+    ///       "layer_experts": {"0": [[0,31]], "1": [[0,15]]} },
+    ///     { "url": "grpc://hostB:9082",
+    ///       "layer_experts": {"0": [[32,63]], "1": [[16,31]]} }
+    ///   ] }
+    /// ```
+    ///
+    /// Each shard owns an explicit `(layer, expert_id)` set instead of a
+    /// layer-uniform expert range — pairs naturally with the server's
+    /// `--units PATH` flag.  Mutually exclusive with `--moe-shards`.
+    #[arg(long, value_name = "PATH")]
+    pub moe_units_manifest: Option<std::path::PathBuf>,
+
+    /// MoE dispatch strategy when `--moe-shards` is set.
+    ///
+    ///   streaming  (default) — one gRPC stream per shard, 30 sequential
+    ///              round-trips per decode token.  Exact: each layer's expert
+    ///              input uses the correct h_post_attn.
+    ///
+    ///   batch      — parallel batch dispatch: all layers in one round trip,
+    ///              approximate.  Combine with `--moe-predispatch-iters 2` for
+    ///              better accuracy.
+    #[arg(long, default_value = "streaming", value_name = "streaming|batch")]
+    pub moe_dispatch: String,
+
+    /// Number of predispatch iterations per token when `--moe-dispatch batch`
+    /// is set.  1 (default) = one dispatch + two passes; 2 = two dispatches +
+    /// three passes.  Each additional iteration improves routing accuracy by
+    /// incorporating prior expert contributions into h_post_attn before
+    /// re-routing, at the cost of one extra remote round-trip per token.
+    #[arg(long, default_value = "1", value_name = "N")]
+    pub moe_predispatch_iters: usize,
 }
 
 pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -161,6 +236,45 @@ pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     if args.experts {
         return experts::run(&vindex_path, &args);
+    }
+
+    if let Some(ref ffn_url) = args.ffn {
+        let prompt = args.prompt.as_deref().ok_or(
+            "--ffn requires a prompt argument (chat mode not yet supported with --ffn-dispatch batch)",
+        )?;
+        return run_with_remote_ffn(
+            &vindex_path,
+            prompt,
+            ffn_url,
+            args.ffn_timeout_secs,
+            args.max_tokens,
+            &args.ffn_dispatch,
+            args.ffn_predispatch_iters,
+        );
+    }
+
+    if args.moe_shards.is_some() && args.moe_units_manifest.is_some() {
+        return Err(
+            "--moe-shards and --moe-units-manifest are mutually exclusive — \
+             use --moe-shards for layer-uniform expert ranges, \
+             --moe-units-manifest for per-(layer, expert) ownership"
+                .into(),
+        );
+    }
+    if args.moe_shards.is_some() || args.moe_units_manifest.is_some() {
+        let prompt = args.prompt.as_deref().ok_or(
+            "--moe-shards / --moe-units-manifest requires a prompt argument \
+             (chat mode not yet supported)",
+        )?;
+        return run_with_moe_shards(
+            &vindex_path,
+            prompt,
+            args.moe_shards.as_deref(),
+            args.moe_units_manifest.as_deref(),
+            args.max_tokens,
+            &args.moe_dispatch,
+            args.moe_predispatch_iters,
+        );
     }
 
     if let Some(prompt) = args.prompt.as_deref() {
@@ -246,7 +360,279 @@ fn build_walk_args(
         metal: args.metal,
         ffn_remote: args.ffn.clone(),
         ffn_remote_timeout_secs: args.ffn_timeout_secs,
+        ffn_dispatch: args.ffn_dispatch.clone(),
+        ffn_predispatch_iters: args.ffn_predispatch_iters,
     }
+}
+
+/// `--moe-shards` dispatch path.
+///
+/// Metal runs attention + dense FFN on GPU (same as normal `larql run --metal`).
+/// MoE expert blocks are dispatched to remote mini-processes via binary
+/// `POST /v1/expert/batch` instead of running locally.
+fn run_with_moe_shards(
+    vindex_path: &std::path::Path,
+    prompt: &str,
+    shards_str: Option<&str>,
+    units_manifest: Option<&std::path::Path>,
+    max_tokens: usize,
+    dispatch: &str,
+    predispatch_iters: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use larql_inference::ffn::moe_remote::{parse_unit_manifest, RemoteMoeBackend, ShardConfig};
+    use larql_inference::{generate_with_remote_moe, generate_with_remote_moe_batch};
+
+    // Pick ownership mode: legacy `--moe-shards` (layer-uniform ranges) or
+    // `--moe-units-manifest` (fine-grained per-(layer, expert) sets).  The
+    // mutually-exclusive guard at the caller means at most one is set here.
+    let configs: Vec<ShardConfig> = if let Some(path) = units_manifest {
+        let cfgs = parse_unit_manifest(path).map_err(|e| format!("--moe-units-manifest: {e}"))?;
+        if cfgs.is_empty() {
+            return Err("--moe-units-manifest: manifest contains no shards".into());
+        }
+        eprintln!(
+            "Loaded {} shard(s) from unit manifest at {}",
+            cfgs.len(),
+            path.display()
+        );
+        cfgs
+    } else if let Some(s) = shards_str {
+        // Parse "START-END=URL,START-END=URL,..." into Vec<ShardConfig>.
+        let mut cfgs: Vec<ShardConfig> = Vec::new();
+        for segment in s.split(',') {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                continue;
+            }
+            let mut parts = segment.splitn(2, '=');
+            let range_str = parts
+                .next()
+                .ok_or_else(|| format!("malformed shard segment: {segment:?}"))?;
+            let url = parts
+                .next()
+                .ok_or_else(|| format!("missing URL in shard segment: {segment:?}"))?;
+            let (start, end_incl) = ShardConfig::parse_range(range_str)
+                .ok_or_else(|| format!("bad expert range {range_str:?} in --moe-shards"))?;
+            cfgs.push(ShardConfig::new(start, end_incl, url));
+        }
+        if cfgs.is_empty() {
+            return Err("--moe-shards: no valid shard segments found".into());
+        }
+        cfgs
+    } else {
+        return Err("internal error: run_with_moe_shards called with neither flag".into());
+    };
+
+    let num_shards = configs.len();
+    // Initialise compute backend early so we can report it in the topology banner.
+    let backend = larql_compute::default_backend();
+    eprintln!("Connecting to {} MoE shard(s)…", num_shards);
+    let remote = RemoteMoeBackend::connect(configs)
+        .map_err(|e| format!("failed to connect to MoE shards: {e}"))?;
+    eprintln!("  Attention:  {} (local)", backend.name());
+    eprintln!("  Router:     local");
+    eprintln!(
+        "  Experts:    remote  (sharded across {} endpoint{})",
+        num_shards,
+        if num_shards == 1 { "" } else { "s" }
+    );
+
+    // Client loads attn + dense FFN + norms + router weights — no expert bytes.
+    let mut cb = larql_vindex::SilentLoadCallbacks;
+    let weights = larql_vindex::load_model_weights_q4k(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load client weights: {e}"))?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)
+        .map_err(|e| format!("failed to load tokenizer: {e}"))?;
+    let mut index = larql_vindex::VectorIndex::load_vindex(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load vindex: {e}"))?;
+    index
+        .load_attn_q4k(vindex_path)
+        .map_err(|e| format!("failed to load attn Q4K: {e}"))?;
+    index
+        .load_interleaved_q4k(vindex_path)
+        .map_err(|e| format!("failed to load interleaved Q4K: {e}"))?;
+    let _ = index.load_lm_head_q4(vindex_path);
+
+    // Prompt-shape options (centralised in `larql_inference::chat::render_user_prompt`):
+    //   default              → chat_template.jinja with auto-injected default system prompt for Gemma 4
+    //   LARQL_RAW_PROMPT=1   → raw user string with <bos> prepended (no template)
+    //   LARQL_THINKING=1     → enable_thinking=true (skips empty thought block)
+    //   LARQL_SYSTEM=<text>  → explicit system message
+    //   LARQL_NO_DEFAULT_SYSTEM=1 → suppress the auto-injected Gemma 4 default
+    let wrapped_prompt =
+        larql_inference::chat::render_user_prompt(vindex_path, weights.arch.family(), prompt)?;
+    if std::env::var("LARQL_DUMP_PROMPT").is_ok() {
+        let mode = if std::env::var("LARQL_RAW_PROMPT").is_ok() {
+            "raw"
+        } else if std::env::var("LARQL_THINKING").is_ok() {
+            "thinking"
+        } else {
+            "default"
+        };
+        eprintln!(
+            "[chat] mode={mode} ---PROMPT START---\n{wrapped_prompt}\n[chat] ---PROMPT END---"
+        );
+    }
+    let prompt_ids = larql_inference::encode_prompt(&tokenizer, &*weights.arch, &wrapped_prompt)
+        .map_err(|e| format!("failed to tokenise prompt: {e}"))?;
+    eprintln!("[chat] tokenised to {} ids", prompt_ids.len());
+
+    let eos = larql_inference::layer_graph::generate::eos::EosConfig::from_vindex_dir(vindex_path);
+    let result = if dispatch == "batch" {
+        generate_with_remote_moe_batch(
+            &weights,
+            &tokenizer,
+            prompt_ids,
+            max_tokens,
+            &index,
+            &remote,
+            &*backend,
+            &eos,
+            predispatch_iters,
+        )
+    } else {
+        generate_with_remote_moe(
+            &weights, &tokenizer, prompt_ids, max_tokens, &index, &remote, &*backend, &eos,
+        )
+    }
+    .map_err(|e| format!("grid generate failed ({dispatch}): {e}"))?;
+
+    for tok in &result.tokens {
+        print!("{tok}");
+    }
+    if !result.tokens.is_empty() {
+        println!();
+    }
+    let n = result.decode_ms.len();
+    if n > 0 {
+        let avg = result.decode_ms.iter().sum::<f64>() / n as f64;
+        let tok_s = 1000.0 / avg;
+        let num_layers = weights.num_layers;
+        let hidden = weights.hidden_size;
+        let top_k = weights.arch.num_experts_per_token();
+        let experts_invoked = num_layers * top_k * n;
+        // One f32 residual vector per layer per shard in each direction.
+        let bytes_per_token = num_layers * num_shards * hidden * std::mem::size_of::<f32>();
+        let kb = |b: usize| b as f64 / 1024.0;
+        eprintln!();
+        eprintln!("  decode:          {tok_s:.1} tok/s");
+        eprintln!(
+            "  experts invoked: {experts_invoked}  ({num_layers} layers × top-{top_k} × {n} token{})",
+            if n == 1 { "" } else { "s" }
+        );
+        eprintln!(
+            "  bytes sent:      ~{:.0} KB  ({num_layers} layers × {num_shards} shard{} × hidden × f32)",
+            kb(bytes_per_token * n),
+            if num_shards == 1 { "" } else { "s" }
+        );
+        eprintln!(
+            "  bytes recv:      ~{:.0} KB  ({num_layers} layers × {num_shards} shard{} × hidden × f32)",
+            kb(bytes_per_token * n),
+            if num_shards == 1 { "" } else { "s" }
+        );
+    }
+    Ok(())
+}
+
+/// `--ffn URL` dispatch path for dense models.
+///
+/// Metal runs attention on the local GPU. Every layer's FFN is a round trip
+/// to the remote server at `ffn_url` via `LayerShardedBackend`. The local
+/// vindex supplies attention weights; the remote server supplies FFN outputs.
+///
+/// This is analogous to `run_with_moe_shards` for hybrid-MoE models, but
+/// simpler: there is no local FFN and no router — every layer unconditionally
+/// calls the remote server.
+fn run_with_remote_ffn(
+    vindex_path: &std::path::Path,
+    prompt: &str,
+    ffn_url: &str,
+    ffn_timeout_secs: u64,
+    max_tokens: usize,
+    dispatch: &str,
+    predispatch_iters: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use larql_inference::{
+        generate_with_remote_ffn, generate_with_remote_ffn_batch, LayerShardedBackend,
+    };
+    use std::time::Duration;
+
+    let timeout = Duration::from_secs(ffn_timeout_secs);
+    let backend = larql_compute::default_backend();
+    eprintln!("Connecting to remote FFN at {ffn_url}…");
+    let remote = LayerShardedBackend::connect(ffn_url, timeout)
+        .map_err(|e| format!("failed to connect to remote FFN server: {e}"))?;
+    eprintln!("  Attention:  {} (local)", backend.name());
+    eprintln!("  FFN:        remote  ({})  dispatch={dispatch}", ffn_url);
+
+    let mut cb = larql_vindex::SilentLoadCallbacks;
+    let weights = larql_vindex::load_model_weights_q4k(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load client weights: {e}"))?;
+    let tokenizer = larql_vindex::load_vindex_tokenizer(vindex_path)
+        .map_err(|e| format!("failed to load tokenizer: {e}"))?;
+    let mut index = larql_vindex::VectorIndex::load_vindex(vindex_path, &mut cb)
+        .map_err(|e| format!("failed to load vindex: {e}"))?;
+    index
+        .load_attn_q4k(vindex_path)
+        .map_err(|e| format!("failed to load attn Q4K: {e}"))?;
+    index
+        .load_interleaved_q4k(vindex_path)
+        .map_err(|e| format!("failed to load interleaved Q4K: {e}"))?;
+    let _ = index.load_lm_head_q4(vindex_path);
+
+    let wrapped_prompt =
+        larql_inference::chat::render_user_prompt(vindex_path, weights.arch.family(), prompt)?;
+    let prompt_ids = larql_inference::encode_prompt(&tokenizer, &*weights.arch, &wrapped_prompt)
+        .map_err(|e| format!("failed to tokenise prompt: {e}"))?;
+    eprintln!("[chat] tokenised to {} ids", prompt_ids.len());
+
+    let eos = larql_inference::layer_graph::generate::eos::EosConfig::from_vindex_dir(vindex_path);
+    let result = if dispatch == "batch" {
+        generate_with_remote_ffn_batch(
+            &weights,
+            &tokenizer,
+            prompt_ids,
+            max_tokens,
+            &index,
+            &*backend,
+            &remote,
+            &eos,
+            predispatch_iters,
+        )
+    } else {
+        generate_with_remote_ffn(
+            &weights, &tokenizer, prompt_ids, max_tokens, &index, &*backend, &remote, &eos,
+        )
+    }
+    .map_err(|e| format!("remote-ffn generate failed ({dispatch}): {e}"))?;
+
+    for tok in &result.tokens {
+        print!("{tok}");
+    }
+    if !result.tokens.is_empty() {
+        println!();
+    }
+    let n = result.decode_ms.len();
+    if n > 0 {
+        let avg = result.decode_ms.iter().sum::<f64>() / n as f64;
+        let tok_s = 1000.0 / avg;
+        let num_layers = weights.num_layers;
+        let hidden = weights.hidden_size;
+        // One f32 residual in each direction per layer.
+        let bytes_per_token = num_layers * hidden * std::mem::size_of::<f32>();
+        let kb = |b: usize| b as f64 / 1024.0;
+        eprintln!();
+        eprintln!("  decode:     {tok_s:.1} tok/s");
+        eprintln!(
+            "  bytes sent: ~{:.0} KB  ({num_layers} layers × hidden × f32)",
+            kb(bytes_per_token * n)
+        );
+        eprintln!(
+            "  bytes recv: ~{:.0} KB  ({num_layers} layers × hidden × f32)",
+            kb(bytes_per_token * n)
+        );
+    }
+    Ok(())
 }
 
 /// `--experts` wiring: load registry, wrap prompt, generate, dispatch.
@@ -342,31 +728,33 @@ mod experts {
                 Strategy::MetalQ4K => {
                     let q4_index = self.q4_index.as_ref().expect("metal-q4k needs q4_index");
                     let backend = larql_compute::default_backend();
-                    let cached_layers = larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
+                    let cached_layers =
+                        larql_inference::layer_graph::CachedLayerGraph::from_residuals(Vec::new());
+                    let num_layers = self.weights.num_layers;
                     let result = if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
                         mask.set_seed_text(OP_CALL_PREFIX);
                         larql_inference::layer_graph::generate_constrained(
-                            &self.weights,
+                            &mut self.weights,
                             &self.tokenizer,
                             &token_ids,
                             max_tokens,
                             q4_index,
                             &*backend,
                             &cached_layers,
-                            0..self.weights.num_layers,
+                            0..num_layers,
                             |ids, logits| mask.apply(ids, logits),
                         )
                     } else {
                         larql_inference::layer_graph::generate(
-                            &self.weights,
+                            &mut self.weights,
                             &self.tokenizer,
                             &token_ids,
                             max_tokens,
                             q4_index,
                             &*backend,
                             &cached_layers,
-                            0..self.weights.num_layers,
+                            0..num_layers,
                         )
                     };
                     result.tokens.iter().map(|(t, _)| t.as_str()).collect()
@@ -396,7 +784,9 @@ mod experts {
                     toks.into_iter().map(|(t, _)| t).collect()
                 }
                 Strategy::CpuF32 => {
-                    let ffn = WeightFfn { weights: &self.weights };
+                    let ffn = WeightFfn {
+                        weights: &self.weights,
+                    };
                     let mut text = String::new();
                     if let Some(ops) = mask_op_names {
                         let mut mask = OpNameMask::new(ops.to_vec(), &self.tokenizer);
@@ -469,14 +859,16 @@ mod experts {
         }
         if let Some(exe) = exe_path {
             for ancestor in exe.ancestors() {
-                let candidate = ancestor
-                    .join("crates/larql-experts/target/wasm32-wasip1/release");
+                let candidate = ancestor.join("crates/larql-experts/target/wasm32-wasip1/release");
                 if candidate.is_dir() {
                     return Ok(candidate);
                 }
             }
         }
-        Err("could not locate WASM experts directory; pass --experts-dir or set LARQL_EXPERTS_DIR".into())
+        Err(
+            "could not locate WASM experts directory; pass --experts-dir or set LARQL_EXPERTS_DIR"
+                .into(),
+        )
     }
 
     /// Detect the chat template from a vindex.
@@ -487,7 +879,7 @@ mod experts {
     /// model dirs, then to `Plain` if neither resolves.
     fn detect_template(vindex_path: &Path) -> ChatTemplate {
         // Try vindex index.json first.
-        let index_path = vindex_path.join("index.json");
+        let index_path = vindex_path.join(INDEX_JSON);
         if let Ok(text) = std::fs::read_to_string(&index_path) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(family) = value.get("family").and_then(|v| v.as_str()) {
@@ -516,8 +908,8 @@ mod experts {
     /// Metal is available + requested, pick a decode strategy.
     fn pick_strategy(quant: larql_vindex::QuantFormat, metal_ready: bool) -> Strategy {
         match (quant, metal_ready) {
-            (larql_vindex::QuantFormat::Q4k, true) => Strategy::MetalQ4K,
-            (larql_vindex::QuantFormat::Q4k, false) => Strategy::CpuQ4K,
+            (larql_vindex::QuantFormat::Q4K, true) => Strategy::MetalQ4K,
+            (larql_vindex::QuantFormat::Q4K, false) => Strategy::CpuQ4K,
             _ => Strategy::CpuF32,
         }
     }
@@ -529,7 +921,12 @@ mod experts {
         let strategy = pick_strategy(cfg.quant, metal_ready_for_q4(args.metal));
 
         if args.verbose {
-            eprintln!("strategy: {} (quant={:?}, metal_requested={})", strategy.name(), cfg.quant, args.metal);
+            eprintln!(
+                "strategy: {} (quant={:?}, metal_requested={})",
+                strategy.name(),
+                cfg.quant,
+                args.metal
+            );
         }
 
         let (weights, q4_index) = match strategy {
@@ -551,11 +948,19 @@ mod experts {
             }
         };
         let tokenizer = load_vindex_tokenizer(vindex_path)?;
-        Ok(Runtime { weights, tokenizer, q4_index, strategy })
+        Ok(Runtime {
+            weights,
+            tokenizer,
+            q4_index,
+            strategy,
+        })
     }
 
     /// Print a single dispatch outcome (or skip reason) to stdout/stderr.
-    fn print_dispatch(model_output: &str, outcome: Result<DispatchOutcome, DispatchSkip>) -> Result<(), BoxErr> {
+    fn print_dispatch(
+        model_output: &str,
+        outcome: Result<DispatchOutcome, DispatchSkip>,
+    ) -> Result<(), BoxErr> {
         match outcome {
             Ok(DispatchOutcome { call, result }) => {
                 println!(
@@ -577,9 +982,10 @@ mod experts {
             Err(DispatchSkip::UnknownOp(op)) => {
                 Err(format!("model emitted unknown op `{op}`; raw output: {model_output}").into())
             }
-            Err(DispatchSkip::ExpertDeclined { op, args }) => {
-                Err(format!("expert `{op}` declined args {args}; raw output: {model_output}").into())
-            }
+            Err(DispatchSkip::ExpertDeclined { op, args }) => Err(format!(
+                "expert `{op}` declined args {args}; raw output: {model_output}"
+            )
+            .into()),
         }
     }
 
@@ -591,7 +997,11 @@ mod experts {
         }
         let registry = ExpertRegistry::load_dir(&experts_dir)?;
         if args.verbose {
-            eprintln!("experts: loaded {} modules ({} ops)", registry.len(), registry.ops().len());
+            eprintln!(
+                "experts: loaded {} modules ({} ops)",
+                registry.len(),
+                registry.ops().len()
+            );
         }
 
         // Optionally narrow the registry to a focused subset — small models
@@ -641,11 +1051,7 @@ mod experts {
         } else {
             None
         };
-        let model_output = runtime.generate(
-            &wrapped,
-            args.max_tokens,
-            mask_op_names.as_deref(),
-        )?;
+        let model_output = runtime.generate(&wrapped, args.max_tokens, mask_op_names.as_deref())?;
         if args.verbose {
             eprintln!("model output: {model_output:?}");
         }
@@ -695,7 +1101,7 @@ mod experts {
         #[test]
         fn pick_strategy_q4k_with_metal_picks_metal() {
             assert!(matches!(
-                pick_strategy(QuantFormat::Q4k, true),
+                pick_strategy(QuantFormat::Q4K, true),
                 Strategy::MetalQ4K
             ));
         }
@@ -703,7 +1109,7 @@ mod experts {
         #[test]
         fn pick_strategy_q4k_without_metal_picks_cpu_q4k() {
             assert!(matches!(
-                pick_strategy(QuantFormat::Q4k, false),
+                pick_strategy(QuantFormat::Q4K, false),
                 Strategy::CpuQ4K
             ));
         }
@@ -741,18 +1147,17 @@ mod experts {
             let err = resolve_experts_dir_inner(Some(bogus.clone()), None, None).unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("--experts-dir does not exist"), "got: {msg}");
-            assert!(msg.contains(bogus.to_str().unwrap()), "msg should name the path; got: {msg}");
+            assert!(
+                msg.contains(bogus.to_str().unwrap()),
+                "msg should name the path; got: {msg}"
+            );
         }
 
         #[test]
         fn resolve_falls_through_to_env_dir() {
             let env = tempfile::tempdir().expect("tempdir");
-            let resolved = resolve_experts_dir_inner(
-                None,
-                Some(env.path().to_path_buf()),
-                None,
-            )
-            .expect("ok");
+            let resolved =
+                resolve_experts_dir_inner(None, Some(env.path().to_path_buf()), None).expect("ok");
             assert_eq!(resolved, env.path());
         }
 
@@ -775,7 +1180,10 @@ mod experts {
                 Some(exe),
             )
             .expect("ok");
-            assert_eq!(resolved.canonicalize().unwrap(), wasm_dir.canonicalize().unwrap());
+            assert_eq!(
+                resolved.canonicalize().unwrap(),
+                wasm_dir.canonicalize().unwrap()
+            );
         }
 
         #[test]
@@ -788,7 +1196,10 @@ mod experts {
             .unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("could not locate"), "got: {msg}");
-            assert!(msg.contains("--experts-dir"), "should hint at the flag; got: {msg}");
+            assert!(
+                msg.contains("--experts-dir"),
+                "should hint at the flag; got: {msg}"
+            );
         }
 
         // ── print_dispatch ─────────────────────────────────────────────────
@@ -799,7 +1210,10 @@ mod experts {
             let err = print_dispatch("raw model output", outcome).unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains("unknown op `foo`"), "got: {msg}");
-            assert!(msg.contains("raw model output"), "should include raw output; got: {msg}");
+            assert!(
+                msg.contains("raw model output"),
+                "should include raw output; got: {msg}"
+            );
         }
 
         #[test]
@@ -821,4 +1235,3 @@ mod experts {
         }
     }
 }
-

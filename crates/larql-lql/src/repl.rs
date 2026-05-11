@@ -87,9 +87,10 @@ pub fn run_repl() {
                 if !trimmed_stmt.ends_with(';')
                     && !trimmed_stmt.to_uppercase().starts_with("STATS")
                     && !trimmed_stmt.to_uppercase().starts_with("SHOW MODELS")
-                    && !is_complete_statement(trimmed_stmt) {
-                        continue;
-                    }
+                    && !is_complete_statement(trimmed_stmt)
+                {
+                    continue;
+                }
 
                 let input = statement_buf.trim().to_string();
                 statement_buf.clear();
@@ -169,10 +170,16 @@ fn run_repl_basic() {
         if statement_buf.is_empty() {
             match trimmed.to_lowercase().as_str() {
                 "exit" | "quit" | "\\q" => break,
-                "clear" | "clear;" => { print!("\x1B[2J\x1B[1;1H");
-                            use std::io::Write;
-                            std::io::stdout().flush().ok(); continue; }
-                "help" | "\\h" | "\\?" => { print_help(); continue; }
+                "clear" | "clear;" => {
+                    print!("\x1B[2J\x1B[1;1H");
+                    use std::io::Write;
+                    std::io::stdout().flush().ok();
+                    continue;
+                }
+                "help" | "\\h" | "\\?" => {
+                    print_help();
+                    continue;
+                }
                 "" => continue,
                 _ => {}
             }
@@ -187,14 +194,24 @@ fn run_repl_basic() {
 
         let input = statement_buf.trim().to_string();
         statement_buf.clear();
-        if input.is_empty() { continue; }
+        if input.is_empty() {
+            continue;
+        }
 
         match parser::parse(&input) {
             Ok(stmt) => match session.execute(&stmt) {
-                Ok(lines) => { for line in &lines { println!("{line}"); } }
-                Err(e) => { eprintln!("Error: {e}"); }
+                Ok(lines) => {
+                    for line in &lines {
+                        println!("{line}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                }
             },
-            Err(e) => { eprintln!("Error: {e}"); }
+            Err(e) => {
+                eprintln!("Error: {e}");
+            }
         }
     }
     println!("Goodbye.");
@@ -423,5 +440,93 @@ mod tests {
     fn run_statement_parse_error() {
         let result = run_statement("NOT A VALID STATEMENT;");
         assert!(result.is_err());
+    }
+
+    // ── Comment / whitespace handling ──────────────────────────────
+
+    #[test]
+    fn batch_empty_string_returns_empty() {
+        let result = run_batch("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn batch_only_comments_returns_empty() {
+        let result = run_batch("-- one\n-- two\n").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn batch_only_whitespace_returns_empty() {
+        // Whitespace-only input has no statement text after splitting;
+        // run_batch should silently produce no output.
+        let result = run_batch("    \n  \t  ").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn batch_mixed_comment_and_statement() {
+        let result = run_batch("-- header\nSHOW MODELS;\n-- trailer\n").unwrap();
+        assert!(!result.is_empty());
+        assert!(!result.iter().any(|l| l.contains("header")));
+    }
+
+    // ── String / quote handling in split_statements ──────────────────
+
+    #[test]
+    fn split_preserves_single_quoted_strings() {
+        let stmts = split_statements(r#"WALK 'hello; world' TOP 5;"#);
+        assert_eq!(stmts.len(), 1);
+        assert!(stmts[0].contains("hello; world"));
+    }
+
+    #[test]
+    fn split_handles_double_then_single_quotes() {
+        let stmts = split_statements(r#"A "x;" B 'y;' C;"#);
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn split_two_statements_each_with_quoted_semicolon() {
+        let stmts = split_statements(r#"A "x;y"; B 'p;q';"#);
+        assert_eq!(stmts.len(), 2);
+    }
+
+    // ── Help banner ──────────────────────────────────────────────
+
+    #[test]
+    fn print_help_does_not_panic() {
+        // Trivially invokes print_help() to cover the println! and
+        // confirm the BANNER text is well-formed.
+        super::print_help();
+    }
+
+    #[test]
+    fn banner_constants_have_expected_shape() {
+        // Sanity: BANNER is rendered at REPL start-up; the PROMPT
+        // ends with "> " so users can tell the REPL is taking input,
+        // and CONTINUATION is at least as wide so multi-line entries
+        // visually line up with the continuation prompt.
+        assert!(super::BANNER.contains("Lazarus") || super::BANNER.contains("LARQL"));
+        assert!(super::PROMPT.contains(">"));
+        assert_eq!(super::PROMPT.len(), super::CONTINUATION.len());
+    }
+
+    // ── History-path helpers ───────────────────────────────────────
+
+    #[test]
+    fn history_path_returns_either_some_or_none() {
+        // Resolution depends on the test environment ($HOME / dirs);
+        // the contract is just that it doesn't panic in either case
+        // and the path (if any) ends with the history-file name.
+        if let Some(path) = super::history_path() {
+            let s = path.to_string_lossy();
+            assert!(s.ends_with(".larql_history") || s.contains("history"));
+        }
+    }
+
+    #[test]
+    fn dirs_or_home_returns_either_some_or_none() {
+        let _ = super::dirs_or_home();
     }
 }

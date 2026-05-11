@@ -43,32 +43,146 @@ pub fn category_words_from(path: &Path) -> Vec<String> {
 /// Built-in core categories (used when wikidata file is not available).
 fn builtin_categories() -> Vec<String> {
     vec![
-        "country", "nation", "city", "place", "location", "region", "continent",
-        "language", "nationality", "person", "people", "animal", "plant", "organism",
-        "company", "organization", "institution", "brand", "product",
-        "capital", "currency", "population", "leader", "president", "founder",
-        "birthplace", "occupation", "profession", "genre", "category",
-        "science", "biology", "chemistry", "physics", "mathematics", "medicine",
-        "technology", "computer", "software", "internet", "digital",
-        "music", "literature", "poetry", "film", "sport", "education",
-        "politics", "government", "military", "religion", "philosophy",
-        "food", "cooking", "ingredient", "agriculture",
-        "art", "culture", "history", "geography", "economics", "business",
-        "law", "health", "environment", "weather", "nature",
-        "color", "shape", "size", "measurement", "quantity", "number",
-        "time", "date", "month", "year", "period", "duration", "age",
-        "direction", "position", "distance", "speed", "weight",
-        "action", "movement", "creation", "destruction", "communication",
-        "transport", "trade", "production", "construction",
-        "concept", "quality", "property", "relation", "state", "condition",
-        "emotion", "behavior", "process", "event", "structure", "system",
-        "method", "theory", "principle",
-        "material", "substance", "chemical", "mineral", "metal", "liquid",
-        "family", "group", "community", "society", "role", "title",
-        "code", "markup", "syntax", "format", "encoding", "protocol",
-        "function", "variable", "type", "class", "pattern",
-        "suffix", "prefix", "plural", "tense", "conjugation",
-        "translation", "foreign", "multilingual",
+        "country",
+        "nation",
+        "city",
+        "place",
+        "location",
+        "region",
+        "continent",
+        "language",
+        "nationality",
+        "person",
+        "people",
+        "animal",
+        "plant",
+        "organism",
+        "company",
+        "organization",
+        "institution",
+        "brand",
+        "product",
+        "capital",
+        "currency",
+        "population",
+        "leader",
+        "president",
+        "founder",
+        "birthplace",
+        "occupation",
+        "profession",
+        "genre",
+        "category",
+        "science",
+        "biology",
+        "chemistry",
+        "physics",
+        "mathematics",
+        "medicine",
+        "technology",
+        "computer",
+        "software",
+        "internet",
+        "digital",
+        "music",
+        "literature",
+        "poetry",
+        "film",
+        "sport",
+        "education",
+        "politics",
+        "government",
+        "military",
+        "religion",
+        "philosophy",
+        "food",
+        "cooking",
+        "ingredient",
+        "agriculture",
+        "art",
+        "culture",
+        "history",
+        "geography",
+        "economics",
+        "business",
+        "law",
+        "health",
+        "environment",
+        "weather",
+        "nature",
+        "color",
+        "shape",
+        "size",
+        "measurement",
+        "quantity",
+        "number",
+        "time",
+        "date",
+        "month",
+        "year",
+        "period",
+        "duration",
+        "age",
+        "direction",
+        "position",
+        "distance",
+        "speed",
+        "weight",
+        "action",
+        "movement",
+        "creation",
+        "destruction",
+        "communication",
+        "transport",
+        "trade",
+        "production",
+        "construction",
+        "concept",
+        "quality",
+        "property",
+        "relation",
+        "state",
+        "condition",
+        "emotion",
+        "behavior",
+        "process",
+        "event",
+        "structure",
+        "system",
+        "method",
+        "theory",
+        "principle",
+        "material",
+        "substance",
+        "chemical",
+        "mineral",
+        "metal",
+        "liquid",
+        "family",
+        "group",
+        "community",
+        "society",
+        "role",
+        "title",
+        "code",
+        "markup",
+        "syntax",
+        "format",
+        "encoding",
+        "protocol",
+        "function",
+        "variable",
+        "type",
+        "class",
+        "pattern",
+        "suffix",
+        "prefix",
+        "plural",
+        "tense",
+        "conjugation",
+        "translation",
+        "foreign",
+        "multilingual",
     ]
     .into_iter()
     .map(|s| s.to_string())
@@ -79,30 +193,154 @@ fn builtin_categories() -> Vec<String> {
 pub fn is_stop_word(tok: &str) -> bool {
     matches!(
         tok,
-        "the" | "and" | "for" | "but" | "not" | "you" | "all" | "can"
-        | "her" | "was" | "one" | "our" | "out" | "are" | "has" | "his"
-        | "how" | "its" | "may" | "new" | "now" | "old" | "see" | "way"
-        | "who" | "did" | "get" | "let" | "say" | "she" | "too" | "use"
-        | "from" | "have" | "been" | "will" | "with" | "this" | "that"
-        | "they" | "were" | "some" | "them" | "than" | "when" | "what"
-        | "your" | "each" | "make" | "like" | "just" | "over" | "such"
-        | "take" | "also" | "into" | "only" | "very" | "more" | "does"
-        | "most" | "about" | "which" | "their" | "would" | "there"
-        | "could" | "other" | "after" | "being" | "where" | "these"
-        | "those" | "first" | "should" | "because" | "through" | "before"
-        | "between" | "during" | "while" | "under" | "still" | "then"
-        | "here" | "both" | "never" | "every" | "much" | "well" | "same"
-        | "further" | "again" | "off" | "always" | "might" | "often"
-        | "know" | "need" | "even" | "really" | "back" | "must"
-        | "another" | "without" | "along" | "until" | "anything"
-        | "something" | "nothing" | "everything" | "however" | "already"
-        | "though" | "either" | "rather" | "instead" | "within"
-        | "right" | "used" | "using" | "since" | "down" | "many"
-        | "long" | "upon" | "whether" | "among" | "later"
-        | "different" | "possible" | "given" | "including"
-        | "called" | "known" | "based" | "several" | "become"
-        | "certain" | "general" | "together" | "following"
-        | "number" | "part" | "found" | "small" | "large" | "great"
+        "the"
+            | "and"
+            | "for"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "her"
+            | "was"
+            | "one"
+            | "our"
+            | "out"
+            | "are"
+            | "has"
+            | "his"
+            | "how"
+            | "its"
+            | "may"
+            | "new"
+            | "now"
+            | "old"
+            | "see"
+            | "way"
+            | "who"
+            | "did"
+            | "get"
+            | "let"
+            | "say"
+            | "she"
+            | "too"
+            | "use"
+            | "from"
+            | "have"
+            | "been"
+            | "will"
+            | "with"
+            | "this"
+            | "that"
+            | "they"
+            | "were"
+            | "some"
+            | "them"
+            | "than"
+            | "when"
+            | "what"
+            | "your"
+            | "each"
+            | "make"
+            | "like"
+            | "just"
+            | "over"
+            | "such"
+            | "take"
+            | "also"
+            | "into"
+            | "only"
+            | "very"
+            | "more"
+            | "does"
+            | "most"
+            | "about"
+            | "which"
+            | "their"
+            | "would"
+            | "there"
+            | "could"
+            | "other"
+            | "after"
+            | "being"
+            | "where"
+            | "these"
+            | "those"
+            | "first"
+            | "should"
+            | "because"
+            | "through"
+            | "before"
+            | "between"
+            | "during"
+            | "while"
+            | "under"
+            | "still"
+            | "then"
+            | "here"
+            | "both"
+            | "never"
+            | "every"
+            | "much"
+            | "well"
+            | "same"
+            | "further"
+            | "again"
+            | "off"
+            | "always"
+            | "might"
+            | "often"
+            | "know"
+            | "need"
+            | "even"
+            | "really"
+            | "back"
+            | "must"
+            | "another"
+            | "without"
+            | "along"
+            | "until"
+            | "anything"
+            | "something"
+            | "nothing"
+            | "everything"
+            | "however"
+            | "already"
+            | "though"
+            | "either"
+            | "rather"
+            | "instead"
+            | "within"
+            | "right"
+            | "used"
+            | "using"
+            | "since"
+            | "down"
+            | "many"
+            | "long"
+            | "upon"
+            | "whether"
+            | "among"
+            | "later"
+            | "different"
+            | "possible"
+            | "given"
+            | "including"
+            | "called"
+            | "known"
+            | "based"
+            | "several"
+            | "become"
+            | "certain"
+            | "general"
+            | "together"
+            | "following"
+            | "number"
+            | "part"
+            | "found"
+            | "small"
+            | "large"
+            | "great"
     )
 }
 

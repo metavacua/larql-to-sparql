@@ -20,24 +20,24 @@ use std::sync::{Arc, OnceLock};
 
 use tokio::net::TcpListener;
 
+use larql_compute::cpu::ops::moe::cpu_moe_forward;
+use larql_compute::MoeLayerWeights;
 use larql_inference::{
-    MoeLayerWeights, MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig,
-    cpu_moe_forward,
-    ndarray::ArcArray2,
+    ndarray::ArcArray2, MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig,
 };
-use larql_models::{ModelArchitecture, ModelConfig};
 use larql_models::weights::ModelWeights;
+use larql_models::{ModelArchitecture, ModelConfig};
 use larql_vindex::{
-    ndarray::Array2, ExtractLevel, LayerBands, PatchedVindex, QuantFormat,
-    VectorIndex, VindexConfig, VindexLayerInfo,
+    ndarray::Array2, ExtractLevel, LayerBands, PatchedVindex, QuantFormat, VectorIndex,
+    VindexConfig, VindexLayerInfo,
 };
 
 use larql_server::{
-    routes::single_model_router,
-    state::{AppState, LoadedModel},
-    ffn_l2_cache::FfnL2Cache,
-    session::SessionManager,
     cache::DescribeCache,
+    ffn_l2_cache::FfnL2Cache,
+    routes::single_model_router,
+    session::SessionManager,
+    state::{AppState, LoadedModel},
 };
 
 // ── Synthetic weight dimensions ───────────────────────────────────────────────
@@ -99,13 +99,27 @@ impl TestMoeArch {
 }
 
 impl ModelArchitecture for TestMoeArch {
-    fn family(&self) -> &str { "test-moe" }
-    fn config(&self) -> &ModelConfig { &self.cfg }
-    fn is_hybrid_moe(&self) -> bool { true }
-    fn num_experts(&self) -> usize { NUM_EXPERTS }
-    fn num_experts_per_token(&self) -> usize { TOP_K }
-    fn moe_intermediate_size(&self) -> usize { INTER }
-    fn norm_eps(&self) -> f32 { 1e-6 }
+    fn family(&self) -> &str {
+        "test-moe"
+    }
+    fn config(&self) -> &ModelConfig {
+        &self.cfg
+    }
+    fn is_hybrid_moe(&self) -> bool {
+        true
+    }
+    fn num_experts(&self) -> usize {
+        NUM_EXPERTS
+    }
+    fn num_experts_per_token(&self) -> usize {
+        TOP_K
+    }
+    fn moe_intermediate_size(&self) -> usize {
+        INTER
+    }
+    fn norm_eps(&self) -> f32 {
+        1e-6
+    }
     fn packed_experts_gate_up_key(&self, _: usize) -> Option<String> {
         Some("test.gate_up".into())
     }
@@ -149,7 +163,9 @@ fn make_down_bytes() -> Vec<u8> {
 }
 
 fn make_router_proj() -> Vec<f32> {
-    (0..NUM_EXPERTS * HIDDEN).map(|i| (i as f32 + 1.0) * 0.05).collect()
+    (0..NUM_EXPERTS * HIDDEN)
+        .map(|i| (i as f32 + 1.0) * 0.05)
+        .collect()
 }
 
 fn make_pre_norm() -> Vec<f32> {
@@ -172,7 +188,8 @@ fn make_loaded_model(
     let index = VectorIndex::new(vec![Some(gate)], vec![None], 1, HIDDEN);
     let patched = PatchedVindex::new(index);
 
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     let tokenizer = larql_vindex::tokenizers::Tokenizer::from_bytes(tok_json).unwrap();
 
     let config = VindexConfig {
@@ -189,14 +206,24 @@ fn make_loaded_model(
         extract_level: ExtractLevel::Browse,
         dtype: larql_vindex::StorageDtype::default(),
         quant: QuantFormat::None,
-        layer_bands: Some(LayerBands { syntax: (0, 0), knowledge: (0, 0), output: (0, 0) }),
+        layer_bands: Some(LayerBands {
+            syntax: (0, 0),
+            knowledge: (0, 0),
+            output: (0, 0),
+        }),
         layers: vec![VindexLayerInfo {
-            layer: 0, num_features: 2, offset: 0, length: 32,
-            num_experts: None, num_features_per_expert: None,
+            layer: 0,
+            num_features: 2,
+            offset: 0,
+            length: 32,
+            num_experts: None,
+            num_features_per_expert: None,
         }],
         down_top_k: 1,
         has_model_weights: false,
         model_config: None,
+        fp4: None,
+        ffn_layout: None,
     };
 
     // Build ModelWeights with expert data in raw_bytes (no mmap needed).
@@ -214,9 +241,11 @@ fn make_loaded_model(
         vectors,
         raw_bytes,
         packed_mmaps: HashMap::new(),
+        skipped_tensors: Vec::new(),
         packed_byte_ranges: HashMap::new(),
         embed: embed.clone(),
         lm_head: embed,
+        position_embed: None,
         arch: Box::new(TestMoeArch::new()),
         num_layers: 1,
         hidden_size: HIDDEN,
@@ -229,7 +258,7 @@ fn make_loaded_model(
     };
 
     let lock = OnceLock::new();
-    lock.set(weights).ok();
+    lock.set(std::sync::RwLock::new(weights)).ok();
 
     LoadedModel {
         id: "test-moe".into(),
@@ -247,7 +276,19 @@ fn make_loaded_model(
         weights: lock,
         probe_labels: HashMap::new(),
         ffn_l2_cache: FfnL2Cache::new(1),
+        layer_latency_tracker: std::sync::Arc::new(
+            larql_server::metrics::LayerLatencyTracker::new(),
+        ),
+        requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         expert_filter: None,
+        unit_filter: None,
+        moe_remote: None,
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        metal_backend: std::sync::OnceLock::new(),
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        moe_scratches: std::sync::Mutex::new(HashMap::new()),
+        #[cfg(all(feature = "metal-experts", target_os = "macos"))]
+        metal_ffn_layer_bufs: std::sync::OnceLock::new(),
     }
 }
 
@@ -282,11 +323,18 @@ fn local_output(
     router_proj: &[f32],
     pre_norm: &[f32],
 ) -> Vec<f32> {
+    let gate_up_per_expert = gate_up.len() / NUM_EXPERTS;
+    let down_per_expert = down.len() / NUM_EXPERTS;
+    let experts_gate_up: Vec<&[u8]> = gate_up.chunks(gate_up_per_expert).collect();
+    let experts_down: Vec<&[u8]> = down.chunks(down_per_expert).collect();
     cpu_moe_forward(
         h,
         &MoeLayerWeights {
-            experts_gate_up: gate_up,
-            experts_down: down,
+            experts_gate_up,
+            experts_down,
+            routing_policy: larql_compute::MoeRoutingPolicy::default(),
+            weight_layout: larql_compute::MoeWeightLayout::default(),
+            expert_data_format: larql_compute::QuantFormat::BF16,
             router_proj,
             router_scale: &[],
             router_per_expert_scale: &[],
@@ -316,9 +364,12 @@ async fn expert_endpoint_single_shard_parity() {
     let pre_norm = make_pre_norm();
     let h = make_input();
 
-    let url = spawn_server_with_model(
-        make_loaded_model(gate_up.clone(), down.clone(), router_proj.clone(), pre_norm.clone()),
-    )
+    let url = spawn_server_with_model(make_loaded_model(
+        gate_up.clone(),
+        down.clone(),
+        router_proj.clone(),
+        pre_norm.clone(),
+    ))
     .await;
 
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -358,7 +409,10 @@ async fn expert_endpoint_single_shard_parity() {
     assert_eq!(remote_out.len(), expected.len());
     for (i, (&got, &exp)) in remote_out.iter().zip(expected.iter()).enumerate() {
         let diff = (got - exp).abs();
-        assert!(diff < 1e-4, "output[{i}]: remote={got} local={exp} diff={diff:.2e}");
+        assert!(
+            diff < 1e-4,
+            "output[{i}]: remote={got} local={exp} diff={diff:.2e}"
+        );
     }
 }
 
@@ -372,12 +426,20 @@ async fn expert_endpoint_two_shard_parity() {
 
     // Two separate server instances, each with all expert weights.
     // Shard A owns experts 0-1, shard B owns experts 2-3.
-    let url_a = spawn_server_with_model(
-        make_loaded_model(gate_up.clone(), down.clone(), router_proj.clone(), pre_norm.clone()),
-    ).await;
-    let url_b = spawn_server_with_model(
-        make_loaded_model(gate_up.clone(), down.clone(), router_proj.clone(), pre_norm.clone()),
-    ).await;
+    let url_a = spawn_server_with_model(make_loaded_model(
+        gate_up.clone(),
+        down.clone(),
+        router_proj.clone(),
+        pre_norm.clone(),
+    ))
+    .await;
+    let url_b = spawn_server_with_model(make_loaded_model(
+        gate_up.clone(),
+        down.clone(),
+        router_proj.clone(),
+        pre_norm.clone(),
+    ))
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let backend = tokio::task::spawn_blocking(move || {
@@ -417,7 +479,10 @@ async fn expert_endpoint_two_shard_parity() {
     assert_eq!(remote_out.len(), expected.len());
     for (i, (&got, &exp)) in remote_out.iter().zip(expected.iter()).enumerate() {
         let diff = (got - exp).abs();
-        assert!(diff < 1e-4, "output[{i}]: remote={got} local={exp} diff={diff:.2e}");
+        assert!(
+            diff < 1e-4,
+            "output[{i}]: remote={got} local={exp} diff={diff:.2e}"
+        );
     }
 }
 
@@ -429,12 +494,20 @@ async fn expert_endpoint_reshard_same_output() {
     let pre_norm = make_pre_norm();
     let h = make_input();
 
-    let url_a = spawn_server_with_model(
-        make_loaded_model(gate_up.clone(), down.clone(), router_proj.clone(), pre_norm.clone()),
-    ).await;
-    let url_b = spawn_server_with_model(
-        make_loaded_model(gate_up.clone(), down.clone(), router_proj.clone(), pre_norm.clone()),
-    ).await;
+    let url_a = spawn_server_with_model(make_loaded_model(
+        gate_up.clone(),
+        down.clone(),
+        router_proj.clone(),
+        pre_norm.clone(),
+    ))
+    .await;
+    let url_b = spawn_server_with_model(make_loaded_model(
+        gate_up.clone(),
+        down.clone(),
+        router_proj.clone(),
+        pre_norm.clone(),
+    ))
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let url_a_c = url_a.clone();
@@ -467,7 +540,9 @@ async fn expert_endpoint_reshard_same_output() {
         };
         b.forward_moe(0, &h_c, &router, 0.0, 1e-6)
     })
-    .await.unwrap().expect("call on A");
+    .await
+    .unwrap()
+    .expect("call on A");
 
     // Reshard to shard B.
     let b = backend.clone();
@@ -475,7 +550,8 @@ async fn expert_endpoint_reshard_same_output() {
         b.reshard(vec![ShardConfig::new(0, NUM_EXPERTS - 1, url_b)])
             .expect("reshard")
     })
-    .await.unwrap();
+    .await
+    .unwrap();
 
     // Second call on shard B — same weights, must produce same output.
     let rp = router_proj.clone();
@@ -497,7 +573,9 @@ async fn expert_endpoint_reshard_same_output() {
         };
         b.forward_moe(0, &h_c, &router, 0.0, 1e-6)
     })
-    .await.unwrap().expect("call on B");
+    .await
+    .unwrap()
+    .expect("call on B");
 
     assert_eq!(out_a.len(), out_b.len());
     for (i, (&a, &b)) in out_a.iter().zip(out_b.iter()).enumerate() {
@@ -514,22 +592,28 @@ async fn expert_endpoint_no_shard_error() {
     let down = make_down_bytes();
     let pre_norm = make_pre_norm();
 
-    let url = spawn_server_with_model(
-        make_loaded_model(gate_up, down, make_router_proj(), pre_norm.clone()),
-    ).await;
+    let url = spawn_server_with_model(make_loaded_model(
+        gate_up,
+        down,
+        make_router_proj(),
+        pre_norm.clone(),
+    ))
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let url_c = url.clone();
     let backend = tokio::task::spawn_blocking(move || {
         // This shard only owns experts 0-1.
-        RemoteMoeBackend::connect(vec![ShardConfig::new(0, 1, url_c)])
-            .expect("connect")
+        RemoteMoeBackend::connect(vec![ShardConfig::new(0, 1, url_c)]).expect("connect")
     })
-    .await.unwrap();
+    .await
+    .unwrap();
 
     // Router projection that makes expert 3 win overwhelmingly.
     let mut router_proj = vec![0.01f32; NUM_EXPERTS * HIDDEN];
-    for j in 0..HIDDEN { router_proj[3 * HIDDEN + j] = 10.0; }
+    for j in 0..HIDDEN {
+        router_proj[3 * HIDDEN + j] = 10.0;
+    }
 
     let rp = router_proj.clone();
     let h = make_input();
@@ -548,7 +632,8 @@ async fn expert_endpoint_no_shard_error() {
         };
         backend.forward_moe(0, &h, &router, 0.0, 1e-6)
     })
-    .await.unwrap();
+    .await
+    .unwrap();
 
     assert!(
         matches!(err, Err(RemoteMoeError::NoShard { expert_id: 3 })),

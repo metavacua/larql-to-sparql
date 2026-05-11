@@ -21,9 +21,16 @@ let model_type = text_config["model_type"]
 
 All dimension fields (hidden_size, num_layers, etc.) read from `text_config`. Only `model_type` falls back to the top level.
 
+Detection is permissive: missing or inconsistent fields are parsed with family
+defaults where possible so tooling can inspect the resulting architecture.
+Call `ModelArchitecture::validate()` before inference or extraction to reject
+invalid dimensions, attention geometry, RoPE values, per-layer metadata, KV
+sharing, or MoE routing.
+
 ## Consequences
 
 - **Good**: Same architecture code works for both text-only and multimodal checkpoints.
 - **Good**: No special "multimodal wrapper" architectures needed.
 - **Good**: Detection logic (`detect_from_json`) is format-agnostic.
+- **Good**: Validation is explicit and shared across top-level and nested text configs.
 - **Trade-off**: Vision-specific config fields (image encoder, patch size) are ignored. Accepted because `larql-models` only handles the text model.

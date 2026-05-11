@@ -10,6 +10,8 @@ use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
+use crate::http::HEALTH_PATH;
+
 /// Token bucket for a single IP.
 struct Bucket {
     tokens: f64,
@@ -21,6 +23,12 @@ pub struct RateLimiter {
     buckets: Mutex<HashMap<IpAddr, Bucket>>,
     max_tokens: f64,
     refill_per_sec: f64,
+}
+
+/// Runtime configuration for rate-limit middleware.
+pub struct RateLimitState {
+    pub limiter: Arc<RateLimiter>,
+    pub trust_forwarded_for: bool,
 }
 
 impl RateLimiter {
@@ -76,9 +84,7 @@ impl RateLimiter {
         if let Ok(mut buckets) = self.buckets.lock() {
             let now = Instant::now();
             // Remove buckets that have been full for > 5 minutes (idle IPs).
-            buckets.retain(|_, b| {
-                now.duration_since(b.last_refill).as_secs() < 300
-            });
+            buckets.retain(|_, b| now.duration_since(b.last_refill).as_secs() < 300);
         }
     }
 }
@@ -86,36 +92,36 @@ impl RateLimiter {
 /// Middleware that applies per-IP rate limiting.
 /// Uses ConnectInfo to get the client IP. Falls back to allowing if IP is unavailable.
 pub async fn rate_limit_middleware(
-    axum::extract::State(limiter): axum::extract::State<Arc<RateLimiter>>,
+    axum::extract::State(state): axum::extract::State<Arc<RateLimitState>>,
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-    // Try to extract IP from ConnectInfo or X-Forwarded-For.
-    let ip = request
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .and_then(|s| s.trim().parse::<IpAddr>().ok())
-        .or_else(|| {
-            request
-                .extensions()
-                .get::<ConnectInfo<std::net::SocketAddr>>()
-                .map(|ci| ci.0.ip())
-        });
+    // Prefer the socket peer. Only trust proxy-provided client IPs when the
+    // server was explicitly configured to sit behind a trusted proxy.
+    let connect_ip = request
+        .extensions()
+        .get::<ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip());
+    let forwarded_ip = if state.trust_forwarded_for {
+        request
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .and_then(|s| s.trim().parse::<IpAddr>().ok())
+    } else {
+        None
+    };
+    let ip = forwarded_ip.or(connect_ip);
 
     // Health check exempt from rate limiting.
-    if request.uri().path() == "/v1/health" {
+    if request.uri().path() == HEALTH_PATH {
         return next.run(request).await;
     }
 
     if let Some(ip) = ip {
-        if !limiter.check(ip) {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate limit exceeded",
-            )
-                .into_response();
+        if !state.limiter.check(ip) {
+            return (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
         }
     }
 
@@ -181,7 +187,7 @@ mod tests {
         let ip2: IpAddr = "10.0.0.2".parse().unwrap();
         assert!(rl.check(ip1));
         assert!(!rl.check(ip1)); // ip1 exhausted
-        assert!(rl.check(ip2));  // ip2 still has tokens
+        assert!(rl.check(ip2)); // ip2 still has tokens
     }
 
     #[test]

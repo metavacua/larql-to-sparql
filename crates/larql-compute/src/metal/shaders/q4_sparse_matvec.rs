@@ -7,6 +7,22 @@
 //! At K=400 out of N=10240, reads 96% less data.
 //!
 //! Each thread handles one selected row. No simd reduction needed.
+//!
+//! ## Retention rationale (ADR-017)
+//!
+//! **Status**: experimental, diag-only. Built into `all_shaders()`
+//! for the bench harness; not wired into production. Designed for a
+//! template-routed feature dispatch pattern (score K≪N rows) that
+//! the production decode path does not currently take.
+//!
+//! Kept on disk because the template-routing dispatch the larql
+//! research arc is exploring (see Tier 2 / variable-argument dispatch
+//! memos) is the natural caller for a "score only K rows by index"
+//! kernel; reviving requires one dispatch site, not a kernel rewrite.
+//!
+//! **Removal trigger**: if template-routed dispatch ships through a
+//! different mechanism (CPU pre-selection + dense GPU matvec, or
+//! row-permuted weights on disk), demote.
 
 pub const SHADER: &str = r#"
 kernel void q4_sparse_matvec(

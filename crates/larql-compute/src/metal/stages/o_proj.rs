@@ -9,8 +9,9 @@
 //!
 //! Single-vector per position. Multi-position prefill loops.
 
-use std::ffi::c_void;
+use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
+use std::ffi::c_void;
 
 use super::quant_matvec;
 
@@ -25,11 +26,16 @@ pub fn encode(
     q8_quant_pipeline: &ComputePipelineState,
     format: crate::QuantFormat,
     wo_buf: &Buffer,
-    attn_in: &Buffer, attn_in_off: u64,
-    q8_stage: &Buffer, q8_stage_off: u64,
-    q8s_stage: &Buffer, q8s_stage_off: u64,
-    o_out: &Buffer, o_out_off: u64,
-    q_dim: usize, hidden: usize,
+    attn_in: &Buffer,
+    attn_in_off: u64,
+    q8_stage: &Buffer,
+    q8_stage_off: u64,
+    q8s_stage: &Buffer,
+    q8s_stage_off: u64,
+    o_out: &Buffer,
+    o_out_off: u64,
+    q_dim: usize,
+    hidden: usize,
 ) {
     let is_f32_input = matches!(
         format,
@@ -39,7 +45,7 @@ pub fn encode(
     if !is_f32_input {
         // Q4_0 / Q8_0: quantise attn_in[q_dim] → Q8 int8 + per-32 f16 scale.
         let dim_val = q_dim as u32;
-        let blocks = (q_dim as u64).div_ceil(32);
+        let blocks = (q_dim as u64).div_ceil(LEGACY_BLOCK_ELEMS as u64);
         enc.set_compute_pipeline_state(q8_quant_pipeline);
         enc.set_buffer(0, Some(attn_in), attn_in_off);
         enc.set_buffer(1, Some(q8_stage), q8_stage_off);
@@ -47,16 +53,28 @@ pub fn encode(
         enc.set_bytes(3, 4, &dim_val as *const u32 as *const c_void);
         enc.dispatch_threads(
             MTLSize::new(blocks, 1, 1),
-            MTLSize::new(256.min(blocks), 1, 1),
+            MTLSize::new(
+                crate::metal::kernel::DISPATCH_TG_MAX_THREADS.min(blocks),
+                1,
+                1,
+            ),
         );
     }
 
     quant_matvec::encode(
-        enc, format, wo_buf,
-        attn_in, attn_in_off,
-        q8_stage, q8_stage_off, q8s_stage, q8s_stage_off,
-        o_out, o_out_off,
+        enc,
+        format,
+        wo_buf,
+        attn_in,
+        attn_in_off,
+        q8_stage,
+        q8_stage_off,
+        q8s_stage,
+        q8s_stage_off,
+        o_out,
+        o_out_off,
         pipes,
-        hidden, q_dim,
+        hidden,
+        q_dim,
     );
 }

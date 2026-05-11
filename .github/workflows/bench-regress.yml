@@ -1,0 +1,101 @@
+# Bench regression detector — runs `make bench-check` on every PR
+# against a baseline saved on `main`. Fails the workflow if any cell
+# in the criterion bench suite regresses past Criterion's noise
+# threshold.
+#
+# Surface covered (`make bench-save` / `make bench-check`):
+#   - `quant_matvec`: Q4_0 / Q4_K / Q4_KF / Q6_K × 3 shapes × cpu/metal
+#   - `matmul`: f32 matmul + f32_gemv (lm-head) — cpu vs metal
+#   - `linalg`: cholesky + ridge solve (cpu only)
+#
+# That's the surface where the next throughput cliff would show up
+# first. The 75 %-row drop in `q4_matvec_v4` would have shown as a 4×
+# regression at `quant_matvec_q4_0/metal/lm_head_262144` weeks before
+# goldens caught it.
+
+name: bench-regress
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual trigger so a maintainer can re-baseline after intentional
+  # perf changes without waiting for the next merge to main.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    # macos-14 = Apple Silicon (M1+). Required for the metal cells —
+    # without it, drop --features metal from FEATURES to skip them
+    # and run only the CPU surface on any runner.
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cargo deps are big and stable across PRs — separate cache.
+      - name: Cache cargo deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      # Criterion baselines: write-through on main, read-only on PRs.
+      # Keyed by the run number so each main push refreshes the cache.
+      - name: Cache criterion baseline (main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-criterion-baseline-${{ github.run_number }}
+          restore-keys: |
+            ${{ runner.os }}-criterion-baseline-
+
+      - name: Restore criterion baseline (PRs only)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-criterion-baseline-
+          restore-keys: |
+            ${{ runner.os }}-criterion-baseline-
+
+      - name: Save baseline (main only)
+        if: github.ref == 'refs/heads/main'
+        run: make bench-save
+
+      - name: Check vs baseline (PRs + manual)
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        run: |
+          # Cold cache → bench-check prints "no baseline found" and
+          # exits 2. Treat as neutral: the first PR after CI is stood
+          # up shouldn't fail just because there's no baseline yet.
+          set +e
+          make bench-check
+          rc=$?
+          set -e
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::no criterion baseline cached; skipping regression check"
+            exit 0
+          fi
+          exit "$rc"
+
+      # On regression, attach the criterion HTML report so reviewers
+      # can see the per-cell delta without re-running locally.
+      - name: Upload criterion report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: target/criterion/
+          retention-days: 14

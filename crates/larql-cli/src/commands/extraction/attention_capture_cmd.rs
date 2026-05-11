@@ -82,12 +82,8 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
         eprintln!("\nRunning forward pass for prompt {}...", i + 1);
         let start = Instant::now();
         let trace = trace_forward_full(
-            weights,
-            token_ids,
-            &layers,
-            false, // no activation capture
-            0,
-            true, // capture attention
+            weights, token_ids, &layers, false, // no activation capture
+            0, true, // capture attention
             &ffn,
         );
         eprintln!("  {:.1}s", start.elapsed().as_secs_f64());
@@ -115,7 +111,8 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
             // Check if this head is active (above threshold) for any prompt
             let max_attn: f32 = (0..num_prompts)
                 .filter_map(|pi| {
-                    all_captures.get(pi)
+                    all_captures
+                        .get(pi)
                         .and_then(|c| c.get(li))
                         .and_then(|h| h.get(head))
                         .map(|w| w.iter().copied().fold(0.0f32, f32::max))
@@ -130,7 +127,8 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
             if args.verbose || num_prompts <= 3 {
                 println!("L{layer} H{head} (max={max_attn:.3}):");
                 for (pi, prompt) in args.prompts.iter().enumerate() {
-                    if let Some(weights) = all_captures.get(pi)
+                    if let Some(weights) = all_captures
+                        .get(pi)
                         .and_then(|c| c.get(li))
                         .and_then(|h| h.get(head))
                     {
@@ -139,7 +137,8 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
                             .enumerate()
                             .filter(|(_, &w)| w > 0.01)
                             .map(|(j, &w)| {
-                                let label = all_token_labels.get(pi)
+                                let label = all_token_labels
+                                    .get(pi)
                                     .and_then(|l| l.get(j))
                                     .map(|s| s.as_str())
                                     .unwrap_or("?");
@@ -171,16 +170,27 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
         for (li, &layer) in layers.iter().enumerate() {
             for head in 0..num_heads {
                 // Get attention patterns for first two prompts
-                let w0 = match all_captures.first().and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                let w0 = match all_captures
+                    .first()
+                    .and_then(|c| c.get(li))
+                    .and_then(|h| h.get(head))
+                {
                     Some(w) => w,
                     None => continue,
                 };
-                let w1 = match all_captures.get(1).and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                let w1 = match all_captures
+                    .get(1)
+                    .and_then(|c| c.get(li))
+                    .and_then(|h| h.get(head))
+                {
                     Some(w) => w,
                     None => continue,
                 };
 
-                let max_attn = w0.iter().copied().fold(0.0f32, f32::max)
+                let max_attn = w0
+                    .iter()
+                    .copied()
+                    .fold(0.0f32, f32::max)
                     .max(w1.iter().copied().fold(0.0f32, f32::max));
 
                 if max_attn < args.threshold {
@@ -214,16 +224,27 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
 
         for (li, _) in layers.iter().enumerate() {
             for head in 0..num_heads {
-                let w0 = match all_captures.first().and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                let w0 = match all_captures
+                    .first()
+                    .and_then(|c| c.get(li))
+                    .and_then(|h| h.get(head))
+                {
                     Some(w) => w,
                     None => continue,
                 };
-                let w1 = match all_captures.get(1).and_then(|c| c.get(li)).and_then(|h| h.get(head)) {
+                let w1 = match all_captures
+                    .get(1)
+                    .and_then(|c| c.get(li))
+                    .and_then(|h| h.get(head))
+                {
                     Some(w) => w,
                     None => continue,
                 };
 
-                let max_attn = w0.iter().copied().fold(0.0f32, f32::max)
+                let max_attn = w0
+                    .iter()
+                    .copied()
+                    .fold(0.0f32, f32::max)
                     .max(w1.iter().copied().fold(0.0f32, f32::max));
                 if max_attn < args.threshold {
                     continue;
@@ -245,10 +266,22 @@ pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>>
 
         println!("\n═══ Summary ═══");
         println!("  Active heads (above threshold): {total_active}");
-        println!("  FIXED (corr > 0.95):    {fixed} ({:.0}%)", fixed as f64 / total_active as f64 * 100.0);
-        println!("  SIMILAR (corr > 0.8):   {similar} ({:.0}%)", similar as f64 / total_active as f64 * 100.0);
-        println!("  PARTIAL (corr > 0.5):   {partial} ({:.0}%)", partial as f64 / total_active as f64 * 100.0);
-        println!("  DIFFERENT (corr < 0.5): {different} ({:.0}%)", different as f64 / total_active as f64 * 100.0);
+        println!(
+            "  FIXED (corr > 0.95):    {fixed} ({:.0}%)",
+            fixed as f64 / total_active as f64 * 100.0
+        );
+        println!(
+            "  SIMILAR (corr > 0.8):   {similar} ({:.0}%)",
+            similar as f64 / total_active as f64 * 100.0
+        );
+        println!(
+            "  PARTIAL (corr > 0.5):   {partial} ({:.0}%)",
+            partial as f64 / total_active as f64 * 100.0
+        );
+        println!(
+            "  DIFFERENT (corr < 0.5): {different} ({:.0}%)",
+            different as f64 / total_active as f64 * 100.0
+        );
 
         if fixed + similar > total_active * 80 / 100 {
             println!("\n  → Attention is largely TEMPLATE-FIXED. Circuit caching viable.");

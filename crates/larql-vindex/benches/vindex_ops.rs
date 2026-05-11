@@ -89,6 +89,36 @@ fn bench_gate_knn(c: &mut Criterion) {
     group.finish();
 }
 
+/// Batched gate KNN at multiple seq_len values — measures the
+/// prefill path (`gate_knn_batch`). seq_len=1 is the decode path
+/// (no parallelism opportunity); seq_len ≥ 4 hits the parallel
+/// per-position top-K branch.
+fn bench_gate_knn_batch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gate_knn_batch");
+    let features = 10240;
+    let hidden = 2560;
+    let index = build_synthetic_index(1, features, hidden, 5);
+
+    fn synth_batch(seq_len: usize, hidden: usize) -> Array2<f32> {
+        let mut state = 0xbeef_cafeu64;
+        Array2::from_shape_fn((seq_len, hidden), |_| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((state >> 33) as f32) / (u32::MAX as f32) * 2.0 - 1.0
+        })
+    }
+
+    for &seq_len in &[1usize, 4, 16, 64, 256] {
+        let x = synth_batch(seq_len, hidden);
+        group.throughput(Throughput::Elements(seq_len as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("seq{seq_len}_10240f×2560h")),
+            &x,
+            |b, x| b.iter(|| index.gate_knn_batch(0, x, 10)),
+        );
+    }
+    group.finish();
+}
+
 /// Multi-layer walk — measures "1 walk across N layers".
 fn bench_walk(c: &mut Criterion) {
     let mut group = c.benchmark_group("walk_all_layers");
@@ -200,24 +230,18 @@ fn bench_save_load(c: &mut Criterion) {
         version: 2,
         model: "bench-load".into(),
         family: "bench".into(),
-        source: None,
-        checksums: None,
         num_layers,
         hidden_size: hidden,
         intermediate_size: features,
         vocab_size: 100,
         embed_scale: 1.0,
-        extract_level: larql_vindex::ExtractLevel::Browse,
-        dtype: larql_vindex::StorageDtype::F32,
-        quant: larql_vindex::QuantFormat::None,
-        layer_bands: None,
         layers: layer_infos,
         down_top_k: 5,
-        has_model_weights: false,
-        model_config: None,
+        ..Default::default()
     };
     VectorIndex::save_config(&config, &load_dir).unwrap();
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     std::fs::write(load_dir.join("tokenizer.json"), tok_json).unwrap();
 
     group.bench_function("load_vindex", |b| {
@@ -259,6 +283,7 @@ fn bench_moe_scaling(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_gate_knn,
+    bench_gate_knn_batch,
     bench_walk,
     bench_feature_meta_lookup,
     bench_mutate,

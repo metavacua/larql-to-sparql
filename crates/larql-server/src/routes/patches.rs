@@ -5,13 +5,16 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
+use crate::session::{extract_session_id, PATCH_UNNAMED};
 use crate::state::AppState;
+
+const PATCH_INLINE_NAME: &str = "inline-patch";
 
 #[derive(Deserialize)]
 pub struct ApplyPatchRequest {
@@ -21,22 +24,16 @@ pub struct ApplyPatchRequest {
     pub patch: Option<larql_vindex::VindexPatch>,
 }
 
-/// Extract session ID from headers (if present).
-fn session_id(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("x-session-id")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-}
-
 /// Resolve a patch from the request body (inline or URL).
-fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, String), ServerError> {
+fn resolve_patch(
+    req: &ApplyPatchRequest,
+) -> Result<(larql_vindex::VindexPatch, String), ServerError> {
     if let Some(ref patch) = req.patch {
         let name = req
             .url
             .clone()
             .or_else(|| patch.description.clone())
-            .unwrap_or_else(|| "inline-patch".into());
+            .unwrap_or_else(|| PATCH_INLINE_NAME.into());
         return Ok((patch.clone(), name));
     }
 
@@ -48,7 +45,9 @@ fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, 
             if vlp_path.exists() {
                 vlp_path
             } else {
-                return Err(ServerError::BadRequest(format!("no patch.vlp found at {url}")));
+                return Err(ServerError::BadRequest(format!(
+                    "no patch.vlp found at {url}"
+                )));
             }
         } else {
             std::path::PathBuf::from(url)
@@ -58,7 +57,9 @@ fn resolve_patch(req: &ApplyPatchRequest) -> Result<(larql_vindex::VindexPatch, 
         return Ok((patch, url.clone()));
     }
 
-    Err(ServerError::BadRequest("must provide 'url' or 'patch' in request body".into()))
+    Err(ServerError::BadRequest(
+        "must provide 'url' or 'patch' in request body".into(),
+    ))
 }
 
 /// Synthesise a gate vector from entity embedding when the client didn't provide one.
@@ -87,23 +88,30 @@ fn enrich_patch_ops(model: &crate::state::LoadedModel, patch: &mut larql_vindex:
                             }
                         }
                         let n = ids.len() as f32;
-                        for v in &mut embed { *v /= n; }
+                        for v in &mut embed {
+                            *v /= n;
+                        }
 
                         // Normalise the embedding to unit length — gate KNN uses
                         // cosine similarity so magnitude doesn't matter.
                         let embed_norm: f32 = embed.iter().map(|v| v * v).sum::<f32>().sqrt();
                         if embed_norm > 1e-8 {
-                            for v in &mut embed { *v /= embed_norm; }
+                            for v in &mut embed {
+                                *v /= embed_norm;
+                            }
                         }
 
-                        *gate_vector_b64 = Some(larql_vindex::patch::core::encode_gate_vector(&embed));
+                        *gate_vector_b64 =
+                            Some(larql_vindex::patch::core::encode_gate_vector(&embed));
                     }
                 }
 
                 // Assign a feature slot if unset
                 if *feature == 0 {
                     // Use a deterministic slot based on layer + entity hash
-                    let hash = entity.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                    let hash = entity
+                        .bytes()
+                        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
                     *feature = (hash as usize % 10240) + 1;
                 }
             }
@@ -125,9 +133,7 @@ async fn apply_patch_to_model(
     headers: &HeaderMap,
     req: ApplyPatchRequest,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let model = state
-        .model(model_id)
-        .ok_or_else(|| ServerError::NotFound("model not found".into()))?;
+    let model = state.model_or_err(model_id)?;
 
     let (mut patch, name) = resolve_patch(&req)?;
 
@@ -137,7 +143,7 @@ async fn apply_patch_to_model(
     let op_count = patch.operations.len();
 
     // Session-scoped or global?
-    if let Some(sid) = session_id(headers) {
+    if let Some(sid) = extract_session_id(headers) {
         let (ops, active) = state.sessions.apply_patch(&sid, model, patch).await;
         Ok(Json(serde_json::json!({
             "applied": name,
@@ -157,6 +163,21 @@ async fn apply_patch_to_model(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/patches/apply",
+    tag = "patches",
+    request_body(
+        content = crate::openapi::schemas::ApplyPatchBody,
+        description = "Provide either a `url` (path / http(s):// / hf://) or an inline `patch` object. \
+                       Use the `X-Session-Id` header to scope the apply to a session.",
+    ),
+    responses(
+        (status = 200, description = "Patch applied", body = crate::openapi::schemas::ApplyPatchResponse),
+        (status = 400, body = crate::error::ErrorBody),
+        (status = 500, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_apply_patch(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -166,6 +187,18 @@ pub async fn handle_apply_patch(
     apply_patch_to_model(&state, None, &headers, req).await
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/{model_id}/patches/apply",
+    tag = "patches",
+    params(("model_id" = String, Path, description = "Id of a loaded vindex.")),
+    request_body(content = crate::openapi::schemas::ApplyPatchBody),
+    responses(
+        (status = 200, body = crate::openapi::schemas::ApplyPatchResponse),
+        (status = 400, body = crate::error::ErrorBody),
+        (status = 404, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_apply_patch_multi(
     State(state): State<Arc<AppState>>,
     Path(model_id): Path<String>,
@@ -181,11 +214,9 @@ async fn list_patches_for_model(
     model_id: Option<&str>,
     headers: &HeaderMap,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let _model = state
-        .model(model_id)
-        .ok_or_else(|| ServerError::NotFound("model not found".into()))?;
+    let _model = state.model_or_err(model_id)?;
 
-    if let Some(sid) = session_id(headers) {
+    if let Some(sid) = extract_session_id(headers) {
         let patches = state.sessions.list_patches(&sid).await;
         return Ok(Json(serde_json::json!({
             "patches": patches,
@@ -200,7 +231,7 @@ async fn list_patches_for_model(
         .iter()
         .map(|p| {
             serde_json::json!({
-                "name": p.description.as_deref().unwrap_or("unnamed"),
+                "name": p.description.as_deref().unwrap_or(PATCH_UNNAMED),
                 "operations": p.operations.len(),
                 "base_model": p.base_model,
             })
@@ -210,6 +241,16 @@ async fn list_patches_for_model(
     Ok(Json(serde_json::json!({ "patches": patches })))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/patches",
+    tag = "patches",
+    responses(
+        (status = 200, description = "Active patches for the current session or global state",
+         body = crate::openapi::schemas::ListPatchesResponse),
+        (status = 404, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_list_patches(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -218,6 +259,16 @@ pub async fn handle_list_patches(
     list_patches_for_model(&state, None, &headers).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/{model_id}/patches",
+    tag = "patches",
+    params(("model_id" = String, Path, description = "Id of a loaded vindex.")),
+    responses(
+        (status = 200, body = crate::openapi::schemas::ListPatchesResponse),
+        (status = 404, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_list_patches_multi(
     State(state): State<Arc<AppState>>,
     Path(model_id): Path<String>,
@@ -233,7 +284,7 @@ async fn remove_patch_from_model(
     headers: &HeaderMap,
     name: &str,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    if let Some(sid) = session_id(headers) {
+    if let Some(sid) = extract_session_id(headers) {
         let remaining = state
             .sessions
             .remove_patch(&sid, name)
@@ -246,16 +297,14 @@ async fn remove_patch_from_model(
         })));
     }
 
-    let model = state
-        .model(model_id)
-        .ok_or_else(|| ServerError::NotFound("model not found".into()))?;
+    let model = state.model_or_err(model_id)?;
 
     let mut patched = model.patched.write().await;
 
     let idx = patched
         .patches
         .iter()
-        .position(|p| p.description.as_deref().unwrap_or("unnamed") == name)
+        .position(|p| p.description.as_deref().unwrap_or(PATCH_UNNAMED) == name)
         .ok_or_else(|| ServerError::NotFound(format!("patch '{}' not found", name)))?;
 
     patched.remove_patch(idx);
@@ -266,6 +315,18 @@ async fn remove_patch_from_model(
     })))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/patches/{name}",
+    tag = "patches",
+    params(
+        ("name" = String, Path, description = "Patch description/name (or `inline-patch` if it was inlined without one)."),
+    ),
+    responses(
+        (status = 200, description = "Patch removed", body = crate::openapi::schemas::RemovePatchResponse),
+        (status = 404, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_remove_patch(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -275,6 +336,19 @@ pub async fn handle_remove_patch(
     remove_patch_from_model(&state, None, &headers, &name).await
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/{model_id}/patches/{name}",
+    tag = "patches",
+    params(
+        ("model_id" = String, Path, description = "Id of a loaded vindex."),
+        ("name" = String, Path, description = "Patch description/name."),
+    ),
+    responses(
+        (status = 200, body = crate::openapi::schemas::RemovePatchResponse),
+        (status = 404, body = crate::error::ErrorBody),
+    ),
+)]
 pub async fn handle_remove_patch_multi(
     State(state): State<Arc<AppState>>,
     Path((model_id, name)): Path<(String, String)>,

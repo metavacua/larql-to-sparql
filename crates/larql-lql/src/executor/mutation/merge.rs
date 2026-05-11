@@ -51,29 +51,33 @@ impl Session {
         let mut merged = 0;
         let mut skipped = 0;
 
+        // Iterate via the heap+mmap-aware accessors so MERGE works on
+        // production load_vindex output (where down_meta lives in
+        // `down_meta_mmap`, not the heap). The earlier `down_meta_at`
+        // path was heap-only and silently merged zero features.
         let source_layers = source_index.loaded_layers();
         for layer in source_layers {
-            if let Some(source_metas) = source_index.down_meta_at(layer) {
-                for (feature, meta_opt) in source_metas.iter().enumerate() {
-                    if let Some(source_meta) = meta_opt {
-                        let existing = patched.feature_meta(layer, feature);
+            let nf = source_index.num_features(layer);
+            for feature in 0..nf {
+                let Some(source_meta) = source_index.feature_meta(layer, feature) else {
+                    continue;
+                };
+                let existing = patched.feature_meta(layer, feature);
 
-                        let should_write = match (existing, &strategy) {
-                            (None, _) => true,
-                            (Some(_), ConflictStrategy::KeepSource) => true,
-                            (Some(_), ConflictStrategy::KeepTarget) => false,
-                            (Some(existing), ConflictStrategy::HighestConfidence) => {
-                                source_meta.c_score > existing.c_score
-                            }
-                        };
-
-                        if should_write {
-                            patched.update_feature_meta(layer, feature, source_meta.clone());
-                            merged += 1;
-                        } else {
-                            skipped += 1;
-                        }
+                let should_write = match (&existing, &strategy) {
+                    (None, _) => true,
+                    (Some(_), ConflictStrategy::KeepSource) => true,
+                    (Some(_), ConflictStrategy::KeepTarget) => false,
+                    (Some(existing), ConflictStrategy::HighestConfidence) => {
+                        source_meta.c_score > existing.c_score
                     }
+                };
+
+                if should_write {
+                    patched.update_feature_meta(layer, feature, source_meta);
+                    merged += 1;
+                } else {
+                    skipped += 1;
                 }
             }
         }

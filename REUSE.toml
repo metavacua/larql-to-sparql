@@ -50,8 +50,8 @@ path = [
   "scripts/version_preflight.sh",
   "scripts/check_first_party_licenses.sh",
   "scripts/ci/**",
-  "docs/specs/compliance-pipeline.md",
-  "docs/specs/code-quality-pipeline.md",
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
   "docs/ci-cd-local.md",
   "deny.toml",
 ]
@@ -102,3 +102,32 @@ path = "audit/**"
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
 SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# ---------------------------------------------------------------------------
+# Upstream-wins merge of https://github.com/chrishayuk/larql @ main into
+# claude/incorporate-upstream-changes-RZWZ7. The merge commit referenced
+# below introduced or last modified the files listed in `path`. Subsequent
+# changes are tracked by `git log` / `git blame`.
+#
+# Provenance strategy chosen by the maintainers for this batch: REUSE.toml
+# annotation block only (no per-file SPDX-FileComment headers). The 32
+# first-party files predating this merge are NOT retroactively stamped.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
+  "Makefile",
+  ".github/workflows/extra-platforms.yml",
+  ".github/workflows/quality.yml",
+  ".github/workflows/validate.yml",
+  "scripts/ci/comprehensive.sh",
+  "docs/ci-cd-local.md",
+  "REUSE.toml",
+  "cog.toml",
+  "audit/upstream-report.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "Last modified by fork in merge commit 979f8c90491d76b326a454274020f24f2bca8556"

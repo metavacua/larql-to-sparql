@@ -19,7 +19,7 @@
 //! Mmap'd for zero-copy reads. RSS ≈ one boundary at a time.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use memmap2::Mmap;
@@ -36,9 +36,9 @@ struct BoundaryHeader {
     magic: [u8; 4],
     version: u32,
     hidden_size: u32,
-    window_size: u32,       // tokens per window
-    n_boundaries: u32,      // number of stored boundaries
-    total_tokens: u32,      // total tokens processed
+    window_size: u32,  // tokens per window
+    n_boundaries: u32, // number of stored boundaries
+    total_tokens: u32, // total tokens processed
     _reserved: [u8; 40],
 }
 
@@ -130,16 +130,28 @@ impl BoundaryStore {
         Ok(Self { mmap, header })
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
-    pub fn hidden_size(&self) -> usize { self.header.hidden_size as usize }
-    pub fn window_size(&self) -> usize { self.header.window_size as usize }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
+    pub fn hidden_size(&self) -> usize {
+        self.header.hidden_size as usize
+    }
+    pub fn window_size(&self) -> usize {
+        self.header.window_size as usize
+    }
 
     /// Get the index entry for boundary i.
     fn entry(&self, i: usize) -> Option<BoundaryEntry> {
-        if i >= self.header.n_boundaries as usize { return None; }
+        if i >= self.header.n_boundaries as usize {
+            return None;
+        }
         let offset = self.header.index_offset() + i * ENTRY_SIZE;
-        if offset + ENTRY_SIZE > self.mmap.len() { return None; }
+        if offset + ENTRY_SIZE > self.mmap.len() {
+            return None;
+        }
         let mut bytes = [0u8; ENTRY_SIZE];
         bytes.copy_from_slice(&self.mmap[offset..offset + ENTRY_SIZE]);
         Some(BoundaryEntry::from_bytes(&bytes))
@@ -151,7 +163,9 @@ impl BoundaryStore {
         let hidden = self.header.hidden_size as usize;
         let start = entry.data_offset as usize;
         let end = start + hidden * 4;
-        if end > self.mmap.len() { return None; }
+        if end > self.mmap.len() {
+            return None;
+        }
         let slice = &self.mmap[start..end];
         Some(unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) })
     }
@@ -172,7 +186,10 @@ impl BoundaryStore {
     /// Get the token range for boundary i.
     pub fn token_range(&self, i: usize) -> Option<(usize, usize)> {
         let entry = self.entry(i)?;
-        Some((entry.token_offset as usize, entry.token_offset as usize + entry.window_tokens as usize))
+        Some((
+            entry.token_offset as usize,
+            entry.token_offset as usize + entry.window_tokens as usize,
+        ))
     }
 
     /// File size in bytes.
@@ -217,7 +234,10 @@ impl BoundaryWriter {
         };
 
         let mut file = OpenOptions::new()
-            .read(true).write(true).create(true).truncate(true)
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
             .open(path)?;
 
         // Write header
@@ -228,7 +248,12 @@ impl BoundaryWriter {
         file.write_all(&index_bytes)?;
         file.flush()?;
 
-        Ok(Self { file, header, path: path.to_path_buf(), max_boundaries })
+        Ok(Self {
+            file,
+            header,
+            path: path.to_path_buf(),
+            max_boundaries,
+        })
     }
 
     /// Append a boundary residual.
@@ -260,9 +285,8 @@ impl BoundaryWriter {
         // Write residual data at end of file
         self.file.seek(SeekFrom::End(0))?;
         let data_pos = self.file.stream_position()? as u32;
-        let r_bytes = unsafe {
-            std::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4)
-        };
+        let r_bytes =
+            unsafe { std::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4) };
         self.file.write_all(r_bytes)?;
 
         // Write index entry
@@ -286,11 +310,140 @@ impl BoundaryWriter {
         Ok(())
     }
 
-    pub fn n_boundaries(&self) -> usize { self.header.n_boundaries as usize }
-    pub fn total_tokens(&self) -> usize { self.header.total_tokens as usize }
+    pub fn n_boundaries(&self) -> usize {
+        self.header.n_boundaries as usize
+    }
+    pub fn total_tokens(&self) -> usize {
+        self.header.total_tokens as usize
+    }
 
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;
         Ok(self.path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── BoundaryWriter + BoundaryStore ────────────────────────────────────────
+
+    #[test]
+    fn create_append_open_roundtrip() {
+        let path = std::env::temp_dir().join("larql_boundary_test_roundtrip.bndx");
+        let hidden = 4;
+        let residual: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+
+        let mut writer = BoundaryWriter::create(&path, hidden, 100, 50).expect("create");
+        writer.append(0, 100, &residual).expect("append");
+        assert_eq!(writer.n_boundaries(), 1);
+        assert_eq!(writer.total_tokens(), 100);
+        writer.finish().expect("finish");
+
+        let store = BoundaryStore::open(&path).expect("open");
+        assert_eq!(store.n_boundaries(), 1);
+        assert_eq!(store.hidden_size(), hidden);
+        assert_eq!(store.window_size(), 100);
+        assert_eq!(store.total_tokens(), 100);
+
+        let r = store.residual(0).expect("residual 0");
+        assert_eq!(r.len(), hidden);
+        for (i, &v) in r.iter().enumerate() {
+            assert!((v - residual[i]).abs() < 1e-6, "residual[{i}] mismatch");
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn multiple_boundaries_indexed_correctly() {
+        let path = std::env::temp_dir().join("larql_boundary_test_multi.bndx");
+        let hidden = 4;
+        let mut writer = BoundaryWriter::create(&path, hidden, 200, 10).expect("create");
+        for i in 0..3 {
+            writer
+                .append(i * 200, 200, &vec![i as f32; hidden])
+                .expect("append");
+        }
+        writer.finish().expect("finish");
+
+        let store = BoundaryStore::open(&path).expect("open");
+        assert_eq!(store.n_boundaries(), 3);
+
+        // Each residual should reflect the index used to write it
+        for i in 0..3 {
+            let r = store.residual(i).expect("residual");
+            assert!(
+                (r[0] - i as f32).abs() < 1e-6,
+                "boundary {i} residual mismatch"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn out_of_range_residual_returns_none() {
+        let path = std::env::temp_dir().join("larql_boundary_test_oob.bndx");
+        let mut writer = BoundaryWriter::create(&path, 4, 100, 10).expect("create");
+        writer.append(0, 100, &[1.0f32; 4]).expect("append");
+        writer.finish().expect("finish");
+
+        let store = BoundaryStore::open(&path).expect("open");
+        assert!(store.residual(99).is_none(), "out-of-range boundary → None");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn boundary_for_token_finds_correct_window() {
+        let path = std::env::temp_dir().join("larql_boundary_test_tok.bndx");
+        let mut writer = BoundaryWriter::create(&path, 4, 100, 10).expect("create");
+        writer.append(0, 100, &[0.0f32; 4]).expect("append 0");
+        writer.append(100, 100, &[1.0f32; 4]).expect("append 1");
+        writer.finish().expect("finish");
+
+        let store = BoundaryStore::open(&path).expect("open");
+        assert_eq!(
+            store.boundary_for_token(50),
+            Some(0),
+            "token 50 in window 0"
+        );
+        assert_eq!(
+            store.boundary_for_token(150),
+            Some(1),
+            "token 150 in window 1"
+        );
+        assert!(
+            store.boundary_for_token(999).is_none(),
+            "out-of-range token"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn token_range_returns_correct_bounds() {
+        let path = std::env::temp_dir().join("larql_boundary_test_range.bndx");
+        let mut writer = BoundaryWriter::create(&path, 4, 200, 5).expect("create");
+        writer.append(0, 200, &[0.0f32; 4]).expect("append");
+        writer.finish().expect("finish");
+
+        let store = BoundaryStore::open(&path).expect("open");
+        let (start, end) = store.token_range(0).expect("token range");
+        assert_eq!(start, 0);
+        assert_eq!(end, 200);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn wrong_residual_size_returns_error() {
+        let path = std::env::temp_dir().join("larql_boundary_test_bad_size.bndx");
+        let mut writer = BoundaryWriter::create(&path, 4, 100, 10).expect("create");
+        let result = writer.append(0, 100, &[1.0f32; 8]); // wrong size
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&path);
     }
 }

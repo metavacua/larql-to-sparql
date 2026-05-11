@@ -14,6 +14,22 @@
 //!
 //! One threadgroup per vector. Threadgroup size = d (e.g., 256).
 //! Expected: <0.01ms per vector on M3 Max.
+//!
+//! ## Retention rationale (ADR-017)
+//!
+//! **Status**: experimental. Built into `all_shaders()` for diag
+//! (`metal/diag/shader_bench.rs` benchmarks it) but not wired into
+//! production decode/prefill — KV-vector quantisation remains as
+//! TurboQuant on the Rust side.
+//!
+//! Kept on disk because (a) it pairs with `turboquant_decode` and
+//! demonstrates the WHT-fused quantise loop in pure-MSL form, and
+//! (b) future KV-cache compression experiments can re-engage the
+//! pair via the diag bench harness without re-deriving the kernel.
+//!
+//! **Removal trigger**: if KV-cache compression gets a non-WHT
+//! production direction (rotational tokenisation, rank-1 sketch,
+//! etc.), demote both `turboquant_*` shaders.
 
 pub const SHADER: &str = r#"
 // TurboQuant 4-bit encode: normalize → sign flip → WHT → sign flip → quantize → pack.

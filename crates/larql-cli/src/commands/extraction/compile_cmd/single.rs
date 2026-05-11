@@ -5,12 +5,13 @@
 //! and pushes the answer token through the LM head. CLI-driven; contrasts
 //! with patch mode (vindex-driven, many edges).
 
+use larql_vindex::format::filenames::*;
 use std::collections::HashMap;
 
 use ndarray::ArcArray2;
 
-use super::edge::install_edge;
 use super::detect::detect_ffn_pattern;
+use super::edge::install_edge;
 use super::save::{copy_model_config, merge_for_save, write_safetensors};
 use super::CompileArgs;
 
@@ -31,13 +32,9 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     let config = weights.arch.config();
     eprintln!("  {} layers, dim={}", config.num_layers, config.hidden_size);
 
-    let tokenizer_path = args.base.join("tokenizer.json");
+    let tokenizer_path = args.base.join(TOKENIZER_JSON);
     if !tokenizer_path.exists() {
-        return Err(format!(
-            "tokenizer.json not found in {}",
-            args.base.display()
-        )
-        .into());
+        return Err(format!("tokenizer.json not found in {}", args.base.display()).into());
     }
     let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_path)
         .map_err(|e| format!("tokenizer: {}", e))?;
@@ -60,11 +57,8 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  prompt tokens: {}", token_ids.len());
 
     eprintln!("\nCapturing L{} residual...", args.layer);
-    let residuals = larql_inference::forward::capture_residuals(
-        &weights,
-        &token_ids,
-        &[args.layer],
-    );
+    let residuals =
+        larql_inference::forward::capture_residuals(&weights, &token_ids, &[args.layer]);
     let (_, residual) = residuals
         .into_iter()
         .find(|(l, _)| *l == args.layer)
@@ -121,10 +115,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         args.gate_scale,
         args.alpha,
     )?;
-    eprintln!(
-        "  gate_scale={}, alpha={:.3}",
-        args.gate_scale, stats.alpha
-    );
+    eprintln!("  gate_scale={}, alpha={:.3}", args.gate_scale, stats.alpha);
     eprintln!("  installed at L{} slot {}", args.layer, args.slot);
 
     // ── Balancer: scale the down vector up/down until the target token's
@@ -142,9 +133,7 @@ pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
         for key in [&gate_key, &up_key, &down_key] {
             weights.tensors.insert(key.clone(), modified[key].clone());
         }
-        let pred = larql_inference::forward::predict(
-            &weights, &tokenizer, &token_ids, 20,
-        );
+        let pred = larql_inference::forward::predict(&weights, &tokenizer, &token_ids, 20);
         let prob: f64 = pred
             .predictions
             .iter()

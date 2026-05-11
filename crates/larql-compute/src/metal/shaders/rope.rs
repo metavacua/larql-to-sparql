@@ -6,6 +6,23 @@
 //! Both kernels support partial rotation via `rotary_dim`:
 //! only the first `rotary_dim` dimensions are rotated, the rest pass through.
 //! Gemma 4 global layers use 25% rotation (rotary_dim = head_dim * 0.25).
+//!
+//! ## RoPE variant coverage gap (model-agnosticity audit, 2026-05-09)
+//!
+//! llama.cpp ships four RoPE variants (per `libggml-metal.dylib` symbols):
+//!
+//! - `kernel_rope_norm_*` — split-half (this kernel's pattern). ✓ covered.
+//! - `kernel_rope_neox_*` — interleaved RoPE (NeoX style: rotates (x[2i], x[2i+1]) pairs
+//!   instead of (x[i], x[i+half_dim])). **TODO**: needed for GPT-NeoX, Pythia, some
+//!   Falcon variants. Not present.
+//! - `kernel_rope_multi_*` — multi-frequency-band RoPE (used by some long-context
+//!   models with frequency interpolation). **TODO**: not present.
+//! - `kernel_rope_vision_*` — 2D RoPE for vision models. Not load-bearing for
+//!   text-only LMs.
+//!
+//! Add NeoX variant when a non-split-half RoPE model is brought into scope
+//! (current architectures in `larql-models/architectures/` all use split-half).
+//! See `docs/llama-cpp-comparison.md` §3 and `docs/shader-inventory.md`.
 
 pub const SHADER: &str = r#"
 // Apply RoPE to a single vector [dim] in-place at a given absolute position.
@@ -98,4 +115,60 @@ kernel void rope_at_pos_batched(
     x[base_idx + d]        = re * cos_a - im * sin_a;
     x[base_idx + d + hdim] = re * sin_a + im * cos_a;
 }
+
+// Fused Q+K batched RoPE — applies RoPE to all Q heads then all K heads
+// in one dispatch instead of two. Grid: (rotary_dim/2, num_q+num_kv, 1).
+// Saves one `dispatch_threads` call per layer × 34 = 34 saved dispatches/token.
+kernel void rope_at_pos_batched_qk(
+    device float*       Q          [[buffer(0)]],   // [num_q_heads * head_dim]
+    device float*       K          [[buffer(1)]],   // [num_kv_heads * head_dim]
+    constant uint&      head_dim   [[buffer(2)]],
+    constant float&     rope_base  [[buffer(3)]],
+    constant uint&      pos        [[buffer(4)]],
+    constant uint&      rotary_dim [[buffer(5)]],
+    constant uint&      num_q      [[buffer(6)]],   // q heads count
+    uint2 tid [[thread_position_in_grid]])
+{
+    uint d = tid.x;   // pair index
+    uint h = tid.y;   // global head index (0..num_q → Q, num_q.. → K)
+
+    uint rdim = (rotary_dim == 0u) ? head_dim : min(rotary_dim, head_dim);
+    uint hdim = rdim / 2u;
+    if (d >= hdim) return;
+
+    bool is_q = (h < num_q);
+    uint local_h = is_q ? h : (h - num_q);
+    device float* x = is_q ? Q : K;
+    uint base_idx = local_h * head_dim;
+
+    float freq  = 1.0f / pow(rope_base, float(2u * d) / float(rdim));
+    float angle = float(pos) * freq;
+    float cos_a = cos(angle);
+    float sin_a = sin(angle);
+
+    float re = x[base_idx + d];
+    float im = x[base_idx + d + hdim];
+    x[base_idx + d]        = re * cos_a - im * sin_a;
+    x[base_idx + d + hdim] = re * sin_a + im * cos_a;
+}
 "#;
+
+pub struct RopeApplyKernel;
+impl crate::metal::kernel::ShaderKernel for RopeApplyKernel {
+    const KERNEL_NAME: &'static str = "rope_apply";
+}
+
+pub struct RopeAtPosKernel;
+impl crate::metal::kernel::ShaderKernel for RopeAtPosKernel {
+    const KERNEL_NAME: &'static str = "rope_at_pos";
+}
+
+pub struct RopeAtPosBatchedKernel;
+impl crate::metal::kernel::ShaderKernel for RopeAtPosBatchedKernel {
+    const KERNEL_NAME: &'static str = "rope_at_pos_batched";
+}
+
+pub struct RopeAtPosBatchedQkKernel;
+impl crate::metal::kernel::ShaderKernel for RopeAtPosBatchedQkKernel {
+    const KERNEL_NAME: &'static str = "rope_at_pos_batched_qk";
+}

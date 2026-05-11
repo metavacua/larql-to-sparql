@@ -28,6 +28,7 @@
 //!    entries match on the `name` half of `owner/name`. Ambiguous
 //!    shorthands error out and list candidates.
 
+use larql_vindex::format::filenames::*;
 use std::path::{Path, PathBuf};
 
 /// Which cache an entry came from.
@@ -131,7 +132,7 @@ pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::erro
         // Pick the most recently modified snapshot that has an index.json.
         let latest = std::fs::read_dir(&snapshots)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().join("index.json").exists())
+            .filter(|e| e.path().join(INDEX_JSON).exists())
             .max_by_key(|e| {
                 e.metadata()
                     .and_then(|m| m.modified())
@@ -172,7 +173,7 @@ pub fn scan_local_at(local: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::err
         if !target_is_dir {
             continue;
         }
-        if !path.join("index.json").exists() {
+        if !path.join(INDEX_JSON).exists() {
             continue;
         }
         let entry_name = entry.file_name().to_string_lossy().to_string();
@@ -318,10 +319,7 @@ pub fn resolve_cached_from(
                 .map(|c| format!("  - {} [{}]", c.repo, c.source.label()))
                 .collect::<Vec<_>>()
                 .join("\n");
-            Err(format!(
-                "shorthand `{key}` is ambiguous — matches:\n{candidates}"
-            )
-            .into())
+            Err(format!("shorthand `{key}` is ambiguous — matches:\n{candidates}").into())
         }
     }
 }
@@ -357,7 +355,7 @@ mod tests {
             let (owner, name) = repo.split_once('/').expect("owner/name");
             let dir = root.join(format!("datasets--{owner}--{name}/snapshots/abc123"));
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("index.json"), b"{}").unwrap();
+            std::fs::write(dir.join(INDEX_JSON), b"{}").unwrap();
             std::fs::write(dir.join("stub.bin"), vec![0u8; 1024]).unwrap();
         }
     }
@@ -368,7 +366,7 @@ mod tests {
         for name in names {
             let dir = root.join(format!("{name}.vindex"));
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("index.json"), b"{}").unwrap();
+            std::fs::write(dir.join(INDEX_JSON), b"{}").unwrap();
             std::fs::write(dir.join("stub.bin"), vec![0u8; 512]).unwrap();
         }
     }
@@ -399,7 +397,10 @@ mod tests {
         std::fs::create_dir_all(&bare).unwrap();
         std::fs::write(bare.join("not-a-vindex.txt"), b"hi").unwrap();
         let out = scan_hf_hub_at(tmp.path()).unwrap();
-        assert!(out.is_empty(), "snapshot without index.json should be skipped");
+        assert!(
+            out.is_empty(),
+            "snapshot without index.json should be skipped"
+        );
     }
 
     #[test]
@@ -447,7 +448,7 @@ mod tests {
         let local = tmp.path().join("local");
         let target = tmp.path().join("src/my-model.vindex");
         std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(target.join("index.json"), b"{}").unwrap();
+        std::fs::write(target.join(INDEX_JSON), b"{}").unwrap();
         std::fs::create_dir_all(&local).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, local.join("my-model.vindex")).unwrap();

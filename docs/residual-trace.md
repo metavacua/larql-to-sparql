@@ -6,7 +6,7 @@ The residual stream is the single wire through a transformer. Attention writes t
 
 ```
 Node:   residual state at (layer, position) — a 2560D vector
-Edges:  attn_delta (what attention added) + ffn_delta (what FFN added)
+Edges:  attn_delta (what attention added) + ffn_delta (post-attention contribution)
 
 residual[L] = residual[L-1] + attn_delta[L] + ffn_delta[L]
 ```
@@ -14,6 +14,12 @@ residual[L] = residual[L-1] + attn_delta[L] + ffn_delta[L]
 The trace is a DAG with `tokens x layers` nodes and two types of edges:
 - **Vertical (FFN):** per-position knowledge retrieval
 - **Horizontal (attention):** cross-position information routing
+
+`ffn_delta` is named for the dominant mechanism, but its contract is
+additive faithfulness: it stores everything after attention that is needed to
+reconstruct the layer residual exactly. For plain decoder blocks that is the
+FFN write. For architectures with PLE, post-feedforward norms, or residual
+scales, those terms are included in `ffn_delta` rather than dropped.
 
 ### Markov Property
 
@@ -60,8 +66,8 @@ TRACE "The capital of France is" DECOMPOSE LAYERS 22-27;
 -- Full decomposition, all layers
 TRACE "The capital of France is" DECOMPOSE;
 
--- Save to mmap'd file
-TRACE "The capital of France is" SAVE "france.trace";
+-- Save to mmap'd file; saved traces require complete token chains
+TRACE "The capital of France is" POSITIONS ALL SAVE "france.trace";
 
 -- All positions, specific layer range, with answer tracking
 TRACE "The capital of France is" FOR "Paris" LAYERS 20-33 POSITIONS ALL;
@@ -100,7 +106,7 @@ t.top_k(24)        # [('Paris', 0.714), ('located', 0.133), ...]
 t.rank_of("Paris", 23)  # 10
 t.residual(24)      # [f32; 2560] — the raw vector
 t.attn_delta(24)    # [f32; 2560] — what attention added
-t.ffn_delta(24)     # [f32; 2560] — what FFN added
+t.ffn_delta(24)     # [f32; 2560] — post-attention contribution
 ```
 
 ### Python: Multi-position trace
@@ -116,7 +122,7 @@ t.residual(24, position=4)  # France's residual at L24
 ```python
 from larql._native import TraceStore
 
-t.save("trace.bin")
+t.save("trace.bin")  # save requires positions="all"
 store = TraceStore("trace.bin")
 # TraceStore(6 tokens, 34 layers, 2560D, 6.5 MB)
 store.residual(5, 25)   # token 5, layer 25 — zero-copy from mmap

@@ -13,8 +13,16 @@ fn make_meta(token: &str, id: u32, score: f32) -> FeatureMeta {
         top_token_id: id,
         c_score: score,
         top_k: vec![
-            larql_models::TopKEntry { token: token.to_string(), token_id: id, logit: score },
-            larql_models::TopKEntry { token: "also".to_string(), token_id: id + 1, logit: score * 0.5 },
+            larql_models::TopKEntry {
+                token: token.to_string(),
+                token_id: id,
+                logit: score,
+            },
+            larql_models::TopKEntry {
+                token: "also".to_string(),
+                token_id: id + 1,
+                logit: score * 0.5,
+            },
         ],
     }
 }
@@ -87,7 +95,10 @@ fn main() {
 
     let start = Instant::now();
     let index = bench_index();
-    println!("  Built in {:.0}ms\n", start.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "  Built in {:.0}ms\n",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
 
     let patched = PatchedVindex::new(index);
 
@@ -259,9 +270,11 @@ fn main() {
         description: None,
         author: None,
         tags: vec![],
-        operations: vec![
-            larql_vindex::PatchOp::Delete { layer: 0, feature: 0, reason: None },
-        ],
+        operations: vec![larql_vindex::PatchOp::Delete {
+            layer: 0,
+            feature: 0,
+            reason: None,
+        }],
     };
     // Measure apply+remove on a fresh PatchedVindex (reuses existing base via clone).
     // Note: clone cost dominates in debug builds. Run with --release for accurate numbers.
@@ -306,8 +319,16 @@ fn main() {
             author: None,
             tags: vec![],
             operations: vec![
-                larql_vindex::PatchOp::Delete { layer: 0, feature: 0, reason: None },
-                larql_vindex::PatchOp::Delete { layer: 1, feature: 1, reason: None },
+                larql_vindex::PatchOp::Delete {
+                    layer: 0,
+                    feature: 0,
+                    reason: None,
+                },
+                larql_vindex::PatchOp::Delete {
+                    layer: 1,
+                    feature: 1,
+                    reason: None,
+                },
             ],
         };
         session.apply_patch(patch);
@@ -371,22 +392,32 @@ fn main() {
         }
         h
     });
-    bench("embed 1-token binary encode (request)", 1000, 1_000_000, || {
-        let mut buf = Vec::with_capacity(8);
-        buf.extend_from_slice(&1u32.to_le_bytes());
-        buf.extend_from_slice(&9515u32.to_le_bytes());
-        buf
-    });
-    bench("embed binary response encode (seq=1, hidden=256)", 1000, 100_000, || {
-        let mut buf = Vec::with_capacity(8 + embed_hidden * 4);
-        buf.extend_from_slice(&1u32.to_le_bytes());
-        buf.extend_from_slice(&(embed_hidden as u32).to_le_bytes());
-        let row = embed_table.row(0);
-        for &v in row.iter() {
-            buf.extend_from_slice(&v.to_le_bytes());
-        }
-        buf
-    });
+    bench(
+        "embed 1-token binary encode (request)",
+        1000,
+        1_000_000,
+        || {
+            let mut buf = Vec::with_capacity(8);
+            buf.extend_from_slice(&1u32.to_le_bytes());
+            buf.extend_from_slice(&9515u32.to_le_bytes());
+            buf
+        },
+    );
+    bench(
+        "embed binary response encode (seq=1, hidden=256)",
+        1000,
+        100_000,
+        || {
+            let mut buf = Vec::with_capacity(8 + embed_hidden * 4);
+            buf.extend_from_slice(&1u32.to_le_bytes());
+            buf.extend_from_slice(&(embed_hidden as u32).to_le_bytes());
+            let row = embed_table.row(0);
+            for &v in row.iter() {
+                buf.extend_from_slice(&v.to_le_bytes());
+            }
+            buf
+        },
+    );
 
     println!("\n── Embed service — logits projection ──");
     // Simulate /v1/logits: one matmul residual @ lm_head.T
@@ -396,7 +427,9 @@ fn main() {
     let lm_head = embed_table.slice(larql_vindex::ndarray::s![..small_vocab, ..]);
     let query = {
         let mut q = Array1::<f32>::zeros(embed_hidden);
-        q[0] = 1.0; q[1] = 0.5; q[5] = 0.3;
+        q[0] = 1.0;
+        q[1] = 0.5;
+        q[5] = 0.3;
         q
     };
 
@@ -413,20 +446,340 @@ fn main() {
         scores
     });
 
-    bench("logits binary response encode (5 tokens)", 1000, 500_000, || {
-        let top5 = [(9515u32, 0.801f32), (235, 0.042), (100, 0.012), (5, 0.008), (1, 0.003)];
-        let resp = serde_json::json!({
-            "top_k": top5.iter().map(|(id, p)| serde_json::json!({"token_id": id, "prob": p})).collect::<Vec<_>>(),
-            "latency_ms": 2.1f32,
-        });
-        serde_json::to_string(&resp).unwrap()
-    });
+    bench(
+        "logits binary response encode (5 tokens)",
+        1000,
+        500_000,
+        || {
+            let top5 = [
+                (9515u32, 0.801f32),
+                (235, 0.042),
+                (100, 0.012),
+                (5, 0.008),
+                (1, 0.003),
+            ];
+            let resp = serde_json::json!({
+                "top_k": top5.iter().map(|(id, p)| serde_json::json!({"token_id": id, "prob": p})).collect::<Vec<_>>(),
+                "latency_ms": 2.1f32,
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
 
     println!("  Note: production Gemma 3 4B logits = 262208 × 2560 ~ 2ms CPU, ~0.1ms Metal");
 
+    // ── OpenAI-compat envelopes (encode-only synthetic timings) ──────────
+    //
+    // The OpenAI N0 endpoints add an envelope around the existing /v1/embed
+    // and /v1/logits compute. These benches measure the JSON encode cost
+    // for the envelope alone — total endpoint latency = compute time
+    // (above) + envelope cost (below). Useful for validating the wire
+    // shape doesn't dominate.
+    println!("\n── OpenAI-compat envelopes (encode-only) ──");
+
+    bench(
+        "/v1/models OpenAI-shape JSON serialize",
+        1000,
+        100_000,
+        || {
+            let resp = serde_json::json!({
+                "object": "list",
+                "data": [{
+                    "id": "gemma-3-4b-it",
+                    "object": "model",
+                    "created": 1746094800u64,
+                    "owned_by": "larql",
+                    "path": "/v1",
+                    "features": 348160usize,
+                    "loaded": true,
+                }]
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/embeddings serialize (single, hidden=256)",
+        1000,
+        50_000,
+        || {
+            let emb: Vec<f32> = (0..256).map(|i| i as f32 * 0.01).collect();
+            let resp = serde_json::json!({
+                "object": "list",
+                "data": [{"object": "embedding", "embedding": emb, "index": 0}],
+                "model": "gemma-3-4b-it",
+                "usage": {"prompt_tokens": 1, "total_tokens": 1}
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/embeddings serialize (batch=8, hidden=256)",
+        500,
+        20_000,
+        || {
+            let emb: Vec<f32> = (0..256).map(|i| i as f32 * 0.01).collect();
+            let data: Vec<serde_json::Value> = (0..8)
+                .map(|i| serde_json::json!({"object": "embedding", "embedding": &emb, "index": i}))
+                .collect();
+            let resp = serde_json::json!({
+                "object": "list",
+                "data": data,
+                "model": "gemma-3-4b-it",
+                "usage": {"prompt_tokens": 8, "total_tokens": 8}
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/completions serialize (max_tokens=10)",
+        1000,
+        100_000,
+        || {
+            let resp = serde_json::json!({
+                "id": "cmpl-abc123def456",
+                "object": "text_completion",
+                "created": 1746094800u64,
+                "model": "gemma-3-4b-it",
+                "choices": [{
+                    "text": " Paris is the capital of France.",
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "logprobs": null,
+                }],
+                "usage": {
+                    "prompt_tokens": 6,
+                    "completion_tokens": 7,
+                    "total_tokens": 13,
+                }
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/completions request validation (stream=true → 400)",
+        1000,
+        100_000,
+        || {
+            // Simulate the cheap path: parse body, check stream flag, return.
+            let body = br#"{"prompt":"hi","max_tokens":1,"stream":true}"#;
+            let req: serde_json::Value = serde_json::from_slice(body).unwrap();
+            req.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
+        },
+    );
+
+    bench(
+        "/v1/chat/completions serialize (assistant content)",
+        1000,
+        100_000,
+        || {
+            let resp = serde_json::json!({
+                "id": "chatcmpl-abc123def456",
+                "object": "chat.completion",
+                "created": 1746094800u64,
+                "model": "gemma-3-4b-it",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": " Paris is the capital of France.",
+                    },
+                    "finish_reason": "stop",
+                    "logprobs": null,
+                }],
+                "usage": {
+                    "prompt_tokens": 16,
+                    "completion_tokens": 7,
+                    "total_tokens": 23,
+                }
+            });
+            serde_json::to_string(&resp).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/chat/completions render gemma multi-turn (3 messages)",
+        1000,
+        100_000,
+        || {
+            // Mirror the rendering path for slice 2 chat templates —
+            // measures string concat cost, not tokenisation.
+            let messages = [
+                ("system", "You are concise."),
+                ("user", "Capital of France?"),
+                ("assistant", "Paris."),
+            ];
+            let mut out = String::with_capacity(256);
+            for (role, content) in messages {
+                let role = if role == "assistant" { "model" } else { role };
+                out.push_str(&format!("<start_of_turn>{role}\n{content}<end_of_turn>\n"));
+            }
+            out.push_str("<start_of_turn>model\n");
+            out
+        },
+    );
+
+    // ── Constrained decoding (slice 4 / N0.6) ────────────────────────────
+    //
+    // Fixed cost added to constrained-decoding requests over plain
+    // sampling. Token-level mask cost (per-step `O(vocab × avg_token_len)`)
+    // lives in the generate loop and isn't bench-able here without a
+    // real backend.
+    use larql_server::routes::openai::schema::{
+        parse_schema_with, resolve_tool_choice, synth_tools_schema, Fsm, ObjectSchema,
+        ParseOptions, Schema, ToolMode,
+    };
+
+    bench(
+        "/v1/chat/completions FSM step Schema::Any (50-char object)",
+        5_000,
+        100_000,
+        || {
+            let mut fsm = Fsm::any();
+            let _ = fsm.step_str(r#"{"name":"Alice","age":30,"role":"admin"}"#);
+            fsm.is_complete()
+        },
+    );
+
+    bench(
+        "/v1/chat/completions FSM step strict Person schema",
+        5_000,
+        100_000,
+        || {
+            let schema = Schema::object(ObjectSchema {
+                properties: [
+                    ("name".to_string(), Schema::string()),
+                    ("age".to_string(), Schema::integer()),
+                ]
+                .into_iter()
+                .collect(),
+                required: vec!["name".into(), "age".into()],
+                additional: None,
+            });
+            let mut fsm = Fsm::new(schema);
+            let _ = fsm.step_str(r#"{"name":"Bob","age":42}"#);
+            fsm.is_complete()
+        },
+    );
+
+    bench(
+        "/v1/chat/completions parse_schema (Person, strict)",
+        5_000,
+        100_000,
+        || {
+            let schema = serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age":  {"type": "integer"}
+                },
+                "required": ["name", "age"]
+            });
+            parse_schema_with(&schema, ParseOptions { strict: true }).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/chat/completions synth_tools_schema (2 functions)",
+        5_000,
+        50_000,
+        || {
+            let tools = serde_json::json!([
+                {"type": "function", "function": {"name": "calc",
+                    "parameters": {"type": "object",
+                        "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                        "required": ["a", "b"]}}},
+                {"type": "function", "function": {"name": "search",
+                    "parameters": {"type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"]}}}
+            ]);
+            let names = vec!["calc".to_string(), "search".to_string()];
+            let mode = resolve_tool_choice(true, None, &names).unwrap();
+            synth_tools_schema(&tools, &mode).unwrap()
+        },
+    );
+
+    bench(
+        "/v1/chat/completions FSM tool-call OneOf (commit on name)",
+        5_000,
+        50_000,
+        || {
+            // Two tools distinguishable by `name` const — exercises
+            // OneOf's parallel-branch tracking + commit-on-disambiguation.
+            let tools = serde_json::json!([
+                {"type": "function", "function": {"name": "calc",
+                    "parameters": {"type": "object",
+                        "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                        "required": ["a", "b"]}}},
+                {"type": "function", "function": {"name": "search",
+                    "parameters": {"type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"]}}}
+            ]);
+            let names = vec!["calc".to_string(), "search".to_string()];
+            let (schema, _) = synth_tools_schema(&tools, &ToolMode::Any).unwrap().unwrap();
+            let mut fsm = Fsm::new(schema);
+            let _ = fsm.step_str(r#"{"name":"calc","arguments":{"a":12,"b":30}}"#);
+            (fsm.is_complete(), names.len())
+        },
+    );
+
+    // ── Sampling extras (F18, F19, slice 4.10) ───────────────────────────
+
+    bench(
+        "Sampler with frequency_penalty (history N=8, vocab=256)",
+        5_000,
+        100_000,
+        || {
+            // Full-vocab logit slice with a small history triggers the
+            // penalty path. Greedy under penalty so RNG cost is zero.
+            let logits: Vec<f32> = (0..256u32).map(|i| i as f32 * 0.01).collect();
+            let cfg = larql_inference::SamplingConfig::greedy()
+                .with_frequency_penalty(0.5)
+                .with_presence_penalty(0.3);
+            let mut s = larql_inference::Sampler::new(cfg);
+            let history = [10u32, 20, 30, 10, 200, 150, 99, 50];
+            s.sample_with_history(&logits, &history)
+        },
+    );
+
+    bench(
+        "Sampler with temperature + top-p (no penalty)",
+        5_000,
+        50_000,
+        || {
+            let logits: Vec<f32> = (0..256u32).map(|i| i as f32 * 0.01).collect();
+            let cfg = larql_inference::SamplingConfig::temperature(0.8)
+                .with_top_p(0.9)
+                .with_seed(42);
+            let mut s = larql_inference::Sampler::new(cfg);
+            s.sample(&logits)
+        },
+    );
+
+    println!(
+        "  Note: OpenAI envelope adds ~10-20 µs over the underlying compute.\n\
+         Total /v1/embeddings latency = embed lookup (above) + ~5 µs encode.\n\
+         Constrained-decoding fixed cost = parse_schema (~µs) + per-step\n\
+         FSM clone+replay (~ns × token surface chars). Per-token mask cost\n\
+         (vocab iteration) is dominated by the generate loop, not the FSM.\n\
+         Repetition penalties add a HashMap-build + per-id subtraction\n\
+         pass — negligible vs the lm_head matvec."
+    );
+
     println!("\n── Summary ──");
     let total_features: usize = all_layers.iter().map(|l| patched.num_features(*l)).sum();
-    println!("  Index: {} layers, {} features/layer, {} total, hidden={}", all_layers.len(), 1024, total_features, hidden);
+    println!(
+        "  Index: {} layers, {} features/layer, {} total, hidden={}",
+        all_layers.len(),
+        1024,
+        total_features,
+        hidden
+    );
     println!("  All times include full operation (KNN + sort + truncate + metadata)");
     println!("\n  Expected server latency = operation time + serialization + network RTT");
     println!("  Embed endpoint: dominated by table lookup (~O(1) with hot cache)");

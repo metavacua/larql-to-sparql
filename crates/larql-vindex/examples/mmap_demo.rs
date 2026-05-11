@@ -41,7 +41,8 @@ fn main() {
 
     let layer_infos = index.save_gate_vectors(&dir).unwrap();
     index.save_down_meta(&dir).unwrap();
-    let tok_json = r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
+    let tok_json =
+        r#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]},"added_tokens":[]}"#;
     std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
 
     let config = VindexConfig {
@@ -63,12 +64,22 @@ fn main() {
         down_top_k: 3,
         has_model_weights: false,
         model_config: None,
+        fp4: None,
+        ffn_layout: None,
     };
     VectorIndex::save_config(&config, &dir).unwrap();
 
-    let gate_file_size = std::fs::metadata(dir.join("gate_vectors.bin")).unwrap().len();
-    println!("── Synthetic vindex: {} layers × {} features × {} hidden ──", num_layers, features, hidden);
-    println!("  gate_vectors.bin: {:.1} MB on disk", gate_file_size as f64 / 1_048_576.0);
+    let gate_file_size = std::fs::metadata(dir.join("gate_vectors.bin"))
+        .unwrap()
+        .len();
+    println!(
+        "── Synthetic vindex: {} layers × {} features × {} hidden ──",
+        num_layers, features, hidden
+    );
+    println!(
+        "  gate_vectors.bin: {:.1} MB on disk",
+        gate_file_size as f64 / 1_048_576.0
+    );
 
     // ── RSS measurements ──
     let rss_before = rss_mb();
@@ -154,52 +165,81 @@ fn print_scaling_table() {
     let models = [
         ModelSpec {
             name: "Gemma 3 4B",
-            layers: 34, hidden: 2560, intermediate: 10240,
-            num_experts: 1, knowledge_band: (14, 27),
+            layers: 34,
+            hidden: 2560,
+            intermediate: 10240,
+            num_experts: 1,
+            knowledge_band: (14, 27),
             total_params: "4B",
         },
         ModelSpec {
             name: "Llama 3 8B",
-            layers: 32, hidden: 4096, intermediate: 14336,
-            num_experts: 1, knowledge_band: (8, 24),
+            layers: 32,
+            hidden: 4096,
+            intermediate: 14336,
+            num_experts: 1,
+            knowledge_band: (8, 24),
             total_params: "8B",
         },
         ModelSpec {
             name: "Llama 3 70B",
-            layers: 80, hidden: 8192, intermediate: 28672,
-            num_experts: 1, knowledge_band: (16, 63),
+            layers: 80,
+            hidden: 8192,
+            intermediate: 28672,
+            num_experts: 1,
+            knowledge_band: (16, 63),
             total_params: "70B",
         },
         ModelSpec {
             name: "Llama 3 405B",
-            layers: 126, hidden: 16384, intermediate: 53248,
-            num_experts: 1, knowledge_band: (25, 100),
+            layers: 126,
+            hidden: 16384,
+            intermediate: 53248,
+            num_experts: 1,
+            knowledge_band: (25, 100),
             total_params: "405B",
         },
         ModelSpec {
             name: "Mixtral 8x22B",
-            layers: 56, hidden: 6144, intermediate: 16384,
-            num_experts: 8, knowledge_band: (12, 43),
+            layers: 56,
+            hidden: 6144,
+            intermediate: 16384,
+            num_experts: 8,
+            knowledge_band: (12, 43),
             total_params: "141B",
         },
         ModelSpec {
             name: "DeepSeek V3",
-            layers: 61, hidden: 7168, intermediate: 2048,
-            num_experts: 256, knowledge_band: (12, 48),
+            layers: 61,
+            hidden: 7168,
+            intermediate: 2048,
+            num_experts: 256,
+            knowledge_band: (12, 48),
             total_params: "671B",
         },
         ModelSpec {
             name: "Kimi-K2",
-            layers: 61, hidden: 7168, intermediate: 2048,
-            num_experts: 256, knowledge_band: (12, 48),
+            layers: 61,
+            hidden: 7168,
+            intermediate: 2048,
+            num_experts: 256,
+            knowledge_band: (12, 48),
             total_params: "1T (est.)",
         },
     ];
 
     println!("\n── Headline: RAM reduction with vindex ──\n");
-    println!("  {:20} {:>14} {:>14} {:>8}", "Model", "Full Infer", "Vindex Infer", "Ratio");
-    println!("  {:20} {:>14} {:>14} {:>8}",
-        "─".repeat(20), "─".repeat(14), "─".repeat(14), "─".repeat(8));
+    println!(
+        "  {:20} {:>14} {:>14} {:>8}",
+        "Model", "Full Infer", "Vindex Infer", "Ratio"
+    );
+    println!(
+        "  {:20} {:>14} {:>14} {:>8}",
+        "─".repeat(20),
+        "─".repeat(14),
+        "─".repeat(14),
+        "─".repeat(8)
+    );
     for m in &models {
         let param_count: f64 = match m.total_params {
             "4B" => 4e9,
@@ -245,9 +285,7 @@ fn rss_mb() -> f64 {
 }
 
 fn random_query(hidden: usize) -> Array1<f32> {
-    let v: Vec<f32> = (0..hidden)
-        .map(|i| (i as f32 * 0.001).sin())
-        .collect();
+    let v: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.001).sin()).collect();
     Array1::from_vec(v)
 }
 

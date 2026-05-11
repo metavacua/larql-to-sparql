@@ -3,12 +3,15 @@
 //! High-level API: load a model, tokenize entities, run forward passes,
 //! write NDJSON output files compatible with vector-load and vindex builds.
 
+use std::borrow::Cow;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::error::InferenceError;
 use crate::forward::trace_forward;
-use crate::model::{load_model_dir, load_model_dir_walk_only, resolve_model_path, ModelWeights};
+use crate::model::{
+    load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
+};
 use crate::tokenizer::load_tokenizer;
 
 /// Configuration for residual/activation capture.
@@ -19,13 +22,16 @@ pub struct CaptureConfig {
     pub activation_top_k: usize,
 }
 
+pub const DEFAULT_ACTIVATION_TOP_K: usize = 50;
+pub const DEFAULT_RESIDUAL_TOP_K: usize = 10;
+
 impl Default for CaptureConfig {
     fn default() -> Self {
         Self {
-            layers: vec![25],
+            layers: Vec::new(),
             prompt_template: None,
             capture_activations: false,
-            activation_top_k: 50,
+            activation_top_k: DEFAULT_ACTIVATION_TOP_K,
         }
     }
 }
@@ -68,7 +74,7 @@ impl InferenceModel {
     /// Load a model from a path or HuggingFace model ID.
     pub fn load(model: &str) -> Result<Self, InferenceError> {
         let model_path = resolve_model_path(model)?;
-        let weights = load_model_dir(&model_path)?;
+        let weights = load_model_dir_validated(&model_path)?;
         let tokenizer = load_tokenizer(&model_path)?;
 
         Ok(Self {
@@ -85,7 +91,7 @@ impl InferenceModel {
     /// couldn't hold the full f32-decoded model in memory.
     pub fn load_walk_only(model: &str) -> Result<Self, InferenceError> {
         let model_path = resolve_model_path(model)?;
-        let weights = load_model_dir_walk_only(&model_path)?;
+        let weights = load_model_dir_walk_only_validated(&model_path)?;
         let tokenizer = load_tokenizer(&model_path)?;
         Ok(Self {
             weights,
@@ -104,6 +110,13 @@ impl InferenceModel {
 
     pub fn weights(&self) -> &ModelWeights {
         &self.weights
+    }
+
+    /// Mutable accessor — needed by the generate() entry point so the CPU
+    /// fallback can dequantise per-layer Q4K tensors into `weights.tensors`.
+    /// Metal-only callers can continue to use the shared `weights()`.
+    pub fn weights_mut(&mut self) -> &mut ModelWeights {
+        &mut self.weights
     }
 
     pub fn tokenizer(&self) -> &tokenizers::Tokenizer {
@@ -148,6 +161,11 @@ impl InferenceModel {
         let total = entities.len();
         let mut res_count = 0;
         let mut act_count = 0;
+        let capture_layers: Cow<'_, [usize]> = if config.layers.is_empty() {
+            Cow::Owned(vec![self.weights.num_layers.saturating_sub(1)])
+        } else {
+            Cow::Borrowed(&config.layers)
+        };
 
         for (i, entity) in entities.iter().enumerate() {
             let start = std::time::Instant::now();
@@ -171,14 +189,19 @@ impl InferenceModel {
             let trace = trace_forward(
                 &self.weights,
                 &token_ids,
-                &config.layers,
+                &capture_layers,
                 config.capture_activations,
                 config.activation_top_k,
             );
 
             // Write residuals
             for (layer, vector) in &trace.residuals {
-                let top_k = project_to_vocab(&self.weights.embed, vector, 10, &self.tokenizer);
+                let top_k = project_to_vocab(
+                    &self.weights.embed,
+                    vector,
+                    DEFAULT_RESIDUAL_TOP_K,
+                    &self.tokenizer,
+                );
 
                 let (top_token, top_token_id, c_score) = if let Some(first) = top_k.first() {
                     (first.token.clone(), first.token_id, first.logit)
@@ -279,14 +302,131 @@ fn project_to_vocab(
 }
 
 fn current_date() -> String {
-    let now = std::time::SystemTime::now()
+    let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let days = now / 86400;
-    let year = 1970 + (days / 365);
-    let remaining = days % 365;
-    let month = remaining / 30 + 1;
-    let day = remaining % 30 + 1;
+    let mut days = (secs / 86400) as i64;
+    let mut year: i64 = 1970;
+    loop {
+        let n = if is_leap_year(year) { 366 } else { 365 };
+        if days < n {
+            break;
+        }
+        days -= n;
+        year += 1;
+    }
+    let month_lens: [i64; 12] = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1;
+    for n in month_lens {
+        if days < n {
+            break;
+        }
+        days -= n;
+        month += 1;
+    }
+    let day = days + 1;
     format!("{year}-{month:02}-{day:02}")
+}
+
+#[inline]
+fn is_leap_year(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Convert epoch seconds to a YYYY-MM-DD string. Mirrors `current_date` but
+    /// takes the timestamp as a parameter so it's deterministic.
+    fn date_from_epoch_secs(secs: u64) -> String {
+        let mut days = (secs / 86400) as i64;
+        let mut year: i64 = 1970;
+        loop {
+            let n = if is_leap_year(year) { 366 } else { 365 };
+            if days < n {
+                break;
+            }
+            days -= n;
+            year += 1;
+        }
+        let month_lens: [i64; 12] = if is_leap_year(year) {
+            [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        } else {
+            [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        };
+        let mut month = 1;
+        for n in month_lens {
+            if days < n {
+                break;
+            }
+            days -= n;
+            month += 1;
+        }
+        let day = days + 1;
+        format!("{year}-{month:02}-{day:02}")
+    }
+
+    #[test]
+    fn epoch_zero_is_1970_01_01() {
+        assert_eq!(date_from_epoch_secs(0), "1970-01-01");
+    }
+
+    #[test]
+    fn end_of_2024_is_leap_year_aware() {
+        // 2024-12-31 23:59:59 UTC = 1735689599 secs since epoch.
+        assert_eq!(date_from_epoch_secs(1_735_689_599), "2024-12-31");
+        // 2025-01-01 00:00:00 UTC = 1735689600 secs.
+        assert_eq!(date_from_epoch_secs(1_735_689_600), "2025-01-01");
+    }
+
+    #[test]
+    fn march_first_after_feb_29_in_leap_year() {
+        // 2024 is leap. 2024-03-01 00:00:00 UTC = 1709251200.
+        assert_eq!(date_from_epoch_secs(1_709_251_200), "2024-03-01");
+        // 2024-02-29 = 1709164800.
+        assert_eq!(date_from_epoch_secs(1_709_164_800), "2024-02-29");
+    }
+
+    #[test]
+    fn march_first_in_non_leap_year() {
+        // 2023-03-01 00:00:00 UTC = 1677628800.
+        assert_eq!(date_from_epoch_secs(1_677_628_800), "2023-03-01");
+        // 2023 has no Feb 29: 2023-02-28 = 1677542400.
+        assert_eq!(date_from_epoch_secs(1_677_542_400), "2023-02-28");
+    }
+
+    #[test]
+    fn century_boundary_2000_is_leap() {
+        // 2000-02-29 = 951782400 (divisible by 400 → leap).
+        assert_eq!(date_from_epoch_secs(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn current_date_returns_well_formed_string() {
+        let s = current_date();
+        // Format YYYY-MM-DD with zero-padded month/day.
+        let parts: Vec<&str> = s.split('-').collect();
+        assert_eq!(parts.len(), 3, "expected YYYY-MM-DD, got {s:?}");
+        let year: i32 = parts[0].parse().unwrap();
+        let month: u32 = parts[1].parse().unwrap();
+        let day: u32 = parts[2].parse().unwrap();
+        assert!(year >= 2025, "year too small: {year}");
+        assert!((1..=12).contains(&month), "bad month: {month}");
+        assert!((1..=31).contains(&day), "bad day: {day}");
+    }
+
+    #[test]
+    fn leap_year_rules() {
+        assert!(is_leap_year(2000)); // /400
+        assert!(!is_leap_year(1900)); // /100 not /400
+        assert!(is_leap_year(2024)); // /4
+        assert!(!is_leap_year(2023));
+        assert!(!is_leap_year(2100)); // /100 not /400
+    }
 }

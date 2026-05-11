@@ -1,6 +1,7 @@
 //! Graph merging with conflict resolution strategies.
 
 use crate::core::enums::MergeStrategy;
+use crate::core::enums::SourceType;
 use crate::core::graph::Graph;
 
 /// Merge edges from `other` into `target` using the given strategy.
@@ -14,6 +15,29 @@ pub fn merge_graphs_with_strategy(
     target: &mut Graph,
     other: &Graph,
     strategy: MergeStrategy,
+) -> usize {
+    merge_graphs_with_options(target, other, strategy, default_source_priority)
+}
+
+/// Merge with explicit source-priority policy.
+pub fn merge_graphs_with_source_priority(
+    target: &mut Graph,
+    other: &Graph,
+    source_priority: impl Fn(&SourceType) -> u8,
+) -> usize {
+    merge_graphs_with_options(
+        target,
+        other,
+        MergeStrategy::SourcePriority,
+        source_priority,
+    )
+}
+
+fn merge_graphs_with_options(
+    target: &mut Graph,
+    other: &Graph,
+    strategy: MergeStrategy,
+    source_priority: impl Fn(&SourceType) -> u8,
 ) -> usize {
     let mut count = 0;
 
@@ -57,9 +81,11 @@ pub fn merge_graphs_with_strategy(
     count
 }
 
-/// Source priority ordering (higher = preferred).
-fn source_priority(source: &crate::core::enums::SourceType) -> u8 {
-    use crate::core::enums::SourceType;
+/// Default source priority ordering used by `MergeStrategy::SourcePriority`.
+///
+/// Higher values are preferred. Call `merge_graphs_with_source_priority` to
+/// supply a domain-specific ordering.
+pub fn default_source_priority(source: &SourceType) -> u8 {
     match source {
         SourceType::Manual => 5,
         SourceType::Wikidata => 4,

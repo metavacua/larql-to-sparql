@@ -15,12 +15,53 @@ pub fn dispatch(q4_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Ve
 }
 
 /// Q4 matvec with pre-quantized Q8 input (avoids re-quantizing).
-pub fn dispatch_q8(q4_data: &[u8], q8_x: &[i8], q8_scales: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {
+pub fn dispatch_q8(
+    q4_data: &[u8],
+    q8_x: &[i8],
+    q8_scales: &[f32],
+    num_rows: usize,
+    hidden: usize,
+) -> Vec<f32> {
+    // The C kernel assumes `hidden % 32 == 0` and reads exactly 18 bytes
+    // per Q4_0 block × `num_rows` rows. Validate at the FFI boundary so a
+    // malformed manifest fails on the Rust side with a clear message
+    // rather than reading OOB inside `q4_0_matvec_c`.
+    debug_assert_eq!(
+        hidden % 32,
+        0,
+        "q4_0 matvec requires hidden to be a multiple of 32 (got {hidden})"
+    );
+    let blocks = hidden / 32;
+    debug_assert_eq!(
+        q4_data.len(),
+        num_rows * blocks * 18,
+        "q4_0 matvec: q4_data is {} bytes; expected {} \
+         (num_rows={num_rows}, blocks={blocks}, 18 bytes/block)",
+        q4_data.len(),
+        num_rows * blocks * 18,
+    );
+    debug_assert_eq!(
+        q8_x.len(),
+        hidden,
+        "q4_0 matvec: q8_x len {} != hidden {hidden}",
+        q8_x.len()
+    );
+    debug_assert_eq!(
+        q8_scales.len(),
+        blocks,
+        "q4_0 matvec: q8_scales len {} != hidden/32 = {blocks}",
+        q8_scales.len()
+    );
+
     let mut scores = vec![0.0f32; num_rows];
     unsafe {
         q4_0_matvec_c(
-            q4_data.as_ptr(), q8_x.as_ptr(), q8_scales.as_ptr(),
-            scores.as_mut_ptr(), num_rows, hidden,
+            q4_data.as_ptr(),
+            q8_x.as_ptr(),
+            q8_scales.as_ptr(),
+            scores.as_mut_ptr(),
+            num_rows,
+            hidden,
         );
     }
     scores
@@ -37,7 +78,9 @@ mod tests {
         let hidden = 256;
         let rows = 64;
         let x: Vec<f32> = (0..hidden).map(|i| (i as f32 * 0.01).sin()).collect();
-        let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let matrix: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let q4 = quantize_q4_0(&matrix);
         let result = dispatch(&q4, &x, rows, hidden);
         assert_eq!(result.len(), rows);
@@ -49,7 +92,9 @@ mod tests {
         let hidden = 256;
         let rows = 32;
         let x = vec![0.0f32; hidden];
-        let matrix: Vec<f32> = (0..rows * hidden).map(|i| (i as f32 * 0.001).cos()).collect();
+        let matrix: Vec<f32> = (0..rows * hidden)
+            .map(|i| (i as f32 * 0.001).cos())
+            .collect();
         let q4 = quantize_q4_0(&matrix);
         let result = dispatch(&q4, &x, rows, hidden);
         assert!(result.iter().all(|&v| v.abs() < 0.01));

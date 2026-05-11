@@ -1,0 +1,91 @@
+# larql-models cross-platform CI
+#
+# Runs fmt + check + clippy + tests + bench test-mode on Linux, Windows, and macOS
+# for every change to the larql-models crate. Validates cross-platform compatibility:
+#   - Linux  (x86_64-unknown-linux-gnu)
+#   - Windows (x86_64-pc-windows-msvc) — HF cache path, mmap, path separators
+#   - macOS  (aarch64-apple-darwin)    — NEON SIMD paths
+
+name: larql-models
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-models/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-models.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-models/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-models.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-models-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-models-
+
+      - name: Format check
+        run: cargo fmt -p larql-models -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-models --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-models --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p larql-models
+
+      - name: Test benches
+        run: cargo test -p larql-models --benches
+
+  coverage:
+    name: coverage · ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-models --summary-only

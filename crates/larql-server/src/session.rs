@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use axum::http::HeaderMap;
 use std::time::{Duration, Instant};
 
 use larql_vindex::PatchedVindex;
@@ -51,11 +53,7 @@ impl SessionManager {
 
     /// Get or create a session's PatchedVindex.
     #[allow(dead_code)]
-    pub async fn get_or_create(
-        &self,
-        session_id: &str,
-        model: &Arc<LoadedModel>,
-    ) -> PatchedVindex {
+    pub async fn get_or_create(&self, session_id: &str, model: &Arc<LoadedModel>) -> PatchedVindex {
         let mut sessions = self.sessions.write().await;
 
         // Evict expired sessions opportunistically (max 10 per call).
@@ -95,26 +93,49 @@ impl SessionManager {
     }
 
     /// Apply a patch to a session (not global).
+    ///
+    /// Lock discipline: never holds the `sessions` write guard while
+    /// awaiting (or blocking on) `model.patched`. The previous
+    /// implementation called `model.patched.blocking_read()` from inside
+    /// `or_insert_with` while holding `sessions.write().await`, which on
+    /// a multi-thread tokio runtime stalls the worker (and risks deadlock
+    /// against any task acquiring those locks in the opposite order).
+    /// We now structure the call as fast-path (session exists) under one
+    /// lock, slow-path (session needs creating) with the patched read
+    /// performed *between* dropping and re-acquiring the sessions write
+    /// guard. The re-acquire uses `entry().or_insert_with` to absorb the
+    /// race where another task inserted the same session_id between our
+    /// drop and re-acquire.
     pub async fn apply_patch(
         &self,
         session_id: &str,
         model: &Arc<LoadedModel>,
         patch: larql_vindex::VindexPatch,
     ) -> (usize, usize) {
-        let mut sessions = self.sessions.write().await;
         let now = Instant::now();
 
+        // Fast path: session already exists. Mutate under one lock and return.
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(session_id) {
+                session.last_accessed = now;
+                let op_count = patch.operations.len();
+                session.patched.apply_patch(patch);
+                return (op_count, session.patched.num_patches());
+            }
+        }
+
+        // Slow path: session needs creating. Read base outside the sessions
+        // lock so the patched read awaits cleanly without blocking a worker.
+        let new_base = model.patched.read().await.base().clone();
+
+        let mut sessions = self.sessions.write().await;
         let session = sessions
             .entry(session_id.to_string())
-            .or_insert_with(|| {
-                // We need the base — block briefly.
-                let base = model.patched.blocking_read();
-                SessionState {
-                    patched: PatchedVindex::new(base.base().clone()),
-                    last_accessed: now,
-                }
+            .or_insert_with(|| SessionState {
+                patched: PatchedVindex::new(new_base),
+                last_accessed: now,
             });
-
         session.last_accessed = now;
         let op_count = patch.operations.len();
         session.patched.apply_patch(patch);
@@ -131,7 +152,7 @@ impl SessionManager {
                 .iter()
                 .map(|p| {
                     serde_json::json!({
-                        "name": p.description.as_deref().unwrap_or("unnamed"),
+                        "name": p.description.as_deref().unwrap_or(PATCH_UNNAMED),
                         "operations": p.operations.len(),
                         "base_model": p.base_model,
                     })
@@ -142,11 +163,7 @@ impl SessionManager {
     }
 
     /// Remove a patch from a session.
-    pub async fn remove_patch(
-        &self,
-        session_id: &str,
-        name: &str,
-    ) -> Result<usize, String> {
+    pub async fn remove_patch(&self, session_id: &str, name: &str) -> Result<usize, String> {
         let mut sessions = self.sessions.write().await;
         let session = sessions
             .get_mut(session_id)
@@ -156,7 +173,7 @@ impl SessionManager {
             .patched
             .patches
             .iter()
-            .position(|p| p.description.as_deref().unwrap_or("unnamed") == name)
+            .position(|p| p.description.as_deref().unwrap_or(PATCH_UNNAMED) == name)
             .ok_or_else(|| format!("patch '{}' not found in session", name))?;
 
         session.patched.remove_patch(idx);
@@ -164,7 +181,9 @@ impl SessionManager {
     }
 
     /// Blocking write access to sessions map (for use in spawn_blocking).
-    pub fn sessions_blocking_write(&self) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
+    pub fn sessions_blocking_write(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionState>> {
         self.sessions.blocking_write()
     }
 
@@ -173,4 +192,18 @@ impl SessionManager {
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
     }
+}
+
+/// HTTP header used to scope patches and queries to a session.
+pub const HEADER_SESSION_ID: &str = "x-session-id";
+
+/// Fallback name for unnamed patches and sessions.
+pub const PATCH_UNNAMED: &str = "unnamed";
+
+/// Extract the `X-Session-Id` header value, if present.
+pub fn extract_session_id(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(HEADER_SESSION_ID)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }

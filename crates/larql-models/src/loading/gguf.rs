@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 
-use ndarray::{Array2, ShapeBuilder};
+use ndarray::Array2;
 
+use crate::detect::{detect_from_json_validated, ModelError};
 use crate::weights::ModelWeights;
-use crate::detect::ModelError;
 
 // ═══════════════════════════════════════════════════════════════
 // GGUF constants
@@ -33,6 +33,52 @@ const GGUF_TYPE_ARRAY: u32 = 9;
 const GGUF_TYPE_UINT64: u32 = 10;
 const GGUF_TYPE_INT64: u32 = 11;
 const GGUF_TYPE_FLOAT64: u32 = 12;
+
+const GGUF_GENERAL_ARCHITECTURE: &str = "general.architecture";
+const GGUF_EMBEDDING_LENGTH: &str = "embedding_length";
+const GGUF_BLOCK_COUNT: &str = "block_count";
+const GGUF_FEED_FORWARD_LENGTH: &str = "feed_forward_length";
+const GGUF_ATTENTION_HEAD_COUNT: &str = "attention.head_count";
+const GGUF_ATTENTION_HEAD_COUNT_KV: &str = "attention.head_count_kv";
+const GGUF_ATTENTION_KEY_LENGTH: &str = "attention.key_length";
+const GGUF_ROPE_FREQ_BASE: &str = "rope.freq_base";
+const GGUF_VOCAB_SIZE: &str = "vocab_size";
+
+const HF_MODEL_TYPE: &str = "model_type";
+const HF_HIDDEN_SIZE: &str = "hidden_size";
+const HF_NUM_HIDDEN_LAYERS: &str = "num_hidden_layers";
+const HF_INTERMEDIATE_SIZE: &str = "intermediate_size";
+const HF_NUM_ATTENTION_HEADS: &str = "num_attention_heads";
+const HF_NUM_KEY_VALUE_HEADS: &str = "num_key_value_heads";
+const HF_HEAD_DIM: &str = "head_dim";
+const HF_ROPE_THETA: &str = "rope_theta";
+const HF_VOCAB_SIZE: &str = "vocab_size";
+
+const TOKENIZER_JSON: &str = "tokenizer.json";
+const TOKENIZER_MODEL: &str = "model";
+const TOKENIZER_VOCAB: &str = "vocab";
+
+const GGUF_OUTPUT_WEIGHT: &str = "output.weight";
+const DEFAULT_GGUF_VOCAB_SIZE: usize = 262_144;
+const GEMMA4_GGUF_HEAD_DIM: u32 = 256;
+
+const GGUF_TO_HF_KEY_REPLACEMENTS: &[(&str, &str)] = &[
+    ("blk.", "layers."),
+    ("attn_qkv.", "self_attn.qkv_proj."),
+    ("attn_q.", "self_attn.q_proj."),
+    ("attn_k.", "self_attn.k_proj."),
+    ("attn_v.", "self_attn.v_proj."),
+    ("attn_output.", "self_attn.o_proj."),
+    ("ffn_gate.", "mlp.gate_proj."),
+    ("ffn_up.", "mlp.up_proj."),
+    ("ffn_down.", "mlp.down_proj."),
+    ("attn_norm.", "input_layernorm."),
+    ("ffn_norm.", "post_attention_layernorm."),
+    ("token_embd.", "embed_tokens."),
+    ("position_embd.", "wpe."),
+    ("output_norm.", "norm."),
+    ("output.", "lm_head."),
+];
 
 // Tensor type constants moved to format::quant::ggml
 
@@ -116,14 +162,17 @@ impl GgufFile {
         let magic = read_u32(&mut r)?;
         if magic != GGUF_MAGIC {
             return Err(ModelError::Parse(format!(
-                "not a GGUF file (magic: 0x{:08X}, expected 0x{:08X})", magic, GGUF_MAGIC
+                "not a GGUF file (magic: 0x{:08X}, expected 0x{:08X})",
+                magic, GGUF_MAGIC
             )));
         }
 
         // Version
         let version = read_u32(&mut r)?;
         if !(2..=3).contains(&version) {
-            return Err(ModelError::Parse(format!("unsupported GGUF version: {version}")));
+            return Err(ModelError::Parse(format!(
+                "unsupported GGUF version: {version}"
+            )));
         }
 
         let n_tensors = read_u64(&mut r)? as usize;
@@ -148,12 +197,17 @@ impl GgufFile {
             }
             let tensor_type = read_u32(&mut r)?;
             let offset = read_u64(&mut r)?;
-            tensor_infos.push(GgufTensorInfo { name, n_dims, dims, tensor_type, offset });
+            tensor_infos.push(GgufTensorInfo {
+                name,
+                n_dims,
+                dims,
+                tensor_type,
+                offset,
+            });
         }
 
         // Data starts at next alignment boundary (32 bytes)
-        let pos = r.stream_position()
-            .map_err(ModelError::Io)?;
+        let pos = r.stream_position().map_err(ModelError::Io)?;
         let alignment = 32u64;
         let data_offset = pos.div_ceil(alignment) * alignment;
 
@@ -167,7 +221,34 @@ impl GgufFile {
 
     /// Load all tensors, dequantizing to f32.
     #[allow(clippy::type_complexity)]
-    pub fn load_tensors(&self) -> Result<(HashMap<String, crate::WeightArray>, HashMap<String, Vec<f32>>), ModelError> {
+    pub fn load_tensors(
+        &self,
+    ) -> Result<
+        (
+            HashMap<String, crate::WeightArray>,
+            HashMap<String, Vec<f32>>,
+        ),
+        ModelError,
+    > {
+        self.load_tensors_filtered(&|_| false)
+    }
+
+    /// Load tensors, skipping normalized keys before reading/dequantizing tensor data.
+    ///
+    /// `skip_key` sees keys after GGUF-to-HF normalization but before architecture-specific
+    /// prefix stripping. GGUF keys do not carry the HF wrapper prefixes, so this is enough for
+    /// the current GGUF path and lets walk-only loading avoid FFN dequantization.
+    #[allow(clippy::type_complexity)]
+    pub fn load_tensors_filtered(
+        &self,
+        skip_key: &dyn Fn(&str) -> bool,
+    ) -> Result<
+        (
+            HashMap<String, crate::WeightArray>,
+            HashMap<String, Vec<f32>>,
+        ),
+        ModelError,
+    > {
         let file = std::fs::File::open(&self.path)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
@@ -175,13 +256,19 @@ impl GgufFile {
         let mut vectors = HashMap::new();
 
         for info in &self.tensor_infos {
-            let abs_offset = self
-                .data_offset
-                .checked_add(info.offset)
-                .ok_or_else(|| ModelError::Parse(format!(
+            // Normalize key name (strip GGUF prefixes). Do this before data-size/dequant
+            // work so filtered loading avoids touching skipped tensor bytes.
+            let key = normalize_gguf_key(&info.name);
+            if skip_key(&key) {
+                continue;
+            }
+
+            let abs_offset = self.data_offset.checked_add(info.offset).ok_or_else(|| {
+                ModelError::Parse(format!(
                     "tensor {}: data_offset {} + tensor offset {} overflows u64",
                     info.name, self.data_offset, info.offset,
-                )))?;
+                ))
+            })?;
             let n_elements: u64 = info.dims.iter().product();
 
             let data_size = tensor_data_size(info.tensor_type, n_elements as usize)?;
@@ -200,35 +287,28 @@ impl GgufFile {
             if end > mmap.len() {
                 return Err(ModelError::Parse(format!(
                     "tensor {} data out of bounds (offset {} + size {} > file {})",
-                    info.name, abs_offset, data_size, mmap.len()
+                    info.name,
+                    abs_offset,
+                    data_size,
+                    mmap.len()
                 )));
             }
 
             let raw = &mmap[abs_offset_usize..end];
             let floats = dequantize(raw, info.tensor_type, n_elements as usize)?;
 
-            // Normalize key name (strip GGUF prefixes)
-            let key = normalize_gguf_key(&info.name);
-
             match info.n_dims {
                 2 => {
-                    // GGUF/GGML uses column-major (Fortran) dimension ordering:
+                    // GGUF/GGML stores tensor dimensions in reverse order:
                     //   dims[0] = number of columns (innermost/fastest)
                     //   dims[1] = number of rows (outermost)
-                    // Data is laid out in column-major order.
-                    //
-                    // ndarray expects row-major (C) order by default.
-                    // To get the correct [rows, cols] matrix in row-major ndarray,
-                    // we swap the dimensions and use Fortran (column-major) layout,
-                    // then convert to standard (C) layout via .as_standard_layout().
+                    // The raw bytes are contiguous along dims[0], so after swapping
+                    // to the conventional [rows, cols] shape, ndarray's standard
+                    // row-major layout preserves the matrix values.
                     let ne0 = info.dims[0] as usize; // columns in GGML
                     let ne1 = info.dims[1] as usize; // rows in GGML
-                    // Shape is (rows, cols) = (ne1, ne0) in standard math convention.
-                    // Data is column-major, so we create with Fortran layout.
-                    let arr = Array2::from_shape_vec((ne1, ne0).f(), floats)
+                    let arr = Array2::from_shape_vec((ne1, ne0), floats)
                         .map_err(|e| ModelError::Parse(format!("tensor {}: {}", info.name, e)))?;
-                    // Convert to standard (C/row-major) layout for compatibility
-                    let arr = arr.as_standard_layout().into_owned();
                     tensors.insert(key, arr.into_shared());
                 }
                 1 => {
@@ -243,11 +323,17 @@ impl GgufFile {
 
     /// Build a config.json-equivalent from GGUF metadata for architecture detection.
     pub fn to_config_json(&self) -> serde_json::Value {
-        let get_str = |k: &str| self.metadata.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let get_str = |k: &str| {
+            self.metadata
+                .get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
         let _get_u32 = |k: &str| self.metadata.get(k).and_then(|v| v.as_u32()).unwrap_or(0);
 
         // GGUF uses "general.architecture" and "{arch}.*" keys
-        let arch = get_str("general.architecture");
+        let arch = get_str(GGUF_GENERAL_ARCHITECTURE);
         let prefix = format!("{arch}.");
 
         let get_arch_u32 = |suffix: &str| {
@@ -263,10 +349,14 @@ impl GgufFile {
             }
             0
         };
+        let get_arch_u32_opt = |suffix: &str| {
+            let key = format!("{prefix}{suffix}");
+            self.metadata.get(&key).and_then(|v| v.as_u32())
+        };
         let get_arch_f64 = |suffix: &str| {
-            self.metadata.get(&format!("{prefix}{suffix}"))
+            self.metadata
+                .get(&format!("{prefix}{suffix}"))
                 .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
         };
 
         // Map GGUF architecture names to HF model_type
@@ -282,100 +372,143 @@ impl GgufFile {
             other => other,
         };
 
-        // Gemma 4's attention.key_length reports a different dimension than
-        // per-head dim; override with hidden_size / num_heads (standard formula)
-        let hidden_size = get_arch_u32("embedding_length");
-        let num_heads = get_arch_u32("attention.head_count");
+        let hidden_size = get_arch_u32(GGUF_EMBEDDING_LENGTH);
+        let num_heads = get_arch_u32(GGUF_ATTENTION_HEAD_COUNT);
+        let num_kv_heads = get_arch_u32(GGUF_ATTENTION_HEAD_COUNT_KV);
         let head_dim = if arch == "gemma4" && num_heads > 0 {
-            // Gemma 4: Q matrix rows = num_heads × head_dim where head_dim = hidden/num_heads × scale
-            // For gemma-4-e2b: 1536 / 8 = 192, but actual is 256. Use 2×(hidden/heads) as heuristic.
-            // Better: derive from known value 2048 Q rows / 8 heads = 256
-            256
+            // Gemma 4 GGUF metadata reports the global key length; known
+            // exports use 256 for the per-head dimension that the runtime
+            // architecture needs as its base layer head_dim.
+            GEMMA4_GGUF_HEAD_DIM
         } else {
-            get_arch_u32("attention.key_length")
+            let key_length = get_arch_u32(GGUF_ATTENTION_KEY_LENGTH);
+            if key_length > 0 {
+                key_length
+            } else {
+                hidden_size.checked_div(num_heads).unwrap_or(0)
+            }
+        };
+        let num_kv_heads = if num_kv_heads > 0 {
+            num_kv_heads
+        } else {
+            num_heads
         };
 
-        serde_json::json!({
-            "model_type": model_type,
-            "hidden_size": hidden_size,
-            "num_hidden_layers": get_arch_u32("block_count"),
-            "intermediate_size": get_arch_u32("feed_forward_length"),
-            "num_attention_heads": num_heads,
-            "num_key_value_heads": get_arch_u32("attention.head_count_kv"),
-            "head_dim": head_dim,
-            "rope_theta": get_arch_f64("rope.freq_base"),
-            "vocab_size": get_arch_u32("vocab_size"),
-        })
+        let mut config = serde_json::json!({
+            HF_MODEL_TYPE: model_type,
+            HF_HIDDEN_SIZE: hidden_size,
+            HF_NUM_HIDDEN_LAYERS: get_arch_u32(GGUF_BLOCK_COUNT),
+            HF_INTERMEDIATE_SIZE: get_arch_u32(GGUF_FEED_FORWARD_LENGTH),
+            HF_NUM_ATTENTION_HEADS: num_heads,
+            HF_NUM_KEY_VALUE_HEADS: num_kv_heads,
+            HF_HEAD_DIM: head_dim,
+        });
+
+        if let Some(rope_base) = get_arch_f64(GGUF_ROPE_FREQ_BASE) {
+            config[HF_ROPE_THETA] = serde_json::json!(rope_base);
+        }
+        if let Some(vocab_size) = get_arch_u32_opt(GGUF_VOCAB_SIZE).filter(|&v| v > 0) {
+            config[HF_VOCAB_SIZE] = serde_json::json!(vocab_size);
+        }
+
+        config
     }
 }
 
 /// Load a GGUF file into ModelWeights (dequantized to f32).
 pub fn load_gguf(path: &Path) -> Result<ModelWeights, ModelError> {
+    load_gguf_filtered(path, &|_| false)
+}
+
+/// Load and validate a GGUF file into ModelWeights (dequantized to f32).
+pub fn load_gguf_validated(path: &Path) -> Result<ModelWeights, ModelError> {
+    load_gguf_filtered_with_validation(path, &|_| false, true)
+}
+
+/// Load a GGUF file into ModelWeights, skipping normalized keys before dequantization.
+pub(crate) fn load_gguf_filtered(
+    path: &Path,
+    skip_key: &dyn Fn(&str) -> bool,
+) -> Result<ModelWeights, ModelError> {
+    load_gguf_filtered_with_validation(path, skip_key, false)
+}
+
+/// Load a GGUF file into ModelWeights with optional architecture validation.
+pub(crate) fn load_gguf_filtered_with_validation(
+    path: &Path,
+    skip_key: &dyn Fn(&str) -> bool,
+    validate_config: bool,
+) -> Result<ModelWeights, ModelError> {
     let gguf = GgufFile::open(path)?;
 
     // Detect architecture from GGUF metadata
     let config_json = gguf.to_config_json();
-    let arch = crate::detect_from_json(&config_json);
+    let arch = if validate_config {
+        detect_from_json_validated(&config_json)?
+    } else {
+        crate::detect_from_json(&config_json)
+    };
     let prefixes = arch.key_prefixes_to_strip();
 
     // Load and dequantize all tensors
-    let (mut tensors, vectors) = gguf.load_tensors()?;
+    let (mut tensors, mut vectors) = gguf.load_tensors_filtered(skip_key)?;
 
     // Re-normalize keys through the architecture's prefix stripping
     let mut normalized_tensors: HashMap<String, crate::WeightArray> = HashMap::new();
     for (k, v) in tensors.drain() {
-        let key = super::safetensors::normalize_key_pub(&k, prefixes);
+        let key = super::safetensors::normalize_key(&k, prefixes);
         normalized_tensors.insert(key, v);
     }
+
+    // Some GGUF converters (notably non-standard GPT-2 builds) ship FFN /
+    // attention weights in the transpose of the canonical Linear layout. Fix
+    // orientation up-front so all downstream consumers see a single shape.
+    orient_ffn_tensors(&mut normalized_tensors, &*arch);
+    orient_attention_tensors(&mut normalized_tensors, &*arch);
+
+    // Architectures that pack Q/K/V into one Conv1D matrix (GPT-2) ship a
+    // single `qkv_proj` tensor. Split into per-projection q/k/v tensors and
+    // matching biases so downstream consumers always see the unfused layout
+    // returned by `attn_q_key` / `attn_k_key` / `attn_v_key`.
+    split_fused_qkv(&mut normalized_tensors, &mut vectors, &*arch);
 
     let embed_key = arch.embed_key();
     let embed_raw = normalized_tensors
         .get(embed_key)
         .ok_or_else(|| ModelError::MissingTensor(embed_key.into()))?
         .clone();
-    // GGUF stores embeddings as [hidden_size, vocab_size] but we need [vocab_size, hidden_size]
-    let embed = if embed_raw.shape()[0] < embed_raw.shape()[1] {
-        let mut out = ndarray::Array2::<f32>::zeros((embed_raw.shape()[1], embed_raw.shape()[0]));
-        out.assign(&embed_raw.t());
-        out.into_shared()
-    } else {
-        embed_raw
-    };
+    let cfg = arch.config();
+    let tokenizer_vocab_size = read_tokenizer_vocab_size(path);
+    let configured_vocab_size = cfg.vocab_size.filter(|&v| v > 0);
+    let expected_vocab_size = configured_vocab_size.or(tokenizer_vocab_size);
+    let embed = orient_embedding(embed_raw, cfg.hidden_size, expected_vocab_size);
 
     let lm_head = normalized_tensors
         .get("lm_head.weight")
-        .or_else(|| normalized_tensors.get("output.weight"))
+        .or_else(|| normalized_tensors.get(GGUF_OUTPUT_WEIGHT))
         .cloned()
         .unwrap_or_else(|| embed.clone());
+    let position_embed = arch
+        .position_embed_key()
+        .and_then(|key| normalized_tensors.get(key).cloned());
 
-    let cfg = arch.config();
-    // Gemma3 GGUF does not store vocab_size in arch metadata.
-    // Read it from tokenizer.json sitting next to the GGUF file.
-    let vocab_size = cfg.vocab_size
-        .filter(|&v| v > 2560)
-        .unwrap_or_else(|| {
-            // Try to read vocab size from tokenizer.json
-            if let Some(parent) = std::path::Path::new(&path).parent() {
-                let tok_path = parent.join("tokenizer.json");
-                if let Ok(data) = std::fs::read_to_string(&tok_path) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                        if let Some(v) = json["model"]["vocab"].as_object() {
-                            return v.len();
-                        }
-                    }
-                }
-            }
-            262144 // Gemma3 default
-        });
+    // Prefer explicit metadata, then tokenizer.json, then the loaded embedding
+    // shape. The final constant is only for malformed files with an empty
+    // embedding; normal GGUFs should resolve from one of the first three.
+    let vocab_size = expected_vocab_size
+        .or_else(|| (embed.shape()[0] > 0).then_some(embed.shape()[0]))
+        .unwrap_or(DEFAULT_GGUF_VOCAB_SIZE);
 
     Ok(ModelWeights {
         tensors: normalized_tensors,
         vectors,
         raw_bytes: std::collections::HashMap::new(),
+        skipped_tensors: Vec::new(),
         packed_mmaps: std::collections::HashMap::new(),
         packed_byte_ranges: std::collections::HashMap::new(),
         embed,
         lm_head,
+        position_embed,
         num_layers: cfg.num_layers,
         hidden_size: cfg.hidden_size,
         intermediate_size: cfg.intermediate_size,
@@ -386,6 +519,272 @@ pub fn load_gguf(path: &Path) -> Result<ModelWeights, ModelError> {
         rope_base: cfg.rope_base,
         arch,
     })
+}
+
+fn read_tokenizer_vocab_size(path: &Path) -> Option<usize> {
+    let parent = path.parent()?;
+    let tok_path = parent.join(TOKENIZER_JSON);
+    let data = std::fs::read_to_string(tok_path).ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(&data).ok()?;
+    json[TOKENIZER_MODEL][TOKENIZER_VOCAB]
+        .as_object()
+        .map(|v| v.len())
+        .filter(|&v| v > 0)
+}
+
+fn orient_embedding(
+    embed: crate::WeightArray,
+    hidden_size: usize,
+    vocab_size: Option<usize>,
+) -> crate::WeightArray {
+    let shape = embed.shape();
+    let rows = shape[0];
+    let cols = shape[1];
+
+    if cols == hidden_size || vocab_size.is_some_and(|vocab| rows == vocab) {
+        return embed;
+    }
+    if rows == hidden_size || vocab_size.is_some_and(|vocab| cols == vocab) {
+        let mut out = ndarray::Array2::<f32>::zeros((cols, rows));
+        out.assign(&embed.t());
+        return out.into_shared();
+    }
+
+    embed
+}
+
+/// Walk per-layer FFN tensors and ensure they're in canonical orientation.
+///
+/// Canonical (Llama / nn.Linear convention):
+/// - gate / up:  shape `(intermediate, hidden)`
+/// - down:       shape `(hidden, intermediate)`
+///
+/// Some GGUF converters (notably non-standard GPT-2 builds where Conv1D
+/// weights weren't transposed) store FFN weights in the inverse layout.
+/// If a tensor's loaded shape matches the inverse of the canonical
+/// orientation — and the two dimensions differ so orientation is
+/// unambiguous — transpose it. Otherwise leave it untouched.
+///
+/// Driven entirely by `ModelArchitecture` keys and `ModelConfig` dimensions
+/// — no family-specific branching.
+fn orient_ffn_tensors(
+    tensors: &mut HashMap<String, crate::WeightArray>,
+    arch: &dyn crate::config::ModelArchitecture,
+) {
+    let cfg = arch.config();
+    let hidden = cfg.hidden_size;
+    let dense_inter = cfg.intermediate_size;
+    if cfg.num_layers == 0 || hidden == 0 {
+        return;
+    }
+
+    let moe_inter = if arch.is_moe() || arch.is_hybrid_moe() {
+        let m = arch.moe_intermediate_size();
+        (m > 0).then_some(m)
+    } else {
+        None
+    };
+    let n_experts = if moe_inter.is_some() {
+        arch.num_experts()
+    } else {
+        0
+    };
+
+    for layer in 0..cfg.num_layers {
+        // Dense FFN tensors
+        if dense_inter > 0 {
+            orient_in_place(tensors, &arch.ffn_gate_key(layer), dense_inter, hidden);
+            orient_in_place(tensors, &arch.ffn_up_key(layer), dense_inter, hidden);
+            orient_in_place(tensors, &arch.ffn_down_key(layer), hidden, dense_inter);
+        }
+
+        // Shared-expert FFN tensors share dense intermediate dim.
+        if dense_inter > 0 {
+            if let Some(key) = arch.shared_expert_gate_key(layer) {
+                orient_in_place(tensors, &key, dense_inter, hidden);
+            }
+            if let Some(key) = arch.shared_expert_up_key(layer) {
+                orient_in_place(tensors, &key, dense_inter, hidden);
+            }
+            if let Some(key) = arch.shared_expert_down_key(layer) {
+                orient_in_place(tensors, &key, hidden, dense_inter);
+            }
+        }
+
+        // Per-expert MoE FFN tensors use the per-expert intermediate dim.
+        if let Some(mf) = moe_inter {
+            for expert in 0..n_experts {
+                if let Some(key) = arch.expert_ffn_gate_key(layer, expert) {
+                    orient_in_place(tensors, &key, mf, hidden);
+                }
+                if let Some(key) = arch.expert_ffn_up_key(layer, expert) {
+                    orient_in_place(tensors, &key, mf, hidden);
+                }
+                if let Some(key) = arch.expert_ffn_down_key(layer, expert) {
+                    orient_in_place(tensors, &key, hidden, mf);
+                }
+            }
+        }
+    }
+}
+
+/// Transpose `tensors[key]` if it's currently shaped `(expected_cols, expected_rows)`
+/// while the canonical shape is `(expected_rows, expected_cols)`. No-op when the
+/// tensor is missing, already canonical, the dimensions are equal (ambiguous),
+/// or the shape matches neither orientation.
+fn orient_in_place(
+    tensors: &mut HashMap<String, crate::WeightArray>,
+    key: &str,
+    expected_rows: usize,
+    expected_cols: usize,
+) {
+    if expected_rows == 0 || expected_cols == 0 || expected_rows == expected_cols {
+        return;
+    }
+    let arr = match tensors.get(key) {
+        Some(a) => a,
+        None => return,
+    };
+    let shape = arr.shape();
+    if shape.len() != 2 {
+        return;
+    }
+    if shape[0] == expected_rows && shape[1] == expected_cols {
+        return;
+    }
+    if shape[0] == expected_cols && shape[1] == expected_rows {
+        let mut out = ndarray::Array2::<f32>::zeros((expected_rows, expected_cols));
+        out.assign(&arr.t());
+        tensors.insert(key.to_string(), out.into_shared());
+    }
+}
+
+/// Walk per-layer attention tensors and ensure they're in canonical orientation.
+///
+/// Canonical (Linear convention):
+/// - q_proj:   shape `(num_q_heads * head_dim, hidden_size)`
+/// - k_proj:   shape `(num_kv_heads * head_dim, hidden_size)`
+/// - v_proj:   shape `(num_kv_heads * head_dim, hidden_size)`
+/// - o_proj:   shape `(hidden_size, num_q_heads * head_dim)`
+/// - qkv_proj: shape `(q_dim + 2 * kv_dim, hidden_size)` — used by fused-QKV
+///   architectures (GPT-2). Split happens in `split_fused_qkv` after this.
+///
+/// `orient_in_place` is a no-op when the two dimensions are equal, so square
+/// tensors (e.g. GPT-2 with `q_dim == kv_dim == hidden`) survive untouched.
+/// The fused-QKV tensor is asymmetric (`3*hidden vs hidden`) and orientable.
+fn orient_attention_tensors(
+    tensors: &mut HashMap<String, crate::WeightArray>,
+    arch: &dyn crate::config::ModelArchitecture,
+) {
+    let cfg = arch.config();
+    let hidden = cfg.hidden_size;
+    let head_dim = cfg.head_dim;
+    if cfg.num_layers == 0 || hidden == 0 || head_dim == 0 {
+        return;
+    }
+    let q_dim = cfg.num_q_heads * head_dim;
+    let kv_dim = cfg.num_kv_heads * head_dim;
+
+    for layer in 0..cfg.num_layers {
+        if q_dim > 0 {
+            orient_in_place(tensors, &arch.attn_q_key(layer), q_dim, hidden);
+            orient_in_place(tensors, &arch.attn_o_key(layer), hidden, q_dim);
+        }
+        if kv_dim > 0 {
+            orient_in_place(tensors, &arch.attn_k_key(layer), kv_dim, hidden);
+            orient_in_place(tensors, &arch.attn_v_key(layer), kv_dim, hidden);
+        }
+        if let Some(key) = arch.fused_qkv_key(layer) {
+            let total = q_dim + 2 * kv_dim;
+            if total > 0 {
+                orient_in_place(tensors, &key, total, hidden);
+            }
+        }
+    }
+}
+
+/// Materialise per-projection q/k/v tensors (and biases) from a fused QKV
+/// matrix, when the architecture declares one via `fused_qkv_key`.
+///
+/// The fused weight is assumed to be in canonical orientation
+/// `(q_dim + 2 * kv_dim, hidden_size)` — `orient_attention_tensors` runs
+/// first to enforce that. Rows split into:
+/// - `0 .. q_dim`                       → `attn_q_key`
+/// - `q_dim .. q_dim + kv_dim`          → `attn_k_key`
+/// - `q_dim + kv_dim .. q_dim + 2*kv_dim` → `attn_v_key`
+///
+/// The fused bias (1D, length `q_dim + 2 * kv_dim`) splits identically into
+/// the per-projection bias keys returned by the trait.
+///
+/// Driven entirely by `ModelArchitecture` keys + `ModelConfig` dimensions —
+/// no family-specific branching.
+fn split_fused_qkv(
+    tensors: &mut HashMap<String, crate::WeightArray>,
+    vectors: &mut HashMap<String, Vec<f32>>,
+    arch: &dyn crate::config::ModelArchitecture,
+) {
+    let cfg = arch.config();
+    let hidden = cfg.hidden_size;
+    let head_dim = cfg.head_dim;
+    if cfg.num_layers == 0 || hidden == 0 || head_dim == 0 {
+        return;
+    }
+    let q_dim = cfg.num_q_heads * head_dim;
+    let kv_dim = cfg.num_kv_heads * head_dim;
+    let total = q_dim + 2 * kv_dim;
+    if total == 0 {
+        return;
+    }
+
+    for layer in 0..cfg.num_layers {
+        let Some(weight_key) = arch.fused_qkv_key(layer) else {
+            continue;
+        };
+
+        if let Some(fused) = tensors.remove(&weight_key) {
+            let shape = fused.shape();
+            if shape.len() == 2 && shape[0] == total && shape[1] == hidden {
+                if q_dim > 0 {
+                    let q = fused.slice(ndarray::s![..q_dim, ..]).to_owned();
+                    tensors.insert(arch.attn_q_key(layer), q.into_shared());
+                }
+                if kv_dim > 0 {
+                    let k = fused
+                        .slice(ndarray::s![q_dim..q_dim + kv_dim, ..])
+                        .to_owned();
+                    let v = fused
+                        .slice(ndarray::s![q_dim + kv_dim..total, ..])
+                        .to_owned();
+                    tensors.insert(arch.attn_k_key(layer), k.into_shared());
+                    tensors.insert(arch.attn_v_key(layer), v.into_shared());
+                }
+            } else {
+                // Shape doesn't match expected fused layout — put it back so
+                // the caller can surface the mismatch via missing-tensor errors.
+                tensors.insert(weight_key, fused);
+            }
+        }
+
+        if let Some(bias_key) = arch.fused_qkv_bias_key(layer) {
+            if let Some(fused_b) = vectors.remove(&bias_key) {
+                if fused_b.len() == total {
+                    if let (Some(qb_key), true) = (arch.attn_q_bias_key(layer), q_dim > 0) {
+                        vectors.insert(qb_key, fused_b[..q_dim].to_vec());
+                    }
+                    if kv_dim > 0 {
+                        if let Some(kb_key) = arch.attn_k_bias_key(layer) {
+                            vectors.insert(kb_key, fused_b[q_dim..q_dim + kv_dim].to_vec());
+                        }
+                        if let Some(vb_key) = arch.attn_v_bias_key(layer) {
+                            vectors.insert(vb_key, fused_b[q_dim + kv_dim..total].to_vec());
+                        }
+                    }
+                } else {
+                    vectors.insert(bias_key, fused_b);
+                }
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -475,7 +874,9 @@ fn read_value(r: &mut impl Read) -> Result<GgufValue, ModelError> {
             }
             Ok(GgufValue::Array(arr))
         }
-        _ => Err(ModelError::Parse(format!("unknown GGUF metadata type: {vtype}"))),
+        _ => Err(ModelError::Parse(format!(
+            "unknown GGUF metadata type: {vtype}"
+        ))),
     }
 }
 
@@ -493,7 +894,9 @@ fn read_array_element(r: &mut impl Read, elem_type: u32) -> Result<GgufValue, Mo
         GGUF_TYPE_UINT64 => Ok(GgufValue::U64(read_u64(r)?)),
         GGUF_TYPE_INT64 => Ok(GgufValue::I64(read_i64(r)?)),
         GGUF_TYPE_FLOAT64 => Ok(GgufValue::F64(read_f64(r)?)),
-        _ => Err(ModelError::Parse(format!("unknown GGUF array element type: {elem_type}"))),
+        _ => Err(ModelError::Parse(format!(
+            "unknown GGUF array element type: {elem_type}"
+        ))),
     }
 }
 
@@ -515,27 +918,277 @@ pub fn normalize_gguf_key(name: &str) -> String {
     // HF uses "model.layers.N.self_attn.q_proj.weight" format
     // We normalize to the HF style since that's what ModelArchitecture expects
 
-    
-
-    name
-        .replace("blk.", "layers.")
-        .replace("attn_q.", "self_attn.q_proj.")
-        .replace("attn_k.", "self_attn.k_proj.")
-        .replace("attn_v.", "self_attn.v_proj.")
-        .replace("attn_output.", "self_attn.o_proj.")
-        .replace("ffn_gate.", "mlp.gate_proj.")
-        .replace("ffn_up.", "mlp.up_proj.")
-        .replace("ffn_down.", "mlp.down_proj.")
-        .replace("attn_norm.", "input_layernorm.")
-        .replace("ffn_norm.", "post_attention_layernorm.")
-        .replace("token_embd.", "embed_tokens.")
-        .replace("output_norm.", "norm.")
-        .replace("output.", "lm_head.")
+    GGUF_TO_HF_KEY_REPLACEMENTS
+        .iter()
+        .fold(name.to_string(), |acc, (from, to)| acc.replace(from, to))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_orient_in_place_transposes_inverse_layout() {
+        use ndarray::Array2;
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        // Inverse layout: stored (cols, rows) when canonical is (rows, cols).
+        // Canonical for ffn_down is (hidden, intermediate).
+        let stored = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .unwrap()
+            .into_shared();
+        tensors.insert("layers.0.mlp.down_proj.weight".to_string(), stored);
+
+        // Canonical (hidden=2, intermediate=3): expect shape (2, 3) after orient.
+        orient_in_place(&mut tensors, "layers.0.mlp.down_proj.weight", 2, 3);
+
+        let oriented = tensors.get("layers.0.mlp.down_proj.weight").unwrap();
+        assert_eq!(oriented.shape(), &[2, 3]);
+        // Transpose maps (i,j) → (j,i): row-major buffer becomes 1,3,5,2,4,6.
+        assert_eq!(oriented[[0, 0]], 1.0);
+        assert_eq!(oriented[[0, 1]], 3.0);
+        assert_eq!(oriented[[0, 2]], 5.0);
+        assert_eq!(oriented[[1, 0]], 2.0);
+        assert_eq!(oriented[[1, 1]], 4.0);
+        assert_eq!(oriented[[1, 2]], 6.0);
+    }
+
+    #[test]
+    fn test_orient_in_place_leaves_canonical_layout_untouched() {
+        use ndarray::Array2;
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        let canonical = Array2::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .unwrap()
+            .into_shared();
+        let original_ptr = canonical.as_ptr();
+        tensors.insert("layers.0.mlp.down_proj.weight".to_string(), canonical);
+
+        orient_in_place(&mut tensors, "layers.0.mlp.down_proj.weight", 2, 3);
+
+        let after = tensors.get("layers.0.mlp.down_proj.weight").unwrap();
+        // No clone-and-replace: same backing buffer.
+        assert_eq!(after.as_ptr(), original_ptr);
+    }
+
+    #[test]
+    fn test_orient_in_place_skips_ambiguous_square_dims() {
+        use ndarray::Array2;
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        let square = Array2::from_shape_vec((4, 4), (0..16).map(|x| x as f32).collect())
+            .unwrap()
+            .into_shared();
+        tensors.insert("layers.0.mlp.up_proj.weight".to_string(), square);
+
+        orient_in_place(&mut tensors, "layers.0.mlp.up_proj.weight", 4, 4);
+
+        let after = tensors.get("layers.0.mlp.up_proj.weight").unwrap();
+        // Untouched — orientation can't be inferred when rows == cols.
+        assert_eq!(after.shape(), &[4, 4]);
+        assert_eq!(after[[0, 0]], 0.0);
+        assert_eq!(after[[3, 3]], 15.0);
+    }
+
+    /// Build a minimal Gpt2-shaped ModelConfig for orientation/split tests.
+    fn synth_gpt2_config(
+        num_layers: usize,
+        hidden: usize,
+        head_dim: usize,
+        n_heads: usize,
+    ) -> crate::config::ModelConfig {
+        crate::config::ModelConfig {
+            model_type: "gpt2".into(),
+            num_layers,
+            hidden_size: hidden,
+            intermediate_size: 4 * hidden,
+            head_dim,
+            num_q_heads: n_heads,
+            num_kv_heads: n_heads,
+            vocab_size: Some(8),
+            rope_base: 10_000.0,
+            rope_local_base: None,
+            sliding_window: None,
+            num_experts: None,
+            num_experts_per_token: None,
+            num_shared_experts: None,
+            enable_moe_block: false,
+            top_k_experts: None,
+            moe_intermediate_size: None,
+            kv_lora_rank: None,
+            q_lora_rank: None,
+            rope_scaling: None,
+            attn_logit_softcapping: None,
+            final_logit_softcapping: None,
+            query_pre_attn_scalar: None,
+            embedding_multiplier: None,
+            residual_multiplier: None,
+            attention_multiplier: None,
+            logits_scaling: None,
+            global_head_dim: None,
+            num_global_kv_heads: None,
+            partial_rotary_factor: None,
+            sliding_window_pattern: None,
+            layer_types: None,
+            attention_k_eq_v: false,
+            per_layer_embed_dim: None,
+            num_kv_shared_layers: None,
+        }
+    }
+
+    #[test]
+    fn test_orient_attention_tensors_fixes_inverse_fused_qkv_layout() {
+        use ndarray::Array2;
+
+        // hidden=4, head_dim=2, n_heads=2 → q_dim=kv_dim=4, total=12.
+        let cfg = synth_gpt2_config(1, 4, 2, 2);
+        let arch = crate::architectures::gpt2::Gpt2Arch::from_config(cfg);
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        // Inverse layout: stored (hidden=4, total=12) instead of (12, 4).
+        let inverse = Array2::<f32>::zeros((4, 12)).into_shared();
+        tensors.insert("layers.0.self_attn.qkv_proj.weight".into(), inverse);
+
+        orient_attention_tensors(&mut tensors, &arch);
+
+        let oriented = tensors.get("layers.0.self_attn.qkv_proj.weight").unwrap();
+        assert_eq!(oriented.shape(), &[12, 4]);
+    }
+
+    #[test]
+    fn test_split_fused_qkv_materialises_per_projection_tensors_and_biases() {
+        use ndarray::Array2;
+
+        // hidden=4, head_dim=2, n_heads=2 → q_dim=kv_dim=4, total=12.
+        let cfg = synth_gpt2_config(1, 4, 2, 2);
+        let arch = crate::architectures::gpt2::Gpt2Arch::from_config(cfg);
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+
+        // Fused weight: row r has constant value r so we can verify slices.
+        let mut data = Vec::with_capacity(12 * 4);
+        for r in 0..12 {
+            for _c in 0..4 {
+                data.push(r as f32);
+            }
+        }
+        let fused_w = Array2::from_shape_vec((12, 4), data).unwrap().into_shared();
+        tensors.insert("layers.0.self_attn.qkv_proj.weight".into(), fused_w);
+
+        // Fused bias: 12 distinct values.
+        let fused_b: Vec<f32> = (0..12).map(|i| i as f32 * 0.1).collect();
+        vectors.insert("layers.0.self_attn.qkv_proj.bias".into(), fused_b);
+
+        split_fused_qkv(&mut tensors, &mut vectors, &arch);
+
+        // Fused tensor + bias removed.
+        assert!(!tensors.contains_key("layers.0.self_attn.qkv_proj.weight"));
+        assert!(!vectors.contains_key("layers.0.self_attn.qkv_proj.bias"));
+
+        let q = tensors.get("layers.0.self_attn.q_proj.weight").unwrap();
+        let k = tensors.get("layers.0.self_attn.k_proj.weight").unwrap();
+        let v = tensors.get("layers.0.self_attn.v_proj.weight").unwrap();
+        assert_eq!(q.shape(), &[4, 4]);
+        assert_eq!(k.shape(), &[4, 4]);
+        assert_eq!(v.shape(), &[4, 4]);
+        // Row r maps to constant r in the fused layout. q rows 0..4, k 4..8, v 8..12.
+        assert_eq!(q[[0, 0]], 0.0);
+        assert_eq!(q[[3, 3]], 3.0);
+        assert_eq!(k[[0, 0]], 4.0);
+        assert_eq!(k[[3, 3]], 7.0);
+        assert_eq!(v[[0, 0]], 8.0);
+        assert_eq!(v[[3, 3]], 11.0);
+
+        let qb = vectors.get("layers.0.self_attn.q_proj.bias").unwrap();
+        let kb = vectors.get("layers.0.self_attn.k_proj.bias").unwrap();
+        let vb = vectors.get("layers.0.self_attn.v_proj.bias").unwrap();
+        assert_eq!(qb.len(), 4);
+        assert_eq!(kb.len(), 4);
+        assert_eq!(vb.len(), 4);
+        assert!((qb[0] - 0.0).abs() < 1e-6);
+        assert!((kb[0] - 0.4).abs() < 1e-6);
+        assert!((vb[0] - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_split_fused_qkv_no_op_when_arch_has_no_fused_key() {
+        use ndarray::Array2;
+
+        // Llama-style arch — no fused QKV.
+        let cfg = synth_gpt2_config(1, 4, 2, 2);
+        let arch = crate::architectures::llama::LlamaArch::from_config(cfg);
+
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        let mut vectors: HashMap<String, Vec<f32>> = HashMap::new();
+        let q = Array2::<f32>::zeros((4, 4)).into_shared();
+        tensors.insert("layers.0.self_attn.q_proj.weight".into(), q);
+
+        split_fused_qkv(&mut tensors, &mut vectors, &arch);
+
+        // Untouched.
+        assert!(tensors.contains_key("layers.0.self_attn.q_proj.weight"));
+    }
+
+    #[test]
+    fn test_orient_ffn_tensors_fixes_gpt2_style_inverse_layout() {
+        use crate::config::ModelConfig;
+        use ndarray::Array2;
+
+        let cfg = ModelConfig {
+            model_type: "gpt2".into(),
+            num_layers: 1,
+            hidden_size: 4,
+            intermediate_size: 12,
+            head_dim: 2,
+            num_q_heads: 2,
+            num_kv_heads: 2,
+            vocab_size: Some(8),
+            rope_base: 10_000.0,
+            rope_local_base: None,
+            sliding_window: None,
+            num_experts: None,
+            num_experts_per_token: None,
+            num_shared_experts: None,
+            enable_moe_block: false,
+            top_k_experts: None,
+            moe_intermediate_size: None,
+            kv_lora_rank: None,
+            q_lora_rank: None,
+            rope_scaling: None,
+            attn_logit_softcapping: None,
+            final_logit_softcapping: None,
+            query_pre_attn_scalar: None,
+            embedding_multiplier: None,
+            residual_multiplier: None,
+            attention_multiplier: None,
+            logits_scaling: None,
+            global_head_dim: None,
+            num_global_kv_heads: None,
+            partial_rotary_factor: None,
+            sliding_window_pattern: None,
+            layer_types: None,
+            attention_k_eq_v: false,
+            per_layer_embed_dim: None,
+            num_kv_shared_layers: None,
+        };
+        let arch = crate::architectures::gpt2::Gpt2Arch::from_config(cfg);
+
+        // Inverse layouts: ffn_up stored (hidden, inter) instead of (inter, hidden);
+        // ffn_down stored (inter, hidden) instead of (hidden, inter).
+        let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
+        let up_inverse = Array2::<f32>::zeros((4, 12)).into_shared();
+        let down_inverse = Array2::<f32>::zeros((12, 4)).into_shared();
+        tensors.insert("layers.0.mlp.up_proj.weight".into(), up_inverse);
+        tensors.insert("layers.0.mlp.down_proj.weight".into(), down_inverse);
+
+        orient_ffn_tensors(&mut tensors, &arch);
+
+        let up = tensors.get("layers.0.mlp.up_proj.weight").unwrap();
+        let down = tensors.get("layers.0.mlp.down_proj.weight").unwrap();
+        assert_eq!(up.shape(), &[12, 4]);
+        assert_eq!(down.shape(), &[4, 12]);
+    }
 
     #[test]
     fn test_normalize_gguf_key() {
@@ -551,10 +1204,7 @@ mod tests {
             normalize_gguf_key("token_embd.weight"),
             "embed_tokens.weight"
         );
-        assert_eq!(
-            normalize_gguf_key("output.weight"),
-            "lm_head.weight"
-        );
+        assert_eq!(normalize_gguf_key("output.weight"), "lm_head.weight");
     }
 
     #[test]
@@ -578,13 +1228,15 @@ mod tests {
         file.write_all(&2u32.to_le_bytes()).unwrap(); // n_dims
         file.write_all(&4u64.to_le_bytes()).unwrap(); // cols
         file.write_all(&2u64.to_le_bytes()).unwrap(); // rows
-        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes()).unwrap();
+        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes())
+            .unwrap();
         file.write_all(&0u64.to_le_bytes()).unwrap(); // tensor data offset
 
         // Pad tensor data start to 32-byte boundary.
         let pos = file.stream_position().unwrap();
         let aligned = pos.div_ceil(32) * 32;
-        file.write_all(&vec![0u8; (aligned - pos) as usize]).unwrap();
+        file.write_all(&vec![0u8; (aligned - pos) as usize])
+            .unwrap();
 
         // Raw row-major data for a logical [2, 4] matrix.
         for v in 1u32..=8 {
@@ -598,6 +1250,12 @@ mod tests {
 
         assert_eq!(down.shape(), &[2, 4]);
         assert_eq!(down[[0, 0]], 1.0);
+        assert_eq!(down[[0, 1]], 2.0);
+        assert_eq!(down[[0, 2]], 3.0);
+        assert_eq!(down[[0, 3]], 4.0);
+        assert_eq!(down[[1, 0]], 5.0);
+        assert_eq!(down[[1, 1]], 6.0);
+        assert_eq!(down[[1, 2]], 7.0);
         assert_eq!(down[[1, 3]], 8.0);
     }
 
@@ -607,14 +1265,23 @@ mod tests {
         // Exercises: (a) gemma4 name pass-through, (b) head_dim=256 override,
         // (c) array metadata (per-layer variable FFN sizes → take max).
         let mut metadata = HashMap::new();
-        metadata.insert("general.architecture".to_string(), GgufValue::String("gemma4".to_string()));
+        metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("gemma4".to_string()),
+        );
         metadata.insert("gemma4.embedding_length".to_string(), GgufValue::U32(1536));
         metadata.insert("gemma4.block_count".to_string(), GgufValue::U32(35));
         metadata.insert("gemma4.attention.head_count".to_string(), GgufValue::U32(8));
-        metadata.insert("gemma4.attention.head_count_kv".to_string(), GgufValue::U32(1));
+        metadata.insert(
+            "gemma4.attention.head_count_kv".to_string(),
+            GgufValue::U32(1),
+        );
         // Gemma 4 reports attention.key_length=512 (global head_dim), not the
         // per-head 256 we want. Loader must override to 256 for arch="gemma4".
-        metadata.insert("gemma4.attention.key_length".to_string(), GgufValue::U32(512));
+        metadata.insert(
+            "gemma4.attention.key_length".to_string(),
+            GgufValue::U32(512),
+        );
         metadata.insert("gemma4.vocab_size".to_string(), GgufValue::U32(262144));
         // Per-layer variable FFN — some layers 6144, some 12288. Must take max.
         metadata.insert(
@@ -630,7 +1297,7 @@ mod tests {
             metadata,
             tensor_infos: Vec::new(),
             data_offset: 0,
-            path: std::path::PathBuf::from("/dev/null"),
+            path: std::path::PathBuf::from("<no-file>"),
         };
         let cfg = gguf.to_config_json();
 
@@ -644,6 +1311,42 @@ mod tests {
         assert_eq!(cfg["num_attention_heads"], 8);
         assert_eq!(cfg["num_key_value_heads"], 1);
         assert_eq!(cfg["vocab_size"], 262144);
+    }
+
+    #[test]
+    fn test_gguf_to_config_json_omits_absent_rope_base_for_arch_default() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "general.architecture".to_string(),
+            GgufValue::String("llama".to_string()),
+        );
+        metadata.insert("llama.embedding_length".to_string(), GgufValue::U32(4096));
+        metadata.insert("llama.block_count".to_string(), GgufValue::U32(32));
+        metadata.insert(
+            "llama.feed_forward_length".to_string(),
+            GgufValue::U32(11008),
+        );
+        metadata.insert("llama.attention.head_count".to_string(), GgufValue::U32(32));
+        metadata.insert(
+            "llama.attention.head_count_kv".to_string(),
+            GgufValue::U32(8),
+        );
+        metadata.insert(
+            "llama.attention.key_length".to_string(),
+            GgufValue::U32(128),
+        );
+
+        let gguf = GgufFile {
+            metadata,
+            tensor_infos: Vec::new(),
+            data_offset: 0,
+            path: std::path::PathBuf::from("<no-file>"),
+        };
+        let cfg = gguf.to_config_json();
+
+        assert!(cfg.get(HF_ROPE_THETA).is_none());
+        let arch = crate::detect_from_json_validated(&cfg).unwrap();
+        assert_eq!(arch.config().rope_base, 10_000.0);
     }
 
     /// Build a minimal GGUF file with one 2-D F32 tensor, but truncate the
@@ -670,14 +1373,16 @@ mod tests {
         file.write_all(&2u32.to_le_bytes()).unwrap();
         file.write_all(&4u64.to_le_bytes()).unwrap();
         file.write_all(&2u64.to_le_bytes()).unwrap();
-        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes()).unwrap();
+        file.write_all(&crate::quant::ggml::TYPE_F32.to_le_bytes())
+            .unwrap();
         file.write_all(&0u64.to_le_bytes()).unwrap();
 
         // Pad to 32-byte boundary, then write only 16 bytes of tensor data
         // (half of the declared 32). Loader must detect the shortfall.
         let pos = file.stream_position().unwrap();
         let aligned = pos.div_ceil(32) * 32;
-        file.write_all(&vec![0u8; (aligned - pos) as usize]).unwrap();
+        file.write_all(&vec![0u8; (aligned - pos) as usize])
+            .unwrap();
         file.write_all(&[0u8; 16]).unwrap();
         file.flush().unwrap();
 

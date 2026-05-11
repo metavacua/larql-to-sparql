@@ -58,6 +58,15 @@ fn main() {
         }
     }
 
+    // Parallel edges keep the exact relation selected by the shortest path.
+    graph.add_edge(Edge::new("A", "slow", "B").with_confidence(0.20));
+    graph.add_edge(Edge::new("A", "fast", "B").with_confidence(0.90));
+    let (cost, edges) = shortest_path(&graph, "A", "B").unwrap();
+    println!(
+        "  A → B chooses relation={} (cost={cost:.3})",
+        edges[0].relation
+    );
+
     // ── Subgraph ──
     println!("\n--- Subgraph Extraction ---");
     for depth in 0..=3 {
@@ -106,6 +115,26 @@ fn main() {
         }
         println!(" (cost={cost:.3})");
     }
+
+    // ── Diff ──
+    println!("\n--- Graph Diff ---");
+    let mut old = Graph::new();
+    old.add_edge(
+        Edge::new("France", "capital-of", "Paris")
+            .with_source(SourceType::Parametric)
+            .with_metadata("layer", serde_json::json!(12)),
+    );
+    let mut new = Graph::new();
+    new.add_edge(
+        Edge::new("France", "capital-of", "Paris")
+            .with_source(SourceType::Wikidata)
+            .with_metadata("layer", serde_json::json!(18)),
+    );
+    let d = diff(&old, &new);
+    println!(
+        "  same triple, changed attributes: {} changed edge",
+        d.changed.len()
+    );
 
     // ── Walk ──
     println!("\n--- Multi-hop Walk ---");

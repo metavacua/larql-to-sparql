@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "Layer-sharding router for distributed larql-server deployments"
 
+[lib]
+name = "larql_router"
+path = "src/lib.rs"
+
 [[bin]]
 name = "larql-router"
 path = "src/main.rs"
@@ -26,3 +30,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = { workspace = true }
 futures = "0.3"
 futures-core = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "routing"
+harness = false

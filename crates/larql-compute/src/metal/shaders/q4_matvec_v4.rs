@@ -4,6 +4,10 @@
 //! extract nibbles with bitwise ops on packed uint32,
 //! multiply with Q8 using integer arithmetic throughout.
 //! Avoids per-byte load + per-nibble branch.
+//!
+//! Geometry is exposed via the [`Kernel`] marker (see
+//! `metal::kernel::TiledKernel`) so the binding site picks up name +
+//! row map + threads-per-TG by *path*, not by hand-typed strings.
 
 pub const SHADER: &str = r#"
 constant uint ROWS_PER_TG_V4 = 8;
@@ -87,3 +91,11 @@ kernel void q4_matvec_v4(
 
 pub const ROWS_PER_TG: u64 = 8;
 pub const THREADS_PER_TG: u64 = 256;
+
+/// Marker for the kernel-handle binding. See `metal::kernel::TiledKernel`.
+pub struct Kernel;
+impl crate::metal::kernel::TiledKernel for Kernel {
+    const KERNEL_NAME: &'static str = "q4_matvec_v4";
+    const ROWS_PER_TG: u64 = ROWS_PER_TG;
+    const THREADS_PER_TG: u64 = THREADS_PER_TG;
+}

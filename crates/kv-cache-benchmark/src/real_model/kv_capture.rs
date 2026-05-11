@@ -3,11 +3,11 @@
 //! Runs `run_attention_with_kv()` per layer and collects the post-RoPE K and V
 //! tensors. These are the ground-truth vectors that TurboQuant compresses.
 
-use ndarray::Array2;
-use larql_inference::model::ModelWeights;
 use larql_inference::attention::run_attention_with_kv;
-use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::ffn::WeightFfn;
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
+use larql_inference::model::ModelWeights;
+use ndarray::Array2;
 
 /// Captured K/V tensors from a full forward pass.
 pub struct KvCapture {
@@ -32,8 +32,8 @@ pub fn capture_kv(weights: &ModelWeights, token_ids: &[u32]) -> KvCapture {
     let mut values = Vec::with_capacity(num_layers);
 
     for layer in 0..num_layers {
-        let (h_post_attn, k_rope, v) = run_attention_with_kv(weights, &h, layer)
-            .expect("attention failed");
+        let (h_post_attn, k_rope, v) =
+            run_attention_with_kv(weights, &h, layer).expect("attention failed");
 
         keys.push(k_rope);
         values.push(v);

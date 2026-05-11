@@ -1,5 +1,6 @@
 //! Tokenizer loading and helpers.
 
+use larql_vindex::format::filenames::*;
 use std::path::Path;
 
 use larql_models::ModelArchitecture;
@@ -8,7 +9,7 @@ use crate::error::InferenceError;
 
 /// Load a tokenizer from a model directory.
 pub fn load_tokenizer(model_dir: &Path) -> Result<tokenizers::Tokenizer, InferenceError> {
-    let path = model_dir.join("tokenizer.json");
+    let path = model_dir.join(TOKENIZER_JSON);
     if !path.exists() {
         return Err(InferenceError::MissingTensor(
             "tokenizer.json not found".into(),
@@ -110,5 +111,89 @@ mod tests {
         // Empty encoding (shouldn't happen in practice, but don't panic).
         assert_eq!(maybe_prepend_bos(vec![], Some(2)), vec![2]);
         assert_eq!(maybe_prepend_bos(vec![], None), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn load_tokenizer_missing_file_errors() {
+        let dir = std::env::temp_dir().join(format!(
+            "larql_tokenizer_missing_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = load_tokenizer(&dir);
+        assert!(matches!(result, Err(InferenceError::MissingTensor(_))));
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn load_tokenizer_invalid_json_returns_parse_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "larql_tokenizer_bad_json_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(TOKENIZER_JSON);
+        std::fs::write(&path, b"not valid json").unwrap();
+        let result = load_tokenizer(&dir);
+        assert!(matches!(result, Err(InferenceError::Parse(_))));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn encode_prompt_returns_token_ids() {
+        // Use the synthetic test tokenizer so we don't need a real model on disk.
+        let tok = crate::test_utils::make_test_tokenizer(32);
+        let arch_json = serde_json::json!({
+            "model_type": "tinymodel",
+            "hidden_size": 16,
+            "num_hidden_layers": 2,
+            "intermediate_size": 32,
+            "head_dim": 8,
+            "num_attention_heads": 2,
+            "num_key_value_heads": 1,
+            "vocab_size": 32,
+        });
+        let arch = larql_models::detect_from_json(&arch_json);
+        // Synthetic tokenizer's vocabulary words are "[N]" — single-token
+        // prompt should encode to exactly one id.
+        let result = encode_prompt(&tok, &*arch, "[5]");
+        let ids = result.expect("encode must succeed for in-vocab prompt");
+        assert!(!ids.is_empty());
+    }
+
+    #[test]
+    fn decode_token_returns_some_for_valid_id() {
+        let tok = crate::test_utils::make_test_tokenizer(32);
+        // Token 5 should decode to "[5]" (per the synthetic tokenizer's
+        // vocab map). decode_token trims whitespace.
+        let s = decode_token(&tok, 5);
+        assert!(s.is_some(), "decode_token must succeed for valid id");
+    }
+
+    #[test]
+    fn decode_token_raw_falls_back_to_vocab_lookup() {
+        let tok = crate::test_utils::make_test_tokenizer(32);
+        // For an in-vocab id the normal decode succeeds and we get the
+        // surface form.
+        let s = decode_token_raw(&tok, 7);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn decode_token_raw_format_fallback_for_out_of_vocab_id() {
+        let tok = crate::test_utils::make_test_tokenizer(32);
+        // Id 9999 is out of vocab — both decode_token and id_to_token
+        // return None → format!("[{id}]") fallback.
+        let s = decode_token_raw(&tok, 9999);
+        assert_eq!(s, "[9999]");
     }
 }

@@ -71,8 +71,7 @@ impl Session {
         // LQL INSERT surface supports canonical-form relations only.
         // Non-canonical facts can be installed via the Python pipeline
         // in `experiments/14_vindex_compilation` for now.
-        let rel_words = relation.replace(['-', '_'], " ");
-        let prompt = format!("The {rel_words} of {entity} is");
+        let prompt = crate::executor::tuning::canonical_prompt(relation, entity);
 
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let weights = larql_vindex::load_model_weights(path, &mut cb)
@@ -104,14 +103,11 @@ impl Session {
         //    residuals and fire them against full-power ones,
         //    producing the "cosines look fine, activations have a
         //    25-unit gap" silent-drift class of bug noted in
-        //    `experiments/15_v11_model/RESULTS.md §20.3`.
-        let walk_ffn = larql_inference::vindex::WalkFfn::new_unlimited_with_trace(
-            &weights,
-            patched.base(),
-        );
-        let _result = larql_inference::predict_with_ffn(
-            &weights, &tokenizer, &token_ids, 1, &walk_ffn,
-        );
+        //    `~/chris-source/chris-experiments/compilation/15_v11_model/RESULTS.md §20.3`.
+        let walk_ffn =
+            larql_inference::vindex::WalkFfn::new_unlimited_with_trace(&weights, patched.base());
+        let _result =
+            larql_inference::predict_with_ffn(&weights, &tokenizer, &token_ids, 1, &walk_ffn);
 
         let per_layer: Vec<(usize, Vec<f32>)> = walk_ffn
             .take_residuals()
@@ -166,7 +162,7 @@ impl Session {
                     && word.chars().all(|c| c.is_alphabetic())
                     && !word.eq_ignore_ascii_case(entity)
                 {
-                    let decoy = format!("The {rel_words} of {word} is");
+                    let decoy = crate::executor::tuning::canonical_prompt(relation, word);
                     decoy_prompts.push(decoy);
                     template_decoys_added += 1;
                 }
@@ -184,9 +180,7 @@ impl Session {
                     &weights,
                     patched.base(),
                 );
-                let _ = larql_inference::predict_with_ffn(
-                    &weights, &tokenizer, &ids, 1, &ffn,
-                );
+                let _ = larql_inference::predict_with_ffn(&weights, &tokenizer, &ids, 1, &ffn);
                 let r = ffn.take_residuals().into_iter().find(|(l, _)| *l == layer);
                 if let Some((_, vec)) = r {
                     captured.push(larql_vindex::ndarray::Array1::from_vec(vec));
@@ -205,7 +199,7 @@ impl Session {
 /// Canonical decoy prompt set used by Phase 1b alongside the
 /// template-matched decoys generated from the tokenizer vocab.
 ///
-/// Same set as `experiments/14_vindex_compilation/experiment_vindex_compilation.py`.
+/// Same set as `~/chris-source/chris-experiments/compilation/14_vindex_compilation/experiment_vindex_compilation.py`.
 /// These prompts span literary, philosophical, poetic, and common
 /// completion templates — the canonical bleed targets for a
 /// fact-install slot operating at `gate_scale=30`. Capturing residuals

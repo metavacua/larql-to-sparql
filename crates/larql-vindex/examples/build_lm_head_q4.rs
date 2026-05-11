@@ -3,17 +3,20 @@
 //! Usage:
 //!   cargo run --release -p larql-vindex --example build_lm_head_q4 -- <vindex_dir>
 
+use larql_compute::cpu::q4::quantize_q4_0;
+use larql_vindex::format::filenames::*;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use larql_compute::cpu::q4::quantize_q4_0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args().nth(1)
-        .unwrap_or_else(|| { eprintln!("Usage: build_lm_head_q4 <vindex_dir>"); std::process::exit(1); });
+    let dir = std::env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("Usage: build_lm_head_q4 <vindex_dir>");
+        std::process::exit(1);
+    });
     let dir = Path::new(&dir);
 
-    let src = dir.join("lm_head.bin");
+    let src = dir.join(LM_HEAD_BIN);
     if !src.exists() {
         return Err("lm_head.bin not found".into());
     }
@@ -21,9 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = std::fs::File::open(&src)?;
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
     let num_floats = mmap.len() / 4;
-    let f32_data = unsafe {
-        std::slice::from_raw_parts(mmap.as_ptr() as *const f32, num_floats)
-    };
+    let f32_data = unsafe { std::slice::from_raw_parts(mmap.as_ptr() as *const f32, num_floats) };
 
     // Must be multiple of 32 for Q4 — pad if needed
     let padded_len = num_floats.div_ceil(32) * 32;
@@ -36,7 +37,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("=== Building lm_head_q4.bin ===");
-    println!("  Source: {} ({:.1} MB, {} floats)", src.display(), mmap.len() as f64 / 1e6, num_floats);
+    println!(
+        "  Source: {} ({:.1} MB, {} floats)",
+        src.display(),
+        mmap.len() as f64 / 1e6,
+        num_floats
+    );
 
     let t0 = Instant::now();
     let q4 = quantize_q4_0(&data);
@@ -47,7 +53,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     out.write_all(&q4)?;
 
     let ratio = mmap.len() as f64 / q4.len() as f64;
-    println!("  Output: {} ({:.1} MB, {:.1}x compression)", out_path.display(), q4.len() as f64 / 1e6, ratio);
+    println!(
+        "  Output: {} ({:.1} MB, {:.1}x compression)",
+        out_path.display(),
+        q4.len() as f64 / 1e6,
+        ratio
+    );
     println!("  Time: {:.2}s", elapsed);
     println!("=== Done ===");
     Ok(())

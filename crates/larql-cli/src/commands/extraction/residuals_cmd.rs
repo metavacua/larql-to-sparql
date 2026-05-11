@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Args, Subcommand};
-use larql_inference::{CaptureCallbacks, CaptureConfig, InferenceModel};
+use larql_inference::{CaptureCallbacks, CaptureConfig, InferenceModel, DEFAULT_ACTIVATION_TOP_K};
 
 #[derive(Args)]
 pub struct ResidualsArgs {
@@ -47,7 +47,7 @@ struct CaptureArgs {
     activations: bool,
 
     /// Number of top features to record per layer when --activations is set.
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value_t = DEFAULT_ACTIVATION_TOP_K)]
     activation_top_k: usize,
 }
 
@@ -95,7 +95,8 @@ fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
     let layers: Vec<usize> = if args.all_layers {
         (0..capturer.num_layers()).collect()
     } else {
-        args.layer.unwrap_or_else(|| vec![25])
+        args.layer
+            .unwrap_or_else(|| vec![capturer.num_layers().saturating_sub(1)])
     };
 
     eprintln!(

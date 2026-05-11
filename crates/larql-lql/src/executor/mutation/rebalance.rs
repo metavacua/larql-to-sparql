@@ -20,6 +20,11 @@
 //! to dampen oscillation between competing template-shared facts.
 
 use crate::error::LqlError;
+use crate::executor::helpers::{target_prefix, TARGET_PREFIX_CHARS};
+use crate::executor::tuning::{
+    REBALANCE_CEILING_DEFAULT, REBALANCE_DOWN_SCALE, REBALANCE_FLOOR_DEFAULT,
+    REBALANCE_MAX_ITERS_DEFAULT, REBALANCE_PROBE_TOP_K, REBALANCE_UP_SCALE,
+};
 use crate::executor::Session;
 
 impl Session {
@@ -29,9 +34,9 @@ impl Session {
         floor: Option<f32>,
         ceiling: Option<f32>,
     ) -> Result<Vec<String>, LqlError> {
-        let max_iters = max_iters.unwrap_or(16) as usize;
-        let floor = floor.unwrap_or(0.30) as f64;
-        let ceiling = ceiling.unwrap_or(0.90) as f64;
+        let max_iters = max_iters.unwrap_or(REBALANCE_MAX_ITERS_DEFAULT) as usize;
+        let floor = floor.unwrap_or(REBALANCE_FLOOR_DEFAULT) as f64;
+        let ceiling = ceiling.unwrap_or(REBALANCE_CEILING_DEFAULT) as f64;
 
         if self.installed_edges.is_empty() {
             return Ok(vec![
@@ -48,9 +53,8 @@ impl Session {
         let tokenizer = larql_vindex::load_vindex_tokenizer(path)
             .map_err(|e| LqlError::exec("rebalance: load tokenizer", e))?;
 
-        const DOWN_SCALE: f32 = 0.85;
-        const UP_SCALE: f32 = 1.15;
-        const PROBE_TOP_K: usize = 200;
+        // DOWN_SCALE / UP_SCALE / PROBE_TOP_K live in `executor::tuning`
+        // (REBALANCE_DOWN_SCALE / REBALANCE_UP_SCALE / REBALANCE_PROBE_TOP_K).
 
         let mut iters_run = 0usize;
         let mut final_probs: Vec<f64> = vec![0.0; n_facts];
@@ -73,11 +77,11 @@ impl Session {
                     &weights,
                     &tokenizer,
                     &ids,
-                    PROBE_TOP_K,
+                    REBALANCE_PROBE_TOP_K,
                     &walk,
                 );
 
-                let prefix = &fact.target[..fact.target.len().min(3)];
+                let prefix = target_prefix(&fact.target, TARGET_PREFIX_CHARS);
                 let prob: f64 = r
                     .predictions
                     .iter()
@@ -87,9 +91,9 @@ impl Session {
                 final_probs[i] = prob;
 
                 let scale: Option<f32> = if prob > ceiling {
-                    Some(DOWN_SCALE)
+                    Some(REBALANCE_DOWN_SCALE)
                 } else if prob < floor {
-                    Some(UP_SCALE)
+                    Some(REBALANCE_UP_SCALE)
                 } else {
                     None
                 };
@@ -108,6 +112,13 @@ impl Session {
                 break;
             }
         }
+
+        let slots: Vec<(usize, usize)> = self
+            .installed_edges
+            .iter()
+            .map(|fact| (fact.layer, fact.feature))
+            .collect();
+        self.refresh_recorded_patch_ops_for_slots(&slots)?;
 
         // Summary
         let mut in_band = 0usize;

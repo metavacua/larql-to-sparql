@@ -185,7 +185,7 @@ t.top_k(24)              # top-5 predictions at L24
 t.rank_of("Paris", 23)   # rank of Paris at L23
 t.residual(24)            # raw residual vector at L24
 t.attn_delta(24)          # what attention added at L24
-t.ffn_delta(24)           # what FFN added at L24
+t.ffn_delta(24)           # post-attention contribution at L24
 t.summary()               # per-layer compact summary
 
 # Multi-position trace (all token positions)
@@ -284,32 +284,21 @@ response = mlx_lm.generate(model, tokenizer, prompt="The side effects of aspirin
 
 ### 3.4 Residual Capture for Probing
 
-Capture MLX residuals and feed them to vindex for analysis.
+Use `WalkModel.capture_residuals` — no MLX required. Residuals come back
+as numpy arrays directly from the Rust forward pass.
 
 ```python
 import larql
-import mlx.core as mx
-import numpy as np
 
-vindex = larql.load("gemma3-4b.vindex")
-model, tokenizer = mlx_lm.load("google/gemma-3-4b-it")
+wm = larql.WalkModel("gemma3-4b.vindex")
+vindex = larql.load_vindex("gemma3-4b.vindex")
 
-def capture_residuals(prompt):
-    """Run MLX forward pass, capture residual at each layer."""
-    tokens = tokenizer.encode(prompt)
-    h = model.embed(mx.array([tokens]))
-    
-    residuals = {}
-    for i, layer in enumerate(model.layers):
-        h = layer(h)
-        residuals[i] = np.array(h[0, -1, :])
-    
-    return residuals
+# Capture last-token residual at every layer in one call.
+all_layers = list(range(wm.num_layers))
+residuals = wm.capture_residuals("The capital of France is", layers=all_layers)
+# residuals: {0: np.ndarray(hidden,), 1: ..., ...}
 
-# Capture
-residuals = capture_residuals("The capital of France is")
-
-# Feed to vindex for analysis
+# Feed each residual to vindex for analysis.
 for layer, residual in residuals.items():
     hits = vindex.gate_knn(layer, residual, top_k=5)
     for feat, score in hits:
@@ -317,6 +306,10 @@ for layer, residual in residuals.items():
         label = vindex.feature_label(layer, feat)
         print(f"  L{layer} F{feat} gate={score:.1f} → {meta.top_token} ({label})")
 ```
+
+For ablation, steering, activation patching, logit lens, embedding
+neighbors, raw DLA, KV-cache surgery, and multi-token generation under
+hooks, see [docs/mech-interp.md](mech-interp.md).
 
 ---
 

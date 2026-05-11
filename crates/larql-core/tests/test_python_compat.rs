@@ -106,6 +106,7 @@ fn test_python_graph_json_roundtrip() {
 
 /// Save the Python graph as MessagePack, reload, verify identical.
 #[test]
+#[cfg(feature = "msgpack")]
 fn test_python_graph_msgpack_roundtrip() {
     let original = load("../../examples/gemma_4b_knowledge.json").unwrap();
     let path = std::env::temp_dir().join("test_python_compat.larql.bin");

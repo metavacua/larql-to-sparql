@@ -142,6 +142,17 @@ to an unreachable shard will return HTTP 502 with the upstream error.
 | `handle_walk_ffn` | Dispatch: `resolve_all` (single lock) → proxy or parallel fan-out |
 | `proxy_to` | Single-shard proxy; propagates HTTP error status |
 
+### Validation
+
+```bash
+cargo test -p larql-router
+cargo test -p larql-server announce
+```
+
+These cover static shard parsing, binary layer peeking, self-assembling grid
+route tables, heartbeat load updates, deregistration, status gap reporting, and
+the server-side announce/heartbeat/drop protocol envelopes.
+
 ---
 
 ## Deployment Examples

@@ -5,7 +5,11 @@ use kv_cache_benchmark::accuracy::*;
 #[test]
 fn test_accuracy_factual_prompts_exist() {
     let prompts = factual_prompts();
-    assert!(prompts.len() >= 20, "Need at least 20 factual prompts, got {}", prompts.len());
+    assert!(
+        prompts.len() >= 20,
+        "Need at least 20 factual prompts, got {}",
+        prompts.len()
+    );
     // All should have non-empty prompt and expected answer
     for (prompt, answer) in &prompts {
         assert!(!prompt.is_empty());
@@ -16,7 +20,11 @@ fn test_accuracy_factual_prompts_exist() {
 #[test]
 fn test_accuracy_diverse_prompts_exist() {
     let prompts = diverse_prompts();
-    assert!(prompts.len() >= 10, "Need at least 10 diverse prompts, got {}", prompts.len());
+    assert!(
+        prompts.len() >= 10,
+        "Need at least 10 diverse prompts, got {}",
+        prompts.len()
+    );
 }
 
 // ── Category 2: KL Divergence ──
@@ -25,7 +33,10 @@ fn test_accuracy_diverse_prompts_exist() {
 fn test_kl_divergence_identical() {
     let p = vec![0.7, 0.2, 0.1];
     let kl = kl_divergence(&p, &p);
-    assert!(kl.abs() < 1e-10, "KL of identical distributions should be 0, got {kl}");
+    assert!(
+        kl.abs() < 1e-10,
+        "KL of identical distributions should be 0, got {kl}"
+    );
 }
 
 #[test]
@@ -63,7 +74,10 @@ fn test_softmax_sums_to_one() {
     let logits = vec![2.0f32, 1.0, 0.5, -1.0, 3.0];
     let probs = softmax(&logits);
     let sum: f64 = probs.iter().sum();
-    assert!((sum - 1.0).abs() < 1e-6, "Softmax should sum to 1, got {sum}");
+    assert!(
+        (sum - 1.0).abs() < 1e-6,
+        "Softmax should sum to 1, got {sum}"
+    );
 }
 
 #[test]
@@ -162,7 +176,8 @@ fn test_haystack_generation_short() {
 
 #[test]
 fn test_haystack_generation_long() {
-    let (context, _needle) = generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
+    let (context, _needle) =
+        generate_haystack(32000, 5000, "The secret project code is AURORA-7749");
     assert!(context.contains("AURORA-7749"));
     assert!(context.len() > 10000);
 }
@@ -205,7 +220,10 @@ fn test_retention_conversation_25_turns() {
     let queries: Vec<_> = turns.iter().filter(|t| t.is_query).collect();
     assert!(queries.len() >= 3);
 
-    let facts: Vec<_> = turns.iter().filter(|t| !t.is_query && t.fact_key.is_some()).collect();
+    let facts: Vec<_> = turns
+        .iter()
+        .filter(|t| !t.is_query && t.fact_key.is_some())
+        .collect();
     assert!(facts.len() >= 3, "Need at least 3 fact-establishing turns");
 }
 

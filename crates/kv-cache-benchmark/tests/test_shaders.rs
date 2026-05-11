@@ -6,7 +6,10 @@ fn test_wht_cpu_benchmark() {
     assert_eq!(result.dimension, 256);
     assert!(result.time_us > 0.0);
     assert!(result.throughput_ops_per_sec > 0.0);
-    println!("WHT d=256: {:.2} us/op, {:.0} ops/sec", result.time_us, result.throughput_ops_per_sec);
+    println!(
+        "WHT d=256: {:.2} us/op, {:.0} ops/sec",
+        result.time_us, result.throughput_ops_per_sec
+    );
 }
 
 #[test]
@@ -74,5 +77,8 @@ fn test_wht_d128_faster_than_d256() {
 
     // d=128 should be faster (fewer butterfly stages)
     // Allow some margin for noise
-    println!("WHT d=128: {:.2} us, d=256: {:.2} us", r128.time_us, r256.time_us);
+    println!(
+        "WHT d=128: {:.2} us, d=256: {:.2} us",
+        r128.time_us, r256.time_us
+    );
 }

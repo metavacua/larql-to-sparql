@@ -4,9 +4,9 @@
 //! Two streams are combined: a model-level projection of the main embeddings,
 //! and a per-layer token embedding lookup, scaled and gated.
 
-use ndarray::Array2;
+use super::{apply_norm, dot_proj};
 use crate::model::ModelWeights;
-use super::{dot_proj, apply_norm};
+use ndarray::Array2;
 
 /// Precompute per-layer input signals from token embeddings.
 ///
@@ -34,7 +34,11 @@ pub fn precompute_per_layer_inputs(
     let hidden = weights.hidden_size;
 
     // Stream 1: model projection from main embeddings
-    let w_model_proj = match weights.tensors.get("per_layer_model_projection.weight") {
+    let model_proj_key = match arch.per_layer_model_projection_key() {
+        Some(k) => k,
+        None => return Vec::new(),
+    };
+    let w_model_proj = match weights.tensors.get(&model_proj_key) {
         Some(w) => w,
         None => return Vec::new(),
     };
@@ -42,13 +46,18 @@ pub fn precompute_per_layer_inputs(
     let model_proj_scale = (hidden as f32).powf(-0.5);
 
     // Stream 2: per-layer token embeddings
-    let ple_embed = weights.tensors.get("embed_tokens_per_layer.weight");
+    let ple_embed = arch
+        .per_layer_embed_key()
+        .and_then(|key| weights.tensors.get(&key));
     let embed_scale = (ple_dim as f32).sqrt();
 
     // Per-layer projection norm weight
-    let proj_norm_w = weights.vectors.get("per_layer_projection_norm.weight");
+    let proj_norm_w = arch
+        .per_layer_projection_norm_key()
+        .and_then(|key| weights.vectors.get(&key));
     let norm_offset = arch.norm_weight_offset();
 
+    let norm_eps = arch.norm_eps();
     let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
 
     let mut per_layer_inputs = Vec::with_capacity(num_layers);
@@ -68,7 +77,7 @@ pub fn precompute_per_layer_inputs(
                 for d in 0..ple_dim {
                     sq_sum += layer_input[[s, d]] * layer_input[[s, d]];
                 }
-                let rms = (sq_sum / ple_dim as f32 + 1e-6).sqrt();
+                let rms = (sq_sum / ple_dim as f32 + norm_eps).sqrt();
                 let inv_rms = 1.0 / rms;
                 for d in 0..ple_dim {
                     layer_input[[s, d]] *= inv_rms * (norm_offset + norm_w[d]);
@@ -104,7 +113,7 @@ pub fn precompute_per_layer_inputs(
 ///   contribution = gated @ projection.T   → [seq, hidden]
 ///   normed = RMSNorm(contribution)
 ///   h = h + normed
-pub(super) fn apply_per_layer_embedding(
+pub(crate) fn apply_per_layer_embedding(
     weights: &ModelWeights,
     h: &Array2<f32>,
     layer: usize,
@@ -158,4 +167,103 @@ pub(super) fn apply_per_layer_embedding(
     };
 
     h + &normed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::make_test_weights;
+    use ndarray::Array2;
+
+    fn input(seq: usize, hidden: usize) -> Array2<f32> {
+        let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
+        Array2::from_shape_vec((seq, hidden), data).unwrap()
+    }
+
+    // ── precompute_per_layer_inputs ────────────────────────────────────────────
+
+    #[test]
+    fn precompute_returns_empty_when_arch_has_no_ple() {
+        let weights = make_test_weights();
+        // TinyModel arch does not have per_layer_embeddings → early return
+        let embeds = input(3, weights.hidden_size);
+        let token_ids = &[0u32, 1, 2];
+        let result = precompute_per_layer_inputs(&weights, &embeds, token_ids);
+        assert!(
+            result.is_empty(),
+            "non-PLE arch should return empty vec, got {} layers",
+            result.len()
+        );
+    }
+
+    #[test]
+    fn precompute_returns_empty_when_projection_weight_missing() {
+        // Even if arch claims PLE support, missing weight → empty return.
+        // TinyModel arch doesn't enable PLE so this exercises the same early exit.
+        let weights = make_test_weights();
+        let embeds = Array2::zeros((1, weights.hidden_size));
+        let result = precompute_per_layer_inputs(&weights, &embeds, &[0u32]);
+        assert!(result.is_empty());
+    }
+
+    // ── apply_per_layer_embedding ─────────────────────────────────────────────
+
+    #[test]
+    fn apply_ple_none_input_returns_h_unchanged() {
+        let weights = make_test_weights();
+        let h = input(2, weights.hidden_size);
+        let result = apply_per_layer_embedding(&weights, &h, 0, None);
+        // None per_layer_input → h returned unchanged
+        assert_eq!(result, h, "None per_layer_input should return h unchanged");
+    }
+
+    #[test]
+    fn apply_ple_missing_gate_weight_returns_h_unchanged() {
+        let weights = make_test_weights();
+        let h = input(1, weights.hidden_size);
+        // Provide a per_layer_input, but TinyModel has no per_layer gate tensors
+        let dummy_input = Array2::zeros((1, 4));
+        let result = apply_per_layer_embedding(&weights, &h, 0, Some(&dummy_input));
+        // Gate key doesn't exist in TinyModel → returns h unchanged
+        assert_eq!(result, h, "missing gate weight should return h unchanged");
+    }
+
+    #[test]
+    fn apply_ple_output_shape_matches_input() {
+        let weights = make_test_weights();
+        let h = input(3, weights.hidden_size);
+        let out = apply_per_layer_embedding(&weights, &h, 0, None);
+        assert_eq!(out.shape(), h.shape());
+    }
+
+    // ── softmax (now in forward/ops) ──────────────────────────────────────────
+
+    #[test]
+    fn softmax_sums_to_one() {
+        let logits = vec![1.0f32, 2.0, 3.0, 0.5];
+        let probs = crate::forward::softmax(&logits);
+        let sum: f32 = probs.iter().sum();
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "softmax should sum to 1, got {sum}"
+        );
+    }
+
+    #[test]
+    fn softmax_preserves_argmax() {
+        let logits = vec![0.1f32, 5.0, 0.2];
+        let probs = crate::forward::softmax(&logits);
+        let argmax = probs
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(argmax, 1, "argmax should be preserved by softmax");
+    }
+
+    #[test]
+    fn softmax_empty_input_returns_empty() {
+        assert!(crate::forward::softmax(&[]).is_empty());
+    }
 }

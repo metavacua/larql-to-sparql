@@ -173,3 +173,19 @@ kernel void q4k_geglu_gelu_tanh_down(
 
 pub const ROWS_PER_TG: u64 = 8;
 pub const THREADS_PER_TG: u64 = 256; // 8 rows × 32 lanes
+
+/// Two activation variants of fused GEGLU+down — SiLU (Llama, Mistral)
+/// and GELU-tanh (Gemma). Same geometry, distinct kernels.
+pub struct SiluKernel;
+impl crate::metal::kernel::TiledKernel for SiluKernel {
+    const KERNEL_NAME: &'static str = "q4k_geglu_silu_down";
+    const ROWS_PER_TG: u64 = ROWS_PER_TG;
+    const THREADS_PER_TG: u64 = THREADS_PER_TG;
+}
+
+pub struct GeluTanhKernel;
+impl crate::metal::kernel::TiledKernel for GeluTanhKernel {
+    const KERNEL_NAME: &'static str = "q4k_geglu_gelu_tanh_down";
+    const ROWS_PER_TG: u64 = ROWS_PER_TG;
+    const THREADS_PER_TG: u64 = THREADS_PER_TG;
+}

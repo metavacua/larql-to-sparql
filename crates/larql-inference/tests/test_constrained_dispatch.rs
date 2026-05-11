@@ -15,22 +15,21 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use larql_inference::{
-    encode_prompt, forward::generate_cached_constrained, prompt::ChatTemplate,
-    InferenceModel, WeightFfn,
-};
 use larql_inference::experts::{parse_op_call, ExpertRegistry};
+use larql_inference::{
+    encode_prompt, forward::generate_cached_constrained, prompt::ChatTemplate, InferenceModel,
+    WeightFfn,
+};
 use serde_json::{json, Value};
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 
-fn model_id() -> String {
-    std::env::var("LARQL_MODEL").unwrap_or_else(|_| "google/gemma-3-4b-it".to_string())
+fn model_id() -> Option<String> {
+    std::env::var("LARQL_MODEL").ok()
 }
 
 fn wasm_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../larql-experts/target/wasm32-wasip1/release")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../larql-experts/target/wasm32-wasip1/release")
 }
 
 // ── Grammar mask ─────────────────────────────────────────────────────────────
@@ -57,7 +56,12 @@ enum GrammarState {
 
 impl OpJsonMask {
     fn new(valid_ops: Vec<String>, tokenizer: tokenizers::Tokenizer) -> Self {
-        Self { valid_ops, op_token_cache: None, tokenizer, generated_text: String::new() }
+        Self {
+            valid_ops,
+            op_token_cache: None,
+            tokenizer,
+            generated_text: String::new(),
+        }
     }
 
     fn state(&self) -> GrammarState {
@@ -69,7 +73,9 @@ impl OpJsonMask {
                 let _ = close; // op name is complete
                 return GrammarState::Done;
             } else {
-                return GrammarState::OpName { so_far: after.to_string() };
+                return GrammarState::OpName {
+                    so_far: after.to_string(),
+                };
             }
         }
         GrammarState::Free
@@ -80,9 +86,8 @@ impl OpJsonMask {
     fn op_tokens(&mut self) -> &[u32] {
         if self.op_token_cache.is_none() {
             // Collect every character that appears in any valid op name.
-            let valid_chars: HashSet<char> = self.valid_ops.iter()
-                .flat_map(|op| op.chars())
-                .collect();
+            let valid_chars: HashSet<char> =
+                self.valid_ops.iter().flat_map(|op| op.chars()).collect();
 
             // Scan vocab for tokens that decode to a non-empty string composed
             // entirely of op-name characters, or `"` (closes the op name field).
@@ -106,7 +111,8 @@ impl OpJsonMask {
     /// Updates the internal text buffer and masks logits when in OpName state.
     #[allow(clippy::ptr_arg)]
     fn apply(&mut self, generated_ids: &[u32], logits: &mut Vec<f32>) {
-        self.generated_text = self.tokenizer
+        self.generated_text = self
+            .tokenizer
             .decode(generated_ids, true)
             .unwrap_or_default();
 
@@ -130,7 +136,9 @@ impl OpJsonMask {
                     } else if !s.is_empty() {
                         // Continuation — allowed if `so_far + s` is a prefix of any valid op.
                         let candidate = format!("{so_far}{s}");
-                        valid_ops.iter().any(|op| op.starts_with(candidate.as_str()))
+                        valid_ops
+                            .iter()
+                            .any(|op| op.starts_with(candidate.as_str()))
                     } else {
                         false
                     }
@@ -200,26 +208,37 @@ No extra text."#;
 // ── Test ──────────────────────────────────────────────────────────────────────
 
 #[test]
+#[ignore = "loads a real model; set LARQL_MODEL and run with --ignored"]
 fn constrained_dispatch_pipeline() {
     if !wasm_dir().exists() {
         eprintln!("skip: wasm dir missing");
         return;
     }
 
-    let mid = model_id();
+    let Some(mid) = model_id() else {
+        eprintln!("skip: set LARQL_MODEL to run constrained_dispatch_pipeline");
+        return;
+    };
     let model = match InferenceModel::load(&mid) {
         Ok(m) => m,
-        Err(e) => { eprintln!("skip: {e}"); return; }
+        Err(e) => {
+            eprintln!("skip: {e}");
+            return;
+        }
     };
     eprintln!("model: {mid}  ({} layers)", model.num_layers());
 
     let mut reg = ExpertRegistry::load_dir(&wasm_dir()).expect("load_dir");
-    let ffn = WeightFfn { weights: model.weights() };
+    let ffn = WeightFfn {
+        weights: model.weights(),
+    };
 
     // Collect all op names from the registry for the mask.
     let valid_ops: Vec<String> = reg.ops().into_iter().map(|s| s.to_string()).collect();
     eprintln!("valid ops ({}):", valid_ops.len());
-    for op in &valid_ops { eprint!("  {op}"); }
+    for op in &valid_ops {
+        eprint!("  {op}");
+    }
     eprintln!();
 
     let template = ChatTemplate::for_model_id(&mid);
@@ -234,7 +253,11 @@ fn constrained_dispatch_pipeline() {
 
         let ids = match encode_prompt(model.tokenizer(), &*model.weights().arch, &wrapped) {
             Ok(v) => v,
-            Err(e) => { eprintln!("  FAIL tokenize: {e}"); failed += 1; continue; }
+            Err(e) => {
+                eprintln!("  FAIL tokenize: {e}");
+                failed += 1;
+                continue;
+            }
         };
 
         // Build a fresh mask for each case (resets generated_text).
@@ -256,14 +279,20 @@ fn constrained_dispatch_pipeline() {
 
         let call = match parse_op_call(&output) {
             Some(c) => c,
-            None => { eprintln!("  FAIL: no op-call JSON"); failed += 1; continue; }
+            None => {
+                eprintln!("  FAIL: no op-call JSON");
+                failed += 1;
+                continue;
+            }
         };
         let op = call.op;
         let args = call.args;
 
         let correct_op = op == case.expected_op;
-        eprintln!("  op={op}{}  args={args}",
-            if correct_op { "" } else { " ← WRONG OP" });
+        eprintln!(
+            "  op={op}{}  args={args}",
+            if correct_op { "" } else { " ← WRONG OP" }
+        );
 
         if !correct_op {
             eprintln!("  FAIL: expected op={}", case.expected_op);
@@ -287,6 +316,9 @@ fn constrained_dispatch_pipeline() {
         }
     }
 
-    eprintln!("\n{passed}/{} constrained dispatch cases passed", passed + failed);
+    eprintln!(
+        "\n{passed}/{} constrained dispatch cases passed",
+        passed + failed
+    );
     assert_eq!(failed, 0, "{failed} cases failed");
 }

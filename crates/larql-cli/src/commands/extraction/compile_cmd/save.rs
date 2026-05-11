@@ -4,6 +4,7 @@
 //! a text-only language model. Tied lm_head is dropped when `embed_tokens` is
 //! present, matching HuggingFace's tied-embedding convention.
 
+use larql_vindex::format::filenames::*;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -48,9 +49,7 @@ pub fn merge_for_save(
         vectors.insert(k.clone(), v.clone());
     }
 
-    if tensors.contains_key("model.embed_tokens.weight")
-        && tensors.contains_key("lm_head.weight")
-    {
+    if tensors.contains_key("model.embed_tokens.weight") && tensors.contains_key("lm_head.weight") {
         tensors.remove("lm_head.weight");
     }
 
@@ -111,7 +110,7 @@ pub fn write_safetensors(
         );
     }
 
-    let serialized = serialize(&views, &None)?;
+    let serialized = serialize(&views, None)?;
     std::fs::write(path, serialized)?;
     Ok(())
 }
@@ -120,11 +119,11 @@ pub fn write_safetensors(
 /// a text-only Gemma 3 checkpoint (multimodal tensors were skipped above).
 pub fn copy_model_config(base: &Path, output: &Path) {
     for name in &[
-        "tokenizer.json",
-        "tokenizer_config.json",
+        TOKENIZER_JSON,
+        TOKENIZER_CONFIG_JSON,
         "special_tokens_map.json",
-        "generation_config.json",
-        "tokenizer.model",  // SentencePiece model — required by llama.cpp's GGUF converter
+        GENERATION_CONFIG_JSON,
+        "tokenizer.model", // SentencePiece model — required by llama.cpp's GGUF converter
     ] {
         let src = base.join(name);
         if src.exists() {

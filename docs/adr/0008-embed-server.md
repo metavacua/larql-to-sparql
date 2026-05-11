@@ -187,6 +187,18 @@ in, …) without the request reaching the embed server at all.
 
 Implemented. Binary by default; `Accept: application/json` for human-readable.
 
+### Error contract
+
+Embed-service HTTP endpoints use the same error envelope as the rest of
+`larql-server`:
+
+```json
+{"error": "message"}
+```
+
+This applies to JSON and binary requests, including bad token IDs, malformed
+binary payloads, model lookup failures, and lm_head weight-load failures.
+
 ---
 
 ### GET /v1/token/encode

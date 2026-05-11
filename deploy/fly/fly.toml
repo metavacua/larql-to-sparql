@@ -1,0 +1,63 @@
+# larql expert-server — fly.io deployment config.
+#
+# Recommended: two apps (larql-expert-a / larql-expert-b), each serving half
+# the expert bank. Each shard holds ~8 GB of expert pages cleanly in RAM with
+# 8 GB headroom — no mmap thrashing. --warmup-walk-ffn pre-faults owned pages
+# at startup so the first request is never cold.
+#
+# Single-machine (simpler, for demos): set EXPERTS="" to serve all 128 experts.
+# Requires performance-8x (16 GB) and tolerates some page pressure under load.
+
+app = "larql-expert-server"
+primary_region = "lhr"   # London
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  VINDEX_PATH = "/data/vindex"
+  HF_REPO = "chrishayuk/gemma-4-26b-a4b-it-vindex-expert-server"
+  # Set per-shard:
+  #   Shard A: EXPERTS="0-63"    WARMUP="1"
+  #   Shard B: EXPERTS="64-127"  WARMUP="1"
+  # Leave empty for single-machine (all experts).
+  EXPERTS = ""
+  WARMUP = "1"   # Pre-fault owned expert pages at startup so first request is never cold
+  GRPC_PORT = "8081"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.http_options]
+    h2_backend = true   # forward HTTP/2 to backend so gRPC streaming works
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+# gRPC streaming service — Fly terminates TLS and forwards h2c to port 8081.
+# Connect with grpcs://larql-expert-server.fly.dev:50051
+[[services]]
+  internal_port = 8081
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 50051
+    handlers = ["tls"]
+
+[[vm]]
+  # performance-8x (16 GB): 8 GB expert pages + 8 GB headroom per shard.
+  # Downgrade to performance-4x only when serving ≤32 experts (tight but viable).
+  size = "performance-8x"
+  memory = "16gb"
+
+[[mounts]]
+  source = "expert_data"
+  destination = "/data"
+  initial_size = "25gb"

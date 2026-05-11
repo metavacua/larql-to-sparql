@@ -1,7 +1,11 @@
 # Metal Shader Reference — larql-compute
 
-~48 Metal Shading Language kernels across ~30 shader files in `src/metal/shaders/`.
+~50 Metal Shading Language kernels across ~30 shader files in `src/metal/shaders/`.
 All compiled into a single Metal library via `all_shaders()`.
+
+Every production kernel exports a `ShaderKernel` or `TiledKernel` marker so
+`MetalBackend::new()` binds pipelines by type rather than raw strings. See
+`metal/kernel/traits.rs` for the trait definitions.
 
 ## f32 Matrix Multiply
 
@@ -14,28 +18,15 @@ Grid: `(ceil(N/32), ceil(M/32), 1)`, TG: `(32, 32, 1)`.
 
 ## Q4_0 Quantized Matvec (4-bit, 18 bytes per 32 values)
 
-### q4_matvec.rs — `q4_matvec` (v1)
-Simdgroup + threadgroup shared memory for Q8 input. Baseline implementation.
-Origin: LARQL original.
-
-### q4_matvec_v2.rs — `q4_matvec_v2`
-4 rows per thread, f32 input. Experimental variant.
-
-### q4_matvec_v3.rs — `q4_matvec_v3`
-8 rows unrolled. Slower due to register spilling. Experimental.
-
-### q4_matvec_v4.rs — `q4_matvec_v4` (PRODUCTION)
-**The fast Q4_0 kernel.** uint32 wide loads (4 bytes → 8 nibbles), Q8 input in threadgroup memory, integer multiply-accumulate, simd_sum reduction. 57-61 GB/s on M3 Max.
-Origin: LARQL original, iterative optimization from v1-v3.
+### q4_matvec_v4.rs — `q4_matvec` (PRODUCTION)
+**The fast Q4_0 kernel.** uint32 wide loads (4 bytes → 8 nibbles), Q8 input,
+integer multiply-accumulate, simd_sum reduction. 57-61 GB/s on M3 Max.
+Note: earlier v1/v2/v3/v5 variants were removed (2026-04-25) — only v4 ships.
 
 ```
-Performance: 0.26ms for [10240, 2560] = 14.7MB (57 GB/s)
 Technique: NIBBLE(w, shift) macro extracts nibbles via bitshift
 Grid: 8 rows per TG, 256 threads (8 simdgroups × 32 lanes)
 ```
-
-### q4_matvec_v5.rs — `q4_matvec_v5`
-256 rows per TG, no simd. Same speed as v4. Experimental.
 
 ### q4_vecmat.rs — `q4_vecmat`
 **out[K] = activation[N] @ Q4[N,K]**. Scatter-accumulate pattern (one thread per output element). Used for down projection alternatives.
@@ -207,3 +198,104 @@ Included by all shaders:
 - `struct block_q4_K` — 148-byte Q4_K superblock layout
 - `struct block_q4_K_gguf` — 144-byte GGUF-compatible layout
 - `struct block_q4_kf` — 160-byte pre-baked half scales layout
+
+## Dispatch-Fusion Kernels — 2026-04-25 wave
+
+These kernels reduce the per-layer dispatch count by combining operations
+that were previously separate dispatches.
+
+### qk_norm.rs — `qk_norm_qk` (fused Q+K norm)
+Applies per-head RMSNorm to both Q and K projections in one dispatch instead
+of two. Grid: `(num_q + num_kv, 1, 1)` TGs. TG index < num_q → Q buffer +
+q_weight; ≥ num_q → K buffer + k_weight.
+**Saves 34 dispatches/token** (1 dispatch/layer × 34 layers).
+Superseded as the default by `qk_norm_rope_fused` below — kept as the
+fallback when `LARQL_FUSED_QK_NORM_ROPE=0`.
+
+### rope.rs — `rope_at_pos_batched_qk` (fused Q+K RoPE)
+Applies RoPE to all Q heads and then all K heads in one 2D dispatch.
+Grid: `(rotary_dim/2, num_q + num_kv, 1)`. Thread `h < num_q` → Q buffer,
+`h ≥ num_q` → K buffer. Saves 34 dispatches/token. Superseded as the
+default by `qk_norm_rope_fused` below — kept as the fallback chain
+component when the merged kernel is opted out.
+
+### fused_ops.rs — `residual_norm_store` (fused residual add + norm, dual output)
+Like `residual_norm` but writes **two** outputs in one pass:
+- `norm_out[i] = (a[i]+b[i]) / rms * (weight[i] + offset)` — normed FFN input
+- `sum_out[i]  = a[i] + b[i]` — raw sum needed for post-FFN residual add
+
+Replaces the `residual_norm + residual_add` two-dispatch pair in the Q4_K
+hot path. Saves 34 dispatches/token. Always-on. Superseded on the
+`has_post_norms` (Gemma 3/4) path by `post_attn_residual_norm_store` below;
+still fires on the non-`has_post_norms` path.
+
+### q4k_q6k_qkv_proj.rs — `q4k_q6k_qkv_proj_normed` (fused norm + QKV)
+All 128 threads in each QKV TG cooperatively reduce `||h||²` (Phase 1,
+threadgroup barrier), then each simdgroup runs its row's matvec with inline
+normalization `h[i] * rms * (offset + norm_w[i])` (Phase 2). The separate
+`rms_norm` dispatch is eliminated. Fires when format is Q4_K Q/K + Q6_K V,
+standard RMS norm, no bias (Gemma 3/4 production extract).
+Saves 34 dispatches/token.
+
+## Dispatch-Fusion Kernels — 2026-05-01 / 2026-05-02 wave
+
+Five further fusions land. Each saves 1 dispatch/layer × 34 layers. Cumulative
+GPU-forward saving 0.99 ms vs. unfused baseline (10.45 → 9.46 ms isolated
+kernel time; end-to-end 71.5 → 72–75 tok/s on Gemma 3 4B). All default-on;
+each has an `LARQL_FUSED_*=0` opt-out for diagnostics.
+
+### qk_norm_rope_fused.rs — `qk_norm_rope_fused`
+Replaces the consecutive `qk_norm_qk` + `rope_at_pos_batched_qk` chain. Each
+threadgroup handles one (Q or K) head: cooperative RMS reduction → per-d
+norm scale → in-place RoPE — single `threadgroup_barrier` between norm and
+rope. Grid: `(num_q + num_kv, 1, 1)` TGs. Same math as the chain
+(bit-equivalent reduction tree).
+- Opt-out: `LARQL_FUSED_QK_NORM_ROPE=0`.
+- Measured: -0.10 ms GPU on Gemma 3 4B.
+
+### kv_append_attend_fused.rs — `kv_append_attend_fused`
+Replaces the consecutive `kv_cache_append` + `kv_attention` dispatches.
+Grid: `num_q` TGs (one per Q head). Phase 0 (cooperative across the TG):
+write the new K/V row at `pos = T-1` for this TG's `kv_head`; with GQA
+several Q-head TGs share the same kv_head and redundantly write the same
+data — idempotent, race-safe. `threadgroup_barrier(mem_device)` then
+publishes the writes inside the TG. Phases 1–3 are the standard
+softmax + V-sum attention loop over `T = pos + 1`.
+- Opt-out: `LARQL_FUSED_KV_APPEND_ATTEND=0`.
+- Measured: -0.21 ms GPU on Gemma 3 4B.
+
+### post_attn_residual_norm_store.rs — `post_attn_residual_norm_store`
+Triple fusion for the `has_post_norms` path (Gemma 3 / Gemma 4): post-attn
+RMS norm + residual add + ffn-norm RMS + h_post_attn store, all in one
+single-TG dispatch with two sequential RMS reductions. Replaces a
+3-dispatch chain (`rms_norm` + `residual_norm_store` + a separate norm).
+- Opt-out: `LARQL_FUSED_POST_ATTN_NORM=0`.
+- Measured: cumulative -0.43 ms GPU.
+
+### post_ffn_norm_residual_add.rs — `post_ffn_norm_residual_add`
+Fused **post-FFN norm + residual add** for the `has_post_norms +
+post_ffn_norm` decode path. One single-TG kernel does the RMS reduction
+over `down_out`, then writes
+`new_h[i] = h_post_attn[i] + down_out[i] · inv_rms · (w[i] + offset)`
+directly. Replaces the consecutive `rms_norm` + `residual_add` dispatches
+at the end of each layer. Bit-equivalent to the unfused chain
+(same reduction tree, same arithmetic).
+- Opt-out: `LARQL_FUSED_POST_FFN_NORM=0`.
+- Measured: cumulative -0.78 ms GPU.
+
+### attn_fused.rs — `attn_fused` (❌ regression, kept opt-in)
+**Attempted** to merge `qk_norm_rope_fused` + `kv_append_attend_fused` into
+one kernel: each Q-head TG normalises+ropes its Q (kept in TG memory),
+normalises+ropes its kv_head's K → writes to cache, streams V to cache,
+then runs the standard attention loop. Single `(cos, sin)` per rotary
+pair shared between Q and K to avoid duplicate transcendentals.
+
+**Result**: regressed Gemma 3 4B from 74 → 64 tok/s (-1.45 ms GPU). Diagnosis:
+the standalone `qk_norm_rope_fused` runs `num_q + num_kv = 12` TGs in
+parallel; the merger collapses to `num_q = 8` TGs (one per Q head) with each
+redundantly doing its kv_head's K work. The dispatch saving (~30 µs) is
+dwarfed by the parallelism loss. Kernel kept registered behind
+`LARQL_FUSED_ATTN=1` for any future multi-TG-per-head retry that preserves
+parallelism. **Lesson**: dispatch fusions only win when they don't reduce
+TG count for an already parallelism-bound stage. See
+`crates/larql-inference/ROADMAP.md` G-3.

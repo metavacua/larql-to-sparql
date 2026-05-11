@@ -4,9 +4,12 @@
 use std::path::PathBuf;
 
 use crate::error::LqlError;
+use crate::executor::helpers::{dir_size, format_bytes};
+use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
 use crate::executor::Session;
-use crate::executor::helpers::{format_bytes, dir_size};
+use larql_vindex::format::filenames::TOKENIZER_JSON;
 
+use super::atomic::run_atomic_compile;
 use super::collect_memit_facts_with_recording;
 
 impl Session {
@@ -23,14 +26,25 @@ impl Session {
                 "COMPILE INTO MODEL requires model weights in the vindex.\n\
                  This vindex was built without --include-weights.\n\
                  Rebuild: EXTRACT MODEL \"{}\" INTO \"{}\" WITH ALL",
-                config.model, vindex_path.display()
+                config.model,
+                vindex_path.display()
             )));
         }
 
-        let output_dir = PathBuf::from(output);
-        std::fs::create_dir_all(&output_dir)
-            .map_err(|e| LqlError::exec("failed to create output dir", e))?;
+        let final_dir = PathBuf::from(output);
+        let vindex_path_owned = vindex_path.to_path_buf();
+        let config_clone = config.clone();
+        run_atomic_compile(&final_dir, &vindex_path_owned, |output_dir| {
+            self.bake_compile_into_model(&vindex_path_owned, output_dir, &config_clone)
+        })
+    }
 
+    fn bake_compile_into_model(
+        &self,
+        vindex_path: &std::path::Path,
+        output_dir: &std::path::Path,
+        config: &larql_vindex::VindexConfig,
+    ) -> Result<Vec<String>, LqlError> {
         let mut cb = larql_vindex::SilentLoadCallbacks;
         let mut weights = larql_vindex::load_model_weights(vindex_path, &mut cb)
             .map_err(|e| LqlError::exec("failed to load model weights", e))?;
@@ -46,10 +60,11 @@ impl Session {
             .map(|r| r.operations.clone())
             .unwrap_or_default();
         let (_, _, patched) = self.require_vindex()?;
-        let memit_facts =
-            collect_memit_facts_with_recording(patched, vindex_path, &recording_ops)?;
+        let collected = collect_memit_facts_with_recording(patched, vindex_path, &recording_ops)?;
+        let memit_facts = collected.facts;
 
         let mut out = Vec::new();
+        out.extend(collected.warnings);
         // MEMIT is opt-in via `LARQL_MEMIT_ENABLE=1`; see the matching
         // block in the COMPILE INTO VINDEX path for the rationale.
         let memit_enabled = std::env::var("LARQL_MEMIT_ENABLE")
@@ -63,13 +78,14 @@ impl Session {
             let ridge = std::env::var("LARQL_MEMIT_RIDGE")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
-                .unwrap_or(0.1);
-            let target_alpha = 5.0;
+                .unwrap_or(MEMIT_DEFAULT_RIDGE);
+            let target_alpha = MEMIT_TARGET_ALPHA;
 
             out.push(format!(
                 "MEMIT: {} fact(s) across {} layer(s)",
                 memit_facts.len(),
-                memit_facts.iter()
+                memit_facts
+                    .iter()
                     .map(|f| f.layer)
                     .collect::<std::collections::HashSet<_>>()
                     .len(),
@@ -88,21 +104,12 @@ impl Session {
                     &tokenizer,
                 )
             } else {
-                larql_inference::run_memit(
-                    &weights,
-                    &memit_facts,
-                    ridge,
-                    target_alpha,
-                    &tokenizer,
-                )
+                larql_inference::run_memit(&weights, &memit_facts, ridge, target_alpha, &tokenizer)
             }
             .map_err(|e| LqlError::Execution(format!("MEMIT failed: {e}")))?;
 
             for result in &results {
-                let delta_norm: f32 = result.delta_w.iter()
-                    .map(|v| v * v)
-                    .sum::<f32>()
-                    .sqrt();
+                let delta_norm: f32 = result.delta_w.iter().map(|v| v * v).sum::<f32>().sqrt();
                 out.push(format!(
                     "  L{}: ΔW_down applied ({} facts, ‖ΔW‖={:.2})",
                     result.layer,
@@ -123,19 +130,26 @@ impl Session {
         }
 
         let mut build_cb = larql_vindex::SilentBuildCallbacks;
-        larql_vindex::write_model_weights(&weights, &output_dir, &mut build_cb)
+        larql_vindex::write_model_weights(&weights, output_dir, &mut build_cb)
             .map_err(|e| LqlError::exec("failed to write model", e))?;
 
-        let tok_src = vindex_path.join("tokenizer.json");
-        let tok_dst = output_dir.join("tokenizer.json");
+        let tok_src = vindex_path.join(TOKENIZER_JSON);
+        let tok_dst = output_dir.join(TOKENIZER_JSON);
         if tok_src.exists() {
             std::fs::copy(&tok_src, &tok_dst)
                 .map_err(|e| LqlError::exec("failed to copy tokenizer", e))?;
         }
 
-        out.insert(0, format!("Compiled {} → {}", vindex_path.display(), output_dir.display()));
+        out.insert(
+            0,
+            format!(
+                "Compiled {} → {}",
+                vindex_path.display(),
+                output_dir.display()
+            ),
+        );
         out.push(format!("Model: {}", config.model));
-        out.push(format!("Size: {}", format_bytes(dir_size(&output_dir))));
+        out.push(format!("Size: {}", format_bytes(dir_size(output_dir))));
         Ok(out)
     }
 }

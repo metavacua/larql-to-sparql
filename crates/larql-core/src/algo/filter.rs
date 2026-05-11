@@ -4,6 +4,113 @@ use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::Graph;
 
+/// Comparison operator for metadata predicates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetadataCompare {
+    Eq,
+    NotEq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
+
+impl MetadataCompare {
+    fn matches_ordering<T: PartialOrd + PartialEq>(self, actual: T, expected: T) -> bool {
+        match self {
+            Self::Eq => actual == expected,
+            Self::NotEq => actual != expected,
+            Self::Gt => actual > expected,
+            Self::Gte => actual >= expected,
+            Self::Lt => actual < expected,
+            Self::Lte => actual <= expected,
+        }
+    }
+}
+
+/// Predicate over an edge metadata value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetadataPredicate {
+    U64 {
+        key: String,
+        op: MetadataCompare,
+        value: u64,
+    },
+    F64 {
+        key: String,
+        op: MetadataCompare,
+        value: f64,
+    },
+    String {
+        key: String,
+        op: MetadataCompare,
+        value: String,
+    },
+    Bool {
+        key: String,
+        value: bool,
+    },
+}
+
+impl MetadataPredicate {
+    pub fn u64_min(key: impl Into<String>, value: u64) -> Self {
+        Self::U64 {
+            key: key.into(),
+            op: MetadataCompare::Gte,
+            value,
+        }
+    }
+
+    pub fn u64_max(key: impl Into<String>, value: u64) -> Self {
+        Self::U64 {
+            key: key.into(),
+            op: MetadataCompare::Lte,
+            value,
+        }
+    }
+
+    pub fn f64_min(key: impl Into<String>, value: f64) -> Self {
+        Self::F64 {
+            key: key.into(),
+            op: MetadataCompare::Gte,
+            value,
+        }
+    }
+
+    pub fn f64_max(key: impl Into<String>, value: f64) -> Self {
+        Self::F64 {
+            key: key.into(),
+            op: MetadataCompare::Lte,
+            value,
+        }
+    }
+
+    fn matches(&self, edge: &Edge) -> bool {
+        let Some(metadata) = edge.metadata.as_ref() else {
+            return false;
+        };
+
+        match self {
+            Self::U64 { key, op, value } => metadata
+                .get(key)
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|actual| op.matches_ordering(actual, *value)),
+            Self::F64 { key, op, value } => metadata
+                .get(key)
+                .and_then(serde_json::Value::as_f64)
+                .is_some_and(|actual| op.matches_ordering(actual, *value)),
+            Self::String { key, op, value } => metadata
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|actual| op.matches_ordering(actual, value.as_str())),
+            Self::Bool { key, value } => metadata
+                .get(key)
+                .and_then(serde_json::Value::as_bool)
+                .is_some_and(|actual| actual == *value),
+        }
+    }
+}
+
 /// Configuration for filtering graph edges.
 ///
 /// All fields are optional. An edge must pass ALL set predicates.
@@ -11,16 +118,19 @@ use crate::core::graph::Graph;
 pub struct FilterConfig {
     pub min_confidence: Option<f64>,
     pub max_confidence: Option<f64>,
-    pub min_layer: Option<usize>,
-    pub max_layer: Option<usize>,
-    pub min_selectivity: Option<f64>,
-    pub min_c_in: Option<f64>,
-    pub min_c_out: Option<f64>,
+    pub metadata: Vec<MetadataPredicate>,
     pub relations: Option<Vec<String>>,
     pub exclude_relations: Option<Vec<String>>,
     pub sources: Option<Vec<SourceType>>,
     pub subject_contains: Option<String>,
     pub object_contains: Option<String>,
+}
+
+impl FilterConfig {
+    pub fn with_metadata(mut self, predicate: MetadataPredicate) -> Self {
+        self.metadata.push(predicate);
+        self
+    }
 }
 
 impl FilterConfig {
@@ -65,27 +175,10 @@ impl FilterConfig {
             }
         }
 
-        // Metadata-based filters — extract values once
-        let meta = edge.metadata.as_ref();
-        let meta_u64 = |key: &str| meta.and_then(|m| m.get(key)).and_then(|v| v.as_u64());
-        let meta_f64 = |key: &str| meta.and_then(|m| m.get(key)).and_then(|v| v.as_f64());
-
-        if let Some(min) = self.min_layer {
-            let layer = meta_u64("layer");
-            if layer.is_none_or(|l| (l as usize) < min) { return false; }
-        }
-        if let Some(max) = self.max_layer {
-            let layer = meta_u64("layer");
-            if layer.is_none_or(|l| (l as usize) > max) { return false; }
-        }
-        if let Some(min) = self.min_selectivity {
-            if meta_f64("selectivity").is_none_or(|v| v < min) { return false; }
-        }
-        if let Some(min) = self.min_c_in {
-            if meta_f64("c_in").is_none_or(|v| v < min) { return false; }
-        }
-        if let Some(min) = self.min_c_out {
-            if meta_f64("c_out").is_none_or(|v| v < min) { return false; }
+        for predicate in &self.metadata {
+            if !predicate.matches(edge) {
+                return false;
+            }
         }
 
         true
@@ -135,9 +228,30 @@ mod tests {
 
     fn build_test_graph() -> Graph {
         let mut g = Graph::new();
-        g.add_edge(test_edge_with_meta("France", "capital-of", "Paris", 0.9, 26, 0.8));
-        g.add_edge(test_edge_with_meta("Germany", "capital-of", "Berlin", 0.7, 26, 0.6));
-        g.add_edge(test_edge_with_meta("France", "language-of", "French", 0.5, 10, 0.3));
+        g.add_edge(test_edge_with_meta(
+            "France",
+            "capital-of",
+            "Paris",
+            0.9,
+            26,
+            0.8,
+        ));
+        g.add_edge(test_edge_with_meta(
+            "Germany",
+            "capital-of",
+            "Berlin",
+            0.7,
+            26,
+            0.6,
+        ));
+        g.add_edge(test_edge_with_meta(
+            "France",
+            "language-of",
+            "French",
+            0.5,
+            10,
+            0.3,
+        ));
         g.add_edge(test_edge("Japan", "continent", "Asia", 1.0).with_source(SourceType::Document));
         g
     }
@@ -210,7 +324,7 @@ mod tests {
     fn test_min_layer() {
         let g = build_test_graph();
         let config = FilterConfig {
-            min_layer: Some(20),
+            metadata: vec![MetadataPredicate::u64_min("layer", 20)],
             ..Default::default()
         };
         let filtered = filter_graph(&g, &config);
@@ -221,7 +335,7 @@ mod tests {
     fn test_max_layer() {
         let g = build_test_graph();
         let config = FilterConfig {
-            max_layer: Some(15),
+            metadata: vec![MetadataPredicate::u64_max("layer", 15)],
             ..Default::default()
         };
         let filtered = filter_graph(&g, &config);
@@ -232,7 +346,7 @@ mod tests {
     fn test_min_selectivity() {
         let g = build_test_graph();
         let config = FilterConfig {
-            min_selectivity: Some(0.5),
+            metadata: vec![MetadataPredicate::f64_min("selectivity", 0.5)],
             ..Default::default()
         };
         let filtered = filter_graph(&g, &config);
@@ -267,11 +381,22 @@ mod tests {
         let config = FilterConfig {
             min_confidence: Some(0.6),
             relations: Some(vec!["capital-of".to_string()]),
-            min_layer: Some(20),
+            metadata: vec![MetadataPredicate::u64_min("layer", 20)],
             ..Default::default()
         };
         let filtered = filter_graph(&g, &config);
         assert_eq!(filtered.edge_count(), 2);
+    }
+
+    #[test]
+    fn test_missing_metadata_fails_predicate() {
+        let g = build_test_graph();
+        let config = FilterConfig {
+            metadata: vec![MetadataPredicate::f64_min("unknown_score", 0.1)],
+            ..Default::default()
+        };
+        let filtered = filter_graph(&g, &config);
+        assert_eq!(filtered.edge_count(), 0);
     }
 
     #[test]

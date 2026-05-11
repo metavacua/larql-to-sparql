@@ -73,7 +73,8 @@ fn main() {
         let _ = graph.describe("Entity_42");
     });
 
-    bench("count(relation, None)", 100_000, || {
+    // count() scans the edge list, so keep iterations low on the 100K-edge graph.
+    bench("count(relation, None)", 100, || {
         let _ = graph.count(Some("rel_0"), None);
     });
 
@@ -193,14 +194,17 @@ fn main() {
         let _ = from_bytes(&json_bytes, Format::Json).unwrap();
     });
 
-    bench("MsgPack serialize", 3, || {
-        let _ = to_bytes(&graph, Format::MessagePack).unwrap();
-    });
+    #[cfg(feature = "msgpack")]
+    {
+        bench("MsgPack serialize", 3, || {
+            let _ = to_bytes(&graph, Format::MessagePack).unwrap();
+        });
 
-    let msgpack_bytes = to_bytes(&graph, Format::MessagePack).unwrap();
-    bench("MsgPack deserialize", 3, || {
-        let _ = from_bytes(&msgpack_bytes, Format::MessagePack).unwrap();
-    });
+        let msgpack_bytes = to_bytes(&graph, Format::MessagePack).unwrap();
+        bench("MsgPack deserialize", 3, || {
+            let _ = from_bytes(&msgpack_bytes, Format::MessagePack).unwrap();
+        });
+    }
 
     bench("Packed binary serialize", 3, || {
         let _ = to_packed_bytes(&graph).unwrap();
@@ -211,11 +215,22 @@ fn main() {
         let _ = from_packed_bytes(&packed_bytes).unwrap();
     });
 
+    #[cfg(feature = "msgpack")]
+    {
+        let msgpack_bytes = to_bytes(&graph, Format::MessagePack).unwrap();
+        println!(
+            "\n  Size: JSON {:.1} MB, MsgPack {:.1} MB ({:.0}%), Packed {:.1} MB ({:.0}%)",
+            json_bytes.len() as f64 / 1024.0 / 1024.0,
+            msgpack_bytes.len() as f64 / 1024.0 / 1024.0,
+            (1.0 - msgpack_bytes.len() as f64 / json_bytes.len() as f64) * 100.0,
+            packed_bytes.len() as f64 / 1024.0 / 1024.0,
+            (1.0 - packed_bytes.len() as f64 / json_bytes.len() as f64) * 100.0,
+        );
+    }
+    #[cfg(not(feature = "msgpack"))]
     println!(
-        "\n  Size: JSON {:.1} MB, MsgPack {:.1} MB ({:.0}%), Packed {:.1} MB ({:.0}%)",
+        "\n  Size: JSON {:.1} MB, Packed {:.1} MB ({:.0}%)",
         json_bytes.len() as f64 / 1024.0 / 1024.0,
-        msgpack_bytes.len() as f64 / 1024.0 / 1024.0,
-        (1.0 - msgpack_bytes.len() as f64 / json_bytes.len() as f64) * 100.0,
         packed_bytes.len() as f64 / 1024.0 / 1024.0,
         (1.0 - packed_bytes.len() as f64 / json_bytes.len() as f64) * 100.0,
     );

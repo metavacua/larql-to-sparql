@@ -72,6 +72,35 @@ fn test_diff_changed_confidence() {
     assert!((d.changed[0].new.confidence - 0.9).abs() < 0.01);
 }
 
+#[test]
+fn test_diff_changed_metadata_source_and_injection() {
+    let mut old_edge = Edge::new("France", "capital-of", "Paris")
+        .with_source(SourceType::Parametric)
+        .with_metadata("layer", serde_json::json!(1));
+    old_edge.injection = Some((1, 0.5));
+    let mut old = Graph::new();
+    old.add_edge(old_edge);
+
+    let mut new_edge = Edge::new("France", "capital-of", "Paris")
+        .with_source(SourceType::Wikidata)
+        .with_metadata("layer", serde_json::json!(2));
+    new_edge.injection = Some((2, 0.7));
+    let mut new = Graph::new();
+    new.add_edge(new_edge);
+
+    let d = diff(&old, &new);
+    assert!(d.added.is_empty());
+    assert!(d.removed.is_empty());
+    assert_eq!(d.changed.len(), 1);
+    assert_eq!(d.changed[0].old.source, SourceType::Parametric);
+    assert_eq!(d.changed[0].new.source, SourceType::Wikidata);
+    assert_eq!(
+        d.changed[0].new.metadata.as_ref().unwrap()["layer"],
+        serde_json::json!(2)
+    );
+    assert_eq!(d.changed[0].new.injection, Some((2, 0.7)));
+}
+
 // ── Merge strategies ──
 
 #[test]
@@ -130,6 +159,27 @@ fn test_merge_source_priority() {
     );
 }
 
+#[test]
+fn test_merge_custom_source_priority() {
+    let mut target = Graph::new();
+    target.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Parametric));
+
+    let mut other = Graph::new();
+    other.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Document));
+
+    let updated = merge_graphs_with_source_priority(&mut target, &other, |source| match source {
+        SourceType::Document => 10,
+        SourceType::Parametric => 1,
+        _ => 0,
+    });
+
+    assert_eq!(updated, 1);
+    assert_eq!(
+        target.select("A", Some("r"))[0].source,
+        SourceType::Document
+    );
+}
+
 // ── PageRank ──
 
 #[test]
@@ -183,8 +233,18 @@ fn test_bfs_depth_limit() {
     let depth1 = bfs_traversal(&g, "France", 1);
 
     assert_eq!(depth0.nodes.len(), 1); // just France
+    assert!(depth0.edges.is_empty());
     assert!(depth1.nodes.len() > 1);
     assert!(depth1.max_depth <= 1);
+}
+
+#[test]
+fn test_dfs_depth_zero_has_no_traversed_edges() {
+    let g = geo_graph();
+    let result = dfs(&g, "France", 0);
+
+    assert_eq!(result.nodes, vec!["France"]);
+    assert!(result.edges.is_empty());
 }
 
 #[test]
@@ -277,6 +337,27 @@ fn test_csv_preserves_confidence() {
     let edge = &loaded.edges()[0];
     assert!((edge.confidence - 0.75).abs() < 0.001);
     assert_eq!(edge.source, SourceType::Parametric);
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_csv_roundtrip_quoted_fields() {
+    let mut g = Graph::new();
+    g.add_edge(Edge::new(
+        "Washington, D.C.",
+        "nickname",
+        "The \"District\"",
+    ));
+    g.add_edge(Edge::new("Line\nBreak", "rel", "Value, with comma"));
+
+    let path = std::env::temp_dir().join("test_csv_quoted_fields.csv");
+    save_csv(&g, &path).unwrap();
+    let loaded = load_csv(&path).unwrap();
+
+    assert_eq!(loaded.edge_count(), 2);
+    assert!(loaded.exists("Washington, D.C.", "nickname", "The \"District\""));
+    assert!(loaded.exists("Line\nBreak", "rel", "Value, with comma"));
 
     std::fs::remove_file(&path).ok();
 }

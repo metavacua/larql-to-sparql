@@ -5,8 +5,8 @@ use std::time::Instant;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_core::*;
-use larql_inference::walker::attention_walker::{AttentionLayerResult, AttentionWalker};
-use larql_inference::walker::weight_walker::{LayerResult, WalkCallbacks, WalkConfig};
+use larql_vindex::walker::attention_walker::{AttentionLayerResult, AttentionWalker};
+use larql_vindex::walker::weight_walker::{LayerResult, WalkCallbacks, WalkConfig};
 
 #[derive(Args)]
 pub struct AttentionWalkArgs {

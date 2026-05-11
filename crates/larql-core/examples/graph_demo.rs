@@ -42,6 +42,9 @@ fn main() {
     println!("  Entities: {}", graph.node_count());
     println!("  Relations: {:?}\n", graph.list_relations());
 
+    let duplicate = graph.try_add_edge(Edge::new("France", "capital-of", "Paris"));
+    println!("  Duplicate insert result: {duplicate:?}");
+
     // ── Select ──
     println!("--- Select ---");
     let capitals = graph.select("France", Some("capital-of"));
@@ -49,6 +52,14 @@ fn main() {
 
     let all_france = graph.select("France", None);
     println!("  France has {} outgoing edges", all_france.len());
+    println!(
+        "  France outgoing relations: {:?}",
+        graph.outgoing_relations("France")
+    );
+    println!(
+        "  France -> Paris relation count: {}",
+        graph.edges_between("France", "Paris").len()
+    );
 
     // ── Describe ──
     println!("\n--- Describe ---");

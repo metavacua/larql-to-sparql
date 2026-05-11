@@ -1,0 +1,83 @@
+syntax = "proto3";
+package larql.expert.v1;
+
+// ── Expert batch service ──────────────────────────────────────────────────────
+//
+// Runs a batch of MoE expert forward passes on the owning shard.
+// One unary RPC per shard per decode step — all layers packed into a single
+// call over a persistent HTTP/2 channel, eliminating per-layer round-trip
+// overhead vs the HTTP /v1/expert/batch endpoint.
+//
+// Wire format for residual / output fields: raw IEEE-754 float32 little-endian
+// bytes, length = hidden_size × 4.  Using bytes avoids proto varint overhead
+// for float arrays.
+
+service ExpertService {
+  rpc ExpertBatch(ExpertBatchRequest) returns (ExpertBatchResponse);
+
+  // Bidirectional streaming: one stream per shard per decode step.
+  // Client sends one ExpertLayerInput per MoE layer; server streams back
+  // one ExpertLayerOutput per layer.  The stream stays open for the entire
+  // decode step, eliminating per-layer connection setup overhead.
+  //
+  // Server receives (layer, expert_ids, expert_weights, residual), runs the
+  // selected experts, applies the weighted sum and post-experts norm, and
+  // returns the combined h2 contribution for that layer.
+  rpc ExpertStream(stream ExpertLayerInput) returns (stream ExpertLayerOutput);
+}
+
+// One expert to compute: the shard runs gate_proj + up_proj + GELU + down_proj
+// for `expert_id` at `layer`, normed from `residual`.
+message ExpertBatchItem {
+  uint32 layer      = 1;
+  uint32 expert_id  = 2;
+  bytes  residual   = 3;  // f32 LE, length = hidden_size × 4
+}
+
+// One expert result.
+message ExpertBatchResult {
+  uint32 layer      = 1;
+  uint32 expert_id  = 2;
+  bytes  output     = 3;  // f32 LE, length = hidden_size × 4
+}
+
+message ExpertBatchRequest {
+  repeated ExpertBatchItem items = 1;
+}
+
+message ExpertBatchResponse {
+  repeated ExpertBatchResult results = 1;
+  float latency_ms = 2;
+}
+
+// ── Streaming layer-at-a-time dispatch ───────────────────────────────────────
+
+// One MoE layer's expert inputs. Client sends these sequentially as each
+// layer's h_post_attn becomes available from the Metal attention step.
+message ExpertLayerInput {
+  uint32 layer = 1;
+  // Which experts to run (pre-selected by the client router).
+  repeated uint32 expert_ids = 2;
+  // Renormalized router weights, one per expert_id.
+  repeated float expert_weights = 3;
+  // h_post_attn: f32 LE bytes, length = hidden_size × 4.
+  bytes residual = 4;
+  // post_experts_norm weight: f32 LE bytes (empty = skip post-norm).
+  bytes post_experts_norm = 5;
+  // norm_offset and eps for the pre_experts_norm RMS normalization.
+  float norm_offset = 6;
+  float eps = 7;
+}
+
+// One MoE layer's combined h2 contribution.
+message ExpertLayerOutput {
+  uint32 layer = 1;
+  // h2 = post_experts_norm(weighted_sum(expert_k_outputs)).
+  // f32 LE bytes, length = hidden_size × 4.
+  bytes h2 = 2;
+  // Server-side compute time for this frame, in milliseconds.
+  // Set when LARQL_MOE_TIMING=1 on the server; lets the client decompose
+  // its collect_ms into network_ms (= collect_ms − compute_ms) vs
+  // server_compute_ms.  Zero / unset means no server timing was recorded.
+  float compute_ms = 3;
+}

@@ -1,6 +1,9 @@
 # FFN-Vindex Unification Spec
 
 **Version:** 0.1 (2026-04-15)
+**Status (2026-04-25):** Not yet implemented. `patch/knn_store.rs` and the
+KNN override branch in `exec_infer` still exist; this spec describes the
+target state, not current code. Tracked in [ROADMAP.md](ROADMAP.md) under P2.
 **Scope:** `larql-vindex`, `larql-lql`, `larql-inference`, `larql-python`
 **Goal:** Collapse arch-B's parallel `KnnStore` into the FFN vindex itself. One data structure, one INSERT path, one INFER path.
 
@@ -275,5 +278,5 @@ Estimated total: **1.5 days of focused work**.
 - `patch/knn_store.rs` — KnnStore (will be deleted)
 - `larql-lql/src/executor/mutation.rs` `exec_insert` (will be rewritten)
 - `larql-lql/src/executor/query.rs` `exec_infer` (KNN override branch deleted)
-- `experiments/15_v11_model/TWO_LEVEL_ARCHITECTURE_SPEC.md` — the architectural context that motivates this unification
+- `~/chris-source/chris-experiments/compilation/15_v11_model/TWO_LEVEL_ARCHITECTURE_SPEC.md` — the architectural context that motivates this unification
 - `arch_b_RESULTS.md` — the 189/189 WASM arithmetic result that the unified path must match

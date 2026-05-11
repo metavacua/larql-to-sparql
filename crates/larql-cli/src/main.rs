@@ -1,5 +1,20 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
+// Architectural lints suppressed crate-wide:
+//
+//  - `too_many_arguments`: most command runners have wide signatures
+//    (`run(args, output, callbacks, ...)`) reflecting CLI surface, not
+//    internal coupling. Reducing to ≤7 args would mean introducing
+//    parameter structs across every command, which is a bigger refactor
+//    than a lint cleanup.
+//  - `large_enum_variant`: a few command-arg enums (notably `OvRdArgs`)
+//    have one or two large variants. Boxing them would change call
+//    sites everywhere.
+//
+// Mechanical lints (iter-on-map-keys, ptr_arg, needless_deref,
+// map_entry, etc.) are fixed in place rather than suppressed.
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::large_enum_variant)]
 
 use clap::{Parser, Subcommand};
 
@@ -7,6 +22,8 @@ mod commands;
 mod formatting;
 mod utils;
 
+use commands::dev::*;
+use commands::diagnostics::*;
 use commands::extraction::*;
 use commands::primary::*;
 use commands::query::*;
@@ -46,6 +63,11 @@ enum Commands {
     /// Download a vindex from HuggingFace and cache it locally.
     Pull(pull_cmd::PullArgs),
 
+    /// Manage HuggingFace *model* repos (safetensors + tokenizer + config).
+    /// Companion to `pull` (which is vindex-only). Use `model pull` to
+    /// stage a raw HF model for `convert safetensors-to-vindex`.
+    Model(model_cmd::ModelArgs),
+
     /// Register a local vindex directory with the cache so `run` / `list`
     /// / `show` can find it by shorthand.
     Link(link_cmd::LinkArgs),
@@ -67,6 +89,10 @@ enum Commands {
 
     /// Benchmark decode throughput on a real vindex (Metal / CPU / Ollama).
     Bench(bench_cmd::BenchArgs),
+
+    /// Shannon-style next-token bit measurements and demo compression.
+    #[command(subcommand)]
+    Shannon(shannon_cmd::ShannonCommand),
 
     // ── Server ──────────────────────────────────────────────────────
     #[command(next_help_heading = "Server")]
@@ -110,6 +136,14 @@ enum Commands {
     #[command(next_help_heading = "Build")]
     /// Verify vindex file integrity (SHA256 checksums).
     Verify(verify_cmd::VerifyArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Engine diagnostic — print which kernel paths fire for a vindex.
+    Diag(diag_cmd::DiagArgs),
+
+    #[command(next_help_heading = "Build")]
+    /// Cross-backend numerical parity diff (CPU vs Metal vs reference).
+    Parity(parity::ParityArgs),
 
     // ── Query (legacy, pre-LQL graph-file surface) ──────────────────
     #[command(next_help_heading = "Query")]
@@ -188,6 +222,9 @@ enum DevCommand {
 
     /// Map attention OV circuits to FFN gate features.
     OvGate(ov_gate_cmd::OvGateArgs),
+
+    /// OV rate-distortion and residual-table attention compilation experiments.
+    OvRd(ov_rd::cmd::OvRdArgs),
 
     /// Discover attention → FFN circuits from weight decomposition.
     CircuitDiscover(circuit_discover_cmd::CircuitDiscoverArgs),
@@ -269,6 +306,12 @@ impl From<ChatArgs> for run_cmd::RunArgs {
             experts_dir: None,
             ops: Vec::new(),
             constrained: false,
+            moe_shards: None,
+            moe_units_manifest: None,
+            moe_dispatch: "streaming".to_string(),
+            moe_predispatch_iters: 1,
+            ffn_dispatch: "streaming".to_string(),
+            ffn_predispatch_iters: 1,
         }
     }
 }
@@ -355,6 +398,67 @@ struct ServeArgs {
     /// Logging level.
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    /// Only load and serve layers in this range (inclusive, e.g. "0-19").
+    /// Pages outside the range are never touched; RSS scales with shard size.
+    #[arg(long)]
+    layers: Option<String>,
+
+    /// Only load and serve experts in this range (inclusive, e.g. "0-63").
+    /// Used to shard the expert bank across servers for MoE models.
+    /// Mutually exclusive with --units.
+    #[arg(long)]
+    experts: Option<String>,
+
+    /// Path to a JSON manifest for fine-grained per-(layer, expert) ownership.
+    /// Mutually exclusive with --experts.
+    #[arg(long, value_name = "PATH")]
+    units: Option<std::path::PathBuf>,
+
+    /// Run as an embed-service endpoint (loads only embeddings + lm_head).
+    #[arg(long)]
+    embed_only: bool,
+
+    /// Eager-build HNSW index for every owned layer at startup. Requires --hnsw.
+    #[arg(long)]
+    warmup_hnsw: bool,
+
+    /// Pre-load inference weights and prefetch all owned layer mmap pages at boot.
+    #[arg(long)]
+    warmup_walk_ffn: bool,
+
+    /// Bind a Unix domain socket alongside TCP for same-host MoE shard clients.
+    #[arg(long, value_name = "PATH")]
+    uds_path: Option<std::path::PathBuf>,
+
+    /// Join one or more router grids (comma-separated gRPC addresses).
+    /// Example: "grpc://router-a:50052,grpc://router-b:50052"
+    /// Requires --public-url so routers know where to direct clients.
+    #[arg(long)]
+    join: Option<String>,
+
+    /// Public HTTP URL clients use to reach this server (used with --join).
+    #[arg(long)]
+    public_url: Option<String>,
+
+    /// Shared secret matching the router's --grid-key (or set LARQL_GRID_KEY env var).
+    #[arg(long)]
+    grid_key: Option<String>,
+
+    /// Trust X-Forwarded-For when rate limiting (enable only behind a trusted proxy).
+    #[arg(long)]
+    trust_forwarded_for: bool,
+
+    /// Server-side MoE expert shard map: `"START-END=URL,START-END=URL,..."`
+    /// The walk-ffn handler will dispatch MoE expert calls to these remote servers.
+    /// Combine with --layers for full 2D (layer × expert) sharding.
+    #[arg(long)]
+    moe_shards: Option<String>,
+
+    /// Path to a JSON manifest for fine-grained per-(layer, expert) shard ownership.
+    /// Mutually exclusive with --moe-shards.
+    #[arg(long, value_name = "PATH")]
+    moe_units_manifest: Option<std::path::PathBuf>,
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -415,7 +519,9 @@ fn main() {
         Commands::Run(args) => run_cmd::run(args),
         Commands::Chat(args) => run_cmd::run(args.into()),
         Commands::Bench(args) => bench_cmd::run(args),
+        Commands::Shannon(cmd) => shannon_cmd::run(cmd),
         Commands::Pull(args) => pull_cmd::run(args),
+        Commands::Model(args) => model_cmd::run(args),
         Commands::Link(args) => link_cmd::run(args),
         Commands::List(args) => list_cmd::run(args),
         Commands::Show(args) => show_cmd::run(args),
@@ -431,6 +537,8 @@ fn main() {
         Commands::Convert(args) => convert_cmd::run(args),
         Commands::Hf(args) => hf_cmd::run(args),
         Commands::Verify(args) => verify_cmd::run(args),
+        Commands::Diag(args) => diag_cmd::run(args),
+        Commands::Parity(args) => parity::run(args),
 
         // ── Query (legacy graph-file surface) ──
         Commands::Query(args) => query_cmd::run(args),
@@ -482,6 +590,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
         DevCommand::QkRank(a) => qk_rank_cmd::run(a),
         DevCommand::QkModes(a) => qk_modes_cmd::run(a),
         DevCommand::OvGate(a) => ov_gate_cmd::run(a),
+        DevCommand::OvRd(a) => ov_rd::cmd::run(a),
         DevCommand::CircuitDiscover(a) => circuit_discover_cmd::run(a),
         DevCommand::AttnBottleneck(a) => attn_bottleneck_cmd::run(a),
         DevCommand::FfnBottleneck(a) => ffn_bottleneck_cmd::run(a),
@@ -559,6 +668,54 @@ fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref key) = args.tls_key {
         cmd_args.push("--tls-key".into());
         cmd_args.push(key.display().to_string());
+    }
+    if let Some(ref range) = args.layers {
+        cmd_args.push("--layers".into());
+        cmd_args.push(range.clone());
+    }
+    if let Some(ref range) = args.experts {
+        cmd_args.push("--experts".into());
+        cmd_args.push(range.clone());
+    }
+    if let Some(ref path) = args.units {
+        cmd_args.push("--units".into());
+        cmd_args.push(path.display().to_string());
+    }
+    if args.embed_only {
+        cmd_args.push("--embed-only".into());
+    }
+    if args.warmup_hnsw {
+        cmd_args.push("--warmup-hnsw".into());
+    }
+    if args.warmup_walk_ffn {
+        cmd_args.push("--warmup-walk-ffn".into());
+    }
+    if let Some(ref path) = args.uds_path {
+        cmd_args.push("--uds-path".into());
+        cmd_args.push(path.display().to_string());
+    }
+    if let Some(ref addrs) = args.join {
+        cmd_args.push("--join".into());
+        cmd_args.push(addrs.clone());
+    }
+    if let Some(ref url) = args.public_url {
+        cmd_args.push("--public-url".into());
+        cmd_args.push(url.clone());
+    }
+    if let Some(ref key) = args.grid_key {
+        cmd_args.push("--grid-key".into());
+        cmd_args.push(key.clone());
+    }
+    if args.trust_forwarded_for {
+        cmd_args.push("--trust-forwarded-for".into());
+    }
+    if let Some(ref s) = args.moe_shards {
+        cmd_args.push("--moe-shards".into());
+        cmd_args.push(s.clone());
+    }
+    if let Some(ref path) = args.moe_units_manifest {
+        cmd_args.push("--moe-units-manifest".into());
+        cmd_args.push(path.display().to_string());
     }
 
     let exe = std::env::current_exe().ok();

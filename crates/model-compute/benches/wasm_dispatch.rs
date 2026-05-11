@@ -10,7 +10,7 @@
 //!
 //! Run with: `cargo bench -p model-compute --features wasm`
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 use model_compute::wasm::SolverRuntime;
 

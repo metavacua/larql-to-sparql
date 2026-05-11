@@ -14,7 +14,7 @@ use ndarray::Array2;
 use std::time::Instant;
 
 use larql_compute::CpuBackend;
-use larql_compute::{default_backend, ComputeBackend, MatMulOp};
+use larql_compute::{default_backend, ComputeBackend, MatMul, MatMulOp};
 
 /// Deterministic f32 matrix.
 fn synth_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
@@ -48,14 +48,18 @@ fn main() {
     println!("Default backend: {}  (init: {init_ms}ms)", default.name());
 
     // Show calibrated threshold if Metal
-    #[cfg(feature = "metal")]
+    #[cfg(all(feature = "metal", target_os = "macos"))]
     {
         // The default_backend() already calibrated. Show the result.
         // We need to access the threshold — let's create a second backend to inspect.
         if let Some(metal) = larql_compute::MetalBackend::new() {
             metal.calibrate();
             let threshold = metal.flop_threshold();
-            println!("Calibrated FLOP threshold: {} ({:.1}M FLOPs)", threshold, threshold as f64 / 1e6);
+            println!(
+                "Calibrated FLOP threshold: {} ({:.1}M FLOPs)",
+                threshold,
+                threshold as f64 / 1e6
+            );
         }
     }
     println!();
@@ -114,8 +118,11 @@ fn main() {
     let _ = cpu.matmul_transb(h.view(), w_q.view());
     let cpu_us = t0.elapsed().as_micros();
 
-    println!("  Q proj [{seq},{hidden}] x [{},{hidden}]^T  ({}M FLOPs)",
-        num_heads * head_dim, 2 * seq * (num_heads * head_dim) * hidden / 1_000_000);
+    println!(
+        "  Q proj [{seq},{hidden}] x [{},{hidden}]^T  ({}M FLOPs)",
+        num_heads * head_dim,
+        2 * seq * (num_heads * head_dim) * hidden / 1_000_000
+    );
     println!("  CPU:               {cpu_us:>8} us");
     println!("  Default cold:      {cold_us:>8} us  (buffer created)");
     println!("  Default warm:      {warm_us:>8} us  (cache hit)");
@@ -218,10 +225,26 @@ fn main() {
     // ── 7. Batched Q/K/V/O in one dispatch ──
     println!("--- Batched attention projections (1 dispatch) ---");
     let ops = vec![
-        MatMulOp { a: h_input.clone(), b: w_q.clone(), transpose_b: true },
-        MatMulOp { a: h_input.clone(), b: w_k.clone(), transpose_b: true },
-        MatMulOp { a: h_input.clone(), b: w_v.clone(), transpose_b: true },
-        MatMulOp { a: attn_out.clone(), b: w_o.clone(), transpose_b: true },
+        MatMulOp {
+            a: h_input.clone(),
+            b: w_q.clone(),
+            transpose_b: true,
+        },
+        MatMulOp {
+            a: h_input.clone(),
+            b: w_k.clone(),
+            transpose_b: true,
+        },
+        MatMulOp {
+            a: h_input.clone(),
+            b: w_v.clone(),
+            transpose_b: true,
+        },
+        MatMulOp {
+            a: attn_out.clone(),
+            b: w_o.clone(),
+            transpose_b: true,
+        },
     ];
 
     let t0 = Instant::now();

@@ -19,9 +19,17 @@ const PAGE_SIZE: usize = 16384;
 /// Buffer cache for Metal GPU buffers.
 /// Weight matrices from mmap'd files have stable addresses — their GPU buffers
 /// are created once and reused for all subsequent calls.
+/// Scratch output buffers are pooled by size — `output()` returns an existing
+/// buffer of the requested size rather than calling `device.new_buffer` each
+/// time. This eliminates ~21 GPU allocations per decode step which were the
+/// dominant CPU overhead for large models (31B: 86KB × 21 = ~200ms/token).
 pub struct BufferCache {
     device: Device,
     cache: Mutex<HashMap<CacheKey, Buffer>>,
+    /// Pool of pre-allocated scratch buffers keyed by byte length.
+    /// Each entry is a Vec of available (not currently in use) buffers.
+    /// Grows on first use; reused on subsequent decode steps.
+    scratch_pool: Mutex<HashMap<u64, Vec<Buffer>>>,
 }
 
 impl BufferCache {
@@ -29,6 +37,7 @@ impl BufferCache {
         Self {
             device: device.clone(),
             cache: Mutex::new(HashMap::new()),
+            scratch_pool: Mutex::new(HashMap::new()),
         }
     }
 
@@ -42,27 +51,37 @@ impl BufferCache {
             // allocated once and reused.
             let stub_key: CacheKey = (0, 0);
             let mut cache = self.cache.lock().unwrap();
-            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
-            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            if let Some(buf) = cache.get(&stub_key) {
+                return buf.clone();
+            }
+            let buf = self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
             cache.insert(stub_key, buf.clone());
             return buf;
         }
 
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
-        if let Some(buf) = cache.get(&key) { return buf.clone(); }
+        if let Some(buf) = cache.get(&key) {
+            return buf.clone();
+        }
 
         let bytes = data.len() * 4;
         let ptr = data.as_ptr() as *const c_void;
 
         let buf = if Self::is_page_aligned(ptr, bytes) {
             self.device.new_buffer_with_bytes_no_copy(
-                ptr as *mut c_void, bytes as u64,
-                MTLResourceOptions::StorageModeShared, None,
+                ptr as *mut c_void,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
+                None,
             )
         } else {
             self.device.new_buffer_with_data(
-                ptr, bytes as u64, MTLResourceOptions::StorageModeShared,
+                ptr,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
             )
         };
 
@@ -77,27 +96,37 @@ impl BufferCache {
         if data.is_empty() {
             let stub_key: CacheKey = (1, 0);
             let mut cache = self.cache.lock().unwrap();
-            if let Some(buf) = cache.get(&stub_key) { return buf.clone(); }
-            let buf = self.device.new_buffer(4, MTLResourceOptions::StorageModeShared);
+            if let Some(buf) = cache.get(&stub_key) {
+                return buf.clone();
+            }
+            let buf = self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
             cache.insert(stub_key, buf.clone());
             return buf;
         }
 
         let key: CacheKey = (data.as_ptr() as usize, data.len());
         let mut cache = self.cache.lock().unwrap();
-        if let Some(buf) = cache.get(&key) { return buf.clone(); }
+        if let Some(buf) = cache.get(&key) {
+            return buf.clone();
+        }
 
         let ptr = data.as_ptr() as *const c_void;
         let bytes = data.len();
 
         let buf = if Self::is_page_aligned(ptr, bytes) {
             self.device.new_buffer_with_bytes_no_copy(
-                ptr as *mut c_void, bytes as u64,
-                MTLResourceOptions::StorageModeShared, None,
+                ptr as *mut c_void,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
+                None,
             )
         } else {
             self.device.new_buffer_with_data(
-                ptr, bytes as u64, MTLResourceOptions::StorageModeShared,
+                ptr,
+                bytes as u64,
+                MTLResourceOptions::StorageModeShared,
             )
         };
 
@@ -124,10 +153,46 @@ impl BufferCache {
         )
     }
 
+    /// Create a transient buffer from raw bytes. Used for staging concatenated
+    /// Q4K expert weight slices before a GPU matvec dispatch.
+    pub fn transient_from_bytes(&self, data: &[u8]) -> Buffer {
+        if data.is_empty() {
+            return self
+                .device
+                .new_buffer(4, MTLResourceOptions::StorageModeShared);
+        }
+        self.device.new_buffer_with_data(
+            data.as_ptr() as *const c_void,
+            data.len() as u64,
+            MTLResourceOptions::StorageModeShared,
+        )
+    }
 
     /// Create an empty output buffer of given byte size.
+    /// Return a scratch output buffer of at least `bytes` bytes.
+    /// Reuses a pooled buffer when one of the exact size is available,
+    /// otherwise allocates once and adds it to the pool for future calls.
+    /// Callers treat the buffer as write-before-read scratch space.
     pub fn output(&self, bytes: u64) -> Buffer {
-        self.device.new_buffer(bytes, MTLResourceOptions::StorageModeShared)
+        let mut pool = self.scratch_pool.lock().unwrap();
+        if let Some(buf) = pool.entry(bytes).or_default().pop() {
+            return buf;
+        }
+        self.device
+            .new_buffer(bytes, MTLResourceOptions::StorageModeShared)
+    }
+
+    /// Return a scratch buffer to the pool after it is no longer needed.
+    /// Must be called after `cmd.wait_until_completed()` — the GPU must
+    /// have finished writing before the buffer is recycled.
+    pub fn recycle(&self, buf: Buffer) {
+        let bytes = buf.length();
+        self.scratch_pool
+            .lock()
+            .unwrap()
+            .entry(bytes)
+            .or_default()
+            .push(buf);
     }
 
     /// Number of cached buffers (for diagnostics).
@@ -142,6 +207,41 @@ impl BufferCache {
 
     fn is_page_aligned(ptr: *const c_void, bytes: usize) -> bool {
         (ptr as usize).is_multiple_of(PAGE_SIZE) && bytes.is_multiple_of(PAGE_SIZE)
+    }
+}
+
+/// RAII guard that returns scratch buffers to the pool when dropped.
+/// Create one per decode step; it holds clones of all output buffers allocated
+/// via `BufferCache::output`. Dropping the guard (at any function-exit path,
+/// including early returns) recycles all held buffers automatically.
+///
+/// **Invariant**: only drop after `cmd.wait_until_completed()` so the GPU has
+/// finished writing. The decode functions satisfy this: the guard is created
+/// early, but by the time it drops the final command buffer has been waited on.
+pub struct ScratchGuard<'a> {
+    bufs: Vec<Buffer>,
+    cache: &'a BufferCache,
+}
+
+impl<'a> ScratchGuard<'a> {
+    pub fn new(cache: &'a BufferCache) -> Self {
+        Self {
+            bufs: Vec::new(),
+            cache,
+        }
+    }
+
+    /// Track a buffer for recycling. Call once per `BufferCache::output()` call.
+    pub fn track(&mut self, buf: &Buffer) {
+        self.bufs.push(buf.clone());
+    }
+}
+
+impl Drop for ScratchGuard<'_> {
+    fn drop(&mut self) {
+        for buf in self.bufs.drain(..) {
+            self.cache.recycle(buf);
+        }
     }
 }
 
@@ -168,4 +268,134 @@ pub fn read_buffer_f32(buf: &metal::Buffer, len: usize) -> Vec<f32> {
     // SAFETY: ptr is non-null, buffer is large enough, and command buffer
     // has completed (caller invariant). Data is immediately copied to Vec.
     unsafe { std::slice::from_raw_parts(ptr, len).to_vec() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dev() -> Option<Device> {
+        Device::system_default()
+    }
+
+    /// `get_f32` caches by (pointer, len). The same slice handed in
+    /// twice must return the same Buffer (one allocation, two clones).
+    #[test]
+    fn get_f32_caches_by_slice_identity() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let data = vec![1.0f32, 2.0, 3.0, 4.0];
+        assert_eq!(cache.len(), 0);
+        let b1 = cache.get_f32(&data);
+        let b2 = cache.get_f32(&data);
+        assert_eq!(cache.len(), 1, "second call must hit cache, not allocate");
+        // Same underlying GPU buffer.
+        assert_eq!(b1.gpu_address(), b2.gpu_address());
+    }
+
+    /// Distinct slices → distinct cache entries even if contents
+    /// happen to be byte-identical (cache key is pointer+len, not value).
+    #[test]
+    fn get_f32_distinct_slices_get_distinct_buffers() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let a = vec![1.0f32; 16];
+        let b = vec![1.0f32; 16];
+        let _ = cache.get_f32(&a);
+        let _ = cache.get_f32(&b);
+        assert_eq!(cache.len(), 2);
+    }
+
+    /// Empty f32 slice → reused 4-byte stub. Metal rejects 0-length
+    /// allocations, so the cache returns a single shared stub buffer.
+    #[test]
+    fn get_f32_empty_slice_returns_shared_stub() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let empty: Vec<f32> = vec![];
+        let b1 = cache.get_f32(&empty);
+        let b2 = cache.get_f32(&empty);
+        assert_eq!(cache.len(), 1, "empty slices share one stub");
+        assert_eq!(b1.length(), 4);
+        assert_eq!(b1.gpu_address(), b2.gpu_address());
+    }
+
+    /// `get_bytes` empty stub keyed separately from `get_f32` empty
+    /// stub (cache keys are different — `(0,0)` vs `(1,0)`).
+    #[test]
+    fn empty_f32_and_empty_bytes_have_separate_stubs() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let _ = cache.get_f32(&[][..]);
+        let _ = cache.get_bytes(&[][..]);
+        assert_eq!(
+            cache.len(),
+            2,
+            "f32 and bytes empty stubs are independent cache entries"
+        );
+    }
+
+    /// `transient_from_*` does NOT cache. Ten calls = ten allocations.
+    #[test]
+    fn transient_buffers_are_not_cached() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let data = vec![0.0f32; 64];
+        let _b1 = cache.transient_from_f32(&data);
+        let _b2 = cache.transient_from_f32(&data);
+        assert_eq!(cache.len(), 0, "transient calls must not touch the cache");
+    }
+
+    /// `output(bytes)` returns a buffer of at least the requested
+    /// size (Metal may round up but never under).
+    #[test]
+    fn output_buffer_is_at_least_requested_size() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let buf = cache.output(1024);
+        assert!(buf.length() >= 1024);
+        let buf2 = cache.output(1024);
+        assert_eq!(cache.len(), 0, "output() does not cache");
+        // Distinct allocations (different gpu_address).
+        assert_ne!(buf.gpu_address(), buf2.gpu_address());
+    }
+
+    /// `read_buffer_f32` round-trips bytes written via the contents
+    /// pointer of a `transient_from_f32` buffer. Pin the
+    /// "buffer-finished → CPU read" contract.
+    #[test]
+    fn read_buffer_f32_round_trip() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let src: Vec<f32> = (0..16).map(|i| i as f32 * 0.5).collect();
+        let buf = cache.transient_from_f32(&src);
+        let got = read_buffer_f32(&buf, src.len());
+        assert_eq!(got, src);
+    }
+
+    /// `read_buffer_f32` panics on an undersized buffer.
+    #[test]
+    #[should_panic(expected = "Metal buffer too small")]
+    fn read_buffer_f32_panics_when_buffer_undersized() {
+        let Some(d) = dev() else {
+            panic!("Metal buffer too small"); // simulate the failure on non-Metal hosts
+        };
+        let cache = BufferCache::new(&d);
+        let buf = cache.output(4); // 1 f32
+        let _ = read_buffer_f32(&buf, 100); // ask for 100 → must panic
+    }
 }

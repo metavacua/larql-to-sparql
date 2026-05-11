@@ -26,7 +26,8 @@ impl ChainResult {
     }
 }
 
-const DEFAULT_STOP: &[char] = &['.', '\n', ',', ';', '!', '?', '(', ')', '[', ']', '<', '>'];
+pub const DEFAULT_STOP_TOKENS: &[char] =
+    &['.', '\n', ',', ';', '!', '?', '(', ')', '[', ']', '<', '>'];
 
 /// Chain forward passes to assemble a multi-token answer.
 pub fn chain_tokens(
@@ -36,13 +37,15 @@ pub fn chain_tokens(
     min_probability: f64,
     stop_tokens: Option<&[char]>,
 ) -> Result<ChainResult, ProviderError> {
-    let stops = stop_tokens.unwrap_or(DEFAULT_STOP);
+    let stops = stop_tokens.unwrap_or(DEFAULT_STOP_TOKENS);
     let mut tokens: Vec<String> = Vec::new();
     let mut probs: Vec<f64> = Vec::new();
     let mut current_prompt = prompt.to_string();
+    let mut num_passes = 0usize;
 
     for _ in 0..max_tokens {
         let result = provider.predict_next_token(&current_prompt, 1)?;
+        num_passes += 1;
         let Some(top) = result.top() else { break };
 
         let stripped = top.token.trim();
@@ -62,8 +65,6 @@ pub fn chain_tokens(
     }
 
     let answer = tokens.join("").trim().to_string();
-    let num_passes = tokens.len();
-
     Ok(ChainResult {
         answer,
         tokens,
