@@ -24,6 +24,9 @@ on:
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   bench:
     name: bench - ${{ matrix.name }}
