@@ -1,10 +1,11 @@
-# larql-models cross-platform CI
+# larql-models Windows CI
 #
-# Runs fmt + check + clippy + tests + bench test-mode on Linux, Windows, and macOS
-# for every change to the larql-models crate. Validates cross-platform compatibility:
-#   - Linux  (x86_64-unknown-linux-gnu)
-#   - Windows (x86_64-pc-windows-msvc) — HF cache path, mmap, path separators
-#   - macOS  (aarch64-apple-darwin)    — NEON SIMD paths
+# Runs fmt + check + clippy + tests + bench test-mode on Windows for every
+# change to the larql-models crate. Validates Windows-specific paths:
+#   - HuggingFace cache path handling
+#   - mmap semantics on Windows
+#   - Path separators
+# Linux/macOS runs are eliminated per project decision to consolidate on Windows.
 
 name: larql-models
 
@@ -13,14 +14,14 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-models/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/larql-models.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-models/**'
       - 'Cargo.toml'
@@ -28,16 +29,14 @@ on:
       - '.github/workflows/larql-models.yml'
   workflow_dispatch: {}
 
+env:
+  CMAKE_BUILD_TYPE: Release
+
 jobs:
   test:
-    name: test · ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 20
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -54,9 +53,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-models-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-models-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-models-
+            windows-cargo-models-
 
       - name: Format check
         run: cargo fmt -p larql-models -- --check
@@ -72,20 +71,3 @@ jobs:
 
       - name: Test benches
         run: cargo test -p larql-models --benches
-
-  coverage:
-    name: coverage · ubuntu
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-models --summary-only

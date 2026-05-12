@@ -1,10 +1,11 @@
-# larql-server cross-platform CI
+# larql-server Windows CI
 #
 # HTTP/gRPC inference server (vindex queries, OpenAI-compat, remote MoE
 # expert shards). Build script bundles `protoc` via `protobuf_src`, so
-# no system protoc install is required on any runner. Tests are split
-# across many `test_http_*`, `test_grpc`, and `test_unit_*` files; all
-# run cross-platform without real model weights.
+# no system protoc install is required. Tests are split across many
+# `test_http_*`, `test_grpc`, and `test_unit_*` files; all run without
+# real model weights. Linux/macOS runs are eliminated per project
+# decision to consolidate on Windows.
 
 name: larql-server
 
@@ -13,7 +14,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-server/**'
       - 'crates/larql-router-protocol/**'
@@ -25,7 +26,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-server.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-server/**'
       - 'crates/larql-router-protocol/**'
@@ -39,21 +40,13 @@ on:
   workflow_dispatch: {}
 
 env:
-  # Existing baseline measured 2026-05-10 in Makefile (see
-  # `LARQL_SERVER_COVERAGE_MIN`). Keep just under the live value to
-  # ratchet upward, never down.
-  LARQL_SERVER_COVERAGE_MIN: 65
+  CMAKE_BUILD_TYPE: Release
 
 jobs:
   test:
-    name: test - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 35
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -63,20 +56,20 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install OpenBLAS (Linux)
-        if: runner.os == 'Linux'
+      - name: Install cmake + zlib (Windows)
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
+          choco install cmake zlib --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          refreshenv
 
       - name: Install OpenBLAS (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
           if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+          "$vcpkgRoot\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
@@ -85,9 +78,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-server-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-server-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-server-
+            windows-cargo-server-
 
       - name: Format check
         run: cargo fmt -p larql-server -- --check
@@ -106,31 +99,3 @@ jobs:
 
       - name: Tests
         run: cargo test -p larql-server
-
-  coverage:
-    name: coverage - ubuntu
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-server --summary-only --fail-under-lines "$LARQL_SERVER_COVERAGE_MIN"
-
-      - name: Coverage policy
-        run: |
-          mkdir -p coverage/larql-server
-          cargo llvm-cov report --package larql-server --json --summary-only --output-path coverage/larql-server/summary.json
-          python3 scripts/check_coverage_policy.py coverage/larql-server/summary.json crates/larql-server/coverage-policy.json

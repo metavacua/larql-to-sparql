@@ -1,8 +1,8 @@
-# larql-compute cross-platform CI
+# larql-compute Windows CI
 #
-# Validates the CPU baseline on Linux, Windows, and macOS, plus the macOS-only
-# Metal feature gate. Linux/Windows intentionally run `--all-features` too:
-# enabling the `metal` feature there must not expose macOS-only modules.
+# Validates the CPU baseline on Windows. The Metal feature is macOS-only
+# and not applicable here. Linux/macOS runs are eliminated per project
+# decision to consolidate on Windows.
 
 name: larql-compute
 
@@ -11,7 +11,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-compute/**'
       - 'crates/larql-models/**'
@@ -20,7 +20,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-compute.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-compute/**'
       - 'crates/larql-models/**'
@@ -30,16 +30,14 @@ on:
       - '.github/workflows/larql-compute.yml'
   workflow_dispatch: {}
 
+env:
+  CMAKE_BUILD_TYPE: Release
+
 jobs:
   test:
-    name: test · ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 35
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -49,14 +47,13 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install OpenBLAS (Linux)
-        if: runner.os == 'Linux'
+      - name: Install cmake + zlib (Windows)
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
+          choco install cmake zlib --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          refreshenv
 
       - name: Install OpenBLAS (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $root = $env:VCPKG_INSTALLATION_ROOT
@@ -74,9 +71,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-compute-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-compute-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-compute-
+            windows-cargo-compute-
 
       - name: Format check
         run: cargo fmt -p larql-compute -- --check
@@ -84,24 +81,14 @@ jobs:
       - name: Check default features
         run: cargo check -p larql-compute --all-targets
 
-      - name: Check all features on Linux/Windows
-        if: runner.os != 'macOS'
+      - name: Check all features
         run: cargo check -p larql-compute --all-targets --all-features
-
-      - name: Check Metal feature on macOS
-        if: runner.os == 'macOS'
-        run: cargo check -p larql-compute --all-targets --features metal
 
       - name: Clippy default features
         run: cargo clippy -p larql-compute --all-targets -- -D warnings
 
-      - name: Clippy all features on Linux/Windows
-        if: runner.os != 'macOS'
+      - name: Clippy all features
         run: cargo clippy -p larql-compute --all-targets --all-features -- -D warnings
-
-      - name: Clippy Metal feature on macOS
-        if: runner.os == 'macOS'
-        run: cargo clippy -p larql-compute --all-targets --features metal -- -D warnings
 
       - name: Unit tests
         run: cargo test -p larql-compute --lib

@@ -1,9 +1,10 @@
-# larql-cli cross-platform CI
+# larql-cli Windows CI
 #
 # Top-level `larql` binary. Default features enable Metal on every
-# member crate, which only resolves on macOS. Linux/Windows runs use
-# `--no-default-features` so the CPU-only surface is exercised. macOS
-# runs include defaults so the Metal feature path is checked too.
+# member crate, which only resolves on macOS. Windows runs use
+# `--no-default-features` so the CPU-only surface is exercised.
+# Linux/macOS runs are eliminated per project decision to consolidate
+# on Windows.
 #
 # `convert_moe_to_per_layer` example currently doesn't build against
 # the post-refactor `larql-inference` API; CI checks bins + tests
@@ -16,7 +17,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'
@@ -29,7 +30,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-cli.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'
@@ -43,16 +44,14 @@ on:
       - '.github/workflows/larql-cli.yml'
   workflow_dispatch: {}
 
+env:
+  CMAKE_BUILD_TYPE: Release
+
 jobs:
   test:
-    name: test - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 35
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -62,20 +61,20 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install OpenBLAS (Linux)
-        if: runner.os == 'Linux'
+      - name: Install cmake + zlib (Windows)
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
+          choco install cmake zlib --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          refreshenv
 
       - name: Install OpenBLAS (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
           if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+          "$vcpkgRoot\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
@@ -84,20 +83,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-cli-
+            windows-cargo-cli-
 
       - name: Format check
         run: cargo fmt -p larql-cli -- --check
 
-      - name: Check (CPU only) on Linux/Windows
-        if: runner.os != 'macOS'
+      - name: Check (CPU only)
         run: cargo check -p larql-cli --bins --tests --no-default-features
-
-      - name: Check (default features incl. metal) on macOS
-        if: runner.os == 'macOS'
-        run: cargo check -p larql-cli --bins --tests
 
       # Clippy is intentionally skipped: as of 2026-05-10 `larql-cli`
       # carries ~82 pre-existing errors under default features and ~112
@@ -106,32 +100,5 @@ jobs:
       # is cleared; the other crates' workflows already enforce
       # `clippy -- -D warnings`.
 
-      - name: Tests (CPU only) on Linux/Windows
-        if: runner.os != 'macOS'
+      - name: Tests (CPU only)
         run: cargo test -p larql-cli --no-default-features
-
-      - name: Tests (default features) on macOS
-        if: runner.os == 'macOS'
-        run: cargo test -p larql-cli
-
-  coverage:
-    name: coverage - ubuntu
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-cli --no-default-features --summary-only

@@ -1,20 +1,17 @@
-# larql-inference cross-platform CI
+# larql-inference Windows CI
 #
 # Transformer inference engine — forward pass, attention, FFN, layer
 # norm. Tests that need real model weights are gated `#[ignore]`
 # (test_arch_golden, test_logits_goldens, test_gemma3_smoke,
 # test_generate_q4k_cpu, test_layer_graph_integration); CI runs the
-# default test set only. Several diagnostic examples
-# (cpu_gpu_diag, debug_generate, debug_gpu_step, debug_layers,
-# decode_vs_prefill, residual_diff, stage_bisect) currently lag the
-# refactored `larql-compute` decode API and are excluded from the
-# `cargo check` surface — repair them and add `--examples` here.
+# default test set only. Linux/macOS runs are eliminated per project
+# decision to consolidate on Windows.
 
 name: larql-inference
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-inference/**'
       - 'crates/larql-compute/**'
@@ -26,7 +23,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-inference.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-inference/**'
       - 'crates/larql-compute/**'
@@ -39,16 +36,14 @@ on:
       - '.github/workflows/larql-inference.yml'
   workflow_dispatch: {}
 
+env:
+  CMAKE_BUILD_TYPE: Release
+
 jobs:
   test:
-    name: test - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 45
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -58,20 +53,20 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install OpenBLAS (Linux)
-        if: runner.os == 'Linux'
+      - name: Install cmake + zlib (Windows)
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
+          choco install cmake zlib --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          refreshenv
 
       - name: Install OpenBLAS (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
           if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+          "$vcpkgRoot\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
@@ -80,9 +75,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-inference-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-inference-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-inference-
+            windows-cargo-inference-
 
       - name: Format check
         run: cargo fmt -p larql-inference -- --check
@@ -98,25 +93,3 @@ jobs:
       # default set. Bench targets compile-check via `--benches` above.
       - name: Tests
         run: cargo test -p larql-inference
-
-  coverage:
-    name: coverage - ubuntu
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-inference --summary-only

@@ -1,14 +1,15 @@
-# larql-core cross-platform CI
+# larql-core Windows CI
 #
 # Runs fmt + feature matrix + clippy + tests + examples + bench test-mode on
-# Linux, Windows, and macOS. The crate is model-architecture agnostic and these
-# checks require no model weights or platform-specific backends.
+# Windows. The crate is model-architecture agnostic and these checks require
+# no model weights or platform-specific backends. Linux/macOS runs are
+# eliminated per project decision to consolidate on Windows.
 
 name: larql-core
 
 on:
   push:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-core/**'
       - 'Cargo.toml'
@@ -16,7 +17,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-core.yml'
   pull_request:
-    branches: [main]
+    branches: [main, windows-ci-cd]
     paths:
       - 'crates/larql-core/**'
       - 'Cargo.toml'
@@ -25,16 +26,14 @@ on:
       - '.github/workflows/larql-core.yml'
   workflow_dispatch: {}
 
+env:
+  CMAKE_BUILD_TYPE: Release
+
 jobs:
   test:
-    name: test · ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · windows
+    runs-on: windows-latest
     timeout-minutes: 25
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -51,9 +50,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-core-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-core-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-core-
+            windows-cargo-core-
 
       - name: Format check
         run: cargo fmt -p larql-core -- --check
@@ -88,20 +87,3 @@ jobs:
           cargo run -p larql-core --example algorithm_demo
           cargo run -p larql-core --example filter_demo
           cargo run -p larql-core --example serialization_demo
-
-  coverage:
-    name: coverage · ubuntu
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-core --summary-only
