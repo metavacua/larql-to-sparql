@@ -223,7 +223,20 @@ fn assert_structural_invariants(graph: &Graph, second_field: &str, expected_laye
     );
 }
 
+// Windows windows-latest produces a different SHA than Linux/macOS: the
+// vector extractor's per-feature normalisation chain runs through ndarray's
+// BLAS dot, and Windows OpenBLAS reorders sgemm reductions in ways that
+// flip the trailing digits of `c_score` in the JSONL output. The file
+// header at the top of this module assumes the vector-extractor stays
+// platform-stable; that's true for the two GitHub runners we'd been
+// using (linux-x86_64, macos-aarch64) but not for windows-latest
+// OpenBLAS. Skip until we either gate-on-determinism or carry a
+// per-platform golden.
 #[test]
+#[cfg_attr(
+    target_os = "windows",
+    ignore = "Windows OpenBLAS reorders sgemm; per-platform golden needed"
+)]
 fn vector_extractor_ffn_down_byte_identical() {
     let dir = fixture("vex");
     let extractor = VectorExtractor::load(dir.to_str().unwrap()).unwrap();
