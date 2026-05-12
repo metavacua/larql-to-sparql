@@ -101,9 +101,21 @@ mod tests {
 
     #[test]
     fn shard_dir_path_is_deterministic() {
+        // `PathBuf::join` is platform-aware: it uses `/` on Unix and `\` on
+        // Windows. We're not asserting separator style — only that joining
+        // a base + two segments yields the same `PathBuf` each call.
         let dir = PathBuf::from("/mnt/shards")
             .join("gemma4-26b")
             .join("layers-0-14");
-        assert_eq!(dir.to_str().unwrap(), "/mnt/shards/gemma4-26b/layers-0-14");
+        let expected = PathBuf::from("/mnt/shards")
+            .join("gemma4-26b")
+            .join("layers-0-14");
+        assert_eq!(dir, expected);
+        // Components are the same regardless of separator.
+        let comps: Vec<_> = dir
+            .components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .collect();
+        assert_eq!(comps.last(), Some(&"layers-0-14"));
     }
 }
