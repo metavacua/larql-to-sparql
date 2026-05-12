@@ -77,6 +77,14 @@ jobs:
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
+      - name: Install cmake + zlib (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install cmake zlib --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          # Force release CRT for protobuf-src (debug CRT lacks full math symbols)
+          echo "CMAKE_BUILD_TYPE=Release" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
         with:
