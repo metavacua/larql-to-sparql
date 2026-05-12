@@ -322,8 +322,12 @@ mod tests {
         for i in 0..w.hidden_size {
             let got = traced.residual[i];
             let expected = expected[i];
+            // 1e-3 matches the sibling `trace_logits_match_raw_forward` test
+            // and tolerates Windows OpenBLAS sgemm reordering between the
+            // two dispatch paths (`trace_residuals` vs `trace_forward_with_ffn`).
+            // Linux + macOS sit comfortably below 1e-5; Windows runs hit ~6e-4.
             assert!(
-                (got - expected).abs() < 1e-4,
+                (got - expected).abs() < 1e-3,
                 "custom backend final residual dim {i}: trace {got} != hooked forward {expected}"
             );
         }
