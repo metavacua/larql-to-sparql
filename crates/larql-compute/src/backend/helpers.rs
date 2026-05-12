@@ -46,6 +46,11 @@ mod tests {
         })
     }
 
+    // Unused on Windows because every caller is `cfg(not(windows))`
+    // (the dispatch tests skip Windows-OpenBLAS reordering). Suppress
+    // dead-code lint there instead of dropping the helper — the
+    // Linux/macOS tests still rely on it.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     fn max_diff(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
         a.iter()
             .zip(b.iter())

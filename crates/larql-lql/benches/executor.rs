@@ -15,6 +15,16 @@ use larql_vindex::ndarray::Array2;
 use larql_vindex::{ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig};
 use std::path::{Path, PathBuf};
 
+/// Quote a filesystem path for embedding in an LQL string literal. The
+/// LQL lexer decodes `\X` (unknown escape) as `X`, so raw Windows paths
+/// like `C:\Users\…` get mangled to `C:Users…`. Doubling the backslashes
+/// inside the literal lets the lexer reconstruct the original path.
+/// See also: `benches/compile.rs::lql_quote` and the equivalent helper
+/// in `executor/tests.rs`.
+fn lql_quote(p: impl AsRef<std::path::Path>) -> String {
+    p.as_ref().display().to_string().replace('\\', r"\\")
+}
+
 // ── Synthetic vindex setup ──────────────────────────────────────────────
 
 /// Build a small but realistic vindex on disk: 8 layers × 64 features ×
@@ -126,7 +136,7 @@ fn make_bench_vindex_dir(tag: &str) -> PathBuf {
 /// Spin up a session and `USE` the bench vindex.
 fn make_session(dir: &Path) -> Session {
     let mut session = Session::new();
-    let stmt = parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parse(&format!(r#"USE "{}";"#, lql_quote(&dir))).unwrap();
     session.execute(&stmt).expect("USE on bench vindex");
     session
 }
@@ -207,7 +217,7 @@ fn bench_patch_lifecycle(c: &mut Criterion) {
     let mut group = c.benchmark_group("executor_patch_lifecycle");
     group.sample_size(20);
 
-    let begin_src = format!(r#"BEGIN PATCH "{}";"#, dir.join("bench.vlp").display());
+    let begin_src = format!(r#"BEGIN PATCH "{}";"#, lql_quote(dir.join("bench.vlp")));
     let begin_stmt = parse(&begin_src).unwrap();
     let mutate_stmt = parse("DELETE FROM EDGES WHERE layer = 4 AND feature = 0;").unwrap();
     let save_stmt = parse("SAVE PATCH;").unwrap();
