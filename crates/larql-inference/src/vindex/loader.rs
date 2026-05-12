@@ -137,7 +137,8 @@ mod tests {
             lower.contains("index.json")
                 || lower.contains("attn_weights")
                 || lower.contains("not found")
-                || lower.contains("no such file"),
+                || lower.contains("no such file")
+                || lower.contains("cannot find"),
             "error must point at the missing file — got: {msg}"
         );
     }
@@ -186,6 +187,7 @@ mod tests {
                 || lower.contains("index.json")
                 || lower.contains("not found")
                 || lower.contains("no such file")
+                || lower.contains("cannot find")
                 || lower.contains("parse"),
             "error must explain what's missing — got: {msg}"
         );

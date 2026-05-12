@@ -53,6 +53,13 @@ mod tests {
             .fold(0.0f32, f32::max)
     }
 
+    // BLAS implementations (notably OpenBLAS on Windows via vcpkg) can use
+    // non-deterministic reduction order across calls, so two identical
+    // `a.dot(&b.t())` invocations may differ by a few ULPs. The tests below
+    // verify the *dispatch* is equivalent, not bit-equality, so the tolerance
+    // sits well above expected ULP drift for the 4×8×6 / 4×8×6 shapes here.
+    const BLAS_ROUTE_TOL: f32 = 1e-4;
+
     /// `None` backend → ndarray fallback. Pin the pure-CPU `a @ b^T`.
     #[test]
     fn dot_proj_gpu_none_backend_uses_ndarray() {
@@ -61,7 +68,7 @@ mod tests {
         let result = dot_proj_gpu(&a, &b, None);
         let expected = a.dot(&b.t());
         assert_eq!(result.shape(), &[4, 6]);
-        assert!(max_diff(&result, &expected) < 1e-6);
+        assert!(max_diff(&result, &expected) < BLAS_ROUTE_TOL);
     }
 
     /// `Some(CpuBackend)` → goes through trait, must equal the `None`
@@ -73,7 +80,7 @@ mod tests {
         let cpu = CpuBackend;
         let routed = dot_proj_gpu(&a, &b, Some(&cpu as &dyn ComputeBackend));
         let fallback = dot_proj_gpu(&a, &b, None);
-        assert!(max_diff(&routed, &fallback) < 1e-5);
+        assert!(max_diff(&routed, &fallback) < BLAS_ROUTE_TOL);
     }
 
     #[test]
@@ -83,7 +90,7 @@ mod tests {
         let result = matmul_gpu(&a, &b, None);
         let expected = a.dot(&b);
         assert_eq!(result.shape(), &[4, 6]);
-        assert!(max_diff(&result, &expected) < 1e-6);
+        assert!(max_diff(&result, &expected) < BLAS_ROUTE_TOL);
     }
 
     #[test]
@@ -93,6 +100,6 @@ mod tests {
         let cpu = CpuBackend;
         let routed = matmul_gpu(&a, &b, Some(&cpu as &dyn ComputeBackend));
         let fallback = matmul_gpu(&a, &b, None);
-        assert!(max_diff(&routed, &fallback) < 1e-5);
+        assert!(max_diff(&routed, &fallback) < BLAS_ROUTE_TOL);
     }
 }

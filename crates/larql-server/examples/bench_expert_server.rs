@@ -142,6 +142,10 @@ async fn spawn_server(model: LoadedModel) -> String {
 /// domain socket, returning `(http_url, unix_url)`.  The two listeners
 /// share the same `AppState`, so the bench can A/B the same shard via
 /// different transports.
+///
+/// Unix-only: `tokio::net::UnixListener` is gated on `cfg(unix)`. The
+/// `--uds` branch in `main` is also gated and errors out on Windows.
+#[cfg(unix)]
 async fn spawn_server_with_uds(model: LoadedModel, uds_path: &std::path::Path) -> (String, String) {
     let state = make_app_state(model);
     let router_tcp = single_model_router(state.clone());
@@ -495,14 +499,26 @@ fn main() {
     // When --uds is set, bind both TCP and UDS on shard A and route the
     // bench client through the unix:// URL.  Two-shard mode keeps shard B
     // on TCP only — UDS is fundamentally same-host so multi-shard UDS
-    // doesn't change the picture.
+    // doesn't change the picture. Unix-only — Windows builds reject `--uds`
+    // up front because `tokio::net::UnixListener` is `cfg(unix)`.
+    #[cfg(unix)]
     let uds_path_a = std::path::PathBuf::from("/tmp/larql-bench-a.sock");
     let url_a = if use_uds {
-        let (http_url, unix_url) = runtime.block_on(spawn_server_with_uds(model_a, &uds_path_a));
-        println!();
-        println!("Shard A:  TCP {http_url}");
-        println!("          UDS {unix_url}  ← bench client routes through this");
-        unix_url
+        #[cfg(unix)]
+        {
+            let (http_url, unix_url) =
+                runtime.block_on(spawn_server_with_uds(model_a, &uds_path_a));
+            println!();
+            println!("Shard A:  TCP {http_url}");
+            println!("          UDS {unix_url}  ← bench client routes through this");
+            unix_url
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = model_a;
+            eprintln!("--uds is Unix-only (UnixListener is `cfg(unix)`); rerun without --uds");
+            std::process::exit(1);
+        }
     } else {
         let u = runtime.block_on(spawn_server(model_a));
         println!();
