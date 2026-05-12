@@ -161,7 +161,18 @@ mod tests {
         );
     }
 
+    // Two back-to-back BLAS-routed dense FFN calls should be byte-identical
+    // because `dense_ffn_forward` just calls `dense_ffn_forward_backend(_, None)`.
+    // On windows-latest the vcpkg-built OpenBLAS prints "BLAS : Bad memory
+    // unallocation!" and the second call returns garbage that doesn't even
+    // share a sign with the first — heap corruption inside the BLAS library
+    // itself, not a numerical-tolerance issue. Skip on Windows; the dispatch
+    // is exercised by Linux + macOS where BLAS is well-behaved.
     #[test]
+    #[cfg_attr(
+        target_os = "windows",
+        ignore = "Windows OpenBLAS heap-corrupts between calls (\"Bad memory unallocation!\")"
+    )]
     fn dense_ffn_forward_backend_matches_no_backend() {
         // backend=None should produce the same result as dense_ffn_forward
         let weights = make_test_weights();
