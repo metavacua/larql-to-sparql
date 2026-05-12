@@ -78,6 +78,12 @@ jobs:
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
+      - name: Install cmake (Windows)
+        if: runner.os == 'Windows'
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: 'latest'
+
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
         with:
@@ -88,12 +94,6 @@ jobs:
           key: ${{ runner.os }}-cargo-server-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-server-
-
-      - name: Install cmake (Windows)
-        if: runner.os == 'Windows'
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: 'latest'
 
       - name: Format check
         run: cargo fmt -p larql-server -- --check
