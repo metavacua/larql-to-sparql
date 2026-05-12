@@ -136,7 +136,7 @@ fn make_bench_vindex_dir(tag: &str) -> PathBuf {
 /// Spin up a session and `USE` the bench vindex.
 fn make_session(dir: &Path) -> Session {
     let mut session = Session::new();
-    let stmt = parse(&format!(r#"USE "{}";"#, lql_quote(&dir))).unwrap();
+    let stmt = parse(&format!(r#"USE "{}";"#, lql_quote(dir))).unwrap();
     session.execute(&stmt).expect("USE on bench vindex");
     session
 }
