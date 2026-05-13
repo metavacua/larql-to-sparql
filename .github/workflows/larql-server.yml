@@ -50,6 +50,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
 
+    permissions:
+      contents: read
+      actions: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -122,6 +126,9 @@ jobs:
     name: coverage - ubuntu
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
