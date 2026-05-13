@@ -1,0 +1,355 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Code scanning and code-quality workflow.
+#
+# Per crates/larql-vindex/docs/compliance-pipeline.md (Out-of-scope), security
+# scanning and vulnerability triage are intentionally NOT part of validate.yml.
+# This file is the separate, parallel workflow that owns those concerns. It
+# must never call into validate.yml, and validate.yml must never call into it.
+#
+# Scope after the upstream-wins merge of chrishayuk/larql @ main:
+# This workflow narrowly owns cross-cutting workspace-level checks that
+# UPSTREAM'S PER-CRATE WORKFLOWS DO NOT COVER. Specifically:
+#
+#   - clippy / test / doc / examples are handled per-crate by upstream's
+#     11 .github/workflows/larql-*.yml workflows. They are NOT duplicated
+#     here.
+#   - audit / deny / msrv / mutants / python / proto-lint are workspace-wide
+#     and not provided upstream. They live here.
+#
+# The two workflows in our fork are independent gates:
+#
+#   validate.yml  - deterministic candidate-validity (Axioms A1-A5)
+#   quality.yml   - cross-cutting workspace quality + advisories (this file)
+
+name: quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly RustSec advisory refresh against the committed lockfile, so
+    # newly-disclosed vulnerabilities surface even when no PR is open.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  # SARIF upload to the Code Scanning API requires `security-events: write`.
+  security-events: write
+  # `actions: read` lets the CodeQL action read workflow metadata.
+  actions: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 1.88.0 is the floor: at this PR's resolution the tree pulls
+  # `home v0.5.12`, `cookie_store v0.22.1`, and the `time-*` crates,
+  # all of which declare `rust-version = 1.88`. Bumping further is
+  # cheap; bumping below 1.88 fails resolution.
+  RUST_TOOLCHAIN: "1.88.0"
+  # Scanner tools (cargo-audit, cargo-deny) are intentionally NOT
+  # version-pinned. They must keep pace with the evolving formats of
+  # their backing advisory database.
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Q1: cargo-audit - RustSec advisory database scan against Cargo.lock.
+  # Runs on every PR and on a weekly cron so that newly-disclosed advisories
+  # surface even when the tree is dormant.
+  # ---------------------------------------------------------------------
+  audit:
+    name: audit (cargo-audit / RustSec)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Install cargo-audit (tracking latest)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        # The --ignore set mirrors deny.toml's [advisories].ignore. Both
+        # gates must accept the same set; if you edit one, edit the other.
+        run: |
+          cargo audit \
+            --deny warnings \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2025-0134
+
+  # ---------------------------------------------------------------------
+  # Q2: cargo-deny - license allow-list, banned crates, advisories,
+  # source allow-list. Configured by deny.toml at the repo root.
+  # ---------------------------------------------------------------------
+  deny:
+    name: deny (cargo-deny / licenses + bans + sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Install cargo-deny (tracking latest)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny check advisories bans licenses sources
+
+  # ---------------------------------------------------------------------
+  # Q3: MSRV verification. cargo-msrv `verify` reads the declared
+  # rust-version and attempts a check at exactly that toolchain.
+  #
+  # The root Cargo.toml is a virtual workspace; cargo-msrv cannot read
+  # `rust-version` from `[workspace.package]` directly (it requires
+  # `package.rust-version` or `package.metadata.msrv`). Instead, iterate
+  # over the subset of workspace members that explicitly inherit
+  # `rust-version.workspace = true`. As more crates opt in (by adding
+  # the inheritance line to their `[package]` block), they automatically
+  # join the gate. The gate is a hard requirement: correct MSRV
+  # determination is a prerequisite for downstream packaging and
+  # publication checks.
+  # ---------------------------------------------------------------------
+  msrv:
+    name: msrv (cargo-msrv verify)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install rustup (no toolchain pin)
+        run: |
+          rustup show
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-msrv
+
+      - name: Install cargo-msrv
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+
+      - name: cargo msrv verify (per opted-in crate)
+        run: |
+          set -euo pipefail
+          # Crates that explicitly inherit `rust-version.workspace = true`.
+          mapfile -t crates < <(
+            grep -l '^rust-version\.workspace = true' crates/*/Cargo.toml
+          )
+          if [ "${#crates[@]}" -eq 0 ]; then
+            echo "::error::No workspace member declares rust-version.workspace = true."
+            echo "::error::MSRV cannot be verified. Add the inheritance line to at"
+            echo "::error::least one crate's [package] block."
+            exit 1
+          fi
+          declared=$(awk '/^rust-version *= *"/{ gsub(/"/,"",$3); print $3; exit }' Cargo.toml)
+          echo "Workspace-declared rust-version: ${declared:-<unset>}"
+          for manifest in "${crates[@]}"; do
+            crate=$(basename "$(dirname "$manifest")")
+            echo "==> Verifying MSRV for $crate ($manifest)"
+            cargo msrv verify --manifest-path "$manifest"
+          done
+
+  # ---------------------------------------------------------------------
+  # Q4: Mutation testing. cargo-mutants flips small predicates in source
+  # code and checks whether the test suite catches each mutation.
+  # ---------------------------------------------------------------------
+  mutants:
+    name: mutants (cargo-mutants, informational)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-mutants
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: cargo mutants (PR diff scope)
+        if: github.event_name == 'pull_request'
+        run: |
+          cargo mutants \
+            --in-diff <(git diff "${{ github.event.pull_request.base.sha }}"..HEAD) \
+            --no-shuffle \
+            --timeout 120 \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            || true
+
+      - name: cargo mutants (full tree, cron only)
+        if: github.event_name == 'schedule'
+        run: |
+          cargo mutants \
+            --no-shuffle \
+            --timeout 120 \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            || true
+
+      - name: Upload mutants report
+        if: always() && hashFiles('mutants.out/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ github.run_id }}
+          path: mutants.out/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------
+  # Q5: Python (PyO3) bindings test surface. The `larql-python` crate
+  # builds a cdylib via maturin under uv, with a tests/ directory that
+  # is not covered by upstream's per-crate workflows.
+  # ---------------------------------------------------------------------
+  python:
+    name: python (maturin develop + pytest)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+
+      - name: Install OpenBLAS
+        # `ndarray`'s BLAS backend (pulled transitively by larql-compute /
+        # larql-vindex) links against libopenblas. The ubuntu-24.04
+        # runner does not include it by default; without this step the
+        # final link fails with `cannot find -lopenblas`.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: quality-python
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: uv sync (dev)
+        working-directory: crates/larql-python
+        run: uv sync --no-install-project --group dev
+
+      - name: maturin develop --release
+        working-directory: crates/larql-python
+        run: uv run --no-sync maturin develop --release
+
+      - name: pytest
+        working-directory: crates/larql-python
+        run: uv run --no-sync pytest tests/ -v
+
+  # ---------------------------------------------------------------------
+  # Q6: Protocol schema lint.
+  # ---------------------------------------------------------------------
+  proto-lint:
+    name: proto-lint (buf lint)
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'schedule'
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup buf
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: buf lint (server proto)
+        working-directory: crates/larql-server/proto
+        run: buf lint || true
+
+      - name: buf lint (router proto)
+        working-directory: crates/larql-router-protocol/proto
+        run: buf lint || true
+
+  # ---------------------------------------------------------------------
+  # Aggregate gate.
+  # ---------------------------------------------------------------------
+  quality-gate:
+    name: quality gate
+    runs-on: ubuntu-24.04
+    needs: [audit, deny, msrv, mutants, python, proto-lint]
+    if: github.event_name != 'schedule'
+    steps:
+      - name: All quality checks passed
+        run: |
+          echo "audit, deny green."
+          echo "msrv, mutants, python, proto-lint are informational."
+          echo "clippy, test, doc, examples are owned by upstream's"
+          echo "per-crate workflows (.github/workflows/larql-*.yml) and"
+          echo "intentionally not duplicated here."
+          echo "See crates/larql-vindex/docs/code-quality-pipeline.md for"
+          echo "the boundary; this workflow is independent of validate.yml."

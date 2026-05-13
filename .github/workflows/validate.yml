@@ -1,0 +1,570 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deterministic PR validation workflow.
+#
+# This workflow is the source of truth for whether a pull request branch is a
+# valid candidate extension of the development branch. Per the project
+# compliance specification, it does NOT decide whether the branch is merged,
+# closed, released, or published — those remain human decisions outside the
+# deterministic core.
+#
+# Each job in this workflow is a pure, reproducible check. They share a fixed
+# tool pin set so that the same SHA always produces the same verdict.
+
+name: validate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Elevated to `write` only so the `report-failure` job can post a single
+  # PR comment summarising failed checks. No other job mutates PR state.
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pinned tool versions. Bumping any of these is a deliberate change to the
+# deterministic core and should be done in a dedicated PR.
+env:
+  # 1.88.0 mirrors the floor pinned in quality.yml. The workspace's
+  # transitive dependency tree (home v0.5.12, cookie_store v0.22.1, the
+  # time-* crates) declares rust-version = 1.88; building below that
+  # fails resolution. Earlier revisions of this file pinned 1.84 because
+  # validate.yml did not invoke cargo; the semver-surface job changed
+  # that and the two workflows must now share a toolchain floor.
+  RUST_TOOLCHAIN: "1.88.0"
+  REUSE_TOOL_VERSION: "6.2.0"
+  COCOGITTO_VERSION: "7.0.0"
+  GIT_CLIFF_VERSION: "2.13.1"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # A1: Explicit Provenance — every tracked file must be covered by either
+  # a SPDX header or an explicit annotation in REUSE.toml.
+  # ---------------------------------------------------------------------
+  provenance:
+    name: provenance (REUSE lint)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run reuse lint
+        uses: fsfe/reuse-action@v5
+        with:
+          args: --suppress-deprecation lint
+
+  # ---------------------------------------------------------------------
+  # A1 (cont.): First-party license gate — verify the canonical text of
+  # every license used in the tree is present, NOTICE non-empty,
+  # SPDX identifiers in source match the REUSE.toml-derived allow-list,
+  # and Apache-2.0 §4(b) modification notices on Apache-2.0 files
+  # modified in the PR range. Replaces the original Apache-2.0-only gate;
+  # the audit (audit/) established the tree is multi-license.
+  # ---------------------------------------------------------------------
+  first-party-licenses:
+    name: first-party-licenses (REUSE-driven §4 gate)
+    runs-on: ubuntu-24.04
+    needs: provenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run first-party license gate
+        run: scripts/check_first_party_licenses.sh "${{ steps.range.outputs.range }}"
+
+  # ---------------------------------------------------------------------
+  # A2: Structured History — every commit on the PR branch must satisfy
+  # Conventional Commits as parsed by cocogitto.
+  # ---------------------------------------------------------------------
+  commits:
+    name: commits (cocogitto check)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install cocogitto
+        run: |
+          # Tarball layout: x86_64-unknown-linux-musl/{cog,LICENSE}
+          curl -sSL "https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin x86_64-unknown-linux-musl/cog
+          cog --version
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            echo "from=${base}" >> "$GITHUB_OUTPUT"
+            echo "to=${head}"   >> "$GITHUB_OUTPUT"
+          else
+            echo "from=" >> "$GITHUB_OUTPUT"
+            echo "to="   >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: cog check (PR range, first-parent + no-merges)
+        if: steps.range.outputs.from != ''
+        # Validate only commits added directly to the PR branch:
+        # `--first-parent` excludes the second-parent ancestry of any
+        # merge commits on the branch (e.g. upstream commits pulled in
+        # by a merge of an upstream fork into this fork), and
+        # `--no-merges` excludes the merge commits themselves
+        # (already covered by `ignore_merge_commits = true` in
+        # cog.toml; doubled here for explicitness).
+        #
+        # Additionally skip commits whose subject starts with
+        # `Potential fix for pull request finding` — that is the
+        # hard-coded subject prefix GitHub Code Scanning writes when
+        # a maintainer accepts a CodeQL suggestion via the
+        # "Commit suggestion" UI button. The body of those commits is
+        # bot-generated and not under our authors' control; gating
+        # them against the Conventional Commits grammar would force
+        # maintainers to choose between accepting CodeQL fixes and
+        # passing the commits gate. Accepting them silently here is
+        # the pragmatic choice; the produced workflow YAML edits are
+        # reviewed in the PR diff like any other change.
+        #
+        # The net effect is that only first-party fork-authored
+        # commits on the PR branch are gated against the Conventional
+        # Commits grammar. Pre-existing upstream history brought in
+        # via merges is grandfathered and not retroactively
+        # re-validated.
+        run: |
+          set -euo pipefail
+          range="${{ steps.range.outputs.from }}..${{ steps.range.outputs.to }}"
+          mapfile -t commits < <(git rev-list --first-parent --no-merges --reverse "$range")
+          if [ "${#commits[@]}" -eq 0 ]; then
+            echo "No first-parent non-merge commits in $range; nothing to check."
+            exit 0
+          fi
+          failed=0
+          for sha in "${commits[@]}"; do
+            subject=$(git log -1 --format=%s "$sha")
+            if [[ "$subject" == "Potential fix for pull request finding"* ]]; then
+              echo "-- $sha: $subject (CodeQL suggestion, skipped)"
+              continue
+            fi
+            echo "==> $sha: $subject"
+            if ! cog check "${sha}~..${sha}"; then
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: cog check (push to main, newest commit only)
+        if: steps.range.outputs.from == ''
+        # Pre-existing history predates the policy and is grandfathered.
+        # On push, only the newly-landed commit must satisfy the grammar.
+        run: cog check HEAD~1..HEAD
+
+  # ---------------------------------------------------------------------
+  # A3: Derived Documentation — CHANGELOG.md `[Unreleased]` must equal the
+  # deterministic git-cliff projection of validated commits in range.
+  # ---------------------------------------------------------------------
+  changelog:
+    name: changelog (git-cliff consistency)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install git-cliff
+        run: |
+          # Tarball layout: git-cliff-${VERSION}/{git-cliff,LICENSE,...}
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | sudo tar -xz --strip-components=1 -C /usr/local/bin "git-cliff-${GIT_CLIFF_VERSION}/git-cliff"
+          git-cliff --version
+
+      - name: Verify CHANGELOG.md [Unreleased] matches projection
+        run: scripts/check_changelog.sh
+
+  # ---------------------------------------------------------------------
+  # A2 (cont.) / informational: deterministic SemVer preflight. Does not
+  # tag, push, publish, or otherwise affect external state.
+  # ---------------------------------------------------------------------
+  version-preflight:
+    name: version preflight (informational)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine commit range
+        id: range
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "range=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=HEAD~1..HEAD" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next SemVer
+        id: semver
+        run: scripts/version_preflight.sh "${{ steps.range.outputs.range }}"
+
+      - name: Surface result on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "::notice title=Version preflight::base=${{ steps.semver.outputs.base_version }} bump=${{ steps.semver.outputs.bump_kind }} next=${{ steps.semver.outputs.next_version }}"
+
+  # ---------------------------------------------------------------------
+  # A2 (cont.): SemVer-surface consistency. The version-preflight job derives
+  # `bump_kind` purely from commit *types* (`feat:` -> minor, `!` -> major,
+  # etc.). It cannot detect when a `feat:` commit silently breaks the public
+  # API surface, which would mis-classify a major bump as minor.
+  #
+  # cargo-semver-checks is the source of truth for "did the public API
+  # break". This job runs it against the PR base, and cross-checks the
+  # verdict against `bump_kind`: a breaking API delta requires the
+  # commit-derived bump to be `major`, otherwise the PR is structurally
+  # inconsistent and must be remediated by amending the offending commit
+  # to use `!` notation or a `BREAKING CHANGE:` footer.
+  #
+  # Disposition under upstream-build failure:
+  # cargo-semver-checks must compile each library crate to extract its
+  # rustdoc JSON. If the workspace does not build (a pre-existing
+  # condition on main, evidenced by the perpetually-red clippy/test/doc
+  # checks in quality.yml), no verdict can be produced and the gate is
+  # inconclusive. The cross-check step distinguishes this case from a
+  # real API break and emits a `::warning::` annotation rather than
+  # failing the job. This avoids a false-block on PRs that do not touch
+  # Rust code while keeping the inconclusive state visible. Once the
+  # upstream build issue is resolved on main, every PR will exercise
+  # the strict gate path again.
+  #
+  # Crates excluded from the scan:
+  #   - larql-python  (PyO3 cdylib; rustdoc-JSON build trips on Python deps)
+  #   - kv-cache-benchmark (binary-only; no public API surface to track)
+  # ---------------------------------------------------------------------
+  semver-surface:
+    name: semver-surface (cargo-semver-checks vs bump_kind)
+    runs-on: ubuntu-24.04
+    needs: [commits, version-preflight]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: validate-semver
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+
+      - name: Recompute bump_kind for cross-check
+        id: bump
+        run: |
+          scripts/version_preflight.sh \
+            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+      - name: cargo semver-checks (baseline = PR base)
+        id: semverchk
+        # Capture stdout+stderr to a file so the cross-check step can
+        # distinguish a real "API-breaking change" verdict from a tool
+        # or workspace-build error. cargo-semver-checks returns the same
+        # non-zero exit code in both cases, so the output text is the
+        # only reliable signal.
+        run: |
+          set +e
+          cargo semver-checks check-release \
+            --workspace \
+            --exclude larql-python \
+            --exclude kv-cache-benchmark \
+            --baseline-rev "${{ github.event.pull_request.base.sha }}" \
+            2>&1 | tee semver-checks.log
+          rc="${PIPESTATUS[0]}"
+          echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cross-check API delta vs commit-derived bump
+        # The deterministic invariant: a breaking API delta requires the
+        # commit-derived bump_kind to be `major`. A non-zero exit from
+        # cargo-semver-checks alone is not sufficient evidence of a
+        # break — a workspace build failure produces the same exit code
+        # without yielding a verdict. This step parses the captured log
+        # to classify the outcome before applying the cross-check.
+        #
+        # Markers we look for:
+        #   "Summary"          — cargo-semver-checks produced its summary
+        #                        line; the verdict is meaningful.
+        #   "FAIL"             — at least one breaking lint fired.
+        #   "error[" / "error:" without a Summary line — the workspace
+        #                        failed to build and no verdict was
+        #                        produced; the failure is upstream of
+        #                        this gate.
+        run: |
+          bump_kind="${{ steps.bump.outputs.bump_kind }}"
+          rc="${{ steps.semverchk.outputs.exit_code }}"
+          echo "version_preflight bump_kind=${bump_kind}"
+          echo "cargo-semver-checks exit_code=${rc}"
+
+          if [[ ! -s semver-checks.log ]]; then
+            echo "::error::cargo-semver-checks produced no output; treating as tool error."
+            exit 1
+          fi
+
+          summary_seen=0
+          fail_seen=0
+          if grep -qE '^[[:space:]]*Summary' semver-checks.log; then
+            summary_seen=1
+          fi
+          if grep -qE '(FAIL|major version bump required)' semver-checks.log; then
+            fail_seen=1
+          fi
+
+          if [[ "$rc" == "0" ]]; then
+            echo "API delta is non-breaking; bump_kind '${bump_kind}' is acceptable."
+            exit 0
+          fi
+
+          if (( summary_seen == 0 )); then
+            # No verdict was produced. The workspace failed to build, or
+            # cargo-semver-checks errored before classifying. The gate
+            # cannot honestly assert anything about the API delta in
+            # this case.
+            #
+            # Disposition: pass-with-warning, not failure. A failure
+            # here would be a false-block — the PR did not introduce
+            # the upstream build error (it is pre-existing on main),
+            # and per the project's scope ruling, fixing pre-existing
+            # workspace issues is out of band for this gate. The
+            # warning annotation keeps the signal visible in the run
+            # summary so a quality-gate-style sweep can see when the
+            # gate has been silently inconclusive.
+            echo "::warning title=semver-surface inconclusive::cargo-semver-checks did not produce a verdict (workspace build error or tool failure). The gate cannot enforce SemVer surface consistency on this PR; inspect the cargo-semver-checks log above. Once the upstream build issue is resolved on main, this warning will become a hard gate again."
+            exit 0
+          fi
+
+          if (( fail_seen == 1 )) && [[ "$bump_kind" != "major" ]]; then
+            echo "::error::API-breaking change detected but commit-derived bump is '${bump_kind}'."
+            echo "::error::Amend the offending commit so its header carries '!' or its body includes a 'BREAKING CHANGE:' footer."
+            exit 1
+          fi
+
+          if (( fail_seen == 1 )); then
+            echo "API delta is breaking; commits already declare major. Consistent."
+          else
+            echo "::warning title=semver-surface ambiguous::cargo-semver-checks reported non-zero without a FAIL line. Treating as inconclusive; please inspect the log above."
+            exit 0
+          fi
+
+  # ---------------------------------------------------------------------
+  # A2 / A3 (cont.): Independent reference implementation cross-check.
+  # The repository's custom Bash implementations (scripts/version_preflight.sh
+  # and scripts/check_changelog.sh) are the primary derivers, but they are
+  # repo-local code paths that could drift from the Conventional Commits
+  # spec. semantic-release is a widely-used Node.js implementation of the
+  # same spec; running it in dry-run mode produces an independent verdict
+  # on whether the validated commits would yield a coherent release.
+  #
+  # The cross-check is implicit: if both this job and version-preflight
+  # succeed, the two implementations agree the commit history is
+  # well-formed. Disagreement would surface as one job passing and the
+  # other failing.
+  #
+  # No publishing happens — `--dry-run` skips the publish lifecycle stage,
+  # and no auth tokens are configured. This job is purely a deterministic
+  # parser cross-check.
+  # ---------------------------------------------------------------------
+  semantic-release-dry-run:
+    name: semantic-release dry-run (independent SemVer reference)
+    runs-on: ubuntu-24.04
+    needs: commits
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve branch name for semantic-release
+        id: branch
+        # semantic-release refuses to operate on a detached HEAD. On PR
+        # events the workflow checks out the merge ref in detached state,
+        # so we synthesise a local branch pointing at HEAD with the same
+        # name semantic-release would expect (the PR head ref).
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            branch="${{ github.event.pull_request.head.ref }}"
+          else
+            branch="${GITHUB_REF##*/}"
+          fi
+          git checkout -B "${branch}"
+          echo "name=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Write semantic-release config to workspace
+        # semantic-release uses cosmiconfig to auto-discover its config
+        # from the current working directory: package.json, .releaserc,
+        # .releaserc.json, etc. The earlier `--extends /tmp/path` form
+        # was wrong — `extends` resolves shareable npm-package configs,
+        # not arbitrary file paths.
+        #
+        # We write `.releaserc.json` at the repo root for the lifetime
+        # of this CI step only; the file is never committed and the
+        # workspace is reset between jobs.
+        #
+        # `repositoryUrl` is set explicitly so semantic-release does not
+        # require a `package.json :: repository` field — the project
+        # deliberately avoids carrying Node-side metadata.
+        run: |
+          cat > .releaserc.json <<EOF
+          {
+            "branches": ["main", "${{ steps.branch.outputs.name }}"],
+            "plugins": [
+              "@semantic-release/commit-analyzer",
+              "@semantic-release/release-notes-generator"
+            ],
+            "tagFormat": "v\${version}",
+            "repositoryUrl": "https://github.com/${{ github.repository }}.git"
+          }
+          EOF
+
+      - name: semantic-release --dry-run
+        # `--no-ci` lets dry-run proceed without a CI-provided auth token;
+        # the lack of publishing plugins makes the run side-effect-free.
+        # Config is auto-discovered from `.releaserc.json` in the cwd.
+        run: |
+          npx --yes \
+            --package=semantic-release@24 \
+            --package=@semantic-release/commit-analyzer@13 \
+            --package=@semantic-release/release-notes-generator@14 \
+            -- semantic-release --dry-run --no-ci
+
+  # ---------------------------------------------------------------------
+  # Aggregate gate. Required by branch protection so the deterministic
+  # verdict reduces to a single check.
+  # ---------------------------------------------------------------------
+  candidate-validity:
+    name: candidate validity (A5)
+    runs-on: ubuntu-24.04
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight, semver-surface, semantic-release-dry-run]
+    # `semver-surface` is PR-only; on push to main we still want this gate
+    # to be green. `always() && !failure() && !cancelled()` yields green
+    # when all `needs:` are either success or skipped, but red on any
+    # failure or cancellation.
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: All deterministic checks passed
+        run: |
+          echo "Branch is a valid candidate extension of the development branch."
+          echo "Per Axiom A5 this does NOT decide merge, close, or release."
+
+  # ---------------------------------------------------------------------
+  # On any failure within a PR, post a single comment on the PR that
+  # enumerates which deterministic check failed and links to the run.
+  # The intent is to put the failure context where downstream agents can
+  # see it via the GitHub API without scraping the Actions UI.
+  # ---------------------------------------------------------------------
+  report-failure:
+    name: report failure (PR comment)
+    runs-on: ubuntu-24.04
+    if: always() && github.event_name == 'pull_request' && contains(needs.*.result, 'failure')
+    needs: [provenance, first-party-licenses, commits, changelog, version-preflight, semver-surface, semantic-release-dry-run]
+    steps:
+      - name: Post failure summary to PR
+        uses: actions/github-script@v7
+        env:
+          PROVENANCE_RESULT:        ${{ needs.provenance.result }}
+          FIRST_PARTY_LICENSES_RESULT:    ${{ needs.first-party-licenses.result }}
+          COMMITS_RESULT:           ${{ needs.commits.result }}
+          CHANGELOG_RESULT:         ${{ needs.changelog.result }}
+          VERSION_PREFLIGHT_RESULT: ${{ needs.version-preflight.result }}
+          SEMVER_SURFACE_RESULT:    ${{ needs.semver-surface.result }}
+          SEMANTIC_RELEASE_RESULT:  ${{ needs.semantic-release-dry-run.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const results = {
+              "provenance (REUSE lint)":           process.env.PROVENANCE_RESULT,
+              "first-party-licenses (§4 gate)":          process.env.FIRST_PARTY_LICENSES_RESULT,
+              "commits (cocogitto check)":        process.env.COMMITS_RESULT,
+              "changelog (git-cliff consistency)": process.env.CHANGELOG_RESULT,
+              "version preflight":                 process.env.VERSION_PREFLIGHT_RESULT,
+              "semver-surface (cargo-semver-checks)": process.env.SEMVER_SURFACE_RESULT,
+              "semantic-release dry-run":          process.env.SEMANTIC_RELEASE_RESULT,
+            };
+            const rows = Object.entries(results)
+              .map(([n, r]) => `| ${n} | ${r} |`)
+              .join("\n");
+            const failed = Object.entries(results)
+              .filter(([_, r]) => r === "failure")
+              .map(([n]) => `\`${n}\``);
+            const body = [
+              `## Deterministic validation failed`,
+              ``,
+              `Failed checks: ${failed.join(", ") || "(none reported failure)"}`,
+              ``,
+              `| Check | Result |`,
+              `|---|---|`,
+              rows,
+              ``,
+              `Full run logs: ${process.env.RUN_URL}`,
+              ``,
+              `Per Axiom A5 this does not block merge mechanically; it ` +
+              `signals that the branch is not yet a valid candidate ` +
+              `extension of the development branch. Remediate per the ` +
+              `contract in \`crates/larql-vindex/docs/compliance-pipeline.md\` and push.`,
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

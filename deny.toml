@@ -1,0 +1,159 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# cargo-deny configuration. Owns the deterministic predicates that the
+# `deny` job in .github/workflows/quality.yml evaluates against the
+# transitive dependency closure:
+#
+#   advisories  — RustSec advisory DB filter (vulnerabilities, unmaintained)
+#   bans        — duplicate-version and crate ban list
+#   licenses    — license allow-list across all dependencies
+#   sources     — registry / git source allow-list
+#
+# The allow-list reflects the audited inbound license posture of the
+# resolved dependency closure, as documented in audit/dependency-licenses.md.
+# Two non-trivially-permissive families are explicitly admitted:
+#
+#   * AGPL-3.0 family — the direct dependency `evalexpr v12.x` (consumed by
+#     `crates/model-compute` behind feature `native`) is AGPL-3.0-only.
+#     Admission of AGPL transitives is a deliberate policy decision aligned
+#     with the fork's forward licensing posture (CC-BY-SA-4.0 + AGPL-3.0-or-later
+#     for new contributions); see audit/upstream-report.md U-1 for the
+#     obligations this creates.
+#
+#   * CDLA-Permissive-2.0 — `webpki-roots` and `webpki-root-certs` (transitive
+#     via `ureq` -> `hf-hub`). Permissive Linux Foundation licence intended
+#     for data; no copyleft effect.
+#
+# Any further license added here must be backed by an audit-report entry in
+# audit/dependency-licenses.md and a deliberate policy PR.
+
+[graph]
+# Evaluate the dependency graph for the host the workflow runs on
+# (ubuntu-24.04). Feature-gated backends like `metal` resolve to no extra
+# crates on this triple, which matches CI behaviour exactly.
+all-features = false
+no-default-features = false
+targets = [
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "x86_64-unknown-linux-musl" },
+  { triple = "aarch64-unknown-linux-gnu" },
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+]
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Advisories: fail on any unfixed vulnerability or unmaintained crate.
+# ---------------------------------------------------------------------------
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Ignored advisories are deliberate, time-boxed admissions. Each entry must
+# carry a one-line justification; periodically prune as upstream maintenance
+# resumes or alternative crates are adopted.
+ignore = [
+  # paste - no longer maintained. Pulled transitively by wasmtime, tokenizers,
+  # metal, macro_rules_attribute. No actual CVE; no maintained drop-in
+  # replacement at scale. Revisit if any consumer migrates off paste.
+  "RUSTSEC-2024-0436",
+  # number_prefix - unmaintained. Pulled by indicatif progress-bar rendering.
+  # No CVE; tiny formatting utility. Revisit if indicatif drops the dep.
+  "RUSTSEC-2025-0119",
+  # rustls-pemfile - unmaintained. Pulled by axum-server. The replacement
+  # (rustls-pki-types PemObject) is not yet on axum-server's main. Revisit
+  # when axum-server picks up the upstream change.
+  "RUSTSEC-2025-0134",
+]
+
+# ---------------------------------------------------------------------------
+# Licenses: explicit allow-list. Anything outside this list fails the gate
+# and must be either replaced upstream or added here in a deliberate PR.
+# ---------------------------------------------------------------------------
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+  # Permissive set — trivially compatible with any outbound license.
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "0BSD",
+  "Unlicense",
+  # Weak copyleft (file-scoped). Admissible without changing outbound posture.
+  "MPL-2.0",
+  # Linux Foundation data licence; permissive. Brought in by `webpki-roots`
+  # and `webpki-root-certs` (see audit/dependency-licenses.md D-2).
+  "CDLA-Permissive-2.0",
+  # Strong copyleft — admitted deliberately. The fork's distributable
+  # already carries AGPL obligations via `evalexpr v12.x` (consumed by
+  # `crates/model-compute` feature `native`); see audit/dependency-licenses.md
+  # D-1 and audit/upstream-report.md U-1.
+  # cargo-deny normalises the deprecated SPDX-id `AGPL-3.0` to
+  # `AGPL-3.0-only` for matching, so listing only the canonical form here.
+  "AGPL-3.0-only",
+]
+# Note: the fork's own outbound license set (AGPL-3.0-or-later, CC-BY-SA-4.0)
+# governs FIRST-PARTY files only and is enforced by REUSE.toml +
+# scripts/check_first_party_licenses.sh, not by deny.toml. This file scopes
+# the inbound DEPENDENCY license policy. We therefore do not list
+# AGPL-3.0-or-later or CC-BY-SA-4.0 here unless and until a transitive
+# dependency declares one of them.
+# Removed entries (audit/dependency-licenses.md D-7):
+#   "OpenSSL"          — no crate in the resolved graph declares it.
+#   "Unicode-DFS-2016" — superseded upstream by Unicode-3.0 (already allowed).
+exceptions = []
+
+# Crates whose published license metadata is non-machine-readable but whose
+# upstream license is well-known. Add entries deliberately, with a hash to
+# pin to a specific source tarball.
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+  { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+# ---------------------------------------------------------------------------
+# Bans: duplicate detection and explicit deny list. Duplicates are warned
+# rather than denied because the workspace pulls a deep tree and aligning
+# all transitive versions is not always feasible without upstream PRs.
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Sources: only allow crates from crates.io and explicitly-listed git
+# remotes. Anything sourced from an unknown registry or git host fails.
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Both URLs are required because Cargo.lock encodes whichever index format
+# was active when the lockfile was generated. Sparse (default since Cargo
+# 1.68) and the legacy git registry resolve to different SourceId values
+# that cargo-deny matches verbatim, so listing only one is fragile.
+allow-registry = [
+  "https://github.com/rust-lang/crates.io-index",
+  "sparse+https://index.crates.io/",
+]
+allow-git = []

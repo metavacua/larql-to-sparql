@@ -1,0 +1,98 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Local pre-commit hooks. These mirror the deterministic CI rules so that the
+# LLM agent receives fail-fast feedback before a commit is finalized. They are
+# a convenience layer; the source of truth is .github/workflows/validate.yml.
+#
+# Install once per clone:
+#
+#   pipx install pre-commit
+#   pre-commit install --install-hooks
+#   pre-commit install --hook-type commit-msg
+#
+# Run all hooks across the repo:
+#
+#   pre-commit run --all-files
+
+minimum_pre_commit_version: "3.7.0"
+fail_fast: false
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+  - pre-push
+
+repos:
+  # ---------------------------------------------------------------------
+  # Provenance: every tracked path must be covered by REUSE.toml or carry
+  # an explicit SPDX header. Mirrors the `reuse-lint` step in CI.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v6.2.0
+    hooks:
+      - id: reuse
+
+  # ---------------------------------------------------------------------
+  # Commit message structure: cocogitto rejects malformed Conventional
+  # Commits headers and breaking-change notation. Pure structural check.
+  # Cocogitto does not ship a pre-commit hooks YAML upstream, so this is
+  # wired as a local hook that requires `cog` on PATH (see CI for the
+  # pinned version; install with `cargo install cocogitto --version 7.0.0`
+  # or download the matching release tarball).
+  # ---------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: cog-verify
+        name: cog verify (commit message)
+        entry: cog verify --file
+        language: system
+        stages: [commit-msg]
+        pass_filenames: true
+
+  # ---------------------------------------------------------------------
+  # Whitespace / line-ending hygiene. Cheap, deterministic, repo-wide.
+  # ---------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-yaml
+      - id: check-toml
+
+  # ---------------------------------------------------------------------
+  # Rust toolchain hooks. Must mirror `make ci` exactly. Hooks shell out
+  # to the local cargo so the version matches rust-toolchain.
+  # ---------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --all -- --check
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy --workspace --tests -- -D warnings
+        entry: cargo clippy --workspace --tests -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: first-party-licenses
+        name: first-party license gate (REUSE-driven §4)
+        entry: scripts/check_first_party_licenses.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: changelog-consistency
+        name: changelog matches git-cliff output (Unreleased)
+        entry: scripts/check_changelog.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

@@ -24,6 +24,9 @@ on:
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   bench:
     # macos-14 = Apple Silicon (M1+). Required for the metal cells —

@@ -1,0 +1,165 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+#
+# Extra-platform build matrix: Android and ChromeOS.
+#
+# Linux, macOS, and Windows are covered by upstream's per-crate workflows
+# (.github/workflows/larql-*.yml) on ubuntu-latest, windows-latest, macos-14.
+# This workflow exists only to cover the two platforms upstream's matrix
+# does not address: Android (cross-compile to aarch64 and armv7) and
+# ChromeOS (Crostini Linux container).
+
+name: extra-platforms
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extra-platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned Rust toolchain version. Must match validate.yml and quality.yml.
+  RUST_TOOLCHAIN: "1.88.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # -----------------------------------------------------------------------
+  # ChromeOS (build + test + python)
+  # ChromeOS runs a Linux container (Crostini) targeting x86_64-unknown-linux-gnu.
+  # -----------------------------------------------------------------------
+  build-chromeos:
+    name: chromeos-24.04 (build + test + python)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Install OpenBLAS
+        # ndarray's BLAS backend links against libopenblas. Needed for
+        # the workspace build and for the Python bindings link step.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: extra-platforms-chromeos
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Setup Python (for Python bindings test)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Test Python bindings (uv + maturin + pytest)
+        working-directory: crates/larql-python
+        run: |
+          uv sync --no-install-project --group dev
+          uv run --no-sync maturin develop --release
+          uv run --no-sync pytest tests/ -v
+
+  # -----------------------------------------------------------------------
+  # Android (cross-compile to aarch64 and armv7 targets)
+  # Python bindings skipped on Android (no runtime test surface).
+  # -----------------------------------------------------------------------
+  build-android:
+    name: android (cross-compile dual targets)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: android-aarch64
+            android-target: aarch64-linux-android
+          - name: android-armv7
+            android-target: armv7-linux-androideabi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "${RUST_TOOLCHAIN}" \
+            --profile minimal \
+            --no-self-update
+          rustup default "${RUST_TOOLCHAIN}"
+          cargo --version
+          rustc --version
+
+      - name: Install OpenBLAS
+        # ndarray's BLAS backend links against libopenblas for the
+        # host-side build artefacts that precede cross-compilation.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Configure Android NDK environment
+        run: |
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+          ls -la "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" 2>/dev/null | head -5 || echo "NDK toolchain not found; checking alternatives..."
+          echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+
+      - name: Add Android target
+        run: rustup target add ${{ matrix.android-target }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: extra-platforms-android-${{ matrix.android-target }}
+
+      - name: cargo build for ${{ matrix.android-target }}
+        run: cargo build --release --workspace --target ${{ matrix.android-target }}
+
+  # -----------------------------------------------------------------------
+  # Aggregate gate: All extra-platform builds passed
+  # -----------------------------------------------------------------------
+  extra-platforms-gate:
+    name: extra-platform builds passed
+    runs-on: ubuntu-24.04
+    needs: [build-chromeos, build-android]
+    if: always() && !failure() && !cancelled()
+    steps:
+      - name: Extra-platform matrix builds successful
+        run: |
+          echo "Extra-platform builds completed successfully."
+          echo "ChromeOS (Crostini) ok"
+          echo "Android (aarch64 + armv7) ok"

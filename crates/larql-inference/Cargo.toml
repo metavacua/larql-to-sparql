@@ -61,8 +61,8 @@ async-stream = "0.3"
 futures = "0.3"
 
 # WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+wasmtime = { version = "36.0.7", default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = "36.0.7"
 anyhow = "1"
 
 
