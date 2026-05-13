@@ -1,0 +1,104 @@
+error[rejected]: failed to satisfy license requirements
+   ┌─ /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/evalexpr-12.0.3/Cargo.toml:38:12
+   │
+38 │ license = "AGPL-3.0-only"
+   │            ━━━━━━━━━━━━━
+   │            │
+   │            rejected: license is not explicitly allowed
+   │
+   ├ AGPL-3.0-only - GNU Affero General Public License v3.0 only:
+   ├   - OSI approved
+   ├   - FSF Free/Libre
+   ├   - Copyleft
+   ├ evalexpr v12.0.3
+     └── model-compute v0.1.0
+
+error[rejected]: failed to satisfy license requirements
+   ┌─ /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webpki-root-certs-1.0.7/Cargo.toml:26:12
+   │
+26 │ license = "CDLA-Permissive-2.0"
+   │            ━━━━━━━━━━━━━━━━━━━
+   │            │
+   │            rejected: license is not explicitly allowed
+   │
+   ├ CDLA-Permissive-2.0 - Community Data License Agreement Permissive 2.0:
+   ├   - No additional metadata available for license
+   ├ webpki-root-certs v1.0.7
+     └── ureq v3.3.0
+         ├── hf-hub v0.5.0
+         │   └── larql-vindex v0.1.0
+         │       ├── larql-cli v0.1.0
+         │       ├── larql-inference v0.1.0
+         │       │   ├── larql-cli v0.1.0 (*)
+         │       │   ├── larql-lql v0.1.0
+         │       │   │   ├── larql-cli v0.1.0 (*)
+         │       │   │   └── larql-python v0.1.0
+         │       │   ├── larql-python v0.1.0 (*)
+         │       │   └── larql-server v0.1.0
+         │       ├── larql-lql v0.1.0 (*)
+         │       ├── larql-python v0.1.0 (*)
+         │       └── larql-server v0.1.0 (*)
+         └── openblas-build v0.10.15
+             └── (build) openblas-src v0.10.15
+                 ├── blas-src v0.10.0
+                 │   ├── larql-compute v0.1.0
+                 │   │   ├── larql-cli v0.1.0 (*)
+                 │   │   ├── larql-inference v0.1.0 (*)
+                 │   │   ├── larql-lql v0.1.0 (*)
+                 │   │   ├── (dev) larql-server v0.1.0 (*)
+                 │   │   └── larql-vindex v0.1.0 (*)
+                 │   └── larql-inference v0.1.0 (*)
+                 ├── larql-compute v0.1.0 (*)
+                 └── larql-inference v0.1.0 (*)
+
+error[rejected]: failed to satisfy license requirements
+   ┌─ /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/webpki-roots-1.0.7/Cargo.toml:26:12
+   │
+26 │ license = "CDLA-Permissive-2.0"
+   │            ━━━━━━━━━━━━━━━━━━━
+   │            │
+   │            rejected: license is not explicitly allowed
+   │
+   ├ CDLA-Permissive-2.0 - Community Data License Agreement Permissive 2.0:
+   ├   - No additional metadata available for license
+   ├ webpki-roots v1.0.7
+     └── ureq v3.3.0
+         ├── hf-hub v0.5.0
+         │   └── larql-vindex v0.1.0
+         │       ├── larql-cli v0.1.0
+         │       ├── larql-inference v0.1.0
+         │       │   ├── larql-cli v0.1.0 (*)
+         │       │   ├── larql-lql v0.1.0
+         │       │   │   ├── larql-cli v0.1.0 (*)
+         │       │   │   └── larql-python v0.1.0
+         │       │   ├── larql-python v0.1.0 (*)
+         │       │   └── larql-server v0.1.0
+         │       ├── larql-lql v0.1.0 (*)
+         │       ├── larql-python v0.1.0 (*)
+         │       └── larql-server v0.1.0 (*)
+         └── openblas-build v0.10.15
+             └── (build) openblas-src v0.10.15
+                 ├── blas-src v0.10.0
+                 │   ├── larql-compute v0.1.0
+                 │   │   ├── larql-cli v0.1.0 (*)
+                 │   │   ├── larql-inference v0.1.0 (*)
+                 │   │   ├── larql-lql v0.1.0 (*)
+                 │   │   ├── (dev) larql-server v0.1.0 (*)
+                 │   │   └── larql-vindex v0.1.0 (*)
+                 │   └── larql-inference v0.1.0 (*)
+                 ├── larql-compute v0.1.0 (*)
+                 └── larql-inference v0.1.0 (*)
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /home/user/larql-to-sparql/deny.toml:66:4
+   │
+66 │   "OpenSSL",
+   │    ━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /home/user/larql-to-sparql/deny.toml:63:4
+   │
+63 │   "Unicode-DFS-2016",
+   │    ━━━━━━━━━━━━━━━━ unmatched license allowance
+
+licenses FAILED

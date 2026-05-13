@@ -7,6 +7,9 @@
 
 name: larql-vindex
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -45,7 +48,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -68,7 +71,7 @@ jobs:
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -102,7 +105,7 @@ jobs:
     timeout-minutes: 35
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable

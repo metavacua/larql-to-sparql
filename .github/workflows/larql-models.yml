@@ -8,6 +8,9 @@
 
 name: larql-models
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -37,7 +40,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-14]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,7 +48,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -76,7 +79,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
