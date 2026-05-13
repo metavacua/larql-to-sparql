@@ -435,7 +435,10 @@ mod tests {
         build_fake_hub_with_prefix(tmp.path(), "datasets--", &["legacy/older-vindex"]);
         let out = scan_hf_hub_at(tmp.path()).unwrap();
         let repos: Vec<_> = out.iter().map(|c| c.repo.as_str()).collect();
-        assert_eq!(repos, vec!["chrishayuk/gemma-3-4b-it-vindex", "legacy/older-vindex"]);
+        assert_eq!(
+            repos,
+            vec!["chrishayuk/gemma-3-4b-it-vindex", "legacy/older-vindex"]
+        );
         assert!(out.iter().all(|c| c.source == CacheSource::HuggingFace));
     }
 
