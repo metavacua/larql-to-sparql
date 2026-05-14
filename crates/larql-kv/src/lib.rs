@@ -8,6 +8,7 @@
 //! hidden state (shape `[1, hidden_dim]`). The caller applies `final_norm +
 //! lm_head` to get logits — see `larql_inference::forward::hidden_to_raw_logits`.
 
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos", target_os = "windows"))]
 extern crate blas_src;
 
 pub mod accuracy;

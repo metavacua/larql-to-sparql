@@ -57,6 +57,7 @@
 //!   multi-layer pipeline, zero-copy mmap buffers.
 //! - `cuda`: (planned) CUDA GPU backend.
 
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos", target_os = "windows"))]
 extern crate blas_src;
 
 pub mod backend;
