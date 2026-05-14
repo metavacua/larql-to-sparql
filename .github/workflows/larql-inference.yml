@@ -144,7 +144,7 @@ jobs:
 
       - name: Enable static CRT for Android
         if: matrix.platform == 'android'
-        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+        run: echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
 
       - name: Install OpenBLAS (Linux/ChromeOS)
         if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'

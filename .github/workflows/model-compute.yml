@@ -131,7 +131,7 @@ jobs:
 
       - name: Enable static CRT for Android
         if: matrix.platform == 'android'
-        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+        run: echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
