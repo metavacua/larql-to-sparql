@@ -185,7 +185,6 @@ jobs:
 
     permissions:
       contents: read
-    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v6
