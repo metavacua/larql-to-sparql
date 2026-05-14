@@ -34,6 +34,11 @@ blas-src = { version = "0.10", features = ["accelerate"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: BLAS cross-compilation is complex; skip system OpenBLAS.
+# ndarray's blas feature will find any available BLAS, or use fallback scalar ops.
+blas-src = { version = "0.10", default-features = false }
+
 [features]
 default = []
 metal = ["larql-compute/metal", "larql-inference/metal"]
