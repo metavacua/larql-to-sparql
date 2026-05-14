@@ -34,9 +34,8 @@ blas-src = { version = "0.10", features = ["accelerate"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-# Android: netlib (pure-Rust BLAS) via blas-src without system OpenBLAS.
-blas-src = { version = "0.10", features = ["netlib"] }
+# Android: Skip BLAS on cross-compiled Android targets.
+# ndarray will use scalar fallback operations instead of optimized BLAS.
 
 [features]
 default = []
