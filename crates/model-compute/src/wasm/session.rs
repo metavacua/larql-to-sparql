@@ -31,7 +31,12 @@ impl<'m> Session<'m> {
     ) -> Result<Self, SolverError> {
         let page_bytes = (limits.memory_pages as usize) * 64 * 1024;
         let store_limits = StoreLimitsBuilder::new().memory_size(page_bytes).build();
-        let mut store = Store::new(engine, State { limits: store_limits });
+        let mut store = Store::new(
+            engine,
+            State {
+                limits: store_limits,
+            },
+        );
         store.limiter(|s: &mut State| &mut s.limits);
         store
             .set_fuel(limits.fuel)
@@ -42,7 +47,11 @@ impl<'m> Session<'m> {
             .instantiate_and_start(&mut store, module)
             .map_err(|e| SolverError::Instantiate(e.to_string()))?;
 
-        Ok(Self { store, instance, _module: module })
+        Ok(Self {
+            store,
+            instance,
+            _module: module,
+        })
     }
 
     /// Fuel remaining after the last call.
@@ -99,7 +108,8 @@ impl<'m> Session<'m> {
             .map_err(|e| trap_or_fuel(WASM_SOLUTION_LEN, e))?;
 
         let out_ptr_usize = checked_ptr(out_ptr, out_len as usize, &memory, &self.store)?;
-        let out = memory.data(&self.store)[out_ptr_usize..out_ptr_usize + out_len as usize].to_vec();
+        let out =
+            memory.data(&self.store)[out_ptr_usize..out_ptr_usize + out_len as usize].to_vec();
         Ok(out)
     }
 

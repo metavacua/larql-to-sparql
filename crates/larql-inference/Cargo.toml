@@ -49,7 +49,7 @@ minijinja = { version = "2", features = ["loader"] }
 minijinja-contrib = { version = "2", features = ["pycompat"] }
 
 # Remote FFN backend (RemoteWalkBackend → POST /v1/walk-ffn)
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 half = "2"
 
 # gRPC expert client (RemoteMoeBackend → ExpertService via tonic)
@@ -66,8 +66,8 @@ anyhow = "1"
 
 # REUSE: original wasmtime JIT backend, optional — activate with `expert-jit` feature.
 # Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"], optional = true }
-wasmtime-wasi = { version = "29", optional = true }
+wasmtime = { version = ">=36.0.7", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+wasmtime-wasi = { version = ">=36.0.7", optional = true }
 
 # Portable 64-bit atomics (software fallback on arm32 / other targets without
 # native 64-bit atomic ops).

@@ -27,10 +27,7 @@ pub fn instantiate(
 }
 
 /// Compile and instantiate a WASM expert in one step.
-pub fn load_expert(
-    engine: &Engine,
-    path: &Path,
-) -> anyhow::Result<(Store<ExpertStore>, Instance)> {
+pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<ExpertStore>, Instance)> {
     let module = load_module(engine, path)?;
     instantiate(engine, &module)
 }

@@ -29,7 +29,7 @@ wasmi = { version = "1", optional = true }
 
 # REUSE: original wasmtime JIT backend, optional — activate with `wasm-jit` feature.
 # Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
-wasmtime = { version = "29", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = ">=36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [dev-dependencies]
 wat = "1"

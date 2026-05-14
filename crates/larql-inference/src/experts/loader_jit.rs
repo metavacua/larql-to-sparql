@@ -18,7 +18,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use wasmtime::{Engine, Instance, Linker, Module, Store};
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+use wasmtime_wasi::p1::{self, WasiP1Ctx};
 
 /// Per-instance store data — just the WASI preview1 context.
 pub struct ExpertStore {
