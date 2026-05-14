@@ -13,14 +13,14 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-models/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/larql-models.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-models/**'
       - 'Cargo.toml'

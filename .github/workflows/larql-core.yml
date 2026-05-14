@@ -8,7 +8,7 @@ name: larql-core
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-core/**'
       - 'Cargo.toml'
@@ -16,7 +16,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-core.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-core/**'
       - 'Cargo.toml'

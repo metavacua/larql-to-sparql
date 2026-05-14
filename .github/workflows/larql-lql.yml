@@ -9,7 +9,7 @@ name: larql-lql
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-lql/**'
       - 'crates/larql-core/**'
@@ -21,7 +21,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-lql.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-lql/**'
       - 'crates/larql-core/**'

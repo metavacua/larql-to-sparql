@@ -16,9 +16,9 @@ name: validate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
   workflow_dispatch:
 
 permissions:

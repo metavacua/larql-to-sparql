@@ -12,7 +12,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-vindex/**'
       - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
@@ -22,7 +22,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-vindex.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-vindex/**'
       - 'crates/larql-lql/src/executor/lifecycle/compile/into_vindex.rs'
