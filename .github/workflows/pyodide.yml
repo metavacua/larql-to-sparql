@@ -1,0 +1,122 @@
+# Pyodide + wasm32-unknown-emscripten CI
+#
+# Stages the Python/Emscripten browser stack:
+#
+# Python side (wasm32-unknown-emscripten via Pyodide):
+#   larql SPARQL bridge, graph query orchestration, result post-processing.
+#   Pyodide is CPython compiled via Emscripten. Pure-Python larql code runs
+#   as-is; C extensions (e.g. PyO3 bindings) require maturin + Emscripten.
+#
+# Rust side does NOT use Emscripten — see wasm-browser.yml for the
+# wasm32-unknown-unknown (wgpu) path.
+#
+# Communication boundary:
+#   Rust/wgpu Web Worker ←→ Python/Pyodide Web Worker
+#   via postMessage / SharedArrayBuffer
+#
+# Activation path:
+#   1. Confirm larql Python package is pure-Python or Pyodide-compatible
+#   2. Uncomment micropip install step in pyodide-probe.mjs
+#   3. Add maturin Emscripten build step if C extensions are required
+#   4. Wire SharedArrayBuffer bridge tests once both workers are in place
+
+name: pyodide
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-python/**'
+      - 'knowledge/**'
+      - 'tests/pyodide/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/pyodide.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-python/**'
+      - 'knowledge/**'
+      - 'tests/pyodide/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/pyodide.yml'
+  workflow_dispatch: {}
+
+jobs:
+  emscripten-toolchain:
+    name: wasm32-unknown-emscripten · toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-emscripten
+          components: clippy, rustfmt
+
+      - name: Install Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm32-unknown-emscripten-cargo
+
+      - name: Verify Emscripten toolchain
+        run: |
+          rustup target list --installed | grep wasm32-unknown-emscripten
+          emcc --version
+
+      # -----------------------------------------------------------------------
+      # PyO3 Emscripten build step — activates when larql-python is packaged
+      # for Pyodide. Pin emsdk version above to match Pyodide's Emscripten
+      # version (check https://pyodide.org/en/stable/project/changelog.html).
+      #
+      #   - name: Build larql-python (wasm32-unknown-emscripten)
+      #     run: |
+      #       maturin build \
+      #         --target wasm32-unknown-emscripten \
+      #         --release \
+      #         --out dist \
+      #         -m crates/larql-python/Cargo.toml
+      # -----------------------------------------------------------------------
+
+  pyodide-runtime:
+    name: pyodide · runtime probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Pyodide runtime
+        working-directory: tests/pyodide
+        run: npm install
+
+      - name: Pyodide runtime probe
+        working-directory: tests/pyodide
+        run: node pyodide-probe.mjs

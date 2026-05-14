@@ -1,0 +1,112 @@
+# wasm32-unknown-unknown browser stack CI
+#
+# Stages the WebGPU + WASM + Web Workers build and test surface.
+#
+# Rust stack (wasm32-unknown-unknown):
+#   wgpu device, WGSL attention shaders, residual stream buffer, LQL query core
+#
+# Browser tests (Playwright + Chromium + SwiftShader):
+#   Headless Chromium with software WebGPU — hardware and OS agnostic by design.
+#   SwiftShader renders WebGPU in CI without a physical GPU. The same test
+#   surface covers ChromeOS, Android Chrome, and all desktop platforms.
+#
+# Activation path:
+#   1. wgpu + wasm-bindgen land in a crate → add wasm-pack build step below
+#   2. wasm-pack produces pkg/ artifacts → browser-test job loads and exercises them
+#   3. ChromeOS and Android Chrome coverage follows automatically from step 2
+
+name: wasm-browser
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'tests/browser/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/wasm-browser.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'tests/browser/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/wasm-browser.yml'
+  workflow_dispatch: {}
+
+jobs:
+  wasm-build:
+    name: wasm32-unknown-unknown · build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@wasm-pack
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm32-unknown-unknown-cargo
+
+      - name: Verify wasm32-unknown-unknown target
+        run: rustup target list --installed | grep wasm32-unknown-unknown
+
+      # -----------------------------------------------------------------------
+      # WASM crate build steps — add one block per crate as wgpu + wasm-bindgen
+      # are integrated. Pattern:
+      #
+      #   - name: Build <crate> (wasm32-unknown-unknown)
+      #     run: wasm-pack build crates/<crate> --target web --out-dir pkg
+      # -----------------------------------------------------------------------
+
+  browser-test:
+    name: browser · Playwright + SwiftShader WebGPU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: wasm-build
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright dependencies
+        working-directory: tests/browser
+        run: npm install
+
+      - name: Install Playwright Chromium
+        working-directory: tests/browser
+        run: npx playwright install chromium --with-deps
+
+      - name: WebGPU probe (SwiftShader)
+        working-directory: tests/browser
+        run: npx playwright test
+
+      # -----------------------------------------------------------------------
+      # WASM module browser tests — add as wasm-pack artifacts become available.
+      # Pattern: copy pkg/ output from wasm-build artifact, then load in browser
+      # via Playwright and exercise the WASM API surface.
+      # -----------------------------------------------------------------------
