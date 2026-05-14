@@ -139,7 +139,11 @@ impl MetalBackend {
         cmd.commit();
         cmd.wait_until_completed();
 
-        Some(crate::metal::buffers::read_buffer_f32(&out_buf, n))
+        // `try_read_buffer_f32` returns `None` if the GPU ran out of
+        // memory and `contents()` is null — callers fall back to CPU
+        // rather than crash. Hit by the lm-head 2.5 GB bench shape on
+        // memory-constrained CI runners.
+        crate::metal::buffers::try_read_buffer_f32(&out_buf, n)
     }
 
     /// GPU gemv → GPU argmax, returning (token_id, score) without a 1MB readback.

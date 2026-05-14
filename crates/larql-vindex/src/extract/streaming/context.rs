@@ -100,25 +100,7 @@ impl<'a> StreamingContext<'a> {
             .collect();
 
         // Mmap all safetensors files (model_dir, with `weights/` fallback).
-        let mut st_files: Vec<PathBuf> = std::fs::read_dir(model_dir)?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
-            .collect();
-        if st_files.is_empty() {
-            let weights_dir = model_dir.join("weights");
-            if weights_dir.is_dir() {
-                st_files = std::fs::read_dir(&weights_dir)?
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
-                    .collect();
-            }
-        }
-        st_files.sort();
-        if st_files.is_empty() {
-            return Err(VindexError::NoSafetensors(model_dir.to_path_buf()));
-        }
+        let st_files = discover_safetensors(model_dir)?;
 
         callbacks.on_stage(STAGE_LOADING);
         eprintln!(
@@ -226,5 +208,94 @@ impl<'a> StreamingContext<'a> {
         // visitor sees a clean output dir, not a half-finished one.
         crate::extract::checkpoint::Checkpoint::clear(self.output_dir)?;
         Ok(())
+    }
+}
+
+/// Find every `*.safetensors` shard for a model. Looks in `model_dir`
+/// first, then falls back to `model_dir/weights/` — some HF clones
+/// land the binary shards under a `weights/` subdirectory.
+///
+/// Returns the deduplicated, lexicographically sorted list. Errors
+/// when neither location yields a single shard.
+fn discover_safetensors(model_dir: &Path) -> Result<Vec<PathBuf>, VindexError> {
+    fn collect(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+        Ok(std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
+            .collect())
+    }
+
+    let mut st_files = collect(model_dir)?;
+    if st_files.is_empty() {
+        let weights_dir = model_dir.join("weights");
+        if weights_dir.is_dir() {
+            st_files = collect(&weights_dir)?;
+        }
+    }
+    st_files.sort();
+    if st_files.is_empty() {
+        return Err(VindexError::NoSafetensors(model_dir.to_path_buf()));
+    }
+    Ok(st_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn touch(path: &Path) {
+        std::fs::write(path, b"").unwrap();
+    }
+
+    #[test]
+    fn discover_safetensors_finds_root_shards() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(&tmp.path().join("model-00001.safetensors"));
+        touch(&tmp.path().join("model-00002.safetensors"));
+        touch(&tmp.path().join("tokenizer.json")); // ignored
+
+        let got = discover_safetensors(tmp.path()).unwrap();
+        assert_eq!(got.len(), 2);
+        // Sorted: 00001 before 00002.
+        assert!(got[0].ends_with("model-00001.safetensors"));
+        assert!(got[1].ends_with("model-00002.safetensors"));
+    }
+
+    #[test]
+    fn discover_safetensors_falls_back_to_weights_subdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Root has none — only json sidecars.
+        touch(&tmp.path().join("config.json"));
+        let weights = tmp.path().join("weights");
+        std::fs::create_dir(&weights).unwrap();
+        touch(&weights.join("model.safetensors"));
+
+        let got = discover_safetensors(tmp.path()).unwrap();
+        assert_eq!(got.len(), 1);
+        assert!(got[0].starts_with(&weights));
+    }
+
+    #[test]
+    fn discover_safetensors_errors_when_neither_location_has_shards() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(&tmp.path().join("config.json"));
+        // No weights/ subdir at all.
+
+        match discover_safetensors(tmp.path()) {
+            Err(VindexError::NoSafetensors(p)) => assert_eq!(p, tmp.path()),
+            other => panic!("expected NoSafetensors, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discover_safetensors_errors_when_weights_subdir_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("weights")).unwrap();
+
+        match discover_safetensors(tmp.path()) {
+            Err(VindexError::NoSafetensors(_)) => {}
+            other => panic!("expected NoSafetensors, got {other:?}"),
+        }
     }
 }

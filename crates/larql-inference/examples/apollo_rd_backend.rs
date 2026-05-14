@@ -522,7 +522,7 @@ impl WindowOffsets {
 fn load_positions(path: &Path) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(path)?;
     let positions: Vec<usize> = serde_json::from_str(&text)?;
-    if positions.iter().any(|&position| position == 0) {
+    if positions.contains(&0) {
         return Err(format!("positions file {} contains prefix length 0", path.display()).into());
     }
     Ok(positions)

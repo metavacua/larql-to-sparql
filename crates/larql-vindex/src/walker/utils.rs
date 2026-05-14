@@ -25,7 +25,7 @@ pub fn top_entities(
         .iter()
         .map(|(name, (count, sum_conf))| (name.clone(), *count, sum_conf / *count as f64))
         .collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|(_, count, _)| std::cmp::Reverse(*count));
     sorted.truncate(n);
     sorted
 }

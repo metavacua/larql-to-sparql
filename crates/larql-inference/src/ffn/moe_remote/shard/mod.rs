@@ -50,9 +50,15 @@ pub(super) enum ShardTransport {
     /// (no Nagle, no delayed ACK, no socket buffer copies through the
     /// network stack).  Most of the saving is on the response path
     /// (server flushes complete writes immediately).
+    ///
+    /// Unix-only — `std::os::unix::net::UnixStream` doesn't exist on
+    /// Windows, so the variant is `cfg(unix)`. `unix://` URLs return
+    /// `RemoteMoeError::Client` on non-unix hosts at connect time.
+    #[cfg(unix)]
     Uds(UdsState),
 }
 
+#[cfg(unix)]
 pub(super) struct UdsState {
     /// Filesystem path of the socket.  Used in error messages.
     path: std::path::PathBuf,
@@ -73,29 +79,40 @@ impl Shard {
         //     socket (same-host fast path; ~50 µs/call faster than TCP
         //     loopback).
         //   `http://host:port` → reqwest blocking HTTP/1.1 (default).
-        let transport = if let Some(uds_path) = config
+        let transport = if let Some(_uds_path) = config
             .url
             .strip_prefix("unix://")
             .or_else(|| config.url.strip_prefix("unix:"))
         {
-            // Strip the leading `///` of `unix:///abs/path` (the third `/`
-            // is part of the path).  `unix:relative/path` also accepted.
-            let path = std::path::PathBuf::from(uds_path);
-            // Open + health check.
-            let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|e| {
-                RemoteMoeError::Unreachable {
-                    url: format!("unix://{}", path.display()),
-                    cause: e.to_string(),
-                }
-            })?;
-            // Apply the configured timeout to read/write so a stuck shard
-            // doesn't wedge the client forever.
-            let _ = stream.set_read_timeout(Some(config.timeout));
-            let _ = stream.set_write_timeout(Some(config.timeout));
-            ShardTransport::Uds(UdsState {
-                path,
-                stream: std::sync::Mutex::new(Some(stream)),
-            })
+            #[cfg(unix)]
+            {
+                // Strip the leading `///` of `unix:///abs/path` (the third `/`
+                // is part of the path).  `unix:relative/path` also accepted.
+                let path = std::path::PathBuf::from(_uds_path);
+                // Open + health check.
+                let stream = std::os::unix::net::UnixStream::connect(&path).map_err(|e| {
+                    RemoteMoeError::Unreachable {
+                        url: format!("unix://{}", path.display()),
+                        cause: e.to_string(),
+                    }
+                })?;
+                // Apply the configured timeout to read/write so a stuck shard
+                // doesn't wedge the client forever.
+                let _ = stream.set_read_timeout(Some(config.timeout));
+                let _ = stream.set_write_timeout(Some(config.timeout));
+                ShardTransport::Uds(UdsState {
+                    path,
+                    stream: std::sync::Mutex::new(Some(stream)),
+                })
+            }
+            #[cfg(not(unix))]
+            {
+                return Err(RemoteMoeError::Client(format!(
+                    "unix:// transport not supported on this platform — \
+                     `{}` requires a unix host; use http:// or grpc:// instead",
+                    config.url,
+                )));
+            }
         } else if config.url.starts_with("grpc://") || config.url.starts_with("grpcs://") {
             let use_tls = config.url.starts_with("grpcs://");
             let grpc_endpoint = if use_tls {
@@ -207,6 +224,7 @@ impl Shard {
 
 /// Send a single POST + read the response body via the persistent UDS
 /// stream.  Reconnects on broken-pipe / read errors.
+#[cfg(unix)]
 pub(super) fn uds_call(
     uds: &UdsState,
     path: &str,
@@ -334,6 +352,7 @@ pub(super) fn uds_call(
     Err(RemoteMoeError::Client("UDS retry exhausted".into()))
 }
 
+#[cfg(unix)]
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     if buf.len() < 4 {
         return None;
@@ -341,6 +360,7 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     (0..=buf.len() - 4).find(|&i| &buf[i..i + 4] == b"\r\n\r\n")
 }
 
+#[cfg(unix)]
 fn parse_content_length(headers: &[u8]) -> Result<usize, RemoteMoeError> {
     // Headers look like:
     //   HTTP/1.1 200 OK\r\nContent-Type: ...\r\nContent-Length: 11264\r\n

@@ -12,7 +12,9 @@ use super::super::wire::{
     decode_expert_response, encode_expert_request, ExpertCallItem, ExpertResultItem,
     EXPERT_BATCH_PATH, EXPERT_BINARY_CONTENT_TYPE,
 };
-use super::{uds_call, Shard, ShardTransport};
+#[cfg(unix)]
+use super::uds_call;
+use super::{Shard, ShardTransport};
 
 impl Shard {
     /// Send a batch of expert calls to this shard.
@@ -114,6 +116,7 @@ impl Shard {
                 decode_expert_response(&bytes)
                     .ok_or_else(|| RemoteMoeError::BadResponse("binary response truncated".into()))
             }
+            #[cfg(unix)]
             ShardTransport::Uds(uds) => {
                 // Same wire body as the HTTP path; UDS framing is identical
                 // to TCP HTTP/1.1 — only the transport differs.

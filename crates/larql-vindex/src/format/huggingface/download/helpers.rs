@@ -196,6 +196,11 @@ mod tests {
         }
     }
 
+    // Compare with `PathBuf` joins instead of forward-slash strings —
+    // on Windows, `Path::join` uses `\`, which breaks raw string
+    // equality. Rebuilding the expected path the same way the
+    // implementation does keeps the assertion platform-portable.
+
     #[test]
     #[serial]
     fn hf_cache_repo_dir_uses_huggingface_hub_cache_when_set() {
@@ -204,7 +209,8 @@ mod tests {
             ("HF_HOME", None),
         ]);
         let dir = hf_cache_repo_dir(RepoKind::Dataset, "owner/name").unwrap();
-        assert_eq!(dir.to_string_lossy(), "/tmp/test-hub/datasets--owner--name");
+        let expected = std::path::PathBuf::from("/tmp/test-hub").join("datasets--owner--name");
+        assert_eq!(dir, expected);
     }
 
     #[test]
@@ -215,10 +221,10 @@ mod tests {
             ("HF_HOME", Some("/tmp/hf-home")),
         ]);
         let dir = hf_cache_repo_dir(RepoKind::Model, "owner/name").unwrap();
-        assert_eq!(
-            dir.to_string_lossy(),
-            "/tmp/hf-home/hub/models--owner--name"
-        );
+        let expected = std::path::PathBuf::from("/tmp/hf-home")
+            .join("hub")
+            .join("models--owner--name");
+        assert_eq!(dir, expected);
     }
 
     #[test]
@@ -230,10 +236,12 @@ mod tests {
             ("HOME", Some("/tmp/fallback-home")),
         ]);
         let dir = hf_cache_repo_dir(RepoKind::Dataset, "owner/repo").unwrap();
-        assert_eq!(
-            dir.to_string_lossy(),
-            "/tmp/fallback-home/.cache/huggingface/hub/datasets--owner--repo"
-        );
+        let expected = std::path::PathBuf::from("/tmp/fallback-home")
+            .join(".cache")
+            .join("huggingface")
+            .join("hub")
+            .join("datasets--owner--repo");
+        assert_eq!(dir, expected);
     }
 
     #[test]

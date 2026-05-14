@@ -14,7 +14,9 @@ use super::super::wire::{
     encode_layer_batch_request_f16, ExpertCallItem, LAYER_BATCH_CONTENT_TYPE,
     LAYER_BATCH_F16_CONTENT_TYPE, LAYER_BATCH_F16_PATH, LAYER_BATCH_PATH,
 };
-use super::{uds_call, Shard, ShardTransport};
+#[cfg(unix)]
+use super::uds_call;
+use super::{Shard, ShardTransport};
 
 impl Shard {
     /// Send a layer-batch request: ONE residual + K (expert_id, weight) pairs.
@@ -147,6 +149,7 @@ impl Shard {
 
                 out
             }
+            #[cfg(unix)]
             ShardTransport::Uds(uds) => {
                 // Manual HTTP/1.1 over UnixStream — same wire format as
                 // the TCP `Http` variant, just no TCP stack.  The server

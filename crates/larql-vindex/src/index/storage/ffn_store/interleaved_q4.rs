@@ -69,7 +69,9 @@ impl VectorIndex {
         self.dequant_q4_matrix(layer, 2)
     }
 
-    /// Prefetch next layer's Q4 data.
+    /// Prefetch next layer's Q4 data. Unix only; no-op on Windows
+    /// where `madvise` isn't available.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     pub fn prefetch_interleaved_q4_layer(&self, layer: usize) {
         #[cfg(unix)]
         if let Some(mmap_view) = self.storage.interleaved_q4_whole_buffer_view() {

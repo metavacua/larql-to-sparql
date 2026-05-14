@@ -9,8 +9,8 @@ keywords = ["matmul", "metal", "gpu", "quantization", "blas"]
 categories = ["science"]
 
 [dependencies]
-# Matrix types
-ndarray = { version = "0.16", features = ["blas"] }
+# Matrix types — blas feature added per-platform below where a backend exists
+ndarray = "0.16"
 # MoE expert parallelism: top-k experts run independently per token.
 rayon = "1.10"
 # Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
@@ -18,6 +18,7 @@ rayon = "1.10"
 larql-models = { path = "../larql-models" }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
@@ -28,11 +29,17 @@ metal = { version = "0.29", optional = true }
 # specifically `MTLCommandBuffer.GPUStartTime/GPUEndTime` for production
 # decode timing diagnostics. Same major version metal-rs uses internally.
 objc = { version = "0.2", optional = true }
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["accelerate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
 
 
 [features]
@@ -69,3 +76,14 @@ harness = false
 [[bench]]
 name = "quant_matvec"
 harness = false
+
+# `objc 0.2.x` (an abandoned-but-still-required transitive dep through
+# `metal`) uses `cfg(cargo-clippy)` inside its `msg_send!` / `sel_impl!`
+# macros. From rustc 1.95 onwards, `cargo-clippy` isn't a recognised
+# cfg name, so every macro expansion in our crate emits an
+# `unexpected_cfgs` warning that promotes to error under
+# `clippy -- -D warnings`. Function- and module-level `#[allow]` don't
+# reach into the macro expansion. Suppress crate-wide via the Cargo
+# `[lints]` table — the only place that reliably wires through.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = [] }

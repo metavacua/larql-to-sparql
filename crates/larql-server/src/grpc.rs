@@ -579,7 +579,7 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
             example,
         })
         .collect();
-    relations.sort_by(|a, b| b.count.cmp(&a.count));
+    relations.sort_by_key(|r| std::cmp::Reverse(r.count));
     let total = relations.len() as u32;
     relations.truncate(50);
 

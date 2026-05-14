@@ -32,6 +32,9 @@ pub unsafe fn mmap_optimized(file: &std::fs::File) -> Result<memmap2::Mmap, std:
 /// the full file size. Pages fault in on first access and are evictable under
 /// memory pressure without any explicit unmap.
 ///
+/// On non-unix targets the madvise hint is a no-op — the page-cache
+/// policy is OS-managed there.
+///
 /// # Safety
 ///
 /// The caller must ensure the file is not modified or truncated while the
@@ -49,8 +52,9 @@ pub unsafe fn mmap_demand_paged(file: &std::fs::File) -> Result<memmap2::Mmap, s
     Ok(mmap)
 }
 
-/// Apply sequential + willneed hints to an existing mmap.
-/// Call after Mmap::map() to optimize access patterns.
+/// Apply sequential + willneed hints to an existing mmap. Unix-only;
+/// on Windows the function is a no-op (the OS handles readahead).
+#[cfg_attr(not(unix), allow(unused_variables))]
 pub fn advise_sequential(mmap: &memmap2::Mmap) {
     #[cfg(unix)]
     {

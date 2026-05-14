@@ -4,28 +4,37 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Bounded-cost compute for neural-model pipelines: native Rust kernels (default) and wasmtime-hosted WASM modules (opt-in)"
+description = "Bounded-cost compute for neural-model pipelines: native Rust kernels (default) and wasmi-hosted WASM modules (opt-in)"
 keywords = ["wasm", "kernel", "deterministic", "solver", "aot"]
 categories = ["wasm", "mathematics"]
 
 [features]
 default = ["native"]
 native = ["dep:evalexpr", "dep:chrono"]
-wasm = ["dep:wasmtime"]
+wasm = ["dep:wasmi"]
+# Enable the original wasmtime JIT/AOT solver backend (desktop platforms only).
+# wasmi remains the active backend regardless; this feature only gates the
+# preserved runtime_jit/session_jit modules for REUSE compliance.
+wasm-jit = ["dep:wasmtime"]
 
 [dependencies]
 thiserror = { workspace = true }
 
 # Feature: native kernels
-evalexpr = { version = "12", optional = true }
+evalexpr = { version = "11", optional = true }
 chrono = { version = "0.4", optional = true, default-features = false, features = ["std", "clock"] }
 
-# Feature: wasm host
-wasmtime = { version = "36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+# Feature: wasm host (pure-Rust interpreter — no JIT, runs on all targets including arm32)
+wasmi = { version = "1", optional = true }
+
+# REUSE: original wasmtime JIT backend, optional — activate with `wasm-jit` feature.
+# Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
+wasmtime = { version = ">=36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [dev-dependencies]
 wat = "1"
 criterion = "0.5"
+wasmi = "1"
 
 [[bench]]
 name = "wasm_dispatch"

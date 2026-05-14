@@ -291,32 +291,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pairs: &[(&str, String, String)] = &[
         (
             "norm_out (pre-Q/K/V)",
-            format!("cpu_L0_norm_out.f32"),
+            "cpu_L0_norm_out.f32".to_string(),
             format!("metal_layer_{ll}_norm_out.f32"),
         ),
         (
             "q_out (raw, pre QK-norm)",
-            format!("cpu_L0_q_out_raw.f32"),
+            "cpu_L0_q_out_raw.f32".to_string(),
             format!("metal_layer_{ll}_q_out.f32"),
         ),
         (
             "q_out_after_qk_norm",
-            format!("cpu_L0_q_out_after_qk_norm.f32"),
-            format!("metal_L0_q_out_after_qk_norm.f32"),
+            "cpu_L0_q_out_after_qk_norm.f32".to_string(),
+            "metal_L0_q_out_after_qk_norm.f32".to_string(),
         ),
         (
             "q_out_after_rope",
-            format!("cpu_L0_q_out_after_rope.f32"),
+            "cpu_L0_q_out_after_rope.f32".to_string(),
             String::new(),
         ),
         (
             "attn_out (softmax·V)",
-            format!("cpu_L0_attn_out.f32"),
+            "cpu_L0_attn_out.f32".to_string(),
             format!("metal_layer_{ll}_attn_out.f32"),
         ),
         (
             "o_out (post Wo-proj)",
-            format!("cpu_L0_o_out.f32"),
+            "cpu_L0_o_out.f32".to_string(),
             format!("metal_layer_{ll}_o_out.f32"),
         ),
     ];

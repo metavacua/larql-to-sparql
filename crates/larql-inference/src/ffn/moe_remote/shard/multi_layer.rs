@@ -13,7 +13,9 @@ use super::super::multi_layer_wire::{
     MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K, MULTI_LAYER_BATCH_CONTENT_TYPE,
     MULTI_LAYER_BATCH_PATH, MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE, MULTI_LAYER_BATCH_Q8K_PATH,
 };
-use super::{uds_call, Shard, ShardTransport};
+#[cfg(unix)]
+use super::uds_call;
+use super::{Shard, ShardTransport};
 
 impl Shard {
     /// Send all layers' routing decisions in one request, receive all h2 values.
@@ -53,6 +55,7 @@ impl Shard {
                     RemoteMoeError::BadResponse("multi-layer-batch response truncated".into())
                 })
             }
+            #[cfg(unix)]
             ShardTransport::Uds(uds) => {
                 let resp_bytes = uds_call(
                     uds,
@@ -113,6 +116,7 @@ impl Shard {
                     RemoteMoeError::BadResponse("multi-layer-batch-q8k response truncated".into())
                 })
             }
+            #[cfg(unix)]
             ShardTransport::Uds(uds) => {
                 let resp_bytes = uds_call(
                     uds,

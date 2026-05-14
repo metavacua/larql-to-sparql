@@ -28,6 +28,10 @@ rand = "0.8"
 # Tokenizer (for embeddings loading + token resolution)
 tokenizers = "0.21"
 
+# Portable 64-bit atomics — provides AtomicU64 on targets that lack
+# native 64-bit atomic ops (e.g. arm-linux-androideabi / ARMv7).
+portable-atomic = "1"
+
 # Checksums
 sha2 = "0.10"
 

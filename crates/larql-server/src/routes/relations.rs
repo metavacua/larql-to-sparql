@@ -213,7 +213,7 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
     }
 
     let mut sorted: Vec<&TokenInfo> = tokens.values().collect();
-    sorted.sort_by(|a, b| b.count.cmp(&a.count));
+    sorted.sort_by_key(|t| std::cmp::Reverse(t.count));
     sorted.truncate(50);
 
     let relations: Vec<serde_json::Value> = sorted

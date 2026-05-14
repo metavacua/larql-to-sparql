@@ -955,4 +955,172 @@ mod tests {
         std::env::remove_var("HOME");
         assert_eq!(result, snapshot);
     }
+
+    // ── FP8 decoders (per-byte bit-pattern → f32) ─────────────────────────
+
+    #[test]
+    fn decode_f8_e4m3_zero_byte_is_zero() {
+        // sign=0, exp=0, mant=0 → 0.0 (subnormal at +0).
+        assert_eq!(decode_f8_e4m3(&[0x00]), vec![0.0]);
+    }
+
+    #[test]
+    fn decode_f8_e4m3_negative_zero() {
+        // sign=1, exp=0, mant=0 → -0.0.
+        let v = decode_f8_e4m3(&[0x80])[0];
+        assert_eq!(v, 0.0); // -0.0 == 0.0 in IEEE comparison
+        assert!(v.is_sign_negative());
+    }
+
+    #[test]
+    fn decode_f8_e4m3_one_is_unit() {
+        // 0x38 = 0011 1000 = sign=0, exp=0b0111=7, mant=0 → 1.0 × 2^(7-7) = 1.0.
+        assert_eq!(decode_f8_e4m3(&[0x38]), vec![1.0]);
+    }
+
+    #[test]
+    fn decode_f8_e4m3_nan_byte_is_nan() {
+        // 0x7F = sign=0, exp=0x0F, mant=0x07 → NaN by OCP convention.
+        assert!(decode_f8_e4m3(&[0x7F])[0].is_nan());
+        // 0xFF = sign=1, exp=0x0F, mant=0x07 → NaN.
+        assert!(decode_f8_e4m3(&[0xFF])[0].is_nan());
+    }
+
+    #[test]
+    fn decode_f8_e4m3_subnormal_path() {
+        // exp=0, mant=4 → (4/8) × 2^(1-7) = 0.5 × 2^-6 = 1/128.
+        let v = decode_f8_e4m3(&[0x04])[0];
+        assert!((v - (1.0 / 128.0)).abs() < 1e-7);
+    }
+
+    #[test]
+    fn decode_f8_e4m3_handles_multiple_bytes() {
+        // Vec output length = input length.
+        let out = decode_f8_e4m3(&[0x00, 0x38, 0x80]);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], 0.0);
+        assert_eq!(out[1], 1.0);
+    }
+
+    #[test]
+    fn decode_f8_e5m2_zero_byte_is_zero() {
+        assert_eq!(decode_f8_e5m2(&[0x00]), vec![0.0]);
+    }
+
+    #[test]
+    fn decode_f8_e5m2_one_is_unit() {
+        // bias=15 → exp byte for 1.0 is 15 → mant bits = 0 → 0b01111000 = 0x3C.
+        assert_eq!(decode_f8_e5m2(&[0x3C]), vec![1.0]);
+    }
+
+    #[test]
+    fn decode_f8_e5m2_inf_byte() {
+        // exp=0x1F, mant=0 → ±∞.
+        assert!(decode_f8_e5m2(&[0x7C])[0].is_infinite());
+        let neg = decode_f8_e5m2(&[0xFC])[0];
+        assert!(neg.is_infinite() && neg.is_sign_negative());
+    }
+
+    #[test]
+    fn decode_f8_e5m2_nan_byte() {
+        // exp=0x1F, mant!=0 → NaN.
+        assert!(decode_f8_e5m2(&[0x7D])[0].is_nan());
+    }
+
+    #[test]
+    fn decode_f8_e5m2_subnormal_path() {
+        // exp=0, mant=2 → (2/4) × 2^(1-15) = 0.5 × 2^-14.
+        let v = decode_f8_e5m2(&[0x02])[0];
+        assert!((v - (0.5_f32 * (-14_i32).exp2_f())).abs() < 1e-10);
+    }
+
+    // f32 doesn't have an exp2 method on i32 directly; small helper.
+    trait ExpHelper {
+        fn exp2_f(self) -> f32;
+    }
+    impl ExpHelper for i32 {
+        fn exp2_f(self) -> f32 {
+            2f32.powi(self)
+        }
+    }
+
+    #[test]
+    fn decode_f8_e8m0_one_is_byte_127() {
+        // E8M0 has no sign or mantissa: value = 2^(byte - 127). byte=127 → 1.0.
+        assert_eq!(decode_f8_e8m0(&[127]), vec![1.0]);
+    }
+
+    #[test]
+    fn decode_f8_e8m0_byte_128_is_two() {
+        // 2^(128-127) = 2.
+        assert_eq!(decode_f8_e8m0(&[128]), vec![2.0]);
+    }
+
+    #[test]
+    fn decode_f8_e8m0_byte_zero_is_smallest() {
+        // 2^(-127) is a very small positive — never NaN.
+        let v = decode_f8_e8m0(&[0])[0];
+        assert!(v > 0.0);
+        assert!(!v.is_nan());
+    }
+
+    #[test]
+    fn decode_f8_e8m0_byte_ff_is_nan() {
+        assert!(decode_f8_e8m0(&[0xFF])[0].is_nan());
+    }
+
+    // ── tensor_to_f32 dispatcher ──────────────────────────────────────────
+
+    fn make_view(
+        dtype: safetensors::Dtype,
+        shape: Vec<usize>,
+        bytes: Vec<u8>,
+    ) -> safetensors::tensor::TensorView<'static> {
+        // Leak the bytes for 'static lifetime — fine in tests.
+        let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+        safetensors::tensor::TensorView::new(dtype, shape, leaked).unwrap()
+    }
+
+    #[test]
+    fn tensor_to_f32_dispatches_f32() {
+        let view = make_view(
+            safetensors::Dtype::F32,
+            vec![2],
+            vec![0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x40],
+        );
+        assert_eq!(tensor_to_f32(&view).unwrap(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn tensor_to_f32_dispatches_f8_e4m3() {
+        let view = make_view(safetensors::Dtype::F8_E4M3, vec![1], vec![0x38]);
+        assert_eq!(tensor_to_f32(&view).unwrap(), vec![1.0]);
+    }
+
+    #[test]
+    fn tensor_to_f32_dispatches_f8_e5m2() {
+        let view = make_view(safetensors::Dtype::F8_E5M2, vec![1], vec![0x3C]);
+        assert_eq!(tensor_to_f32(&view).unwrap(), vec![1.0]);
+    }
+
+    #[test]
+    fn tensor_to_f32_dispatches_f8_e8m0() {
+        let view = make_view(safetensors::Dtype::F8_E8M0, vec![1], vec![127]);
+        assert_eq!(tensor_to_f32(&view).unwrap(), vec![1.0]);
+    }
+
+    #[test]
+    fn tensor_to_f32_dispatches_i8() {
+        // I8 dispatches via `(b as i8) as f32` — sign-extend.
+        let view = make_view(safetensors::Dtype::I8, vec![3], vec![0, 1, 0xFF]);
+        assert_eq!(tensor_to_f32(&view).unwrap(), vec![0.0, 1.0, -1.0]);
+    }
+
+    #[test]
+    fn tensor_to_f32_unsupported_dtype_returns_error() {
+        // I64 is not in the allow-list (used for token-id metadata, not weights).
+        let view = make_view(safetensors::Dtype::I64, vec![1], vec![0u8; 8]);
+        let err = tensor_to_f32(&view).expect_err("I64 must be unsupported");
+        assert!(matches!(err, ModelError::UnsupportedDtype(_)));
+    }
 }

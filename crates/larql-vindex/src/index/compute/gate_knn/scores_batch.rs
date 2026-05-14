@@ -314,8 +314,12 @@ mod tests {
     /// short-circuits without panicking.
     #[test]
     fn f16_path_returns_none_when_layer_unowned() {
+        // Windows' `MapViewOfFile` rejects zero-length mappings
+        // (ERROR_INVALID_PARAMETER, code 87). One byte is enough —
+        // the test only cares that `num_features == 0` short-circuits
+        // before the mmap is read.
         let mmap = memmap2::MmapOptions::new()
-            .len(0)
+            .len(1)
             .map_anon()
             .unwrap()
             .make_read_only()

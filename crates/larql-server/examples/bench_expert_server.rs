@@ -32,7 +32,8 @@ use std::time::{Duration, Instant};
 
 use tokio::net::TcpListener;
 
-use larql_compute::{cpu_moe_forward, MoeLayerWeights};
+use larql_compute::cpu::ops::moe::cpu_moe_forward;
+use larql_compute::MoeLayerWeights;
 use larql_inference::{MoeRouterWeights, RemoteMoeBackend, ShardConfig};
 use larql_server::{
     bootstrap::{load_single_vindex, LoadVindexOptions},
@@ -141,6 +142,9 @@ async fn spawn_server(model: LoadedModel) -> String {
 /// domain socket, returning `(http_url, unix_url)`.  The two listeners
 /// share the same `AppState`, so the bench can A/B the same shard via
 /// different transports.
+///
+/// Unix-only — `tokio::net::UnixListener` is gated on `cfg(unix)`.
+#[cfg(unix)]
 async fn spawn_server_with_uds(model: LoadedModel, uds_path: &std::path::Path) -> (String, String) {
     let state = make_app_state(model);
     let router_tcp = single_model_router(state.clone());
@@ -418,8 +422,12 @@ fn main() {
         let no = arch.norm_weight_offset();
         let ep = arch.norm_eps();
 
-        let layer_rs: Vec<(Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>)> = (0
-            ..num_layers)
+        // Six owned f32 vectors per layer: input/post-attn/pre-FFN/post-FFN
+        // norms plus QK-norm weights. `type` alias keeps the clippy
+        // `type_complexity` lint happy.
+        type LayerNorms = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
+
+        let layer_rs: Vec<LayerNorms> = (0..num_layers)
             .map(|l| {
                 (
                     arch.moe_router_key(l)
@@ -493,11 +501,24 @@ fn main() {
     // doesn't change the picture.
     let uds_path_a = std::path::PathBuf::from("/tmp/larql-bench-a.sock");
     let url_a = if use_uds {
-        let (http_url, unix_url) = runtime.block_on(spawn_server_with_uds(model_a, &uds_path_a));
-        println!();
-        println!("Shard A:  TCP {http_url}");
-        println!("          UDS {unix_url}  ← bench client routes through this");
-        unix_url
+        #[cfg(unix)]
+        {
+            let (http_url, unix_url) =
+                runtime.block_on(spawn_server_with_uds(model_a, &uds_path_a));
+            println!();
+            println!("Shard A:  TCP {http_url}");
+            println!("          UDS {unix_url}  ← bench client routes through this");
+            unix_url
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &uds_path_a;
+            eprintln!(
+                "--uds is unix-only; ignoring and serving TCP only \
+                 (same-host MoE optimisation is unavailable on this target)"
+            );
+            runtime.block_on(spawn_server(model_a))
+        }
     } else {
         let u = runtime.block_on(spawn_server(model_a));
         println!();

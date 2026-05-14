@@ -362,7 +362,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
     let mut circuits: Vec<Circuit> = Vec::new();
     let mut sorted_clusters: Vec<(usize, Vec<(usize, usize)>)> =
         cluster_heads.into_iter().collect();
-    sorted_clusters.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    sorted_clusters.sort_by_key(|(_, heads)| std::cmp::Reverse(heads.len()));
 
     for (cid, mut heads) in sorted_clusters {
         heads.sort();

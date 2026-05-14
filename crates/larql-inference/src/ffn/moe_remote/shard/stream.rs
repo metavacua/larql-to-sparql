@@ -115,7 +115,11 @@ impl Shard {
                     _runtime: rt,
                 })
             }
-            ShardTransport::Http(_) | ShardTransport::Uds(_) => Err(RemoteMoeError::Client(
+            ShardTransport::Http(_) => Err(RemoteMoeError::Client(
+                "open_stream requires grpc:// shards".into(),
+            )),
+            #[cfg(unix)]
+            ShardTransport::Uds(_) => Err(RemoteMoeError::Client(
                 "open_stream requires grpc:// shards".into(),
             )),
         }

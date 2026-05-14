@@ -745,7 +745,7 @@ fn test_select_order_by_layer_asc() {
 #[test]
 fn test_select_order_by_layer_desc() {
     let mut rows: Vec<(usize, &str)> = vec![(5, "a"), (0, "b"), (3, "c"), (1, "d")];
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by_key(|(layer, _)| std::cmp::Reverse(*layer));
     assert_eq!(rows[0].0, 5);
     assert_eq!(rows[3].0, 0);
 }

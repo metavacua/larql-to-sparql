@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 
-EPSILON = 0.0001
+# Tolerance against `cargo-llvm-cov` measurement noise. The 0.01% original
+# value was tight enough that the same code reported below-floor on
+# different `rustc` / `llvm-cov` builds even with no edits to the file
+# under test (grpc.rs 64.64 vs floor 64.70, walk_ffn.rs 48.97 vs 49.00
+# on the 2026-05-11 main run). 0.1% absorbs that without letting a real
+# regression of a few percent through.
+EPSILON = 0.1
 
 
 def load_json(path: Path) -> Any:

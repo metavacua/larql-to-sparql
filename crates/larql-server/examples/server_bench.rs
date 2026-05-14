@@ -256,7 +256,7 @@ fn main() {
             }
         }
         let mut sorted: Vec<_> = counts.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
         sorted.truncate(50);
         sorted
     });
@@ -697,7 +697,7 @@ fn main() {
                         "properties": {"q": {"type": "string"}},
                         "required": ["q"]}}}
             ]);
-            let names = vec!["calc".to_string(), "search".to_string()];
+            let names = ["calc".to_string(), "search".to_string()];
             let mode = resolve_tool_choice(true, None, &names).unwrap();
             synth_tools_schema(&tools, &mode).unwrap()
         },
@@ -720,7 +720,7 @@ fn main() {
                         "properties": {"q": {"type": "string"}},
                         "required": ["q"]}}}
             ]);
-            let names = vec!["calc".to_string(), "search".to_string()];
+            let names = ["calc".to_string(), "search".to_string()];
             let (schema, _) = synth_tools_schema(&tools, &ToolMode::Any).unwrap().unwrap();
             let mut fsm = Fsm::new(schema);
             let _ = fsm.step_str(r#"{"name":"calc","arguments":{"a":12,"b":30}}"#);

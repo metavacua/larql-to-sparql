@@ -193,6 +193,7 @@ impl VectorIndex {
     /// gate/up are Q4_K (144 B/256). Without a manifest, falls back to
     /// the legacy uniform Q4_K stride (144 B/256 across all three
     /// matrices) — matches the build_q4k_weights writer.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     pub fn prefetch_interleaved_q4k_layer(&self, layer: usize) {
         #[cfg(unix)]
         if let Some(bytes) = self.storage.interleaved_q4k_whole_buffer_view() {

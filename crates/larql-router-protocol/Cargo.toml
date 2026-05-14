@@ -14,4 +14,12 @@ tokio-stream = "0.1"
 
 [build-dependencies]
 tonic-build = "0.13"
+
+# `protobuf-src` builds a fresh `protoc` via cmake. That works on Linux
+# and macOS but fails on the GitHub windows-latest runner — cmake links
+# against the debug UCRT and absl drops a pile of unresolved
+# `__imp_ceilf` / `__imp_modf` symbols. On Windows we expect `protoc`
+# to be on `PATH` (CI installs it via `arduino/setup-protoc`); the
+# build script falls back to that.
+[target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"

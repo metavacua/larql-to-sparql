@@ -15,6 +15,15 @@ use larql_vindex::ndarray::Array2;
 use larql_vindex::{ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig};
 use std::path::{Path, PathBuf};
 
+/// Render a filesystem path for safe inclusion inside an LQL quoted
+/// string literal. The LQL lexer decodes `\X` escape sequences, so a
+/// raw Windows path like `C:\Users\runner\...` ends up as
+/// `C:UsersRUNNER...`. Doubling each backslash leaves the path
+/// untouched after the lexer's escape pass on every platform.
+fn lql_path(p: impl AsRef<Path>) -> String {
+    p.as_ref().display().to_string().replace('\\', "\\\\")
+}
+
 // ── Synthetic vindex setup ──────────────────────────────────────────────
 
 /// Build a small but realistic vindex on disk: 8 layers × 64 features ×
@@ -126,7 +135,7 @@ fn make_bench_vindex_dir(tag: &str) -> PathBuf {
 /// Spin up a session and `USE` the bench vindex.
 fn make_session(dir: &Path) -> Session {
     let mut session = Session::new();
-    let stmt = parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parse(&format!(r#"USE "{}";"#, lql_path(dir))).unwrap();
     session.execute(&stmt).expect("USE on bench vindex");
     session
 }
@@ -207,7 +216,7 @@ fn bench_patch_lifecycle(c: &mut Criterion) {
     let mut group = c.benchmark_group("executor_patch_lifecycle");
     group.sample_size(20);
 
-    let begin_src = format!(r#"BEGIN PATCH "{}";"#, dir.join("bench.vlp").display());
+    let begin_src = format!(r#"BEGIN PATCH "{}";"#, lql_path(dir.join("bench.vlp")));
     let begin_stmt = parse(&begin_src).unwrap();
     let mutate_stmt = parse("DELETE FROM EDGES WHERE layer = 4 AND feature = 0;").unwrap();
     let save_stmt = parse("SAVE PATCH;").unwrap();

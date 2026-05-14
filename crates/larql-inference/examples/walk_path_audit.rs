@@ -40,7 +40,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ndarray::{Array1, Array2};
@@ -763,6 +763,7 @@ struct PathRun {
 
 /// Run one prompt through DualFfn + secondary-only, fold per-(layer,
 /// position) diffs into `per_layer`, and capture top-1 prediction.
+#[allow(clippy::too_many_arguments)]
 fn run_prompt_for_path(
     weights: &larql_inference::model::ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -771,7 +772,7 @@ fn run_prompt_for_path(
     spec: &PathSpec,
     inner: &dyn GateIndex,
     weight_ffn: &WeightFfn<'_>,
-    per_layer: &mut Vec<Option<LayerSummary>>,
+    per_layer: &mut [Option<LayerSummary>],
     dispatch_counts: &mut BTreeMap<String, usize>,
     exact_layers_seen: &mut Vec<usize>,
 ) -> (String, f64) {
@@ -871,7 +872,7 @@ fn run_prompt_for_path(
 
 // ── Markdown / JSON emit ───────────────────────────────────────────────
 
-fn render_markdown(model: &str, vindex: &PathBuf, runs: &[PathRun]) -> String {
+fn render_markdown(model: &str, vindex: &Path, runs: &[PathRun]) -> String {
     let mut s = String::new();
     s.push_str("# walk_path_audit\n\n");
     s.push_str(&format!("**Model:** `{}`  \n", model));
@@ -891,20 +892,17 @@ fn render_markdown(model: &str, vindex: &PathBuf, runs: &[PathRun]) -> String {
     );
     s.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
     for r in runs {
-        let top1_ok = r
-            .per_prompt
-            .values()
-            .all(|p| p.top1_match)
-            .then(|| "✓".to_string())
-            .unwrap_or_else(|| {
-                let bad: Vec<_> = r
-                    .per_prompt
-                    .iter()
-                    .filter(|(_, p)| !p.top1_match)
-                    .map(|(k, _)| k.as_str())
-                    .collect();
-                format!("✗ ({})", bad.join(","))
-            });
+        let top1_ok = if r.per_prompt.values().all(|p| p.top1_match) {
+            "✓".to_string()
+        } else {
+            let bad: Vec<_> = r
+                .per_prompt
+                .iter()
+                .filter(|(_, p)| !p.top1_match)
+                .map(|(k, _)| k.as_str())
+                .collect();
+            format!("✗ ({})", bad.join(","))
+        };
         let paris_delta = r
             .per_prompt
             .get(PARIS_KEY)
@@ -1045,7 +1043,7 @@ fn render_markdown(model: &str, vindex: &PathBuf, runs: &[PathRun]) -> String {
     s
 }
 
-fn render_json(model: &str, vindex: &PathBuf, runs: &[PathRun]) -> String {
+fn render_json(model: &str, vindex: &Path, runs: &[PathRun]) -> String {
     use serde_json::{json, Value};
     let paths: Vec<Value> = runs
         .iter()

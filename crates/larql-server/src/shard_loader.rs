@@ -104,6 +104,12 @@ mod tests {
         let dir = PathBuf::from("/mnt/shards")
             .join("gemma4-26b")
             .join("layers-0-14");
-        assert_eq!(dir.to_str().unwrap(), "/mnt/shards/gemma4-26b/layers-0-14");
+        let expected = PathBuf::from("/mnt/shards")
+            .join("gemma4-26b")
+            .join("layers-0-14");
+        // Build the expected value the same way the code under test does, so
+        // the comparison works under whatever the host separator is — Windows
+        // produces `\` joins, Unix produces `/`.
+        assert_eq!(dir, expected);
     }
 }

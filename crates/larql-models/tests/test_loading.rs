@@ -979,3 +979,223 @@ fn gguf_vectors_map_includes_1d_norms() {
         weights.vectors.keys().collect::<Vec<_>>()
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GPT-OSS MXFP4 (load_mxfp4_expert_tensors): full-load path
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `walk_only_excludes_gpt_oss_packed_mxfp4_experts` exercises only the
+// walk-only path which short-circuits before dequantising. The full
+// `load_model_dir` path runs `load_mxfp4_expert_tensors`, which:
+//   1. iterates safetensors looking for `*.gate_up_proj_blocks` tensors,
+//   2. pairs each with its scales companion + the down companion,
+//   3. dequantises them via `crate::quant::mxfp4::split_gate_up_experts`.
+//
+// This test pins that path against a tiny synthetic GPT-OSS fixture.
+
+#[test]
+fn load_full_gpt_oss_dequantises_packed_mxfp4_experts() {
+    let dir = TempDir::new().unwrap();
+    let config = serde_json::json!({
+        "model_type": "gpt_oss",
+        "hidden_size": 4,
+        "num_hidden_layers": 1,
+        "intermediate_size": 4,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "num_local_experts": 1,
+        "num_experts_per_tok": 1,
+        "head_dim": 2,
+        "vocab_size": 10,
+    });
+    write_model_dir_with_config(
+        dir.path(),
+        config,
+        &[
+            (
+                "embed_tokens.weight",
+                "F32",
+                &[10, 4],
+                f32_bytes(&[1.0f32; 40]),
+            ),
+            ("norm.weight", "F32", &[4], f32_bytes(&[1.0f32; 4])),
+            ("lm_head.weight", "F32", &[10, 4], f32_bytes(&[1.0f32; 40])),
+            (
+                "layers.0.mlp.router.weight",
+                "F32",
+                &[1, 4],
+                f32_bytes(&[1.0f32; 4]),
+            ),
+            // Packed MXFP4: gate+up fused, 1 expert, out_features=8 (2×inter=4),
+            // groups=1, packed_bytes=16 per (expert, out, group).
+            // shape = [num_experts=1, out_features=8, groups=1, 16].
+            (
+                "layers.0.mlp.experts.gate_up_proj_blocks",
+                "U8",
+                &[1, 8, 1, 16],
+                vec![0x22; 8 * 16],
+            ),
+            (
+                "layers.0.mlp.experts.gate_up_proj_scales",
+                "U8",
+                &[1, 8, 1],
+                vec![127; 8],
+            ),
+            // Down: 1 expert, out_features=4 (=hidden), groups=1.
+            (
+                "layers.0.mlp.experts.down_proj_blocks",
+                "U8",
+                &[1, 4, 1, 16],
+                vec![0x22; 4 * 16],
+            ),
+            (
+                "layers.0.mlp.experts.down_proj_scales",
+                "U8",
+                &[1, 4, 1],
+                vec![127; 4],
+            ),
+        ],
+    );
+
+    let weights = load_model_dir(dir.path()).expect("full GPT-OSS load");
+    // The dequantiser splits gate_up into gate (w1) + up (w3) per expert,
+    // and emits down (w2). Each per-expert key uses the
+    // `block_sparse_moe.experts.<E>.<proj>` shape from
+    // `mxfp4_expert_key`. Pin that we got non-empty tensors back.
+    let any_expert_key = weights
+        .tensors
+        .keys()
+        .any(|k| k.contains("block_sparse_moe.experts.0"));
+    assert!(
+        any_expert_key,
+        "load_mxfp4_expert_tensors must populate per-expert keys; got: {:?}",
+        weights.tensors.keys().collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DeepSeek-V4 per-expert MXFP4 (dequantize_per_expert_mxfp4)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// V4 stores expert weights as separate `(.weight=I8, .scale=F8_E8M0)`
+// pairs per (expert, projection). The `dequantize_per_expert_mxfp4`
+// detector inside the standard load branch finds those pairs by
+// dtype + naming pattern, regardless of architecture metadata. This
+// test exercises that path against a synthetic V4-style fixture.
+
+fn f8_e8m0_bytes(n: usize) -> Vec<u8> {
+    // Byte = 127 → 2^0 = 1.0 (per-group scale of unity).
+    vec![127u8; n]
+}
+
+#[test]
+fn load_full_deepseek_v4_dequantises_per_expert_mxfp4() {
+    let dir = TempDir::new().unwrap();
+    // V4 detection in detect.rs requires `model_type = "deepseek_v4"`,
+    // and uses_mla() requires kv/q_lora_rank present.
+    let config = serde_json::json!({
+        "model_type": "deepseek_v4",
+        "hidden_size": 4,
+        "num_hidden_layers": 1,
+        "intermediate_size": 4,
+        "num_attention_heads": 2,
+        "num_key_value_heads": 2,
+        "head_dim": 2,
+        "vocab_size": 10,
+        "n_routed_experts": 1,
+        "num_experts_per_tok": 1,
+        "n_shared_experts": 0,
+        "kv_lora_rank": 4,
+        "q_lora_rank": 4,
+    });
+    // V4 strips no `model.` prefix and uses `embed.weight` + `norm.weight`
+    // (see `architectures/deepseek_v4.rs`).
+    //
+    // Per-expert MXFP4 layout: weight [out_features, packed_cols=groups*16],
+    // scale [out_features, groups]. We use out_features=2, groups=1 →
+    // packed_cols=16 → unpacked_cols=32.
+    let out_features = 2usize;
+    let groups = 1usize;
+    let packed_cols = groups * 16;
+    let weight_bytes = vec![0u8; out_features * packed_cols]; // all-zero nibbles → all-zero unpacked
+    let scale_bytes = f8_e8m0_bytes(out_features * groups);
+
+    write_model_dir_with_config(
+        dir.path(),
+        config,
+        &[
+            ("embed.weight", "F32", &[10, 4], f32_bytes(&[1.0f32; 40])),
+            ("norm.weight", "F32", &[4], f32_bytes(&[1.0f32; 4])),
+            // V4 doesn't necessarily have lm_head; loader falls back to embed.
+            // Per-expert MXFP4 weight + scale pair for w1 (gate_proj).
+            (
+                "layers.0.ffn.experts.0.w1.weight",
+                "I8",
+                &[out_features, packed_cols],
+                weight_bytes.clone(),
+            ),
+            (
+                "layers.0.ffn.experts.0.w1.scale",
+                "F8_E8M0",
+                &[out_features, groups],
+                scale_bytes.clone(),
+            ),
+            // Plus w2 (down) and w3 (up) — same shape.
+            (
+                "layers.0.ffn.experts.0.w2.weight",
+                "I8",
+                &[out_features, packed_cols],
+                weight_bytes.clone(),
+            ),
+            (
+                "layers.0.ffn.experts.0.w2.scale",
+                "F8_E8M0",
+                &[out_features, groups],
+                scale_bytes.clone(),
+            ),
+            (
+                "layers.0.ffn.experts.0.w3.weight",
+                "I8",
+                &[out_features, packed_cols],
+                weight_bytes,
+            ),
+            (
+                "layers.0.ffn.experts.0.w3.scale",
+                "F8_E8M0",
+                &[out_features, groups],
+                scale_bytes,
+            ),
+        ],
+    );
+
+    let weights = load_model_dir(dir.path()).expect("full V4 load");
+    // The V4 dequantiser writes the dequantised weight under the
+    // (prefix-stripped) tensor name. With V4's empty prefix list, that's
+    // exactly `layers.0.ffn.experts.0.w1.weight`.
+    assert!(
+        weights
+            .tensors
+            .contains_key("layers.0.ffn.experts.0.w1.weight"),
+        "V4 dequantiser must emit the unpacked weight; got: {:?}",
+        weights.tensors.keys().collect::<Vec<_>>()
+    );
+    let arr = weights
+        .tensors
+        .get("layers.0.ffn.experts.0.w1.weight")
+        .unwrap();
+    // Output cols = packed_cols * 2 = 32 (the dequantiser unpacks
+    // nibbles).
+    assert_eq!(arr.shape(), &[out_features, packed_cols * 2]);
+}
+
+#[test]
+fn load_filtered_validated_runs_with_validation() {
+    // `load_model_dir_filtered_validated` is the public validated
+    // entrypoint that callers like the streaming extractor use. Pin that
+    // it accepts a passing predicate + invokes the validation path.
+    let dir = TempDir::new().unwrap();
+    write_model_dir(dir.path(), &minimal_tensors());
+    let weights = larql_models::load_model_dir_filtered_validated(dir.path(), |_| false)
+        .expect("validated filter accepts minimal model");
+    assert!(weights.tensors.contains_key("embed_tokens.weight"));
+}

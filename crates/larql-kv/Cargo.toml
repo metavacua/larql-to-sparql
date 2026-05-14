@@ -17,22 +17,29 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-ndarray = { version = "0.16", features = ["blas"] }
+ndarray = "0.16"
 zip = { version = "2", default-features = false }
 
 rand = "0.8"
 rand_distr = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["accelerate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
 
 [features]
 default = []

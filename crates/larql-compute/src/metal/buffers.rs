@@ -255,19 +255,33 @@ impl Drop for ScratchGuard<'_> {
 ///
 /// # Panics
 /// Panics if the buffer's contents pointer is null or the buffer is
-/// smaller than `len * sizeof(f32)` bytes.
+/// smaller than `len * sizeof(f32)` bytes. Use [`try_read_buffer_f32`]
+/// in paths where alloc may legitimately fail (low-GPU-memory benches).
 pub fn read_buffer_f32(buf: &metal::Buffer, len: usize) -> Vec<f32> {
+    try_read_buffer_f32(buf, len)
+        .expect("Metal buffer contents pointer is null or buffer is undersized")
+}
+
+/// Fallible read: returns `None` if the buffer's contents pointer is
+/// null or the buffer is smaller than `len * sizeof(f32)` bytes.
+///
+/// Metal's `newBufferWithBytes:length:options:` can return a buffer
+/// whose `contents()` is null when the device is out of memory — the
+/// Rust binding doesn't surface that as `None`, so callers that may
+/// dispatch very large buffers (the 2.5 GB lm-head bench shape, for
+/// example) use this to fall back rather than panic.
+pub fn try_read_buffer_f32(buf: &metal::Buffer, len: usize) -> Option<Vec<f32>> {
     let ptr = buf.contents() as *const f32;
-    assert!(!ptr.is_null(), "Metal buffer contents pointer is null");
-    assert!(
-        buf.length() as usize >= len * std::mem::size_of::<f32>(),
-        "Metal buffer too small: {} bytes, need {}",
-        buf.length(),
-        len * std::mem::size_of::<f32>(),
-    );
-    // SAFETY: ptr is non-null, buffer is large enough, and command buffer
-    // has completed (caller invariant). Data is immediately copied to Vec.
-    unsafe { std::slice::from_raw_parts(ptr, len).to_vec() }
+    if ptr.is_null() {
+        return None;
+    }
+    if (buf.length() as usize) < len * std::mem::size_of::<f32>() {
+        return None;
+    }
+    // SAFETY: ptr is non-null, buffer is large enough, and the command
+    // buffer has completed (caller invariant). Data is immediately
+    // copied into a new Vec, so no dangling reference is possible.
+    Some(unsafe { std::slice::from_raw_parts(ptr, len).to_vec() })
 }
 
 #[cfg(test)]
@@ -389,13 +403,39 @@ mod tests {
 
     /// `read_buffer_f32` panics on an undersized buffer.
     #[test]
-    #[should_panic(expected = "Metal buffer too small")]
+    #[should_panic(expected = "buffer is undersized")]
     fn read_buffer_f32_panics_when_buffer_undersized() {
         let Some(d) = dev() else {
-            panic!("Metal buffer too small"); // simulate the failure on non-Metal hosts
+            panic!("buffer is undersized"); // simulate the failure on non-Metal hosts
         };
         let cache = BufferCache::new(&d);
         let buf = cache.output(4); // 1 f32
         let _ = read_buffer_f32(&buf, 100); // ask for 100 → must panic
+    }
+
+    /// `try_read_buffer_f32` returns `None` on undersized buffer
+    /// instead of panicking — the bench-safe path.
+    #[test]
+    fn try_read_buffer_f32_none_when_buffer_undersized() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let buf = cache.output(4); // 1 f32
+        assert!(try_read_buffer_f32(&buf, 100).is_none());
+    }
+
+    /// `try_read_buffer_f32` round-trips like `read_buffer_f32` on a
+    /// healthy buffer — the fallible wrapper isn't supposed to lose
+    /// data, only avoid the panic.
+    #[test]
+    fn try_read_buffer_f32_round_trips_on_healthy_buffer() {
+        let Some(d) = dev() else {
+            return;
+        };
+        let cache = BufferCache::new(&d);
+        let src: Vec<f32> = (0..8).map(|i| i as f32 * 1.5).collect();
+        let buf = cache.transient_from_f32(&src);
+        assert_eq!(try_read_buffer_f32(&buf, src.len()), Some(src));
     }
 }

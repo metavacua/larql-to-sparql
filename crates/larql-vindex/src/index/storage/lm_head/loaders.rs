@@ -54,8 +54,11 @@ impl VectorIndex {
         if self.vocab_size == 0 && self.hidden_size > 0 {
             let bytes = mmap.len();
             let denom = self.hidden_size * Q4_BYTES_PER_ELEM_NUM;
-            if denom > 0 {
-                let vocab = (bytes * Q4_BYTES_PER_ELEM_DEN) / denom;
+            if let Some(vocab) = (bytes as u64)
+                .checked_mul(Q4_BYTES_PER_ELEM_DEN as u64)
+                .and_then(|v| v.checked_div(denom as u64))
+                .and_then(|v| usize::try_from(v).ok())
+            {
                 if vocab > 0 {
                     self.vocab_size = vocab;
                 }

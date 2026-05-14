@@ -61,7 +61,10 @@ mod tests {
         let result = dot_proj_gpu(&a, &b, None);
         let expected = a.dot(&b.t());
         assert_eq!(result.shape(), &[4, 6]);
-        assert!(max_diff(&result, &expected) < 1e-6);
+        // Tolerance 1e-5 (not 1e-6): the underlying BLAS may use parallel
+        // reduction whose summation order isn't bit-reproducible across
+        // calls (observed on Windows OpenBLAS).
+        assert!(max_diff(&result, &expected) < 1e-5);
     }
 
     /// `Some(CpuBackend)` → goes through trait, must equal the `None`
@@ -83,7 +86,8 @@ mod tests {
         let result = matmul_gpu(&a, &b, None);
         let expected = a.dot(&b);
         assert_eq!(result.shape(), &[4, 6]);
-        assert!(max_diff(&result, &expected) < 1e-6);
+        // See note on dot_proj_gpu_none_backend_uses_ndarray.
+        assert!(max_diff(&result, &expected) < 1e-5);
     }
 
     #[test]

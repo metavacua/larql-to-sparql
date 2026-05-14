@@ -25,9 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let h = larql_inference::forward::embed_tokens_pub(weights, &ids);
     let x: Vec<f32> = h.row(0).to_vec();
 
-    let q_dim = weights.num_q_heads * weights.head_dim;
-    let kv_dim = weights.num_kv_heads * weights.head_dim;
-    let rope = weights.arch.rope_base_for_layer(0) as f32;
+    // `q_dim` / `kv_dim` / `rope` used to be passed to `decode_token`;
+    // the post-refactor 4-arg API doesn't need them.
 
     println!("=== Layer-by-Layer Decode Debug ===\n");
     println!("  Layers  nonzero  max_abs   norm");
@@ -44,18 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         backend.reset_kv_cache();
-        let result = backend.decode_token(
-            &layers,
-            &x,
-            hidden,
-            intermediate,
-            q_dim,
-            kv_dim,
-            weights.num_q_heads,
-            weights.num_kv_heads,
-            weights.head_dim,
-            rope,
-        );
+        let result = backend.decode_token(&layers, &x, hidden, intermediate);
 
         if let Some(ref h) = result {
             let nonzero = h.iter().filter(|v| v.abs() > 1e-10).count();

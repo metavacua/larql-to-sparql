@@ -1049,27 +1049,38 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
             .await?;
     } else {
         // Optional Unix domain socket alongside TCP (for same-host MoE
-        // shard clients).
+        // shard clients). Unix-only — `tokio::net::UnixListener` is
+        // gated on `cfg(unix)`. On Windows we warn and serve TCP only;
+        // the same-host MoE optimisation is unavailable.
         if let Some(uds_path) = cli.uds_path.clone() {
-            let _ = std::fs::remove_file(&uds_path);
-            match tokio::net::UnixListener::bind(&uds_path) {
-                Ok(uds_listener) => {
-                    info!("Listening: unix://{}", uds_path.display());
-                    let uds_app = app.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = axum::serve(uds_listener, uds_app).await {
-                            tracing::error!(
-                                "UDS listener crashed: {e:#}; same-host MoE shard \
-                                 clients will need to fall back to TCP"
-                            );
-                        }
-                    });
+            #[cfg(unix)]
+            {
+                let _ = std::fs::remove_file(&uds_path);
+                match tokio::net::UnixListener::bind(&uds_path) {
+                    Ok(uds_listener) => {
+                        info!("Listening: unix://{}", uds_path.display());
+                        let uds_app = app.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = axum::serve(uds_listener, uds_app).await {
+                                tracing::error!(
+                                    "UDS listener crashed: {e:#}; same-host MoE shard \
+                                     clients will need to fall back to TCP"
+                                );
+                            }
+                        });
+                    }
+                    Err(e) => warn!(
+                        "failed to bind UDS at {}: {e:#}; serving TCP only",
+                        uds_path.display()
+                    ),
                 }
-                Err(e) => warn!(
-                    "failed to bind UDS at {}: {e:#}; serving TCP only",
-                    uds_path.display()
-                ),
             }
+            #[cfg(not(unix))]
+            warn!(
+                "--uds-path {} ignored: Unix domain sockets are unix-only; \
+                 serving TCP only",
+                uds_path.display()
+            );
         }
 
         info!("Listening: http://{}", addr);

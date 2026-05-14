@@ -116,7 +116,7 @@ impl Session {
             .collect();
         // Sort by occurrence count descending — entities that appear at
         // many layers come first as the most "load-bearing".
-        entities.sort_by(|a, b| b.1.cmp(&a.1));
+        entities.sort_by_key(|(_, count, _)| std::cmp::Reverse(*count));
         entities.truncate(limit);
 
         let mut out = Vec::new();

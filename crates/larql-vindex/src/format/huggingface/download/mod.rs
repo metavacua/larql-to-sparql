@@ -273,8 +273,12 @@ fn head_etag_and_size(
     filename: &str,
 ) -> Option<(String, u64)> {
     let rev = revision.unwrap_or("main");
+    // Honour `HF_ENDPOINT` the same way hf-hub does, so tests can point
+    // at a mockito server. Production reads the default huggingface.co.
+    let endpoint =
+        std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string());
     let url = format!(
-        "https://huggingface.co/{}{repo_id}/resolve/{rev}/{filename}",
+        "{endpoint}/{}{repo_id}/resolve/{rev}/{filename}",
         kind.url_segment()
     );
     let token = get_hf_token().ok();
@@ -721,5 +725,301 @@ mod tests {
         let err = resolve_hf_vindex_with_progress("hf://owner/repo", |_| NoOpProgress)
             .expect_err("404 on index.json must error");
         assert!(err.to_string().contains("failed to fetch index.json"));
+    }
+
+    // ── head_etag_and_size: header-parsing and dispatch ──────────────────
+    //
+    // The HEAD probe is the etag-pinning step that drives cache hits in
+    // `cached_snapshot_file`. Mockito returns specific header
+    // combinations — git-tracked file with `ETag`, LFS-redirected file
+    // with `X-Linked-Etag` + `X-Linked-Size`, missing-headers fail-soft —
+    // and we confirm the parser picks the right values per case.
+
+    #[test]
+    #[serial]
+    fn head_etag_and_size_prefers_x_linked_headers_on_redirect() {
+        // LFS path: HF returns 302 + `X-Linked-Etag` (SHA256 oid) +
+        // `X-Linked-Size`. The parser must prefer those over the plain
+        // `ETag`/`Content-Length` (which would be S3's MD5 hash post-302).
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(302)
+            .with_header("X-Linked-Etag", "\"linked-oid-abc\"")
+            .with_header("X-Linked-Size", "1234")
+            .with_header("ETag", "\"plain-md5\"")
+            .with_header("Content-Length", "9999")
+            .create();
+
+        let result =
+            head_etag_and_size(RepoKind::Dataset, "owner/repo", None, "blobs.bin").unwrap();
+        assert_eq!(result, ("linked-oid-abc".to_string(), 1234));
+    }
+
+    #[test]
+    #[serial]
+    fn head_etag_and_size_falls_back_to_plain_etag_on_2xx() {
+        // Git-tracked small files don't redirect — they just 200 with a
+        // plain `ETag` (git blob SHA1) + `Content-Length`. Parser uses
+        // those when the X-Linked-* headers are absent.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "W/\"git-blob-sha1\"")
+            .with_header("Content-Length", "42")
+            .create();
+
+        let result =
+            head_etag_and_size(RepoKind::Dataset, "owner/repo", None, "index.json").unwrap();
+        // Weak-prefix `W/` is stripped by `strip_etag_quoting`.
+        assert_eq!(result.0, "git-blob-sha1");
+        assert_eq!(result.1, 42);
+    }
+
+    #[test]
+    #[serial]
+    fn head_etag_and_size_returns_none_on_4xx() {
+        // 4xx (not redirection, not success) → None.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(404)
+            .create();
+
+        let result = head_etag_and_size(RepoKind::Dataset, "owner/repo", None, "missing.bin");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn head_etag_and_size_returns_none_when_etag_missing() {
+        // 200 OK but no ETag/X-Linked-Etag → parser bails (cache cannot
+        // be pinned without a content identifier).
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Length", "100")
+            .create();
+
+        let result = head_etag_and_size(RepoKind::Dataset, "owner/repo", None, "f");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn head_etag_and_size_uses_revision_in_url() {
+        // `revision = Some("v2")` puts `/resolve/v2/` in the URL instead
+        // of `/resolve/main/`. Pin via a regex that requires `v2`.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock(
+                "HEAD",
+                mockito::Matcher::Regex(r"/resolve/v2/file\.bin$".into()),
+            )
+            .with_status(200)
+            .with_header("ETag", "\"v2-etag\"")
+            .with_header("Content-Length", "7")
+            .create();
+
+        let result =
+            head_etag_and_size(RepoKind::Dataset, "owner/repo", Some("v2"), "file.bin").unwrap();
+        assert_eq!(result.0, "v2-etag");
+    }
+
+    // ── cached_snapshot_file: cache directory traversal ──────────────────
+
+    /// Build an hf-hub-shaped cache layout under `hub_root`:
+    ///   models--owner--name/
+    ///     blobs/<etag>            ← `bytes`
+    ///     snapshots/main/file.bin → blobs/<etag>  (we just write a
+    ///                                              regular file, not
+    ///                                              a symlink, since
+    ///                                              the lookup walks
+    ///                                              `entries.path()`
+    ///                                              and tests
+    ///                                              file presence
+    ///                                              not symlink-ness)
+    fn make_hub_blob(
+        hub_root: &std::path::Path,
+        kind_prefix: &str,
+        repo_id: &str,
+        etag: &str,
+        bytes: &[u8],
+        snapshot_revision: Option<&str>,
+        filename: &str,
+    ) {
+        let safe = repo_id.replace('/', "--");
+        let repo_dir = hub_root.join(format!("{kind_prefix}{safe}"));
+        let blobs = repo_dir.join("blobs");
+        std::fs::create_dir_all(&blobs).unwrap();
+        std::fs::write(blobs.join(etag), bytes).unwrap();
+        if let Some(rev) = snapshot_revision {
+            let snap = repo_dir.join("snapshots").join(rev);
+            std::fs::create_dir_all(&snap).unwrap();
+            std::fs::write(snap.join(filename), bytes).unwrap();
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn cached_snapshot_file_returns_snapshot_path_when_present() {
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "\"abc123\"")
+            .with_header("Content-Length", "5")
+            .create();
+
+        // Build a cache dir at $HF_HOME/hub matching what the function
+        // expects. HfTestEnv set HF_HOME to a tempdir; reuse it.
+        let hub_root: PathBuf = std::env::var("HF_HOME")
+            .map(|p| PathBuf::from(p).join("hub"))
+            .unwrap();
+        std::fs::create_dir_all(&hub_root).unwrap();
+        let bytes = b"hello";
+        make_hub_blob(
+            &hub_root,
+            "datasets--",
+            "owner/repo",
+            "abc123",
+            bytes,
+            Some("main"),
+            "file.bin",
+        );
+
+        let (path, size) =
+            cached_snapshot_file(RepoKind::Dataset, "owner/repo", None, "file.bin").unwrap();
+        assert_eq!(size, 5);
+        assert!(path.ends_with("file.bin"));
+    }
+
+    #[test]
+    #[serial]
+    fn cached_snapshot_file_returns_blob_when_no_snapshot_link() {
+        // Same blob present, but no snapshot directory linking to the
+        // filename. The function falls back to the raw blob path.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "\"deadbeef\"")
+            .with_header("Content-Length", "4")
+            .create();
+
+        let hub_root: PathBuf = std::env::var("HF_HOME")
+            .map(|p| PathBuf::from(p).join("hub"))
+            .unwrap();
+        std::fs::create_dir_all(&hub_root).unwrap();
+        make_hub_blob(
+            &hub_root,
+            "datasets--",
+            "owner/repo",
+            "deadbeef",
+            b"abcd",
+            None, // no snapshot dir
+            "f.bin",
+        );
+
+        let (path, size) =
+            cached_snapshot_file(RepoKind::Dataset, "owner/repo", None, "f.bin").unwrap();
+        assert_eq!(size, 4);
+        // No snapshot link → returns the blob path directly.
+        assert!(path.ends_with("blobs/deadbeef"));
+    }
+
+    #[test]
+    #[serial]
+    fn cached_snapshot_file_returns_none_on_size_mismatch() {
+        // The HEAD reports size=10 but the on-disk blob is 4 bytes — the
+        // defensive size check rejects the cache hit and returns None.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "\"sizemismatch\"")
+            .with_header("Content-Length", "10")
+            .create();
+
+        let hub_root: PathBuf = std::env::var("HF_HOME")
+            .map(|p| PathBuf::from(p).join("hub"))
+            .unwrap();
+        std::fs::create_dir_all(&hub_root).unwrap();
+        make_hub_blob(
+            &hub_root,
+            "datasets--",
+            "owner/repo",
+            "sizemismatch",
+            b"only4", // 5 bytes (still ≠ 10)
+            Some("main"),
+            "f.bin",
+        );
+
+        let result = cached_snapshot_file(RepoKind::Dataset, "owner/repo", None, "f.bin");
+        assert!(result.is_none(), "size mismatch must abort cache hit");
+    }
+
+    #[test]
+    #[serial]
+    fn cached_snapshot_file_returns_none_when_blob_missing() {
+        // HEAD returns valid headers but the blob doesn't exist on disk.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "\"never-cached\"")
+            .with_header("Content-Length", "1")
+            .create();
+
+        // No blob written — straight cache miss.
+        let result = cached_snapshot_file(RepoKind::Dataset, "owner/repo", None, "f.bin");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn cached_snapshot_file_with_revision_falls_back_to_pinned_dir() {
+        // Snapshot tree exists but doesn't have a directory matching the
+        // requested revision under the iter — exercises the explicit
+        // `snapshots.join(rev)` fallback path.
+        let mut server = mockito::Server::new();
+        let _g = HfTestEnv::new(&server.url());
+        let _m = server
+            .mock("HEAD", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("ETag", "\"rev-blob\"")
+            .with_header("Content-Length", "3")
+            .create();
+
+        let hub_root: PathBuf = std::env::var("HF_HOME")
+            .map(|p| PathBuf::from(p).join("hub"))
+            .unwrap();
+        std::fs::create_dir_all(&hub_root).unwrap();
+        // Write blob + snapshot at the pinned revision.
+        make_hub_blob(
+            &hub_root,
+            "datasets--",
+            "owner/repo",
+            "rev-blob",
+            b"abc",
+            Some("v3"),
+            "f.bin",
+        );
+
+        let (path, size) =
+            cached_snapshot_file(RepoKind::Dataset, "owner/repo", Some("v3"), "f.bin").unwrap();
+        assert_eq!(size, 3);
+        assert!(path.ends_with("f.bin"));
     }
 }

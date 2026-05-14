@@ -510,6 +510,22 @@ fn rewrite_legacy_argv(args: Vec<String>) -> Vec<String> {
 }
 
 fn main() {
+    // Windows defaults the main thread to a 1 MiB stack, which our large
+    // clap-derived `Commands` enum overflows during parse_from in debug
+    // builds. Spawn the real entrypoint on a worker thread with a roomy
+    // stack so the binary behaves the same as on Linux/macOS (where the
+    // default main stack is ~8 MiB).
+    let code = std::thread::Builder::new()
+        .name("larql-main".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(real_main)
+        .expect("spawn larql-main thread")
+        .join()
+        .expect("larql-main thread panicked");
+    std::process::exit(code);
+}
+
+fn real_main() -> i32 {
     let raw_args: Vec<String> = std::env::args().collect();
     let args = rewrite_legacy_argv(raw_args);
     let cli = Cli::parse_from(args);
@@ -572,8 +588,9 @@ fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        return 1;
     }
+    0
 }
 
 fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {

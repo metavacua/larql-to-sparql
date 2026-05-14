@@ -155,12 +155,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // up to the prefill; then run one decode for `token_0_id`.
     let layers = build_layers(&w_metal, &q4_index, num_layers)?;
     let arch = &*w_metal.arch;
-    let head_dim = arch.head_dim_for_layer(0);
-    let num_q_heads = arch.num_q_heads_for_layer(0);
-    let num_kv_heads = arch.num_kv_heads_for_layer(0);
-    let q_dim = num_q_heads * head_dim;
-    let kv_dim = num_kv_heads * head_dim;
-    let rope = arch.rope_base_for_layer(0) as f32;
+    // head_dim / num_q_heads / num_kv_heads / q_dim / kv_dim / rope used
+    // to be passed to the pre-refactor `decode_token` / `prefill_q4`;
+    // the new APIs derive them from the `FullPipelineLayer` slice.
 
     metal_backend.reset_kv_cache();
     {
@@ -184,13 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &prefill_x,
             hidden,
             intermediate,
-            q_dim,
-            kv_dim,
             prompt_ids.len(),
-            num_q_heads,
-            num_kv_heads,
-            head_dim,
-            rope,
             qk_norm_val,
             softcap,
         )
@@ -218,18 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend_dyn: &dyn ComputeBackend = &metal_backend;
     let t2 = Instant::now();
     let metal_decode = backend_dyn
-        .decode_token(
-            &layers,
-            &dec_x,
-            hidden,
-            intermediate,
-            q_dim,
-            kv_dim,
-            num_q_heads,
-            num_kv_heads,
-            head_dim,
-            rope,
-        )
+        .decode_token(&layers, &dec_x, hidden, intermediate)
         .ok_or("Metal decode_token returned None")?;
     let metal_decode_ms = t2.elapsed().as_secs_f64() * 1000.0;
 

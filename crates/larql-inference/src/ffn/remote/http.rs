@@ -4,8 +4,9 @@
 //! to a `larql-server` over HTTP, implementing the same [`FfnBackend`] trait
 //! as [`WalkFfn`](crate::vindex::WalkFfn).
 
+use portable_atomic::AtomicU64;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 

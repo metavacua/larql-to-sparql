@@ -442,6 +442,13 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    /// Unix-only — Windows directory symlinks require admin or
+    /// developer-mode and aren't available on the default
+    /// `windows-latest` runner. The "resolves symlinks" behaviour
+    /// itself is unix-specific (`std::os::unix::fs::symlink`); on
+    /// Windows the scan path falls back to walking the directory
+    /// normally, which is covered by `scan_local_finds_bare_name_entries`.
+    #[cfg(unix)]
     #[test]
     fn scan_local_resolves_symlinks() {
         let tmp = tempfile::tempdir().unwrap();
@@ -450,7 +457,6 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join(INDEX_JSON), b"{}").unwrap();
         std::fs::create_dir_all(&local).unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&target, local.join("my-model.vindex")).unwrap();
         let out = scan_local_at(&local).unwrap();
         assert_eq!(out.len(), 1);

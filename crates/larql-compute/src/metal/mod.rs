@@ -353,7 +353,7 @@ impl MetalBackend {
     /// when generation finishes.
     pub fn prepare_ple_inputs(&self, data: &[f32], num_layers: usize, ple_dim: usize) {
         debug_assert!(
-            data.len() % (num_layers * ple_dim) == 0,
+            data.len().is_multiple_of(num_layers * ple_dim),
             "PLE input table size {} must be a multiple of num_layers * ple_dim ({} * {})",
             data.len(),
             num_layers,

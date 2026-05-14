@@ -2,6 +2,15 @@ use super::helpers::*;
 use super::*;
 use crate::parser;
 
+/// Render a filesystem path for safe inclusion inside an LQL quoted string
+/// literal. The LQL lexer interprets `\` as an escape introducer, so a raw
+/// Windows path like `C:\Users\runner\...` ends up decoded as
+/// `C:UsersRUNNER...`. Doubling each backslash leaves the path untouched
+/// after the lexer's escape pass on every platform.
+fn lql_path(path: impl AsRef<std::path::Path>) -> String {
+    path.as_ref().display().to_string().replace('\\', "\\\\")
+}
+
 // ── Session state: no backend ──
 
 #[test]
@@ -114,7 +123,7 @@ fn use_with_corrupt_index_json_errors() {
     std::fs::write(dir.join("index.json"), "{ this is not valid json").unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     let err = session.execute(&stmt).unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -137,7 +146,7 @@ fn use_with_corrupt_knn_store_warns_and_continues() {
     .unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     let _ = session
         .execute(&stmt)
         .expect("USE should tolerate corrupt knn_store.bin");
@@ -153,7 +162,7 @@ fn use_with_corrupt_memit_store_warns_and_continues() {
     std::fs::write(dir.join("memit_store.json"), "not valid json {{{{").unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     let _ = session
         .execute(&stmt)
         .expect("USE should tolerate corrupt memit_store.json");
@@ -716,7 +725,7 @@ fn make_test_vindex_dir(tag: &str) -> std::path::PathBuf {
 fn vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_test_vindex_dir(tag);
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session
         .execute(&stmt)
         .expect("USE on synthetic vindex should succeed");
@@ -891,7 +900,7 @@ fn make_rich_test_vindex_dir(tag: &str) -> std::path::PathBuf {
 fn rich_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_rich_test_vindex_dir(tag);
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session
         .execute(&stmt)
         .expect("USE on rich synthetic vindex should succeed");
@@ -1276,7 +1285,7 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
 fn large_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_large_test_vindex_dir(tag);
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session
         .execute(&stmt)
         .expect("USE on large synthetic vindex should succeed");
@@ -1464,7 +1473,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
 fn moe_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_moe_test_vindex_dir(tag);
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session
         .execute(&stmt)
         .expect("USE on MoE synthetic vindex should succeed");
@@ -1474,7 +1483,7 @@ fn moe_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
 fn full_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_full_test_vindex_dir(tag);
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session
         .execute(&stmt)
         .expect("USE on full synthetic vindex should succeed");
@@ -1603,7 +1612,7 @@ fn explicit_begin_patch_starts_session() {
     let (mut session, dir) = vindex_session("begin_patch");
 
     let patch_path = dir.join("session.vlp");
-    let stmt = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, patch_path.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, lql_path(&patch_path))).unwrap();
     session.execute(&stmt).expect("BEGIN PATCH should succeed");
 
     assert!(
@@ -1620,7 +1629,7 @@ fn save_patch_writes_file_to_disk() {
 
     // Start a patch, do a delete (so there's at least one operation), save.
     let patch_path = dir.join("save.vlp");
-    let begin = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, patch_path.display())).unwrap();
+    let begin = parser::parse(&format!(r#"BEGIN PATCH "{}";"#, lql_path(&patch_path))).unwrap();
     session.execute(&begin).expect("BEGIN PATCH");
 
     let del = parser::parse(r#"DELETE FROM EDGES WHERE layer = 0 AND feature = 1;"#).unwrap();
@@ -1833,7 +1842,7 @@ fn compile_into_vindex_no_patches_succeeds() {
     let output = dir.join("compiled.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let out = session
@@ -1856,8 +1865,8 @@ fn compile_path_into_vindex_uses_supplied_source_without_active_backend() {
 
     let stmt = parser::parse(&format!(
         r#"COMPILE "{}" INTO VINDEX "{}";"#,
-        dir.display(),
-        output.display()
+        lql_path(&dir),
+        lql_path(&output)
     ))
     .unwrap();
     let out = session
@@ -1881,8 +1890,8 @@ fn compile_path_into_model_reports_supplied_source_requirements() {
 
     let stmt = parser::parse(&format!(
         r#"COMPILE "{}" INTO MODEL "{}";"#,
-        dir.display(),
-        output.display()
+        lql_path(&dir),
+        lql_path(&output)
     ))
     .unwrap();
     let err = session
@@ -1934,7 +1943,7 @@ fn compile_into_vindex_with_down_overrides_bakes_them() {
     let output = dir.join("compiled_baked.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("COMPILE should succeed");
@@ -1980,7 +1989,7 @@ fn compile_on_conflict_fail_detects_collision() {
     let output = dir.join("compiled_fail.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}" ON CONFLICT FAIL;"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let result = session.execute(&stmt);
@@ -2030,7 +2039,7 @@ fn compile_on_conflict_last_wins_succeeds() {
     let output = dir.join("compiled_lw.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}" ON CONFLICT LAST_WINS;"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     assert!(
@@ -2185,7 +2194,7 @@ fn compile_into_model_requires_model_weights() {
     let output = dir.join("model_out");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO MODEL "{}";"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let result = session.execute(&stmt);
@@ -2322,7 +2331,7 @@ fn knn_store_compile_saves_and_loads() {
     let output = dir.join("compiled_knn.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("COMPILE should succeed");
@@ -2339,7 +2348,7 @@ fn knn_store_compile_saves_and_loads() {
     );
 
     // Load the compiled vindex and verify KNN store survives round-trip
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, output.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&output))).unwrap();
     session.execute(&stmt).expect("USE compiled vindex");
 
     // Check the KNN store is loaded with the fact
@@ -2513,7 +2522,7 @@ fn knn_insert_q4k_flagged_no_weights_uses_embedding_fallback() {
     std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session.execute(&stmt).expect("USE");
 
     // INSERT must succeed via the embedding-key fallback — not attempt to load q4k weights.
@@ -2603,7 +2612,7 @@ fn trace_on_q4k_vindex_returns_clear_error() {
     std::fs::write(dir.join("tokenizer.json"), tok_json).unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session.execute(&stmt).expect("USE");
 
     let stmt = parser::parse(r#"TRACE "hello world";"#).unwrap();
@@ -3038,7 +3047,7 @@ fn compile_skips_memit_fact_with_no_relation() {
     let out_dir = dir.join("compiled.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-        out_dir.display()
+        lql_path(&out_dir)
     ))
     .unwrap();
     let lines = session.execute(&stmt).expect("compile should succeed");
@@ -3447,7 +3456,7 @@ fn stats_with_relation_classifier_renders_coverage_breakdown() {
     .unwrap();
 
     let mut session = Session::new();
-    let stmt = parser::parse(&format!(r#"USE "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"USE "{}";"#, lql_path(&dir))).unwrap();
     session.execute(&stmt).expect("USE with classifier");
     let stmt = parser::parse("STATS;").unwrap();
     let out = session.execute(&stmt).expect("STATS");
@@ -3467,7 +3476,7 @@ fn stats_with_relation_classifier_renders_coverage_breakdown() {
 fn stats_with_explicit_path_runs() {
     // STATS "<path>" form — explicit vindex path argument.
     let (mut session, dir) = vindex_session("stats_path");
-    let stmt = parser::parse(&format!(r#"STATS "{}";"#, dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"STATS "{}";"#, lql_path(&dir))).unwrap();
     let _ = session.execute(&stmt).expect("STATS <path>");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -3508,8 +3517,8 @@ fn diff_two_synthetic_vindexes_runs() {
     // DIFF doesn't require a USE — it takes explicit paths.
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}";"#,
-        dir_a.display(),
-        dir_b.display()
+        lql_path(&dir_a),
+        lql_path(&dir_b)
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF");
@@ -3526,8 +3535,8 @@ fn diff_with_layer_filter_runs() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" LAYER 0;"#,
-        dir_a.display(),
-        dir_b.display()
+        lql_path(&dir_a),
+        lql_path(&dir_b)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("DIFF LAYER");
@@ -3542,8 +3551,8 @@ fn diff_with_explicit_limit_runs() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" LIMIT 5;"#,
-        dir_a.display(),
-        dir_b.display()
+        lql_path(&dir_a),
+        lql_path(&dir_b)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("DIFF LIMIT");
@@ -3567,7 +3576,7 @@ fn diff_with_nonexistent_source_errors() {
 fn merge_synthetic_into_current_keeps_source_strategy() {
     let (mut session, dir) = vindex_session("merge_target");
     let source_dir = make_test_vindex_dir("merge_source");
-    let stmt = parser::parse(&format!(r#"MERGE "{}";"#, source_dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"MERGE "{}";"#, lql_path(&source_dir))).unwrap();
     let out = session.execute(&stmt).expect("MERGE");
     let joined = out.join("\n");
     assert!(joined.contains("Merged"));
@@ -3582,7 +3591,7 @@ fn merge_with_keep_target_strategy() {
     let source_dir = make_test_vindex_dir("merge_keep_target_src");
     let stmt = parser::parse(&format!(
         r#"MERGE "{}" ON CONFLICT KEEP_TARGET;"#,
-        source_dir.display()
+        lql_path(&source_dir)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("MERGE KEEP_TARGET");
@@ -3596,7 +3605,7 @@ fn merge_with_highest_confidence_strategy() {
     let source_dir = make_test_vindex_dir("merge_highest_src");
     let stmt = parser::parse(&format!(
         r#"MERGE "{}" ON CONFLICT HIGHEST_CONFIDENCE;"#,
-        source_dir.display()
+        lql_path(&source_dir)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("MERGE HIGHEST_CONFIDENCE");
@@ -3617,7 +3626,7 @@ fn merge_with_missing_source_errors() {
 fn merge_no_backend_no_target_errors() {
     let mut session = Session::new();
     let source_dir = make_test_vindex_dir("merge_no_backend");
-    let stmt = parser::parse(&format!(r#"MERGE "{}";"#, source_dir.display())).unwrap();
+    let stmt = parser::parse(&format!(r#"MERGE "{}";"#, lql_path(&source_dir))).unwrap();
     // No USE ran → MERGE without explicit target should error.
     let _ = session.execute(&stmt); // accept either error or ok depending on path
     let _ = std::fs::remove_dir_all(&source_dir);
@@ -4283,7 +4292,7 @@ fn trace_with_save_writes_file() {
     let save_path = dir.join("trace_output.json");
     let stmt = parser::parse(&format!(
         r#"TRACE "[1] [2]" POSITIONS ALL SAVE "{}";"#,
-        save_path.display()
+        lql_path(&save_path)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("TRACE SAVE");
@@ -4309,9 +4318,9 @@ fn diff_into_patch_writes_vlp_file() {
         std::env::temp_dir().join(format!("larql_diff_patch_{}.vlp", std::process::id()));
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" INTO PATCH "{}";"#,
-        dir_a.display(),
-        dir_b.display(),
-        patch_path.display()
+        lql_path(&dir_a),
+        lql_path(&dir_b),
+        lql_path(&patch_path)
     ))
     .unwrap();
     let _ = session.execute(&stmt).expect("DIFF INTO PATCH");
@@ -4426,8 +4435,8 @@ fn diff_with_changes_reports_modified_added_removed() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}";"#,
-        dir_a.display(),
-        dir_b.display(),
+        lql_path(&dir_a),
+        lql_path(&dir_b),
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF should succeed");
@@ -4459,8 +4468,8 @@ fn diff_with_no_changes_reports_no_differences() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}";"#,
-        dir_a.display(),
-        dir_b.display(),
+        lql_path(&dir_a),
+        lql_path(&dir_b),
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF self");
@@ -4490,9 +4499,9 @@ fn diff_into_patch_with_real_changes_serialises_all_op_types() {
     ));
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" INTO PATCH "{}";"#,
-        dir_a.display(),
-        dir_b.display(),
-        patch_path.display(),
+        lql_path(&dir_a),
+        lql_path(&dir_b),
+        lql_path(&patch_path),
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF INTO PATCH real");
@@ -4523,7 +4532,7 @@ fn diff_current_resolves_to_active_vindex() {
     // VindexRef::Current resolves to the session's active backend path.
     let (mut session, dir_a) = vindex_session("diff_current_a");
     let dir_b = make_modified_test_vindex_dir("diff_current_b");
-    let stmt = parser::parse(&format!(r#"DIFF CURRENT "{}";"#, dir_b.display(),)).unwrap();
+    let stmt = parser::parse(&format!(r#"DIFF CURRENT "{}";"#, lql_path(&dir_b),)).unwrap();
     let out = session
         .execute(&stmt)
         .expect("DIFF CURRENT against another path");
@@ -4545,8 +4554,8 @@ fn diff_with_layer_filter_excludes_other_layers() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" LAYER 1;"#,
-        dir_a.display(),
-        dir_b.display(),
+        lql_path(&dir_a),
+        lql_path(&dir_b),
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF LAYER 1");
@@ -4569,8 +4578,8 @@ fn diff_with_explicit_limit_caps_displayed_diffs() {
     let mut session = Session::new();
     let stmt = parser::parse(&format!(
         r#"DIFF "{}" "{}" LIMIT 1;"#,
-        dir_a.display(),
-        dir_b.display(),
+        lql_path(&dir_a),
+        lql_path(&dir_b),
     ))
     .unwrap();
     let out = session.execute(&stmt).expect("DIFF LIMIT 1");
@@ -4606,7 +4615,7 @@ fn compile_into_model_default_path_runs() {
     ));
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO MODEL "{}" FORMAT safetensors;"#,
-        out_dir.display()
+        lql_path(&out_dir)
     ))
     .unwrap();
     // Compile may succeed or hit a vindex-internal error against the
@@ -4640,7 +4649,7 @@ fn compile_into_vindex_with_memit_enabled_runs_solver_path() {
     ));
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-        out_dir.display()
+        lql_path(&out_dir)
     ))
     .unwrap();
 
@@ -4694,7 +4703,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
     let output = dir.join("compiled_hc.vindex");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO VINDEX "{}" ON CONFLICT HIGHEST_CONFIDENCE;"#,
-        output.display()
+        lql_path(&output)
     ))
     .unwrap();
     let result = session.execute(&stmt);
@@ -4722,7 +4731,7 @@ fn compile_into_model_with_memit_enabled_runs() {
     let out_dir = dir.join("compiled_memit");
     let stmt = parser::parse(&format!(
         r#"COMPILE CURRENT INTO MODEL "{}" FORMAT safetensors;"#,
-        out_dir.display()
+        lql_path(&out_dir)
     ))
     .unwrap();
 

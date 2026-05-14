@@ -93,22 +93,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let h = larql_inference::forward::embed_tokens_pub(weights, &token_ids);
         let x: Vec<f32> = h.row(0).to_vec();
 
-        let q_dim = weights.num_q_heads * weights.head_dim;
-        let kv_dim = weights.num_kv_heads * weights.head_dim;
+        // `q_dim` / `kv_dim` used to be passed to the pre-refactor
+        // `decode_token` arg-list; the new 4-arg API no longer needs them.
 
         println!("\nTrying decode_token with 1 layer...");
-        let result = backend.decode_token(
-            &layers,
-            &x,
-            hidden,
-            intermediate,
-            q_dim,
-            kv_dim,
-            weights.num_q_heads,
-            weights.num_kv_heads,
-            weights.head_dim,
-            weights.arch.rope_base_for_layer(0) as f32,
-        );
+        let result = backend.decode_token(&layers, &x, hidden, intermediate);
         println!(
             "decode_token result: {}",
             if result.is_some() { "Some" } else { "None" }
@@ -131,18 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             all_layers.len()
         );
         backend.reset_kv_cache();
-        let result = backend.decode_token(
-            &all_layers,
-            &x,
-            hidden,
-            intermediate,
-            q_dim,
-            kv_dim,
-            weights.num_q_heads,
-            weights.num_kv_heads,
-            weights.head_dim,
-            weights.arch.rope_base_for_layer(0) as f32,
-        );
+        let result = backend.decode_token(&all_layers, &x, hidden, intermediate);
         println!(
             "decode_token result: {}",
             if result.is_some() { "Some" } else { "None" }
@@ -167,13 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &x_all,
             hidden,
             intermediate,
-            q_dim,
-            kv_dim,
             token_ids.len(),
-            weights.num_q_heads,
-            weights.num_kv_heads,
-            weights.head_dim,
-            weights.arch.rope_base_for_layer(0) as f32,
             qk_norm,
             softcap,
         );

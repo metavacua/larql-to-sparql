@@ -97,18 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Now test decode_token
     println!("\n=== decode_token test ===");
     backend.reset_kv_cache();
-    let result = backend.decode_token(
-        &layers,
-        &x,
-        hidden,
-        intermediate,
-        q_dim,
-        kv_dim,
-        weights.num_q_heads,
-        weights.num_kv_heads,
-        weights.head_dim,
-        weights.arch.rope_base_for_layer(0) as f32,
-    );
+    let result = backend.decode_token(&layers, &x, hidden, intermediate);
     if let Some(ref r) = result {
         let nz = r.iter().filter(|v: &&f32| v.abs() > 1e-10).count();
         let max = r.iter().cloned().fold(0.0f32, f32::max);

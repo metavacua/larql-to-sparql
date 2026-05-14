@@ -565,6 +565,12 @@ mod tests {
 
     // ── generate_cached_hooked ────────────────────────────────────────────────
 
+    // The unhooked and hooked decode paths are mathematically equivalent
+    // under NoopHook, but BLAS reduction order can drift call-to-call on
+    // Windows OpenBLAS — observed argmax flipping after the first decode
+    // step. Linux/macOS BLAS implementations are bit-stable enough for
+    // this assertion to hold, so we keep the coverage there.
+    #[cfg(not(windows))]
     #[test]
     fn generate_cached_hooked_with_noop_matches_baseline() {
         // Hook-aware generation with a NoopHook should produce the same

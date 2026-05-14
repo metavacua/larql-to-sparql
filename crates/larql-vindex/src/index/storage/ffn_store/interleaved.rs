@@ -100,7 +100,10 @@ impl VectorIndex {
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
 
-    /// Prefetch next layer's interleaved data into page cache.
+    /// Prefetch next layer's interleaved data into page cache. Unix
+    /// only; on Windows the function is a no-op because `madvise`
+    /// isn't available and the OS handles readahead itself.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     pub fn prefetch_interleaved_layer(&self, layer: usize) {
         #[cfg(unix)]
         if let Some(bytes) = self.storage.interleaved_f32_view() {

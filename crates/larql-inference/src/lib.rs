@@ -40,6 +40,12 @@
 //! See `examples/mech_interp_demo.rs` for an end-to-end walkthrough on
 //! synthetic weights (no vindex required).
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "macos",
+    target_os = "windows"
+))]
 extern crate blas_src;
 
 pub mod attention;

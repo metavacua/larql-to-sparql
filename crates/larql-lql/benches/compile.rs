@@ -20,6 +20,15 @@ use larql_vindex::ndarray::Array2;
 use larql_vindex::{ExtractLevel, FeatureMeta, StorageDtype, VectorIndex, VindexConfig};
 use std::path::PathBuf;
 
+/// Render a filesystem path for safe inclusion inside an LQL quoted
+/// string literal. The LQL lexer decodes `\X` escape sequences, so a
+/// raw Windows path like `C:\Users\runner\...` ends up as
+/// `C:UsersRUNNER...`. Doubling each backslash leaves the path
+/// untouched after the lexer's escape pass on every platform.
+fn lql_path(p: impl AsRef<std::path::Path>) -> String {
+    p.as_ref().display().to_string().replace('\\', "\\\\")
+}
+
 /// Build a synthetic vindex with the SHAPE of a real model (so the byte
 /// offsets in `down_weights.bin` are non-trivial) but small enough to
 /// compile in a few milliseconds.
@@ -130,11 +139,11 @@ fn bench_compile_no_patches(c: &mut Criterion) {
         b.iter(|| {
             let _ = std::fs::remove_dir_all(&dst);
             let mut session = Session::new();
-            let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
+            let use_stmt = parse(&format!(r#"USE "{}";"#, lql_path(&src_dir))).unwrap();
             session.execute(&use_stmt).unwrap();
             let stmt = parse(&format!(
                 r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-                dst.display()
+                lql_path(&dst)
             ))
             .unwrap();
             session.execute(&stmt).unwrap();
@@ -161,11 +170,11 @@ fn bench_compile_with_weights(c: &mut Criterion) {
         b.iter(|| {
             let _ = std::fs::remove_dir_all(&dst);
             let mut session = Session::new();
-            let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
+            let use_stmt = parse(&format!(r#"USE "{}";"#, lql_path(&src_dir))).unwrap();
             session.execute(&use_stmt).unwrap();
             let stmt = parse(&format!(
                 r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-                dst.display()
+                lql_path(&dst)
             ))
             .unwrap();
             session.execute(&stmt).unwrap();
@@ -178,7 +187,7 @@ fn bench_compile_with_weights(c: &mut Criterion) {
         b.iter(|| {
             let _ = std::fs::remove_dir_all(&dst);
             let mut session = Session::new();
-            let use_stmt = parse(&format!(r#"USE "{}";"#, src_dir.display())).unwrap();
+            let use_stmt = parse(&format!(r#"USE "{}";"#, lql_path(&src_dir))).unwrap();
             session.execute(&use_stmt).unwrap();
             {
                 let overlay = session.patched_overlay_mut().expect("vindex backend");
@@ -201,7 +210,7 @@ fn bench_compile_with_weights(c: &mut Criterion) {
             }
             let stmt = parse(&format!(
                 r#"COMPILE CURRENT INTO VINDEX "{}";"#,
-                dst.display()
+                lql_path(&dst)
             ))
             .unwrap();
             session.execute(&stmt).unwrap();
