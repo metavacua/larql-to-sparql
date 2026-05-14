@@ -5,11 +5,13 @@
 # `jobs = 0` as a no-op placeholder, but Cargo rejects 0 (`error: jobs
 # may not be 0`) and the line silently broke every cargo invocation in CI.
 
-# Android cross-compilation configuration
+# Android cross-compilation configuration.
+# NDK r23+ removed unversioned wrapper scripts; use the API-21 versioned
+# clang and LLVM archiver that NDK r27 (used in CI) actually ships.
 [target.aarch64-linux-android]
-linker = "aarch64-linux-android-clang"
-ar = "aarch64-linux-android-ar"
+linker = "aarch64-linux-android21-clang"
+ar = "llvm-ar"
 
 [target.armv7-linux-androideabi]
-linker = "armv7a-linux-androideabi-clang"
-ar = "armv7a-linux-androideabi-ar"
+linker = "armv7a-linux-androideabi21-clang"
+ar = "llvm-ar"
