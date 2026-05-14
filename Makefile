@@ -542,6 +542,22 @@ lint:
 # All quality checks
 ci: fmt-check lint test-full
 
+# Cross-platform testing
+platform-test:
+	./scripts/ci/comprehensive.sh
+
+platform-test-ubuntu:
+	./scripts/ci/build-ubuntu.sh
+
+platform-test-android:
+	./scripts/ci/build-android.sh
+
+platform-test-chromeos:
+	./scripts/ci/build-chromeos.sh
+
+platform-test-macos:
+	./scripts/ci/build-macos.sh
+
 # Clean
 clean:
 	cargo clean
@@ -666,3 +682,43 @@ extract-full:
 predict:
 	cargo run --release -p larql-cli -- predict google/gemma-3-4b-it \
 		--prompt "The capital of France is" -k 10
+
+# ----------------------------------------------------------------------------
+# Fork-only modules. These coexist with upstream's `ci`, `test`, `larql-*-ci`
+# targets and do not redefine any upstream target. See
+# crates/larql-vindex/docs/compliance-pipeline.md and
+# crates/larql-vindex/docs/code-quality-pipeline.md for the boundary.
+# ----------------------------------------------------------------------------
+
+# Compliance gate: REUSE, Conventional Commits, changelog, license allow-list,
+# semver preflight. Mirrors .github/workflows/validate.yml.
+.PHONY: compliance
+compliance:
+	reuse lint
+	cog check origin/main..HEAD || true
+	bash scripts/check_changelog.sh
+	bash scripts/check_first_party_licenses.sh
+	bash scripts/version_preflight.sh
+
+# Workspace-wide quality gate: complements (does not duplicate) upstream's
+# per-crate larql-*-ci family with cross-cutting deny / audit checks plus
+# a single workspace clippy pass.
+.PHONY: quality-fork
+quality-fork:
+	cargo clippy --workspace --tests -- -D warnings
+	cargo deny check
+	cargo audit
+
+# Extra-platforms smoke: only Android and ChromeOS. Linux, macOS, and Windows
+# are covered by upstream's per-crate matrix.
+.PHONY: platform-test platform-test-android platform-test-chromeos
+platform-test: platform-test-android platform-test-chromeos
+platform-test-android:
+	bash scripts/ci/build-android.sh
+platform-test-chromeos:
+	bash scripts/ci/build-chromeos.sh
+
+# Full fork-level pre-flight: upstream's `ci`, plus our compliance and
+# fork-only quality. Use this before pushing a PR.
+.PHONY: ci-fork
+ci-fork: ci compliance quality-fork

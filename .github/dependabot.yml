@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Ian Douglas Lawrence Norman McLean
+# SPDX-License-Identifier: Apache-2.0
+#
+# Dependabot configuration. Scoped narrowly: GitHub Actions versions are the
+# only ecosystem tracked here.
+#
+# Rationale for the scope:
+#
+#   - cargo:   The workspace gitignores Cargo.lock per repository policy.
+#              cargo-deny + cargo-audit run with a freshly-generated lockfile
+#              and already track the dependency frontier on every PR and on
+#              a weekly cron. Adding Dependabot for the cargo ecosystem would
+#              propose lockfile changes that the project does not commit, and
+#              Cargo.toml-only updates would require manual lockfile resolution
+#              anyway. The current advisory-feed coverage is the deterministic
+#              path.
+#
+#   - pip / uv: The Python bindings are built from a maturin/uv toolchain
+#              whose deps are tracked in `crates/larql-python/uv.lock`. uv
+#              has its own update path (`uv lock --upgrade`); Dependabot's
+#              pip ecosystem doesn't read uv.lock. Once a CI job runs
+#              `uv lock --check` on a schedule, the equivalent signal will
+#              be present without needing Dependabot here.
+#
+#   - github-actions: Action versions are the one place where Dependabot is
+#              both well-supported and necessary. The two existing workflow
+#              files use floating tags (e.g. `actions/checkout@v4`) which
+#              the compliance pipeline's determinism guarantee softens; SHA
+#              pinning is the eventual goal, and Dependabot is the standard
+#              mechanism for keeping SHA-pinned actions current.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    # Group all action updates into a single PR per week. Reduces churn and
+    # keeps the validate.yml + quality.yml updates atomic.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    # Conventional Commits prefix so cocogitto accepts the auto-generated
+    # commit messages without amendment. `ci:` mirrors the manual scope
+    # used elsewhere for workflow changes.
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5

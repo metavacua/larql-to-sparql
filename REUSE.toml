@@ -1,0 +1,133 @@
+version = 1
+
+# Explicit, machine-readable provenance for every file under version control,
+# per Foundational Axiom A1 (Explicit Provenance) of the project compliance
+# specification, and per Apache-2.0 §4(c) (retain attribution notices).
+#
+# Two distinct copyright holders apply:
+#
+#   - The pre-existing LARQL codebase on `main` (origin:
+#     https://github.com/chrishayuk/larql, created 2026) is attributed to
+#     Chris Hay.
+#
+#   - The deterministic compliance toolchain added in PR
+#     `claude/implement-standardized-tool-PGol9` (2026) is attributed to
+#     Ian Douglas Lawrence Norman McLean.
+#
+# Both are licensed under Apache-2.0. The verbatim Apache-2.0 license text
+# under LICENSES/ is itself unattributed boilerplate (SPDX-FileCopyrightText
+# = NONE), per common REUSE practice.
+
+# ---------------------------------------------------------------------------
+# Default: pre-existing LARQL codebase from `main`. This is the broadest
+# match; specific overrides below carve out the PR-added paths.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Chris Hay"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Compliance-pipeline infrastructure. Originally added by PR
+# `claude/implement-standardized-tool-PGol9`; extended by the licensing-audit
+# pass that produced audit/. Apache-2.0-licensed because the toolchain itself
+# does not consume any AGPL/CC-BY-SA dependency and Apache-2.0 keeps it
+# trivially redistributable as part of either an upstream Apache-2.0 backport
+# or a downstream AGPL distribution.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "REUSE.toml",
+  "NOTICE",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "cliff.toml",
+  "cog.toml",
+  ".pre-commit-config.yaml",
+  ".github/**",
+  "scripts/check_changelog.sh",
+  "scripts/version_preflight.sh",
+  "scripts/check_first_party_licenses.sh",
+  "scripts/ci/**",
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
+  "docs/ci-cd-local.md",
+  "deny.toml",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Verbatim Apache-2.0 license text. Boilerplate; not separately copyrighted.
+# `knowledge/LICENSE` is a duplicate of the top-level Apache-2.0 boilerplate
+# carried by the `larql-knowledge` Python sub-project so it can be installed
+# stand-alone; it receives the same NONE-copyright treatment.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "LICENSE",
+  "LICENSES/Apache-2.0.txt",
+  "knowledge/LICENSE",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Verbatim CC-BY-SA-4.0 license text. Boilerplate; not separately copyrighted.
+[[annotations]]
+path = "LICENSES/CC-BY-SA-4.0.txt"
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# `LICENSES/AGPL-3.0-or-later.txt` is intentionally NOT pre-staged. REUSE 3.3
+# rejects unused license texts under `LICENSES/`, and no first-party file
+# currently declares AGPL-3.0-or-later. The text will be added (via
+# `reuse download AGPL-3.0-or-later`) in the same PR that introduces the
+# first AGPL-licensed first-party file. The forward licensing posture in
+# CONTRIBUTING.md and NOTICE remains unchanged; admission of AGPL transitives
+# is handled at the dependency layer by deny.toml.
+
+# ---------------------------------------------------------------------------
+# Licensing audit deliverables produced by Phase A of the cleanup workstream
+# (see audit/first-party-report.md, audit/dependency-licenses.md,
+# audit/upstream-report.md). Authored by the fork; per the forward licensing
+# posture documented in audit/upstream-report.md, fork-authored documentation
+# is licensed CC-BY-SA-4.0.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "audit/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# ---------------------------------------------------------------------------
+# Upstream-wins merge of https://github.com/chrishayuk/larql @ main into
+# claude/incorporate-upstream-changes-RZWZ7. The merge commit referenced
+# below introduced or last modified the files listed in `path`. Subsequent
+# changes are tracked by `git log` / `git blame`.
+#
+# Provenance strategy chosen by the maintainers for this batch: REUSE.toml
+# annotation block only (no per-file SPDX-FileComment headers). The 32
+# first-party files predating this merge are NOT retroactively stamped.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
+  "Makefile",
+  ".github/workflows/extra-platforms.yml",
+  ".github/workflows/quality.yml",
+  ".github/workflows/validate.yml",
+  "scripts/ci/comprehensive.sh",
+  "docs/ci-cd-local.md",
+  "REUSE.toml",
+  "cog.toml",
+  "audit/upstream-report.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "Last modified by fork in merge commit 979f8c90491d76b326a454274020f24f2bca8556"
