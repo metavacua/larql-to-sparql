@@ -452,6 +452,12 @@ fn stream_chat_completion(
     let chat_id = format!("chatcmpl-{}", new_id_suffix());
 
     tokio::task::spawn_blocking(move || {
+        // Pick template + render BEFORE locking weights — see comment in
+        // `run_chat_completion`. `pick_template` takes a read lock on
+        // `model.weights`, which deadlocks against our own write lock
+        // below on non-reentrant std::sync::RwLock (task #127).
+        let template = pick_template(&model);
+        let prompt = render(template, &messages);
         let mut weights_guard = match model.lock_weights_for_gen() {
             Ok(w) => w,
             Err(e) => {
@@ -460,8 +466,6 @@ fn stream_chat_completion(
             }
         };
         let weights: &mut larql_inference::ModelWeights = &mut weights_guard;
-        let template = pick_template(&model);
-        let prompt = render(template, &messages);
         let encoding = match model.tokenizer.encode(prompt.as_str(), true) {
             Ok(e) => e,
             Err(e) => {
@@ -696,6 +700,15 @@ fn run_chat_completion(
     stop_strings: &[String],
     constrained_schema: Option<Schema>,
 ) -> Result<ChatGenerationOutput, ServerError> {
+    // Pick the chat template BEFORE acquiring the weights write lock.
+    // `pick_template` takes a read lock on `model.weights` to inspect
+    // the arch family — taking that read lock from the same thread that
+    // already holds the write lock deadlocks `std::sync::RwLock` on
+    // glibc (non-reentrant), which is what task #127 reported as
+    // `/v1/chat/completions` hanging.
+    let template = pick_template(model);
+    let prompt = render(template, messages);
+
     // Take an exclusive write guard on the weights for the duration
     // of generation. `larql_inference::layer_graph::generate` mutates
     // `weights.tensors` (the per-layer Q4_K dequant cache), so other
@@ -704,9 +717,6 @@ fn run_chat_completion(
         .lock_weights_for_gen()
         .map_err(ServerError::InferenceUnavailable)?;
     let weights: &mut larql_inference::ModelWeights = &mut weights_guard;
-
-    let template = pick_template(model);
-    let prompt = render(template, messages);
 
     let encoding = model
         .tokenizer
