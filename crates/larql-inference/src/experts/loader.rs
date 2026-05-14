@@ -34,7 +34,6 @@ pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<Expert
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     fn fresh_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
