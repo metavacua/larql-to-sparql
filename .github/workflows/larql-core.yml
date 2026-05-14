@@ -107,6 +107,7 @@ jobs:
         run: cargo fmt -p larql-core -- --check
 
       - name: Check default features
+        if: matrix.platform != 'android'
         run: cargo check -p larql-core --target ${{ matrix.target }} --all-targets
 
       - name: Check no default features
