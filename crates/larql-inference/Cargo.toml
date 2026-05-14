@@ -60,10 +60,18 @@ larql-router-protocol = { path = "../larql-router-protocol" }
 async-stream = "0.3"
 futures = "0.3"
 
-# WASM expert registry
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = "29"
+# WASM expert registry (pure-Rust interpreter — no Cranelift, runs on all targets)
+wasmi = "1"
 anyhow = "1"
+
+# REUSE: original wasmtime JIT backend, optional — activate with `expert-jit` feature.
+# Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
+wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"], optional = true }
+wasmtime-wasi = { version = "29", optional = true }
+
+# Portable 64-bit atomics (software fallback on arm32 / other targets without
+# native 64-bit atomic ops).
+portable-atomic = "1"
 
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
@@ -83,6 +91,10 @@ openblas-src = { version = "0.10", features = ["system"] }
 [features]
 default = []
 metal = ["larql-compute/metal"]
+# Enable the original wasmtime JIT/AOT expert backend (desktop platforms only).
+# wasmi remains the active backend regardless; this feature only gates the
+# preserved loader_jit/caller_jit modules for REUSE compliance.
+expert-jit = ["dep:wasmtime", "dep:wasmtime-wasi"]
 
 [[example]]
 name = "cpu_gpu_diag"

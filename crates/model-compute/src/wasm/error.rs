@@ -37,9 +37,3 @@ pub enum SolverError {
     #[error("non-zero solve status: {0}")]
     SolveFailed(u32),
 }
-
-impl From<wasmtime::Error> for SolverError {
-    fn from(e: wasmtime::Error) -> Self {
-        SolverError::Engine(e.to_string())
-    }
-}

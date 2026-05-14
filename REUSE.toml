@@ -1,0 +1,407 @@
+version = 1
+
+# Explicit, machine-readable provenance for every file under version control,
+# per Foundational Axiom A1 (Explicit Provenance) of the project compliance
+# specification, and per Apache-2.0 §4(c) (retain attribution notices).
+#
+# Two distinct copyright holders apply:
+#
+#   - The pre-existing LARQL codebase on `main` (origin:
+#     https://github.com/chrishayuk/larql, created 2026) is attributed to
+#     Chris Hay.
+#
+#   - The deterministic compliance toolchain added in PR
+#     `claude/implement-standardized-tool-PGol9` (2026) is attributed to
+#     Ian Douglas Lawrence Norman McLean.
+#
+# Both are licensed under Apache-2.0. The verbatim Apache-2.0 license text
+# under LICENSES/ is itself unattributed boilerplate (SPDX-FileCopyrightText
+# = NONE), per common REUSE practice.
+
+# ---------------------------------------------------------------------------
+# Default: pre-existing LARQL codebase from `main`. This is the broadest
+# match; specific overrides below carve out the PR-added paths.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Chris Hay"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Compliance-pipeline infrastructure. Originally added by PR
+# `claude/implement-standardized-tool-PGol9`; extended by the licensing-audit
+# pass that produced audit/. Apache-2.0-licensed because the toolchain itself
+# does not consume any AGPL/CC-BY-SA dependency and Apache-2.0 keeps it
+# trivially redistributable as part of either an upstream Apache-2.0 backport
+# or a downstream AGPL distribution.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "REUSE.toml",
+  "NOTICE",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "cliff.toml",
+  "cog.toml",
+  ".pre-commit-config.yaml",
+  ".github/**",
+  "scripts/check_changelog.sh",
+  "scripts/version_preflight.sh",
+  "scripts/check_first_party_licenses.sh",
+  "scripts/ci/**",
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
+  "docs/ci-cd-local.md",
+  "deny.toml",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Verbatim Apache-2.0 license text. Boilerplate; not separately copyrighted.
+# `knowledge/LICENSE` is a duplicate of the top-level Apache-2.0 boilerplate
+# carried by the `larql-knowledge` Python sub-project so it can be installed
+# stand-alone; it receives the same NONE-copyright treatment.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "LICENSE",
+  "LICENSES/Apache-2.0.txt",
+  "knowledge/LICENSE",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Verbatim CC-BY-SA-4.0 license text. Boilerplate; not separately copyrighted.
+[[annotations]]
+path = "LICENSES/CC-BY-SA-4.0.txt"
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# `LICENSES/AGPL-3.0-or-later.txt` is intentionally NOT pre-staged. REUSE 3.3
+# rejects unused license texts under `LICENSES/`, and no first-party file
+# currently declares AGPL-3.0-or-later. The text will be added (via
+# `reuse download AGPL-3.0-or-later`) in the same PR that introduces the
+# first AGPL-licensed first-party file. The forward licensing posture in
+# CONTRIBUTING.md and NOTICE remains unchanged; admission of AGPL transitives
+# is handled at the dependency layer by deny.toml.
+
+# ---------------------------------------------------------------------------
+# Licensing audit deliverables produced by Phase A of the cleanup workstream
+# (see audit/first-party-report.md, audit/dependency-licenses.md,
+# audit/upstream-report.md). Authored by the fork; per the forward licensing
+# posture documented in audit/upstream-report.md, fork-authored documentation
+# is licensed CC-BY-SA-4.0.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "audit/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# ---------------------------------------------------------------------------
+# Upstream-wins merge of https://github.com/chrishayuk/larql @ main into
+# claude/incorporate-upstream-changes-RZWZ7. The merge commit referenced
+# below introduced or last modified the files listed in `path`. Subsequent
+# changes are tracked by `git log` / `git blame`.
+#
+# Provenance strategy chosen by the maintainers for this batch: REUSE.toml
+# annotation block only (no per-file SPDX-FileComment headers). The 32
+# first-party files predating this merge are NOT retroactively stamped.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = [
+  "crates/larql-vindex/docs/compliance-pipeline.md",
+  "crates/larql-vindex/docs/code-quality-pipeline.md",
+  "Makefile",
+  ".github/workflows/extra-platforms.yml",
+  ".github/workflows/quality.yml",
+  ".github/workflows/validate.yml",
+  "scripts/ci/comprehensive.sh",
+  "docs/ci-cd-local.md",
+  "REUSE.toml",
+  "cog.toml",
+  "audit/upstream-report.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "Last modified by fork in merge commit 979f8c90491d76b326a454274020f24f2bca8556"
+
+# ---------------------------------------------------------------------------
+# feat/android-aarch64 — wasmi migration + arm32 portable-atomic fixes.
+#
+# Two categories:
+#
+#   modified — originally Chris Hay's code, changed by Ian Douglas Lawrence
+#              Norman McLean (wasmi interpreter replaces wasmtime JIT;
+#              portable_atomic::AtomicU64 replaces std::sync::atomic::AtomicU64
+#              for arm32 / targets without native 64-bit atomics).
+#
+#   new       — wasi_shim.rs is authored entirely by Ian Douglas Lawrence
+#              Norman McLean (WASI preview1 host shim for wasmi).
+#
+#   preserved — *_jit.rs files are verbatim copies of Chris Hay's original
+#              wasmtime-based implementations, gated behind the `expert-jit`
+#              / `wasm-jit` features and desktop-only OS cfg conditions, kept
+#              for REUSE compliance per Apache-2.0 §4(a).
+# ---------------------------------------------------------------------------
+
+[[annotations]]
+path = [
+  "crates/larql-inference/src/experts/caller.rs",
+  "crates/larql-inference/src/experts/loader.rs",
+  "crates/larql-inference/src/experts/mod.rs",
+  "crates/larql-inference/src/experts/registry.rs",
+  "crates/larql-inference/src/ffn/remote/http.rs",
+  "crates/larql-vindex/src/engine/epoch.rs",
+  "crates/larql-vindex/src/format/down_meta.rs",
+  "crates/larql-vindex/src/format/huggingface/publish/lfs/mod.rs",
+  "crates/larql-vindex/src/format/huggingface/publish/lfs/stream.rs",
+  "crates/larql-vindex/src/index/storage/fp4_store.rs",
+  "crates/model-compute/src/wasm/error.rs",
+  "crates/model-compute/src/wasm/mod.rs",
+  "crates/model-compute/src/wasm/runtime.rs",
+  "crates/model-compute/src/wasm/session.rs",
+  "crates/model-compute/tests/wasm_roundtrip.rs",
+]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Copyright (C) 2026 Chris Hay",
+  "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean",
+]
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "Modified in feat/android-aarch64: wasmi replaces wasmtime; portable_atomic::AtomicU64 for arm32"
+
+[[annotations]]
+path = "crates/larql-inference/src/experts/wasi_shim.rs"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "New in feat/android-aarch64: WASI snapshot-preview1 host shim for wasmi"
+
+[[annotations]]
+path = [
+  "crates/larql-inference/src/experts/caller_jit.rs",
+  "crates/larql-inference/src/experts/loader_jit.rs",
+  "crates/model-compute/src/wasm/runtime_jit.rs",
+  "crates/model-compute/src/wasm/session_jit.rs",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Chris Hay"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "Preserved from chrishayuk/larql: original wasmtime JIT backend retained for Apache-2.0 §4(a) attribution"
+
+# ---------------------------------------------------------------------------
+# Makefile: fork infrastructure (Ian Douglas Lawrence Norman McLean) and also
+# modified by Dallas Pool. Explicit override so both copyright holders appear.
+# ---------------------------------------------------------------------------
+[[annotations]]
+path = "Makefile"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean",
+  "Copyright (C) 2026 Dallas Pool",
+]
+SPDX-License-Identifier = "Apache-2.0"
+
+# ---------------------------------------------------------------------------
+# Individual contributor copyrights derived from `git log` over the
+# chrishayuk/larql history merged into this fork. Each block identifies the
+# files a contributor authored or substantially modified; their copyright adds
+# to (aggregate) Chris Hay's baseline rather than replacing it.
+#
+# Auto-generated files (Cargo.lock, uv.lock, .python-version) are excluded.
+# ---------------------------------------------------------------------------
+
+[[annotations]]
+path = [
+  "AGENTS.md",
+  "CLAUDE.md",
+  "crates/kv-cache-benchmark/src/real_model/runner.rs",
+  "crates/larql-cli/src/commands/diagnostics/parity.rs",
+  "crates/larql-cli/src/commands/extraction/walk_cmd.rs",
+  "crates/larql-cli/src/commands/primary/bench_cmd.rs",
+  "crates/larql-compute/build.rs",
+  "crates/larql-compute/src/lib.rs",
+  "crates/larql-inference/src/layer_graph/generate/gpu.rs",
+  "crates/larql-inference/src/layer_graph/hybrid.rs",
+  "crates/larql-inference/src/layer_graph/predict.rs",
+  "crates/larql-inference/src/lib.rs",
+  "crates/larql-models/src/detect.rs",
+  "crates/larql-models/src/validation.rs",
+  "crates/larql-models/tests/test_architectures.rs",
+  "crates/larql-models/tests/test_loading.rs",
+  "crates/larql-python/pyproject.toml",
+  "crates/larql-python/README.md",
+  "crates/larql-server/src/routes/expert/multi_layer_batch.rs",
+  "crates/larql-vindex/src/extract/build.rs",
+  "crates/larql-vindex/src/index/compute/router.rs",
+  "docs/larql-python.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Dallas Pool"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-cli/src/main.rs",
+  "crates/larql-compute/examples/compare_decode.rs",
+  "crates/larql-compute/examples/compare_formats.rs",
+  "crates/larql-compute/examples/compare_ollama.rs",
+  "crates/larql-compute/examples/compare_pipeline.rs",
+  "crates/larql-compute/examples/demo_architecture.rs",
+  "crates/larql-compute/examples/diag_decode_pipeline.rs",
+  "crates/larql-compute/src/backend/helpers.rs",
+  "crates/larql-inference/src/forward/kv_generate.rs",
+  "crates/larql-inference/src/trace/capture.rs",
+  "crates/larql-inference/src/vindex/loader.rs",
+  "crates/larql-lql/benches/compile.rs",
+  "crates/larql-lql/benches/executor.rs",
+  "crates/larql-lql/src/executor/tests.rs",
+  "crates/larql-server/examples/bench_expert_server.rs",
+  "crates/larql-server/examples/openai_demo.rs",
+  "crates/larql-server/src/shard_loader.rs",
+  "crates/larql-server/tests/common/mod.rs",
+  "crates/larql-server/tests/test_expert_endpoint.rs",
+  "crates/larql-server/tests/test_http_full_routes.rs",
+  "crates/larql-server/tests/test_unit_band_utils.rs",
+  "crates/larql-server/tests/test_unit_state.rs",
+  "crates/larql-vindex/src/extract/build.rs",
+  "crates/larql-vindex/src/format/down_meta.rs",
+  "crates/larql-vindex/tests/test_walker_accuracy.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Dmitry Dorofeev"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-cli/src/commands/extraction/predict_cmd.rs",
+  "crates/larql-compute/Cargo.toml",
+  "crates/larql-inference/Cargo.toml",
+  "crates/larql-inference/src/forward/mod.rs",
+  "crates/larql-inference/src/forward/predict.rs",
+  "crates/larql-models/src/loading/gguf.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 kariboo84"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-cli/src/commands/extraction/qk_rank_cmd.rs",
+  "crates/larql-models/src/loading/gguf.rs",
+  "crates/larql-models/src/quant/ggml.rs",
+  "crates/larql-vindex/src/extract/build.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Michael Duane Mooring"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-cli/Cargo.toml",
+  "crates/larql-cli/src/commands/extraction/compile_cmd/save.rs",
+  "crates/larql-cli/src/commands/extraction/extract_index_cmd.rs",
+  "crates/larql-models/Cargo.toml",
+  "crates/larql-models/src/architectures/deepseek_v4.rs",
+  "crates/larql-models/src/architectures/mod.rs",
+  "crates/larql-models/src/detect.rs",
+  "crates/larql-models/src/loading/safetensors.rs",
+  "crates/larql-vindex/benches/extract_throughput.rs",
+  "crates/larql-vindex/benches/q4k_vs_f32.rs",
+  "crates/larql-vindex/Cargo.toml",
+  "crates/larql-vindex/examples/q4k_demo.rs",
+  "crates/larql-vindex/src/extract/mod.rs",
+  "crates/larql-vindex/src/extract/moe_svd.rs",
+  "crates/larql-vindex/src/extract/streaming/stages/down_meta.rs",
+  "crates/larql-vindex/src/extract/streaming/stages/gate_vectors.rs",
+  "crates/larql-vindex/src/extract/streaming/tensor_io.rs",
+  "crates/larql-vindex/src/format/huggingface/download/mod.rs",
+  "crates/larql-vindex/src/format/huggingface/mod.rs",
+  "crates/larql-vindex/src/walker/test_fixture.rs",
+  "crates/larql-vindex/tests/golden_resume.rs",
+  "crates/larql-vindex/tests/test_streaming_stages_moe.rs",
+  "crates/larql-vindex/tests/test_vindex.rs",
+  "crates/larql-vindex/tests/test_vindex_to_q4k.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Mike Mooring"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-server/Cargo.toml",
+  "crates/larql-server/src/bootstrap.rs",
+  "crates/larql-server/src/error.rs",
+  "crates/larql-server/src/lib.rs",
+  "crates/larql-server/src/openapi.rs",
+  "crates/larql-server/src/routes/describe.rs",
+  "crates/larql-server/src/routes/embed.rs",
+  "crates/larql-server/src/routes/expert/batch_legacy.rs",
+  "crates/larql-server/src/routes/expert/layer_batch.rs",
+  "crates/larql-server/src/routes/expert/mod.rs",
+  "crates/larql-server/src/routes/expert/multi_layer_batch.rs",
+  "crates/larql-server/src/routes/expert/single.rs",
+  "crates/larql-server/src/routes/explain.rs",
+  "crates/larql-server/src/routes/health.rs",
+  "crates/larql-server/src/routes/infer.rs",
+  "crates/larql-server/src/routes/insert.rs",
+  "crates/larql-server/src/routes/models.rs",
+  "crates/larql-server/src/routes/openai/chat.rs",
+  "crates/larql-server/src/routes/openai/completions.rs",
+  "crates/larql-server/src/routes/openai/embeddings.rs",
+  "crates/larql-server/src/routes/patches.rs",
+  "crates/larql-server/src/routes/relations.rs",
+  "crates/larql-server/src/routes/select.rs",
+  "crates/larql-server/src/routes/stats.rs",
+  "crates/larql-server/src/routes/stream.rs",
+  "crates/larql-server/src/routes/topology.rs",
+  "crates/larql-server/src/routes/walk_ffn.rs",
+  "crates/larql-server/src/routes/walk.rs",
+  "crates/larql-server/src/routes/warmup.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Priyanshu Rai"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "nix/example-queries.md",
+  "nix/README.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Dave Seddon"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "crates/larql-compute/csrc/q4_dot.c"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Remi Petiot"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-compute/Cargo.toml",
+  "crates/larql-inference/Cargo.toml",
+  "README.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Spezialk-dev"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "crates/larql-compute/Cargo.toml",
+  "crates/larql-inference/Cargo.toml",
+  "crates/larql-vindex/src/format/huggingface/download/mod.rs",
+  "crates/larql-vindex/src/format/huggingface/mod.rs",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright (C) 2026 Thaddeus Covert"
+SPDX-License-Identifier = "Apache-2.0"

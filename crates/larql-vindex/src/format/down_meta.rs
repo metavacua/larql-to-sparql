@@ -42,7 +42,8 @@ pub fn write_binary(
     down_meta: &[Option<Vec<Option<FeatureMeta>>>],
     top_k_count: usize,
 ) -> Result<usize, VindexError> {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use portable_atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(DOWN_META_BIN);
