@@ -820,27 +820,32 @@ pub fn q4k_q8k_gate_up_neon(
 
 // ── Q6_K × Q8_K matvec ───────────────────────────────────────────────────────
 //
-// Q6_K super-block: 210 bytes per 256 values.
-//   [0..128]   128 bytes: ql — lo4 bits packed 2 per byte (nibble-packed)
-//   [128..192]  64 bytes: qh — hi2 bits packed 4 per byte (2 bits each)
+// Q6_K super-block: 210 bytes per 256 values, llama.cpp wire format.
+// Matches `quantize_q6_k` in this crate and the canonical
+// `larql_models::quant::ggml::dequantize_q6_k`.
+//
+//   [0..128]   128 bytes: ql — lo4 bits, interleaved-stride layout
+//   [128..192]  64 bytes: qh — hi2 bits, packed 4 per byte (2 bits each)
 //   [192..208]  16 bytes: scales — one int8 per 16 elements
 //   [208..210]   2 bytes: d — f16 super-block scale
 //
-// Element i: raw6 = (ql[i/2] >> 4*(i&1)) & 0xF | (((qh[i/4] >> 2*(i%4)) & 3) << 4)
-//            w[i] = d * scales[i/16] * (raw6 - 32)
+// Layout: two halves of 128 elements each. Per half, for l in 0..32:
+//   y[l + 0]  ← (ql[l]     & 0xF) | (((qh[l] >> 0) & 3) << 4) − 32   scale sc[is+0]
+//   y[l + 32] ← (ql[l+32]  & 0xF) | (((qh[l] >> 2) & 3) << 4) − 32   scale sc[is+2]
+//   y[l + 64] ← (ql[l]     >> 4 ) | (((qh[l] >> 4) & 3) << 4) − 32   scale sc[is+4]
+//   y[l + 96] ← (ql[l+32]  >> 4 ) | (((qh[l] >> 6) & 3) << 4) − 32   scale sc[is+6]
+// where is = l/16. Half h uses ql[h*64..], qh[h*32..], sc[h*8..].
 //
-// Dot product with Q8_K activation `q8k`:
-//   out[r] = Σ_blocks d_w * d_y * Σ_{g=0..15} scales[g] * dot_g
-//   where dot_g = Σ_{i in g*16..(g+1)*16} (raw6[i] - 32) * q8k_q[i]
-//
-// The -(raw6 - 32) sign matches llama.cpp's `ggml_vec_dot_q6_K_q8_K`.
-// No `mins` term (Q6_K doesn't have per-group mins — it's symmetric around 32).
+// This is the SAME interleaved layout produced by `quantize_q6_k` and read by
+// `dequantize_row_q6_K` in llama.cpp. The previous sequential layout produced
+// garbled dot products on vindex-extracted Q6_K (off by ~7% on smooth input,
+// much worse on real weights).
 
 /// Q6_K super-block size in bytes (re-export of the wire-format constant).
 const Q6K_BLOCK_BYTES: usize = larql_models::quant::ggml::Q6_K_BLOCK_BYTES;
 
 /// Scalar reference: Q6_K weights × Q8_K activation matvec.
-/// Correctness oracle for the NEON implementation below.
+/// Reads the llama.cpp Q6_K wire format directly.
 pub fn q6k_q8k_matvec_scalar(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -871,23 +876,31 @@ pub fn q6k_q8k_matvec_scalar(
             let q8_qs = &q8k_x.qs[q8_base..q8_base + ELEMS_PER_BLOCK];
 
             let mut sum1: i32 = 0;
-            for (g, scale_byte) in sc.iter().enumerate().take(16usize) {
-                // 16-element group g, using scale sc[g].
-                let scale = *scale_byte as i8 as i32;
-                let mut dot_g: i32 = 0;
-                for k in 0..16usize {
-                    let i = g * 16 + k;
-                    let lo4 = if i & 1 == 0 {
-                        (ql[i / 2] & 0x0F) as i32
-                    } else {
-                        ((ql[i / 2] >> 4) & 0x0F) as i32
-                    };
-                    let hi2 = ((qh[i / 4] >> (2 * (i % 4))) & 0x03) as i32;
-                    let raw6 = lo4 | (hi2 << 4);
-                    let w_i = raw6 - 32;
-                    dot_g += w_i * q8_qs[i] as i32;
+            for half in 0..2usize {
+                let ql_off = half * 64;
+                let qh_off = half * 32;
+                let sc_off = half * 8;
+                let y_off = half * 128;
+                for l in 0..32usize {
+                    let is = l / 16;
+                    let qh_byte = qh[qh_off + l] as i32;
+                    let q1 =
+                        (((ql[ql_off + l] & 0x0F) as i32) | (((qh_byte >> 0) & 0x03) << 4)) - 32;
+                    let q2 = (((ql[ql_off + l + 32] & 0x0F) as i32)
+                        | (((qh_byte >> 2) & 0x03) << 4))
+                        - 32;
+                    let q3 = (((ql[ql_off + l] >> 4) as i32) | (((qh_byte >> 4) & 0x03) << 4)) - 32;
+                    let q4 =
+                        (((ql[ql_off + l + 32] >> 4) as i32) | (((qh_byte >> 6) & 0x03) << 4)) - 32;
+                    let s0 = sc[sc_off + is] as i8 as i32;
+                    let s1 = sc[sc_off + is + 2] as i8 as i32;
+                    let s2 = sc[sc_off + is + 4] as i8 as i32;
+                    let s3 = sc[sc_off + is + 6] as i8 as i32;
+                    sum1 += s0 * q1 * q8_qs[y_off + l] as i32;
+                    sum1 += s1 * q2 * q8_qs[y_off + l + 32] as i32;
+                    sum1 += s2 * q3 * q8_qs[y_off + l + 64] as i32;
+                    sum1 += s3 * q4 * q8_qs[y_off + l + 96] as i32;
                 }
-                sum1 += scale * dot_g;
             }
             acc += d_w * d_y * sum1 as f32;
         }
@@ -897,15 +910,18 @@ pub fn q6k_q8k_matvec_scalar(
 
 /// NEON-accelerated Q6_K × Q8_K matvec for `aarch64`.
 ///
-/// Per 16-element scale group:
-/// 1. Vectorised dequant: 8 ql bytes → lo4[16] via nibble-unpack + vzip.
-///    4 qh bytes → hi2[16] via byte-replicate + vshlq_s8 + mask.
-///    raw6 = lo4 | (hi2 << 4); signed = raw6 - 32 → int8.
-/// 2. One SDOT over the 16 int8 weight × int8 activation products.
-/// 3. scale * dot_g accumulated into sum1.
+/// WARNING: This implementation reads the legacy "sequential nibble"
+/// Q6_K layout (scale group `g` uses ql[g*8..(g+1)*8] / qh[g*4..(g+1)*4]
+/// for elements `g*16..(g+1)*16`). The on-disk Q6_K wire format produced
+/// by `quantize_q6_k` and read by `larql_models::quant::ggml::dequantize_q6_k`
+/// uses the llama.cpp interleaved-stride layout, which is incompatible.
 ///
-/// Final: acc += d_w * d_y * sum1.
-#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
+/// `q6k_q8k_matvec_into` therefore dispatches to the scalar path on all
+/// targets until this kernel is re-vectorised against the canonical
+/// layout. See follow-up issue. Kept for reference; not in the production
+/// dispatch graph.
+#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[allow(dead_code)]
 pub fn q6k_q8k_matvec_neon(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -1012,9 +1028,13 @@ pub fn q6k_q8k_matvec_neon(
     }
 }
 
-/// Public entry point: dispatches to NEON on aarch64, scalar elsewhere.
+/// Public entry point: scalar (llama.cpp wire-format) on all targets.
 /// `w` is a Q6_K weight matrix of `rows` rows × `cols` columns.
 /// `q8k_x` is the pre-quantised activation vector (`cols` elements).
+///
+/// NEON intentionally not dispatched: the existing aarch64 SIMD reads a
+/// legacy sequential layout incompatible with the on-disk Q6_K format.
+/// See `q6k_q8k_matvec_neon` doc for the follow-up.
 pub fn q6k_q8k_matvec_into(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -1022,12 +1042,6 @@ pub fn q6k_q8k_matvec_into(
     rows: usize,
     cols: usize,
 ) {
-    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
-    {
-        q6k_q8k_matvec_neon(out, q8k_x, w, rows, cols);
-        return;
-    }
-    #[allow(unreachable_code)]
     q6k_q8k_matvec_scalar(out, q8k_x, w, rows, cols);
 }
 
@@ -1322,8 +1336,14 @@ mod tests {
         assert!(out.iter().all(|&v| v == 0.0));
     }
 
+    /// Canonical oracle: dequantise via `larql_models::quant::ggml::dequantize_q6_k`
+    /// (mirrors llama.cpp `dequantize_row_q6_K` wire format) and compute the
+    /// f32 reference dot. `q6k_q8k_matvec_scalar` must match — anything
+    /// looser hides a layout bug. The previous comparison-to-`q6k_matvec::dispatch`
+    /// was tautological because both readers used the same (buggy) sequential layout.
     #[test]
-    fn q6k_q8k_matvec_matches_q6k_f32_dispatch_within_noise() {
+    fn q6k_q8k_matvec_matches_canonical_dequant() {
+        use larql_models::quant::ggml::dequantize_q6_k as canonical_dequant_q6_k;
         let cols = 512;
         let rows = 5;
         let x: Vec<f32> = (0..cols).map(|i| (i as f32 * 0.017).sin() * 1.5).collect();
@@ -1331,19 +1351,33 @@ mod tests {
             .map(|i| (i as f32 * 0.006).cos() * 0.7)
             .collect();
         let w_q6 = quantize_q6_k(&w_f32);
+        let w_deq = canonical_dequant_q6_k(&w_q6, rows * cols).expect("dequant q6_k");
 
-        let f32_path = crate::cpu::ops::q6k_matvec::dispatch(&w_q6, &x, rows, cols);
+        // f32 reference: dot(canonical_dequant(w_q6), x) row-wise.
+        let mut f32_ref = vec![0.0f32; rows];
+        for (r, out_r) in f32_ref.iter_mut().enumerate() {
+            let mut acc = 0.0f32;
+            for c in 0..cols {
+                acc += w_deq[r * cols + c] * x[c];
+            }
+            *out_r = acc;
+        }
+
         let q8 = quantize_x_to_q8k(&x);
         let mut q8_path = vec![0.0f32; rows];
         q6k_q8k_matvec_scalar(&mut q8_path, &q8, &w_q6, rows, cols);
 
+        // Q8_K quantisation of `x` introduces at most ~0.5 % activation noise.
+        // Tolerance: relative 1.5 % of the f32 reference magnitude (well above
+        // Q8_K noise, well below any layout-mismatch error which would be O(1)).
         for r in 0..rows {
-            let diff = (f32_path[r] - q8_path[r]).abs();
+            let ref_v = f32_ref[r];
+            let got = q8_path[r];
+            let abs = (ref_v - got).abs();
+            let rel = abs / ref_v.abs().max(1e-6);
             assert!(
-                diff < 1.2e-1,
-                "row {r}: f32={} q8={} diff={diff}",
-                f32_path[r],
-                q8_path[r]
+                rel < 1.5e-2,
+                "row {r}: ref={ref_v} got={got} abs={abs} rel={rel}"
             );
         }
     }
