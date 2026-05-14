@@ -73,6 +73,57 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set Android NDK compiler vars (aarch64)
+        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set Android NDK compiler vars (armv7)
+        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Install OpenBLAS (Linux/ChromeOS)
+        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
       # Cargo deps are big and stable across PRs — separate cache.
       - name: Cache cargo deps
         uses: actions/cache@v5
