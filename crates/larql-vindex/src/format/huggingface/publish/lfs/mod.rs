@@ -30,14 +30,14 @@ use stream::stream_put_with_progress;
 /// a poll thread can report upload progress without per-chunk syscalls.
 pub(super) struct CountingReader<R: std::io::Read> {
     pub(super) inner: R,
-    pub(super) counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub(super) counter: std::sync::Arc<portable_atomic::AtomicU64>,
 }
 
 impl<R: std::io::Read> std::io::Read for CountingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
         self.counter
-            .fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(n as u64, portable_atomic::Ordering::Relaxed);
         Ok(n)
     }
 }
@@ -102,7 +102,7 @@ mod tests {
     fn counting_reader_counts_bytes_read() {
         use std::sync::atomic::Ordering;
         let bytes = b"hello world".to_vec();
-        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
         let mut reader = CountingReader {
             inner: bytes.as_slice(),
             counter: counter.clone(),
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn counting_reader_counter_starts_at_zero() {
         use std::sync::atomic::Ordering;
-        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
         let mut reader = CountingReader {
             inner: std::io::empty(),
             counter: counter.clone(),

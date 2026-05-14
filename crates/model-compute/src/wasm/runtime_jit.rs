@@ -1,11 +1,23 @@
-//! Engine + compiled-module management. The runtime holds a long-lived
-//! `wasmi::Engine`; each `Session::new` creates a fresh `Store` with
-//! the configured limits so calls are isolated.
+//! Engine + compiled-module management — wasmtime JIT/AOT path.
+//!
+//! This module preserves the original wasmtime implementation for REUSE
+//! compliance. It is gated behind the `wasm-jit` feature and compiles only
+//! on platforms where Cranelift is available (Linux, macOS, Windows, FreeBSD).
+//! The universal default is `runtime.rs` (wasmi pure-Rust interpreter).
+#![cfg(all(
+    feature = "wasm-jit",
+    any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "freebsd"
+    )
+))]
 
-use wasmi::{Engine, Module};
+use wasmtime::{Config, Engine, Module};
 
 use super::error::SolverError;
-use super::session::Session;
+use super::session_jit::Session;
 
 /// Per-call resource budget. Defaults: 100M fuel units, 256 linear-memory
 /// pages (16 MiB). CP-SAT solver demo uses ~2M fuel for 9×9 Sudoku.
@@ -35,7 +47,9 @@ impl SolverRuntime {
     }
 
     pub fn with_limits(limits: SolverLimits) -> Result<Self, SolverError> {
-        let engine = Engine::default();
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config).map_err(|e| SolverError::Engine(e.to_string()))?;
         Ok(Self { engine, limits })
     }
 
