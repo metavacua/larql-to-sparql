@@ -195,7 +195,6 @@ jobs:
   mutants:
     name: mutants (cargo-mutants, informational)
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -252,72 +251,13 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------
-  # Q5: Python (PyO3) bindings test surface. The `larql-python` crate
-  # builds a cdylib via maturin under uv, with a tests/ directory that
-  # is not covered by upstream's per-crate workflows.
-  # ---------------------------------------------------------------------
-  python:
-    name: python (maturin develop + pytest)
-    runs-on: ubuntu-24.04
-    if: github.event_name != 'schedule'
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install "${RUST_TOOLCHAIN}" \
-            --profile minimal \
-            --no-self-update
-          rustup default "${RUST_TOOLCHAIN}"
-
-      - name: Install OpenBLAS
-        # `ndarray`'s BLAS backend (pulled transitively by larql-compute /
-        # larql-vindex) links against libopenblas. The ubuntu-24.04
-        # runner does not include it by default; without this step the
-        # final link fails with `cannot find -lopenblas`.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libopenblas-dev
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: quality-python
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      - name: uv sync (dev)
-        working-directory: crates/larql-python
-        run: uv sync --no-install-project --group dev
-
-      - name: maturin develop --release
-        working-directory: crates/larql-python
-        run: uv run --no-sync maturin develop --release
-
-      - name: pytest
-        working-directory: crates/larql-python
-        run: uv run --no-sync pytest tests/ -v
-
-  # ---------------------------------------------------------------------
-  # Q6: Protocol schema lint.
+  # Q5: Protocol schema lint.
   # ---------------------------------------------------------------------
   proto-lint:
     name: proto-lint (buf lint)
     runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
-    continue-on-error: true
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -329,11 +269,11 @@ jobs:
 
       - name: buf lint (server proto)
         working-directory: crates/larql-server/proto
-        run: buf lint || true
+        run: buf lint
 
       - name: buf lint (router proto)
         working-directory: crates/larql-router-protocol/proto
-        run: buf lint || true
+        run: buf lint
 
   # ---------------------------------------------------------------------
   # Aggregate gate.
@@ -341,7 +281,7 @@ jobs:
   quality-gate:
     name: quality gate
     runs-on: ubuntu-24.04
-    needs: [audit, deny, msrv, mutants, python, proto-lint]
+    needs: [audit, deny, msrv, mutants, proto-lint]
     if: github.event_name != 'schedule'
     steps:
       - name: All quality checks passed

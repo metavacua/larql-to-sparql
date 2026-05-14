@@ -1,0 +1,91 @@
+# larql-python PyO3 bindings CI
+#
+# Builds the larql-python cdylib via maturin and runs pytest on the test
+# surface. Python bindings are platform-specific (requires libopenblas);
+# tests run on Linux only. Build is included in per-crate matrix to catch
+# dependency changes; tests are Linux-only since emulation/CI VMs add no
+# practical coverage beyond the host system.
+
+name: larql-python
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-python/**'
+      - 'crates/larql-core/**'
+      - 'crates/larql-inference/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-python.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/larql-python/**'
+      - 'crates/larql-core/**'
+      - 'crates/larql-inference/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-python.yml'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test - ubuntu (maturin + pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopenblas-dev
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: larql-python-cargo
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Format check
+        run: cargo fmt -p larql-python -- --check
+
+      - name: Cargo check (Rust surface)
+        run: cargo check -p larql-python --lib
+
+      - name: Clippy
+        run: cargo clippy -p larql-python --lib --tests --benches --no-deps -- -D warnings
+
+      - name: uv sync (dev dependencies)
+        working-directory: crates/larql-python
+        run: uv sync --no-install-project --group dev
+
+      - name: maturin develop (build PyO3 bindings)
+        working-directory: crates/larql-python
+        run: uv run --no-sync maturin develop --release
+
+      - name: pytest (Python binding tests)
+        working-directory: crates/larql-python
+        run: uv run --no-sync pytest tests/ -v
