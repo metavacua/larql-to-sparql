@@ -32,7 +32,8 @@ use std::time::{Duration, Instant};
 
 use tokio::net::TcpListener;
 
-use larql_compute::{cpu_moe_forward, MoeLayerWeights};
+use larql_compute::cpu::ops::moe::cpu_moe_forward;
+use larql_compute::MoeLayerWeights;
 use larql_inference::{MoeRouterWeights, RemoteMoeBackend, ShardConfig};
 use larql_server::{
     bootstrap::{load_single_vindex, LoadVindexOptions},
@@ -142,7 +143,8 @@ async fn spawn_server(model: LoadedModel) -> String {
 /// share the same `AppState`, so the bench can A/B the same shard via
 /// different transports.
 ///
-/// Unix-only — `tokio::net::UnixListener` is gated on `cfg(unix)`.
+/// Unix-only: `tokio::net::UnixListener` is gated on `cfg(unix)`. The
+/// `--uds` branch in `main` is also gated and errors out on Windows.
 #[cfg(unix)]
 async fn spawn_server_with_uds(model: LoadedModel, uds_path: &std::path::Path) -> (String, String) {
     let state = make_app_state(model);
@@ -497,7 +499,9 @@ fn main() {
     // When --uds is set, bind both TCP and UDS on shard A and route the
     // bench client through the unix:// URL.  Two-shard mode keeps shard B
     // on TCP only — UDS is fundamentally same-host so multi-shard UDS
-    // doesn't change the picture.
+    // doesn't change the picture. Unix-only — Windows builds reject `--uds`
+    // up front because `tokio::net::UnixListener` is `cfg(unix)`.
+    #[cfg(unix)]
     let uds_path_a = std::path::PathBuf::from("/tmp/larql-bench-a.sock");
     let url_a = if use_uds {
         #[cfg(unix)]
@@ -511,12 +515,9 @@ fn main() {
         }
         #[cfg(not(unix))]
         {
-            let _ = &uds_path_a;
-            eprintln!(
-                "--uds is unix-only; ignoring and serving TCP only \
-                 (same-host MoE optimisation is unavailable on this target)"
-            );
-            runtime.block_on(spawn_server(model_a))
+            let _ = model_a;
+            eprintln!("--uds is Unix-only (UnixListener is `cfg(unix)`); rerun without --uds");
+            std::process::exit(1);
         }
     } else {
         let u = runtime.block_on(spawn_server(model_a));
