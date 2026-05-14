@@ -78,9 +78,8 @@ blas-src = { version = "0.10", features = ["openblas"], default-features = false
 openblas-src = { version = "0.10", features = ["system"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-# Android: Use netlib (pure-Rust BLAS) as system OpenBLAS cross-compilation is complex.
-blas-src = { version = "0.10", features = ["netlib"], default-features = false }
-netlib-src = "0.10"
+# Android: netlib (pure-Rust BLAS) via blas-src without system OpenBLAS.
+blas-src = { version = "0.10", features = ["netlib"] }
 
 [features]
 default = []
