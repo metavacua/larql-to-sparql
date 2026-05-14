@@ -130,6 +130,7 @@ jobs:
         run: cargo fmt -p larql-compute -- --check
 
       - name: Check default features
+        if: matrix.platform != 'android'
         run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets
 
       - name: Check all features on Linux/Windows/ChromeOS/Android
