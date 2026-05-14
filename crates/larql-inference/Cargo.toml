@@ -88,6 +88,10 @@ ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
 openblas-src = { version = "0.10", features = ["system"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
+
 [features]
 default = []
 metal = ["larql-compute/metal"]
