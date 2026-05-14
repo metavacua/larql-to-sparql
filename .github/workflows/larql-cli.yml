@@ -176,7 +176,6 @@ jobs:
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests
 
       - name: Tests (CPU only) on Linux/Windows/ChromeOS/Android
-        if: matrix.platform != 'android' && matrix.platform != 'macos'
         run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features
 
       - name: Tests (default features) on macOS

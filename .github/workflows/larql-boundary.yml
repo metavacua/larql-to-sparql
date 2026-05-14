@@ -138,15 +138,12 @@ jobs:
         run: cargo clippy -p larql-boundary --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Unit + integration tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-boundary --target ${{ matrix.target }}
 
       - name: Test benchmarks (compile + smoke)
-        if: matrix.platform != 'android'
         run: cargo test -p larql-boundary --target ${{ matrix.target }} --benches
 
       - name: Run examples
-        if: matrix.platform != 'android'
         run: |
           cargo run -p larql-boundary --target ${{ matrix.target }} --example encode_decode
           cargo run -p larql-boundary --target ${{ matrix.target }} --example gate_decision

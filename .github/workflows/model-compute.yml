@@ -136,19 +136,15 @@ jobs:
         run: cargo clippy -p model-compute --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Tests (default features)
-        if: matrix.platform != 'android'
         run: cargo test -p model-compute --target ${{ matrix.target }}
 
       - name: Tests (native feature)
-        if: matrix.platform != 'android'
         run: cargo test -p model-compute --target ${{ matrix.target }} --no-default-features --features native
 
       - name: Tests (wasm feature)
-        if: matrix.platform != 'android'
         run: cargo test -p model-compute --target ${{ matrix.target }} --no-default-features --features wasm
 
       - name: Benchmark compile/tests
-        if: matrix.platform != 'android'
         run: cargo test -p model-compute --target ${{ matrix.target }} --benches
 
   coverage:

@@ -146,9 +146,7 @@ jobs:
         run: cargo clippy -p kv-cache-benchmark --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Tests
-        if: matrix.platform != 'android'
         run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }}
 
       - name: Benchmark compile/tests
-        if: matrix.platform != 'android'
         run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }} --benches

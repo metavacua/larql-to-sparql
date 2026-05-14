@@ -138,11 +138,9 @@ jobs:
         run: cargo clippy -p larql-models --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Test
-        if: matrix.platform != 'android'
         run: cargo test -p larql-models --target ${{ matrix.target }}
 
       - name: Test benches
-        if: matrix.platform != 'android'
         run: cargo test -p larql-models --target ${{ matrix.target }} --benches
 
   coverage:
