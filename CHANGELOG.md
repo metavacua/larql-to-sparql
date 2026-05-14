@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - MSRV truth, OpenBLAS, version-preflight, changelog
