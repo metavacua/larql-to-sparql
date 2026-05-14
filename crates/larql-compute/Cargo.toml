@@ -23,8 +23,11 @@ blas-src = { version = "0.10", features = ["openblas"], default-features = false
 openblas-src = { version = "0.10", features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# `metal` + `objc` moved to `larql-compute-metal` per ADR-019. This crate
-# is CPU-only; Metal GPU dependencies live in the sibling crate.
+metal = { version = "0.29", optional = true }
+# Direct objc msg_send! for Metal API not exposed by metal-rs 0.29 —
+# specifically `MTLCommandBuffer.GPUStartTime/GPUEndTime` for production
+# decode timing diagnostics. Same major version metal-rs uses internally.
+objc = { version = "0.2", optional = true }
 ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["accelerate"] }
 
@@ -45,8 +48,9 @@ blas-src = { version = "0.10", features = ["accelerate"] }
 # Mac (Accelerate) and Linux (OpenBLAS, which works correctly there)
 # are unchanged.
 [target.'cfg(target_os = "windows")'.dependencies]
-ndarray = "0.16"
-blas-src = { version = "0.10", default-features = false }
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
 
 
 [features]

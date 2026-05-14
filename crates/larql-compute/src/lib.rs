@@ -65,12 +65,7 @@
 //! local to each backend crate, so a new format doesn't require
 //! touching every consumer.
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "freebsd",
-    target_os = "macos",
-    target_os = "windows"
-))]
+#[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos", target_os = "windows"))]
 extern crate blas_src;
 
 pub mod async_compute_backend;

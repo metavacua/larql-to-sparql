@@ -88,8 +88,9 @@ blas-src = { version = "0.10", features = ["accelerate"] }
 # rationale. `blas-src` kept featureless so existing `extern crate
 # blas_src;` declarations still compile.
 [target.'cfg(target_os = "windows")'.dependencies]
-ndarray = "0.16"
-blas-src = { version = "0.10", default-features = false }
+ndarray = { version = "0.16", features = ["blas"] }
+blas-src = { version = "0.10", features = ["openblas"], default-features = false }
+openblas-src = { version = "0.10", features = ["system"] }
 
 [features]
 default = []
