@@ -45,12 +45,10 @@ pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
                     if off + 8 > data.len() {
                         return ERRNO_FAULT;
                     }
-                    let buf_ptr = u32::from_le_bytes(
-                        data[off..off + 4].try_into().unwrap(),
-                    ) as usize;
-                    let buf_len = u32::from_le_bytes(
-                        data[off + 4..off + 8].try_into().unwrap(),
-                    ) as usize;
+                    let buf_ptr =
+                        u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
+                    let buf_len =
+                        u32::from_le_bytes(data[off + 4..off + 8].try_into().unwrap()) as usize;
                     if buf_ptr + buf_len > data.len() {
                         return ERRNO_FAULT;
                     }
@@ -110,9 +108,7 @@ pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
     linker.func_wrap(
         WASI_MODULE,
         "environ_get",
-        |_caller: Caller<ExpertStore>, _environ: i32, _environ_buf: i32| -> i32 {
-            ERRNO_SUCCESS
-        },
+        |_caller: Caller<ExpertStore>, _environ: i32, _environ_buf: i32| -> i32 { ERRNO_SUCCESS },
     )?;
 
     // ── args_sizes_get / args_get ─────────────────────────────────────────────
@@ -128,9 +124,7 @@ pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
     linker.func_wrap(
         WASI_MODULE,
         "args_get",
-        |_caller: Caller<ExpertStore>, _argv: i32, _argv_buf: i32| -> i32 {
-            ERRNO_SUCCESS
-        },
+        |_caller: Caller<ExpertStore>, _argv: i32, _argv_buf: i32| -> i32 { ERRNO_SUCCESS },
     )?;
 
     // ── clock_time_get ────────────────────────────────────────────────────────
@@ -218,9 +212,7 @@ pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
     linker.func_wrap(
         WASI_MODULE,
         "fd_prestat_dir_name",
-        |_caller: Caller<ExpertStore>, _fd: i32, _path: i32, _path_len: i32| -> i32 {
-            ERRNO_BADF
-        },
+        |_caller: Caller<ExpertStore>, _fd: i32, _path: i32, _path_len: i32| -> i32 { ERRNO_BADF },
     )?;
 
     // ── fd_fdstat_get ─────────────────────────────────────────────────────────

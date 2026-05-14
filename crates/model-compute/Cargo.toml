@@ -24,8 +24,12 @@ thiserror = { workspace = true }
 evalexpr = { version = "11", optional = true }
 chrono = { version = "0.4", optional = true, default-features = false, features = ["std", "clock"] }
 
-# Feature: wasm host
-wasmtime = { version = "36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+# Feature: wasm host (pure-Rust interpreter — no JIT, runs on all targets including arm32)
+wasmi = { version = "1", optional = true }
+
+# REUSE: original wasmtime JIT backend, optional — activate with `wasm-jit` feature.
+# Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
+wasmtime = { version = ">=36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
 
 [dev-dependencies]
 wat = "1"
