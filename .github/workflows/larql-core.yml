@@ -27,14 +27,47 @@ on:
 
 jobs:
   test:
-    name: test · ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: test · ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            platform: ubuntu
+            target: x86_64-unknown-linux-gnu
+
+          - name: chromeos-24.04
+            runner: ubuntu-24.04
+            platform: chromeos
+            target: x86_64-unknown-linux-gnu
+
+          - name: windows-latest
+            runner: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+
+          - name: macos-15-arm64
+            runner: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+
+          - name: android-aarch64
+            runner: ubuntu-24.04
+            platform: android
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            runner: ubuntu-24.04
+            platform: android
+            target: armv7-linux-androideabi
+
+    permissions:
+      contents: read
+      checks: write
 
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +77,21 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v4
         with:
@@ -51,48 +99,55 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-core-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-core-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-core-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-core-
 
       - name: Format check
         run: cargo fmt -p larql-core -- --check
 
       - name: Check default features
-        run: cargo check -p larql-core --all-targets
+        run: cargo check -p larql-core --target ${{ matrix.target }} --all-targets
 
       - name: Check no default features
-        run: cargo check -p larql-core --no-default-features --all-targets
+        run: cargo check -p larql-core --target ${{ matrix.target }} --no-default-features --all-targets
 
       - name: Check msgpack-only feature
-        run: cargo check -p larql-core --no-default-features --features msgpack --all-targets
+        run: cargo check -p larql-core --target ${{ matrix.target }} --no-default-features --features msgpack --all-targets
 
       - name: Clippy default features
-        run: cargo clippy -p larql-core --all-targets -- -D warnings
+        run: cargo clippy -p larql-core --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Unit + integration tests
-        run: cargo test -p larql-core
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-core --target ${{ matrix.target }}
 
       - name: Feature matrix tests
+        if: matrix.platform != 'android'
         run: |
-          cargo test -p larql-core --no-default-features
-          cargo test -p larql-core --no-default-features --features msgpack
+          cargo test -p larql-core --target ${{ matrix.target }} --no-default-features
+          cargo test -p larql-core --target ${{ matrix.target }} --no-default-features --features msgpack
 
       - name: Test benchmarks
-        run: cargo test -p larql-core --benches
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-core --target ${{ matrix.target }} --benches
 
       - name: Run examples
+        if: matrix.platform != 'android'
         run: |
-          cargo run -p larql-core --example edge_demo
-          cargo run -p larql-core --example graph_demo
-          cargo run -p larql-core --example algorithm_demo
-          cargo run -p larql-core --example filter_demo
-          cargo run -p larql-core --example serialization_demo
+          cargo run -p larql-core --target ${{ matrix.target }} --example edge_demo
+          cargo run -p larql-core --target ${{ matrix.target }} --example graph_demo
+          cargo run -p larql-core --target ${{ matrix.target }} --example algorithm_demo
+          cargo run -p larql-core --target ${{ matrix.target }} --example filter_demo
+          cargo run -p larql-core --target ${{ matrix.target }} --example serialization_demo
 
   coverage:
     name: coverage · ubuntu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
+
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
