@@ -35,9 +35,8 @@ blas-src = { version = "0.10", features = ["openblas"], default-features = false
 openblas-src = { version = "0.10", features = ["system"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-# Android: Use BLIS (pure-Rust BLAS) for cross-compilation.
-blas-src = { version = "0.10", features = ["blis"], default-features = false }
-blis-src = "0.1"
+# Android: Minimal blas-src without external dependencies.
+blas-src = { version = "0.10", default-features = false }
 
 [features]
 default = []
