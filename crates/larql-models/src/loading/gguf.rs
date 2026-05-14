@@ -369,6 +369,7 @@ impl GgufFile {
             "phi" | "phi2" | "phi3" => "phi",
             "gpt2" => "gpt2",
             "deepseek" | "deepseek2" => "deepseek_v2",
+            "deepseek_v4" | "deepseekv4" => "deepseek_v4",
             other => other,
         };
 
