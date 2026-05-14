@@ -62,8 +62,11 @@ larql-cli         top-level `larql` binary (every subcommand lives in commands/)
 larql-python      PyO3 bindings (maturin-built, module name `larql._native`)
 
 # Portable (no LARQL deps; extract to sibling repo later, name stable)
-model-compute         bounded native kernels (arithmetic/datetime) and optional
-                      wasmtime-hosted WASM modules (features: `native`/`wasm`)
+model-compute         bounded native kernels (arithmetic/datetime); wasmi-hosted
+                      WASM modules (universal default, all platforms including
+                      arm32, features: `native`/`wasm`); original wasmtime JIT
+                      backend preserved for REUSE compliance (desktop only,
+                      feature: `wasm-jit`)
 ```
 
 **Metal is a first-class peer** (ADR-0022, 2026-05-18). `larql-compute-metal`

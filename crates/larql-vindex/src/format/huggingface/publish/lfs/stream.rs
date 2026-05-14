@@ -23,7 +23,7 @@ pub(super) fn stream_put_with_progress(
     use std::sync::mpsc::TryRecvError;
 
     let file = std::fs::File::open(local_path)?;
-    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
     let reader = CountingReader {
         inner: file,
         counter: counter.clone(),

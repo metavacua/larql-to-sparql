@@ -53,7 +53,7 @@ const INFINITE_LOOP_WAT: &str = r#"
   (func (export "solution_len") (result i32) (i32.const 0)))
 "#;
 
-fn compile(runtime: &SolverRuntime, wat: &str) -> wasmtime::Module {
+fn wasm(runtime: &SolverRuntime, wat: &str) -> wasmi::Module {
     let bytes = wat::parse_str(wat).expect("wat parse");
     runtime.compile(&bytes).expect("module compile")
 }
@@ -61,7 +61,7 @@ fn compile(runtime: &SolverRuntime, wat: &str) -> wasmtime::Module {
 #[test]
 fn echo_roundtrip() {
     let runtime = SolverRuntime::new().unwrap();
-    let module = compile(&runtime, ECHO_WAT);
+    let module = wasm(&runtime, ECHO_WAT);
     let mut session = runtime.session(&module).unwrap();
 
     let input = b"hello, model-compute";
@@ -73,7 +73,7 @@ fn echo_roundtrip() {
 fn echo_two_sessions_isolated() {
     // Two sessions on the same module must not share state.
     let runtime = SolverRuntime::new().unwrap();
-    let module = compile(&runtime, ECHO_WAT);
+    let module = wasm(&runtime, ECHO_WAT);
 
     let mut s1 = runtime.session(&module).unwrap();
     let r1 = s1.solve(b"first").unwrap();
@@ -91,7 +91,7 @@ fn fuel_cap_stops_infinite_loop() {
         memory_pages: 16,
     };
     let runtime = SolverRuntime::with_limits(limits).unwrap();
-    let module = compile(&runtime, INFINITE_LOOP_WAT);
+    let module = wasm(&runtime, INFINITE_LOOP_WAT);
     let mut session = runtime.session(&module).unwrap();
 
     let err = session.solve(b"anything").expect_err("should exhaust fuel");
@@ -106,7 +106,7 @@ fn missing_export_errors_clearly() {
     let runtime = SolverRuntime::new().unwrap();
     // Module with memory but no ABI exports
     let wat = r#"(module (memory (export "memory") 1))"#;
-    let module = compile(&runtime, wat);
+    let module = wasm(&runtime, wat);
     let mut session = runtime.session(&module).unwrap();
 
     let err = session.solve(b"").expect_err("should fail");
@@ -137,7 +137,7 @@ fn memory_cap_rejects_grow() {
         memory_pages: 16, // 1 initial + anything trying to grow past 16 should fail
     };
     let runtime = SolverRuntime::with_limits(limits).unwrap();
-    let module = compile(&runtime, MEMORY_HOG_WAT);
+    let module = wasm(&runtime, MEMORY_HOG_WAT);
     let mut session = runtime.session(&module).unwrap();
 
     let err = session
@@ -164,7 +164,7 @@ const FAIL_STATUS_WAT: &str = r#"
 #[test]
 fn nonzero_solve_status_reported() {
     let runtime = SolverRuntime::new().unwrap();
-    let module = compile(&runtime, FAIL_STATUS_WAT);
+    let module = wasm(&runtime, FAIL_STATUS_WAT);
     let mut session = runtime.session(&module).unwrap();
 
     let err = session
@@ -176,13 +176,10 @@ fn nonzero_solve_status_reported() {
 #[test]
 fn large_input_crosses_multiple_pages() {
     let runtime = SolverRuntime::new().unwrap();
-    let module = compile(&runtime, ECHO_WAT);
+    let module = wasm(&runtime, ECHO_WAT);
     let mut session = runtime.session(&module).unwrap();
 
-    // 200 KiB — crosses several 64 KiB pages. Echo module's memory grows
-    // implicitly via linear.memory layout; the echo fixture places output
-    // at offset 4096, so 200 KiB round-trips the full input + output region.
-    // We cap at ~48 KiB to fit within the default 1-page memory of the WAT.
+    // Cap at ~48 KiB to fit within the default 1-page memory of the WAT.
     let input: Vec<u8> = (0..48_000).map(|i| (i % 251) as u8).collect();
     let output = session.solve(&input).expect("solve");
     assert_eq!(output, input);
@@ -191,7 +188,7 @@ fn large_input_crosses_multiple_pages() {
 #[test]
 fn fuel_remaining_decreases_after_call() {
     let runtime = SolverRuntime::new().unwrap();
-    let module = compile(&runtime, ECHO_WAT);
+    let module = wasm(&runtime, ECHO_WAT);
     let mut session = runtime.session(&module).unwrap();
 
     let initial = session.fuel_remaining();

@@ -289,7 +289,7 @@ mod tests {
     /// alone is not granular enough on macOS — we observed two parallel
     /// tests reading the same nanosecond and stomping each other's files).
     struct TempDir(std::path::PathBuf);
-    static TEMPDIR_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static TEMPDIR_SEQ: portable_atomic::AtomicU64 = portable_atomic::AtomicU64::new(0);
     impl TempDir {
         fn new(label: &str) -> Self {
             let base = std::env::temp_dir();

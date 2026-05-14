@@ -1,15 +1,24 @@
+//! wasmtime-based WASM expert caller — JIT path with mutable-store API.
+//!
+//! This module preserves the original wasmtime implementation for REUSE
+//! compliance. It is gated behind the `expert-jit` feature and compiles only
+//! on platforms where Cranelift is available (Linux, macOS, Windows, FreeBSD).
+//! The universal default is `caller.rs` (wasmi pure-Rust interpreter).
+#![cfg(all(
+    feature = "expert-jit",
+    any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "freebsd"
+    )
+))]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use wasmi::{Instance, Memory, Store, TypedFunc};
+use wasmtime::{Instance, Memory, Store, TypedFunc};
 
-use super::loader::ExpertStore;
-
-// Guest ABI export names.
-const WASM_MEMORY: &str = "memory";
-const LARQL_ALLOC: &str = "larql_alloc";
-const LARQL_DEALLOC: &str = "larql_dealloc";
-const LARQL_CALL: &str = "larql_call";
-const LARQL_METADATA: &str = "larql_metadata";
+use super::loader_jit::ExpertStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpertResult {
@@ -36,8 +45,7 @@ pub struct ExpertMetadata {
     pub ops: Vec<OpSpec>,
 }
 
-/// Write a UTF-8 string into WASM linear memory via `larql_alloc`.
-/// Returns (ptr, len) of the allocated buffer.
+/// Write a UTF-8 string into WASM linear memory via `larql_alloc`, return (ptr, len).
 pub(crate) fn write_str(
     store: &mut Store<ExpertStore>,
     instance: &Instance,
@@ -46,27 +54,27 @@ pub(crate) fn write_str(
     let bytes = s.as_bytes();
     let len = bytes.len() as u32;
 
-    let alloc: TypedFunc<u32, u32> = instance.get_typed_func(&*store, LARQL_ALLOC)?;
+    let alloc: TypedFunc<u32, u32> = instance.get_typed_func(&mut *store, "larql_alloc")?;
     let ptr = alloc.call(&mut *store, len)?;
 
     let memory: Memory = instance
-        .get_memory(&*store, WASM_MEMORY)
+        .get_memory(&mut *store, "memory")
         .ok_or_else(|| anyhow::anyhow!("no memory export"))?;
 
-    let offset = ptr as usize;
-    memory.data_mut(&mut *store)[offset..offset + bytes.len()].copy_from_slice(bytes);
+    memory.write(&mut *store, ptr as usize, bytes)?;
     Ok((ptr, len))
 }
 
 /// Read a null-terminated string from WASM linear memory at `ptr`.
-/// Returns the decoded string and the byte count before the null terminator.
+/// Returns the decoded string plus the number of UTF-8 bytes before the null
+/// terminator — callers need this to free the buffer (allocated as `bytes + 1`).
 pub(crate) fn read_cstring(
     store: &mut Store<ExpertStore>,
     instance: &Instance,
     ptr: u32,
 ) -> anyhow::Result<(String, u32)> {
     let memory: Memory = instance
-        .get_memory(&*store, WASM_MEMORY)
+        .get_memory(&mut *store, "memory")
         .ok_or_else(|| anyhow::anyhow!("no memory export"))?;
     let data = memory.data(&*store);
     let start = ptr as usize;
@@ -78,16 +86,20 @@ pub(crate) fn read_cstring(
     Ok((s, end as u32))
 }
 
-/// Call `larql_dealloc(ptr, len)`. Errors are silenced — a failed free must
-/// not mask a successful result.
+/// Call `larql_dealloc(ptr, len)` inside the module. Errors are swallowed: a
+/// failed free should not mask a successful result.
 fn dealloc(store: &mut Store<ExpertStore>, instance: &Instance, ptr: u32, len: u32) {
-    if let Ok(f) = instance.get_typed_func::<(u32, u32), ()>(&*store, LARQL_DEALLOC) {
+    if let Ok(f) = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "larql_dealloc") {
         let _ = f.call(&mut *store, (ptr, len));
     }
 }
 
-/// Call `larql_call(op, args)` and return the parsed `ExpertResult`, or
-/// `None` if the expert declined the op.
+/// Call `larql_call(op, args)` and return the parsed `ExpertResult`, or `None`
+/// if the expert declined to handle the op.
+///
+/// Every buffer allocated inside the module's linear memory during this call
+/// (op string, args string, result string) is freed via `larql_dealloc` before
+/// returning. Without this, a long-running registry leaks ~140 bytes per call.
 pub fn call(
     store: &mut Store<ExpertStore>,
     instance: &Instance,
@@ -99,7 +111,7 @@ pub fn call(
     let (args_ptr, args_len) = write_str(store, instance, &args_json)?;
 
     let handle: TypedFunc<(u32, u32, u32, u32), u32> =
-        instance.get_typed_func(&*store, LARQL_CALL)?;
+        instance.get_typed_func(&mut *store, "larql_call")?;
     let result_ptr = handle.call(&mut *store, (op_ptr, op_len, args_ptr, args_len))?;
 
     dealloc(store, instance, op_ptr, op_len);
@@ -110,7 +122,8 @@ pub fn call(
     }
 
     let (json, json_len) = read_cstring(store, instance, result_ptr)?;
-    // `write_cstring` inside the expert allocates `json_len + 1` bytes.
+    // `write_cstring` inside the expert allocates `json_len + 1` bytes (string
+    // plus trailing null). Free the full allocation.
     dealloc(store, instance, result_ptr, json_len + 1);
 
     let result: ExpertResult = serde_json::from_str(&json)?;
@@ -122,7 +135,7 @@ pub fn metadata(
     store: &mut Store<ExpertStore>,
     instance: &Instance,
 ) -> anyhow::Result<ExpertMetadata> {
-    let meta_fn: TypedFunc<(), u32> = instance.get_typed_func(&*store, LARQL_METADATA)?;
+    let meta_fn: TypedFunc<(), u32> = instance.get_typed_func(&mut *store, "larql_metadata")?;
     let ptr = meta_fn.call(&mut *store, ())?;
     let (json, json_len) = read_cstring(&mut *store, instance, ptr)?;
     dealloc(store, instance, ptr, json_len + 1);

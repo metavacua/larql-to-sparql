@@ -3,21 +3,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
-use wasmtime::{Engine, Instance, Module, Store};
+use wasmi::{Engine, Instance, Module, Store};
 
 use super::caller::{self, ExpertMetadata, ExpertResult};
 use super::loader::{instantiate, load_module, ExpertStore};
 
-/// Runtime information about an expert's WASM module — used to prove (in
-/// demos, tests, tooling) that calls actually traverse the sandbox.
+/// Runtime information about an expert's WASM module.
 #[derive(Debug, Clone)]
 pub struct WasmInfo {
     /// Path to the `.wasm` file the module was loaded from.
     pub path: PathBuf,
     /// Size of the on-disk WASM file in bytes.
     pub wasm_bytes: u64,
-    /// Current size of the module's linear memory in 64 KiB pages. Zero if the
-    /// module has not yet been instantiated (lazy-load state).
+    /// Current size of the module's linear memory in 64 KiB pages. Zero if
+    /// the module has not yet been instantiated (lazy-load state).
     pub memory_pages: u64,
     /// Whether a live `Store` + `Instance` pair is currently resident.
     pub instantiated: bool,
@@ -26,8 +25,7 @@ pub struct WasmInfo {
 /// A single loaded expert module.
 ///
 /// The compiled `Module` is held from load time, but the `Store` + `Instance`
-/// pair (the expensive part — ~1 MiB of linear memory per expert) is created
-/// lazily on the first `call()` and reused thereafter.
+/// pair is created lazily on the first `call()` and reused thereafter.
 pub struct ExpertHandle {
     pub metadata: ExpertMetadata,
     path: PathBuf,
@@ -38,17 +36,14 @@ pub struct ExpertHandle {
 }
 
 impl ExpertHandle {
-    /// Invoke `op` on this expert. Returns `None` if the expert declines (e.g.
-    /// the op is in its advertised set but the args don't validate).
+    /// Invoke `op` on this expert. Returns `None` if the expert declines.
     pub fn call(&mut self, op: &str, args: &Value) -> anyhow::Result<Option<ExpertResult>> {
         self.ensure_live()?;
         let (store, instance) = self.live.as_mut().expect("ensure_live");
         caller::call(store, instance, op, args)
     }
 
-    /// Drop the live `Store` + `Instance` so this expert no longer occupies
-    /// linear memory. The next `call()` will re-instantiate from the cached
-    /// compiled `Module` (cheap — microseconds, not milliseconds).
+    /// Drop the live `Store` + `Instance` to release linear memory.
     pub fn evict(&mut self) {
         self.live = None;
     }
@@ -57,7 +52,7 @@ impl ExpertHandle {
     pub fn wasm_info(&mut self) -> WasmInfo {
         let pages = match self.live.as_mut() {
             Some((store, instance)) => instance
-                .get_memory(&mut *store, "memory")
+                .get_memory(&*store, "memory")
                 .map(|m| m.size(&*store))
                 .unwrap_or(0),
             None => 0,
@@ -79,13 +74,6 @@ impl ExpertHandle {
 }
 
 /// Registry of all loaded WASM experts.
-///
-/// Dispatch is by op name (e.g. `"gcd"`, `"base64_encode"`). Each expert
-/// advertises the ops it handles in its metadata; the registry builds an
-/// op→expert index on load. Experts are compiled at load time but are not
-/// instantiated until their first call — calling `call()` for an op backed by
-/// expert X materialises X's linear memory; experts never touched stay at
-/// zero-pages until used.
 pub struct ExpertRegistry {
     engine: Arc<Engine>,
     experts: Vec<ExpertHandle>,
@@ -139,7 +127,6 @@ impl ExpertRegistry {
         self.op_index.clear();
         for (i, h) in self.experts.iter().enumerate() {
             for op in &h.metadata.ops {
-                // First writer wins (lower tier sorts earlier, so lower tier takes priority).
                 self.op_index.entry(op.name.clone()).or_insert(i);
             }
         }
@@ -166,9 +153,7 @@ impl ExpertRegistry {
         self.experts.iter().map(|h| &h.metadata).collect()
     }
 
-    /// Every (op, args-schema) pair this registry can dispatch, sorted by
-    /// op name. Use this to render prompts that tell the model the exact
-    /// argument keys per op.
+    /// Every (op, args-schema) pair this registry can dispatch, sorted by op name.
     pub fn op_specs(&self) -> Vec<&crate::experts::caller::OpSpec> {
         let mut specs: Vec<&crate::experts::caller::OpSpec> = self
             .experts
@@ -202,9 +187,7 @@ impl ExpertRegistry {
             .collect()
     }
 
-    /// Drop the live `Store` + `Instance` for every expert. The compiled
-    /// modules stay loaded, so the next `call()` will only pay the
-    /// microsecond-scale instantiation cost — not recompilation.
+    /// Drop the live `Store` + `Instance` for every expert.
     pub fn evict_all(&mut self) {
         for h in &mut self.experts {
             h.evict();
@@ -232,8 +215,6 @@ impl Default for ExpertRegistry {
 
 fn load_one(engine: &Arc<Engine>, path: &Path) -> anyhow::Result<ExpertHandle> {
     let module = load_module(engine, path)?;
-    // Instantiate once only to read metadata, then drop the instance so the
-    // expert's linear memory is reclaimed until an actual call arrives.
     let (mut store, instance) = instantiate(engine, &module)?;
     let meta = caller::metadata(&mut store, &instance)?;
     let wasm_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
