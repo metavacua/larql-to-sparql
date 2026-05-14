@@ -10,7 +10,7 @@ name: larql-kv
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-kv/**'
       - 'crates/larql-inference/src/test_utils.rs'
@@ -26,7 +26,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-kv.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-kv/**'
       - 'crates/larql-inference/src/test_utils.rs'

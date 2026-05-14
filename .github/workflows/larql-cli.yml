@@ -16,7 +16,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'
@@ -29,7 +29,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-cli.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'

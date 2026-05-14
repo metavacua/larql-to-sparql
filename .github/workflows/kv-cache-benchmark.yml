@@ -8,7 +8,7 @@ name: kv-cache-benchmark
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/kv-cache-benchmark/**'
       - 'crates/larql-inference/**'
@@ -17,7 +17,7 @@ on:
       - 'Makefile'
       - '.github/workflows/kv-cache-benchmark.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/kv-cache-benchmark/**'
       - 'crates/larql-inference/**'
