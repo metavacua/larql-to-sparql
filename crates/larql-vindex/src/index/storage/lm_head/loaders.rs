@@ -57,9 +57,6 @@ impl VectorIndex {
         if self.vocab_size == 0 && self.hidden_size > 0 {
             let bytes = mmap.len();
             let denom = self.hidden_size * Q4_BYTES_PER_ELEM_NUM;
-            // u64 multiply guards 32-bit hosts (e.g. armv7-android) where
-            // `bytes * Q4_BYTES_PER_ELEM_DEN` can overflow `usize` before the
-            // division for large lm_head mmaps.
             if let Some(vocab) = (bytes as u64)
                 .checked_mul(Q4_BYTES_PER_ELEM_DEN as u64)
                 .and_then(|v| v.checked_div(denom as u64))
