@@ -120,17 +120,25 @@ jobs:
         with:
           platforms: arm64,arm
 
-      - name: Set Android QEMU test runner (aarch64)
-        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
-        run: echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER=qemu-aarch64-static" >> $GITHUB_ENV
-
-      - name: Set Android QEMU test runner (armv7)
-        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
-        run: echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUNNER=qemu-arm-static" >> $GITHUB_ENV
-
-      - name: Enable static CRT for Android
+      - name: Set Android QEMU test runners
         if: matrix.platform == 'android'
-        run: echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
+        run: |
+          QEMU_AARCH64=$(which qemu-aarch64-static 2>/dev/null || which qemu-aarch64)
+          QEMU_ARM=$(which qemu-arm-static 2>/dev/null || which qemu-arm)
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER=${QEMU_AARCH64}" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUNNER=${QEMU_ARM}" >> $GITHUB_ENV
+
+      - name: Enable static CRT and redirect libc++_shared for Android
+        if: matrix.platform == 'android'
+        run: |
+          echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
+          NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          LIBUNWIND_AARCH64=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/aarch64*" | head -1)
+          LIBUNWIND_ARM=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/arm*" ! -path "*/aarch64*" | head -1)
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_static.a ${LIBUNWIND_AARCH64})" \
+            > "${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_shared.a"
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
+            > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v5
