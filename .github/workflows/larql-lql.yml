@@ -129,14 +129,6 @@ jobs:
         with:
           platforms: arm64,arm
 
-      - name: Set Android QEMU test runners
-        if: matrix.platform == 'android'
-        run: |
-          QEMU_AARCH64=$(which qemu-aarch64-static 2>/dev/null || which qemu-aarch64)
-          QEMU_ARM=$(which qemu-arm-static 2>/dev/null || which qemu-arm)
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER=${QEMU_AARCH64}" >> $GITHUB_ENV
-          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUNNER=${QEMU_ARM}" >> $GITHUB_ENV
-
       - name: Enable static CRT and redirect libc++_shared for Android
         if: matrix.platform == 'android'
         run: |
