@@ -165,11 +165,9 @@ jobs:
         run: cargo clippy -p larql-lql --target ${{ matrix.target }} --all-targets --no-deps -- -D warnings
 
       - name: Tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-lql --target ${{ matrix.target }}
 
       - name: Benchmark compile/tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-lql --target ${{ matrix.target }} --benches
 
   coverage:

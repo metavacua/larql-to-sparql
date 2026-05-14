@@ -129,7 +129,6 @@ jobs:
         run: cargo fmt -p larql-core -- --check
 
       - name: Check default features
-        if: matrix.platform != 'android'
         run: cargo check -p larql-core --target ${{ matrix.target }} --all-targets
 
       - name: Check no default features
@@ -142,21 +141,17 @@ jobs:
         run: cargo clippy -p larql-core --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Unit + integration tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-core --target ${{ matrix.target }}
 
       - name: Feature matrix tests
-        if: matrix.platform != 'android'
         run: |
           cargo test -p larql-core --target ${{ matrix.target }} --no-default-features
           cargo test -p larql-core --target ${{ matrix.target }} --no-default-features --features msgpack
 
       - name: Test benchmarks
-        if: matrix.platform != 'android'
         run: cargo test -p larql-core --target ${{ matrix.target }} --benches
 
       - name: Run examples
-        if: matrix.platform != 'android'
         run: |
           cargo run -p larql-core --target ${{ matrix.target }} --example edge_demo
           cargo run -p larql-core --target ${{ matrix.target }} --example graph_demo

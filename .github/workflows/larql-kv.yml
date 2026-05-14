@@ -180,11 +180,9 @@ jobs:
         run: cargo clippy -p larql-kv --target ${{ matrix.target }} --all-targets --no-deps -- -D warnings
 
       - name: Tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-kv --target ${{ matrix.target }}
 
       - name: Benchmark compile/tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-kv --target ${{ matrix.target }} --benches
 
   coverage:

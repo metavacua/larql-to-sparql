@@ -147,15 +147,12 @@ jobs:
         run: cargo clippy -p larql-router-protocol --target ${{ matrix.target }} --lib --no-deps -- -D warnings
 
       - name: Tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-router --target ${{ matrix.target }}
 
       - name: Tests (protocol)
-        if: matrix.platform != 'android'
         run: cargo test -p larql-router-protocol --target ${{ matrix.target }}
 
       - name: Benchmark compile/tests
-        if: matrix.platform != 'android'
         run: cargo test -p larql-router --target ${{ matrix.target }} --benches
 
   coverage:
