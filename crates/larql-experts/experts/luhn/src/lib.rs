@@ -18,9 +18,9 @@ expert_exports!(
     description = "Luhn algorithm: validation, check-digit generation, card-network detection",
     version = "0.2.0",
     ops = [
-        ("check",                ["number"]),
+        ("check", ["number"]),
         ("generate_check_digit", ["number"]),
-        ("card_type",            ["number"]),
+        ("card_type", ["number"]),
     ],
     dispatch = dispatch
 );
@@ -45,17 +45,32 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
 }
 
 fn digits_of(s: &str) -> Option<Vec<u8>> {
-    let v: Vec<u8> = s.chars().filter(|c| c.is_ascii_digit()).map(|c| c as u8 - b'0').collect();
-    if v.is_empty() { None } else { Some(v) }
+    let v: Vec<u8> = s
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .map(|c| c as u8 - b'0')
+        .collect();
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 
 fn luhn_check(digits: &[u8]) -> bool {
-    if digits.len() < 2 { return false; }
+    if digits.len() < 2 {
+        return false;
+    }
     let mut sum = 0u32;
     let mut double = false;
     for &d in digits.iter().rev() {
         let mut n = d as u32;
-        if double { n *= 2; if n > 9 { n -= 9; } }
+        if double {
+            n *= 2;
+            if n > 9 {
+                n -= 9;
+            }
+        }
         sum += n;
         double = !double;
     }
@@ -67,7 +82,12 @@ fn luhn_generate(digits: &[u8]) -> u8 {
     let mut double = true;
     for &d in digits.iter().rev() {
         let mut n = d as u32;
-        if double { n *= 2; if n > 9 { n -= 9; } }
+        if double {
+            n *= 2;
+            if n > 9 {
+                n -= 9;
+            }
+        }
         sum += n;
         double = !double;
     }
@@ -75,10 +95,19 @@ fn luhn_generate(digits: &[u8]) -> u8 {
 }
 
 fn card_type(digits: &[u8]) -> &'static str {
-    if digits.is_empty() { return "unknown"; }
+    if digits.is_empty() {
+        return "unknown";
+    }
     let first = digits[0];
-    let first_two = if digits.len() >= 2 { digits[0] * 10 + digits[1] } else { 0 };
-    let first_four: u32 = digits.iter().take(4).fold(0u32, |acc, &d| acc * 10 + d as u32);
+    let first_two = if digits.len() >= 2 {
+        digits[0] * 10 + digits[1]
+    } else {
+        0
+    };
+    let first_four: u32 = digits
+        .iter()
+        .take(4)
+        .fold(0u32, |acc, &d| acc * 10 + d as u32);
     match first {
         4 if digits.len() == 16 || digits.len() == 13 => "visa",
         5 if (51..=55).contains(&first_two) => "mastercard",

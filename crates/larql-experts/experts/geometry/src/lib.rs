@@ -31,24 +31,24 @@ expert_exports!(
     description = "Geometry: areas, perimeters, volumes, Pythagorean theorem",
     version = "0.2.0",
     ops = [
-        ("circle_area",          ["r"]),
+        ("circle_area", ["r"]),
         ("circle_circumference", ["r"]),
-        ("circle_diameter",      ["r"]),
-        ("sphere_volume",        ["r"]),
-        ("sphere_surface_area",  ["r"]),
-        ("cylinder_volume",      ["r", "h"]),
-        ("cone_volume",          ["r", "h"]),
-        ("cube_volume",          ["s"]),
-        ("box_volume",           ["l", "w", "h"]),
-        ("square_area",          ["s"]),
-        ("square_perimeter",     ["s"]),
-        ("rectangle_area",       ["l", "w"]),
-        ("rectangle_perimeter",  ["l", "w"]),
-        ("triangle_area_bh",     ["base", "height"]),
-        ("triangle_area_heron",  ["a", "b", "c"]),
-        ("trapezoid_area",       ["a", "b", "h"]),
-        ("ellipse_area",         ["a", "b"]),
-        ("hypotenuse",           ["a", "b"]),
+        ("circle_diameter", ["r"]),
+        ("sphere_volume", ["r"]),
+        ("sphere_surface_area", ["r"]),
+        ("cylinder_volume", ["r", "h"]),
+        ("cone_volume", ["r", "h"]),
+        ("cube_volume", ["s"]),
+        ("box_volume", ["l", "w", "h"]),
+        ("square_area", ["s"]),
+        ("square_perimeter", ["s"]),
+        ("rectangle_area", ["l", "w"]),
+        ("rectangle_perimeter", ["l", "w"]),
+        ("triangle_area_bh", ["base", "height"]),
+        ("triangle_area_heron", ["a", "b", "c"]),
+        ("trapezoid_area", ["a", "b", "h"]),
+        ("ellipse_area", ["a", "b"]),
+        ("hypotenuse", ["a", "b"]),
     ],
     dispatch = dispatch
 );
@@ -66,27 +66,37 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         }
         "sphere_surface_area" => Some(json!(4.0 * PI * sq(arg_f64(args, "r")?))),
         "cylinder_volume" => Some(json!(PI * sq(arg_f64(args, "r")?) * arg_f64(args, "h")?)),
-        "cone_volume" => Some(json!(PI * sq(arg_f64(args, "r")?) * arg_f64(args, "h")? / 3.0)),
+        "cone_volume" => Some(json!(
+            PI * sq(arg_f64(args, "r")?) * arg_f64(args, "h")? / 3.0
+        )),
         "cube_volume" => {
             let s = arg_f64(args, "s")?;
             Some(json!(s * s * s))
         }
-        "box_volume" => Some(json!(arg_f64(args, "l")? * arg_f64(args, "w")? * arg_f64(args, "h")?)),
+        "box_volume" => Some(json!(
+            arg_f64(args, "l")? * arg_f64(args, "w")? * arg_f64(args, "h")?
+        )),
         "square_area" => Some(json!(sq(arg_f64(args, "s")?))),
         "square_perimeter" => Some(json!(4.0 * arg_f64(args, "s")?)),
         "rectangle_area" => Some(json!(arg_f64(args, "l")? * arg_f64(args, "w")?)),
         "rectangle_perimeter" => Some(json!(2.0 * (arg_f64(args, "l")? + arg_f64(args, "w")?))),
-        "triangle_area_bh" => Some(json!(0.5 * arg_f64(args, "base")? * arg_f64(args, "height")?)),
+        "triangle_area_bh" => Some(json!(
+            0.5 * arg_f64(args, "base")? * arg_f64(args, "height")?
+        )),
         "triangle_area_heron" => {
             let a = arg_f64(args, "a")?;
             let b = arg_f64(args, "b")?;
             let c = arg_f64(args, "c")?;
             let s = (a + b + c) / 2.0;
             let inside = s * (s - a) * (s - b) * (s - c);
-            if inside < 0.0 { return None; }
+            if inside < 0.0 {
+                return None;
+            }
             Some(json!(inside.sqrt()))
         }
-        "trapezoid_area" => Some(json!(0.5 * (arg_f64(args, "a")? + arg_f64(args, "b")?) * arg_f64(args, "h")?)),
+        "trapezoid_area" => Some(json!(
+            0.5 * (arg_f64(args, "a")? + arg_f64(args, "b")?) * arg_f64(args, "h")?
+        )),
         "ellipse_area" => Some(json!(PI * arg_f64(args, "a")? * arg_f64(args, "b")?)),
         "hypotenuse" => {
             let a = arg_f64(args, "a")?;
@@ -97,4 +107,6 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
     }
 }
 
-fn sq(x: f64) -> f64 { x * x }
+fn sq(x: f64) -> f64 {
+    x * x
+}

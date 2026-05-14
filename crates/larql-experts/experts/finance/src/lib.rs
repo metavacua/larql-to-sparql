@@ -25,15 +25,18 @@ expert_exports!(
     description = "Finance: future/present value, interest, mortgage, NPV, Bayes, Kelly, ROI",
     version = "0.2.0",
     ops = [
-        ("future_value",      ["pv", "rate_pct", "years", "compounding"]),
-        ("present_value",     ["fv", "rate_pct", "years"]),
+        ("future_value", ["pv", "rate_pct", "years", "compounding"]),
+        ("present_value", ["fv", "rate_pct", "years"]),
         ("compound_interest", ["principal", "rate_pct", "years"]),
-        ("simple_interest",   ["principal", "rate_pct", "years"]),
-        ("mortgage_payment",  ["principal", "annual_rate_pct", "years"]),
-        ("npv",               ["cash_flows", "discount_pct"]),
-        ("bayes",             ["p_b_given_a", "p_a", "p_b"]),
-        ("kelly",             ["p", "b"]),
-        ("roi",               ["gain", "cost"]),
+        ("simple_interest", ["principal", "rate_pct", "years"]),
+        (
+            "mortgage_payment",
+            ["principal", "annual_rate_pct", "years"]
+        ),
+        ("npv", ["cash_flows", "discount_pct"]),
+        ("bayes", ["p_b_given_a", "p_a", "p_b"]),
+        ("kelly", ["p", "b"]),
+        ("roi", ["gain", "cost"]),
     ],
     dispatch = dispatch
 );
@@ -44,7 +47,10 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
             let pv = arg_f64(args, "pv")?;
             let rate_pct = arg_f64(args, "rate_pct")?;
             let years = arg_u64(args, "years")? as u32;
-            let compounding = args.get("compounding").and_then(|v| v.as_str()).unwrap_or("annual");
+            let compounding = args
+                .get("compounding")
+                .and_then(|v| v.as_str())
+                .unwrap_or("annual");
             let (periods, r) = periods_and_rate(years, rate_pct, compounding);
             Some(json!(pv * pow_int(1.0 + r, periods)))
         }
@@ -73,7 +79,9 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
             let years = arg_f64(args, "years")?;
             let n = (years * 12.0) as u32;
             let r = annual_pct / 100.0 / 12.0;
-            if r == 0.0 { return Some(json!(principal / n as f64)); }
+            if r == 0.0 {
+                return Some(json!(principal / n as f64));
+            }
             let factor = pow_int(1.0 + r, n);
             Some(json!(principal * r * factor / (factor - 1.0)))
         }
@@ -91,20 +99,26 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
             let p_b_given_a = arg_f64(args, "p_b_given_a")?;
             let p_a = arg_f64(args, "p_a")?;
             let p_b = arg_f64(args, "p_b")?;
-            if p_b == 0.0 { return Some(Value::Null); }
+            if p_b == 0.0 {
+                return Some(Value::Null);
+            }
             Some(json!(p_b_given_a * p_a / p_b))
         }
         "kelly" => {
             let p = arg_f64(args, "p")?;
             let b = arg_f64(args, "b")?;
-            if b == 0.0 { return Some(Value::Null); }
+            if b == 0.0 {
+                return Some(Value::Null);
+            }
             let q = 1.0 - p;
             Some(json!(((b * p - q) / b).max(0.0)))
         }
         "roi" => {
             let gain = arg_f64(args, "gain")?;
             let cost = arg_f64(args, "cost")?;
-            if cost == 0.0 { return Some(Value::Null); }
+            if cost == 0.0 {
+                return Some(Value::Null);
+            }
             // returned as a fraction; caller multiplies by 100 for percentage display.
             Some(json!((gain - cost) / cost))
         }
@@ -125,7 +139,9 @@ fn pow_int(x: f64, n: u32) -> f64 {
     let mut base = x;
     let mut exp = n;
     while exp > 0 {
-        if exp & 1 == 1 { r *= base; }
+        if exp & 1 == 1 {
+            r *= base;
+        }
         base *= base;
         exp >>= 1;
     }

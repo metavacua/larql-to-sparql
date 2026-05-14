@@ -22,18 +22,19 @@ use expert_interface::{arg_f64, expert_exports, json, Value};
 expert_exports!(
     id = "trig",
     tier = 1,
-    description = "Trigonometry: sin, cos, tan, arc functions, degree/radian conversion (angles in radians)",
+    description =
+        "Trigonometry: sin, cos, tan, arc functions, degree/radian conversion (angles in radians)",
     version = "0.2.0",
     ops = [
-        ("sin",        ["x"]),
-        ("cos",        ["x"]),
-        ("tan",        ["x"]),
-        ("asin",       ["x"]),
-        ("acos",       ["x"]),
-        ("atan",       ["x"]),
-        ("sec",        ["x"]),
-        ("csc",        ["x"]),
-        ("cot",        ["x"]),
+        ("sin", ["x"]),
+        ("cos", ["x"]),
+        ("tan", ["x"]),
+        ("asin", ["x"]),
+        ("acos", ["x"]),
+        ("atan", ["x"]),
+        ("sec", ["x"]),
+        ("csc", ["x"]),
+        ("cot", ["x"]),
         ("deg_to_rad", ["deg"]),
         ("rad_to_deg", ["rad"]),
     ],
@@ -47,29 +48,53 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "tan" => {
             let x = arg_f64(args, "x")?;
             let c = x.cos();
-            if c.abs() < 1e-14 { Some(Value::Null) } else { Some(json!(x.sin() / c)) }
+            if c.abs() < 1e-14 {
+                Some(Value::Null)
+            } else {
+                Some(json!(x.sin() / c))
+            }
         }
         "asin" => {
             let x = arg_f64(args, "x")?;
-            if !(-1.0..=1.0).contains(&x) { Some(Value::Null) } else { Some(json!(x.asin())) }
+            if !(-1.0..=1.0).contains(&x) {
+                Some(Value::Null)
+            } else {
+                Some(json!(x.asin()))
+            }
         }
         "acos" => {
             let x = arg_f64(args, "x")?;
-            if !(-1.0..=1.0).contains(&x) { Some(Value::Null) } else { Some(json!(x.acos())) }
+            if !(-1.0..=1.0).contains(&x) {
+                Some(Value::Null)
+            } else {
+                Some(json!(x.acos()))
+            }
         }
         "atan" => Some(json!(arg_f64(args, "x")?.atan())),
         "sec" => {
             let c = arg_f64(args, "x")?.cos();
-            if c.abs() < 1e-14 { Some(Value::Null) } else { Some(json!(1.0 / c)) }
+            if c.abs() < 1e-14 {
+                Some(Value::Null)
+            } else {
+                Some(json!(1.0 / c))
+            }
         }
         "csc" => {
             let s = arg_f64(args, "x")?.sin();
-            if s.abs() < 1e-14 { Some(Value::Null) } else { Some(json!(1.0 / s)) }
+            if s.abs() < 1e-14 {
+                Some(Value::Null)
+            } else {
+                Some(json!(1.0 / s))
+            }
         }
         "cot" => {
             let x = arg_f64(args, "x")?;
             let s = x.sin();
-            if s.abs() < 1e-14 { Some(Value::Null) } else { Some(json!(x.cos() / s)) }
+            if s.abs() < 1e-14 {
+                Some(Value::Null)
+            } else {
+                Some(json!(x.cos() / s))
+            }
         }
         "deg_to_rad" => Some(json!(arg_f64(args, "deg")?.to_radians())),
         "rad_to_deg" => Some(json!(arg_f64(args, "rad")?.to_degrees())),
