@@ -69,10 +69,20 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
                     .map(|(i, &c)| (c, (row >> (vars.len() - 1 - i)) & 1 == 1))
                     .collect();
                 let r = expr.eval(&assignment);
-                if !r { all_true = false; }
-                if r { all_false = false; }
+                if !r {
+                    all_true = false;
+                }
+                if r {
+                    all_false = false;
+                }
             }
-            Some(json!(if all_true { "tautology" } else if all_false { "contradiction" } else { "contingent" }))
+            Some(json!(if all_true {
+                "tautology"
+            } else if all_false {
+                "contradiction"
+            } else {
+                "contingent"
+            }))
         }
         _ => None,
     }
@@ -81,7 +91,18 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
 // ── Expression model ─────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
-enum Tok { Var(char), And, Or, Not, Imp, Iff, LP, RP, T, F }
+enum Tok {
+    Var(char),
+    And,
+    Or,
+    Not,
+    Imp,
+    Iff,
+    LP,
+    RP,
+    T,
+    F,
+}
 
 fn tokenize(s: &str) -> Vec<Tok> {
     let mut out = Vec::new();
@@ -91,28 +112,71 @@ fn tokenize(s: &str) -> Vec<Tok> {
     while i < chars.len() {
         let c = chars[i];
         match c {
-            ' ' | '\t' | '\n' => { i += 1; }
-            '(' => { out.push(Tok::LP); i += 1; }
-            ')' => { out.push(Tok::RP); i += 1; }
-            '¬' | '~' | '!' => { out.push(Tok::Not); i += 1; }
-            '∧' | '&' => { out.push(Tok::And); i += 1; }
-            '∨' | '|' => { out.push(Tok::Or); i += 1; }
-            '→' => { out.push(Tok::Imp); i += 1; }
-            '↔' => { out.push(Tok::Iff); i += 1; }
+            ' ' | '\t' | '\n' => {
+                i += 1;
+            }
+            '(' => {
+                out.push(Tok::LP);
+                i += 1;
+            }
+            ')' => {
+                out.push(Tok::RP);
+                i += 1;
+            }
+            '¬' | '~' | '!' => {
+                out.push(Tok::Not);
+                i += 1;
+            }
+            '∧' | '&' => {
+                out.push(Tok::And);
+                i += 1;
+            }
+            '∨' | '|' => {
+                out.push(Tok::Or);
+                i += 1;
+            }
+            '→' => {
+                out.push(Tok::Imp);
+                i += 1;
+            }
+            '↔' => {
+                out.push(Tok::Iff);
+                i += 1;
+            }
             'A'..='Z' => {
                 let rest: String = chars[i..].iter().collect();
-                let boundary = |len: usize| rest.len() == len
-                    || !chars.get(i + len).is_some_and(|c| c.is_alphabetic());
-                if rest.starts_with("AND") && boundary(3) { out.push(Tok::And); i += 3; }
-                else if rest.starts_with("OR") && boundary(2) { out.push(Tok::Or); i += 2; }
-                else if rest.starts_with("NOT") && boundary(3) { out.push(Tok::Not); i += 3; }
-                else if rest.starts_with("IMPLIES") && boundary(7) { out.push(Tok::Imp); i += 7; }
-                else if rest.starts_with("IFF") && boundary(3) { out.push(Tok::Iff); i += 3; }
-                else if rest.starts_with("TRUE") && boundary(4) { out.push(Tok::T); i += 4; }
-                else if rest.starts_with("FALSE") && boundary(5) { out.push(Tok::F); i += 5; }
-                else { out.push(Tok::Var(c)); i += 1; }
+                let boundary = |len: usize| {
+                    rest.len() == len || !chars.get(i + len).is_some_and(|c| c.is_alphabetic())
+                };
+                if rest.starts_with("AND") && boundary(3) {
+                    out.push(Tok::And);
+                    i += 3;
+                } else if rest.starts_with("OR") && boundary(2) {
+                    out.push(Tok::Or);
+                    i += 2;
+                } else if rest.starts_with("NOT") && boundary(3) {
+                    out.push(Tok::Not);
+                    i += 3;
+                } else if rest.starts_with("IMPLIES") && boundary(7) {
+                    out.push(Tok::Imp);
+                    i += 7;
+                } else if rest.starts_with("IFF") && boundary(3) {
+                    out.push(Tok::Iff);
+                    i += 3;
+                } else if rest.starts_with("TRUE") && boundary(4) {
+                    out.push(Tok::T);
+                    i += 4;
+                } else if rest.starts_with("FALSE") && boundary(5) {
+                    out.push(Tok::F);
+                    i += 5;
+                } else {
+                    out.push(Tok::Var(c));
+                    i += 1;
+                }
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     out
@@ -143,13 +207,18 @@ impl Expr {
             Expr::Const(_) => {}
             Expr::Not(e) => e.collect(out),
             Expr::And(a, b) | Expr::Or(a, b) | Expr::Imp(a, b) | Expr::Iff(a, b) => {
-                a.collect(out); b.collect(out);
+                a.collect(out);
+                b.collect(out);
             }
         }
     }
     fn eval(&self, vars: &[(char, bool)]) -> bool {
         match self {
-            Expr::Var(c) => vars.iter().find(|(v, _)| v == c).map(|(_, b)| *b).unwrap_or(false),
+            Expr::Var(c) => vars
+                .iter()
+                .find(|(v, _)| v == c)
+                .map(|(_, b)| *b)
+                .unwrap_or(false),
             Expr::Const(b) => *b,
             Expr::Not(e) => !e.eval(vars),
             Expr::And(a, b) => a.eval(vars) && b.eval(vars),
@@ -172,11 +241,18 @@ impl Expr {
     }
 }
 
-struct Parser { toks: Vec<Tok>, pos: usize }
+struct Parser {
+    toks: Vec<Tok>,
+    pos: usize,
+}
 
 impl Parser {
-    fn peek(&self) -> Option<&Tok> { self.toks.get(self.pos) }
-    fn eat(&mut self) { self.pos += 1; }
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos)
+    }
+    fn eat(&mut self) {
+        self.pos += 1;
+    }
 
     fn iff(&mut self) -> Option<Expr> {
         let mut lhs = self.implies()?;
@@ -211,22 +287,45 @@ impl Parser {
         Some(lhs)
     }
     fn not(&mut self) -> Option<Expr> {
-        if self.peek() == Some(&Tok::Not) { self.eat(); Some(Expr::Not(Box::new(self.not()?))) }
-        else { self.atom() }
+        if self.peek() == Some(&Tok::Not) {
+            self.eat();
+            Some(Expr::Not(Box::new(self.not()?)))
+        } else {
+            self.atom()
+        }
     }
     fn atom(&mut self) -> Option<Expr> {
         match self.peek()?.clone() {
-            Tok::LP => { self.eat(); let e = self.iff()?; if self.peek() == Some(&Tok::RP) { self.eat(); } Some(e) }
-            Tok::Var(c) => { self.eat(); Some(Expr::Var(c)) }
-            Tok::T => { self.eat(); Some(Expr::Const(true)) }
-            Tok::F => { self.eat(); Some(Expr::Const(false)) }
+            Tok::LP => {
+                self.eat();
+                let e = self.iff()?;
+                if self.peek() == Some(&Tok::RP) {
+                    self.eat();
+                }
+                Some(e)
+            }
+            Tok::Var(c) => {
+                self.eat();
+                Some(Expr::Var(c))
+            }
+            Tok::T => {
+                self.eat();
+                Some(Expr::Const(true))
+            }
+            Tok::F => {
+                self.eat();
+                Some(Expr::Const(false))
+            }
             _ => None,
         }
     }
 }
 
 fn parse(s: &str) -> Option<Expr> {
-    let mut p = Parser { toks: tokenize(s), pos: 0 };
+    let mut p = Parser {
+        toks: tokenize(s),
+        pos: 0,
+    };
     p.iff()
 }
 
@@ -241,7 +340,8 @@ fn simplify(e: &Expr) -> Expr {
             }
         }
         Expr::And(a, b) => {
-            let sa = simplify(a); let sb = simplify(b);
+            let sa = simplify(a);
+            let sb = simplify(b);
             match (&sa, &sb) {
                 (Expr::Const(false), _) | (_, Expr::Const(false)) => Expr::Const(false),
                 (Expr::Const(true), _) => sb,
@@ -250,7 +350,8 @@ fn simplify(e: &Expr) -> Expr {
             }
         }
         Expr::Or(a, b) => {
-            let sa = simplify(a); let sb = simplify(b);
+            let sa = simplify(a);
+            let sb = simplify(b);
             match (&sa, &sb) {
                 (Expr::Const(true), _) | (_, Expr::Const(true)) => Expr::Const(true),
                 (Expr::Const(false), _) => sb,

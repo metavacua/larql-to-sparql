@@ -32,24 +32,24 @@ expert_exports!(
     description = "Arithmetic, number theory, base conversion, Roman numerals, percentages",
     version = "0.2.0",
     ops = [
-        ("add",               ["a", "b"]),
-        ("sub",               ["a", "b"]),
-        ("mul",               ["a", "b"]),
-        ("div",               ["a", "b"]),
-        ("pow",               ["a", "b"]),
-        ("mod",               ["a", "b"]),
-        ("gcd",               ["a", "b"]),
-        ("lcm",               ["a", "b"]),
-        ("factorial",         ["n"]),
-        ("is_prime",          ["n"]),
+        ("add", ["a", "b"]),
+        ("sub", ["a", "b"]),
+        ("mul", ["a", "b"]),
+        ("div", ["a", "b"]),
+        ("pow", ["a", "b"]),
+        ("mod", ["a", "b"]),
+        ("gcd", ["a", "b"]),
+        ("lcm", ["a", "b"]),
+        ("factorial", ["n"]),
+        ("is_prime", ["n"]),
         ("is_perfect_square", ["n"]),
-        ("to_base",           ["n", "base"]),
-        ("from_base",         ["s", "base"]),
-        ("to_roman",          ["n"]),
-        ("from_roman",        ["s"]),
-        ("percent_of",        ["pct", "n"]),
-        ("percent_increase",  ["n", "pct"]),
-        ("percent_decrease",  ["n", "pct"]),
+        ("to_base", ["n", "base"]),
+        ("from_base", ["s", "base"]),
+        ("to_roman", ["n"]),
+        ("from_roman", ["s"]),
+        ("percent_of", ["pct", "n"]),
+        ("percent_increase", ["n", "pct"]),
+        ("percent_decrease", ["n", "pct"]),
     ],
     dispatch = dispatch
 );
@@ -61,23 +61,37 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "mul" => Some(json!(arg_f(args, "a")? * arg_f(args, "b")?)),
         "div" => {
             let b = arg_f(args, "b")?;
-            if b == 0.0 { Some(Value::Null) } else { Some(json!(arg_f(args, "a")? / b)) }
+            if b == 0.0 {
+                Some(Value::Null)
+            } else {
+                Some(json!(arg_f(args, "a")? / b))
+            }
         }
         "pow" => Some(json!(arg_f(args, "a")?.powf(arg_f(args, "b")?))),
         "mod" => {
             let a = arg_i64(args, "a")?;
             let b = arg_i64(args, "b")?;
-            if b == 0 { Some(Value::Null) } else { Some(json!(a % b)) }
+            if b == 0 {
+                Some(Value::Null)
+            } else {
+                Some(json!(a % b))
+            }
         }
         "gcd" => Some(json!(gcd(arg_u64(args, "a")?, arg_u64(args, "b")?))),
         "lcm" => {
             let a = arg_u64(args, "a")?;
             let b = arg_u64(args, "b")?;
-            if a == 0 || b == 0 { Some(json!(0u64)) } else { Some(json!(a / gcd(a, b) * b)) }
+            if a == 0 || b == 0 {
+                Some(json!(0u64))
+            } else {
+                Some(json!(a / gcd(a, b) * b))
+            }
         }
         "factorial" => {
             let n = arg_u64(args, "n")?;
-            if n > 20 { return None; }
+            if n > 20 {
+                return None;
+            }
             Some(json!((1..=n).product::<u64>()))
         }
         "is_prime" => Some(json!(is_prime(arg_u64(args, "n")?))),
@@ -106,13 +120,19 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         }
         "to_roman" => {
             let n = arg_u64(args, "n")?;
-            if n == 0 || n > 3999 { return None; }
+            if n == 0 || n > 3999 {
+                return None;
+            }
             Some(json!(to_roman(n as u32)))
         }
         "from_roman" => from_roman(arg_str(args, "s")?).map(|n| json!(n)),
         "percent_of" => Some(json!(arg_f(args, "pct")? / 100.0 * arg_f(args, "n")?)),
-        "percent_increase" => Some(json!(arg_f(args, "n")? * (1.0 + arg_f(args, "pct")? / 100.0))),
-        "percent_decrease" => Some(json!(arg_f(args, "n")? * (1.0 - arg_f(args, "pct")? / 100.0))),
+        "percent_increase" => Some(json!(
+            arg_f(args, "n")? * (1.0 + arg_f(args, "pct")? / 100.0)
+        )),
+        "percent_decrease" => Some(json!(
+            arg_f(args, "n")? * (1.0 - arg_f(args, "pct")? / 100.0)
+        )),
         _ => None,
     }
 }
@@ -122,47 +142,91 @@ fn arg_f(args: &Value, key: &str) -> Option<f64> {
 }
 
 fn is_prime(n: u64) -> bool {
-    if n < 2 { return false; }
-    if n == 2 { return true; }
-    if n.is_multiple_of(2) { return false; }
+    if n < 2 {
+        return false;
+    }
+    if n == 2 {
+        return true;
+    }
+    if n.is_multiple_of(2) {
+        return false;
+    }
     let mut i = 3u64;
     while i.saturating_mul(i) <= n {
-        if n.is_multiple_of(i) { return false; }
+        if n.is_multiple_of(i) {
+            return false;
+        }
         i += 2;
     }
     true
 }
 
 fn gcd(a: u64, b: u64) -> u64 {
-    if b == 0 { a } else { gcd(b, a % b) }
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
 }
 
 fn to_roman(mut n: u32) -> String {
     const VALS: &[(u32, &str)] = &[
-        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
     ];
     let mut out = String::new();
     for &(v, s) in VALS {
-        while n >= v { out.push_str(s); n -= v; }
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
     }
     out
 }
 
 fn from_roman(s: &str) -> Option<u32> {
     let value_of = |c: char| match c {
-        'I' => Some(1u32), 'V' => Some(5), 'X' => Some(10),
-        'L' => Some(50), 'C' => Some(100), 'D' => Some(500), 'M' => Some(1000),
+        'I' => Some(1u32),
+        'V' => Some(5),
+        'X' => Some(10),
+        'L' => Some(50),
+        'C' => Some(100),
+        'D' => Some(500),
+        'M' => Some(1000),
         _ => None,
     };
     let chars: Vec<char> = s.chars().collect();
-    if chars.is_empty() { return None; }
+    if chars.is_empty() {
+        return None;
+    }
     let mut total: i64 = 0;
     for i in 0..chars.len() {
         let curr = value_of(chars[i])? as i64;
-        let next = if i + 1 < chars.len() { value_of(chars[i + 1])? as i64 } else { 0 };
-        if curr < next { total -= curr; } else { total += curr; }
+        let next = if i + 1 < chars.len() {
+            value_of(chars[i + 1])? as i64
+        } else {
+            0
+        };
+        if curr < next {
+            total -= curr;
+        } else {
+            total += curr;
+        }
     }
-    if total > 0 { Some(total as u32) } else { None }
+    if total > 0 {
+        Some(total as u32)
+    } else {
+        None
+    }
 }

@@ -16,9 +16,7 @@ expert_exports!(
     tier = 1,
     description = "HTTP status code lookup: IANA canonical reason phrases and category",
     version = "0.2.0",
-    ops = [
-        ("lookup", ["code"]),
-    ],
+    ops = [("lookup", ["code"]),],
     dispatch = dispatch
 );
 

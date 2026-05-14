@@ -19,15 +19,16 @@ use expert_interface::{arg_bool, expert_exports, json, Value};
 expert_exports!(
     id = "graph",
     tier = 1,
-    description = "Graph algorithms: centrality, cycle detection, components, topological sort, bipartite",
+    description =
+        "Graph algorithms: centrality, cycle detection, components, topological sort, bipartite",
     version = "0.2.0",
     ops = [
-        ("most_central",         ["edges", "directed"]),
-        ("has_cycle",            ["edges", "directed"]),
+        ("most_central", ["edges", "directed"]),
+        ("has_cycle", ["edges", "directed"]),
         ("connected_components", ["edges"]),
-        ("topological_sort",     ["edges", "directed"]),
-        ("is_bipartite",         ["edges"]),
-        ("degrees",              ["edges"]),
+        ("topological_sort", ["edges", "directed"]),
+        ("is_bipartite", ["edges"]),
+        ("degrees", ["edges"]),
     ],
     dispatch = dispatch
 );
@@ -37,7 +38,9 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
     let g = parse_graph(args.get("edges")?, directed)?;
     match op {
         "most_central" => {
-            if g.nodes.is_empty() { return None; }
+            if g.nodes.is_empty() {
+                return None;
+            }
             let i = (0..g.nodes.len()).max_by_key(|&i| g.adj[i].len())?;
             Some(json!({"node": g.nodes[i], "degree": g.adj[i].len()}))
         }
@@ -72,9 +75,17 @@ struct Graph {
 }
 
 impl Graph {
-    fn new() -> Self { Self { nodes: Vec::new(), adj: Vec::new(), dadj: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            adj: Vec::new(),
+            dadj: Vec::new(),
+        }
+    }
     fn node(&mut self, name: &str) -> usize {
-        if let Some(p) = self.nodes.iter().position(|n| n == name) { return p; }
+        if let Some(p) = self.nodes.iter().position(|n| n == name) {
+            return p;
+        }
         self.nodes.push(name.to_string());
         self.adj.push(Vec::new());
         self.dadj.push(Vec::new());
@@ -87,14 +98,22 @@ fn parse_graph(v: &Value, directed: bool) -> Option<Graph> {
     let mut g = Graph::new();
     for e in arr {
         let row = e.as_array()?;
-        if row.len() < 2 { return None; }
+        if row.len() < 2 {
+            return None;
+        }
         let a = row[0].as_str()?;
         let b = row[1].as_str()?;
         let ai = g.node(a);
         let bi = g.node(b);
-        if !g.adj[ai].contains(&bi) { g.adj[ai].push(bi); }
-        if !g.adj[bi].contains(&ai) { g.adj[bi].push(ai); }
-        if directed && !g.dadj[ai].contains(&bi) { g.dadj[ai].push(bi); }
+        if !g.adj[ai].contains(&bi) {
+            g.adj[ai].push(bi);
+        }
+        if !g.adj[bi].contains(&ai) {
+            g.adj[bi].push(ai);
+        }
+        if directed && !g.dadj[ai].contains(&bi) {
+            g.dadj[ai].push(bi);
+        }
     }
     Some(g)
 }
@@ -106,7 +125,9 @@ fn has_cycle_undirected(g: &Graph) -> bool {
         visited[u] = true;
         for &v in &g.adj[u] {
             if !visited[v] {
-                if dfs(g, v, Some(u), visited) { return true; }
+                if dfs(g, v, Some(u), visited) {
+                    return true;
+                }
             } else if Some(v) != parent {
                 return true;
             }
@@ -114,7 +135,9 @@ fn has_cycle_undirected(g: &Graph) -> bool {
         false
     }
     for start in 0..n {
-        if !visited[start] && dfs(g, start, None, &mut visited) { return true; }
+        if !visited[start] && dfs(g, start, None, &mut visited) {
+            return true;
+        }
     }
     false
 }
@@ -125,31 +148,43 @@ fn has_cycle_directed(g: &Graph) -> bool {
     fn dfs(g: &Graph, u: usize, state: &mut Vec<u8>) -> bool {
         state[u] = 1;
         for &v in &g.dadj[u] {
-            if state[v] == 1 { return true; }
-            if state[v] == 0 && dfs(g, v, state) { return true; }
+            if state[v] == 1 {
+                return true;
+            }
+            if state[v] == 0 && dfs(g, v, state) {
+                return true;
+            }
         }
         state[u] = 2;
         false
     }
     for start in 0..n {
-        if state[start] == 0 && dfs(g, start, &mut state) { return true; }
+        if state[start] == 0 && dfs(g, start, &mut state) {
+            return true;
+        }
     }
     false
 }
 
 fn count_components(g: &Graph) -> usize {
     let n = g.nodes.len();
-    if n == 0 { return 0; }
+    if n == 0 {
+        return 0;
+    }
     let mut parent: Vec<usize> = (0..n).collect();
     fn find(p: &mut [usize], x: usize) -> usize {
-        if p[x] != x { p[x] = find(p, p[x]); }
+        if p[x] != x {
+            p[x] = find(p, p[x]);
+        }
         p[x]
     }
     for u in 0..n {
         for &v in &g.adj[u] {
             let ru = find(&mut parent, u);
             let rv = find(&mut parent, v);
-            if ru != rv { parent[ru] = rv; }
+            if ru != rv {
+                parent[ru] = rv;
+            }
         }
     }
     let mut roots: Vec<usize> = (0..n).map(|i| find(&mut parent, i)).collect();
@@ -161,25 +196,36 @@ fn count_components(g: &Graph) -> usize {
 fn topo_sort(g: &Graph) -> Option<Vec<String>> {
     let n = g.nodes.len();
     let mut indeg = vec![0usize; n];
-    for u in 0..n { for &v in &g.dadj[u] { indeg[v] += 1; } }
-    let mut queue: std::collections::VecDeque<usize> =
-        (0..n).filter(|&i| indeg[i] == 0).collect();
+    for u in 0..n {
+        for &v in &g.dadj[u] {
+            indeg[v] += 1;
+        }
+    }
+    let mut queue: std::collections::VecDeque<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
     let mut order = Vec::new();
     while let Some(u) = queue.pop_front() {
         order.push(g.nodes[u].clone());
         for &v in &g.dadj[u] {
             indeg[v] -= 1;
-            if indeg[v] == 0 { queue.push_back(v); }
+            if indeg[v] == 0 {
+                queue.push_back(v);
+            }
         }
     }
-    if order.len() == n { Some(order) } else { None }
+    if order.len() == n {
+        Some(order)
+    } else {
+        None
+    }
 }
 
 fn is_bipartite(g: &Graph) -> bool {
     let n = g.nodes.len();
     let mut color = vec![255u8; n];
     for start in 0..n {
-        if color[start] != 255 { continue; }
+        if color[start] != 255 {
+            continue;
+        }
         color[start] = 0;
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(start);

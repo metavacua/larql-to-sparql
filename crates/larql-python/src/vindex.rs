@@ -875,7 +875,7 @@ impl PyVindex {
             }
         }
 
-        rels.sort_by_key(|r| std::cmp::Reverse(r.count));
+        rels.sort_by_key(|b| std::cmp::Reverse(b.count));
         rels
     }
 

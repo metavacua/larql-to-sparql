@@ -16,10 +16,7 @@ expert_exports!(
     tier = 1,
     description = "Conway's Game of Life: single step, N-generation simulation",
     version = "0.2.0",
-    ops = [
-        ("step",     ["grid"]),
-        ("simulate", ["grid", "generations"]),
-    ],
+    ops = [("step", ["grid"]), ("simulate", ["grid", "generations"]),],
     dispatch = dispatch
 );
 
@@ -30,7 +27,9 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "simulate" => {
             let gens = arg_u64(args, "generations")? as u32;
             let mut g = grid;
-            for _ in 0..gens { g = step(&g); }
+            for _ in 0..gens {
+                g = step(&g);
+            }
             Some(json!({
                 "grid": g,
                 "live": count_live(&g),
@@ -48,12 +47,19 @@ fn parse_grid(v: &Value) -> Option<Grid> {
     let mut grid = Vec::new();
     for row in arr {
         let r = row.as_array()?;
-        let cells: Option<Vec<u8>> = r.iter().map(|c| c.as_u64().map(|n| if n != 0 { 1 } else { 0 })).collect();
+        let cells: Option<Vec<u8>> = r
+            .iter()
+            .map(|c| c.as_u64().map(|n| if n != 0 { 1 } else { 0 }))
+            .collect();
         grid.push(cells?);
     }
-    if grid.is_empty() { return None; }
+    if grid.is_empty() {
+        return None;
+    }
     let cols = grid[0].len();
-    if grid.iter().any(|r| r.len() != cols) { return None; }
+    if grid.iter().any(|r| r.len() != cols) {
+        return None;
+    }
     Some(grid)
 }
 
@@ -63,7 +69,9 @@ fn count_live_neighbours(g: &Grid, r: usize, c: usize) -> u8 {
     let mut n = 0u8;
     for dr in -1..=1 {
         for dc in -1..=1 {
-            if dr == 0 && dc == 0 { continue; }
+            if dr == 0 && dc == 0 {
+                continue;
+            }
             let nr = r as i32 + dr;
             let nc = c as i32 + dc;
             if nr >= 0 && nr < rows && nc >= 0 && nc < cols {

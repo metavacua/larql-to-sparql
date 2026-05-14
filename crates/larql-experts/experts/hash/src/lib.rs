@@ -25,11 +25,11 @@ expert_exports!(
     ops = [
         ("base64_encode", ["s"]),
         ("base64_decode", ["s"]),
-        ("hex_encode",    ["s"]),
-        ("hex_decode",    ["s"]),
-        ("url_encode",    ["s"]),
-        ("url_decode",    ["s"]),
-        ("fnv1a_32",      ["s"]),
+        ("hex_encode", ["s"]),
+        ("hex_decode", ["s"]),
+        ("url_encode", ["s"]),
+        ("url_decode", ["s"]),
+        ("fnv1a_32", ["s"]),
     ],
     dispatch = dispatch
 );
@@ -48,7 +48,10 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         }
         "url_encode" => Some(json!(url_encode(arg_str(args, "s")?))),
         "url_decode" => Some(json!(url_decode(arg_str(args, "s")?))),
-        "fnv1a_32" => Some(json!(format!("0x{:08x}", fnv1a_32(arg_str(args, "s")?.as_bytes())))),
+        "fnv1a_32" => Some(json!(format!(
+            "0x{:08x}",
+            fnv1a_32(arg_str(args, "s")?.as_bytes())
+        ))),
         _ => None,
     }
 }
@@ -65,8 +68,16 @@ fn base64_encode(input: &[u8]) -> String {
 
         out.push(B64[(b0 >> 2) as usize]);
         out.push(B64[((b0 & 0x03) << 4 | b1 >> 4) as usize]);
-        out.push(if i + 1 < input.len() { B64[((b1 & 0x0f) << 2 | b2 >> 6) as usize] } else { b'=' });
-        out.push(if i + 2 < input.len() { B64[(b2 & 0x3f) as usize] } else { b'=' });
+        out.push(if i + 1 < input.len() {
+            B64[((b1 & 0x0f) << 2 | b2 >> 6) as usize]
+        } else {
+            b'='
+        });
+        out.push(if i + 2 < input.len() {
+            B64[(b2 & 0x3f) as usize]
+        } else {
+            b'='
+        });
         i += 3;
     }
     String::from_utf8(out).unwrap_or_default()
@@ -86,7 +97,9 @@ fn b64_val(c: u8) -> Option<u8> {
 
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if !bytes.len().is_multiple_of(4) { return None; }
+    if !bytes.len().is_multiple_of(4) {
+        return None;
+    }
     let mut out = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
@@ -95,8 +108,12 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
         let v2 = b64_val(bytes[i + 2])?;
         let v3 = b64_val(bytes[i + 3])?;
         out.push((v0 << 2) | (v1 >> 4));
-        if bytes[i + 2] != b'=' { out.push((v1 << 4) | (v2 >> 2)); }
-        if bytes[i + 3] != b'=' { out.push((v2 << 6) | v3); }
+        if bytes[i + 2] != b'=' {
+            out.push((v1 << 4) | (v2 >> 2));
+        }
+        if bytes[i + 3] != b'=' {
+            out.push((v2 << 6) | v3);
+        }
         i += 4;
     }
     Some(out)
@@ -122,7 +139,9 @@ fn hex_nibble(b: u8) -> Option<u8> {
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let s = s.trim().trim_start_matches("0x").trim_start_matches("0X");
-    if !s.len().is_multiple_of(2) { return None; }
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len() / 2);
     let mut i = 0;
@@ -159,7 +178,11 @@ fn url_decode(s: &str) -> String {
                 continue;
             }
         }
-        if bytes[i] == b'+' { out.push(b' '); } else { out.push(bytes[i]); }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+        } else {
+            out.push(bytes[i]);
+        }
         i += 1;
     }
     String::from_utf8(out).unwrap_or_default()

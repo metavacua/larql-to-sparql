@@ -18,7 +18,7 @@ expert_exports!(
     description = "ISBN-10 and ISBN-13 validation and conversion",
     version = "0.2.0",
     ops = [
-        ("validate",         ["isbn"]),
+        ("validate", ["isbn"]),
         ("isbn10_to_isbn13", ["isbn"]),
         ("isbn13_to_isbn10", ["isbn"]),
     ],
@@ -54,14 +54,22 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "isbn10_to_isbn13" => {
             let s = arg_str(args, "isbn")?;
             let digits = normalise(s)?;
-            if digits.len() != 10 { return None; }
+            if digits.len() != 10 {
+                return None;
+            }
             Some(json!(isbn10_to_isbn13(&digits)))
         }
         "isbn13_to_isbn10" => {
             let s = arg_str(args, "isbn")?;
             let digits = normalise(s)?;
-            if digits.len() != 13 { return None; }
-            Some(isbn13_to_isbn10(&digits).map(|s| json!(s)).unwrap_or(Value::Null))
+            if digits.len() != 13 {
+                return None;
+            }
+            Some(
+                isbn13_to_isbn10(&digits)
+                    .map(|s| json!(s))
+                    .unwrap_or(Value::Null),
+            )
         }
         _ => None,
     }
@@ -71,17 +79,28 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
 fn normalise(s: &str) -> Option<String> {
     let mut out = String::new();
     for c in s.chars() {
-        if c.is_ascii_digit() { out.push(c); }
-        else if (c == 'X' || c == 'x') && out.len() == 9 { out.push('X'); }
+        if c.is_ascii_digit() {
+            out.push(c);
+        } else if (c == 'X' || c == 'x') && out.len() == 9 {
+            out.push('X');
+        }
     }
-    if out.len() == 10 || out.len() == 13 { Some(out) } else { None }
+    if out.len() == 10 || out.len() == 13 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 fn validate10(bytes: &[u8]) -> bool {
-    if bytes.len() != 10 { return false; }
+    if bytes.len() != 10 {
+        return false;
+    }
     let mut sum = 0u32;
     for (i, &b) in bytes.iter().enumerate().take(9) {
-        if !b.is_ascii_digit() { return false; }
+        if !b.is_ascii_digit() {
+            return false;
+        }
         sum += (10 - i as u32) * (b - b'0') as u32;
     }
     sum += match bytes[9] {
@@ -110,13 +129,19 @@ fn isbn10_to_isbn13(s: &str) -> String {
 }
 
 fn isbn13_to_isbn10(s: &str) -> Option<String> {
-    if !s.starts_with("978") { return None; }
+    if !s.starts_with("978") {
+        return None;
+    }
     let core = &s[3..12];
     let mut sum = 0u32;
     for (i, b) in core.bytes().enumerate() {
         sum += (10 - i as u32) * (b - b'0') as u32;
     }
     let check = (11 - (sum % 11)) % 11;
-    let c = if check == 10 { 'X' } else { (b'0' + check as u8) as char };
+    let c = if check == 10 {
+        'X'
+    } else {
+        (b'0' + check as u8) as char
+    };
     Some(format!("{}{}", core, c))
 }

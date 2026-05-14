@@ -18,7 +18,7 @@ expert_exports!(
     version = "0.2.0",
     ops = [
         ("expected_value", ["outcomes", "probabilities"]),
-        ("steady_state",   ["matrix"]),
+        ("steady_state", ["matrix"]),
     ],
     dispatch = dispatch
 );
@@ -28,15 +28,23 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "expected_value" => {
             let outcomes = arg_list_f64(args, "outcomes")?;
             let probs = arg_list_f64(args, "probabilities")?;
-            if outcomes.len() != probs.len() || outcomes.is_empty() { return None; }
+            if outcomes.len() != probs.len() || outcomes.is_empty() {
+                return None;
+            }
             let ev: f64 = outcomes.iter().zip(probs.iter()).map(|(o, p)| o * p).sum();
             Some(json!(ev))
         }
         "steady_state" => {
             let matrix = parse_matrix(args.get("matrix")?)?;
             let n = matrix.len();
-            if n == 0 { return None; }
-            for row in &matrix { if row.len() != n { return None; } }
+            if n == 0 {
+                return None;
+            }
+            for row in &matrix {
+                if row.len() != n {
+                    return None;
+                }
+            }
             Some(json!(power_iteration(&matrix)))
         }
         _ => None,
@@ -61,7 +69,11 @@ fn power_iteration(m: &[Vec<f64>]) -> Vec<f64> {
             }
         }
         let s: f64 = out.iter().sum();
-        if s > 0.0 { for x in &mut out { *x /= s; } }
+        if s > 0.0 {
+            for x in &mut out {
+                *x /= s;
+            }
+        }
         v = out;
     }
     v

@@ -20,11 +20,11 @@ expert_exports!(
     description = "Date arithmetic: days between, day of week, date +/- N days, leap year",
     version = "0.2.0",
     ops = [
-        ("days_between",  ["from", "to"]),
+        ("days_between", ["from", "to"]),
         ("weeks_between", ["from", "to"]),
-        ("day_of_week",   ["date"]),
-        ("add_days",      ["date", "days"]),
-        ("is_leap_year",  ["year"]),
+        ("day_of_week", ["date"]),
+        ("add_days", ["date", "days"]),
+        ("is_leap_year", ["year"]),
         ("days_in_month", ["year", "month"]),
     ],
     dispatch = dispatch
@@ -68,7 +68,9 @@ fn ymd(args: &Value, key: &str) -> Option<(i32, u32, u32)> {
     let y = obj.get("year")?.as_i64()? as i32;
     let m = obj.get("month")?.as_u64()? as u32;
     let d = obj.get("day")?.as_u64()? as u32;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) { return None; }
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
     Some((y, m, d))
 }
 
@@ -76,8 +78,9 @@ fn to_jdn(y: i32, m: u32, d: u32) -> i64 {
     let a = (14 - m as i32) / 12;
     let y4 = y + 4800 - a;
     let m4 = m as i32 + 12 * a - 3;
-    d as i64 + (153 * m4 as i64 + 2) / 5 + 365 * y4 as i64
-        + y4 as i64 / 4 - y4 as i64 / 100 + y4 as i64 / 400 - 32045
+    d as i64 + (153 * m4 as i64 + 2) / 5 + 365 * y4 as i64 + y4 as i64 / 4 - y4 as i64 / 100
+        + y4 as i64 / 400
+        - 32045
 }
 
 fn from_jdn(jdn: i64) -> (i32, u32, u32) {
@@ -106,7 +109,13 @@ fn days_in_month(y: i32, m: u32) -> u32 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        2 => if is_leap(y) { 29 } else { 28 },
+        2 => {
+            if is_leap(y) {
+                29
+            } else {
+                28
+            }
+        }
         _ => 0,
     }
 }

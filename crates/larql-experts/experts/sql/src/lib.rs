@@ -27,9 +27,7 @@ expert_exports!(
     tier = 1,
     description = "In-memory SQL evaluator: CREATE TABLE, INSERT, SELECT with aggregates and WHERE",
     version = "0.2.0",
-    ops = [
-        ("execute", ["sql"]),
-    ],
+    ops = [("execute", ["sql"]),],
     dispatch = dispatch
 );
 
@@ -47,15 +45,23 @@ fn execute(sql: &str) -> Option<Value> {
     for stmt in &stmts {
         let upper = stmt.to_uppercase();
         let t = upper.trim_start();
-        if t.starts_with("CREATE TABLE") { execute_create(stmt, &mut tables); }
-        else if t.starts_with("INSERT INTO") { execute_insert(stmt, &mut tables); }
-        else if t.starts_with("SELECT") { last = execute_select(stmt, &tables); }
+        if t.starts_with("CREATE TABLE") {
+            execute_create(stmt, &mut tables);
+        } else if t.starts_with("INSERT INTO") {
+            execute_insert(stmt, &mut tables);
+        } else if t.starts_with("SELECT") {
+            last = execute_select(stmt, &tables);
+        }
     }
     last
 }
 
 #[derive(Clone)]
-enum V { Num(f64), Str(String), Null }
+enum V {
+    Num(f64),
+    Str(String),
+    Null,
+}
 
 impl V {
     fn as_f64(&self) -> Option<f64> {
@@ -68,7 +74,11 @@ impl V {
     fn to_json(&self) -> Value {
         match self {
             V::Num(n) => {
-                if (n - (*n as i64 as f64)).abs() < 1e-10 { json!(*n as i64) } else { json!(n) }
+                if (n - (*n as i64 as f64)).abs() < 1e-10 {
+                    json!(*n as i64)
+                } else {
+                    json!(n)
+                }
             }
             V::Str(s) => json!(s),
             V::Null => Value::Null,
@@ -83,18 +93,29 @@ struct Table {
 }
 
 impl Table {
-    fn new(name: &str, columns: Vec<String>) -> Self { Self { name: name.to_string(), columns, rows: Vec::new() } }
+    fn new(name: &str, columns: Vec<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            columns,
+            rows: Vec::new(),
+        }
+    }
     fn col_idx(&self, name: &str) -> Option<usize> {
         let l = name.to_lowercase();
         self.columns.iter().position(|c| c.to_lowercase() == l)
     }
     fn insert_row(&mut self, values: Vec<V>) {
-        if values.len() == self.columns.len() { self.rows.push(values); }
+        if values.len() == self.columns.len() {
+            self.rows.push(values);
+        }
     }
 }
 
 fn split_statements(sql: &str) -> Vec<String> {
-    sql.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    sql.split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn parse_value(s: &str) -> V {
@@ -102,8 +123,12 @@ fn parse_value(s: &str) -> V {
     if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
         return V::Str(s[1..s.len() - 1].to_string());
     }
-    if let Ok(n) = s.parse::<f64>() { return V::Num(n); }
-    if s.eq_ignore_ascii_case("null") { return V::Null; }
+    if let Ok(n) = s.parse::<f64>() {
+        return V::Num(n);
+    }
+    if s.eq_ignore_ascii_case("null") {
+        return V::Null;
+    }
     V::Str(s.to_string())
 }
 
@@ -112,20 +137,37 @@ fn split_csv(s: &str) -> Vec<String> {
     let mut buf = String::new();
     let mut in_str = false;
     for c in s.chars() {
-        if c == '\'' { in_str = !in_str; buf.push(c); }
-        else if c == ',' && !in_str { parts.push(buf.trim().to_string()); buf.clear(); }
-        else { buf.push(c); }
+        if c == '\'' {
+            in_str = !in_str;
+            buf.push(c);
+        } else if c == ',' && !in_str {
+            parts.push(buf.trim().to_string());
+            buf.clear();
+        } else {
+            buf.push(c);
+        }
     }
-    if !buf.trim().is_empty() { parts.push(buf.trim().to_string()); }
+    if !buf.trim().is_empty() {
+        parts.push(buf.trim().to_string());
+    }
     parts
 }
 
 fn execute_create(stmt: &str, tables: &mut Vec<Table>) {
     let upper = stmt.to_uppercase();
-    let after = match upper.find("TABLE ") { Some(p) => &stmt[p + 6..], None => return };
-    let paren_start = match after.find('(') { Some(p) => p, None => return };
+    let after = match upper.find("TABLE ") {
+        Some(p) => &stmt[p + 6..],
+        None => return,
+    };
+    let paren_start = match after.find('(') {
+        Some(p) => p,
+        None => return,
+    };
     let name = after[..paren_start].trim();
-    let paren_end = match after.rfind(')') { Some(p) => p, None => return };
+    let paren_end = match after.rfind(')') {
+        Some(p) => p,
+        None => return,
+    };
     let cols: Vec<String> = after[paren_start + 1..paren_end]
         .split(',')
         .map(|c| c.split_whitespace().next().unwrap_or("").to_string())
@@ -137,17 +179,35 @@ fn execute_create(stmt: &str, tables: &mut Vec<Table>) {
 
 fn execute_insert(stmt: &str, tables: &mut [Table]) {
     let upper = stmt.to_uppercase();
-    let after = match upper.find("INTO ") { Some(p) => &stmt[p + 5..], None => return };
-    let tbl_end = after.find(|c: char| c.is_whitespace() || c == '(').unwrap_or(after.len());
+    let after = match upper.find("INTO ") {
+        Some(p) => &stmt[p + 5..],
+        None => return,
+    };
+    let tbl_end = after
+        .find(|c: char| c.is_whitespace() || c == '(')
+        .unwrap_or(after.len());
     let tbl_name = after[..tbl_end].trim();
-    let table = match tables.iter_mut().find(|t| t.name.to_lowercase() == tbl_name.to_lowercase()) {
-        Some(t) => t, None => return,
+    let table = match tables
+        .iter_mut()
+        .find(|t| t.name.to_lowercase() == tbl_name.to_lowercase())
+    {
+        Some(t) => t,
+        None => return,
     };
     let upper2 = after.to_uppercase();
-    let values_pos = match upper2.find("VALUES") { Some(p) => p, None => return };
+    let values_pos = match upper2.find("VALUES") {
+        Some(p) => p,
+        None => return,
+    };
     let after_values = &after[values_pos + 6..];
-    let start = match after_values.find('(') { Some(p) => p, None => return };
-    let end = match after_values.rfind(')') { Some(p) => p, None => return };
+    let start = match after_values.find('(') {
+        Some(p) => p,
+        None => return,
+    };
+    let end = match after_values.rfind(')') {
+        Some(p) => p,
+        None => return,
+    };
     let values: Vec<V> = split_csv(&after_values[start + 1..end])
         .iter()
         .map(|s| parse_value(s))
@@ -159,16 +219,22 @@ fn execute_select(stmt: &str, tables: &[Table]) -> Option<Value> {
     let upper = stmt.to_uppercase();
     let from_pos = upper.find(" FROM ")?;
     let after_from = &stmt[from_pos + 6..];
-    let tbl_end = after_from.find(|c: char| c.is_whitespace() || c == ';').unwrap_or(after_from.len());
+    let tbl_end = after_from
+        .find(|c: char| c.is_whitespace() || c == ';')
+        .unwrap_or(after_from.len());
     let tbl_name = after_from[..tbl_end].trim();
-    let table = tables.iter().find(|t| t.name.to_lowercase() == tbl_name.to_lowercase())?;
+    let table = tables
+        .iter()
+        .find(|t| t.name.to_lowercase() == tbl_name.to_lowercase())?;
     let sel_clause = stmt[7..from_pos].trim();
 
     let where_filter = {
         let upper_after = after_from[tbl_end..].to_uppercase();
         if let Some(wp) = upper_after.find("WHERE ") {
             parse_where(&after_from[tbl_end + wp + 6..])
-        } else { None }
+        } else {
+            None
+        }
     };
 
     let mut rows: Vec<&Vec<V>> = table
@@ -192,7 +258,11 @@ fn execute_select(stmt: &str, tables: &[Table]) -> Option<Value> {
                     (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
                     _ => std::cmp::Ordering::Equal,
                 };
-                if asc { ord } else { ord.reverse() }
+                if asc {
+                    ord
+                } else {
+                    ord.reverse()
+                }
             });
         }
     }
@@ -216,12 +286,18 @@ fn order_by(stmt: &str) -> Option<(String, bool)> {
 fn limit(stmt: &str) -> Option<usize> {
     let upper = stmt.to_uppercase();
     let pos = upper.find("LIMIT ")?;
-    stmt[pos + 6..].split_whitespace().next().and_then(|s| s.parse::<usize>().ok())
+    stmt[pos + 6..]
+        .split_whitespace()
+        .next()
+        .and_then(|s| s.parse::<usize>().ok())
 }
 
 fn parse_where(s: &str) -> Option<(String, String, String)> {
     let upper = s.to_uppercase();
-    let end = upper.find("ORDER BY").or_else(|| upper.find("LIMIT")).unwrap_or(s.len());
+    let end = upper
+        .find("ORDER BY")
+        .or_else(|| upper.find("LIMIT"))
+        .unwrap_or(s.len());
     let cond = s[..end].trim();
     for op in &[">=", "<=", "<>", "!=", "=", ">", "<"] {
         if let Some(pos) = cond.find(op) {
@@ -238,12 +314,18 @@ fn apply_where(cell: &V, op: &str, val: &str) -> bool {
         return match op {
             "=" => (cn - vn).abs() < 1e-12,
             "!=" | "<>" => (cn - vn).abs() >= 1e-12,
-            ">" => cn > vn, ">=" => cn >= vn,
-            "<" => cn < vn, "<=" => cn <= vn,
+            ">" => cn > vn,
+            ">=" => cn >= vn,
+            "<" => cn < vn,
+            "<=" => cn <= vn,
             _ => false,
         };
     }
-    let cs = match cell { V::Str(s) => s.clone(), V::Num(n) => format!("{}", n), V::Null => String::new() };
+    let cs = match cell {
+        V::Str(s) => s.clone(),
+        V::Num(n) => format!("{}", n),
+        V::Null => String::new(),
+    };
     match op {
         "=" => cs.eq_ignore_ascii_case(val),
         "!=" | "<>" => !cs.eq_ignore_ascii_case(val),
@@ -263,10 +345,20 @@ fn evaluate_select(sel: &str, table: &Table, rows: &[&Vec<V>]) -> Option<Value> 
             let end = after.find(')').unwrap_or(after.len());
             let col_name = after[..end].trim().trim_matches('*');
             if col_name == "*" || *agg == "COUNT" {
-                let ci = if col_name == "*" { None } else { table.col_idx(col_name) };
+                let ci = if col_name == "*" {
+                    None
+                } else {
+                    table.col_idx(col_name)
+                };
                 let values: Vec<f64> = rows
                     .iter()
-                    .filter_map(|r| if let Some(i) = ci { r[i].as_f64() } else { Some(1.0) })
+                    .filter_map(|r| {
+                        if let Some(i) = ci {
+                            r[i].as_f64()
+                        } else {
+                            Some(1.0)
+                        }
+                    })
                     .collect();
                 return Some(agg_result(agg, &values));
             }
@@ -293,11 +385,15 @@ fn evaluate_select(sel: &str, table: &Table, rows: &[&Vec<V>]) -> Option<Value> 
     }
     let cols: Vec<&str> = sel.split(',').map(|s| s.trim()).collect();
     let idxs: Vec<usize> = cols.iter().filter_map(|c| table.col_idx(c)).collect();
-    if idxs.is_empty() { return None; }
+    if idxs.is_empty() {
+        return None;
+    }
     if cols.len() == 1 {
         let ci = idxs[0];
         let vals: Vec<Value> = rows.iter().map(|r| r[ci].to_json()).collect();
-        if vals.len() == 1 { return Some(vals.into_iter().next().unwrap()); }
+        if vals.len() == 1 {
+            return Some(vals.into_iter().next().unwrap());
+        }
         return Some(json!(vals));
     }
     let out: Vec<Value> = rows
@@ -316,7 +412,11 @@ fn evaluate_select(sel: &str, table: &Table, rows: &[&Vec<V>]) -> Option<Value> 
 
 fn agg_result(agg: &str, values: &[f64]) -> Value {
     if values.is_empty() {
-        return if agg == "COUNT" { json!(0) } else { Value::Null };
+        return if agg == "COUNT" {
+            json!(0)
+        } else {
+            Value::Null
+        };
     }
     let r = match agg {
         "COUNT" => values.len() as f64,
@@ -326,5 +426,9 @@ fn agg_result(agg: &str, values: &[f64]) -> Value {
         "MIN" => values.iter().cloned().fold(f64::INFINITY, f64::min),
         _ => return Value::Null,
     };
-    if (r - (r as i64 as f64)).abs() < 1e-10 { json!(r as i64) } else { json!(r) }
+    if (r - (r as i64 as f64)).abs() < 1e-10 {
+        json!(r as i64)
+    } else {
+        json!(r)
+    }
 }

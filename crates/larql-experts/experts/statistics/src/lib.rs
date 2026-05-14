@@ -25,24 +25,26 @@ expert_exports!(
     description = "Statistics: mean, median, mode, stddev, variance, min, max, sum, sort, range",
     version = "0.2.0",
     ops = [
-        ("mean",     ["values"]),
-        ("median",   ["values"]),
-        ("mode",     ["values"]),
-        ("stddev",   ["values"]),
+        ("mean", ["values"]),
+        ("median", ["values"]),
+        ("mode", ["values"]),
+        ("stddev", ["values"]),
         ("variance", ["values"]),
-        ("min",      ["values"]),
-        ("max",      ["values"]),
-        ("sum",      ["values"]),
-        ("count",    ["values"]),
-        ("range",    ["values"]),
-        ("sort",     ["values"]),
+        ("min", ["values"]),
+        ("max", ["values"]),
+        ("sum", ["values"]),
+        ("count", ["values"]),
+        ("range", ["values"]),
+        ("sort", ["values"]),
     ],
     dispatch = dispatch
 );
 
 fn dispatch(op: &str, args: &Value) -> Option<Value> {
     let nums = arg_list_f64(args, "values")?;
-    if nums.is_empty() { return None; }
+    if nums.is_empty() {
+        return None;
+    }
     match op {
         "mean" => Some(json!(mean(&nums))),
         "median" => Some(json!(median(&nums))),
@@ -50,7 +52,10 @@ fn dispatch(op: &str, args: &Value) -> Option<Value> {
         "stddev" => Some(json!(variance_pop(&nums).sqrt())),
         "variance" => Some(json!(variance_pop(&nums))),
         "min" => Some(json!(nums.iter().cloned().fold(f64::INFINITY, f64::min))),
-        "max" => Some(json!(nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max))),
+        "max" => Some(json!(nums
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max))),
         "sum" => Some(json!(nums.iter().sum::<f64>())),
         "count" => Some(json!(nums.len())),
         "range" => {
@@ -76,7 +81,11 @@ fn sorted(nums: &[f64]) -> Vec<f64> {
 fn median(nums: &[f64]) -> f64 {
     let s = sorted(nums);
     let n = s.len();
-    if n % 2 == 1 { s[n / 2] } else { (s[n / 2 - 1] + s[n / 2]) / 2.0 }
+    if n % 2 == 1 {
+        s[n / 2]
+    } else {
+        (s[n / 2 - 1] + s[n / 2]) / 2.0
+    }
 }
 
 fn variance_pop(nums: &[f64]) -> f64 {
@@ -96,6 +105,12 @@ fn mode(nums: &[f64]) -> Vec<f64> {
         }
     }
     let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(0);
-    if max <= 1 { return Vec::new(); }
-    counts.iter().filter(|(_, c)| *c == max).map(|(v, _)| *v).collect()
+    if max <= 1 {
+        return Vec::new();
+    }
+    counts
+        .iter()
+        .filter(|(_, c)| *c == max)
+        .map(|(v, _)| *v)
+        .collect()
 }
