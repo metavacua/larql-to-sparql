@@ -2,6 +2,7 @@
 target/
 coverage/
 **/*.rs.bk
+*.rlib
 .cargo/
 
 # Python / maturin
