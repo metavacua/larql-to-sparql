@@ -62,7 +62,7 @@ fn test_standard_kv_memory_formula() {
     #[cfg(target_pointer_width = "64")]
     {
         let mem_370k = StandardKv.memory_bytes(&config, 370_000);
-        let expected_370k = 370_000 * 34 * 2 * 2 * 256 * 2;
+        let expected_370k = 370_000 * config.kv_bytes_per_token();
         assert_eq!(mem_370k, expected_370k);
         // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
         assert!(mem_370k > 20_000_000_000);
@@ -74,12 +74,12 @@ fn test_standard_kv_memory_formula() {
     // Verify the boundary: max_tokens fits, max_tokens+1 wraps.
     #[cfg(target_pointer_width = "32")]
     {
-        let bytes_per_token: usize = 34 * 2 * 2 * 256 * 2; // 69_632
+        let bytes_per_token = config.kv_bytes_per_token(); // 69_632
         let max_tokens = usize::MAX / bytes_per_token; // 61_681
         assert_eq!(max_tokens, 61_681);
         assert!((max_tokens + 1).checked_mul(bytes_per_token).is_none());
         let mem_max = StandardKv.memory_bytes(&config, max_tokens);
-        assert!(mem_max <= usize::MAX);
+        assert_eq!(mem_max, max_tokens * bytes_per_token);
     }
 }
 
