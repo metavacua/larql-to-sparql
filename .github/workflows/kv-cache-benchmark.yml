@@ -16,6 +16,7 @@ on:
       - 'Cargo.lock'
       - 'Makefile'
       - '.github/workflows/kv-cache-benchmark.yml'
+      - '.github/workflows/wasm-gate.yml'
   pull_request:
     branches: [main, ci/workflows-complete]
     paths:
@@ -25,9 +26,13 @@ on:
       - 'Cargo.lock'
       - 'Makefile'
       - '.github/workflows/kv-cache-benchmark.yml'
+      - '.github/workflows/wasm-gate.yml'
   workflow_dispatch: {}
 
 jobs:
+  wasm-gate:
+    uses: ./.github/workflows/wasm-gate.yml
+
   test:
     name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -43,33 +48,19 @@ jobs:
         include:
           - name: ubuntu-24.04
             runner: ubuntu-24.04
-            platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
           - name: chromeos-24.04
             runner: ubuntu-24.04
-            platform: chromeos
             target: x86_64-unknown-linux-gnu
 
           - name: windows-latest
             runner: windows-latest
-            platform: windows
             target: x86_64-pc-windows-msvc
 
           - name: macos-15-arm64
             runner: macos-15
-            platform: macos
             target: aarch64-apple-darwin
-
-          - name: android-aarch64
-            runner: ubuntu-24.04
-            platform: android
-            target: aarch64-linux-android
-
-          - name: android-armv7
-            runner: ubuntu-24.04
-            platform: android
-            target: armv7-linux-androideabi
 
     steps:
       - uses: actions/checkout@v6
@@ -80,13 +71,13 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+        if: matrix.name == 'ubuntu-24.04' || matrix.name == 'chromeos-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config
 
       - name: Install OpenBLAS (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.name == 'windows-latest'
         shell: pwsh
         run: |
           $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
@@ -94,23 +85,72 @@ jobs:
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
           & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
 
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ runner.os }}-${{ matrix.target }}-cargo-kv-bench
+
+      - name: Format check
+        run: cargo fmt -p kv-cache-benchmark -- --check
+
+      - name: Check
+        run: cargo check -p kv-cache-benchmark --target ${{ matrix.target }} --all-targets
+
+      - name: Clippy
+        run: cargo clippy -p kv-cache-benchmark --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }}
+
+      - name: Benchmark compile/tests
+        run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }} --benches
+
+  test-android:
+    name: test · ${{ matrix.name }}
+    needs: [wasm-gate]
+    if: |
+      always() &&
+      needs.wasm-gate.outputs.wasmi == 'success' &&
+      (matrix.target != 'aarch64-linux-android' || needs.wasm-gate.outputs.wasmtime == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: android-aarch64
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            target: armv7-linux-androideabi
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
       - name: Install Android NDK
-        if: matrix.platform == 'android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27
           link-to-sdk: true
 
       - name: Add Android NDK to PATH
-        if: matrix.platform == 'android'
         run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
       - name: Add Android target
-        if: matrix.platform == 'android'
         run: rustup target add ${{ matrix.target }}
 
       - name: Set Android NDK compiler vars (aarch64)
-        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        if: matrix.target == 'aarch64-linux-android'
         run: |
           NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
@@ -121,7 +161,7 @@ jobs:
           echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
 
       - name: Set Android NDK compiler vars (armv7)
-        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        if: matrix.target == 'armv7-linux-androideabi'
         run: |
           NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
@@ -132,13 +172,11 @@ jobs:
           echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
 
       - name: Set up QEMU for Android emulation
-        if: matrix.platform == 'android'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64,arm
 
       - name: Enable static CRT and redirect libc++_shared for Android
-        if: matrix.platform == 'android'
         run: |
           echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
           echo "TMPDIR=/tmp" >> $GITHUB_ENV
@@ -165,11 +203,6 @@ jobs:
         run: cargo clippy -p kv-cache-benchmark --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Tests
-        if: matrix.platform != 'android'
-        run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }}
-
-      - name: Tests (Android)
-        if: matrix.platform == 'android'
         run: cargo test -p kv-cache-benchmark --target ${{ matrix.target }} --lib --tests
 
       - name: Benchmark compile/tests

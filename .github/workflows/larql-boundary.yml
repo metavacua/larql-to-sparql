@@ -19,6 +19,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/larql-boundary.yml'
+      - '.github/workflows/wasm-gate.yml'
   pull_request:
     branches: [main, ci/workflows-complete]
     paths:
@@ -26,9 +27,13 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/larql-boundary.yml'
+      - '.github/workflows/wasm-gate.yml'
   workflow_dispatch: {}
 
 jobs:
+  wasm-gate:
+    uses: ./.github/workflows/wasm-gate.yml
+
   test:
     name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -40,33 +45,19 @@ jobs:
         include:
           - name: ubuntu-24.04
             runner: ubuntu-24.04
-            platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
           - name: chromeos-24.04
             runner: ubuntu-24.04
-            platform: chromeos
             target: x86_64-unknown-linux-gnu
 
           - name: windows-latest
             runner: windows-latest
-            platform: windows
             target: x86_64-pc-windows-msvc
 
           - name: macos-15-arm64
             runner: macos-15
-            platform: macos
             target: aarch64-apple-darwin
-
-          - name: android-aarch64
-            runner: ubuntu-24.04
-            platform: android
-            target: aarch64-linux-android
-
-          - name: android-armv7
-            runner: ubuntu-24.04
-            platform: android
-            target: armv7-linux-androideabi
 
     permissions:
       contents: read
@@ -80,23 +71,83 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-boundary-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-boundary-
+
+      - name: Format check
+        run: cargo fmt -p larql-boundary -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-boundary --target ${{ matrix.target }} --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-boundary --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: Unit + integration tests
+        run: cargo test -p larql-boundary --target ${{ matrix.target }}
+
+      - name: Test benchmarks (compile + smoke)
+        run: cargo test -p larql-boundary --target ${{ matrix.target }} --benches
+
+      - name: Run examples
+        run: |
+          cargo run -p larql-boundary --target ${{ matrix.target }} --example encode_decode
+          cargo run -p larql-boundary --target ${{ matrix.target }} --example gate_decision
+
+  test-android:
+    name: test · ${{ matrix.name }}
+    needs: [wasm-gate]
+    if: |
+      always() &&
+      needs.wasm-gate.outputs.wasmi == 'success' &&
+      (matrix.target != 'aarch64-linux-android' || needs.wasm-gate.outputs.wasmtime == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: android-aarch64
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            target: armv7-linux-androideabi
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
       - name: Install Android NDK
-        if: matrix.platform == 'android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27
           link-to-sdk: true
 
       - name: Add Android NDK to PATH
-        if: matrix.platform == 'android'
         run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
       - name: Add Android target
-        if: matrix.platform == 'android'
         run: rustup target add ${{ matrix.target }}
 
       - name: Set Android NDK compiler vars (aarch64)
-        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        if: matrix.target == 'aarch64-linux-android'
         run: |
           NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
@@ -107,7 +158,7 @@ jobs:
           echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
 
       - name: Set Android NDK compiler vars (armv7)
-        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        if: matrix.target == 'armv7-linux-androideabi'
         run: |
           NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
@@ -118,13 +169,11 @@ jobs:
           echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
 
       - name: Set up QEMU for Android emulation
-        if: matrix.platform == 'android'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64,arm
 
       - name: Enable static CRT and redirect libc++_shared for Android
-        if: matrix.platform == 'android'
         run: |
           echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
           echo "TMPDIR=/tmp" >> $GITHUB_ENV
@@ -157,11 +206,6 @@ jobs:
         run: cargo clippy -p larql-boundary --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Unit + integration tests
-        if: matrix.platform != 'android'
-        run: cargo test -p larql-boundary --target ${{ matrix.target }}
-
-      - name: Unit + integration tests (Android)
-        if: matrix.platform == 'android'
         run: cargo test -p larql-boundary --target ${{ matrix.target }} --lib --tests
 
       - name: Test benchmarks (compile + smoke)

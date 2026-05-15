@@ -60,3 +60,22 @@ impl SolverRuntime {
         Session::new(&self.engine, module, self.limits)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SolverRuntime;
+
+    // Verify that the engine produced by SolverRuntime has fuel metering
+    // enabled. set_fuel() errors immediately if Config::consume_fuel(true)
+    // was not set; catching that here gives a single clear failure point
+    // instead of cryptic panics spread across every wasm_roundtrip test.
+    #[test]
+    fn engine_fuel_metering_is_enabled() {
+        struct Dummy;
+        let runtime = SolverRuntime::new().expect("runtime");
+        let mut store = wasmi::Store::new(runtime.engine(), Dummy);
+        store
+            .set_fuel(1_000)
+            .expect("Engine must have fuel metering enabled (Config::consume_fuel(true))");
+    }
+}

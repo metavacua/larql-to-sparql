@@ -1,0 +1,90 @@
+# Reusable WASM backend gate.
+#
+# Called by every workflow that carries Android targets. Runs the wasmi and
+# wasmtime backend checks on the host before any cross-compiled Android build
+# is attempted, so a broken WASM backend fails fast rather than burning NDK
+# compile time across the whole matrix.
+#
+# Outputs
+#   wasmi    — result of the wasmi job   ('success' | 'failure' | 'skipped' | 'cancelled')
+#   wasmtime — result of the wasmtime job
+#
+# Callers gate Android targets like this:
+#   armv7:   if: always() && needs.wasm-gate.outputs.wasmi == 'success'
+#   aarch64: if: always() && needs.wasm-gate.outputs.wasmi == 'success'
+#                         && needs.wasm-gate.outputs.wasmtime == 'success'
+#
+# Why the split:
+#   wasmi   — pure-Rust interpreter, works on all targets including arm32.
+#             Active runtime backend for all Android builds.
+#   wasmtime — Cranelift JIT. Cranelift has no arm32 code-generator, so
+#              armv7 can never use it; aarch64 can. The wasmtime gate
+#              verifies the Cranelift aarch64 path compiles correctly even
+#              when wasmi is the active runtime.
+
+name: wasm-gate
+
+on:
+  workflow_call:
+    outputs:
+      wasmi:
+        description: "Result of the wasmi roundtrip gate"
+        value: ${{ jobs.wasmi.result }}
+      wasmtime:
+        description: "Result of the wasmtime compile gate"
+        value: ${{ jobs.wasmtime.result }}
+
+jobs:
+  wasmi:
+    name: wasm gate · wasmi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-x86_64-wasm-gate-wasmi-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-x86_64-wasm-gate-wasmi-
+
+      - name: Compile (wasm feature)
+        run: cargo build -p model-compute --no-default-features --features wasm
+
+      - name: Test wasm_roundtrip
+        run: cargo test -p model-compute --no-default-features --features wasm --tests
+
+  wasmtime:
+    name: wasm gate · wasmtime (aarch64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-x86_64-wasm-gate-wasmtime-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-x86_64-wasm-gate-wasmtime-
+
+      - name: Compile (wasm-jit feature)
+        run: cargo build -p model-compute --no-default-features --features wasm-jit
+
+      - name: Test (wasm-jit feature)
+        run: cargo test -p model-compute --no-default-features --features wasm-jit
