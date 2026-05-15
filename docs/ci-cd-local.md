@@ -81,8 +81,8 @@ forms do not block the local run (the same check is enforced strictly in
 All checks share a pinned Rust toolchain.
 
 ```bash
-rustup toolchain install 1.88.0
-rustup default 1.88.0
+rustup toolchain install 1.92.0
+rustup default 1.92.0
 ```
 
 Additional tooling required by `compliance` and `quality-fork`:

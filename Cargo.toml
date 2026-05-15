@@ -40,14 +40,10 @@ default-members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# Actual MSRV floor of the resolved dependency tree. Several transitive
-# crates (cranelift-control >= 0.123, home >= 0.5.12, cookie_store >= 0.22,
-# the time-* family) declare `rust-version = 1.85+` or require the
-# `edition2024` Cargo feature, stabilised in Rust 1.85. We pin to 1.88
-# to match the toolchain used by .github/workflows/quality.yml. The
-# previous declaration of "1.80" was inaccurate and broke `cargo-msrv
-# verify`.
-rust-version = "1.88"
+# Actual MSRV floor of the resolved dependency tree. The wasm-jit backend
+# requires wasmtime 44.0.1+, which mandates Rust 1.92.0+. This supersedes the
+# previous constraint (1.88 for cranelift-control, home, cookie_store, time-*).
+rust-version = "1.92"
 authors = []
 license = "Apache-2.0"
 repository = "https://github.com/chrishayuk/chuk-larql-rs"

@@ -34,8 +34,8 @@ readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
-# Pinned Rust toolchain (matches .github/workflows/cross-platform-build.yml)
-readonly RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.88.0}"
+# Pinned Rust toolchain (matches .github/workflows/validate.yml and quality.yml)
+readonly RUST_TOOLCHAIN="${RUST_TOOLCHAIN:-1.92.0}"
 
 # Utility functions
 log_header() {

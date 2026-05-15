@@ -48,11 +48,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # 1.88.0 is the floor: at this PR's resolution the tree pulls
-  # `home v0.5.12`, `cookie_store v0.22.1`, and the `time-*` crates,
-  # all of which declare `rust-version = 1.88`. Bumping further is
-  # cheap; bumping below 1.88 fails resolution.
-  RUST_TOOLCHAIN: "1.88.0"
+  # 1.92.0 is required by wasmtime 44.0.1+ (the wasm-jit feature gate).
+  # Earlier revisions pinned 1.88.0 based on transitive dependencies
+  # (home v0.5.12, cookie_store v0.22.1, time-* crates), but newer
+  # WASM backend dependencies raise the floor.
+  RUST_TOOLCHAIN: "1.92.0"
   # Scanner tools (cargo-audit, cargo-deny) are intentionally NOT
   # version-pinned. They must keep pace with the evolving formats of
   # their backing advisory database.
