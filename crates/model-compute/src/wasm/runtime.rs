@@ -2,7 +2,7 @@
 //! `wasmi::Engine`; each `Session::new` creates a fresh `Store` with
 //! the configured limits so calls are isolated.
 
-use wasmi::{Engine, Module};
+use wasmi::{Config, Engine, Module};
 
 use super::error::SolverError;
 use super::session::Session;
@@ -35,7 +35,9 @@ impl SolverRuntime {
     }
 
     pub fn with_limits(limits: SolverLimits) -> Result<Self, SolverError> {
-        let engine = Engine::default();
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
         Ok(Self { engine, limits })
     }
 
