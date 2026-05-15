@@ -57,13 +57,30 @@ fn test_standard_kv_memory_formula() {
     let expected = 4096 * 34 * 2 * 2 * 256 * 2;
     assert_eq!(mem, expected);
 
-    // 370K tokens
-    let mem_370k = StandardKv.memory_bytes(&config, 370_000);
-    let expected_370k = 370_000 * 34 * 2 * 2 * 256 * 2;
-    assert_eq!(mem_370k, expected_370k);
-    // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
-    assert!(mem_370k > 20_000_000_000);
-    assert!(mem_370k < 30_000_000_000);
+    // 370K tokens: ~25.8 GB — only valid on 64-bit (x86_64, aarch64).
+    // On 32-bit (ARMv7, WASM), usize::MAX ≈ 4.3 GB so 370K tokens overflows.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let mem_370k = StandardKv.memory_bytes(&config, 370_000);
+        let expected_370k = 370_000 * config.kv_bytes_per_token();
+        assert_eq!(mem_370k, expected_370k);
+        // 370K × 34L × 2(KV) × 2 heads × 256 dim × 2 bytes = ~25.8 GB
+        assert!(mem_370k > 20_000_000_000);
+        assert!(mem_370k < 30_000_000_000);
+    }
+
+    // On 32-bit targets (ARMv7, WASM in-browser), the maximum representable
+    // KV cache without usize overflow is 61_681 tokens (~4.29 GB).
+    // Verify the boundary: max_tokens fits, max_tokens+1 wraps.
+    #[cfg(target_pointer_width = "32")]
+    {
+        let bytes_per_token = config.kv_bytes_per_token(); // 69_632
+        let max_tokens = usize::MAX / bytes_per_token; // 61_681
+        assert_eq!(max_tokens, 61_681);
+        assert!((max_tokens + 1).checked_mul(bytes_per_token).is_none());
+        let mem_max = StandardKv.memory_bytes(&config, max_tokens);
+        assert_eq!(mem_max, max_tokens * bytes_per_token);
+    }
 }
 
 #[test]
