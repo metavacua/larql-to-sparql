@@ -193,10 +193,17 @@ jobs:
         run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets --features metal -- -D warnings
 
       - name: Unit tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-compute --target ${{ matrix.target }} --lib
 
       - name: Backend contract tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-compute --target ${{ matrix.target }} --test test_backend_matmul_quant
 
       - name: Pipeline and MoE contract tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-compute --target ${{ matrix.target }} --test test_pipeline_and_moe
+
+      - name: Tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-compute --target ${{ matrix.target }} --lib --tests
