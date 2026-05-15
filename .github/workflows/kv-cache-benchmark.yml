@@ -79,6 +79,12 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Install protoc (Windows)
+        if: matrix.platform == 'windows'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install OpenBLAS (Linux/ChromeOS)
         if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
         run: |
