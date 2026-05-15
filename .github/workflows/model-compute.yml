@@ -32,6 +32,10 @@ on:
       - '.github/workflows/wasm-gate.yml'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   wasm-gate:
     uses: ./.github/workflows/wasm-gate.yml
