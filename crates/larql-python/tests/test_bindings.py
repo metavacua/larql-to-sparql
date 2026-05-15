@@ -97,7 +97,7 @@ def vindex_path():
     # Per layer: num_features(u32 LE) + per-feature records
     # Per feature: top_token_id(u32 LE) + c_score(f32 LE) + top_k*(token_id(u32 LE)+logit(f32 LE))
     MAGIC = 0x444D4554  # "DMET"
-    top_k_count = 3
+    top_k_count = config["down_top_k"]
     record_size = 8 + top_k_count * 8
     meta_data = bytearray()
     meta_data += struct.pack("<IIII", MAGIC, 1, NUM_LAYERS, top_k_count)
