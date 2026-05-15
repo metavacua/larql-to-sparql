@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Rust toolchain upgrade to 1.92.0 for wasmtime 44.0.1+ (wasm-jit) compatibility
 - Linux support — conditional BLAS and Q4 scalar fallback
 - Linux/WSL2 support + temperature parameter
 - MSRV truth, OpenBLAS, version-preflight, changelog
