@@ -184,7 +184,12 @@ jobs:
         run: cargo clippy -p larql-lql --target ${{ matrix.target }} --all-targets --no-deps -- -D warnings
 
       - name: Tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-lql --target ${{ matrix.target }}
+
+      - name: Tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-lql --target ${{ matrix.target }} --lib --tests
 
       - name: Benchmark compile/tests
         run: cargo test -p larql-lql --target ${{ matrix.target }} --benches

@@ -18,7 +18,12 @@ set -euo pipefail
 
 BASELINE_NAME="${BASELINE_NAME:-main}"
 THRESHOLD="${THRESHOLD:-0.10}"   # 10 % slowdown = regression
-FEATURES="${FEATURES:---features metal}"
+# metal is an Apple-only dependency (dep:metal, dep:objc); only enable it on macOS.
+if [[ "$(uname)" == "Darwin" ]]; then
+    FEATURES="${FEATURES:---features metal}"
+else
+    FEATURES="${FEATURES:-}"
+fi
 # Benches to gate on. Override with `BENCHES="quant_matvec"` to focus.
 BENCHES="${BENCHES:-quant_matvec matmul linalg}"
 

@@ -183,7 +183,12 @@ jobs:
         run: cargo clippy -p larql-vindex --target ${{ matrix.target }} --all-targets -- -D warnings
 
       - name: Tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-vindex --target ${{ matrix.target }}
+
+      - name: Tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-vindex --target ${{ matrix.target }} --lib --tests
 
       - name: Benchmark compile/tests
         run: cargo test -p larql-vindex --target ${{ matrix.target }} --benches

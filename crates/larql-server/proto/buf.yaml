@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
+# SPDX-License-Identifier: Apache-2.0
+version: v2
+lint:
+  use:
+    - DEFAULT
