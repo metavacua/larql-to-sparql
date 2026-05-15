@@ -16,7 +16,7 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'
@@ -29,7 +29,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-cli.yml'
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-cli/**'
       - 'crates/larql-lql/**'
@@ -132,6 +132,25 @@ jobs:
           echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
           echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
 
+      - name: Set up QEMU for Android emulation
+        if: matrix.platform == 'android'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Enable static CRT and redirect libc++_shared for Android
+        if: matrix.platform == 'android'
+        run: |
+          echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
+          echo "TMPDIR=/tmp" >> $GITHUB_ENV
+          NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          LIBUNWIND_AARCH64=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/aarch64*" | head -1)
+          LIBUNWIND_ARM=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/arm*" ! -path "*/aarch64*" | head -1)
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_static.a ${LIBUNWIND_AARCH64})" \
+            > "${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_shared.a"
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
+            > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
+
       - name: Install OpenBLAS (Linux/ChromeOS)
         if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
         run: |
@@ -176,7 +195,6 @@ jobs:
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests
 
       - name: Tests (CPU only) on Linux/Windows/ChromeOS/Android
-        if: matrix.platform != 'android' && matrix.platform != 'macos'
         run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features
 
       - name: Tests (default features) on macOS

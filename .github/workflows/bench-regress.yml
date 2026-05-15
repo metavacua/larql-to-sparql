@@ -17,9 +17,9 @@ name: bench-regress
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
   pull_request:
-    branches: [main]
+    branches: [main, ci/workflows-complete]
   # Manual trigger so a maintainer can re-baseline after intentional
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}

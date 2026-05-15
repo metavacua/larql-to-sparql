@@ -1,54 +1,36 @@
-# larql-server cross-platform CI
+# larql-experts WASM expert modules CI
 #
-# HTTP/gRPC inference server (vindex queries, OpenAI-compat, remote MoE
-# expert shards). Build script bundles `protoc` via `protobuf_src`, so
-# no system protoc install is required on any runner. Tests are split
-# across many `test_http_*`, `test_grpc`, and `test_unit_*` files; all
-# run cross-platform without real model weights.
+# Tests the expert-interface and all expert modules (arithmetic, date, unit,
+# logic, dijkstra, statistics, geometry, trig, string_ops, hash, finance,
+# sql, element, http_status, isbn, luhn, markov, conway, graph).
+# These modules compile to WebAssembly and are loaded by larql-inference.
 
-name: larql-server
-
-permissions:
-  contents: read
+name: larql-experts
 
 on:
   push:
     branches: [main, ci/workflows-complete]
     paths:
-      - 'crates/larql-server/**'
-      - 'crates/larql-router-protocol/**'
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-inference/src/**'
-      - 'crates/larql-models/**'
+      - 'crates/larql-experts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
-      - '.github/workflows/larql-server.yml'
+      - '.github/workflows/larql-experts.yml'
   pull_request:
     branches: [main, ci/workflows-complete]
     paths:
-      - 'crates/larql-server/**'
-      - 'crates/larql-router-protocol/**'
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-inference/src/**'
-      - 'crates/larql-models/**'
+      - 'crates/larql-experts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
-      - '.github/workflows/larql-server.yml'
+      - '.github/workflows/larql-experts.yml'
   workflow_dispatch: {}
-
-env:
-  # Existing baseline measured 2026-05-10 in Makefile (see
-  # `LARQL_SERVER_COVERAGE_MIN`). Keep just under the live value to
-  # ratchet upward, never down.
-  LARQL_SERVER_COVERAGE_MIN: 65
 
 jobs:
   test:
-    name: test - ${{ matrix.name }}
+    name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     permissions:
       contents: read
@@ -152,54 +134,31 @@ jobs:
           echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
             > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
-      - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install OpenBLAS (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
-
-      - name: Install protoc (Windows)
-        if: matrix.platform == 'windows'
-        uses: arduino/setup-protoc@v3
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          shared-key: ${{ runner.os }}-${{ matrix.target }}-cargo-experts
 
-      - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-server-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-server-
+      - name: Format check (workspace)
+        working-directory: crates/larql-experts
+        run: cargo fmt --all -- --check
 
-      - name: Format check
-        run: cargo fmt -p larql-server -- --check
+      - name: Check workspace members
+        working-directory: crates/larql-experts
+        run: cargo check --target ${{ matrix.target }} --all --all-targets
 
-      - name: Check lib + bins + tests
-        run: cargo check -p larql-server --target ${{ matrix.target }} --lib --bins --tests
-
-      - name: Clippy
-        run: cargo clippy -p larql-server --target ${{ matrix.target }} --lib --bins --tests --no-deps -- -D warnings
+      - name: Clippy (workspace)
+        working-directory: crates/larql-experts
+        run: cargo clippy --target ${{ matrix.target }} --all --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test -p larql-server --target ${{ matrix.target }}
+        working-directory: crates/larql-experts
+        run: cargo test --target ${{ matrix.target }} --all
 
   coverage:
-    name: coverage - ubuntu
+    name: coverage · ubuntu
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     permissions:
       contents: read
@@ -210,19 +169,9 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-server --summary-only --fail-under-lines "$LARQL_SERVER_COVERAGE_MIN"
-
-      - name: Coverage policy
-        run: |
-          mkdir -p coverage/larql-server
-          cargo llvm-cov report --package larql-server --json --summary-only --output-path coverage/larql-server/summary.json
-          python3 scripts/check_coverage_policy.py coverage/larql-server/summary.json crates/larql-server/coverage-policy.json
+      - name: Coverage summary (workspace)
+        working-directory: crates/larql-experts
+        run: cargo llvm-cov --all --summary-only

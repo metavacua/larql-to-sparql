@@ -255,7 +255,7 @@ pub fn q4k_q8k_matvec_scalar(
 /// Implemented via inline asm because `core::arch::aarch64::vdotq_s32` is
 /// still gated behind the unstable `stdarch_neon_dotprod` feature on Rust
 /// 1.91 (issue rust-lang/rust#117224).  The asm form is stable today.
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
 #[inline(always)]
 unsafe fn sdot_acc(
     acc: std::arch::aarch64::int32x4_t,
@@ -280,7 +280,7 @@ unsafe fn sdot_acc(
 /// products against the Q8_K activation.  Per-row work per super-block:
 /// load 32-byte nibble chunk, mask low / shift high, two SDOT calls per
 /// half (16 lanes each), add into per-row f32 accumulator.
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
 pub fn q4k_q8k_matvec_neon(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -393,7 +393,7 @@ pub fn q4k_q8k_matvec_neon(
 /// Tail handling: if `rows` is odd, the final row falls back to the
 /// single-row kernel.  Production matvec dims (`inter=704`, `hidden=2816`)
 /// are even so this is a no-op there.
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
 pub fn q4k_q8k_matvec_neon_2row(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -540,7 +540,7 @@ pub fn q4k_q8k_matvec_into(
     rows: usize,
     cols: usize,
 ) {
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
     {
         // 2-row variant tried 2026-05-01 — bit-exact (`q8k_matvec_2row_matches_single_row_bit_exact`)
         // but bench-neutral on M3 Max: per-thread is BW-bound on the
@@ -677,7 +677,7 @@ pub fn q4k_q8k_gate_up_into(
     rows: usize,
     cols: usize,
 ) {
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
     {
         q4k_q8k_gate_up_neon(gate_out, up_out, q8k_x, gate_w, up_w, rows, cols);
         return;
@@ -690,7 +690,7 @@ pub fn q4k_q8k_gate_up_into(
     }
 }
 
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
 pub fn q4k_q8k_gate_up_neon(
     gate_out: &mut [f32],
     up_out: &mut [f32],
@@ -905,7 +905,7 @@ pub fn q6k_q8k_matvec_scalar(
 /// 3. scale * dot_g accumulated into sum1.
 ///
 /// Final: acc += d_w * d_y * sum1.
-#[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+#[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
 pub fn q6k_q8k_matvec_neon(
     out: &mut [f32],
     q8k_x: &Q8KActivation,
@@ -1022,7 +1022,7 @@ pub fn q6k_q8k_matvec_into(
     rows: usize,
     cols: usize,
 ) {
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
     {
         q6k_q8k_matvec_neon(out, q8k_x, w, rows, cols);
         return;
@@ -1146,7 +1146,7 @@ mod tests {
     /// aarch64 — both implement the same i32 dot math.  Different inputs
     /// from the noise tests above to catch byte-ordering / lane-mapping
     /// bugs that happen to vanish on regular ramps.
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
     #[test]
     fn q8k_matvec_neon_matches_scalar_bit_exact() {
         let cols = 1024; // 4 super-blocks — exercises sb-loop + g-loop
@@ -1216,7 +1216,7 @@ mod tests {
     /// kernel for the same input — the dot math is identical, only the
     /// instruction scheduling differs.  Test on both even and odd row
     /// counts so the tail-handling path is exercised.
-    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    #[cfg(all(target_arch = "aarch64", target_feature = "dotprod"))]
     #[test]
     fn q8k_matvec_2row_matches_single_row_bit_exact() {
         for &rows in &[2usize, 4, 7, 11, 16, 17] {

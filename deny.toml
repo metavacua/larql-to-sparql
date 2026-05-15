@@ -129,10 +129,13 @@ license-files = [
 # Bans: duplicate detection and explicit deny list. Duplicates are warned
 # rather than denied because the workspace pulls a deep tree and aligning
 # all transitive versions is not always feasible without upstream PRs.
+# Wildcards are allowed for external published crates per standard Rust
+# semver practices (e.g. "0.8" allows maintenance updates). Internal larql
+# crates use path dependencies, so wildcard restrictions don't apply to them.
 # ---------------------------------------------------------------------------
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "allow"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"

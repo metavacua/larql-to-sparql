@@ -1,54 +1,37 @@
-# larql-server cross-platform CI
+# larql-router distributed layer-sharding router CI
 #
-# HTTP/gRPC inference server (vindex queries, OpenAI-compat, remote MoE
-# expert shards). Build script bundles `protoc` via `protobuf_src`, so
-# no system protoc install is required on any runner. Tests are split
-# across many `test_http_*`, `test_grpc`, and `test_unit_*` files; all
-# run cross-platform without real model weights.
+# Tests the router library and binary on Linux, Windows, and macOS.
+# The router is platform-agnostic (no GPU/BLAS dependencies) and runs
+# the same test surface across all platforms.
 
-name: larql-server
-
-permissions:
-  contents: read
+name: larql-router
 
 on:
   push:
     branches: [main, ci/workflows-complete]
     paths:
-      - 'crates/larql-server/**'
+      - 'crates/larql-router/**'
       - 'crates/larql-router-protocol/**'
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-inference/src/**'
-      - 'crates/larql-models/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
-      - '.github/workflows/larql-server.yml'
+      - '.github/workflows/larql-router.yml'
   pull_request:
     branches: [main, ci/workflows-complete]
     paths:
-      - 'crates/larql-server/**'
+      - 'crates/larql-router/**'
       - 'crates/larql-router-protocol/**'
-      - 'crates/larql-vindex/**'
-      - 'crates/larql-inference/src/**'
-      - 'crates/larql-models/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Makefile'
-      - '.github/workflows/larql-server.yml'
+      - '.github/workflows/larql-router.yml'
   workflow_dispatch: {}
-
-env:
-  # Existing baseline measured 2026-05-10 in Makefile (see
-  # `LARQL_SERVER_COVERAGE_MIN`). Keep just under the live value to
-  # ratchet upward, never down.
-  LARQL_SERVER_COVERAGE_MIN: 65
 
 jobs:
   test:
-    name: test - ${{ matrix.name }}
+    name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     permissions:
       contents: read
@@ -95,6 +78,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Install protoc (Windows)
+        if: matrix.platform == 'windows'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Android NDK
         if: matrix.platform == 'android'
@@ -152,54 +141,43 @@ jobs:
           echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
             > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
-      - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
-
-      - name: Install OpenBLAS (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
-          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
-          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
-          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
-
-      - name: Install protoc (Windows)
-        if: matrix.platform == 'windows'
-        uses: arduino/setup-protoc@v3
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v5
-        with:
-          path: |
+          shared-key: ${{ runner.os }}-${{ matrix.target }}-cargo-router
+          cache-directories: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-server-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-server-
 
       - name: Format check
-        run: cargo fmt -p larql-server -- --check
+        run: cargo fmt -p larql-router -p larql-router-protocol -- --check
 
-      - name: Check lib + bins + tests
-        run: cargo check -p larql-server --target ${{ matrix.target }} --lib --bins --tests
+      - name: Check lib + tests + benches
+        run: cargo check -p larql-router --target ${{ matrix.target }} --lib --tests --benches
 
-      - name: Clippy
-        run: cargo clippy -p larql-server --target ${{ matrix.target }} --lib --bins --tests --no-deps -- -D warnings
+      - name: Check protocol
+        run: cargo check -p larql-router-protocol --target ${{ matrix.target }} --lib
+
+      - name: Clippy (router)
+        run: cargo clippy -p larql-router --target ${{ matrix.target }} --lib --tests --benches --no-deps -- -D warnings
+
+      - name: Clippy (protocol)
+        run: cargo clippy -p larql-router-protocol --target ${{ matrix.target }} --lib --no-deps -- -D warnings
 
       - name: Tests
-        run: cargo test -p larql-server --target ${{ matrix.target }}
+        run: cargo test -p larql-router --target ${{ matrix.target }}
+
+      - name: Tests (protocol)
+        run: cargo test -p larql-router-protocol --target ${{ matrix.target }}
+
+      - name: Benchmark compile/tests
+        run: cargo test -p larql-router --target ${{ matrix.target }} --benches
 
   coverage:
-    name: coverage - ubuntu
+    name: coverage · ubuntu
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     permissions:
       contents: read
@@ -210,19 +188,16 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install OpenBLAS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev pkg-config
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Coverage summary
-        run: cargo llvm-cov --package larql-server --summary-only --fail-under-lines "$LARQL_SERVER_COVERAGE_MIN"
+      - name: Coverage summary (router)
+        run: cargo llvm-cov --package larql-router --summary-only
 
-      - name: Coverage policy
-        run: |
-          mkdir -p coverage/larql-server
-          cargo llvm-cov report --package larql-server --json --summary-only --output-path coverage/larql-server/summary.json
-          python3 scripts/check_coverage_policy.py coverage/larql-server/summary.json crates/larql-server/coverage-policy.json
+      - name: Coverage summary (protocol)
+        run: cargo llvm-cov --package larql-router-protocol --summary-only
