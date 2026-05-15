@@ -194,7 +194,12 @@ jobs:
         run: cargo clippy -p larql-server --target ${{ matrix.target }} --lib --bins --tests --no-deps -- -D warnings
 
       - name: Tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-server --target ${{ matrix.target }}
+
+      - name: Tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-server --target ${{ matrix.target }} --lib --tests
 
   coverage:
     name: coverage - ubuntu

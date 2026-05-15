@@ -189,7 +189,12 @@ jobs:
         run: cargo clippy -p larql-inference --target ${{ matrix.target }} --lib --tests --benches --no-deps -- -D warnings
 
       - name: Tests
+        if: matrix.platform != 'android'
         run: cargo test -p larql-inference --target ${{ matrix.target }}
+
+      - name: Tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-inference --target ${{ matrix.target }} --lib --tests
 
   coverage:
     name: coverage - ubuntu

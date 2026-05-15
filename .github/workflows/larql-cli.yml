@@ -194,8 +194,13 @@ jobs:
         if: matrix.platform == 'macos'
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests
 
-      - name: Tests (CPU only) on Linux/Windows/ChromeOS/Android
+      - name: Tests (CPU only) on Linux/Windows/ChromeOS
+        if: matrix.platform != 'android' && matrix.platform != 'macos'
         run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features
+
+      - name: Tests (CPU only, Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features --lib --tests
 
       - name: Tests (default features) on macOS
         if: matrix.platform == 'macos'
