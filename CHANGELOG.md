@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Configure BLAS for Android in larql-inference and larql-kv
 - Configure larql-compute BLAS for Android cross-compilation
 - Correct CHANGELOG.md structure and formatting
+- Correct test JSON format and parallel build-std arg passing
 - Drop bogus `hidden_size % head_dim == 0` invariant
 - Drop §4(b) per-file re-walk; rely on REUSE.toml manifest
 - Error on missing config.json / required topology fields (#22)
@@ -70,6 +71,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate orphan items in vindex test + cover second lql bench
 - Gate sdot on dotprod feature and add QEMU emulation for tests
 - Gate trace_final_residual_matches_raw_forward_logits
+- Move wasm-pack flags before crate path for latest wasm-pack compat
 - Pin evalexpr to v11.3.1 (MIT) to avoid AGPL-3.0 at v12
 - Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Pull Q4K vindex weight artifacts
@@ -96,3 +98,4 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Use checked_div for head_dim derivation (#50)
 - Use matmul_transb for MoE expert scoring
 - Use netlib (pure-Rust BLAS) for Android builds
+- Use single-line wasm-pack commands to avoid backslash continuation
