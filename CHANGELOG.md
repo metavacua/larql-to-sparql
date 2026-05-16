@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Implement ChromeOS (Phase 2a) cross-platform CI/CD support
 - Implement macOS (Phase 3) cross-platform CI/CD support
 - Metadata-only resolve_hf_vindex (no eager binary downloads)
+- Per-crate WASM compatibility matrix (16 × serial/parallel × node/firefox)
 - Per-expert dequantization for DeepSeek-V4 layout
 - Per-expert top-K SVD summary tier for many-experts MoE
 - Support F8_E4M3 / F8_E5M2 / F8_E8M0 / I8 dtypes
@@ -91,6 +92,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Switch browser target from Chrome to Firefox
 - Unblock CI tests broken by e67b4f3
 - Update runtime to use Engine with Config
+- Use --features=parallel (equals) to avoid wasm-pack path ambiguity
 - Use BLIS (pure-Rust BLAS) for Android cross-compilation
 - Use blas-src netlib feature for Android BLAS
 - Use checked_div for head_dim derivation
