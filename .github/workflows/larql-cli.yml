@@ -29,6 +29,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-cli.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-cli/**'
@@ -42,6 +43,10 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-cli.yml'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   test:

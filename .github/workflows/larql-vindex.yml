@@ -22,6 +22,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-vindex.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-vindex/**'
@@ -32,6 +33,10 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-vindex.yml'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   LARQL_VINDEX_COVERAGE_MIN: 71

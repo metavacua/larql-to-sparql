@@ -18,17 +18,35 @@ name: bench-regress
 on:
   push:
     branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.reuse/**'
+      - 'CHANGELOG*'
+      - 'LICENSE*'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.reuse/**'
+      - 'CHANGELOG*'
+      - 'LICENSE*'
   # Manual trigger so a maintainer can re-baseline after intentional
   # perf changes without waiting for the next merge to main.
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
 
 jobs:
   bench:
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     name: bench - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90

@@ -17,6 +17,7 @@ on:
       - 'Makefile'
       - '.github/workflows/model-compute.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/model-compute/**'
@@ -26,8 +27,13 @@ on:
       - '.github/workflows/model-compute.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   test:
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -182,6 +188,8 @@ jobs:
         run: cargo test -p model-compute --target ${{ matrix.target }} --benches
 
   coverage:
+    needs: [test]
+    if: success() && (github.event.pull_request.draft == false || github.event_name != 'pull_request')
     name: coverage · ubuntu
     runs-on: ubuntu-24.04
     timeout-minutes: 30
