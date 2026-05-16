@@ -5,8 +5,10 @@ lint:
   use:
     - STANDARD
   except:
-    # Proto files live flat in proto/ rather than proto/larql/{expert,grid}/v1/;
-    # relocating them would break generated-code import paths.
+    # expert.proto (larql.expert.v1) and grid.proto (larql.grid.v1) share the
+    # same flat proto/ directory; splitting them into per-package subdirectories
+    # would break generated-code import paths.
+    - DIRECTORY_SAME_PACKAGE
     - PACKAGE_DIRECTORY_MATCH
     # GridService.Join uses ServerMessage/RouterMessage and ExpertService.ExpertStream
     # uses ExpertLayerInput/ExpertLayerOutput — non-standard names that are part
