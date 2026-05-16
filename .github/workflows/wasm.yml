@@ -100,15 +100,13 @@ jobs:
 
       - name: Build (serial)
         if: matrix.mode == 'serial'
-        run: wasm-pack build crates/larql-wasm --target web --release
+        run: wasm-pack build --target web --release crates/larql-wasm
 
       - name: Build (parallel)
         if: matrix.mode == 'parallel'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: |
-          wasm-pack build crates/larql-wasm --target web --release \
-            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack build --target web --release crates/larql-wasm -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
 
       - name: Upload wasm pkg artifact
         uses: actions/upload-artifact@v7
@@ -200,23 +198,23 @@ jobs:
 
       - name: Test (serial · node)
         if: matrix.mode == 'serial' && matrix.env == 'node'
-        run: wasm-pack test crates/larql-wasm --node
+        run: wasm-pack test --node crates/larql-wasm
 
       - name: Test (serial · firefox)
         if: matrix.mode == 'serial' && matrix.env == 'firefox'
-        run: wasm-pack test crates/larql-wasm --headless --firefox
+        run: wasm-pack test --headless --firefox crates/larql-wasm
 
       - name: Test (parallel · node)
         if: matrix.mode == 'parallel' && matrix.env == 'node'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: wasm-pack test crates/larql-wasm --node -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test --node crates/larql-wasm -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
 
       - name: Test (parallel · firefox)
         if: matrix.mode == 'parallel' && matrix.env == 'firefox'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: wasm-pack test crates/larql-wasm --headless --firefox -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test --headless --firefox crates/larql-wasm -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
 
 # ── Stage C: Bench ─────────────────────────────────────────────────────────────
 # Single job serialized after all four test cells pass.
