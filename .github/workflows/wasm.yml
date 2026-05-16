@@ -12,9 +12,11 @@
 # serial build  — stable Rust, standard wasm32-unknown-unknown.
 # parallel build — nightly Rust + atomics target features + -Z build-std
 #                  (wasm-bindgen-rayon: Web Workers + SharedArrayBuffer).
+#                  Requires rust-src component for -Z build-std.
 #
-# Triggers: all branches and all PRs — broad scope for iterative debugging.
-# Tighten to `branches: [main, ci/workflows-complete]` once the pipeline is stable.
+# Triggers: all branches and all PRs (including drafts) — broad scope for
+# iterative debugging.  Tighten to `branches: [main, ci/workflows-complete]`
+# once the pipeline is stable.
 
 name: wasm
 
@@ -28,7 +30,7 @@ on:
       - 'scripts/wasm-bench.mjs'
       - '.github/workflows/wasm.yml'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'crates/larql-wasm/**'
       - 'crates/larql-core/**'
@@ -44,10 +46,10 @@ concurrency:
 
 # ── Stage A: Build ─────────────────────────────────────────────────────────────
 # serial and parallel builds run in parallel (no `needs`).
+# No draft guard — intentionally runs on all PRs including drafts for debugging.
 
 jobs:
   build:
-    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
     name: build · ${{ matrix.mode }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -70,18 +72,21 @@ jobs:
             features: parallel
             rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
             # Passed after `--` to cargo so wasm-pack forwards them.
+            # rust-src component required for -Z build-std.
             cargo_opts: '-Z build-std=std,panic_abort'
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust (${{ matrix.toolchain }})
+      - name: Install Rust (${{ matrix.toolchain }}) + wasm32 target
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+          targets: wasm32-unknown-unknown
 
-      - name: Add wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
+      - name: Add rust-src component (parallel / -Z build-std only)
+        if: matrix.mode == 'parallel'
+        run: rustup component add rust-src --toolchain nightly
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
@@ -118,7 +123,6 @@ jobs:
 
   test:
     needs: [build]
-    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
     name: test · ${{ matrix.mode }} · ${{ matrix.env }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -165,13 +169,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust (${{ matrix.toolchain }})
+      - name: Install Rust (${{ matrix.toolchain }}) + wasm32 target
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+          targets: wasm32-unknown-unknown
 
-      - name: Add wasm32-unknown-unknown target
-        run: rustup target add wasm32-unknown-unknown
+      - name: Add rust-src component (parallel / -Z build-std only)
+        if: matrix.mode == 'parallel'
+        run: rustup component add rust-src --toolchain nightly
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
@@ -222,7 +228,6 @@ jobs:
 
   bench:
     needs: [test]
-    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
     name: bench · serial vs parallel
     runs-on: ubuntu-24.04
     timeout-minutes: 20
