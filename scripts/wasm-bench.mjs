@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,7 +77,7 @@ async function main() {
 
   console.log("Loading serial WASM module...");
   const serialPkgJs = path.join(SERIAL_PKG, "larql_wasm.js");
-  const serialWasm = await import(serialPkgJs);
+  const serialWasm = await import(pathToFileURL(serialPkgJs).href);
   // wasm-pack web target: call default export to init.
   await serialWasm.default(
     readFileSync(path.join(SERIAL_PKG, "larql_wasm_bg.wasm"))
@@ -85,7 +85,7 @@ async function main() {
 
   console.log("Loading parallel WASM module...");
   const parallelPkgJs = path.join(PARALLEL_PKG, "larql_wasm.js");
-  const parallelWasm = await import(parallelPkgJs);
+  const parallelWasm = await import(pathToFileURL(parallelPkgJs).href);
   await parallelWasm.default(
     readFileSync(path.join(PARALLEL_PKG, "larql_wasm_bg.wasm"))
   );

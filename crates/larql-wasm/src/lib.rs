@@ -48,7 +48,7 @@ impl GraphSession {
 
     /// Number of distinct entity nodes in the loaded graph.
     pub fn entity_count(&self) -> usize {
-        self.graph.list_entities().len()
+        self.graph.node_count()
     }
 
     /// Return graph statistics as a JSON string.
