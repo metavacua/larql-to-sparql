@@ -6,12 +6,15 @@
 # sync' or rustup invocation is needed.
 #
 # This workflow is build-only; CI passes on successful cargo build regardless
-# of test results. Triggered weekly (Monday 04:00 UTC) and on manual dispatch
-# to avoid adding per-commit CI burden.
+# of test results. Triggered on pull_request, weekly (Monday 04:00 UTC), and
+# on manual dispatch.
 
 name: ChromeOS (cros_sdk)
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: '0 4 * * 1'   # weekly, Monday 04:00 UTC
