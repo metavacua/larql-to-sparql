@@ -67,7 +67,11 @@ pub fn benchmark_bfs_serial(n_edges: u32, rounds: u32) -> f64 {
 
 /// Run PageRank `rounds` times in parallel using rayon's thread pool.
 ///
-/// Each round is an independent computation over a clone of the synthetic graph.
+/// larql_core::Graph contains a RefCell for lazy node caching and is therefore
+/// !Sync — it cannot be shared across rayon threads.  Each parallel worker
+/// builds its own independent Graph instead, modelling N concurrent independent
+/// graph queries rather than N queries over a single shared graph.
+///
 /// Requires the caller to first `await initThreadPool(n)`.
 ///
 /// Returns elapsed wall-clock milliseconds.
@@ -75,9 +79,9 @@ pub fn benchmark_bfs_serial(n_edges: u32, rounds: u32) -> f64 {
 #[wasm_bindgen]
 pub fn benchmark_pagerank_parallel(n_edges: u32, rounds: u32) -> f64 {
     use rayon::prelude::*;
-    let graph = synthetic_graph(n_edges);
     let start = js_sys::Date::now();
     (0..rounds as usize).into_par_iter().for_each(|_| {
+        let graph = synthetic_graph(n_edges);
         let _ = larql_core::pagerank(&graph, 0.85, 20, 1e-4);
     });
     js_sys::Date::now() - start
@@ -85,6 +89,7 @@ pub fn benchmark_pagerank_parallel(n_edges: u32, rounds: u32) -> f64 {
 
 /// Run BFS `rounds` times in parallel.
 ///
+/// Each worker builds its own Graph for the same reason as benchmark_pagerank_parallel.
 /// Requires the caller to first `await initThreadPool(n)`.
 ///
 /// Returns elapsed wall-clock milliseconds.
@@ -92,9 +97,9 @@ pub fn benchmark_pagerank_parallel(n_edges: u32, rounds: u32) -> f64 {
 #[wasm_bindgen]
 pub fn benchmark_bfs_parallel(n_edges: u32, rounds: u32) -> f64 {
     use rayon::prelude::*;
-    let graph = synthetic_graph(n_edges);
     let start = js_sys::Date::now();
     (0..rounds as usize).into_par_iter().for_each(|_| {
+        let graph = synthetic_graph(n_edges);
         let _ = larql_core::bfs_traversal(&graph, "e0", 6);
     });
     js_sys::Date::now() - start
