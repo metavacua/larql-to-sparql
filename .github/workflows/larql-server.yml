@@ -25,6 +25,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-server.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-server/**'
@@ -38,6 +39,10 @@ on:
       - '.github/workflows/larql-server.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 env:
   # Existing baseline measured 2026-05-10 in Makefile (see
   # `LARQL_SERVER_COVERAGE_MIN`). Keep just under the live value to
@@ -46,6 +51,7 @@ env:
 
 jobs:
   test:
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     name: test - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
@@ -197,6 +203,8 @@ jobs:
         run: cargo test -p larql-server --target ${{ matrix.target }}
 
   coverage:
+    needs: [test]
+    if: success() && (github.event.pull_request.draft == false || github.event_name != 'pull_request')
     name: coverage - ubuntu
     runs-on: ubuntu-24.04
     timeout-minutes: 35

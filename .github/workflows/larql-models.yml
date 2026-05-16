@@ -20,6 +20,7 @@ on:
       - 'Cargo.lock'
       - '.github/workflows/larql-models.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-models/**'
@@ -27,6 +28,10 @@ on:
       - 'Cargo.lock'
       - '.github/workflows/larql-models.yml'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   test:

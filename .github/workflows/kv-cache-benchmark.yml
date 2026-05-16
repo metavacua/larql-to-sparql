@@ -17,6 +17,7 @@ on:
       - 'Makefile'
       - '.github/workflows/kv-cache-benchmark.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/kv-cache-benchmark/**'
@@ -27,8 +28,13 @@ on:
       - '.github/workflows/kv-cache-benchmark.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   test:
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     name: test · ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35

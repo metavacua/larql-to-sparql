@@ -26,6 +26,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-inference.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-inference/**'
@@ -39,8 +40,13 @@ on:
       - '.github/workflows/larql-inference.yml'
   workflow_dispatch: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   test:
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
     name: test - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -192,6 +198,8 @@ jobs:
         run: cargo test -p larql-inference --target ${{ matrix.target }}
 
   coverage:
+    needs: [test]
+    if: success() && (github.event.pull_request.draft == false || github.event_name != 'pull_request')
     name: coverage - ubuntu
     runs-on: ubuntu-24.04
     timeout-minutes: 45
