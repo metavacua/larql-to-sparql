@@ -64,16 +64,16 @@ jobs:
       - name: Cache cros_sdk chroot
         uses: actions/cache@v5
         with:
-          path: ~/.cache/cros_sdk
+          path: ~/chromiumos/chroot
           key: chromiumos-cros_sdk-${{ steps.date.outputs.week }}-${{ matrix.cros_target }}
           restore-keys: chromiumos-cros_sdk-${{ matrix.cros_target }}-
 
-      - name: Install depot_tools
+      - name: Install chromite (provides cros_sdk)
         run: |
           git clone --depth=1 \
-            https://chromium.googlesource.com/chromium/tools/depot_tools.git \
-            ~/depot_tools
-          echo "$HOME/depot_tools" >> $GITHUB_PATH
+            https://chromium.googlesource.com/chromiumos/chromite.git \
+            ~/chromiumos/chromite
+          echo "$HOME/chromiumos/chromite/bin" >> $GITHUB_PATH
 
       - name: Build ${{ matrix.crate }} for ${{ matrix.cros_target }}
         env:

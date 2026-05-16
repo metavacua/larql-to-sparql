@@ -11,7 +11,7 @@
 # do NOT invoke rustup inside the chroot.
 #
 # Assumptions:
-#   - depot_tools is on PATH (cros_sdk command available)
+#   - chromite/bin is on PATH (provides cros_sdk; clone chromite to ~/chromiumos/chromite)
 #   - Running on Linux (ubuntu-latest or equivalent)
 #
 # Usage:
