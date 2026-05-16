@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Add -C link-arg=-static to eliminate Android PT_INTERP
 - Add Android NDK setup to cross-platform-build workflow
 - Add arithmetic overflow fix to changelog
+- Add libc++abi.a to aarch64 Android static link group
+- Add libc++abi.a to aarch64 GROUP in all Android workflows
 - Add missing down_meta.bin header in test fixture
 - Address code review feedback on CI scripts
 - Address review feedback and CI environment realities
