@@ -48,11 +48,6 @@ jobs:
             platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
-          - name: chromeos-24.04
-            runner: ubuntu-24.04
-            platform: chromeos
-            target: x86_64-unknown-linux-gnu
-
           - name: windows-latest
             runner: windows-latest
             platform: windows

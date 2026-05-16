@@ -54,11 +54,6 @@ jobs:
             platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
-          - name: chromeos-24.04
-            runner: ubuntu-24.04
-            platform: chromeos
-            target: x86_64-unknown-linux-gnu
-
           - name: windows-latest
             runner: windows-latest
             platform: windows
@@ -143,8 +138,8 @@ jobs:
           echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
             > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
-      - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+      - name: Install OpenBLAS (Linux)
+        if: matrix.platform == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config
@@ -178,7 +173,7 @@ jobs:
       - name: Check default features
         run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets
 
-      - name: Check all features on Linux/Windows/ChromeOS/Android
+      - name: Check all features on Linux/Windows/Android
         if: matrix.platform != 'macos'
         run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets --all-features
 
@@ -189,7 +184,7 @@ jobs:
       - name: Clippy default features
         run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets -- -D warnings
 
-      - name: Clippy all features on Linux/Windows/ChromeOS/Android
+      - name: Clippy all features on Linux/Windows/Android
         if: matrix.platform != 'macos'
         run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets --all-features -- -D warnings
 
