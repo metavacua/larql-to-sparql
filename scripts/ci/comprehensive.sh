@@ -2,17 +2,16 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# Extra-platforms CI orchestrator (Android, ChromeOS).
+# Extra-platforms CI orchestrator (Android).
 #
 # Linux, macOS, and Windows are covered by upstream's per-crate workflows
-# (.github/workflows/larql-*.yml). This script drives only the two extra
-# platforms unique to the fork.
+# (.github/workflows/larql-*.yml). This script drives the Android platform.
 #
 # Usage:
 #   ./scripts/ci/comprehensive.sh          # Auto-detect and run
 #   PLATFORM=android ./scripts/ci/comprehensive.sh  # Force platform
 #
-# Supported platforms: android, chromeos
+# Supported platforms: android
 # Environment variables:
 #   PLATFORM: Override auto-detected platform (optional)
 #   VERBOSE: Enable verbose output (set to 1)
@@ -27,17 +26,15 @@ readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m'
 
-# Detect platform if not explicitly set. Only ChromeOS and Android are
-# in scope here; everything else is delegated to upstream's per-crate CI.
+# Detect platform if not explicitly set. Only Android is in scope here;
+# everything else is delegated to upstream's per-crate CI.
 detect_platform() {
   local os_name
   os_name="$(uname -s)"
 
   case "${os_name}" in
     Linux)
-      if [[ -f /etc/lsb-release ]] && grep -qi "CHROMEOS" /etc/lsb-release 2>/dev/null; then
-        echo "chromeos"
-      elif [[ -f /system/build.prop ]] 2>/dev/null; then
+      if [[ -f /system/build.prop ]] 2>/dev/null; then
         echo "android"
       else
         echo "unsupported-linux"
@@ -83,7 +80,7 @@ main() {
   fi
 
   case "${platform}" in
-    android|chromeos)
+    android)
       ;;
     unsupported-linux)
       echo -e "${YELLOW}Skipping: generic Linux is covered by upstream's per-crate workflows.${NC}" >&2
@@ -91,7 +88,7 @@ main() {
       ;;
     *)
       echo -e "${RED}x Unsupported platform: ${platform}${NC}" >&2
-      echo "Supported: android, chromeos. Linux/macOS/Windows are covered by"
+      echo "Supported: android. Linux/macOS/Windows are covered by"
       echo "upstream's per-crate workflows (.github/workflows/larql-*.yml)."
       exit 1
       ;;
