@@ -41,17 +41,26 @@ if [[ -n "${CRATE:-}" && -z "${CROS_TARGET:-}" ]] || \
   exit 1
 fi
 
+# When running outside a full ChromiumOS source tree (e.g. on CI runners where
+# only chromite is cloned), cros_sdk cannot auto-detect the SDK version.
+# The workflow extracts SDK_VERSION from chromite/lib/constants.py and exports
+# it as CHROMEOS_SDK_VERSION so we can pass it explicitly here.
+SDK_VER_FLAG=()
+if [[ -n "${CHROMEOS_SDK_VERSION:-}" ]]; then
+  SDK_VER_FLAG=(--sdk-version "${CHROMEOS_SDK_VERSION}")
+fi
+
 # Ensure the cros_sdk chroot is bootstrapped (downloads SDK tarball if needed).
-cros_sdk --download
+cros_sdk "${SDK_VER_FLAG[@]}" --download
 
 # Build inside the chroot.
 # --working-dir bind-mounts REPO_ROOT and cds into it inside the chroot.
 if [[ -n "${CRATE:-}" ]]; then
   # Single-crate mode (CI matrix).
-  cros_sdk --working-dir="$REPO_ROOT" -- \
+  cros_sdk "${SDK_VER_FLAG[@]}" --working-dir="$REPO_ROOT" -- \
     cargo build -p "$CRATE" --target "$CROS_TARGET"
 else
   # Workspace smoke build (local use / comprehensive.sh).
-  cros_sdk --working-dir="$REPO_ROOT" -- \
+  cros_sdk "${SDK_VER_FLAG[@]}" --working-dir="$REPO_ROOT" -- \
     cargo build --workspace
 fi
