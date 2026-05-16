@@ -83,6 +83,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Skip BLAS entirely for Android cross-compilation
 - Skip default features check for Android in larql-compute
 - Skip default features check for Android in larql-core
+- Sync CHANGELOG.md unreleased block with git-cliff
 - Unblock CI tests broken by e67b4f3
 - Update runtime to use Engine with Config
 - Use BLIS (pure-Rust BLAS) for Android cross-compilation
