@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Configure BLAS for Android in larql-inference and larql-kv
 - Configure larql-compute BLAS for Android cross-compilation
 - Correct CHANGELOG.md structure and formatting
+- Correct buf lint exception for router-protocol multi-package directory
 - Correct cog.toml schema, workflow flags, and review feedback
 - Correct tool release URLs and pre-commit hook wiring
 - Drop --no-fail-fast from cargo build; regenerate CHANGELOG
@@ -95,6 +96,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Skip CodeQL suggestion commits in cog check
 - Skip default features check for Android in larql-compute
 - Skip default features check for Android in larql-core
+- Sync CHANGELOG and add buf.yaml for router-protocol proto
 - Unblock CI tests broken by e67b4f3
 - Unblock cargo, bump wasmtime past CVEs, require MSRV
 - Update runtime to use Engine with Config
