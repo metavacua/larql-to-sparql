@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - MXFP4-aware streaming gate_vectors path
 - Add Nix flake for reproducible builds; track Cargo.lock (#34)
 - Add deterministic changelog and SemVer preflight checks
-- Add larql-wasm crate and serial-vs-parallel CI/CD pipeline
+- Add larql-wasm crate (experimental wasm-bindgen wrapper over larql-core)
 - Add modular Nix flake with demos, OCI containers, and model catalog
 - Cap down_meta feature count via LARQL_SUMMARY_FEATURES_PER_EXPERT
 - Cross-platform CI/CD foundation (Phase 1)
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Implement ChromeOS (Phase 2a) cross-platform CI/CD support
 - Implement macOS (Phase 3) cross-platform CI/CD support
 - Metadata-only resolve_hf_vindex (no eager binary downloads)
-- Per-crate WASM compatibility matrix (16 × serial/parallel × node/firefox)
+- Per-crate WASM compatibility matrix (15 crates × serial/parallel) for forensic identification of wasm32 porting blockers
 - Per-expert dequantization for DeepSeek-V4 layout
 - Per-expert top-K SVD summary tier for many-experts MoE
 - Support F8_E4M3 / F8_E5M2 / F8_E8M0 / I8 dtypes

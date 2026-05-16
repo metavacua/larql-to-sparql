@@ -1,21 +1,19 @@
-# wasm.yml — per-crate WASM compatibility matrix + larql-wasm serial/parallel
-# benchmark pipeline.
+# wasm.yml — per-crate WASM compatibility matrix (forensic)
 #
-# Strategy matrix: 16 crates × 2 modes (serial/parallel) × 2 envs (node/firefox)
-#   = 64 cells, all running with fail-fast: false.
+# Goal: identify which crates compile to wasm32-unknown-unknown as we
+# transition LARQL to an all-WASM-in-browser deployment.  Failures are
+# intentional data — they surface which crates have blocking OS/native
+# dependencies that must be removed or gated before the port is viable.
 #
-# Non-wasm-pack crates: cargo check --target wasm32-unknown-unknown
-#   Surfaces which crates compile to WASM and which are blocked.
-#   Failures are informational — they expose dependency assumptions and
-#   hard OS/runtime requirements that need addressing.
+# Strategy matrix: 15 crates × 2 modes = 30 cells, fail-fast: false.
 #
-# larql-wasm (wasm_pack: 'true'): wasm-pack build + wasm-pack test
-#   serial  — stable Rust, standard wasm32-unknown-unknown.
-#   parallel — nightly + atomics + -Z build-std (wasm-bindgen-rayon).
+# Serial   — stable Rust, standard wasm32-unknown-unknown.
+# Parallel — nightly + atomics + bulk-memory + mutable-globals RUSTFLAGS
+#            (wasm-bindgen-rayon / SharedArrayBuffer model).
 #
-# Triggers: push to main (post-merge) + all PRs to avoid duplicate runs.
-# push: branches: [main] prevents double-runs when a branch push and its
-# open PR both match the path filter.
+# Once a crate passes cargo check, the next step is to port its tests.
+#
+# Triggers: push to main + all PRs.
 
 name: wasm
 
@@ -26,7 +24,6 @@ on:
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'scripts/wasm-bench.mjs'
       - '.github/workflows/wasm.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
@@ -34,7 +31,6 @@ on:
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'scripts/wasm-bench.mjs'
       - '.github/workflows/wasm.yml'
   workflow_dispatch: {}
 
@@ -43,14 +39,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  # ── Per-crate WASM matrix ─────────────────────────────────────────────────
-  # 16 crates × 2 modes × 2 envs = 64 cells.
-  # fail-fast: false — all cells run; failures surface blockers.
-
   wasm:
-    name: ${{ matrix.crate.name }} · ${{ matrix.mode.name }} · ${{ matrix.env.name }}
+    name: ${{ matrix.crate.name }} · ${{ matrix.mode.name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     permissions:
       contents: read
@@ -60,42 +52,34 @@ jobs:
       matrix:
 
         # ── Crate definitions ─────────────────────────────────────────────
-        # cargo_flags: feature flags / --no-default-features for each crate
-        # wasm_pack:   'true'  → wasm-pack build + test (JS bindings crate)
-        #              'false' → cargo check --target wasm32-unknown-unknown only
+        # cargo_flags: --no-default-features where native deps would otherwise
+        #              pull in OS/BLAS/Metal code that can never compile for
+        #              wasm32.  The goal is the minimum surface that could
+        #              plausibly compile; flag what still blocks.
 
         crate:
-          # WASM-safe (no blocking deps with listed flags)
-          - { name: larql-boundary,        path: crates/larql-boundary,        cargo_flags: '',                                      wasm_pack: 'false' }
-          - { name: larql-core,            path: crates/larql-core,            cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-models,          path: crates/larql-models,          cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: model-compute,         path: crates/model-compute,         cargo_flags: '--no-default-features --features wasm', wasm_pack: 'false' }
-          # JS bindings crate — full wasm-pack pipeline
-          - { name: larql-wasm,            path: crates/larql-wasm,            cargo_flags: '',                                      wasm_pack: 'true'  }
-          # Likely blocked — failures are informational
-          - { name: larql-compute,         path: crates/larql-compute,         cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-inference,       path: crates/larql-inference,       cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-kv,              path: crates/larql-kv,              cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-lql,             path: crates/larql-lql,             cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-vindex,          path: crates/larql-vindex,          cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-server,          path: crates/larql-server,          cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-router,          path: crates/larql-router,          cargo_flags: '',                                      wasm_pack: 'false' }
-          - { name: larql-router-protocol, path: crates/larql-router-protocol, cargo_flags: '',                                      wasm_pack: 'false' }
-          - { name: larql-cli,             path: crates/larql-cli,             cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: kv-cache-benchmark,    path: crates/kv-cache-benchmark,    cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
-          - { name: larql-python,          path: crates/larql-python,          cargo_flags: '--no-default-features',                 wasm_pack: 'false' }
+          # Passing (or expected to pass with listed flags)
+          - { name: larql-boundary,        cargo_flags: ''                                       }
+          - { name: larql-core,            cargo_flags: '--no-default-features'                  }
+          - { name: larql-models,          cargo_flags: '--no-default-features'                  }
+          - { name: model-compute,         cargo_flags: '--no-default-features --features wasm'  }
+          # Blocked — failures identify what needs porting
+          - { name: larql-compute,         cargo_flags: '--no-default-features'                  }
+          - { name: larql-inference,       cargo_flags: '--no-default-features'                  }
+          - { name: larql-kv,              cargo_flags: '--no-default-features'                  }
+          - { name: larql-lql,             cargo_flags: '--no-default-features'                  }
+          - { name: larql-vindex,          cargo_flags: '--no-default-features'                  }
+          - { name: larql-server,          cargo_flags: '--no-default-features'                  }
+          - { name: larql-router,          cargo_flags: ''                                       }
+          - { name: larql-router-protocol, cargo_flags: ''                                       }
+          - { name: larql-cli,             cargo_flags: '--no-default-features'                  }
+          - { name: kv-cache-benchmark,    cargo_flags: '--no-default-features'                  }
+          - { name: larql-python,          cargo_flags: '--no-default-features'                  }
 
         # ── Build modes ───────────────────────────────────────────────────
         mode:
-          - { name: serial,   toolchain: stable,  rustflags: '' }
-          - { name: parallel, toolchain: nightly, rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals' }
-
-        # ── Test environments ─────────────────────────────────────────────
-        # node/firefox are only exercised for wasm-pack crates; non-wasm-pack
-        # crates run the same cargo check regardless of env.
-        env:
-          - { name: node,    flag: '--node' }
-          - { name: firefox, flag: '--headless --firefox' }
+          - { name: serial,   toolchain: stable,  rustflags: ''                                                          }
+          - { name: parallel, toolchain: nightly, rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'  }
 
     steps:
       - uses: actions/checkout@v6
@@ -106,124 +90,17 @@ jobs:
           toolchain: ${{ matrix.mode.toolchain }}
           targets: wasm32-unknown-unknown
 
-      - name: Add rust-src component (larql-wasm · parallel only)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'parallel'
-        run: rustup component add rust-src --toolchain nightly
-
-      - name: Install wasm-pack (larql-wasm only)
-        if: matrix.crate.wasm_pack == 'true'
-        uses: jetli/wasm-pack-action@v0.4.0
-        with:
-          version: 'latest'
-
-      - name: Set up Node.js 20 (larql-wasm only)
-        if: matrix.crate.wasm_pack == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Firefox (larql-wasm · firefox env only)
-        if: matrix.crate.wasm_pack == 'true' && matrix.env.name == 'firefox'
-        uses: browser-actions/setup-firefox@v1
-
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ubuntu-wasm-${{ matrix.crate.name }}-${{ matrix.mode.name }}
 
-      - name: Enable build-std for parallel WASM (larql-wasm · parallel only)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'parallel'
-        run: |
-          mkdir -p ${{ matrix.crate.path }}/.cargo
-          printf '[unstable]\nbuild-std = ["std", "panic_abort"]\n' > ${{ matrix.crate.path }}/.cargo/config.toml
-
-      # ── Non-wasm-pack crates: cargo check ─────────────────────────────
-      # node vs firefox env makes no difference here — the same check runs
-      # for both (informational duplication, both cells must pass/fail).
-
       - name: Check (serial)
-        if: matrix.crate.wasm_pack == 'false' && matrix.mode.name == 'serial'
+        if: matrix.mode.name == 'serial'
         run: cargo check --target wasm32-unknown-unknown -p ${{ matrix.crate.name }} ${{ matrix.crate.cargo_flags }}
 
       - name: Check (parallel)
-        if: matrix.crate.wasm_pack == 'false' && matrix.mode.name == 'parallel'
+        if: matrix.mode.name == 'parallel'
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
         run: cargo check --target wasm32-unknown-unknown -p ${{ matrix.crate.name }} ${{ matrix.crate.cargo_flags }}
-
-      # ── larql-wasm: wasm-pack build + test ────────────────────────────
-
-      - name: Build (wasm-pack · serial)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'serial'
-        run: wasm-pack build --target web --release ${{ matrix.crate.path }}
-
-      - name: Build (wasm-pack · parallel)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'parallel'
-        env:
-          RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack build --target web --release ${{ matrix.crate.path }} -- --features=parallel
-
-      - name: Test (wasm-pack · serial)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'serial'
-        run: wasm-pack test ${{ matrix.env.flag }} ${{ matrix.crate.path }}
-
-      - name: Test (wasm-pack · parallel)
-        if: matrix.crate.wasm_pack == 'true' && matrix.mode.name == 'parallel'
-        env:
-          RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test ${{ matrix.env.flag }} --features=parallel ${{ matrix.crate.path }}
-
-      # Upload artifact once per mode (node env only) to avoid name conflicts.
-      - name: Upload wasm pkg artifact (larql-wasm · node env only)
-        if: matrix.crate.wasm_pack == 'true' && matrix.env.name == 'node'
-        uses: actions/upload-artifact@v7
-        with:
-          name: larql-wasm-${{ matrix.mode.name }}
-          path: ${{ matrix.crate.path }}/pkg/
-          retention-days: 7
-
-  # ── Serial vs parallel benchmark ─────────────────────────────────────────
-  # Runs after the matrix completes (or fails) — best-effort.
-  # Downloads larql-wasm-serial and larql-wasm-parallel artifacts and
-  # compares throughput for pagerank and BFS.
-
-  bench:
-    needs: [wasm]
-    if: ${{ !cancelled() }}
-    name: bench · serial vs parallel
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Download serial WASM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: larql-wasm-serial
-          path: wasm-artifacts/serial
-
-      - name: Download parallel WASM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: larql-wasm-parallel
-          path: wasm-artifacts/parallel
-
-      - name: Run serial-vs-parallel benchmark
-        run: node scripts/wasm-bench.mjs
-
-      - name: Upload bench results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: wasm-bench-results
-          path: bench-results.json
-          retention-days: 30
