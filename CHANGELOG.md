@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Pull Q4K vindex weight artifacts
 - Remove BLIS dependency due to yanked transitive versions
+- Resolve three review issues in ChromeOS/crosh CI integration
 - Restore cfg-gated imports removed by PR #48
 - Restore deleted extract/build.rs and align stale test/example initializers
 - Restore extract/build.rs and align stale test/example initializers (#46)
