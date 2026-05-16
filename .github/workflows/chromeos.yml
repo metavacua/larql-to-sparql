@@ -76,15 +76,8 @@ jobs:
           echo "$HOME/chromiumos/chromite/bin" >> $GITHUB_PATH
           # Extract the SDK version from chromite's own constants so cros_sdk can
           # locate the right tarball without a full ChromiumOS source tree.
-          sdk_ver=$(python3 -c "
-import ast, pathlib, sys
-src = pathlib.Path('$HOME/chromiumos/chromite/lib/constants.py').read_text()
-for node in ast.walk(ast.parse(src)):
-    if isinstance(node, ast.Assign):
-        for t in node.targets:
-            if isinstance(t, ast.Name) and t.id == 'SDK_VERSION':
-                print(ast.literal_eval(node.value)); sys.exit(0)
-" 2>/dev/null || true)
+          sdk_ver=$(grep -oP "SDK_VERSION\s*=\s*['\"]?\K[^'\"[:space:]]+" \
+            ~/chromiumos/chromite/lib/constants.py | head -1 || true)
           if [[ -n "${sdk_ver}" ]]; then
             echo "CHROMEOS_SDK_VERSION=${sdk_ver}" >> $GITHUB_ENV
           fi
