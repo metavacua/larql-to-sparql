@@ -18,20 +18,12 @@ fn new_session_starts_empty() {
 #[wasm_bindgen_test]
 fn load_minimal_json() {
     let mut s = GraphSession::new();
-    // Minimal valid larql-core JSON graph with one edge.
+    // Minimal valid larql-core JSON graph with one edge (compact format: s/r/o).
     let json = r#"{
         "larql_version": "0.1.0",
         "metadata": {},
         "schema": {},
-        "edges": [
-            {
-                "subject": "alice",
-                "relation": "knows",
-                "object":   "bob",
-                "confidence": 1.0,
-                "source": "Unknown"
-            }
-        ]
+        "edges": [{"s": "alice", "r": "knows", "o": "bob"}]
     }"#;
     s.load_json(json).expect("load_json failed");
     assert_eq!(s.edge_count(), 1);
@@ -64,11 +56,13 @@ fn pagerank_on_empty_graph_returns_empty_array() {
 }
 
 #[wasm_bindgen_test]
-fn bfs_on_empty_graph_returns_empty_array() {
+fn bfs_from_unknown_node_returns_only_start() {
+    // bfs_traversal includes the start node itself even when the graph has no
+    // edges, so the result is [start] — one element, not zero.
     let s = GraphSession::new();
     let json_str = s.bfs("nonexistent", 3).expect("bfs failed");
     let v: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-    assert_eq!(v.as_array().map(|a| a.len()), Some(0));
+    assert_eq!(v.as_array().map(|a| a.len()), Some(1));
 }
 
 #[wasm_bindgen_test]
