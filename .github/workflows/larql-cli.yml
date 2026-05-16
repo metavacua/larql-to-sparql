@@ -67,11 +67,6 @@ jobs:
             platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
-          - name: chromeos-24.04
-            runner: ubuntu-24.04
-            platform: chromeos
-            target: x86_64-unknown-linux-gnu
-
           - name: windows-latest
             runner: windows-latest
             platform: windows
@@ -156,8 +151,8 @@ jobs:
           echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
             > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
-      - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+      - name: Install OpenBLAS (Linux)
+        if: matrix.platform == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config
@@ -191,7 +186,7 @@ jobs:
       - name: Format check
         run: cargo fmt -p larql-cli -- --check
 
-      - name: Check (CPU only) on Linux/Windows/ChromeOS/Android
+      - name: Check (CPU only) on Linux/Windows/Android
         if: matrix.platform != 'macos'
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests --no-default-features
 
@@ -199,7 +194,7 @@ jobs:
         if: matrix.platform == 'macos'
         run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests
 
-      - name: Tests (CPU only) on Linux/Windows/ChromeOS/Android
+      - name: Tests (CPU only) on Linux/Windows/Android
         run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features
 
       - name: Tests (default features) on macOS
