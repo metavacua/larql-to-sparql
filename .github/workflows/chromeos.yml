@@ -74,10 +74,15 @@ jobs:
             https://chromium.googlesource.com/chromiumos/chromite.git \
             ~/chromiumos/chromite
           echo "$HOME/chromiumos/chromite/bin" >> $GITHUB_PATH
-          # Extract the SDK version from chromite's own constants so cros_sdk can
-          # locate the right tarball without a full ChromiumOS source tree.
-          sdk_ver=$(grep -oP "SDK_VERSION\s*=\s*['\"]?\K[^'\"[:space:]]+" \
-            ~/chromiumos/chromite/lib/constants.py | head -1 || true)
+          # cros_sdk needs a version to know which SDK tarball to download.
+          # The version is not in chromite itself; it lives in the ChromiumOS
+          # source tree overlay. Discover the latest available tarball version
+          # from the public GCS bucket instead of requiring a full source tree.
+          sdk_ver=$(curl -fsSL \
+            "https://storage.googleapis.com/storage/v1/b/chromiumos-sdk/o?prefix=cros-sdk-&maxResults=20&fields=items%2Fname" \
+            2>/dev/null \
+            | grep -oP '(?<="cros-sdk-)[\d.]+(?=\.tar\.xz")' \
+            | sort -rV | head -1 || true)
           if [[ -n "${sdk_ver}" ]]; then
             echo "CHROMEOS_SDK_VERSION=${sdk_ver}" >> $GITHUB_ENV
           fi
