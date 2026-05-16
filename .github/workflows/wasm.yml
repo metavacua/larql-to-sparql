@@ -210,17 +210,13 @@ jobs:
         if: matrix.mode == 'parallel' && matrix.env == 'node'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: |
-          wasm-pack test crates/larql-wasm --node \
-            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test crates/larql-wasm --node -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
 
       - name: Test (parallel · firefox)
         if: matrix.mode == 'parallel' && matrix.env == 'firefox'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: |
-          wasm-pack test crates/larql-wasm --headless --firefox \
-            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test crates/larql-wasm --headless --firefox -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
 
 # ── Stage C: Bench ─────────────────────────────────────────────────────────────
 # Single job serialized after all four test cells pass.

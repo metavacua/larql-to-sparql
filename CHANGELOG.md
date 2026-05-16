@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - MXFP4-aware streaming gate_vectors path
 - Add Nix flake for reproducible builds; track Cargo.lock (#34)
 - Add deterministic changelog and SemVer preflight checks
+- Add larql-wasm crate and serial-vs-parallel CI/CD pipeline
 - Add modular Nix flake with demos, OCI containers, and model catalog
 - Cap down_meta feature count via LARQL_SUMMARY_FEATURES_PER_EXPERT
 - Cross-platform CI/CD foundation (Phase 1)
@@ -49,7 +50,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Address second-wave windows-fix CI failures
 - Align license enforcement with audited multi-license tree
 - Allow pulling vindexes from HF model repos
+- Apply code review suggestions
 - Apply rustfmt and fix clippy::unnecessary_sort_by
+- Build Graph per parallel worker to satisfy Sync bound
 - Bump pinned versions and drop fmt CI duplication
 - Bump toolchain to 1.88 and unpin scanner-tool versions
 - Configure Android cross-compilation with linker and PATH setup
@@ -71,6 +74,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Pull Q4K vindex weight artifacts
 - Remove BLIS dependency due to yanked transitive versions
+- Remove draft guard and add rust-src for parallel build
 - Restore cfg-gated imports removed by PR #48
 - Restore deleted extract/build.rs and align stale test/example initializers
 - Restore extract/build.rs and align stale test/example initializers (#46)
@@ -82,6 +86,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Skip BLAS entirely for Android cross-compilation
 - Skip default features check for Android in larql-compute
 - Skip default features check for Android in larql-core
+- Switch browser target from Chrome to Firefox
 - Unblock CI tests broken by e67b4f3
 - Update runtime to use Engine with Config
 - Use BLIS (pure-Rust BLAS) for Android cross-compilation
@@ -91,5 +96,3 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Use checked_div for head_dim derivation (#50)
 - Use matmul_transb for MoE expert scoring
 - Use netlib (pure-Rust BLAS) for Android builds
-
-
