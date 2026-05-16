@@ -51,7 +51,7 @@ env:
 
 jobs:
   test:
-    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
     name: test - ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
@@ -204,7 +204,7 @@ jobs:
 
   coverage:
     needs: [test]
-    if: success() && (github.event.pull_request.draft == false || github.event_name != 'pull_request')
+    if: success() && (github.event.pull_request.draft != true || github.event_name != 'pull_request')
     name: coverage - ubuntu
     runs-on: ubuntu-24.04
     timeout-minutes: 35
