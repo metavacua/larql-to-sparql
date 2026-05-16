@@ -182,6 +182,9 @@ jobs:
       - name: Benchmark compile/tests
         run: cargo test -p model-compute --target ${{ matrix.target }} --benches
 
+      - name: Benchmark compile/tests (wasm feature)
+        run: cargo test -p model-compute --target ${{ matrix.target }} --benches --no-default-features --features wasm
+
   coverage:
     needs: [test]
     if: success() && (github.event.pull_request.draft != true || github.event_name != 'pull_request')
