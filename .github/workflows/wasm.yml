@@ -14,14 +14,15 @@
 #                  (wasm-bindgen-rayon: Web Workers + SharedArrayBuffer).
 #                  Requires rust-src component for -Z build-std.
 #
-# Triggers: all branches and all PRs (including drafts) — broad scope for
-# iterative debugging.  Tighten to `branches: [main, ci/workflows-complete]`
-# once the pipeline is stable.
+# Triggers: push restricted to main (post-merge) to avoid duplicate runs when
+# a branch push and its open PR both fire.  PRs (all types including drafts)
+# provide CI feedback during development.
 
 name: wasm
 
 on:
   push:
+    branches: [main]
     paths:
       - 'crates/larql-wasm/**'
       - 'crates/larql-core/**'
