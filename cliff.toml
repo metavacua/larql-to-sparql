@@ -8,8 +8,10 @@
 #
 # Mapping policy (Conventional Commit type -> Keep a Changelog section):
 #
-#   feat     -> Added
-#   fix      -> Fixed
+#   feat          -> Added
+#   fix           -> Fixed
+#   fix(ci)       -> omitted  (CI infra, not user-facing; same treatment as ci:)
+#   fix(cd)       -> omitted  (CD infra, not user-facing)
 #   perf     -> Changed
 #   refactor -> Changed
 #   revert   -> Removed
@@ -69,6 +71,11 @@ sort_commits = "oldest"
 # Mapping is total and explicit. Anything not matched is dropped.
 commit_parsers = [
   { message = "^feat",       group = "Added"   },
+  # CI/CD infrastructure fixes (fix(ci):, fix(cd):) are excluded because they
+  # are not user-facing changes. They are treated the same as `ci:` commits.
+  # Rules are evaluated in order; these must precede the generic `^fix` rule.
+  { message = "^fix\\(ci\\)", skip = true      },
+  { message = "^fix\\(cd\\)", skip = true      },
   { message = "^fix",        group = "Fixed"   },
   { message = "^perf",       group = "Changed" },
   { message = "^refactor",   group = "Changed" },
