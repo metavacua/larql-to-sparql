@@ -67,7 +67,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate orphan items in vindex test + cover second lql bench
 - Gate sdot on dotprod feature and add QEMU emulation for tests
 - Gate trace_final_residual_matches_raw_forward_logits
+- Install chromite (not depot_tools) to provide cros_sdk in CI
 - Pin evalexpr to v11.3.1 (MIT) to avoid AGPL-3.0 at v12
+- Pass --sdk-version to cros_sdk when running outside a ChromiumOS tree
 - Prevent arithmetic overflow in lm_head vocab calculation on 32-bit platforms
 - Pull Q4K vindex weight artifacts
 - Remove BLIS dependency due to yanked transitive versions
