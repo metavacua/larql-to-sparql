@@ -19,6 +19,8 @@ members = [
     "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
+    # WASM bindings for browser/Node.js (serial + parallel variants)
+    "crates/larql-wasm",
 ]
 default-members = [
     "crates/larql-models",

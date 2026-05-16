@@ -1,0 +1,262 @@
+# wasm.yml — larql-wasm build, test, and serial-vs-parallel benchmark pipeline.
+#
+# Three-stage pipeline demonstrating both parallel and serialized execution:
+#
+#   Stage A (parallel)        Stage B (parallel, needs A)      Stage C (serial, needs B)
+#   ─────────────────         ────────────────────────────     ──────────────────────────
+#   build · serial     ──────► test · serial · node      ─────► bench · compare
+#   build · parallel   ──────► test · serial · chrome           (uploads bench-results.json)
+#                      ──────► test · parallel · node
+#                      ──────► test · parallel · chrome
+#
+# serial build  — stable Rust, standard wasm32-unknown-unknown.
+# parallel build — nightly Rust + atomics target features + -Z build-std
+#                  (wasm-bindgen-rayon: Web Workers + SharedArrayBuffer).
+#
+# Triggers: all branches and all PRs — broad scope for iterative debugging.
+# Tighten to `branches: [main, ci/workflows-complete]` once the pipeline is stable.
+
+name: wasm
+
+on:
+  push:
+    paths:
+      - 'crates/larql-wasm/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/wasm-bench.mjs'
+      - '.github/workflows/wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'crates/larql-wasm/**'
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/wasm-bench.mjs'
+      - '.github/workflows/wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+# ── Stage A: Build ─────────────────────────────────────────────────────────────
+# serial and parallel builds run in parallel (no `needs`).
+
+jobs:
+  build:
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+    name: build · ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: serial
+            toolchain: stable
+            features: ''
+            rustflags: ''
+            cargo_opts: ''
+
+          - mode: parallel
+            toolchain: nightly
+            features: parallel
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+            # Passed after `--` to cargo so wasm-pack forwards them.
+            cargo_opts: '-Z build-std=std,panic_abort'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.toolchain }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Add wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-wasm-larql-wasm-build-${{ matrix.mode }}
+
+      - name: Build (serial)
+        if: matrix.mode == 'serial'
+        run: wasm-pack build crates/larql-wasm --target web --release
+
+      - name: Build (parallel)
+        if: matrix.mode == 'parallel'
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          wasm-pack build crates/larql-wasm --target web --release \
+            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+
+      - name: Upload wasm pkg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: larql-wasm-${{ matrix.mode }}
+          path: crates/larql-wasm/pkg/
+          retention-days: 7
+
+# ── Stage B: Test ──────────────────────────────────────────────────────────────
+# Four matrix cells (serial×node, serial×chrome, parallel×node, parallel×chrome)
+# all run in parallel, but are gated on the build stage completing first.
+
+  test:
+    needs: [build]
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+    name: test · ${{ matrix.mode }} · ${{ matrix.env }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: serial
+            env: node
+            toolchain: stable
+            features: ''
+            rustflags: ''
+            cargo_opts: ''
+            node_version: '20'
+
+          - mode: serial
+            env: chrome
+            toolchain: stable
+            features: ''
+            rustflags: ''
+            cargo_opts: ''
+            node_version: '20'
+
+          - mode: parallel
+            env: node
+            toolchain: nightly
+            features: parallel
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+            cargo_opts: '-Z build-std=std,panic_abort'
+            node_version: '20'
+
+          - mode: parallel
+            env: chrome
+            toolchain: nightly
+            features: parallel
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+            cargo_opts: '-Z build-std=std,panic_abort'
+            node_version: '20'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.toolchain }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Add wasm32-unknown-unknown target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - name: Set up Node.js ${{ matrix.node_version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node_version }}
+
+      - name: Install Chrome (chrome env only)
+        if: matrix.env == 'chrome'
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-wasm-larql-wasm-test-${{ matrix.mode }}-${{ matrix.env }}
+
+      - name: Test (serial · node)
+        if: matrix.mode == 'serial' && matrix.env == 'node'
+        run: wasm-pack test crates/larql-wasm --node
+
+      - name: Test (serial · chrome)
+        if: matrix.mode == 'serial' && matrix.env == 'chrome'
+        run: wasm-pack test crates/larql-wasm --headless --chrome
+
+      - name: Test (parallel · node)
+        if: matrix.mode == 'parallel' && matrix.env == 'node'
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          wasm-pack test crates/larql-wasm --node \
+            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+
+      - name: Test (parallel · chrome)
+        if: matrix.mode == 'parallel' && matrix.env == 'chrome'
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          wasm-pack test crates/larql-wasm --headless --chrome \
+            -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+
+# ── Stage C: Bench ─────────────────────────────────────────────────────────────
+# Single job serialized after all four test cells pass.
+# Downloads both build artifacts and compares serial vs parallel throughput.
+
+  bench:
+    needs: [test]
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+    name: bench · serial vs parallel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download serial WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-wasm-serial
+          path: wasm-artifacts/serial
+
+      - name: Download parallel WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: larql-wasm-parallel
+          path: wasm-artifacts/parallel
+
+      - name: Run serial-vs-parallel benchmark
+        run: node scripts/wasm-bench.mjs
+
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-bench-results
+          path: bench-results.json
+          retention-days: 30
