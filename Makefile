@@ -709,11 +709,9 @@ quality-fork:
 	cargo deny check
 	cargo audit
 
-# Extra-platforms smoke: Android, Crostini (ChromeOS Linux container), and
-# crosh (native ChromeOS via cros_sdk). Linux, macOS, and Windows are covered
-# by upstream's per-crate matrix.
-.PHONY: platform-test platform-test-android platform-test-crostini platform-test-crosh
-platform-test: platform-test-android platform-test-crostini platform-test-crosh
+# Explicit crosh target for developers with depot_tools in PATH.
+# platform-test uses comprehensive.sh (auto-detects) — do not redefine it here.
+.PHONY: platform-test-crosh
 platform-test-crosh:
 	bash scripts/ci/build-crosh.sh
 

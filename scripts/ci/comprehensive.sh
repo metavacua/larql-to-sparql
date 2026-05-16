@@ -27,8 +27,12 @@ readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m'
 
-# Detect platform if not explicitly set. Only ChromeOS and Android are
-# in scope here; everything else is delegated to upstream's per-crate CI.
+# Detect platform if not explicitly set.
+# Priority order on Linux:
+#   1. Crostini container (CHROMEOS in /etc/lsb-release)
+#   2. crosh dev machine (cros_sdk available in PATH via depot_tools)
+#   3. Android (build.prop present)
+#   4. Unsupported (generic Linux — covered by upstream per-crate CI)
 detect_platform() {
   local os_name
   os_name="$(uname -s)"
@@ -37,6 +41,8 @@ detect_platform() {
     Linux)
       if [[ -f /etc/lsb-release ]] && grep -qi "CHROMEOS" /etc/lsb-release 2>/dev/null; then
         echo "crostini"
+      elif command -v cros_sdk &>/dev/null; then
+        echo "crosh"
       elif [[ -f /system/build.prop ]] 2>/dev/null; then
         echo "android"
       else

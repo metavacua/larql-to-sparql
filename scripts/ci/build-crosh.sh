@@ -14,36 +14,44 @@
 #   - depot_tools is on PATH (cros_sdk command available)
 #   - Running on Linux (ubuntu-latest or equivalent)
 #
-# Usage (via chromeos.yml workflow):
+# Usage:
+#   # Workspace smoke build (local / comprehensive.sh / make platform-test-crosh):
+#   ./scripts/ci/build-crosh.sh
+#
+#   # Single-crate CI matrix build (chromeos.yml):
 #   CRATE=larql-core CROS_TARGET=x86_64-cros-linux-gnu ./scripts/ci/build-crosh.sh
 #
 # Environment variables:
-#   CRATE: Cargo package name to build (required)
-#   CROS_TARGET: Rust target triple to compile for (required)
+#   CRATE: Cargo package name (optional; if unset, builds the whole workspace)
+#   CROS_TARGET: Rust target triple (optional; required when CRATE is set)
 #   VERBOSE: Enable verbose output (set to 1)
 
 set -euo pipefail
 
 REPO_ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 
-if [[ -z "${CRATE:-}" ]]; then
-  echo "Error: CRATE environment variable is required" >&2
-  exit 1
-fi
-
-if [[ -z "${CROS_TARGET:-}" ]]; then
-  echo "Error: CROS_TARGET environment variable is required" >&2
-  exit 1
-fi
-
 if [[ "${VERBOSE:-0}" == "1" ]]; then
   set -x
+fi
+
+# Validate: CRATE and CROS_TARGET must be set together or not at all.
+if [[ -n "${CRATE:-}" && -z "${CROS_TARGET:-}" ]] || \
+   [[ -z "${CRATE:-}" && -n "${CROS_TARGET:-}" ]]; then
+  echo "Error: set both CRATE and CROS_TARGET, or neither" >&2
+  exit 1
 fi
 
 # Ensure the cros_sdk chroot is bootstrapped (downloads SDK tarball if needed).
 cros_sdk --download
 
-# Build the crate inside the chroot.
+# Build inside the chroot.
 # --working-dir bind-mounts REPO_ROOT and cds into it inside the chroot.
-cros_sdk --working-dir="$REPO_ROOT" -- \
-  cargo build -p "$CRATE" --target "$CROS_TARGET"
+if [[ -n "${CRATE:-}" ]]; then
+  # Single-crate mode (CI matrix).
+  cros_sdk --working-dir="$REPO_ROOT" -- \
+    cargo build -p "$CRATE" --target "$CROS_TARGET"
+else
+  # Workspace smoke build (local use / comprehensive.sh).
+  cros_sdk --working-dir="$REPO_ROOT" -- \
+    cargo build --workspace
+fi
