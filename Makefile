@@ -552,8 +552,8 @@ platform-test-ubuntu:
 platform-test-android:
 	./scripts/ci/build-android.sh
 
-platform-test-chromeos:
-	./scripts/ci/build-chromeos.sh
+platform-test-crostini:
+	./scripts/ci/build-crostini.sh
 
 platform-test-macos:
 	./scripts/ci/build-macos.sh
@@ -709,14 +709,13 @@ quality-fork:
 	cargo deny check
 	cargo audit
 
-# Extra-platforms smoke: only Android and ChromeOS. Linux, macOS, and Windows
-# are covered by upstream's per-crate matrix.
-.PHONY: platform-test platform-test-android platform-test-chromeos
-platform-test: platform-test-android platform-test-chromeos
-platform-test-android:
-	bash scripts/ci/build-android.sh
-platform-test-chromeos:
-	bash scripts/ci/build-chromeos.sh
+# Extra-platforms smoke: Android, Crostini (ChromeOS Linux container), and
+# crosh (native ChromeOS via cros_sdk). Linux, macOS, and Windows are covered
+# by upstream's per-crate matrix.
+.PHONY: platform-test platform-test-android platform-test-crostini platform-test-crosh
+platform-test: platform-test-android platform-test-crostini platform-test-crosh
+platform-test-crosh:
+	bash scripts/ci/build-crosh.sh
 
 # Full fork-level pre-flight: upstream's `ci`, plus our compliance and
 # fork-only quality. Use this before pushing a PR.

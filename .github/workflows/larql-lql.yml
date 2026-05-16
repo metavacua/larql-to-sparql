@@ -58,11 +58,6 @@ jobs:
             platform: ubuntu
             target: x86_64-unknown-linux-gnu
 
-          - name: chromeos-24.04
-            runner: ubuntu-24.04
-            platform: chromeos
-            target: x86_64-unknown-linux-gnu
-
           - name: windows-latest
             runner: windows-latest
             platform: windows
@@ -148,7 +143,7 @@ jobs:
             > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
 
       - name: Install OpenBLAS (Linux/ChromeOS)
-        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+        if: matrix.platform == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenblas-dev pkg-config

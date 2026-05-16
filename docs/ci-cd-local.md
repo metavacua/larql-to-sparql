@@ -21,7 +21,8 @@ that coexist without redefining each other.
 | Nix builds / dev shell / containers | Upstream | `flake.nix`, `nix/*.nix` |
 | Conventional Commits, Keep a Changelog, REUSE 3.3, SemVer surface | Fork | `.github/workflows/validate.yml`, `cliff.toml`, `cog.toml`, `REUSE.toml` |
 | Workspace-wide cross-cutting quality (audit, deny, msrv, mutants, python, proto-lint) | Fork | `.github/workflows/quality.yml` |
-| Android + ChromeOS smoke builds | Fork | `.github/workflows/extra-platforms.yml`, `scripts/ci/build-{android,chromeos}.sh` |
+| Android + Crostini smoke builds | Fork | `scripts/ci/build-{android,crostini}.sh` |
+| ChromeOS/crosh native builds (cros_sdk) | Fork | `.github/workflows/chromeos.yml`, `scripts/ci/build-crosh.sh` (weekly + manual; see `docs/chromeos-targets.md`) |
 | Dependency-update bot (GitHub Actions only) | Fork | `.github/dependabot.yml` |
 
 Upstream's `make ci` is unchanged (`fmt-check lint test-full`). The fork
@@ -33,7 +34,7 @@ upstream targets.
 ```bash
 make compliance      # REUSE + Conventional Commits + changelog + first-party license + semver preflight
 make quality-fork    # cargo clippy --workspace -- -D warnings + cargo deny check + cargo audit
-make platform-test   # Android + ChromeOS smoke (delegates to scripts/ci/build-*.sh)
+make platform-test   # Android + Crostini + crosh smoke (delegates to scripts/ci/build-*.sh)
 make ci-fork         # ci (upstream) + compliance + quality-fork  -- run this before pushing a PR
 ```
 
@@ -41,7 +42,8 @@ Per-target details:
 
 ```bash
 make platform-test-android     # cross-compile for aarch64-linux-android + armv7-linux-androideabi
-make platform-test-chromeos    # Crostini (x86_64-unknown-linux-gnu) build + test + Python bindings
+make platform-test-crostini    # Crostini (x86_64-unknown-linux-gnu) build + test + Python bindings
+make platform-test-crosh       # native ChromeOS via cros_sdk chroot (requires depot_tools on PATH)
 ```
 
 Linux, macOS, and Windows are covered by upstream's per-crate workflows

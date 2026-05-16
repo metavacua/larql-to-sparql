@@ -1,0 +1,79 @@
+# ChromeOS / crosh CI — native Chromium OS SDK builds
+#
+# Builds each crate against all four ChromeOS target triples inside a
+# cros_sdk chroot. The SDK provides pre-installed cargo (dev-lang/rust ebuild)
+# and cross-compilation toolchains for the CrOS-specific triples; no 'repo
+# sync' or rustup invocation is needed.
+#
+# This workflow is build-only; CI passes on successful cargo build regardless
+# of test results. Triggered weekly (Monday 04:00 UTC) and on manual dispatch
+# to avoid adding per-commit CI burden.
+
+name: ChromeOS (cros_sdk)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'   # weekly, Monday 04:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    name: build · ${{ matrix.crate }} · ${{ matrix.cros_target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - larql-boundary
+          - larql-cli
+          - larql-compute
+          - larql-core
+          - larql-experts
+          - larql-inference
+          - larql-kv
+          - larql-lql
+          - larql-models
+          - larql-router
+          - larql-server
+          - larql-vindex
+        cros_target:
+          - x86_64-cros-linux-gnu
+          - aarch64-cros-linux-gnu
+          - armv7a-cros-linux-gnueabihf
+          - x86_64-pc-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compute weekly cache key
+        id: date
+        run: echo "week=$(date +%Y-%U)" >> $GITHUB_OUTPUT
+
+      - name: Cache cros_sdk chroot
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/cros_sdk
+          key: chromiumos-cros_sdk-${{ steps.date.outputs.week }}-${{ matrix.cros_target }}
+          restore-keys: chromiumos-cros_sdk-${{ matrix.cros_target }}-
+
+      - name: Install depot_tools
+        run: |
+          git clone --depth=1 \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git \
+            ~/depot_tools
+          echo "$HOME/depot_tools" >> $GITHUB_PATH
+
+      - name: Build ${{ matrix.crate }} for ${{ matrix.cros_target }}
+        env:
+          CROS_TARGET: ${{ matrix.cros_target }}
+          CRATE: ${{ matrix.crate }}
+        run: ./scripts/ci/build-crosh.sh

@@ -2,21 +2,21 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# ChromeOS platform build and test script (Phase 2a).
+# Crostini (ChromeOS Linux container) build and test script.
 #
-# ChromeOS runs a Linux container (Crostini) targeting x86_64-unknown-linux-gnu.
-# The build process is nearly identical to Ubuntu since both target the same
-# Linux environment. This script validates that the project builds and tests
-# successfully on ChromeOS.
+# Crostini is a Debian-based Linux container (x86_64-unknown-linux-gnu) running
+# inside ChromeOS via CrosVM. It is functionally equivalent to a standard Ubuntu
+# environment. For native ChromeOS/crosh builds using the Chromium OS SDK, see
+# build-crosh.sh instead.
 #
 # Assumptions:
 #   - Rust is installed and on PATH
 #   - Python 3.12+ is available (for Python bindings test)
 #   - uv package manager is installed
-#   - Running on ChromeOS with Linux container (Crostini) enabled
+#   - Running inside a Crostini container on ChromeOS
 #
 # Usage:
-#   ./scripts/ci/build-chromeos.sh
+#   ./scripts/ci/build-crostini.sh
 #
 # Environment variables:
 #   VERBOSE: Enable verbose output (set to 1)
@@ -158,7 +158,7 @@ main() {
     set -x
   fi
 
-  log_header "ChromeOS Platform Build & Test (Phase 2a)"
+  log_header "Crostini Platform Build & Test"
   echo "Target: x86_64-unknown-linux-gnu (Crostini Linux container)"
   echo ""
 

@@ -2,17 +2,17 @@
 # SPDX-FileCopyrightText: Contributors to the larql-to-sparql project
 # SPDX-License-Identifier: Apache-2.0
 #
-# Extra-platforms CI orchestrator (Android, ChromeOS).
+# Extra-platforms CI orchestrator (Android, Crostini, crosh).
 #
 # Linux, macOS, and Windows are covered by upstream's per-crate workflows
-# (.github/workflows/larql-*.yml). This script drives only the two extra
+# (.github/workflows/larql-*.yml). This script drives only the extra
 # platforms unique to the fork.
 #
 # Usage:
-#   ./scripts/ci/comprehensive.sh          # Auto-detect and run
-#   PLATFORM=android ./scripts/ci/comprehensive.sh  # Force platform
+#   ./scripts/ci/comprehensive.sh              # Auto-detect and run
+#   PLATFORM=crostini ./scripts/ci/comprehensive.sh  # Force platform
 #
-# Supported platforms: android, chromeos
+# Supported platforms: android, crostini, crosh
 # Environment variables:
 #   PLATFORM: Override auto-detected platform (optional)
 #   VERBOSE: Enable verbose output (set to 1)
@@ -36,7 +36,7 @@ detect_platform() {
   case "${os_name}" in
     Linux)
       if [[ -f /etc/lsb-release ]] && grep -qi "CHROMEOS" /etc/lsb-release 2>/dev/null; then
-        echo "chromeos"
+        echo "crostini"
       elif [[ -f /system/build.prop ]] 2>/dev/null; then
         echo "android"
       else
@@ -83,7 +83,7 @@ main() {
   fi
 
   case "${platform}" in
-    android|chromeos)
+    android|crostini|crosh)
       ;;
     unsupported-linux)
       echo -e "${YELLOW}Skipping: generic Linux is covered by upstream's per-crate workflows.${NC}" >&2
@@ -91,7 +91,7 @@ main() {
       ;;
     *)
       echo -e "${RED}x Unsupported platform: ${platform}${NC}" >&2
-      echo "Supported: android, chromeos. Linux/macOS/Windows are covered by"
+      echo "Supported: android, crostini, crosh. Linux/macOS/Windows are covered by"
       echo "upstream's per-crate workflows (.github/workflows/larql-*.yml)."
       exit 1
       ;;
