@@ -197,6 +197,12 @@ jobs:
         with:
           shared-key: ubuntu-wasm-larql-wasm-test-${{ matrix.mode }}-${{ matrix.env }}
 
+      - name: Enable build-std for parallel WASM (parallel only)
+        if: matrix.mode == 'parallel'
+        run: |
+          mkdir -p crates/larql-wasm/.cargo
+          printf '[unstable]\nbuild-std = ["std", "panic_abort"]\n' > crates/larql-wasm/.cargo/config.toml
+
       - name: Test (serial · node)
         if: matrix.mode == 'serial' && matrix.env == 'node'
         run: wasm-pack test --node crates/larql-wasm
@@ -209,13 +215,13 @@ jobs:
         if: matrix.mode == 'parallel' && matrix.env == 'node'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: wasm-pack test --node crates/larql-wasm -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test --node --features ${{ matrix.features }} crates/larql-wasm
 
       - name: Test (parallel · firefox)
         if: matrix.mode == 'parallel' && matrix.env == 'firefox'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: wasm-pack test --headless --firefox crates/larql-wasm -- --features ${{ matrix.features }} ${{ matrix.cargo_opts }}
+        run: wasm-pack test --headless --firefox --features ${{ matrix.features }} crates/larql-wasm
 
 # ── Stage C: Bench ─────────────────────────────────────────────────────────────
 # Single job serialized after all four test cells pass.
