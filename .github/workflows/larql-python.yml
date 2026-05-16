@@ -20,6 +20,7 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-python.yml'
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, ci/workflows-complete]
     paths:
       - 'crates/larql-python/**'
@@ -30,6 +31,10 @@ on:
       - 'Makefile'
       - '.github/workflows/larql-python.yml'
   workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   test:
