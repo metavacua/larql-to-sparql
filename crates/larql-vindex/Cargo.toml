@@ -25,9 +25,6 @@ rayon = "1.10"
 # RNG for randomized SVD (per-expert MoE summary tier in extract/moe_svd.rs).
 rand = "0.8"
 
-# Tokenizer (for embeddings loading + token resolution)
-tokenizers = "0.21"
-
 # Portable 64-bit atomics — provides AtomicU64 on targets that lack
 # native 64-bit atomic ops (e.g. arm-linux-androideabi / ARMv7).
 portable-atomic = "1"
@@ -48,13 +45,19 @@ memmap2 = "0.9"
 # lifetime contortions. Already transitive via reqwest / hf-hub.
 bytes = "1"
 
-# HuggingFace Hub integration
-hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# HuggingFace Hub integration — non-wasm only; see target section below.
 
 # OS-level mmap hints (madvise)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Tokenizer — onig/Oniguruma backend; not wasm-safe (wasm32 uses unstable_wasm below).
+tokenizers = "0.21"
+# Blocking HTTP with ring-based TLS — incompatible with wasm32.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# HuggingFace Hub — ureq backend pulls in socks/OS sockets; not wasm-safe.
+hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
 
 [features]
 default = []
@@ -116,3 +119,7 @@ harness = false
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
+# Tokenizer with fancy-regex backend — no Oniguruma C bindings.
+tokenizers = { version = "0.21", default-features = false, features = ["unstable_wasm"] }
+# Async HTTP without blocking API or ring TLS (uses browser fetch).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
