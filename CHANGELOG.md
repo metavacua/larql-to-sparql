@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Add wasm-test workflow: node and firefox runtime matrix for wasm-bindgen-test crates
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - DeepSeekV4Arch — V4 tensor naming (no model. prefix, ffn, w1/w2/w3)
 - MXFP4-aware streaming gate_vectors path
