@@ -45,3 +45,6 @@ harness = false
 [[bench]]
 name = "compile"
 harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }

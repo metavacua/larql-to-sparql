@@ -113,3 +113,6 @@ harness = false
 [[bench]]
 name = "vindex_storage_dispatch"
 harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }

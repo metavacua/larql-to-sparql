@@ -71,3 +71,6 @@ tonic-build = "0.13"
 # (installed by CI via `arduino/setup-protoc`).
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }

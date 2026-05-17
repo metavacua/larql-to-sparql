@@ -1985,6 +1985,7 @@ name = "kv-cache-benchmark"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "getrandom 0.2.17",
  "larql-compute",
  "larql-inference",
  "larql-kv",
@@ -2016,6 +2017,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "getrandom 0.2.17",
  "indicatif 0.17.11",
  "larql-compute",
  "larql-core",
@@ -2044,6 +2046,7 @@ dependencies = [
  "blas-src",
  "cc",
  "criterion",
+ "getrandom 0.2.17",
  "larql-models",
  "libc",
  "memmap2",
@@ -2078,6 +2081,7 @@ dependencies = [
  "blas-src",
  "criterion",
  "futures",
+ "getrandom 0.2.17",
  "half",
  "larql-compute",
  "larql-core",
@@ -2117,6 +2121,7 @@ version = "0.1.0"
 dependencies = [
  "blas-src",
  "criterion",
+ "getrandom 0.2.17",
  "larql-compute",
  "larql-inference",
  "larql-vindex",
@@ -2136,6 +2141,7 @@ name = "larql-lql"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "getrandom 0.2.17",
  "larql-compute",
  "larql-core",
  "larql-inference",
@@ -2168,6 +2174,7 @@ dependencies = [
 name = "larql-python"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "larql-core",
  "larql-inference",
  "larql-lql",
@@ -2190,6 +2197,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-core",
+ "getrandom 0.2.17",
  "larql-router-protocol",
  "reqwest",
  "serde",
@@ -2206,6 +2214,7 @@ dependencies = [
 name = "larql-router-protocol"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.2.17",
  "prost",
  "protobuf-src",
  "tokio",
@@ -2224,6 +2233,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "futures",
+ "getrandom 0.2.17",
  "half",
  "larql-compute",
  "larql-inference",
@@ -2260,6 +2270,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "criterion",
+ "getrandom 0.2.17",
  "hf-hub",
  "larql-compute",
  "larql-core",

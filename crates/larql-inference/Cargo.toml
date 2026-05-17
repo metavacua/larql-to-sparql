@@ -125,3 +125,6 @@ larql-kv = { path = "../larql-kv" }
 [[bench]]
 name = "wire_codec"
 harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
