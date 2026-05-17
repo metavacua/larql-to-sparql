@@ -67,13 +67,13 @@ jobs:
           - { name: larql-router-protocol, cargo_flags: ''                                       }
           - { name: larql-router,          cargo_flags: ''                                       }
           - { name: larql-server,          cargo_flags: '--no-default-features'                  }
-          # Blocked — failures identify what needs porting
+          - { name: larql-vindex,          cargo_flags: '--no-default-features'                  }
           - { name: larql-inference,       cargo_flags: '--no-default-features'                  }
           - { name: larql-kv,              cargo_flags: '--no-default-features'                  }
-          - { name: larql-lql,             cargo_flags: '--no-default-features'                  }
-          - { name: larql-vindex,          cargo_flags: '--no-default-features'                  }
-          - { name: larql-cli,             cargo_flags: '--no-default-features'                  }
           - { name: kv-cache-benchmark,    cargo_flags: '--no-default-features'                  }
+          - { name: larql-lql,             cargo_flags: '--no-default-features'                  }
+          - { name: larql-cli,             cargo_flags: '--no-default-features'                  }
+          # Blocked — failures identify what needs porting
           - { name: larql-python,          cargo_flags: '--no-default-features'                  }
 
         # ── Build modes ───────────────────────────────────────────────────
