@@ -13,7 +13,6 @@ larql-inference = { path = "../larql-inference" }
 larql-models = { path = "../larql-models" }
 larql-vindex = { path = "../larql-vindex" }
 ndarray = "0.16"
-rustyline = "15"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -47,6 +46,7 @@ harness = false
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rustyline = "15"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
