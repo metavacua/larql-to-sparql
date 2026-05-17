@@ -8,6 +8,9 @@ description = "Bounded-cost compute for neural-model pipelines: native Rust kern
 keywords = ["wasm", "kernel", "deterministic", "solver", "aot"]
 categories = ["wasm", "mathematics"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["native"]
 native = ["dep:evalexpr", "dep:chrono"]
@@ -35,6 +38,7 @@ wasmtime = { version = ">=36.0.7", optional = true, default-features = false, fe
 wat = "1"
 criterion = "0.5"
 wasmi = "1"
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "wasm_dispatch"

@@ -6,6 +6,9 @@ authors.workspace = true
 license.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 larql-compute = { path = "../larql-compute" }
 larql-core = { path = "../larql-core" }
@@ -31,6 +34,7 @@ criterion = "0.5"
 # `mockito::Server`, points the session at it via `USE "<url>"`, and
 # asserts on the canned response.
 mockito = "1.7"
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "parser"

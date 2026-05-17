@@ -1,10 +1,10 @@
 [package]
-name = "larql-wasm"
+name = "larql-js"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Browser/Node.js WASM bindings for larql-core — serial and parallel graph query variants"
+description = "JavaScript/WASM API layer for LARQL — serial and parallel graph query bindings for Node.js and browsers"
 keywords = ["wasm", "knowledge-graph", "webassembly", "graph"]
 categories = ["wasm", "web-programming"]
 

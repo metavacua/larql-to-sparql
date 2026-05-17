@@ -8,6 +8,9 @@ description = "Vindex — the queryable model format. Storage, KNN index, build,
 keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 larql-core = { path = "../larql-core", default-features = false }
 larql-models = { path = "../larql-models" }
@@ -72,6 +75,7 @@ tempfile = "3"
 # parallel runs would race.
 mockito = "1.7"
 serial_test = "3.2"
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "vindex_ops"

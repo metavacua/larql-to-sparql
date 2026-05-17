@@ -8,6 +8,9 @@ description = "Model architecture definitions for LARQL — traits, config parsi
 keywords = ["transformer", "model-config", "llm", "architecture"]
 categories = ["data-structures"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 ndarray = "0.16"
 serde = { workspace = true }
@@ -21,6 +24,7 @@ memmap2 = "0.9"
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3"
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "models"

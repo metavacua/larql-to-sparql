@@ -6,6 +6,9 @@ authors.workspace = true
 license.workspace = true
 description = "gRPC protocol types for the larql-router self-assembling grid"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 prost = "0.13"
 
@@ -28,3 +31,6 @@ tokio-stream = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

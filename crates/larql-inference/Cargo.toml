@@ -8,6 +8,9 @@ description = "Transformer inference engine — forward pass, attention, FFN, la
 keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 larql-models = { path = "../larql-models" }
 larql-compute = { path = "../larql-compute" }
@@ -123,6 +126,7 @@ assert_approx_eq = "1"
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 larql-kv = { path = "../larql-kv" }
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "wire_codec"

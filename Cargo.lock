@@ -2024,6 +2024,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokenizers",
+ "wasm-bindgen-test",
  "zip 2.4.2",
 ]
 
@@ -2035,6 +2036,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2063,6 +2065,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2082,6 +2085,7 @@ dependencies = [
  "openblas-src",
  "rayon",
  "serde_json",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2095,6 +2099,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2135,10 +2140,26 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tonic",
+ "wasm-bindgen-test",
  "wasmi",
  "wasmtime",
  "wasmtime-wasi",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "larql-js"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "larql-core",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+ "wasm-bindgen-rayon",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2159,6 +2180,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
  "zip 2.4.2",
 ]
 
@@ -2180,6 +2202,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2194,6 +2217,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2234,6 +2258,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2247,6 +2272,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-build",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2287,6 +2313,7 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "utoipa-swagger-ui",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2317,20 +2344,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
-]
-
-[[package]]
-name = "larql-wasm"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "larql-core",
- "rayon",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "wasm-bindgen",
- "wasm-bindgen-rayon",
  "wasm-bindgen-test",
 ]
 
@@ -2643,6 +2656,7 @@ dependencies = [
  "criterion",
  "evalexpr",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
  "wasmi",
  "wasmtime",
  "wat",

@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
 
+[lib]
+name = "larql_cli"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "larql"
 path = "src/main.rs"
@@ -41,6 +46,7 @@ metal = [
 
 [dev-dependencies]
 tempfile = "3"
+wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }

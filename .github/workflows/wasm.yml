@@ -1,19 +1,25 @@
-# wasm.yml — per-crate WASM compatibility matrix (forensic)
+# wasm.yml — WASM CI: compile check + runtime test + native baseline
 #
-# Goal: identify which crates compile to wasm32-unknown-unknown as we
-# transition LARQL to an all-WASM-in-browser deployment.  Failures are
-# intentional data — they surface which crates have blocking OS/native
-# dependencies that must be removed or gated before the port is viable.
+# Three job groups, sequenced and forensic:
 #
-# Strategy matrix: 15 crates × 2 modes = 30 cells, fail-fast: false.
+#   wasm-check   — cargo check --target wasm32-unknown-unknown for every crate.
+#                  Failures identify which native-only dependencies block WASM
+#                  compilation. 15 crates × 2 modes = 30 cells.
 #
-# Serial   — stable Rust, standard wasm32-unknown-unknown.
-# Parallel — nightly + atomics + bulk-memory + mutable-globals RUSTFLAGS
-#            (wasm-bindgen-rayon / SharedArrayBuffer model).
+#   wasm-test    — wasm-pack test with native test suites ported to
+#                  #[wasm_bindgen_test]. Two CPU models × two runtimes:
+#                    Serial CPU (single-threaded wasm32)
+#                    Parallel CPU (multi-threaded via SharedArrayBuffer + Rayon)
+#                  Many cells are expected to be red; that is the success
+#                  criterion for this phase — failures are forensic data
+#                  identifying porting work. 15 crates × 4 modes = 60 cells.
 #
-# Once a crate passes cargo check, the next step is to port its tests.
+#   native-test  — cargo test on the native target. Runs after both WASM phases
+#                  complete (pass or fail). Expected green; comparison with
+#                  wasm-test reveals the porting backlog. 14 crates × 1 = 14
+#                  cells (larql-js tested via wasm-test only).
 #
-# Triggers: push to main + all PRs.
+# Triggers: push to main + all PRs that touch crate code or this file.
 
 name: wasm
 
@@ -38,9 +44,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
+# ── WASM compile check ──────────────────────────────────────────────────────
+
 jobs:
-  wasm:
-    name: ${{ matrix.crate.name }} · ${{ matrix.mode.name }}
+  wasm-check:
+    name: check · ${{ matrix.crate.name }} · ${{ matrix.mode.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -50,12 +58,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-
-        # ── Crate definitions ─────────────────────────────────────────────
-        # cargo_flags: --no-default-features where native deps would otherwise
-        #              pull in OS/BLAS/Metal code that can never compile for
-        #              wasm32.  The goal is the minimum surface that could
-        #              plausibly compile; flag what still blocks.
 
         crate:
           # Passing (or expected to pass with listed flags)
@@ -73,10 +75,8 @@ jobs:
           - { name: kv-cache-benchmark,    cargo_flags: '--no-default-features'                  }
           - { name: larql-lql,             cargo_flags: '--no-default-features'                  }
           - { name: larql-cli,             cargo_flags: '--no-default-features'                  }
-          # Blocked — failures identify what needs porting
-          - { name: larql-python,          cargo_flags: '--no-default-features'                  }
+          - { name: larql-js,              cargo_flags: ''                                       }
 
-        # ── Build modes ───────────────────────────────────────────────────
         mode:
           - { name: serial,   toolchain: stable,  rustflags: ''                                                          }
           - { name: parallel, toolchain: nightly, rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'  }
@@ -93,14 +93,192 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ubuntu-wasm-${{ matrix.crate.name }}-${{ matrix.mode.name }}
+          shared-key: ubuntu-wasm-check-${{ matrix.crate.name }}-${{ matrix.mode.name }}
 
-      - name: Check (serial)
+      - name: Check (serial CPU)
         if: matrix.mode.name == 'serial'
-        run: cargo check --target wasm32-unknown-unknown -p ${{ matrix.crate.name }} ${{ matrix.crate.cargo_flags }}
+        run: >-
+          cargo check --target wasm32-unknown-unknown
+          -p ${{ matrix.crate.name }}
+          ${{ matrix.crate.cargo_flags }}
 
-      - name: Check (parallel)
+      - name: Check (parallel CPU)
         if: matrix.mode.name == 'parallel'
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: cargo check --target wasm32-unknown-unknown -p ${{ matrix.crate.name }} ${{ matrix.crate.cargo_flags }}
+        run: >-
+          cargo check --target wasm32-unknown-unknown
+          -p ${{ matrix.crate.name }}
+          ${{ matrix.crate.cargo_flags }}
+
+# ── WASM runtime test ────────────────────────────────────────────────────────
+
+  wasm-test:
+    name: test · ${{ matrix.crate.name }} · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+
+        # ── Testable crates ─────────────────────────────────────────────────
+        # Each crate must have:
+        #   crate-type = ["cdylib", "rlib"]  in Cargo.toml [lib]
+        #   wasm-bindgen-test = "0.3"        in [dev-dependencies]
+        #   at least one #[wasm_bindgen_test] in tests/wasm_compat.rs
+        #
+        # cargo_flags:       passed to wasm-pack test (mirrors wasm-check flags)
+        # parallel_features: --features parallel appended only in parallel modes;
+        #                    only larql-js exposes a `parallel` feature.
+        crate:
+          - { name: larql-js,              path: crates/larql-wasm,            cargo_flags: '',                                       parallel_features: '--features parallel' }
+          - { name: larql-boundary,        path: crates/larql-boundary,        cargo_flags: '',                                       parallel_features: '' }
+          - { name: larql-core,            path: crates/larql-core,            cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-models,          path: crates/larql-models,          cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: model-compute,         path: crates/model-compute,         cargo_flags: '--no-default-features --features wasm',  parallel_features: '' }
+          - { name: larql-compute,         path: crates/larql-compute,         cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-router-protocol, path: crates/larql-router-protocol, cargo_flags: '',                                       parallel_features: '' }
+          - { name: larql-router,          path: crates/larql-router,          cargo_flags: '',                                       parallel_features: '' }
+          - { name: larql-server,          path: crates/larql-server,          cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-vindex,          path: crates/larql-vindex,          cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-inference,       path: crates/larql-inference,       cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-kv,              path: crates/larql-kv,              cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: kv-cache-benchmark,    path: crates/kv-cache-benchmark,    cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-lql,             path: crates/larql-lql,             cargo_flags: '--no-default-features',                  parallel_features: '' }
+          - { name: larql-cli,             path: crates/larql-cli,             cargo_flags: '--no-default-features',                  parallel_features: '' }
+
+        # ── Test modes: 2 CPU models × 2 runtimes ───────────────────────────
+        #
+        # Serial CPU   — single-threaded wasm32, no atomics/SharedArrayBuffer.
+        # Parallel CPU — multi-threaded via SharedArrayBuffer + Rayon Workers.
+        #
+        # Node runtime   — SharedArrayBuffer available without COOP/COEP in Node 20+.
+        # Firefox runtime — SharedArrayBuffer requires COOP/COEP headers from
+        #                   wasm-pack's bundled test server (firefox-parallel).
+        #                   Firefox 79+ supports WASM threads natively.
+        mode:
+          - name: node-serial
+            runtime: node
+            wasm_pack_flags: '--node'
+            toolchain: stable
+            rustflags: ''
+
+          - name: node-parallel
+            runtime: node
+            wasm_pack_flags: '--node'
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+          - name: firefox-serial
+            runtime: firefox
+            wasm_pack_flags: '--firefox --headless'
+            toolchain: stable
+            rustflags: ''
+
+          - name: firefox-parallel
+            runtime: firefox
+            wasm_pack_flags: '--firefox --headless'
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-wasm-test-${{ matrix.crate.name }}-${{ matrix.mode.name }}
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Set up Node.js 22
+        if: matrix.mode.runtime == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Firefox
+        if: matrix.mode.runtime == 'firefox'
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Set up geckodriver
+        if: matrix.mode.runtime == 'firefox'
+        uses: browser-actions/setup-geckodriver@v0.0.0
+
+      - name: Test (serial CPU)
+        if: "!contains(matrix.mode.name, 'parallel')"
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: >-
+          wasm-pack test
+          ${{ matrix.mode.wasm_pack_flags }}
+          ${{ matrix.crate.path }}
+          ${{ matrix.crate.cargo_flags }}
+
+      - name: Test (parallel CPU)
+        if: contains(matrix.mode.name, 'parallel')
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: >-
+          wasm-pack test
+          ${{ matrix.mode.wasm_pack_flags }}
+          ${{ matrix.crate.path }}
+          ${{ matrix.crate.cargo_flags }}
+          ${{ matrix.crate.parallel_features }}
+
+# ── Native test baseline ──────────────────────────────────────────────────────
+
+  native-test:
+    name: test · ${{ matrix.crate }} · native
+    needs: [wasm-check, wasm-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # larql-js is the WASM API bundle; tested via wasm-test only.
+        crate:
+          - larql-boundary
+          - larql-core
+          - larql-models
+          - model-compute
+          - larql-compute
+          - larql-router-protocol
+          - larql-router
+          - larql-server
+          - larql-vindex
+          - larql-inference
+          - larql-kv
+          - kv-cache-benchmark
+          - larql-lql
+          - larql-cli
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-native-${{ matrix.crate }}
+
+      - name: Test
+        run: cargo test -p ${{ matrix.crate }}

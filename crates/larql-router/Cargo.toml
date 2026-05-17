@@ -9,6 +9,7 @@ description = "Layer-sharding router for distributed larql-server deployments"
 [lib]
 name = "larql_router"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "larql-router"
@@ -28,6 +29,7 @@ futures-core = "0.3"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "routing"

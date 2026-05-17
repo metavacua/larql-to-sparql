@@ -207,8 +207,11 @@ async fn send_unassign(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn imbalance_tracker_records_and_clears() {
         let mut t = ImbalanceTracker::default();
         let key = ("model".to_string(), 5u32);
@@ -222,7 +225,8 @@ mod tests {
         assert!(t.record(key2, Duration::from_secs(0)));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn rebalancer_config_defaults() {
         let cfg = RebalancerConfig::default();
         assert_eq!(cfg.check_interval, Duration::from_secs(30));

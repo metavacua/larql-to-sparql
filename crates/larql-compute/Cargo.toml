@@ -8,6 +8,9 @@ description = "Compute backends for LARQL — CPU (BLAS), Metal (GPU), CUDA (pla
 keywords = ["matmul", "metal", "gpu", "quantization", "blas"]
 categories = ["science"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # Matrix types — blas feature added per-platform below where a backend exists
 ndarray = "0.16"
@@ -64,6 +67,7 @@ libc = "0.2"
 criterion = "0.5"
 serde_json = "1"
 memmap2 = "0.9"
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "matmul"

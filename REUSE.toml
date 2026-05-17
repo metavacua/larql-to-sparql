@@ -54,6 +54,11 @@ path = [
   "crates/larql-vindex/docs/code-quality-pipeline.md",
   "docs/ci-cd-local.md",
   "deny.toml",
+  # WASM port (PRs 59–61): CI infrastructure and per-crate wasm-bindgen-test
+  # suites ported from the native per-crate workflows.
+  "crates/*/tests/wasm_compat.rs",
+  "crates/larql-cli/src/lib.rs",
+  "crates/larql-wasm/Cargo.toml",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 2026 Ian Douglas Lawrence Norman McLean"

@@ -679,6 +679,8 @@ impl GridService for GridServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
 
     fn entry(
         server_id: &str,
@@ -701,7 +703,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn route_uses_inclusive_layer_ranges() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 2));
@@ -714,7 +717,8 @@ mod tests {
         assert_eq!(state.route(Some("model-a"), 6), None);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn route_without_model_uses_any_model_table() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 1));
@@ -723,7 +727,8 @@ mod tests {
         assert_eq!(state.route(None, 2), None);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn route_prefers_least_loaded_replica() {
         let mut state = GridState::default();
         let mut busy = entry("busy", "http://busy", "model-a", 0, 4);
@@ -740,7 +745,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn deregister_removes_server_from_route_table() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 2));
@@ -752,7 +758,8 @@ mod tests {
         assert_eq!(state.route(Some("model-a"), 4).as_deref(), Some("http://b"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn heartbeat_updates_load_without_rebuilding_topology() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 4));
@@ -768,7 +775,8 @@ mod tests {
         assert_eq!(a.requests_in_flight, 20);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn route_all_returns_first_uncovered_layer() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 1));
@@ -777,7 +785,8 @@ mod tests {
         assert_eq!(state.route_all(Some("model-a"), &[0, 1, 2, 3]), Err(2));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn status_response_reports_shards_and_gaps() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 1));
@@ -795,7 +804,8 @@ mod tests {
         assert_eq!(model.gaps[0].layer_end, 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn route_prefers_lower_layer_latency_over_inflight() {
         // slow has fewer requests_in_flight but higher per-layer latency.
         // fast has more requests but lower layer latency.
@@ -818,7 +828,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn heartbeat_stores_layer_latencies() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 4));
@@ -834,7 +845,8 @@ mod tests {
         assert_eq!(entry.layer_latencies.get(&2), Some(&(3.5, 7.0)));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn status_response_includes_layer_stats() {
         let mut state = GridState::default();
         let mut srv = entry("a", "http://a", "model-a", 0, 1);
@@ -848,7 +860,8 @@ mod tests {
         assert!((server.layer_stats[0].avg_ms - 2.1).abs() < 0.001);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn register_available_and_deregister() {
         let mut state = GridState::default();
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -864,7 +877,8 @@ mod tests {
         assert!(!state.available_servers.contains_key("avail-1"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn coverage_gaps_finds_uncovered_range() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 1));
@@ -875,7 +889,8 @@ mod tests {
         assert_eq!(gaps[0], ("model-a".to_string(), 2, 2));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn coverage_gaps_empty_when_fully_covered() {
         let mut state = GridState::default();
         state.register(entry("a", "http://a", "model-a", 0, 2));

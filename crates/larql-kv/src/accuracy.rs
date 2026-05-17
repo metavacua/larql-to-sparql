@@ -107,41 +107,49 @@ pub fn compare_hidden(h1: &Array2<f32>, h2: &Array2<f32>) -> HiddenAccuracy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn cosine_identical() {
         let v = vec![1.0f32, 2.0, 3.0];
         assert!((cosine_similarity(&v, &v) - 1.0).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn cosine_orthogonal() {
         let a = vec![1.0f32, 0.0];
         let b = vec![0.0f32, 1.0];
         assert!(cosine_similarity(&a, &b).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn cosine_zero_vector() {
         let a = vec![0.0f32; 4];
         let b = vec![1.0f32, 2.0, 3.0, 4.0];
         assert_eq!(cosine_similarity(&a, &b), 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn mse_identical() {
         let v = vec![1.0f32, 2.0, 3.0];
         assert!(mse(&v, &v) < 1e-12);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn mse_known_value() {
         let a = vec![0.0f32, 0.0];
         let b = vec![2.0f32, 2.0];
         assert!((mse(&a, &b) - 4.0).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn softmax_sums_to_one() {
         let logits = vec![2.0f32, 1.0, 0.5, -1.0, 3.0];
         let p = softmax(&logits);
@@ -149,7 +157,8 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-6, "softmax sum = {sum}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn softmax_max_index_preserved() {
         let logits = vec![0.0f32, 0.0, 5.0, 0.0];
         let p = softmax(&logits);
@@ -162,7 +171,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn kl_identical_distributions() {
         let logits = vec![2.0f32, 1.0, 0.5, -1.0, 3.0];
         let p = softmax(&logits);
@@ -170,7 +180,8 @@ mod tests {
         assert!(kl < 1e-10, "KL of identical = {kl}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn kl_different_distributions_positive() {
         let p = vec![0.9f32, 0.1];
         let q = vec![0.1f32, 0.9];
@@ -181,7 +192,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn js_divergence_symmetric() {
         let p = vec![0.8f32, 0.2];
         let q = vec![0.2f32, 0.8];
@@ -193,7 +205,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn js_divergence_bounded() {
         let p = vec![1.0f32, 0.0, 0.0];
         let q = vec![0.0f32, 0.0, 1.0];
@@ -201,7 +214,8 @@ mod tests {
         assert!(js <= std::f64::consts::LN_2 + 1e-9, "JSD > ln2: {js}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn compare_hidden_identical() {
         let h = ndarray::array![[1.0f32, 2.0, 3.0]];
         let acc = compare_hidden(&h, &h);
@@ -209,7 +223,8 @@ mod tests {
         assert!(acc.mse < 1e-12);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn compare_hidden_assert_helpers() {
         let h = ndarray::array![[1.0f32, 0.0, 0.0]];
         let acc = compare_hidden(&h, &h);

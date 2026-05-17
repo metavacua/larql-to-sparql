@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 description = "KV cache benchmark: Standard KV vs TurboQuant vs Markov RS vs Graph Walk"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = []
 real-model = ["larql-vindex", "larql-models", "ndarray", "tokenizers", "zip"]
@@ -34,6 +37,7 @@ zip = { version = "2", optional = true, default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "kv_strategies"

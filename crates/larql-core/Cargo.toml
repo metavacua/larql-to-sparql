@@ -8,6 +8,9 @@ description = "Core graph engine for LARQL — knowledge graphs extracted from n
 keywords = ["knowledge-graph", "llm", "interpretability", "graph"]
 categories = ["data-structures", "science"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,6 +30,7 @@ msgpack = ["dep:rmp-serde"]
 [dev-dependencies]
 assert_approx_eq = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "graph"
