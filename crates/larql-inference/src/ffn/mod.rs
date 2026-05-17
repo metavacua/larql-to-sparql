@@ -8,7 +8,9 @@
 //! production dispatch.
 
 pub mod graph_backend;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod moe_remote;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 pub mod sparse;
 pub mod sparse_compute;
@@ -52,7 +54,9 @@ pub trait FfnBackend {
 
 // ── Re-exports ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use moe_remote::{MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig};
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::{
     LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
     WirePreference,
