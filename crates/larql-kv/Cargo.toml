@@ -55,3 +55,6 @@ harness = false
 
 [[example]]
 name = "engine_ladder"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }
