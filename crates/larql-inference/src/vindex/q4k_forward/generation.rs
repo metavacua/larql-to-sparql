@@ -65,6 +65,7 @@ pub fn generate_q4k_cpu(
 
 /// Like [`generate_q4k_cpu`] but dispatches MoE expert matmuls to remote shard
 /// servers via [`crate::ffn::RemoteMoeBackend`].
+#[cfg(not(target_arch = "wasm32"))]
 pub fn generate_q4k_cpu_remote(
     weights: &mut ModelWeights,
     tokenizer: &Tokenizer,
