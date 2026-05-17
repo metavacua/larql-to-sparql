@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate metal-only code behind target_os = "macos" so the workspace builds on Linux
 - Gate orphan items in vindex test + cover second lql bench
 - Gate source-level tonic/tokio/axum types and native-only server modules behind `#[cfg(not(target_arch = "wasm32"))]`; larql-router-protocol, larql-router, and larql-server now pass `cargo check --target wasm32-unknown-unknown`
+- Gate source-level reqwest::blocking/hf-hub references in larql-vindex (huggingface module), larql-inference (remote/moe_remote FFN modules), and larql-lql (Remote backend variant, executor/remote module); promote larql-compute from Blocked to Passing in wasm CI matrix
 - Gate sdot on dotprod feature and add QEMU emulation for tests
 - Gate trace_final_residual_matches_raw_forward_logits
 - Move wasm-pack flags before crate path for latest wasm-pack compat
