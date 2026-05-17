@@ -15,6 +15,7 @@
 mod cached;
 mod dense;
 pub mod generate;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod grid;
 pub mod hybrid;
 pub mod logits;
