@@ -87,3 +87,6 @@ harness = false
 # `[lints]` table — the only place that reliably wires through.
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true }

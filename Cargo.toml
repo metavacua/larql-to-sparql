@@ -19,6 +19,8 @@ members = [
     "crates/larql-boundary",
     # portable (extract to sibling repos later, names stable)
     "crates/model-compute",
+    # WASM bindings for browser/Node.js (serial + parallel variants)
+    "crates/larql-wasm",
 ]
 default-members = [
     "crates/larql-models",
@@ -56,6 +58,7 @@ repository = "https://github.com/chrishayuk/chuk-larql-rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+getrandom = { version = "0.2", features = ["js"] }
 
 [profile.dev]
 debug = "line-tables-only"
