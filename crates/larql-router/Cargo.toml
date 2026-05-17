@@ -17,11 +17,6 @@ path = "src/main.rs"
 [dependencies]
 larql-router-protocol = { path = "../larql-router-protocol" }
 
-axum = "0.8"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-tonic = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
@@ -37,6 +32,13 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "routing"
 harness = false
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }

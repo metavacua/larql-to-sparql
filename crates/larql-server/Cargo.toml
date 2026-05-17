@@ -25,24 +25,16 @@ larql-router-protocol = { path = "../larql-router-protocol" }
 # selected experts on the GPU instead of running them per-expert on CPU.
 larql-compute = { path = "../larql-compute" }
 
-axum = { version = "0.8", features = ["ws"] }
 half = "2"
-axum-server = { version = "0.7", features = ["tls-rustls"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
 # Constant-time byte equality for API-key comparison (auth middleware).
 # Already in the lockfile via rustls; declared here as a direct dep so the
 # threat-model rationale is visible at the crate boundary.
 subtle = "2.6"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-tonic = "0.13"
 prost = "0.13"
 async-stream = "0.3"
 futures = "0.3"
 rayon = "1.10"
-tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
@@ -53,8 +45,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22"
-utoipa = { version = "5", features = ["axum_extras", "preserve_order"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [features]
 default = []
@@ -71,6 +61,18 @@ tonic-build = "0.13"
 # (installed by CI via `arduino/setup-protoc`).
 [target.'cfg(not(windows))'.build-dependencies]
 protobuf-src = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+utoipa = { version = "5", features = ["axum_extras", "preserve_order"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
