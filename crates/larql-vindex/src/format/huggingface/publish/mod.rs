@@ -423,11 +423,14 @@ mod tests {
     // ─── get_hf_token ──────────────────────────────────────────────
 
     #[test]
+    #[serial]
     fn get_hf_token_reads_env_var() {
-        // Process-wide env mutation is unsafe to do under cargo's parallel
-        // test runner without serialisation; this test sets HF_TOKEN to
-        // a known value and immediately reads it. If another test in the
-        // same binary also touches HF_TOKEN, mark both #[serial].
+        // Process-wide env mutation must be serialised against the other
+        // `get_hf_token_*` tests below — they share `HF_TOKEN` and `HOME`
+        // and Windows scheduling has surfaced the race that Linux/macOS
+        // happened to mask (this test sets HF_TOKEN to a sentinel and
+        // `errors_when_no_source_present` then read the sentinel instead
+        // of erroring on a missing token).
         let prev = std::env::var("HF_TOKEN").ok();
         std::env::set_var("HF_TOKEN", "sentinel-token-XYZ");
         let result = get_hf_token();
