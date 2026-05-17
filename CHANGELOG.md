@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Gate source-level tonic/tokio/axum types and native-only server modules behind `#[cfg(not(target_arch = "wasm32"))]`; larql-router-protocol, larql-router, and larql-server now pass `cargo check --target wasm32-unknown-unknown`
 - Gate source-level reqwest::blocking/hf-hub references in larql-vindex (huggingface module), larql-inference (remote/moe_remote FFN modules), and larql-lql (Remote backend variant, executor/remote module); promote larql-compute from Blocked to Passing in wasm CI matrix
 - Gate larql-core HttpProvider (reqwest::blocking) behind not(wasm32) in addition to http feature; gate vindexfile huggingface path resolver behind not(wasm32)
+- Gate rustyline REPL and HF/remote path resolution in larql-lql behind not(wasm32); gate HF/remote FFN commands in larql-cli (hf_cmd, ffn_latency_cmd, model_cmd, publish_cmd, pull_cmd, bench/walk/run remote paths) behind not(wasm32); promote larql-vindex, larql-inference, larql-kv, kv-cache-benchmark, larql-lql, larql-cli from Blocked to Passing in wasm CI matrix
 - Gate sdot on dotprod feature and add QEMU emulation for tests
 - Gate trace_final_residual_matches_raw_forward_logits
 - Move wasm-pack flags before crate path for latest wasm-pack compat

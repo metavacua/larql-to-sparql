@@ -3,7 +3,9 @@
 use crate::executor::Session;
 use crate::parser;
 
+#[cfg(not(target_arch = "wasm32"))]
 use rustyline::error::ReadlineError;
+#[cfg(not(target_arch = "wasm32"))]
 use rustyline::DefaultEditor;
 
 const BANNER: &str = r#"
@@ -26,6 +28,7 @@ fn dirs_or_home() -> Option<std::path::PathBuf> {
 }
 
 /// Run the interactive REPL.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_repl() {
     println!("{BANNER}");
 
@@ -140,6 +143,9 @@ pub fn run_repl() {
 
     println!("Goodbye.");
 }
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_repl() {}
 
 /// Basic fallback REPL without line editing (used if rustyline fails).
 fn run_repl_basic() {
