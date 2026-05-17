@@ -6,10 +6,13 @@
 //! integration tests can drive the same code path without going through
 //! `clap::Parser::parse_from`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_server::bootstrap::{self, normalize_serve_alias, BoxError, Cli};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
     // Accept both `larql-server <path>` and `larql-server serve <path>`.
@@ -24,3 +27,6 @@ async fn main() -> Result<(), BoxError> {
 
     bootstrap::serve(cli).await
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
