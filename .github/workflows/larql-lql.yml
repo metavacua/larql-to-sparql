@@ -9,7 +9,7 @@ name: larql-lql
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-lql/**'
       - 'crates/larql-core/**'
@@ -22,7 +22,7 @@ on:
       - '.github/workflows/larql-lql.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-lql/**'
       - 'crates/larql-core/**'

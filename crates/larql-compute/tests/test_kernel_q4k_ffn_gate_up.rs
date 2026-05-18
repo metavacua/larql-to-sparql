@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 #![cfg(all(feature = "metal", target_os = "macos"))]
 
 //! Per-kernel tests for `q4k_ffn_gate_up` — the fused gate+up matvec

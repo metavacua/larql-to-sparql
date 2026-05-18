@@ -7,7 +7,7 @@
 //! Run with: cargo test -p larql-compute --features metal
 
 #![cfg(all(feature = "metal", target_os = "macos"))]
-
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::cpu::q4;

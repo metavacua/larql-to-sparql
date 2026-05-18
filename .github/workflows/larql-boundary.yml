@@ -13,7 +13,7 @@ permissions:
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-boundary/**'
       - 'Cargo.toml'
@@ -21,7 +21,7 @@ on:
       - '.github/workflows/larql-boundary.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-boundary/**'
       - 'Cargo.toml'

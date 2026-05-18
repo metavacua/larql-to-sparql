@@ -205,6 +205,9 @@ mod tests {
     use super::*;
     use crate::core::enums::SourceType;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn test_edge(subj: &str, rel: &str, obj: &str, conf: f64) -> Edge {
         Edge::new(subj, rel, obj).with_confidence(conf)
     }
@@ -256,7 +259,8 @@ mod tests {
         g
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_no_filters_passes_all() {
         let g = build_test_graph();
         let config = FilterConfig::default();
@@ -264,7 +268,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 4);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_min_confidence() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -276,7 +281,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 3);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_max_confidence() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -287,7 +293,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_relation_whitelist() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -298,7 +305,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_relation_blacklist() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -309,7 +317,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_source_filter() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -320,7 +329,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 3);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_min_layer() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -331,7 +341,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_max_layer() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -342,7 +353,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_min_selectivity() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -353,7 +365,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_subject_contains() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -364,7 +377,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_object_contains() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -375,7 +389,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_combined_filters() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -388,7 +403,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_missing_metadata_fails_predicate() {
         let g = build_test_graph();
         let config = FilterConfig {
@@ -399,7 +415,8 @@ mod tests {
         assert_eq!(filtered.edge_count(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_preserves_metadata() {
         let mut g = Graph::new();
         g.metadata
@@ -410,7 +427,8 @@ mod tests {
         assert_eq!(filtered.metadata.get("source"), g.metadata.get("source"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_empty_graph() {
         let g = Graph::new();
         let config = FilterConfig {

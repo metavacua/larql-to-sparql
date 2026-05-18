@@ -1,0 +1,106 @@
+# model-compute WASM CI
+#
+# Mirrors model-compute.yml for wasm32-unknown-unknown. Tests run with
+# --no-default-features --features wasm (the wasmi interpreter path).
+# The native feature (evalexpr + chrono) is excluded — it is tested natively.
+# fail-fast is false intentionally: all failures must be visible.
+
+name: model-compute-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/model-compute/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/model-compute-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/model-compute/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/model-compute-wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-model-compute-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-model-compute-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p model-compute -- --check
+
+      - name: Check (no features)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p model-compute --target wasm32-unknown-unknown --no-default-features
+
+      - name: Check (wasm feature)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p model-compute --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p model-compute --target wasm32-unknown-unknown --no-default-features --features wasm -- -D warnings
+
+      - name: wasm-pack test · node
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --node crates/model-compute --no-default-features --features wasm
+
+      - name: wasm-pack test · firefox
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --firefox --headless crates/model-compute --no-default-features --features wasm,browser-tests

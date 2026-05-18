@@ -106,6 +106,7 @@ impl Checkpoint {
         let mut f = std::fs::File::create(&tmp_path)?;
         f.write_all(json.as_bytes())?;
         f.sync_all()?;
+        #[allow(clippy::drop_non_drop)]
         drop(f);
         std::fs::rename(&tmp_path, &path)?;
         Ok(())

@@ -1,3 +1,6 @@
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_core::engine::mock_provider::MockProvider;
 use larql_core::engine::templates::PromptTemplate;
 use larql_core::*;
@@ -39,7 +42,8 @@ fn geo_provider() -> MockProvider {
     ])
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_basic() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -68,7 +72,8 @@ fn test_bfs_basic() {
     assert!(graph.exists("France", "currency", "Euro"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_depth_1_follows_entities() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -97,7 +102,8 @@ fn test_bfs_depth_1_follows_entities() {
     assert!(graph.exists("Paris", "located-in", "France"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_multiple_seeds() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -124,7 +130,8 @@ fn test_bfs_multiple_seeds() {
     assert!(graph.exists("Germany", "capital-of", "Berlin"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_respects_max_entities() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -150,7 +157,8 @@ fn test_bfs_respects_max_entities() {
     assert_eq!(result.entities_visited, 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_respects_min_confidence() {
     // Provider returns low confidence
     let provider = MockProvider::with_knowledge(vec![(
@@ -182,7 +190,8 @@ fn test_bfs_respects_min_confidence() {
     assert!(!graph.exists("France", "capital-of", "Paris"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_respects_template_stop_tokens() {
     let provider = MockProvider::with_knowledge(vec![(
         "The capital of France is".into(),
@@ -221,7 +230,8 @@ fn test_bfs_respects_template_stop_tokens() {
     assert!(!graph.exists("France", "capital-of", "Paris|"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_empty_provider() {
     let provider = MockProvider::new(); // no knowledge
     let templates = geo_templates();
@@ -244,7 +254,8 @@ fn test_bfs_empty_provider() {
     assert_eq!(graph.edge_count(), 0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_no_duplicate_visits() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -273,7 +284,8 @@ fn test_bfs_no_duplicate_visits() {
     assert_eq!(france_caps.len(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_edges_have_source_parametric() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -301,7 +313,8 @@ fn test_bfs_edges_have_source_parametric() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_edges_use_configured_source() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -330,7 +343,8 @@ fn test_bfs_edges_use_configured_source() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_edges_have_metadata() {
     let provider = geo_provider();
     let templates = geo_templates();
@@ -361,7 +375,8 @@ fn test_bfs_edges_have_metadata() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_result_counts() {
     let provider = geo_provider();
     let templates = geo_templates();

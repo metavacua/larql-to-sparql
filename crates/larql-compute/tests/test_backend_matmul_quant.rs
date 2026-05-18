@@ -1,6 +1,7 @@
 //! Coverage for the backend trait default methods (matmul_batch, gemv stubs)
 //! and quant_matvec dispatch for Q4_K / Q6_K / quant_matvec_q8_input.
 
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k, quantize_to_q8};

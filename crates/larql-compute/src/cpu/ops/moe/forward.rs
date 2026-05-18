@@ -274,6 +274,9 @@ mod tests {
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn bf16_fill(len: usize, val: f32) -> Vec<u8> {
         let b = ((val.to_bits() >> 16) as u16).to_le_bytes();
         let mut bytes = vec![0u8; len * 2];
@@ -314,7 +317,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn empty_selected_expert_weight_slices_are_skipped() {
         let hidden = 8;
         let inter = 2;
@@ -350,7 +354,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn selected_expert_with_missing_down_table_is_skipped() {
         let hidden = 8;
         let inter = 2;
@@ -393,7 +398,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_cached_dequant_fallback_runs_for_non_256_hidden() {
         let hidden = 128;
         let inter = 1;
@@ -429,7 +435,8 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_per_expert_scale_filters_selected_expert() {
         let hidden = 8;
         let inter = 2;

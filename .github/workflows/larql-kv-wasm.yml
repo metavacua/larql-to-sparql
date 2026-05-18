@@ -1,0 +1,105 @@
+# larql-kv WASM CI
+#
+# Mirrors larql-kv.yml for wasm32-unknown-unknown. Tests run with default
+# features (no blas on wasm32 — platform-gated). The 15 apollo/store.rs
+# tests that require tempfile/std::fs are excluded (native-only).
+# fail-fast is false intentionally: all failures must be visible.
+
+name: larql-kv-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-compute/**'
+      - 'crates/larql-vindex/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-kv-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-kv/**'
+      - 'crates/larql-inference/**'
+      - 'crates/larql-compute/**'
+      - 'crates/larql-vindex/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-kv-wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-kv-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-kv-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-kv -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-kv --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-kv --target wasm32-unknown-unknown -- -D warnings
+
+      # larql-kv → larql-inference/larql-vindex → reqwest browser-fetch on
+      # wasm32 → WASM "env" host imports Node.js cannot resolve. Firefox is
+      # the only viable wasm-pack test runner for this crate.
+      - name: wasm-pack test · firefox
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --firefox --headless crates/larql-kv --features browser-tests

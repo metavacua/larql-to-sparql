@@ -1,0 +1,36 @@
+[package]
+name = "larql-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Browser/Node.js WASM bindings for larql-core — serial and parallel graph query variants"
+keywords = ["wasm", "knowledge-graph", "webassembly", "graph"]
+categories = ["wasm", "web-programming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Multi-threaded variant via wasm-bindgen-rayon (Web Workers + SharedArrayBuffer).
+# Requires nightly Rust and atomics target features at build time.
+parallel = ["dep:wasm-bindgen-rayon", "dep:rayon"]
+
+[dependencies]
+larql-core = { path = "../larql-core", default-features = false }
+wasm-bindgen = "0.2"
+js-sys        = "0.3"
+serde         = { workspace = true, features = ["derive"] }
+serde_json    = { workspace = true }
+thiserror     = { workspace = true }
+
+# Parallel WASM: rayon thread pool backed by Web Workers.
+wasm-bindgen-rayon = { version = "1", optional = true }
+rayon              = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom_03 = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

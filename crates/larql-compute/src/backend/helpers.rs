@@ -38,6 +38,9 @@ mod tests {
     use crate::CpuBackend;
     use ndarray::Array2;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn synth(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
         let mut s = seed;
         Array2::from_shape_fn((rows, cols), |_| {
@@ -54,7 +57,8 @@ mod tests {
     }
 
     /// `None` backend → ndarray fallback. Pin the pure-CPU `a @ b^T`.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dot_proj_gpu_none_backend_uses_ndarray() {
         let a = synth(4, 8, 1);
         let b = synth(6, 8, 2);
@@ -69,7 +73,8 @@ mod tests {
 
     /// `Some(CpuBackend)` → goes through trait, must equal the `None`
     /// fallback (both are CPU paths, just routed differently).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dot_proj_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 1);
         let b = synth(6, 8, 2);
@@ -79,7 +84,8 @@ mod tests {
         assert!(max_diff(&routed, &fallback) < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn matmul_gpu_none_backend_uses_ndarray() {
         let a = synth(4, 8, 3);
         let b = synth(8, 6, 4);
@@ -90,7 +96,8 @@ mod tests {
         assert!(max_diff(&result, &expected) < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn matmul_gpu_some_backend_matches_fallback() {
         let a = synth(4, 8, 3);
         let b = synth(8, 6, 4);

@@ -517,7 +517,11 @@ pub(crate) fn q4k_decode_token(
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn new_engine_is_empty() {
         let eng = UnlimitedContextEngine::new(512);
         assert_eq!(eng.window_size, 512);
@@ -527,7 +531,8 @@ mod tests {
         assert_eq!(eng.memory_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_backend_is_cpu() {
         let eng = UnlimitedContextEngine::new(256);
         let info = eng.info();
@@ -542,13 +547,15 @@ mod tests {
         assert!(info.summary().contains("cpu"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_config_contains_window_size() {
         let eng = UnlimitedContextEngine::new(1024);
         assert!(eng.info().config.contains("1024"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn window_tokens_and_cold_bytes_start_zero() {
         let eng = UnlimitedContextEngine::new(512);
         assert_eq!(eng.window_tokens(), 0);
@@ -557,7 +564,8 @@ mod tests {
 
     // ── prefill / decode cycle ─────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_returns_hidden_state() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -572,7 +580,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_step_returns_hidden_state() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -583,7 +592,8 @@ mod tests {
         assert!(h.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn window_auto_closes_when_full() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -607,7 +617,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn two_full_windows_archives_two() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -621,7 +632,8 @@ mod tests {
         assert_eq!(engine.checkpoints.len(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn partial_window_after_process() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -633,7 +645,8 @@ mod tests {
         assert_eq!(engine.window_tokens(), 3);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn flush_closes_partial_window() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -644,7 +657,8 @@ mod tests {
         assert_eq!(engine.archive.len(), 1, "flush should close partial window");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cold_bytes_grow_after_window_close() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -657,7 +671,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_bytes_nonzero_after_prefill() {
         use larql_inference::test_utils::make_test_weights;
         let weights = make_test_weights();
@@ -667,7 +682,8 @@ mod tests {
         assert!(engine.memory_bytes() > 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn logits_from_unlimited_context_are_finite() {
         use larql_inference::forward::hidden_to_raw_logits;
         use larql_inference::test_utils::make_test_weights;

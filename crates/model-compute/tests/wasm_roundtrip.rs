@@ -7,6 +7,9 @@
 
 #![cfg(feature = "wasm")]
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use model_compute::wasm::{SolverError, SolverLimits, SolverRuntime};
 
 const ECHO_WAT: &str = r#"
@@ -58,7 +61,8 @@ fn wasm(runtime: &SolverRuntime, wat: &str) -> wasmi::Module {
     runtime.compile(&bytes).expect("module compile")
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn echo_roundtrip() {
     let runtime = SolverRuntime::new().unwrap();
     let module = wasm(&runtime, ECHO_WAT);
@@ -69,7 +73,8 @@ fn echo_roundtrip() {
     assert_eq!(output.as_slice(), input);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn echo_two_sessions_isolated() {
     // Two sessions on the same module must not share state.
     let runtime = SolverRuntime::new().unwrap();
@@ -84,7 +89,8 @@ fn echo_two_sessions_isolated() {
     assert_eq!(&r2, b"second-longer");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn fuel_cap_stops_infinite_loop() {
     let limits = SolverLimits {
         fuel: 10_000,
@@ -101,7 +107,8 @@ fn fuel_cap_stops_infinite_loop() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn missing_export_errors_clearly() {
     let runtime = SolverRuntime::new().unwrap();
     // Module with memory but no ABI exports
@@ -130,7 +137,8 @@ const MEMORY_HOG_WAT: &str = r#"
   (func (export "solution_len") (result i32) (i32.const 0)))
 "#;
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn memory_cap_rejects_grow() {
     let limits = SolverLimits {
         fuel: 10_000_000,
@@ -161,7 +169,8 @@ const FAIL_STATUS_WAT: &str = r#"
   (func (export "solution_len") (result i32) (i32.const 0)))
 "#;
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn nonzero_solve_status_reported() {
     let runtime = SolverRuntime::new().unwrap();
     let module = wasm(&runtime, FAIL_STATUS_WAT);
@@ -173,7 +182,8 @@ fn nonzero_solve_status_reported() {
     assert!(matches!(err, SolverError::SolveFailed(42)));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn large_input_crosses_multiple_pages() {
     let runtime = SolverRuntime::new().unwrap();
     let module = wasm(&runtime, ECHO_WAT);
@@ -185,7 +195,8 @@ fn large_input_crosses_multiple_pages() {
     assert_eq!(output, input);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn fuel_remaining_decreases_after_call() {
     let runtime = SolverRuntime::new().unwrap();
     let module = wasm(&runtime, ECHO_WAT);

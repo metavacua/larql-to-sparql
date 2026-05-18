@@ -16,7 +16,7 @@
 //! seconds it adds to `cargo test`.
 
 #![cfg(all(feature = "metal", target_os = "macos"))]
-
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::cpu::ops::q4_common::quantize_q4_k;

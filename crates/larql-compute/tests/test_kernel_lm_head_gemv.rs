@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 #![cfg(all(feature = "metal", target_os = "macos"))]
 
 //! Kernel-level bisect for the CPU/Metal LM-head divergence surfaced

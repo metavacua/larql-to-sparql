@@ -200,7 +200,11 @@ pub fn cpu_backend() -> Box<dyn ComputeBackend> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cpu_backend_exposes_cpu_backend_capabilities() {
         let backend = cpu_backend();
 
@@ -209,7 +213,8 @@ mod tests {
         assert!(backend.supports(Capability::QuantMatVec));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_backend_is_usable_through_prelude_traits() {
         fn assert_compute_backend<T: prelude::ComputeBackend + ?Sized>(backend: &T) {
             assert!(backend.supports(prelude::Capability::QuantMatVec));

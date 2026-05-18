@@ -211,8 +211,12 @@ mod cache_format_tests {
     use super::*;
     use crate::QuantFormat;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// BF16 path: 2 bytes per float, no padding. Round-trip a fixed value.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bf16_dispatch_round_trip() {
         // 4 BF16 values of 1.0 (0x3F80 little-endian = [0x80, 0x3F]).
         let bytes = vec![0x80u8, 0x3F, 0x80, 0x3F, 0x80, 0x3F, 0x80, 0x3F];
@@ -225,7 +229,8 @@ mod cache_format_tests {
 
     /// Q4_K path: 144 bytes per 256 floats. Quantise→dequantise round-trip
     /// must come back within Q4 quantisation noise.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_dispatch_round_trip() {
         // 256-element ramp [-1, 1] — same fixture used by q4_common tests.
         let data: Vec<f32> = (0..256).map(|i| (i as f32 / 255.0) * 2.0 - 1.0).collect();
@@ -244,7 +249,8 @@ mod cache_format_tests {
     }
 
     /// F32 path: passthrough.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_dispatch_passthrough() {
         let data: Vec<f32> = vec![1.0, -2.5, 3.125, 0.0];
         let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -255,7 +261,8 @@ mod cache_format_tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cache_key_separates_format_and_expected_length() {
         let data: Vec<f32> = vec![1.0, 2.0];
         let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -273,7 +280,8 @@ mod cache_format_tests {
     }
 
     /// Unsupported formats fail explicitly instead of looking like a skipped expert.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn unsupported_format_returns_error() {
         let bytes = vec![0u8; 18];
         let err = try_cached_dequant(&bytes, QuantFormat::Q4_0, 32).unwrap_err();
@@ -281,7 +289,8 @@ mod cache_format_tests {
     }
 
     /// Out-of-bounds Q4_K input returns empty (no panic).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_truncated_input_returns_empty() {
         let bytes = vec![0u8; 100]; // 100 < 144 = one super-block
         let out = try_cached_dequant(&bytes, QuantFormat::Q4_K, 256).unwrap();
@@ -289,14 +298,16 @@ mod cache_format_tests {
     }
 
     /// Q4_K with non-multiple-of-256 expected_floats returns empty.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_misaligned_length_returns_empty() {
         let bytes = vec![0u8; larql_models::quant::ggml::Q4_K_BLOCK_BYTES];
         let out = try_cached_dequant(&bytes, QuantFormat::Q4_K, 200).unwrap();
         assert!(out.is_empty(), "expected_floats not a 256 multiple → empty");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn inner_zero_capacity_drops_inserts() {
         let mut inner = Inner::new(0);
         let bytes = vec![1u8, 2, 3, 4];
@@ -308,7 +319,8 @@ mod cache_format_tests {
         assert!(inner.order.is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn inner_fifo_eviction_removes_oldest_entry() {
         let mut inner = Inner::new(2);
         let a = vec![1u8];
@@ -328,7 +340,8 @@ mod cache_format_tests {
         assert_eq!(inner.order.len(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn inner_duplicate_insert_keeps_original_value_and_order() {
         let mut inner = Inner::new(2);
         let bytes = vec![9u8];
@@ -347,7 +360,8 @@ mod cache_format_tests {
     /// each key without serializing readers (the perf claim isn't
     /// asserted here, but the absence of deadlock and content-identity
     /// regression is).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn parallel_hits_do_not_deadlock_or_corrupt() {
         // Pre-warm: a few small BF16 entries.
         let entries: Vec<Vec<u8>> = (0..4)

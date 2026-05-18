@@ -7,7 +7,7 @@
 //! population bug in earlier versions.
 
 #![cfg(all(feature = "metal", target_os = "macos"))]
-
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 #[path = "common/mod.rs"]

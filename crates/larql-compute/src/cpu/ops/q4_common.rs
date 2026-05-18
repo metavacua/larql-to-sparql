@@ -631,6 +631,9 @@ pub fn q4k_matvec_into(out: &mut [f32], x: &[f32], w: &[u8], rows: usize, cols: 
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// Reference implementation kept here as the correctness oracle for
     /// the bit-manipulation `f16_to_f32`.  Mirrors the previous (slow)
     /// version that used `2.0f32.powi(...)`.  The new fast path must
@@ -673,7 +676,8 @@ mod tests {
     /// fast path preserves payload — both are valid IEEE NaNs and the
     /// distinction is unobservable in Q4_K decode because real-world
     /// Q4_K headers never contain NaNs).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_to_f32_bit_exact_for_all_inputs() {
         let mut diffs = 0usize;
         for bits in 0u16..=u16::MAX {
@@ -698,7 +702,8 @@ mod tests {
         assert_eq!(diffs, 0, "{diffs} f16 inputs decode to different f32 bits");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_quantize_round_trip() {
         let x: Vec<f32> = (0..64).map(|i| (i as f32 - 32.0) * 0.1).collect();
         let (q8, scales) = quantize_to_q8(&x);
@@ -707,7 +712,8 @@ mod tests {
         assert!(scales.iter().all(|&s| s >= 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_zero_input() {
         let x = vec![0.0f32; 32];
         let (q8, scales) = quantize_to_q8(&x);
@@ -717,7 +723,8 @@ mod tests {
 
     // ── quantize_q4_0 tests ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_output_size() {
         // 64 floats = 2 blocks of 32, each block → 18 bytes (2 f16 scale + 16 nibbles)
         let data = vec![1.0f32; 64];
@@ -729,7 +736,8 @@ mod tests {
         assert_eq!(q4.len(), 8 * 18);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_zero_input() {
         let data = vec![0.0f32; 32];
         let q4 = quantize_q4_0(&data);
@@ -743,7 +751,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_round_trip_accuracy() {
         // Quantize then dequantize, check values are close
         let data: Vec<f32> = (0..32).map(|i| (i as f32 - 16.0) * 0.5).collect();
@@ -780,7 +789,8 @@ mod tests {
     /// designed Q4_K-quantised input where the round-trip error is
     /// already inside the quantizer, so the matvec output should match
     /// within float-rounding noise (1e-3 on small magnitudes).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_matvec_matches_dequant_then_matmul() {
         // 4 rows × 256 cols (one super-block per row).
         let rows = 4;
@@ -833,7 +843,8 @@ mod tests {
     /// iterate `n_blocks > 1`.  Catches off-by-one in row-stride arithmetic
     /// (`row_bytes = n_blocks * 144`) that the single-block test wouldn't
     /// notice.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_matvec_multi_block_matches_dequant() {
         let rows = 3;
         let cols = 512; // 2 super-blocks per row
@@ -865,7 +876,8 @@ mod tests {
     /// Defensive: caller passes a malformed `cols` (not multiple of 256).
     /// We zero the output rather than reading past the buffer, mirroring
     /// `dequantize_q4_k`'s `Vec::new()` shape-error contract.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_matvec_rejects_non_multiple_of_256() {
         let mut out = vec![1.0f32; 4]; // pre-fill to detect zeroing
         let x = vec![0.5f32; 100];
@@ -874,7 +886,8 @@ mod tests {
         assert_eq!(out, vec![0.0f32; 4]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_matvec_zero_dims_and_short_weights_zero_output() {
         let mut out = vec![1.0f32; 3];
         q4k_matvec_into(&mut out, &[], &[], 3, 0);
@@ -887,20 +900,22 @@ mod tests {
         assert_eq!(out, vec![0.0f32; 2]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn dequantize_q4k_rejects_misaligned_or_truncated_input() {
         assert!(dequantize_q4_k(&[0u8; 144], 255).is_empty());
         assert!(dequantize_q4_k(&[0u8; 143], 256).is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[should_panic(expected = "multiple of 32")]
     fn q4_rejects_non_aligned() {
         let data = vec![1.0f32; 33];
         let _ = quantize_q4_0(&data);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_matvec_uses_quantized_data() {
         // End-to-end: quantize a matrix, run matvec, verify nonzero output
         let hidden = 256;
@@ -966,7 +981,8 @@ mod tests {
         super::dequantize_q4_k(data, n_elements)
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_k_round_trip_is_gguf_format() {
         // One super-block of a smooth [-1, 1] ramp — the worst case for
         // block-level scales. Verifies (a) the output is the 144-byte
@@ -997,7 +1013,8 @@ mod tests {
 
     // ── quantize_q6_k tests ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6_k_output_size() {
         let data = vec![0.5f32; 256];
         let q6k = quantize_q6_k(&data);
@@ -1008,7 +1025,8 @@ mod tests {
         assert_eq!(q6k2.len(), 420, "two Q6_K super-blocks must be 420 bytes");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6_k_round_trip_via_matvec() {
         let hidden = 256usize;
         let rows = 4usize;
@@ -1028,14 +1046,16 @@ mod tests {
 
     // ── q4k_to_q4kf / quantize_q4_kf tests ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4kf_output_size() {
         let data = vec![0.5f32; 256];
         let q4kf = quantize_q4_kf(&data);
         assert_eq!(q4kf.len(), 160, "Q4_KF super-block must be 160 bytes");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_to_q4kf_converts_format() {
         let hidden = 256usize;
         let rows = 2usize;
@@ -1049,7 +1069,8 @@ mod tests {
         assert_eq!(q4k.len(), rows * 144);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_to_q4kf_multi_superblock_rows() {
         let hidden = 512usize;
         let rows = 3usize;
@@ -1069,7 +1090,8 @@ mod tests {
 
     // ── f32_to_f16 edge cases ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_normal_round_trip() {
         // 1.0, -1.0, 0.5: all representable exactly in f16
         for &val in &[1.0f32, -1.0, 0.5, -0.5, 2.0] {
@@ -1082,7 +1104,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_infinity() {
         let inf_bits = super::f32_to_f16(f32::INFINITY);
         let back = f16_to_f32(inf_bits);
@@ -1099,7 +1122,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_large_value_clamps_to_infinity() {
         // 1e30 is beyond f16 max (~65504) → should return f16 infinity
         let bits = super::f32_to_f16(1e30f32);
@@ -1110,7 +1134,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_subnormal_range() {
         // 1e-10 is below f16 normal range (min normal ≈ 6.1e-5) → subnormal or zero f16
         let bits = super::f32_to_f16(1e-10f32);
@@ -1122,7 +1147,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_denormal_f32_input() {
         // f32 denormal (exp == 0) → f32_to_f16 should return signed zero
         let denormal = f32::from_bits(1u32); // smallest positive f32 denormal
@@ -1131,7 +1157,8 @@ mod tests {
         assert_eq!(bits, 0, "f32 denormal should encode as f16 zero");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_k_round_trip_matches_larql_models_decoder() {
         // Cross-check against the authoritative decoder in larql-models.
         // Guards against silent drift between the quantizer here and the
@@ -1160,7 +1187,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_to_f16_valid_f16_subnormal() {
         // 1e-7 maps to new_exp ≈ -9 → shift = 10 → total_shift = 23 < 24
         // so it encodes as a nonzero f16 subnormal rather than clamping to zero.
@@ -1177,7 +1205,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quantize_q4k_all_zero_covers_d_zero_branch() {
         // All-zero data → global_max_range = 0 → d = 0 branch; global_min = 0 → dmin = 0 branch.
         // Also exercises f16_to_f32(0) in the decoder (mant==0, sign==0 path).
@@ -1192,7 +1221,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quantize_q4k_all_positive_covers_dmin_zero() {
         // All-positive data → global_min = 0 → dmin = 0 branch (no negative offset needed).
         let data = vec![1.0f32; 256];
@@ -1206,7 +1236,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quantize_q6k_all_zero_covers_d_zero_branch() {
         // All-zero data → d = 0 branch; all sub-block scales = 0.
         let data = vec![0.0f32; 256];
@@ -1217,7 +1248,7 @@ mod tests {
         assert_eq!(d_bits, 0, "all-zero data should produce d=0 (f16 zero)");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[should_panic(expected = "multiple of 256")]
     fn quantize_q6k_rejects_non_aligned() {
         let _ = quantize_q6_k(&vec![1.0f32; 255]);

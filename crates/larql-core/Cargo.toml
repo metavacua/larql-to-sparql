@@ -13,19 +13,24 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-# HTTP provider — optional so pure graph usage has zero network deps
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
-
 # Binary serialization via MessagePack
 rmp-serde = { version = "1", optional = true }
+
+# HTTP provider — optional; excluded on wasm32 because reqwest::blocking requires tokio
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 
 [features]
 default = ["http", "msgpack"]
 http = ["dep:reqwest"]
 msgpack = ["dep:rmp-serde"]
+browser-tests = []
 
 [dev-dependencies]
 assert_approx_eq = "1"
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

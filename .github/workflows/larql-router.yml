@@ -8,7 +8,7 @@ name: larql-router
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-router/**'
       - 'crates/larql-router-protocol/**'
@@ -18,7 +18,7 @@ on:
       - '.github/workflows/larql-router.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-router/**'
       - 'crates/larql-router-protocol/**'

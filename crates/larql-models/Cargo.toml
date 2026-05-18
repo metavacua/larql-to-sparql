@@ -18,9 +18,15 @@ thiserror = { workspace = true }
 safetensors = "0.7"
 memmap2 = "0.9"
 
+[features]
+browser-tests = []
+
 [dev-dependencies]
-criterion = "0.5"
 tempfile = "3"
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.5"
 
 [[bench]]
 name = "models"

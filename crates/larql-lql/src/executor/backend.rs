@@ -48,6 +48,7 @@ pub(crate) enum Backend {
     },
     /// Remote server backend — queries forwarded via HTTP.
     /// Local patches can be applied for client-side overlay.
+    #[cfg(not(target_arch = "wasm32"))]
     Remote {
         url: String,
         client: reqwest::blocking::Client,

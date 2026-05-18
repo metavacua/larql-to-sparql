@@ -160,14 +160,19 @@ mod tests {
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // ── Construction ──────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_name() {
         assert_eq!(MarkovResidualEngine::new(None).name(), "markov-rs");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_memory_zero_before_prefill() {
         let eng = MarkovResidualEngine::new(None);
         assert_eq!(eng.memory_bytes(), 0);
@@ -175,7 +180,8 @@ mod tests {
         assert_eq!(eng.cold_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_full_window() {
         let eng = MarkovResidualEngine::new(None);
         let info = eng.info();
@@ -186,7 +192,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_info_fixed_window() {
         let eng = MarkovResidualEngine::new(Some(16));
         let info = eng.info();
@@ -199,7 +206,8 @@ mod tests {
 
     // ── Prefill → decode cycle ────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_stores_residuals_for_all_layers() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None);
@@ -211,7 +219,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_step_produces_finite_logits() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None);
@@ -223,7 +232,8 @@ mod tests {
             .all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_grows_with_each_decode_step() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None);
@@ -240,7 +250,8 @@ mod tests {
         assert!(mem_after_2 > mem_after_1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn window_clipping_limits_hot_store() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(Some(2)); // window=2 tokens
@@ -260,7 +271,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn multiple_decode_steps_produce_consistent_shapes() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None);
@@ -273,7 +285,8 @@ mod tests {
 
     // ── Profiling ─────────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn with_profiling_enables_profiling_branch() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None).with_profiling(true);
@@ -289,7 +302,8 @@ mod tests {
         assert!(summary.avg_total_decode_us > 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn stage_summary_none_without_profiling() {
         let weights = make_test_weights();
         let mut engine = MarkovResidualEngine::new(None); // profiling: false
@@ -301,7 +315,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn profiling_decode_path_matches_unprofiled_shape() {
         // Two engines: one profiled, one not. Both should yield hidden states
         // of the same shape after the same prefill+decode sequence.
@@ -322,7 +337,8 @@ mod tests {
     // This exercises the prefill_q4k / decode_step_q4k branches that the
     // Metal-only happy path also takes (apart from the Metal early-return).
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_q4k_cpu_fallback_runs_walk_path() {
         let mut weights = make_test_weights();
         let index = larql_inference::test_utils::make_test_vindex(&weights);
@@ -335,7 +351,8 @@ mod tests {
         assert!(engine.memory_bytes() > 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_step_q4k_cpu_fallback_extends_store() {
         let mut weights = make_test_weights();
         let index = larql_inference::test_utils::make_test_vindex(&weights);

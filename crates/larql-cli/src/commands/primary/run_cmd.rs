@@ -238,6 +238,7 @@ pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
         return experts::run(&vindex_path, &args);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(ref ffn_url) = args.ffn {
         let prompt = args.prompt.as_deref().ok_or(
             "--ffn requires a prompt argument (chat mode not yet supported with --ffn-dispatch batch)",
@@ -261,6 +262,7 @@ pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
+    #[cfg(not(target_arch = "wasm32"))]
     if args.moe_shards.is_some() || args.moe_units_manifest.is_some() {
         let prompt = args.prompt.as_deref().ok_or(
             "--moe-shards / --moe-units-manifest requires a prompt argument \
@@ -370,6 +372,7 @@ fn build_walk_args(
 /// Metal runs attention + dense FFN on GPU (same as normal `larql run --metal`).
 /// MoE expert blocks are dispatched to remote mini-processes via binary
 /// `POST /v1/expert/batch` instead of running locally.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_with_moe_shards(
     vindex_path: &std::path::Path,
     prompt: &str,
@@ -543,6 +546,7 @@ fn run_with_moe_shards(
 /// This is analogous to `run_with_moe_shards` for hybrid-MoE models, but
 /// simpler: there is no local FFN and no router — every layer unconditionally
 /// calls the remote server.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_with_remote_ffn(
     vindex_path: &std::path::Path,
     prompt: &str,

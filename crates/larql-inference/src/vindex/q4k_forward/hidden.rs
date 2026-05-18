@@ -11,14 +11,22 @@ use crate::forward::run_layer_with_ffn;
 
 use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
 
+// On wasm32 the remote-MoE types are not available; use a zero-sized
+// placeholder so callers that always pass `None` keep the same call signature.
+#[cfg(not(target_arch = "wasm32"))]
+type MoeRemoteArg<'a> = Option<&'a crate::ffn::RemoteMoeBackend>;
+#[cfg(target_arch = "wasm32")]
+type MoeRemoteArg<'a> = Option<&'a ()>;
+
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
 /// `[seq_len, hidden]` array; caller owns the lm_head step.
+#[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
 pub fn predict_q4k_hidden(
     weights: &mut ModelWeights,
     token_ids: &[u32],
     index: &VectorIndex,
-    moe_remote: Option<&crate::ffn::RemoteMoeBackend>,
+    moe_remote: MoeRemoteArg<'_>,
 ) -> Array2<f32> {
     let num_layers = weights.num_layers;
     let mut h = embed_tokens_pub(weights, token_ids);
@@ -43,6 +51,7 @@ pub fn predict_q4k_hidden(
         let is_moe_layer = weights.arch.is_hybrid_moe();
         let ffn_backend = crate::ffn::WeightFfn { weights };
         if is_moe_layer {
+            #[cfg(not(target_arch = "wasm32"))]
             if let Some((h_new, kv_out)) = run_moe_layer_cpu(
                 weights,
                 &h,
@@ -87,7 +96,7 @@ pub fn predict_q4k_hidden(
     h
 }
 
-/// Build `MoeRouterWeights` for a single layer from the model's vector store.
+#[cfg(not(target_arch = "wasm32"))]
 fn build_moe_router_weights<'a>(
     weights: &'a larql_models::ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
@@ -114,7 +123,7 @@ fn build_moe_router_weights<'a>(
     })
 }
 
-/// CPU forward for one hybrid-MoE layer (Gemma 4 26B A4B).
+#[cfg(not(target_arch = "wasm32"))]
 fn run_moe_layer_cpu(
     weights: &ModelWeights,
     h: &Array2<f32>,

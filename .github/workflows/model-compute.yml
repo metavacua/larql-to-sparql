@@ -9,7 +9,7 @@ name: model-compute
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/model-compute/**'
       - 'Cargo.toml'
@@ -18,7 +18,7 @@ on:
       - '.github/workflows/model-compute.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/model-compute/**'
       - 'Cargo.toml'

@@ -2,6 +2,7 @@ use larql_core::*;
 
 /// Load the example graph (matches Python format) and verify every field.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_load_python_produced_graph() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -18,6 +19,7 @@ fn test_load_python_produced_graph() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_confidence() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -31,6 +33,7 @@ fn test_python_graph_confidence() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_source() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -40,6 +43,7 @@ fn test_python_graph_source() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_schema() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -56,6 +60,7 @@ fn test_python_graph_schema() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_type_rules() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -71,6 +76,7 @@ fn test_python_graph_type_rules() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_stats() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
     let stats = g.stats();
@@ -83,6 +89,7 @@ fn test_python_graph_stats() {
 
 /// Save the Python graph as JSON, reload, verify identical.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_json_roundtrip() {
     let original = load("../../examples/gemma_4b_knowledge.json").unwrap();
     let path = std::env::temp_dir().join("test_python_compat.larql.json");
@@ -106,6 +113,7 @@ fn test_python_graph_json_roundtrip() {
 
 /// Save the Python graph as MessagePack, reload, verify identical.
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "msgpack")]
 fn test_python_graph_msgpack_roundtrip() {
     let original = load("../../examples/gemma_4b_knowledge.json").unwrap();

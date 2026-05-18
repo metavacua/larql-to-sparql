@@ -137,13 +137,17 @@ fn top2_by_logit(logits: &[f32]) -> (usize, usize) {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn peaked_logits(top: usize, v_top: f32, v_rest: f32, n: usize) -> Vec<f32> {
         let mut l = vec![v_rest; n];
         l[top] = v_top;
         l
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn agrees_when_hat_same_argmax() {
         let raw = peaked_logits(42, 10.0, 0.0, 1000);
         let hat = raw.clone();
@@ -154,7 +158,8 @@ mod tests {
         assert!(!meta.codec_fragile);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn disagrees_when_hat_different_argmax() {
         let raw = peaked_logits(42, 10.0, 0.0, 1000);
         let hat = peaked_logits(99, 10.0, 0.0, 1000);
@@ -166,7 +171,8 @@ mod tests {
         assert!(meta.codec_fragile);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn not_checked_when_no_hat() {
         let raw = peaked_logits(5, 3.0, 0.0, 100);
         let meta = compute(&raw, None);
@@ -178,14 +184,16 @@ mod tests {
         assert!(meta.compressed_top1_token.is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn log_prob_margin_always_positive() {
         let raw = vec![3.0f32, 2.0, 1.0, 0.5];
         let meta = compute(&raw, None);
         assert!(meta.raw_log_prob_margin > 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn uniform_logits_have_small_margin() {
         let raw = vec![1.0f32; 1000];
         let meta = compute(&raw, None);
