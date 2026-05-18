@@ -1,0 +1,206 @@
+# Bench regression detector — runs `make bench-check` on every PR
+# against a baseline saved on `main`. Fails the workflow if any cell
+# in the criterion bench suite regresses past Criterion's noise
+# threshold.
+#
+# Surface covered (`make bench-save` / `make bench-check`):
+#   - `quant_matvec`: Q4_0 / Q4_K / Q4_KF / Q6_K × 3 shapes × cpu/metal
+#   - `matmul`: f32 matmul + f32_gemv (lm-head) — cpu vs metal
+#   - `linalg`: cholesky + ridge solve (cpu only)
+#
+# That's the surface where the next throughput cliff would show up
+# first. The 75 %-row drop in `q4_matvec_v4` would have shown as a 4×
+# regression at `quant_matvec_q4_0/metal/lm_head_262144` weeks before
+# goldens caught it.
+
+name: bench-regress
+
+on:
+  push:
+    branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.reuse/**'
+      - 'CHANGELOG*'
+      - 'LICENSE*'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, ci/workflows-complete]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.reuse/**'
+      - 'CHANGELOG*'
+      - 'LICENSE*'
+  # Manual trigger so a maintainer can re-baseline after intentional
+  # perf changes without waiting for the next merge to main.
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    if: github.event.pull_request.draft != true || github.event_name != 'pull_request'
+    name: bench - ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            platform: ubuntu
+            target: x86_64-unknown-linux-gnu
+
+          - name: windows-latest
+            runner: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+
+          - name: macos-15-arm64
+            runner: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+
+          - name: android-aarch64
+            runner: ubuntu-24.04
+            platform: android
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            runner: ubuntu-24.04
+            platform: android
+            target: armv7-linux-androideabi
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set Android NDK compiler vars (aarch64)
+        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CXX=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set Android NDK compiler vars (armv7)
+        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CXX=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Install OpenBLAS (Linux)
+        if: matrix.platform == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      # Cargo deps are big and stable across PRs — separate cache.
+      - name: Cache cargo deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-bench-
+
+      # Criterion baselines: write-through on main, read-only on PRs.
+      # Keyed by the run number so each main push refreshes the cache.
+      - name: Cache criterion baseline (main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@v5
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-${{ matrix.target }}-criterion-baseline-${{ github.run_number }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-criterion-baseline-
+
+      - name: Restore criterion baseline (PRs only)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v5
+        with:
+          path: target/criterion
+          key: ${{ runner.os }}-${{ matrix.target }}-criterion-baseline-
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-criterion-baseline-
+
+      - name: Save baseline (main only)
+        if: github.ref == 'refs/heads/main'
+        run: make bench-save
+
+      - name: Check vs baseline (PRs + manual)
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        run: |
+          # Cold cache → bench-check prints "no baseline found" and
+          # exits 2. Treat as neutral: the first PR after CI is stood
+          # up shouldn't fail just because there's no baseline yet.
+          set +e
+          make bench-check
+          rc=$?
+          set -e
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::no criterion baseline cached; skipping regression check"
+            exit 0
+          fi
+          exit "$rc"
+
+      # On regression, attach the criterion HTML report so reviewers
+      # can see the per-cell delta without re-running locally.
+      - name: Upload criterion report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: criterion-report
+          path: target/criterion/
+          retention-days: 14
