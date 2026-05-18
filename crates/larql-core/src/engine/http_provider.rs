@@ -1,7 +1,7 @@
-#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-use reqwest::blocking::Client;
 #[cfg(not(target_arch = "wasm32"))]
 use super::provider::*;
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+use reqwest::blocking::Client;
 
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 60;
