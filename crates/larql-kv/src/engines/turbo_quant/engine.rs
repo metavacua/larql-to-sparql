@@ -407,6 +407,9 @@ mod tests {
     use super::*;
     use crate::accuracy::cosine_similarity;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// TurboQuant's codebooks are optimised for unit-norm vectors (the natural
     /// distribution of K/V heads after QK-norm). Using unit-norm inputs gives
     /// the same quality as real K/V vectors (cos≈0.991 at 4-bit).
@@ -432,7 +435,8 @@ mod tests {
 
     // ── Codec roundtrip quality ───────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn encode_decode_4bit_cosine_near_one() {
         let tq = TurboQuant::new(4);
         let x = unit_norm_vec(256, 42);
@@ -443,7 +447,8 @@ mod tests {
         assert!(cos > 0.88, "4-bit cosine {cos:.4} < 0.88");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn encode_decode_3bit_cosine_acceptable() {
         let tq = TurboQuant::new(3);
         let x = unit_norm_vec(256, 99);
@@ -454,7 +459,8 @@ mod tests {
         assert!(cos > 0.85, "3-bit cosine {cos:.4} < 0.85");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn encode_decode_dim128_roundtrip() {
         let tq = TurboQuant::new(4);
         let x = unit_norm_vec(128, 7);
@@ -463,7 +469,8 @@ mod tests {
         assert!(cosine_similarity(&x, &dec) > 0.88);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn norm_approximately_preserved() {
         let tq = TurboQuant::new(4);
         let x = unit_norm_vec(256, 13);
@@ -479,7 +486,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_vector_roundtrip_no_panic() {
         let tq = TurboQuant::new(4);
         let x = vec![0.0f32; 256];
@@ -493,7 +501,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn identical_vectors_same_encoding() {
         let tq = TurboQuant::new(4);
         let x = unit_norm_vec(256, 55);
@@ -504,28 +513,32 @@ mod tests {
 
     // ── Encoded byte size ────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bytes_per_vector_4bit_dim256() {
         let tq = TurboQuant::new(4);
         // norm (4 bytes) + 256 × 4 bits / 8 = 4 + 128 = 132
         assert_eq!(tq.bytes_per_vector(256), 132);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bytes_per_vector_3bit_dim256() {
         let tq = TurboQuant::new(3);
         // norm (4 bytes) + ceil(256 × 3 / 8) = 4 + 96 = 100
         assert_eq!(tq.bytes_per_vector(256), 100);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bytes_per_vector_4bit_dim128() {
         let tq = TurboQuant::new(4);
         // 4 + 128 × 4 / 8 = 4 + 64 = 68
         assert_eq!(tq.bytes_per_vector(128), 68);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn compression_ratio_vs_fp16() {
         let tq = TurboQuant::new(4);
         // FP16 per dim=256 vector: 256 × 2 = 512 bytes
@@ -539,7 +552,8 @@ mod tests {
 
     // ── Engine construction and config ────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_name_and_config_4bit() {
         let eng = TurboQuantEngine::new(4);
         assert_eq!(eng.name(), "turbo-quant");
@@ -549,20 +563,23 @@ mod tests {
         assert!(info.description.contains("4-bit"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_name_and_config_3bit() {
         let eng = TurboQuantEngine::new(3);
         assert_eq!(eng.info().config, "bits=3");
         assert!(eng.info().description.contains("3-bit"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_memory_zero_before_prefill() {
         let eng = TurboQuantEngine::new(4);
         assert_eq!(eng.memory_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_summary_shows_bits_in_config() {
         let eng = TurboQuantEngine::new(4);
         let s = eng.info().summary();
@@ -572,7 +589,8 @@ mod tests {
 
     // ── CompressedLayer memory accounting ────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn compressed_layer_memory_is_smaller_than_fp32() {
         use ndarray::Array2;
         let tq = TurboQuant::new(4);
@@ -591,7 +609,8 @@ mod tests {
         assert!(ratio > 3.0, "ratio {ratio:.2} < 3.0");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn compressed_layer_roundtrip_cosine() {
         use ndarray::Array2;
         let tq = TurboQuant::new(4);
@@ -630,7 +649,11 @@ mod integration_tests {
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn prefill_compresses_kv_for_all_layers() {
         let weights = make_test_weights();
         let mut engine = TurboQuantEngine::new(4);
@@ -647,7 +670,8 @@ mod integration_tests {
         assert!(engine.memory_bytes() > 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_step_grows_compressed_cache() {
         let weights = make_test_weights();
         let mut engine = TurboQuantEngine::new(4);
@@ -662,7 +686,8 @@ mod integration_tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn logits_finite_after_prefill_and_decode() {
         let weights = make_test_weights();
         let mut engine = TurboQuantEngine::new(4);
@@ -676,7 +701,8 @@ mod integration_tests {
             .all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn three_bit_engine_also_works() {
         let weights = make_test_weights();
         let mut engine = TurboQuantEngine::new(3);

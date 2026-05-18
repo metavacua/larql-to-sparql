@@ -46,7 +46,11 @@ impl TokenArchive {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn archive_and_retrieve_roundtrip() {
         let mut archive = TokenArchive::new();
         archive.archive(0, vec![1, 2, 3, 4, 5], 0);
@@ -59,7 +63,8 @@ mod tests {
         assert_eq!(o1, 5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn total_accounting() {
         let mut archive = TokenArchive::new();
         archive.archive(0, vec![0u32; 512], 0);
@@ -68,13 +73,15 @@ mod tests {
         assert_eq!(archive.total_bytes(), 1024 * 4);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn retrieve_missing_returns_none() {
         let archive = TokenArchive::new();
         assert!(archive.retrieve(42).is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn is_empty_on_new() {
         let archive = TokenArchive::new();
         assert!(archive.is_empty());

@@ -63,7 +63,11 @@ impl Default for InjectionConfig {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn default_injection_matches_apollo() {
         let cfg = InjectionConfig::default();
         assert_eq!(cfg.injection_layer, 30);
@@ -71,7 +75,8 @@ mod tests {
         assert_eq!(cfg.top_k, 8);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn entry_is_pod_sized() {
         // Must be layout-compatible with the Python structured dtype:
         // token_id u32 (4) + coef f32 (4) + window_id u16 (2) +

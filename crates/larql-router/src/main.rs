@@ -18,6 +18,9 @@
 //! HTTP 400 (use the batched JSON format or route per-shard manually).
 
 #[cfg(not(target_arch = "wasm32"))]
+use larql_router::routing::{parse_shards, peek_binary, Shard};
+
+#[cfg(not(target_arch = "wasm32"))]
 use larql_router::grid;
 #[cfg(not(target_arch = "wasm32"))]
 use larql_router::rebalancer;
@@ -59,8 +62,8 @@ use larql_router_protocol::GridServiceServer;
 
 // ── Binary wire format constants ───────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 const BINARY_CT: &str = "application/x-larql-ffn";
-const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
@@ -115,85 +118,6 @@ struct Cli {
     /// for the same layer before the rebalancer acts.
     #[arg(long, default_value = "2.0")]
     rebalance_threshold: f32,
-}
-
-// ── Static shard map ───────────────────────────────────────────────────────────
-
-#[derive(Clone, Debug)]
-struct Shard {
-    layer_start: usize, // inclusive
-    layer_end: usize,   // exclusive
-    url: String,
-}
-
-impl Shard {
-    fn owns(&self, layer: usize) -> bool {
-        layer >= self.layer_start && layer < self.layer_end
-    }
-}
-
-fn parse_shards(spec: &str) -> Result<Vec<Shard>, String> {
-    let mut shards = Vec::new();
-    for entry in spec.split(',') {
-        let entry = entry.trim();
-        if entry.is_empty() {
-            continue;
-        }
-        let (range, url) = entry
-            .split_once('=')
-            .ok_or_else(|| format!("expected 'START-END=URL', got '{entry}'"))?;
-        let (start_s, end_s) = range
-            .split_once('-')
-            .ok_or_else(|| format!("expected 'START-END', got '{range}'"))?;
-        let start: usize = start_s
-            .trim()
-            .parse()
-            .map_err(|_| format!("invalid start '{start_s}'"))?;
-        let end: usize = end_s
-            .trim()
-            .parse()
-            .map_err(|_| format!("invalid end '{end_s}'"))?;
-        if end < start {
-            return Err(format!("end ({end}) must be >= start ({start})"));
-        }
-        shards.push(Shard {
-            layer_start: start,
-            layer_end: end + 1,
-            url: url.trim().to_string(),
-        });
-    }
-    if shards.is_empty() {
-        return Err("no shards specified".into());
-    }
-    Ok(shards)
-}
-
-// ── Binary routing ─────────────────────────────────────────────────────────────
-
-/// Extract layer indices from a binary request body without parsing the residual.
-///
-/// Returns `None` if the header is malformed or truncated.
-pub(crate) fn peek_binary(body: &[u8]) -> Option<Vec<usize>> {
-    if body.len() < 4 {
-        return None;
-    }
-    let first = u32::from_le_bytes(body[0..4].try_into().ok()?);
-    if first == BATCH_MARKER {
-        if body.len() < 8 {
-            return None;
-        }
-        let n = u32::from_le_bytes(body[4..8].try_into().ok()?) as usize;
-        let needed = 8 + n * 4;
-        if body.len() < needed {
-            return None;
-        }
-        let layers = (0..n)
-            .map(|i| u32::from_le_bytes(body[8 + i * 4..12 + i * 4].try_into().unwrap()) as usize)
-            .collect();
-        Some(layers)
-    } else {
-        Some(vec![first as usize])
-    }
 }
 
 // ── App state ──────────────────────────────────────────────────────────────────
@@ -633,133 +557,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 #[cfg(target_arch = "wasm32")]
 fn main() {}
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Tests
-// ══════════════════════════════════════════════════════════════════════════════
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ── peek_binary ───────────────────────────────────────────────────────────
-
-    fn make_binary_single(layer: u32, residual_floats: usize) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&layer.to_le_bytes());
-        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
-        buf.extend_from_slice(&1u32.to_le_bytes()); // flags (full_output)
-        buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
-        buf
-    }
-
-    fn make_binary_batch(layers: &[u32], residual_floats: usize) -> Vec<u8> {
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
-        buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());
-        for &l in layers {
-            buf.extend_from_slice(&l.to_le_bytes());
-        }
-        buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
-        buf.extend_from_slice(&1u32.to_le_bytes()); // flags
-        buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
-        buf
-    }
-
-    #[test]
-    fn peek_binary_single_layer() {
-        let body = make_binary_single(5, 4);
-        let layers = peek_binary(&body).unwrap();
-        assert_eq!(layers, vec![5]);
-    }
-
-    #[test]
-    fn peek_binary_batch_layers() {
-        let body = make_binary_batch(&[5, 20, 30], 4);
-        let layers = peek_binary(&body).unwrap();
-        assert_eq!(layers, vec![5, 20, 30]);
-    }
-
-    #[test]
-    fn peek_binary_empty_body_returns_none() {
-        assert!(peek_binary(&[]).is_none());
-    }
-
-    #[test]
-    fn peek_binary_truncated_single_returns_value() {
-        // Only 4 bytes — enough for a single-layer marker.
-        let buf = 7u32.to_le_bytes();
-        let layers = peek_binary(&buf).unwrap();
-        assert_eq!(layers, vec![7]);
-    }
-
-    #[test]
-    fn peek_binary_batch_truncated_layer_list_returns_none() {
-        // Claims 10 layers but only provides 2 u32s after num_layers.
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&BATCH_MARKER.to_le_bytes());
-        buf.extend_from_slice(&10u32.to_le_bytes()); // num_layers = 10
-        buf.extend_from_slice(&0u32.to_le_bytes()); // layer 0
-        buf.extend_from_slice(&1u32.to_le_bytes()); // layer 1 — only 2 of 10
-        assert!(peek_binary(&buf).is_none());
-    }
-
-    #[test]
-    fn peek_binary_zero_batch_layers() {
-        let body = make_binary_batch(&[], 4);
-        let layers = peek_binary(&body).unwrap();
-        assert!(layers.is_empty());
-    }
-
-    // ── parse_shards ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn parse_shards_single_entry() {
-        let shards = parse_shards("0-16=http://host-a:8080").unwrap();
-        assert_eq!(shards.len(), 1);
-        assert_eq!(shards[0].layer_start, 0);
-        assert_eq!(shards[0].layer_end, 17); // exclusive
-        assert_eq!(shards[0].url, "http://host-a:8080");
-    }
-
-    #[test]
-    fn parse_shards_two_entries() {
-        let shards = parse_shards("0-16=http://host-a:8080,17-33=http://host-b:8081").unwrap();
-        assert_eq!(shards.len(), 2);
-        assert!(shards[0].owns(0));
-        assert!(shards[0].owns(16));
-        assert!(!shards[0].owns(17));
-        assert!(shards[1].owns(17));
-        assert!(shards[1].owns(33));
-    }
-
-    #[test]
-    fn parse_shards_empty_string_errors() {
-        assert!(parse_shards("").is_err());
-    }
-
-    #[test]
-    fn parse_shards_missing_url_errors() {
-        assert!(parse_shards("0-16").is_err());
-    }
-
-    #[test]
-    fn parse_shards_end_less_than_start_errors() {
-        assert!(parse_shards("16-0=http://host:8080").is_err());
-    }
-
-    #[test]
-    fn parse_shards_ignores_trailing_comma() {
-        let shards = parse_shards("0-16=http://host:8080,").unwrap();
-        assert_eq!(shards.len(), 1);
-    }
-
-    #[test]
-    fn shard_owns_inclusive_bounds() {
-        let shards = parse_shards("0-16=http://host:8080").unwrap();
-        assert!(shards[0].owns(0));
-        assert!(shards[0].owns(16));
-        assert!(!shards[0].owns(17));
-    }
-}
+// Tests live in crates/larql-router/src/routing.rs (the library module).

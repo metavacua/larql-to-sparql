@@ -44,7 +44,11 @@ pub fn decode(payload: &[u8]) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn roundtrip_normal_values() {
         let r = vec![0.0f32, 1.0, -1.0, 2.71, -100.0, 0.001]; // not a clippy approx_constant
         let dec = decode(&encode(&r));
@@ -56,7 +60,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn no_overflow_for_large_residuals() {
         // Gemma 3 residuals can reach ≈ 150 K; fp16 max is 65 504.
         let r = vec![94_208.0f32, -151_552.0, 1.5e38, 0.0];
@@ -66,14 +71,16 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn roundtrip_preserves_sign_of_zero() {
         let r = vec![0.0f32, -0.0];
         let dec = decode(&encode(&r));
         assert_eq!(dec.len(), 2);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn payload_length() {
         let r = vec![0.0f32; 2560];
         assert_eq!(encode(&r).len(), 2560 * BYTES_PER_ELEM);

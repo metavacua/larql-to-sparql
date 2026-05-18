@@ -353,9 +353,13 @@ mod tests {
     use larql_compute::CpuBackend;
     use larql_inference::test_utils::make_test_weights;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // ── recompute_kv ──────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn recompute_kv_returns_some_with_valid_weights() {
         let weights = make_test_weights();
         let h = Array2::from_elem((3, weights.hidden_size), 0.5f32);
@@ -366,7 +370,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn recompute_kv_output_shape_correct() {
         let weights = make_test_weights();
         let seq_len = 4;
@@ -377,7 +382,8 @@ mod tests {
         assert_eq!(v.shape(), &[seq_len, kv_dim], "V shape mismatch");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn recompute_kv_output_is_finite() {
         let weights = make_test_weights();
         let h = Array2::from_elem((2, weights.hidden_size), 0.1f32);
@@ -392,7 +398,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn recompute_kv_abs_start_shifts_rope() {
         let weights = make_test_weights();
         let h = Array2::from_elem((1, weights.hidden_size), 0.5f32);
@@ -408,7 +415,8 @@ mod tests {
 
     // ── rs_prefill ────────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rs_prefill_returns_correct_shape() {
         let weights = make_test_weights();
         let result = rs_prefill(&weights, &[0u32, 1, 2], None, &CpuBackend);
@@ -416,7 +424,8 @@ mod tests {
         assert!(result.hidden.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rs_prefill_stores_all_layers() {
         let weights = make_test_weights();
         let result = rs_prefill(&weights, &[0u32], None, &CpuBackend);
@@ -424,7 +433,8 @@ mod tests {
         assert_eq!(result.store.next_position, 1);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rs_prefill_with_window_clips_hot_store() {
         let weights = make_test_weights();
         let result = rs_prefill(&weights, &[0u32, 1, 2, 3, 4], Some(2), &CpuBackend);
@@ -437,7 +447,8 @@ mod tests {
 
     // ── rs_decode_step ────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rs_decode_step_produces_finite_hidden() {
         let weights = make_test_weights();
         let prefill = rs_prefill(&weights, &[0u32], None, &CpuBackend);
@@ -446,7 +457,8 @@ mod tests {
         assert!(h.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rs_decode_step_advances_position() {
         let weights = make_test_weights();
         let prefill = rs_prefill(&weights, &[0u32, 1], None, &CpuBackend);

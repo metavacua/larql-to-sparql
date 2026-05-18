@@ -137,14 +137,19 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn stage_accumulator_avg_us_zero_when_empty() {
         let acc = StageAccumulator::default();
         assert_eq!(acc.avg_us(), 0.0);
         assert_eq!(acc.count, 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn stage_accumulator_records_and_averages() {
         let mut acc = StageAccumulator::default();
         for _ in 0..3 {
@@ -162,7 +167,8 @@ mod tests {
         assert!(avg >= 50.0, "expected avg ≥50 µs, got {avg}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn stage_accumulator_clone_preserves_state() {
         let mut acc = StageAccumulator::default();
         let t = Instant::now();
@@ -173,7 +179,8 @@ mod tests {
         assert_eq!(copy.total_us, acc.total_us);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_profiler_summary_reflects_decode_total_steps() {
         let mut prof = EngineProfiler::default();
         for _ in 0..5 {
@@ -187,7 +194,8 @@ mod tests {
         assert_eq!(summary.avg_attention_us, 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn engine_profiler_summary_carries_per_stage_averages() {
         let mut prof = EngineProfiler::default();
         let t = Instant::now();
@@ -205,7 +213,8 @@ mod tests {
         assert_eq!(s.avg_recompute_total_us(), 0.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_stage_summary_recompute_total_sums_tiers() {
         let s = DecodeStageSummary {
             engine: "x".into(),
@@ -221,7 +230,8 @@ mod tests {
         assert_eq!(s.avg_recompute_total_us(), 20.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_stage_summary_print_with_recompute() {
         // Smoke test that print() handles both branches (recompute_total > 0
         // and == 0). Output goes to stdout — captured by the test harness.
@@ -253,7 +263,8 @@ mod tests {
         no_recompute.print();
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_stage_summary_clone_is_independent() {
         let s = DecodeStageSummary {
             engine: "a".into(),

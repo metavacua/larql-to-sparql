@@ -362,7 +362,7 @@ fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, Str
     Ok(out)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use std::io::Write;

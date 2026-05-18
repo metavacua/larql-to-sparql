@@ -68,6 +68,9 @@ impl RsStore {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn make_store(num_layers: usize, seq_len: usize, hidden: usize) -> RsStore {
         let stored = (0..num_layers)
             .map(|_| Array2::from_elem((seq_len, hidden), 1.0f32))
@@ -84,20 +87,23 @@ mod tests {
 
     // ── memory_bytes ──────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_bytes_hot_only() {
         let store = make_store(2, 5, 16);
         // 2 layers × 5 rows × 16 cols × 4 bytes
         assert_eq!(store.memory_bytes(), 2 * 5 * 16 * 4);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn memory_bytes_empty_store_is_zero() {
         let store = make_store(0, 0, 16);
         assert_eq!(store.memory_bytes(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cold_bytes_zero_when_no_cold() {
         let store = make_store(2, 5, 16);
         assert_eq!(store.cold_bytes(), 0);
@@ -105,13 +111,15 @@ mod tests {
 
     // ── window_tokens ─────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn window_tokens_matches_stored_rows() {
         let store = make_store(3, 7, 8);
         assert_eq!(store.window_tokens(), 7);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn window_tokens_zero_for_empty_store() {
         let store = make_store(0, 0, 8);
         assert_eq!(store.window_tokens(), 0);
@@ -119,7 +127,8 @@ mod tests {
 
     // ── clip_layer ────────────────────────────────────────────────────────────
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn clip_layer_no_window_is_noop() {
         let mut store = make_store(1, 10, 4);
         let mut cold = Vec::new();
@@ -133,7 +142,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn clip_layer_within_window_pushes_empty_cold() {
         let mut store = make_store(1, 4, 4);
         store.max_window = Some(8); // window larger than rows
@@ -145,7 +155,8 @@ mod tests {
         assert_eq!(store.stored[0].shape()[0], 4, "hot store unchanged");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn clip_layer_excess_rows_moved_to_cold() {
         let mut store = make_store(1, 10, 4);
         store.max_window = Some(3);
@@ -156,7 +167,8 @@ mod tests {
         assert_eq!(store.stored[0].shape()[0], 3);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn clip_layer_exactly_at_window_no_cold() {
         let mut store = make_store(1, 5, 4);
         store.max_window = Some(5); // exactly at limit
