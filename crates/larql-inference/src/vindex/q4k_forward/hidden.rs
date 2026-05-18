@@ -21,6 +21,7 @@ type MoeRemoteArg<'a> = Option<&'a ()>;
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
 /// `[seq_len, hidden]` array; caller owns the lm_head step.
+#[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
 pub fn predict_q4k_hidden(
     weights: &mut ModelWeights,
     token_ids: &[u32],

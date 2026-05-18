@@ -1,4 +1,6 @@
 //! Tokenizer-level generation policy shared by generation frontends.
+// TokenSelectionPolicy and its helpers are consumed by grid/ (not(wasm32)).
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use std::collections::HashSet;
 

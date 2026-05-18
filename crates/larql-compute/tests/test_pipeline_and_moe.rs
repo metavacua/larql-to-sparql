@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::cpu::ops::moe::cpu_moe_forward;
