@@ -95,22 +95,15 @@ jobs:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
         run: cargo clippy -p larql-core --target wasm32-unknown-unknown --no-default-features -- -D warnings
 
-      - name: Diagnose wasm-pack CLI
-        run: |
-          which wasm-pack
-          wasm-pack --version
-          wasm-pack test --help
-          wasm-pack test crates/larql-core --help || true
-
       - name: wasm-pack test · node
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test crates/larql-core --node
+        run: wasm-pack test --node crates/larql-core
 
       - name: wasm-pack test · firefox
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test crates/larql-core --firefox --headless
+        run: wasm-pack test --firefox --headless crates/larql-core
 
       - name: Check examples (compile only)
         env:
