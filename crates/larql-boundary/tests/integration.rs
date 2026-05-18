@@ -1,5 +1,8 @@
 //! Integration tests: full Phase 1 → 2 → 3 pipeline.
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_boundary::{
     codec::{bf16, int8},
     frame::{
@@ -28,7 +31,8 @@ fn peaked_logits(top: usize, n: usize) -> Vec<f32> {
 
 // ── Phase 1 ──────────────────────────────────────────────────────────────
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn bf16_roundtrip_no_overflow() {
     let r = synthetic_residual();
     let enc = bf16::encode(&r);
@@ -39,7 +43,8 @@ fn bf16_roundtrip_no_overflow() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn int8_roundtrip_correct_length() {
     let r = synthetic_residual();
     let payload = int8::encode(&r);
@@ -51,7 +56,8 @@ fn int8_roundtrip_correct_length() {
 
 // ── Phase 2 ──────────────────────────────────────────────────────────────
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn metadata_agrees_for_same_logits() {
     let logits = peaked_logits(42, 10_000);
     let meta = compute(&logits, Some(&logits));
@@ -60,7 +66,8 @@ fn metadata_agrees_for_same_logits() {
     assert!(meta.raw_log_prob_margin > 0.0);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn metadata_disagrees_for_different_top1() {
     let raw = peaked_logits(42, 10_000);
     let hat = peaked_logits(99, 10_000);
@@ -74,7 +81,8 @@ fn metadata_disagrees_for_different_top1() {
 
 // ── Phase 3 ──────────────────────────────────────────────────────────────
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn gate_compresses_confident_boundary() {
     let logits = peaked_logits(42, 10_000);
     let mut meta = compute(&logits, Some(&logits));
@@ -92,7 +100,8 @@ fn gate_compresses_confident_boundary() {
     assert!(!meta.boundary_fragile);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn gate_bf16_fallback_in_calibration_mode() {
     let logits = peaked_logits(42, 10_000);
     let mut meta = compute(&logits, Some(&logits));
@@ -100,7 +109,8 @@ fn gate_bf16_fallback_in_calibration_mode() {
     assert_eq!(apply(&mut meta, &config), BoundaryDecision::UseBf16);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn gate_rejects_codec_fragile() {
     let raw = peaked_logits(42, 10_000);
     let hat = peaked_logits(99, 10_000);
@@ -115,7 +125,8 @@ fn gate_rejects_codec_fragile() {
 
 // ── Frame ─────────────────────────────────────────────────────────────────
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn frame_continuation_safety() {
     let mut f = BoundaryFrame {
         version: 1,
@@ -169,7 +180,8 @@ fn frame_continuation_safety() {
 // the gate's hard-reject on Disagrees, and the confidence-gate's correct use of
 // log-prob margin (not raw logit margin).
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn codec_non_outlier_reconstruction_quality() {
     // int8-clip3σ saturates outlier elements but should preserve the bulk of the
     // vector with reasonable fidelity. The Exp 43 characterisation showed the codec
@@ -204,7 +216,8 @@ fn codec_non_outlier_reconstruction_quality() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn gate_codec_fragile_always_rejects_regardless_of_margin() {
     // The Exp 43 characterisation depends on the gate hard-rejecting codec-fragile
     // boundaries. A codec that flips the argmax must never be accepted, even if the
@@ -242,7 +255,8 @@ fn gate_codec_fragile_always_rejects_regardless_of_margin() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn gate_uses_log_prob_margin_not_raw_logit_margin() {
     // This is the units-correctness test. The gate threshold is calibrated in
     // log-prob margin units. If the gate compared raw_logit_margin against
@@ -282,7 +296,8 @@ fn gate_uses_log_prob_margin_not_raw_logit_margin() {
 
 // ── Full pipeline ─────────────────────────────────────────────────────────
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn full_pipeline_encode_metadata_gate() {
     let residual = synthetic_residual();
 

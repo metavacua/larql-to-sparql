@@ -111,7 +111,11 @@ fn std_dev(r: &[f32]) -> f32 {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn roundtrip_small_vector() {
         let r: Vec<f32> = (0..256).map(|i| i as f32 * 0.5 - 64.0).collect();
         let p = encode(&r);
@@ -125,7 +129,8 @@ mod tests {
         assert!(mse < 50.0, "MSE too high: {mse}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn outlier_is_clipped_not_nan() {
         let mut r = vec![0.5f32; 2560];
         r[100] = 150_000.0;
@@ -137,13 +142,15 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn payload_byte_length() {
         let r = vec![0.0f32; 2560];
         assert_eq!(encode(&r).to_bytes().len(), SCALE_BYTES + 2560);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bytes_roundtrip() {
         let r: Vec<f32> = (0..100).map(|i| i as f32 - 50.0).collect();
         let p = encode(&r);
@@ -159,7 +166,8 @@ mod tests {
         assert!(mse < 50.0, "bytes-roundtrip MSE too high: {mse}");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn constant_vector_does_not_panic() {
         // σ = 0 edge case — degenerate vector
         let r = vec![5.0f32; 64];

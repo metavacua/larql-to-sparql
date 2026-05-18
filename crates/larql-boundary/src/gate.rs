@@ -153,6 +153,9 @@ mod tests {
     use crate::frame::BoundaryAgreement;
     use crate::metadata::BoundaryMetadata;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn meta(logit_margin: f32, top1_prob: f32, agreement: BoundaryAgreement) -> BoundaryMetadata {
         BoundaryMetadata {
             raw_top1_token: 42,
@@ -173,7 +176,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn calibration_mode_always_bf16() {
         // Default config has calibration_mode = true.
         let config = BoundaryGateConfig::default();
@@ -181,21 +185,24 @@ mod tests {
         assert_eq!(apply(&mut m, &config), BoundaryDecision::UseBf16);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn disagrees_hard_rejects() {
         let config = live();
         let mut m = meta(5.0, 0.9, BoundaryAgreement::Disagrees);
         assert_eq!(apply(&mut m, &config), BoundaryDecision::UseBf16);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn not_checked_hard_rejects() {
         let config = live();
         let mut m = meta(5.0, 0.9, BoundaryAgreement::NotChecked);
         assert_eq!(apply(&mut m, &config), BoundaryDecision::UseBf16);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn low_margin_is_boundary_fragile() {
         let mut config = live();
         config.min_log_prob_margin = 2.0;
@@ -205,7 +212,8 @@ mod tests {
         assert_eq!(decision, BoundaryDecision::UseBf16);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn confident_boundary_compresses() {
         let config = live();
         let mut m = meta(3.0, 0.8, BoundaryAgreement::Agrees);
@@ -214,7 +222,8 @@ mod tests {
         assert!(matches!(decision, BoundaryDecision::CompressedOk { .. }));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn cold_replay_fallback() {
         let mut config = live();
         config.fallback_policy = FallbackPolicy::ColdReplay;
@@ -222,7 +231,8 @@ mod tests {
         assert_eq!(apply(&mut m, &config), BoundaryDecision::UseColdReplay);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn reject_if_unsafe_fallback() {
         let mut config = live();
         config.fallback_policy = FallbackPolicy::RejectIfUnsafe;

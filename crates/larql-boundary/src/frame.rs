@@ -222,7 +222,11 @@ impl BoundaryFrame {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn continuation_safety_rejects_calibrating() {
         let mut frame = minimal_frame();
         frame.contract_level = BoundaryContract::Calibrating;
@@ -230,7 +234,8 @@ mod tests {
         assert!(!frame.is_safe_for_routing());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn continuation_safety_rejects_not_checked_compressed() {
         let mut frame = minimal_frame();
         frame.compression_scheme = BoundaryCompression::Int8Clip3Sigma;
@@ -238,7 +243,8 @@ mod tests {
         assert!(!frame.is_safe_for_routing());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn continuation_safety_accepts_highmargin() {
         let mut frame = minimal_frame();
         frame.contract_level = BoundaryContract::ArgmaxNearEquivalentHighMargin;
@@ -247,7 +253,8 @@ mod tests {
         assert!(frame.is_safe_for_routing());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn routing_accepts_lowmargin_rejects_for_continuation() {
         let mut frame = minimal_frame();
         frame.contract_level = BoundaryContract::ArgmaxNearEquivalentLowMargin;
