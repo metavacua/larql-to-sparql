@@ -1,0 +1,173 @@
+# larql-compute cross-platform CI
+#
+# Validates the CPU baseline on Linux, Windows, and macOS, plus the macOS-only
+# Metal feature gate. Linux/Windows intentionally run `--all-features` too:
+# enabling the `metal` feature there must not expose macOS-only modules.
+
+name: larql-compute
+
+permissions:
+  contents: read
+
+on:
+  workflow_run:
+    workflows: [wasm]
+    types: [completed]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: test · ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            platform: ubuntu
+            target: x86_64-unknown-linux-gnu
+
+          - name: chromeos-24.04
+            runner: ubuntu-24.04
+            platform: chromeos
+            target: x86_64-unknown-linux-gnu
+
+          - name: windows-latest
+            runner: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+
+          - name: macos-15-arm64
+            runner: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+
+          - name: android-aarch64
+            runner: ubuntu-24.04
+            platform: android
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            runner: ubuntu-24.04
+            platform: android
+            target: armv7-linux-androideabi
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set Android NDK compiler vars (aarch64)
+        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CXX=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set Android NDK compiler vars (armv7)
+        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CXX=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Install OpenBLAS (Linux/ChromeOS)
+        if: matrix.platform == 'ubuntu' || matrix.platform == 'chromeos'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $root) {
+            $root = 'C:\vcpkg'
+          }
+          & "$root\vcpkg.exe" install openblas:x64-windows
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$root\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-compute-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-compute-
+
+      - name: Format check
+        run: cargo fmt -p larql-compute -- --check
+
+      - name: Check default features
+        if: matrix.platform != 'android'
+        run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets
+
+      - name: Check all features on Linux/Windows/ChromeOS/Android
+        if: matrix.platform != 'macos'
+        run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets --all-features
+
+      - name: Check Metal feature on macOS
+        if: matrix.platform == 'macos'
+        run: cargo check -p larql-compute --target ${{ matrix.target }} --all-targets --features metal
+
+      - name: Clippy default features
+        run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: Clippy all features on Linux/Windows/ChromeOS/Android
+        if: matrix.platform != 'macos'
+        run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets --all-features -- -D warnings
+
+      - name: Clippy Metal feature on macOS
+        if: matrix.platform == 'macos'
+        run: cargo clippy -p larql-compute --target ${{ matrix.target }} --all-targets --features metal -- -D warnings
+
+      - name: Unit tests
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-compute --target ${{ matrix.target }} --lib
+
+      - name: Backend contract tests
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-compute --target ${{ matrix.target }} --test test_backend_matmul_quant
+
+      - name: Pipeline and MoE contract tests
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-compute --target ${{ matrix.target }} --test test_pipeline_and_moe

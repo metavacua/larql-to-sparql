@@ -1,6 +1,6 @@
-# wasm.yml — WASM CI: compile check + runtime test + native baseline
+# wasm.yml — WASM CI: compile check + runtime test
 #
-# Three job groups, sequenced and forensic:
+# Two job groups, forensic:
 #
 #   wasm-check   — cargo check --target wasm32-unknown-unknown for every crate.
 #                  Failures identify which native-only dependencies block WASM
@@ -14,10 +14,9 @@
 #                  criterion for this phase — failures are forensic data
 #                  identifying porting work. 15 crates × 4 modes = 60 cells.
 #
-#   native-test  — cargo test on the native target. Runs after both WASM phases
-#                  complete (pass or fail). Expected green; comparison with
-#                  wasm-test reveals the porting backlog. 14 crates × 1 = 14
-#                  cells (larql-js tested via wasm-test only).
+# Native testing is handled by the per-crate workflows (larql-boundary.yml,
+# larql-core.yml, etc.), each triggered via workflow_run on wasm completion.
+# Those workflows cover the full platform matrix (Linux, Windows, macOS, Android).
 #
 # Triggers: push to main + all PRs that touch crate code or this file.
 
@@ -236,49 +235,3 @@ jobs:
           ${{ matrix.crate.path }}
           ${{ matrix.crate.cargo_flags }}
           ${{ matrix.crate.parallel_features }}
-
-# ── Native test baseline ──────────────────────────────────────────────────────
-
-  native-test:
-    name: test · ${{ matrix.crate }} · native
-    needs: [wasm-check, wasm-test]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-
-    permissions:
-      contents: read
-
-    strategy:
-      fail-fast: false
-      matrix:
-        # larql-js is the WASM API bundle; tested via wasm-test only.
-        crate:
-          - larql-boundary
-          - larql-core
-          - larql-models
-          - model-compute
-          - larql-compute
-          - larql-router-protocol
-          - larql-router
-          - larql-server
-          - larql-vindex
-          - larql-inference
-          - larql-kv
-          - kv-cache-benchmark
-          - larql-lql
-          - larql-cli
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ubuntu-native-${{ matrix.crate }}
-
-      - name: Test
-        run: cargo test -p ${{ matrix.crate }}
