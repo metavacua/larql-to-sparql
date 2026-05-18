@@ -1,8 +1,5 @@
 use larql_core::*;
 
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
-
 fn sample_graph() -> Graph {
     let mut g = Graph::new();
     g.add_edge(

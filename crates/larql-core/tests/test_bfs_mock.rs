@@ -2,9 +2,6 @@ use larql_core::engine::mock_provider::MockProvider;
 use larql_core::engine::templates::PromptTemplate;
 use larql_core::*;
 
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
-
 fn geo_templates() -> TemplateRegistry {
     let mut reg = TemplateRegistry::new();
     reg.register(PromptTemplate {

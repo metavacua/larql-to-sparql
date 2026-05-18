@@ -1,8 +1,5 @@
 use larql_core::*;
 
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
-
 // ── Construction ──
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
