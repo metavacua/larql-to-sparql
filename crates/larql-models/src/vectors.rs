@@ -57,6 +57,9 @@ pub struct VectorFileHeader {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn sample_top_k_entry() -> TopKEntry {
         TopKEntry {
             token: "hello".to_string(),
@@ -89,7 +92,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn vector_record_json_roundtrip() {
         let record = sample_vector_record();
         let json = serde_json::to_string(&record).expect("serialize VectorRecord");
@@ -107,7 +111,8 @@ mod tests {
         assert_eq!(back.top_k[0].token, "hello");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn top_k_entry_clone_and_serialize() {
         let entry = sample_top_k_entry();
         let cloned = entry.clone();
@@ -121,7 +126,8 @@ mod tests {
         assert!(json.contains("\"token_id\":42"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn vector_file_header_json_roundtrip() {
         let header = sample_header();
         let json = serde_json::to_string(&header).expect("serialize VectorFileHeader");
@@ -135,7 +141,8 @@ mod tests {
         assert_eq!(back.extraction_date, "2026-03-29");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn all_components_contains_all_six() {
         assert_eq!(ALL_COMPONENTS.len(), 6);
         assert!(ALL_COMPONENTS.contains(&COMPONENT_FFN_DOWN));
@@ -146,7 +153,8 @@ mod tests {
         assert!(ALL_COMPONENTS.contains(&COMPONENT_EMBEDDINGS));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn component_constants_match_expected_strings() {
         assert_eq!(COMPONENT_FFN_DOWN, "ffn_down");
         assert_eq!(COMPONENT_FFN_GATE, "ffn_gate");

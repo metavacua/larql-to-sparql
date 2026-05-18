@@ -236,9 +236,13 @@ mod tests {
     use super::q6_k::q6k_row_dot_scalar;
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // ── Q4_0 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_basic() {
         // Scale = 1.0, quants = 0x12 → lo=2-8=-6, hi=1-8=-7
         let mut block = vec![0x00, 0x3C]; // f16 1.0
@@ -249,7 +253,8 @@ mod tests {
         assert!((result[1] - (-7.0)).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_zero_scale() {
         let mut block = vec![0x00, 0x00]; // f16 0.0
         block.extend_from_slice(&[0xFF; 16]);
@@ -257,7 +262,8 @@ mod tests {
         assert!(result.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_two_blocks() {
         let mut data = vec![0x00, 0x3C]; // block 0: scale=1.0
         data.extend_from_slice(&[0x88; 16]); // quants: lo=8-8=0, hi=8-8=0
@@ -272,7 +278,8 @@ mod tests {
 
     // ── Q4_1 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_1_basic() {
         // Scale=1.0, min=0.5, quants=0x00 → lo=0*1+0.5=0.5, hi=0*1+0.5=0.5
         let mut block = vec![0x00, 0x3C, 0x00, 0x38]; // scale=1.0, min=0.5
@@ -281,7 +288,8 @@ mod tests {
         assert!((result[0] - 0.5).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_1_with_offset() {
         // Scale=2.0, min=-1.0, quants=0x31 → lo=1*2-1=1, hi=3*2-1=5
         let mut block = vec![0x00, 0x40, 0x00, 0xBC]; // scale=2.0, min=-1.0
@@ -293,7 +301,8 @@ mod tests {
 
     // ── Q8_0 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_basic() {
         let mut block = vec![0x00, 0x38]; // f16 scale = 0.5
         for _ in 0..16 {
@@ -305,7 +314,8 @@ mod tests {
         assert!((result[1] - (-1.0)).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_zero_scale() {
         let mut block = vec![0x00, 0x00]; // scale = 0
         block.extend_from_slice(&[127u8; 32]); // max int8
@@ -313,7 +323,8 @@ mod tests {
         assert!(result.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_full_range() {
         let mut block = vec![0x00, 0x3C]; // scale = 1.0
         block.push(127); // max positive
@@ -327,7 +338,8 @@ mod tests {
 
     // ── Type metadata ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn tensor_sizes() {
         assert_eq!(tensor_data_size(TYPE_F32, 32).unwrap(), 128);
         assert_eq!(tensor_data_size(TYPE_F16, 32).unwrap(), 64);
@@ -336,7 +348,8 @@ mod tests {
         assert_eq!(tensor_data_size(TYPE_Q8_0, 32).unwrap(), 34);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn type_names() {
         assert_eq!(type_name(TYPE_F32), "F32");
         assert_eq!(type_name(TYPE_Q4_0), "Q4_0");
@@ -346,7 +359,8 @@ mod tests {
 
     // ── F32 passthrough ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f32_passthrough() {
         let data: Vec<u8> = [1.0f32, -2.0, 3.0]
             .iter()
@@ -358,7 +372,8 @@ mod tests {
 
     // ── Q5_0 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_basic() {
         // scale=1.0, high_bits=0, quants=0x88 → lo4=8, hi4=8, hi1=0
         // combined=8, value=(8-16)*1.0=-8.0
@@ -371,7 +386,8 @@ mod tests {
         assert!((result[1] - (-8.0)).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_with_high_bits() {
         // scale=1.0, high_bits=0xFFFFFFFF (all 1), quants=0x00
         // lo4=0, hi1=1, combined=0|16=16, value=(16-16)*1.0=0.0
@@ -383,7 +399,8 @@ mod tests {
         assert!((result[0] - 0.0).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_mixed() {
         // scale=2.0, high_bits=0x00000001 (bit 0 set), quants[0]=0x53
         // element 0: lo4=3, hi1=bit0=1, combined=3|16=19, value=(19-16)*2=6.0
@@ -397,7 +414,8 @@ mod tests {
         assert!((result[1] - (-22.0)).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_zero_scale() {
         let mut block = vec![0x00, 0x00]; // scale=0
         block.extend_from_slice(&[0xFF; 4]);
@@ -408,7 +426,8 @@ mod tests {
 
     // ── Q5_1 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_1_basic() {
         // scale=1.0, min=0.5, high_bits=0, quants=0x00
         // combined=0, value=0*1.0+0.5=0.5
@@ -420,7 +439,8 @@ mod tests {
         assert!((result[0] - 0.5).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_1_with_high_bits() {
         // scale=2.0, min=1.0, high_bits=0xFFFFFFFF, quants=0xFF
         // lo4=15, hi1=1, combined=15|16=31, value=31*2.0+1.0=63.0
@@ -431,7 +451,8 @@ mod tests {
         assert!((result[0] - 63.0).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_1_via_dequantize() {
         // Verify dispatch works through the main dequantize() function
         let mut block = vec![0x00, 0x3C, 0x00, 0x00]; // scale=1.0, min=0.0
@@ -442,7 +463,8 @@ mod tests {
         assert!((result[1] - 3.0).abs() < 0.01);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_via_dequantize() {
         // Verify dispatch works through the main dequantize() function
         let mut block = vec![0x00, 0x3C]; // scale=1.0
@@ -468,7 +490,8 @@ mod tests {
         block
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_row_dot_neon_matches_scalar_single_block() {
         let data = synth_q6k_block(42);
         let x: Vec<f32> = (0..256).map(|i| ((i as f32) * 0.01).sin()).collect();
@@ -481,7 +504,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_row_dot_neon_matches_scalar_multi_block() {
         let mut data = Vec::with_capacity(210 * 8);
         for sb in 0..8 {
@@ -517,46 +541,54 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_rejects_short_buffer() {
         // 32 elements need 18 bytes; give it 10.
         assert_short_buffer(dequantize_q4_0(&[0u8; 10], 32), "Q4_0");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_1_rejects_short_buffer() {
         assert_short_buffer(dequantize(&[0u8; 4], TYPE_Q4_1, 32), "Q4_1");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_rejects_short_buffer() {
         // 64 elements = 2 blocks × 34 bytes = 68; give 40.
         assert_short_buffer(dequantize(&[0u8; 40], TYPE_Q8_0, 64), "Q8_0");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_0_rejects_short_buffer() {
         assert_short_buffer(dequantize_q5_0(&[0u8; 10], 32), "Q5_0");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q5_1_rejects_short_buffer() {
         assert_short_buffer(dequantize_q5_1(&[0u8; 10], 32), "Q5_1");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_k_rejects_short_buffer() {
         // 256 elements = 1 super-block = 144 bytes; give 100.
         assert_short_buffer(dequantize_q4_k(&[0u8; 100], 256), "Q4_K");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6_k_rejects_short_buffer() {
         // 256 elements = 1 super-block = 210 bytes; give 100.
         assert_short_buffer(dequantize_q6_k(&[0u8; 100], 256), "Q6_K");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_rejects_misaligned_n_elements() {
         // 33 is not a multiple of 32.
         match dequantize_q4_0(&[0u8; 18], 33) {
@@ -567,7 +599,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6_k_rejects_misaligned_n_elements() {
         // 300 is not a multiple of 256.
         match dequantize_q6_k(&[0u8; 210], 300) {
@@ -578,7 +611,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn passthrough_f32_rejects_short_buffer() {
         // 8 elements = 32 bytes; give 20.
         match dequantize(&[0u8; 20], TYPE_F32, 8) {
@@ -587,7 +621,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn passthrough_f16_rejects_short_buffer() {
         // 8 elements = 16 bytes; give 10.
         match dequantize(&[0u8; 10], TYPE_F16, 8) {
@@ -596,7 +631,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn passthrough_bf16_rejects_short_buffer() {
         match dequantize(&[0u8; 10], TYPE_BF16, 8) {
             Err(ModelError::Parse(msg)) => assert!(msg.contains("BF16"), "got: {msg}"),
@@ -604,7 +640,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn empty_input_ok_when_zero_elements() {
         // Zero-element tensor should succeed with empty output across all block types.
         for &ty in &[
@@ -620,7 +657,8 @@ mod tests {
     /// Max component-wise representation error for a given scale — Q4_0 maps
     /// every value to the nearest multiple of `scale` in `[-8*scale, 7*scale]`,
     /// so round-trip error is bounded by half a quantization step.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_round_trip_preserves_within_half_step() {
         // Inputs fit the ±7*scale range cleanly.
         let vals: Vec<f32> = (0..64).map(|i| (i as f32 - 31.5) * 0.1).collect();
@@ -637,7 +675,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_round_trip_all_zero() {
         // Zero-scale corner: every value must decode to exactly 0.
         let vals = vec![0.0f32; 32];
@@ -646,7 +685,8 @@ mod tests {
         assert!(round.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_round_trip_precise() {
         // Q8_0 has 127 steps — 2 decimal places should survive cleanly.
         let vals: Vec<f32> = (0..64).map(|i| ((i as f32 - 32.0) * 0.013).sin()).collect();
@@ -659,7 +699,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_round_trip_edges() {
         // Values hitting the ±127/scale clamp edges. Scale is stored as f16
         // (11-bit mantissa), so allow ~1e-3 for the quantized representation
@@ -678,7 +719,8 @@ mod tests {
 
     // ── Dispatch coverage via dequantize() for the K-quants and Q4_0 ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_0_via_dequantize() {
         let vals: Vec<f32> = (0..32).map(|i| (i as f32 - 15.5) * 0.05).collect();
         let packed = quantize_q4_0(&vals);
@@ -686,7 +728,8 @@ mod tests {
         assert_eq!(round.len(), 32);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q8_0_via_dequantize() {
         let vals: Vec<f32> = (0..32).map(|i| (i as f32) * 0.01).collect();
         let packed = quantize_q8_0(&vals);
@@ -697,7 +740,8 @@ mod tests {
         assert_eq!(round, direct);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_k_via_dequantize_roundtrips_to_known_output() {
         // Build a 144-byte Q4K block with scale 1.0, min 0.0, all sub-scales=1,
         // sub-mins=0, nibbles = low nibble index 0..7 repeated — check shape,
@@ -720,7 +764,8 @@ mod tests {
         assert!(out.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6_k_via_dequantize() {
         // Dispatch-path check — uses the single-block synth helper.
         let block = synth_q6k_block(99);
@@ -729,7 +774,8 @@ mod tests {
         assert_eq!(direct, dispatched);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_row_dot_matches_dequantized_dot() {
         // Ground truth: dequantize_q6_k then compute the dot manually.
         let data = synth_q6k_block(7);
@@ -761,7 +807,8 @@ mod tests {
         block
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_row_dot_neon_matches_scalar_single_block() {
         use super::q4_k::q4k_row_dot_scalar;
         let data = synth_q4k_block(42);
@@ -774,7 +821,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_row_dot_neon_matches_scalar_multi_block() {
         use super::q4_k::q4k_row_dot_scalar;
         let mut data = Vec::with_capacity(144 * 8);
@@ -793,7 +841,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_row_dot_matches_dequantized_dot() {
         let data = synth_q4k_block(7);
         let deq = dequantize_q4_k(&data, 256).unwrap();
@@ -809,7 +858,8 @@ mod tests {
 
     // ── Q4_K dequantize with nonzero known values ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4_k_dequantize_known_nonzero_values() {
         // d=1.0, dmin=0.0, scales[0..4]=2, scales[4..8]=0, mins all 0.
         // All quant bytes = 0x53 → lo nibble=3, hi nibble=5.
@@ -855,7 +905,8 @@ mod tests {
 
     // ── scaled_add correctness (q4k and q6k) ──
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_row_scaled_add_matches_alpha_times_deq() {
         let data = synth_q4k_block(13);
         let alpha = 0.25_f32;
@@ -871,7 +922,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_row_scaled_add_matches_alpha_times_deq() {
         let data = synth_q6k_block(21);
         let alpha = 0.5_f32;
@@ -887,7 +939,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q4k_row_scaled_add_rejects_misaligned() {
         let mut out = vec![0.0f32; 300]; // not a multiple of 256
         match q4k_row_scaled_add(&[0u8; 144], 1.0, &mut out) {
@@ -896,7 +949,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn q6k_row_scaled_add_rejects_misaligned() {
         let mut out = vec![0.0f32; 300];
         match q6k_row_scaled_add(&[0u8; 210], 1.0, &mut out) {

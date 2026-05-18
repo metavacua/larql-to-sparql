@@ -1,0 +1,105 @@
+# larql-compute WASM CI
+#
+# Mirrors larql-compute.yml for wasm32-unknown-unknown. The metal/ module is
+# already gated to cfg(all(feature = "metal", target_os = "macos")) and never
+# compiles on wasm32. The 2 #[should_panic] tests in q4_common.rs are
+# native-only (wasm_bindgen_test does not support should_panic). All 161
+# remaining CPU kernel and backend tests run here.
+# fail-fast is false intentionally: all failures must be visible.
+
+name: larql-compute-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-compute/**'
+      - 'crates/larql-models/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-compute-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-compute/**'
+      - 'crates/larql-models/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-compute-wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-compute-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-compute-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-compute -- --check
+
+      - name: Check
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-compute --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-compute --target wasm32-unknown-unknown -- -D warnings
+
+      - name: wasm-pack test · node
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --node crates/larql-compute
+
+      - name: wasm-pack test · firefox
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --firefox --headless crates/larql-compute --features browser-tests

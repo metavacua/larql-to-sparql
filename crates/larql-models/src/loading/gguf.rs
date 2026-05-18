@@ -927,7 +927,11 @@ pub fn normalize_gguf_key(name: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_orient_in_place_transposes_inverse_layout() {
         use ndarray::Array2;
 
@@ -953,7 +957,8 @@ mod tests {
         assert_eq!(oriented[[1, 2]], 6.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_orient_in_place_leaves_canonical_layout_untouched() {
         use ndarray::Array2;
 
@@ -971,7 +976,8 @@ mod tests {
         assert_eq!(after.as_ptr(), original_ptr);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_orient_in_place_skips_ambiguous_square_dims() {
         use ndarray::Array2;
 
@@ -1036,7 +1042,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_orient_attention_tensors_fixes_inverse_fused_qkv_layout() {
         use ndarray::Array2;
 
@@ -1055,7 +1062,8 @@ mod tests {
         assert_eq!(oriented.shape(), &[12, 4]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_split_fused_qkv_materialises_per_projection_tensors_and_biases() {
         use ndarray::Array2;
 
@@ -1111,7 +1119,8 @@ mod tests {
         assert!((vb[0] - 0.8).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_split_fused_qkv_no_op_when_arch_has_no_fused_key() {
         use ndarray::Array2;
 
@@ -1130,7 +1139,8 @@ mod tests {
         assert!(tensors.contains_key("layers.0.self_attn.q_proj.weight"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_orient_ffn_tensors_fixes_gpt2_style_inverse_layout() {
         use crate::config::ModelConfig;
         use ndarray::Array2;
@@ -1190,7 +1200,8 @@ mod tests {
         assert_eq!(down.shape(), &[4, 12]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_normalize_gguf_key() {
         assert_eq!(
             normalize_gguf_key("blk.0.attn_q.weight"),
@@ -1207,7 +1218,7 @@ mod tests {
         assert_eq!(normalize_gguf_key("output.weight"), "lm_head.weight");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn test_load_tensors_swaps_gguf_2d_dims_to_rows_cols() {
         use std::io::{Seek, Write};
 
@@ -1259,7 +1270,8 @@ mod tests {
         assert_eq!(down[[1, 3]], 8.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_gemma4_gguf_to_config_json_maps_arch_and_overrides_head_dim() {
         // Synthesize GGUF metadata matching gemma-4-e2b's shape.
         // Exercises: (a) gemma4 name pass-through, (b) head_dim=256 override,
@@ -1313,7 +1325,8 @@ mod tests {
         assert_eq!(cfg["vocab_size"], 262144);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_gguf_to_config_json_omits_absent_rope_base_for_arch_default() {
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -1352,7 +1365,7 @@ mod tests {
     /// Build a minimal GGUF file with one 2-D F32 tensor, but truncate the
     /// tensor data region so that `offset + size > file len`. Loader must
     /// reject this cleanly, not panic on a slice OOB.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn test_load_tensors_rejects_truncated_tensor_data() {
         use std::io::{Seek, Write};
 

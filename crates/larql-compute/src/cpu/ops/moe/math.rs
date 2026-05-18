@@ -145,9 +145,13 @@ pub(super) fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
 mod tests {
     use super::*;
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     /// BF16 round-trip on the standard handful of "easy" floats —
     /// catches an endianness flip or a bit-shift typo.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bf16_to_f32_known_values() {
         // 1.0 in BF16 = 0x3F80
         let bytes = vec![0x80u8, 0x3F];
@@ -165,7 +169,8 @@ mod tests {
 
     /// `rms_norm(constant_x, weight=1, offset=0)` — RMS of [c,c,…] is
     /// |c|, so out[i] = c / |c| * 1 = sign(c).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rms_norm_constant_input() {
         let x = vec![2.0; 8];
         let w = vec![1.0; 8];
@@ -177,7 +182,8 @@ mod tests {
 
     /// `rms_norm` with empty weight slice returns the input unchanged
     /// (defensive guard for "weight tensor not present").
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rms_norm_empty_weight_passthrough() {
         let x = vec![3.0, 4.0, 5.0];
         let out = rms_norm(&x, &[], 1e-6, 0.0);
@@ -185,7 +191,8 @@ mod tests {
     }
 
     /// Parameter-free RMSNorm: scales `x` so that `mean(out²) ≈ 1`.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn rms_norm_no_weight_normalises_to_unit_rms() {
         let x = vec![2.0, 4.0, 6.0, 8.0];
         let out = rms_norm_no_weight(&x, 1e-6);
@@ -197,7 +204,8 @@ mod tests {
     }
 
     /// SiLU(0) = 0, SiLU(x) → x as x → ∞, SiLU(x) → 0 as x → -∞.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn silu_known_values() {
         assert_eq!(silu(0.0), 0.0);
         assert!(silu(10.0) > 9.99);
@@ -205,7 +213,8 @@ mod tests {
     }
 
     /// `top_k` returns the largest k values in descending order.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn top_k_descending_with_k_capped_at_len() {
         let (idx, val) = top_k(&[0.1, 0.5, 0.3, 0.9, 0.2], 3);
         assert_eq!(idx, vec![3, 1, 2]); // values 0.9, 0.5, 0.3
@@ -217,7 +226,8 @@ mod tests {
     }
 
     /// `softmax` produces a probability distribution.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn softmax_sums_to_one() {
         let mut v = vec![1.0f32, 2.0, 3.0, 4.0];
         softmax(&mut v);
@@ -234,7 +244,8 @@ mod tests {
     }
 
     /// `matmul_vec` agrees with a hand-rolled scalar reference.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn matmul_vec_matches_scalar_reference() {
         let w = vec![
             1.0, 2.0, 3.0, // row 0
@@ -248,7 +259,8 @@ mod tests {
 
     /// Empty input dimensions return a zero-filled output of the
     /// requested length — defensive guard, not a panic.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn matmul_vec_zero_dimensions_returns_zeros() {
         let out = matmul_vec(&[], &[], 4, 0);
         assert_eq!(out, vec![0.0, 0.0, 0.0, 0.0]);

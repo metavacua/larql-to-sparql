@@ -166,7 +166,11 @@ pub fn decode_e4m3(bytes: &[u8]) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_canonical_values() {
         // Zero.
         assert_eq!(e4m3_to_f32(0x00), 0.0);
@@ -187,7 +191,8 @@ mod tests {
         assert!(e4m3_to_f32(0xFF).is_nan());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_round_trip_representable() {
         // Every representable E4M3 value should round-trip exactly.
         for byte in 0..=255u8 {
@@ -205,7 +210,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_saturation() {
         // Values above max normal saturate rather than overflow.
         assert_eq!(f32_to_e4m3(1000.0), 0x7E);
@@ -214,13 +220,15 @@ mod tests {
         assert_eq!(f32_to_e4m3(-448.0), 0xFE);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_tiny_flush_to_zero() {
         assert_eq!(f32_to_e4m3(1e-10), 0x00);
         assert_eq!(f32_to_e4m3(-1e-10), 0x80);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_rounding_to_nearest() {
         // 1.0 is exactly representable.
         assert_eq!(f32_to_e4m3(1.0), 0x38); // exp=7, mant=0 → (1+0)×2^0 = 1
@@ -236,7 +244,8 @@ mod tests {
 
     /// E4M3 has subnormals for exponent=0. These represent values
     /// `m/8 × 2⁻⁶` for m ∈ [0, 7], i.e. `{0, 2⁻⁹, 2·2⁻⁹, …, 7·2⁻⁹}`.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_subnormal_sweep() {
         // All 7 non-zero subnormals should decode to m/8 × 2⁻⁶.
         for m in 1..=7u8 {
@@ -259,7 +268,8 @@ mod tests {
     /// largest subnormal, 0x08 is 2⁻⁶ (smallest normal). The gap here
     /// is smaller than subsequent gaps because subnormals are uniformly
     /// spaced while normals are exponentially spaced.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_subnormal_normal_boundary() {
         let largest_subnormal = e4m3_to_f32(0x07);
         let smallest_normal = e4m3_to_f32(0x08);
@@ -276,7 +286,8 @@ mod tests {
     /// Values that would require rounding up past max normal (448)
     /// must saturate to max rather than produce NaN (which is a
     /// separate bit pattern).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_saturates_short_of_nan() {
         // Just below 448.0.
         let b = f32_to_e4m3(448.0 - 1.0);
@@ -289,14 +300,16 @@ mod tests {
     }
 
     /// `+Inf` / `-Inf` also saturate, not NaN.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_infinity_saturates() {
         assert_eq!(f32_to_e4m3(f32::INFINITY), 0x7E);
         assert_eq!(f32_to_e4m3(f32::NEG_INFINITY), 0xFE);
     }
 
     /// Negative NaN should map to a NaN pattern (0xFF), not a normal.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_negative_nan_preserved() {
         let neg_nan = f32::from_bits(f32::NAN.to_bits() | 0x8000_0000);
         assert_eq!(f32_to_e4m3(neg_nan), 0xFF);
@@ -307,7 +320,8 @@ mod tests {
     /// intersecting E4M3's representable set. Within the per-value
     /// precision bound (roughly 2⁻³ × value), round-trip error should
     /// be modest.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn e4m3_bulk_representable_round_trip() {
         let values = [
             0.0, 0.01, 0.1, 0.5, 1.0, 2.5, 10.0, 100.0, 400.0, -0.1, -1.0, -100.0,

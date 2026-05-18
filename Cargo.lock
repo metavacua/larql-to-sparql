@@ -2083,6 +2083,7 @@ dependencies = [
  "openblas-src",
  "rayon",
  "serde_json",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -2197,6 +2198,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "wasm-bindgen-test",
 ]
 
 [[package]]

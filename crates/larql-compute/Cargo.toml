@@ -52,6 +52,8 @@ metal = ["dep:metal", "dep:objc"]
 # devloop (`cargo test -p larql-compute --features metal`) still runs
 # them — the two axes are independent on purpose.
 heavy_tests = []
+# Enable wasm_bindgen_test runner for in-browser unit-test runs.
+browser-tests = []
 # cuda = []  # Future: CUDA backend
 
 [build-dependencies]
@@ -61,9 +63,12 @@ cc = "1.0"
 libc = "0.2"
 
 [dev-dependencies]
-criterion = "0.5"
 serde_json = "1"
 memmap2 = "0.9"
+wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.5"
 
 [[bench]]
 name = "matmul"

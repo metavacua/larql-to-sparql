@@ -116,7 +116,11 @@ pub fn quantise_fp4(values: &[f32]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_table_matches_mxfp4() {
         use crate::quant::mxfp4;
         // Exported table must be byte-identical to the MXFP4 one; otherwise
@@ -130,7 +134,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_representable_round_trip() {
         // Every representable value round-trips exactly.
         for code in 0..16u8 {
@@ -145,13 +150,15 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_saturation() {
         assert_eq!(e2m1_to_f32(f32_to_e2m1(100.0)), 6.0);
         assert_eq!(e2m1_to_f32(f32_to_e2m1(-100.0)), -6.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_rounding_to_nearest_even() {
         // Halfway between 4.0 (code 0b110, odd-index 6) and 6.0 (code 0b111,
         // odd-index 7). Round-to-nearest-even prefers even index → 4.0.
@@ -160,7 +167,8 @@ mod tests {
         assert_eq!(f, 4.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn nibble_pack_unpack_round_trip() {
         let codes: Vec<u8> = (0..32u8).map(|i| i & 0x0F).collect();
         let packed = pack_nibbles(&codes);
@@ -169,7 +177,8 @@ mod tests {
         assert_eq!(unpacked, codes);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn nibble_pack_order_lower_is_even_index() {
         // Pin the convention: byte[0] lower nibble = code[0], upper = code[1].
         let codes = [0x03u8, 0x0Cu8];
@@ -177,7 +186,8 @@ mod tests {
         assert_eq!(packed, vec![0xC3], "lower=0x3 (even), upper=0xC (odd)");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn decode_fp4_into_matches_table() {
         let bytes = [0xC3u8, 0x01u8];
         let mut out = [0.0f32; 4];
@@ -192,14 +202,16 @@ mod tests {
     /// FP4 E2M1 has no NaN representation. Our encoder maps NaN → +0
     /// (code 0x00), matching DeepSeek-V4 and OCP guidance that NaNs
     /// should never appear in FP4 storage.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_nan_input_maps_to_zero() {
         assert_eq!(f32_to_e2m1(f32::NAN), 0x00);
         assert_eq!(e2m1_to_f32(f32_to_e2m1(f32::NAN)), 0.0);
     }
 
     /// FP4 has no Inf either — ±Inf saturate to ±6 (the max representable).
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_inf_saturates() {
         assert_eq!(e2m1_to_f32(f32_to_e2m1(f32::INFINITY)), 6.0);
         assert_eq!(e2m1_to_f32(f32_to_e2m1(f32::NEG_INFINITY)), -6.0);
@@ -208,7 +220,8 @@ mod tests {
     /// Very-small positive values that fall below FP4's smallest
     /// non-zero magnitude (0.5) should round to either 0 or 0.5
     /// depending on distance. RTE picks even tie-break.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_subnormal_like_values() {
         // 0.24 is closer to 0 than to 0.5 → rounds to 0.
         assert_eq!(e2m1_to_f32(f32_to_e2m1(0.24)), 0.0);
@@ -220,7 +233,8 @@ mod tests {
     }
 
     /// The value encoding preserves sign bit across zero.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_signed_zero() {
         // 0.0 and -0.0 both quantise to *some* code encoding 0.0. The
         // canonical positive zero is 0x00; the negative zero is 0x08.
@@ -234,7 +248,8 @@ mod tests {
     }
 
     /// Nibble packing is stable across varying lengths.
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn fp4_nibble_packing_assorted_lengths() {
         for n in [2usize, 4, 16, 64, 256] {
             let codes: Vec<u8> = (0..n).map(|i| (i as u8) & 0x0F).collect();

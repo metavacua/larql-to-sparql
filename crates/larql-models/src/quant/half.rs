@@ -100,7 +100,11 @@ pub fn encode_bf16(data: &[f32]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_round_trip() {
         for &v in &[0.0f32, 1.0, -1.0, 0.5, 100.0, 2.71] {
             let bits = f32_to_f16(v);
@@ -112,7 +116,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bf16_round_trip() {
         for &v in &[0.0f32, 1.0, -1.0, 0.5, 100.0, -42.0] {
             let bits = f32_to_bf16(v);
@@ -124,7 +129,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_special_values() {
         assert_eq!(f16_to_f32(0), 0.0);
         assert_eq!(f16_to_f32(0x8000), -0.0); // negative zero
@@ -133,14 +139,16 @@ mod tests {
         assert!(f16_to_f32(0x7E00).is_nan()); // nan
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_known_values() {
         assert_eq!(f16_to_f32(0x3C00), 1.0);
         assert_eq!(f16_to_f32(0x4000), 2.0);
         assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bf16_known_values() {
         assert_eq!(bf16_to_f32(0x3F80), 1.0);
         assert_eq!(bf16_to_f32(0x4000), 2.0);
@@ -148,7 +156,8 @@ mod tests {
         assert_eq!(bf16_to_f32(0xBF80), -1.0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn f16_encode_decode_round_trip() {
         let data = vec![1.0f32, -2.0, 0.0, 0.5, 100.0];
         let encoded = encode_f16(&data);
@@ -160,7 +169,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bf16_encode_decode_round_trip() {
         let data = vec![1.0f32, -2.0, 0.0, 0.5, 100.0];
         let encoded = encode_bf16(&data);

@@ -563,6 +563,9 @@ mod tests {
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
 
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     // BF16 encoding for common values (little-endian: low byte first).
     fn bf16_bytes(v: f32) -> [u8; 2] {
         let bits = v.to_bits();
@@ -580,28 +583,32 @@ mod tests {
         v
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_inter_returns_zero_vec() {
         let h = vec![1.0f32; 4];
         let out = run_single_expert(&h, &[], &[], 0, QuantFormat::BF16, Activation::Silu);
         assert_eq!(out, vec![0.0f32; 4]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn zero_hidden_returns_empty() {
         let h: Vec<f32> = vec![];
         let out = run_single_expert(&h, &[], &[], 0, QuantFormat::BF16, Activation::Silu);
         assert_eq!(out.len(), 0);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn pre_experts_norm_empty_weight_returns_input_copy() {
         let h = vec![1.0f32, -2.0, 3.5];
         let out = pre_experts_norm(&h, &[], 0.0, 1e-6);
         assert_eq!(out, h);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn pre_experts_norm_applies_weight_and_offset() {
         let h = vec![3.0f32, 4.0];
         let norm_w = vec![1.0f32, 2.0];
@@ -614,7 +621,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn nonzero_weights_produce_nonzero_output() {
         let hidden = 4;
         let inter = 2;
@@ -637,7 +645,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_matches_allocating_path() {
         let hidden = 4;
         let inter = 2;
@@ -669,7 +678,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_zeroes_output_for_empty_weights() {
         let hidden = 4;
         let inter = 2;
@@ -690,7 +700,8 @@ mod tests {
         assert_eq!(out, &[0.0, 0.0, 0.0, 0.0]);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn quantize_h_norm_for_q4k_rejects_empty_or_misaligned_input() {
         assert!(quantize_h_norm_for_q4k(&[]).is_none());
         assert!(quantize_h_norm_for_q4k(&vec![1.0f32; 255]).is_none());
@@ -699,7 +710,8 @@ mod tests {
         assert_eq!(q8.qs.len(), 256);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_q4k_q8k_into_zeroes_output_for_short_gate_up() {
         let hidden = 256;
         let inter = 1;
@@ -713,7 +725,8 @@ mod tests {
         assert!(out.iter().all(|v| *v == 0.0));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_q4k_q8k_into_valid_weights_produces_finite_output() {
         let hidden = 256;
         let inter = 256;
@@ -745,7 +758,8 @@ mod tests {
         assert!(out.iter().any(|v| v.abs() > 1e-8), "got all-zero output");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn run_single_expert_into_q4k_cached_dequant_path_runs() {
         let hidden = 256;
         let inter = 256;
@@ -776,7 +790,8 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn with_norm_matches_manual_prenorm() {
         let hidden = 4;
         let inter = 2;
@@ -824,7 +839,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn gelu_tanh_differs_from_silu() {
         let hidden = 4;
         let inter = 2;

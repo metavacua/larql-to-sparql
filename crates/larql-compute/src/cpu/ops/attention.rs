@@ -68,7 +68,11 @@ pub fn causal_attention(
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn single_token_attention() {
         // seq=1: attention should just return V (softmax of one element = 1.0)
         let q = vec![1.0, 0.0, 0.0, 0.0];
@@ -79,7 +83,8 @@ mod tests {
         assert!((out[1] - 0.6).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn causal_mask() {
         // seq=2: position 0 can only see position 0
         let q = vec![1.0, 0.0, 0.0, 1.0]; // 2 queries
@@ -91,7 +96,8 @@ mod tests {
         assert!((out[1] - 0.0).abs() < 1e-5);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn output_shape() {
         let seq = 6;
         let dim = 320;
@@ -102,7 +108,8 @@ mod tests {
         assert_eq!(out.len(), seq * dim);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn uniform_keys_average_values() {
         // When all Q and K vectors are identical, the last token attends equally
         // to all preceding positions, so its output equals the mean of the V vectors.
@@ -127,7 +134,8 @@ mod tests {
         assert!(t2[1].abs() < 1e-6);
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn later_positions_cannot_see_future() {
         // t=0 sees only itself. t=1 sees t=0 and t=1.
         // Encode v0=[10,0], v1=[0,10] so we can tell which positions were attended.
