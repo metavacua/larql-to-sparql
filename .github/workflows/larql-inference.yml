@@ -14,7 +14,7 @@ name: larql-inference
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-inference/**'
       - 'crates/larql-compute/**'
@@ -27,7 +27,7 @@ on:
       - '.github/workflows/larql-inference.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-inference/**'
       - 'crates/larql-compute/**'
