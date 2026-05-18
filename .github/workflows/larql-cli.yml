@@ -1,0 +1,227 @@
+# larql-cli cross-platform CI
+#
+# Top-level `larql` binary. Default features enable Metal on every
+# member crate, which only resolves on macOS. Linux/Windows runs use
+# `--no-default-features` so the CPU-only surface is exercised. macOS
+# runs include defaults so the Metal feature path is checked too.
+#
+# `convert_moe_to_per_layer` example currently doesn't build against
+# the post-refactor `larql-inference` API; CI checks bins + tests
+# instead of `--all-targets` until that example is repaired.
+
+name: larql-cli
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, ci/workflows-complete]
+    paths:
+      - 'crates/larql-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-kv/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-models/**'
+      - 'crates/larql-inference/src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-cli.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, ci/workflows-complete]
+    paths:
+      - 'crates/larql-cli/**'
+      - 'crates/larql-lql/**'
+      - 'crates/larql-kv/**'
+      - 'crates/larql-vindex/**'
+      - 'crates/larql-models/**'
+      - 'crates/larql-inference/src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/workflows/larql-cli.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: test - ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+
+    permissions:
+      contents: read
+      checks: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            platform: ubuntu
+            target: x86_64-unknown-linux-gnu
+
+          - name: windows-latest
+            runner: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+
+          - name: macos-15-arm64
+            runner: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+
+          - name: android-aarch64
+            runner: ubuntu-24.04
+            platform: android
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            runner: ubuntu-24.04
+            platform: android
+            target: armv7-linux-androideabi
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set Android NDK compiler vars (aarch64)
+        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CXX=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set Android NDK compiler vars (armv7)
+        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CXX=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set up QEMU for Android emulation
+        if: matrix.platform == 'android'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Enable static CRT and redirect libc++_shared for Android
+        if: matrix.platform == 'android'
+        run: |
+          echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
+          echo "TMPDIR=/tmp" >> $GITHUB_ENV
+          NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          LIBUNWIND_AARCH64=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/aarch64*" | head -1)
+          LIBUNWIND_ARM=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/arm*" ! -path "*/aarch64*" | head -1)
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_static.a ${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++abi.a ${LIBUNWIND_AARCH64})" \
+            > "${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_shared.a"
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
+            > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
+
+      - name: Install OpenBLAS (Linux)
+        if: matrix.platform == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install OpenBLAS (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$vcpkgRoot\vcpkg.exe" install openblas:x64-windows
+
+      - name: Install protoc (Windows)
+        if: matrix.platform == 'windows'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-cli-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-cli-
+
+      - name: Format check
+        run: cargo fmt -p larql-cli -- --check
+
+      - name: Check (CPU only) on Linux/Windows/Android
+        if: matrix.platform != 'macos'
+        run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests --no-default-features
+
+      - name: Check (default features incl. metal) on macOS
+        if: matrix.platform == 'macos'
+        run: cargo check -p larql-cli --target ${{ matrix.target }} --bins --tests
+
+      - name: Tests (CPU only) on Linux/Windows/Android
+        run: cargo test -p larql-cli --target ${{ matrix.target }} --no-default-features
+
+      - name: Tests (default features) on macOS
+        if: matrix.platform == 'macos'
+        run: cargo test -p larql-cli --target ${{ matrix.target }}
+
+  coverage:
+    name: coverage - ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev pkg-config
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-cli --no-default-features --summary-only
