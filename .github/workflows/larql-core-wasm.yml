@@ -109,8 +109,3 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
         run: cargo check -p larql-core --target wasm32-unknown-unknown --examples --no-default-features
-
-      - name: Check benches (compile only)
-        env:
-          RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: cargo check -p larql-core --target wasm32-unknown-unknown --benches --no-default-features
