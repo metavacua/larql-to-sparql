@@ -17,9 +17,9 @@ name: validate
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

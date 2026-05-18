@@ -13,7 +13,7 @@ permissions:
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-server/**'
       - 'crates/larql-router-protocol/**'
@@ -26,7 +26,7 @@ on:
       - '.github/workflows/larql-server.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-server/**'
       - 'crates/larql-router-protocol/**'
