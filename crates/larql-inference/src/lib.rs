@@ -133,6 +133,11 @@ pub use forward::{
 // `GridGenerateResult`, `ChatMLRenderer`, `GemmaRenderer`, `LayerOutput`,
 // `Llama3Renderer`, `PerLayerGraph`, `TurnRenderer`. They remain reachable
 // via `larql_inference::layer_graph::*`.
+#[cfg(not(target_arch = "wasm32"))]
+pub use layer_graph::grid::{
+    generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
+    generate_with_remote_moe_batch,
+};
 pub use layer_graph::{
     build_adaptive_graph,
     detect_template,
@@ -170,11 +175,6 @@ pub use layer_graph::{
     TemplatePattern,
     TemplateUniverse,
     WalkLayerGraph,
-};
-#[cfg(not(target_arch = "wasm32"))]
-pub use layer_graph::grid::{
-    generate_with_remote_ffn, generate_with_remote_ffn_batch, generate_with_remote_moe,
-    generate_with_remote_moe_batch,
 };
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};

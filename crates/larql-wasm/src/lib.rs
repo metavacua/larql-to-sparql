@@ -63,8 +63,7 @@ impl GraphSession {
     /// which feature variant is active.  The *parallel* variant benchmarks N
     /// independent computations running concurrently — see `benchmark_pagerank`.
     pub fn pagerank(&self, iterations: u32, top_k: usize) -> Result<String, JsValue> {
-        let result =
-            larql_core::pagerank(&self.graph, 0.85, iterations as usize, 1e-6);
+        let result = larql_core::pagerank(&self.graph, 0.85, iterations as usize, 1e-6);
         let top = result.top_k(top_k);
         let json: Vec<_> = top
             .iter()
@@ -78,8 +77,7 @@ impl GraphSession {
     /// Returns a JSON array of visited entity names in visit order.
     pub fn bfs(&self, start: &str, depth: u32) -> Result<String, JsValue> {
         let result = larql_core::bfs_traversal(&self.graph, start, depth as usize);
-        serde_json::to_string(&result.nodes)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&result.nodes).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }
 

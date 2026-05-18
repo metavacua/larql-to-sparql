@@ -24,12 +24,12 @@ fn rss_mb() -> f64 {
 }
 
 use clap::Args;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::LayerShardedBackend;
 use larql_inference::{
     predict_with_ffn, predict_with_router, vindex::WalkFfn, InferenceModel, LayerFfnRouter,
     ModelWeights, SparseFfn, WeightFfn,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use larql_inference::LayerShardedBackend;
 use larql_vindex::{
     load_vindex_embeddings, load_vindex_tokenizer, ndarray, tokenizers, IndexLoadCallbacks,
     SilentLoadCallbacks, VectorIndex,

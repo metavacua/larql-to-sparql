@@ -41,8 +41,7 @@ fn stats_returns_valid_json() {
     let s = GraphSession::new();
     let json_str = s.stats().expect("stats failed");
     // Just check it parses as JSON and has expected fields.
-    let v: serde_json::Value =
-        serde_json::from_str(&json_str).expect("stats is not valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&json_str).expect("stats is not valid JSON");
     assert!(v["edges"].is_number());
     assert!(v["entities"].is_number());
 }

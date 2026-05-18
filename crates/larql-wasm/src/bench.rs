@@ -23,11 +23,13 @@ fn synthetic_graph(n_edges: u32) -> larql_core::Graph {
     let relations = ["knows", "contains", "relates_to", "precedes", "follows"];
 
     for _ in 0..n_edges {
-        rng = rng.wrapping_mul(6_364_136_223_846_793_005)
-                 .wrapping_add(1_442_695_040_888_963_407);
+        rng = rng
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let s = format!("e{}", rng % entities);
-        rng = rng.wrapping_mul(6_364_136_223_846_793_005)
-                 .wrapping_add(1_442_695_040_888_963_407);
+        rng = rng
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let o = format!("e{}", rng % entities);
         let rel = relations[(rng % relations.len() as u64) as usize];
         graph.add_edge(larql_core::Edge::new(s, rel, o));
