@@ -9,7 +9,7 @@ name: larql-experts
 
 on:
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-experts/**'
       - 'Cargo.toml'
@@ -18,7 +18,7 @@ on:
       - '.github/workflows/larql-experts.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
     paths:
       - 'crates/larql-experts/**'
       - 'Cargo.toml'
