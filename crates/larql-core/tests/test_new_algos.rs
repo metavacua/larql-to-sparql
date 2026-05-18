@@ -1,6 +1,9 @@
 use larql_core::algo::shortest_path::default_weight;
 use larql_core::*;
 
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
 fn geo_graph() -> Graph {
     let mut g = Graph::new();
     let edges = vec![
@@ -29,7 +32,8 @@ fn geo_graph() -> Graph {
 
 // ── Diff ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_diff_identical() {
     let g = geo_graph();
     let d = diff(&g, &g);
@@ -38,7 +42,8 @@ fn test_diff_identical() {
     assert!(d.changed.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_diff_added() {
     let old = Graph::new();
     let new = geo_graph();
@@ -47,7 +52,8 @@ fn test_diff_added() {
     assert!(d.removed.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_diff_removed() {
     let old = geo_graph();
     let new = Graph::new();
@@ -56,7 +62,8 @@ fn test_diff_removed() {
     assert_eq!(d.removed.len(), old.edge_count());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_diff_changed_confidence() {
     let mut old = Graph::new();
     old.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.5));
@@ -72,7 +79,8 @@ fn test_diff_changed_confidence() {
     assert!((d.changed[0].new.confidence - 0.9).abs() < 0.01);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_diff_changed_metadata_source_and_injection() {
     let mut old_edge = Edge::new("France", "capital-of", "Paris")
         .with_source(SourceType::Parametric)
@@ -103,7 +111,8 @@ fn test_diff_changed_metadata_source_and_injection() {
 
 // ── Merge strategies ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_union() {
     let mut target = Graph::new();
     target.add_edge(Edge::new("A", "r", "B").with_confidence(0.5));
@@ -118,7 +127,8 @@ fn test_merge_union() {
     assert!((target.select("A", Some("r"))[0].confidence - 0.5).abs() < 0.01);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_max_confidence() {
     let mut target = Graph::new();
     target.add_edge(Edge::new("A", "r", "B").with_confidence(0.5));
@@ -131,7 +141,8 @@ fn test_merge_max_confidence() {
     assert!((target.select("A", Some("r"))[0].confidence - 0.9).abs() < 0.01);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_max_confidence_keeps_higher() {
     let mut target = Graph::new();
     target.add_edge(Edge::new("A", "r", "B").with_confidence(0.9));
@@ -143,7 +154,8 @@ fn test_merge_max_confidence_keeps_higher() {
     assert_eq!(updated, 0); // target was already higher
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_source_priority() {
     let mut target = Graph::new();
     target.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Parametric));
@@ -159,7 +171,8 @@ fn test_merge_source_priority() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_merge_custom_source_priority() {
     let mut target = Graph::new();
     target.add_edge(Edge::new("A", "r", "B").with_source(SourceType::Parametric));
@@ -182,7 +195,8 @@ fn test_merge_custom_source_priority() {
 
 // ── PageRank ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_pagerank_basic() {
     let g = geo_graph();
     let result = pagerank(&g, 0.85, 100, 1e-6);
@@ -196,7 +210,8 @@ fn test_pagerank_basic() {
     assert!(top5.iter().any(|(name, _)| *name == "Europe"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_pagerank_empty() {
     let g = Graph::new();
     let result = pagerank(&g, 0.85, 100, 1e-6);
@@ -204,7 +219,8 @@ fn test_pagerank_empty() {
     assert!(result.ranks.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_pagerank_single_edge() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B"));
@@ -214,7 +230,8 @@ fn test_pagerank_single_edge() {
 
 // ── BFS/DFS Traversal ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_traversal() {
     let g = geo_graph();
     let result = bfs_traversal(&g, "France", 2);
@@ -226,7 +243,8 @@ fn test_bfs_traversal() {
     assert!(result.depths.contains_key("Europe"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_depth_limit() {
     let g = geo_graph();
     let depth0 = bfs_traversal(&g, "France", 0);
@@ -238,7 +256,8 @@ fn test_bfs_depth_limit() {
     assert!(depth1.max_depth <= 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_dfs_depth_zero_has_no_traversed_edges() {
     let g = geo_graph();
     let result = dfs(&g, "France", 0);
@@ -247,7 +266,8 @@ fn test_dfs_depth_zero_has_no_traversed_edges() {
     assert!(result.edges.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_dfs_traversal() {
     let g = geo_graph();
     let result = dfs(&g, "France", 3);
@@ -257,7 +277,8 @@ fn test_dfs_traversal() {
     assert!(result.nodes.len() > 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_bfs_unknown_entity() {
     let g = geo_graph();
     let result = bfs_traversal(&g, "Narnia", 5);
@@ -266,7 +287,8 @@ fn test_bfs_unknown_entity() {
 
 // ── A* Search ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_astar_finds_path() {
     let g = geo_graph();
     let result = astar(&g, "Mozart", "Europe", default_weight, |_, _| 0.0);
@@ -276,7 +298,8 @@ fn test_astar_finds_path() {
     assert!(!result.path.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_astar_no_path() {
     let g = geo_graph();
     let result = astar(&g, "France", "Asia", default_weight, |_, _| 0.0);
@@ -285,7 +308,8 @@ fn test_astar_no_path() {
     assert!(!result.found || result.path.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_astar_with_heuristic() {
     let g = geo_graph();
     // Heuristic that slightly guides toward the target (always admissible at 0)
@@ -296,7 +320,8 @@ fn test_astar_with_heuristic() {
     assert!((result.cost - dijkstra.0).abs() < 0.001);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_path_result_nodes_explored() {
     let g = geo_graph();
     let result = astar(&g, "Mozart", "Europe", default_weight, |_, _| 0.0);
@@ -305,7 +330,8 @@ fn test_path_result_nodes_explored() {
 
 // ── CSV I/O ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_csv_roundtrip() {
     let g = geo_graph();
     let path = std::env::temp_dir().join("test_csv_roundtrip.csv");
@@ -321,7 +347,8 @@ fn test_csv_roundtrip() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_csv_preserves_confidence() {
     let mut g = Graph::new();
     g.add_edge(
@@ -341,7 +368,8 @@ fn test_csv_preserves_confidence() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_csv_roundtrip_quoted_fields() {
     let mut g = Graph::new();
     g.add_edge(Edge::new(
@@ -362,7 +390,8 @@ fn test_csv_roundtrip_quoted_fields() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_csv_format() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));

@@ -2,6 +2,9 @@
 
 use larql_core::*;
 
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
 fn geo_graph() -> Graph {
     let mut g = Graph::new();
     // Component 1: Europe
@@ -31,7 +34,8 @@ fn chain_graph() -> Graph {
 // CONNECTED COMPONENTS
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn components_finds_two_components() {
     let g = geo_graph();
     let comps = connected_components(&g);
@@ -45,7 +49,8 @@ fn components_finds_two_components() {
     assert_eq!(comps[1], vec!["Asia", "Japan", "Tokyo"]);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn components_equal_size_order_is_deterministic() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("Z", "to", "Y"));
@@ -55,7 +60,8 @@ fn components_equal_size_order_is_deterministic() {
     assert_eq!(comps, vec![vec!["A", "B"], vec!["Y", "Z"]]);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn components_europe_and_asia_separate() {
     let g = geo_graph();
     assert!(
@@ -73,7 +79,8 @@ fn components_europe_and_asia_separate() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn components_single_component() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "to", "B").with_confidence(1.0));
@@ -83,20 +90,23 @@ fn components_single_component() {
     assert_eq!(comps[0].len(), 3);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn components_empty_graph() {
     let g = Graph::new();
     let comps = connected_components(&g);
     assert!(comps.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn are_connected_same_node() {
     let g = geo_graph();
     assert!(are_connected(&g, "France", "France"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn are_connected_nonexistent() {
     let g = geo_graph();
     assert!(!are_connected(&g, "France", "Narnia"));
@@ -106,7 +116,8 @@ fn are_connected_nonexistent() {
 // WALK: HIGHEST CONFIDENCE SELECTION
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_picks_highest_confidence() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital", "Paris").with_confidence(0.95));
@@ -119,13 +130,15 @@ fn walk_picks_highest_confidence() {
     assert!((path[0].confidence - 0.95).abs() < 1e-10);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_returns_none_on_missing_relation() {
     let g = geo_graph();
     assert!(g.walk("France", &["currency"]).is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_multi_hop() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital", "Paris").with_confidence(0.95));
@@ -140,7 +153,8 @@ fn walk_multi_hop() {
 // WALK ALL PATHS
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_all_paths_finds_multiple() {
     let g = chain_graph();
     let paths = walk_all_paths(&g, "A", &["leads_to", "leads_to"], 10);
@@ -157,21 +171,24 @@ fn walk_all_paths_finds_multiple() {
     assert!((paths[0].min_confidence - 0.8).abs() < 1e-10);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_all_paths_max_limit() {
     let g = chain_graph();
     let paths = walk_all_paths(&g, "A", &["leads_to", "leads_to"], 2);
     assert_eq!(paths.len(), 2, "should respect max_paths limit");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_all_paths_no_match() {
     let g = chain_graph();
     let paths = walk_all_paths(&g, "A", &["nonexistent"], 10);
     assert!(paths.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn walk_all_paths_single_hop() {
     let g = chain_graph();
     let paths = walk_all_paths(&g, "A", &["leads_to"], 10);
@@ -182,7 +199,8 @@ fn walk_all_paths_single_hop() {
 // REMOVE EDGE + INDEX REBUILD
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn remove_edge_rebuilds_indexes() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital", "Paris").with_confidence(0.95));
@@ -207,7 +225,8 @@ fn remove_edge_rebuilds_indexes() {
     assert_eq!(france_edges[0].relation, "language");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn remove_edge_nonexistent() {
     let mut g = geo_graph();
     let count_before = g.edge_count();
@@ -219,21 +238,24 @@ fn remove_edge_nonexistent() {
 // SEARCH EDGE CASES
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn search_empty_query() {
     let g = geo_graph();
     let results = g.search("", 10);
     assert!(results.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn search_no_match() {
     let g = geo_graph();
     let results = g.search("Narnia", 10);
     assert!(results.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn search_case_insensitive() {
     let g = geo_graph();
     let r1 = g.search("france", 10);
@@ -246,7 +268,8 @@ fn search_case_insensitive() {
 // DEDUPLICATION
 // ══════════════════════════════════════════════════════════════
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn deduplicate_after_merge() {
     // Merge two graphs with overlapping edges to create duplicates,
     // then test dedup with MaxConfidence strategy.

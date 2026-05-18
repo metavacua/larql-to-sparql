@@ -1,8 +1,12 @@
 use larql_core::*;
 
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
 // ── Construction ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_empty_graph() {
     let g = Graph::new();
     assert_eq!(g.edge_count(), 0);
@@ -13,7 +17,8 @@ fn test_empty_graph() {
     assert!(g.list_relations().is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_add_edge() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
@@ -21,7 +26,8 @@ fn test_add_edge() {
     assert_eq!(g.node_count(), 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_add_edges_batch() {
     let mut g = Graph::new();
     g.add_edges(vec![
@@ -33,7 +39,8 @@ fn test_add_edges_batch() {
     assert_eq!(g.node_count(), 6);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_duplicate_skipped() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
@@ -43,7 +50,8 @@ fn test_duplicate_skipped() {
     assert!((g.edges()[0].confidence - 0.89).abs() < f64::EPSILON);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_try_add_edge_reports_duplicate() {
     let mut g = Graph::new();
     assert_eq!(
@@ -59,7 +67,8 @@ fn test_try_add_edge_reports_duplicate() {
     assert!((g.edges()[0].confidence - 0.89).abs() < f64::EPSILON);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_insert_edge_replaces_changed_payload() {
     let mut g = Graph::new();
     let original = Edge::new("France", "capital-of", "Paris")
@@ -86,7 +95,8 @@ fn test_insert_edge_replaces_changed_payload() {
     assert_eq!(g.select_reverse("Paris", Some("capital-of")).len(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_same_subject_relation_different_object() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "language-of", "French"));
@@ -96,7 +106,8 @@ fn test_same_subject_relation_different_object() {
 
 // ── Remove ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_remove_edge() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -108,7 +119,8 @@ fn test_remove_edge() {
     assert!(g.exists("Germany", "capital-of", "Berlin"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_remove_nonexistent_edge() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -116,7 +128,8 @@ fn test_remove_nonexistent_edge() {
     assert_eq!(g.edge_count(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_remove_rebuilds_indexes() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -136,7 +149,8 @@ fn test_remove_rebuilds_indexes() {
 
 // ── Deduplication ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_deduplicate_max_confidence() {
     let mut g = Graph::new();
     // Manually build without dedup check — use rebuild
@@ -150,7 +164,8 @@ fn test_deduplicate_max_confidence() {
 
 // ── Queries ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_select() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -171,7 +186,8 @@ fn test_select() {
     assert!(missing.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_select_reverse() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -189,7 +205,8 @@ fn test_select_reverse() {
     assert_eq!(euro_currency.len(), 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_describe() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -207,7 +224,8 @@ fn test_describe() {
     assert!(empty.incoming.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_exists() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -218,7 +236,8 @@ fn test_exists() {
     assert!(!g.exists("France", "currency", "Paris"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_get_edge_exact_triple() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
@@ -231,7 +250,8 @@ fn test_get_edge_exact_triple() {
     assert!(g.get_edge("France", "currency", "Paris").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_multiedge_lookup_helpers() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "friend-of", "B"));
@@ -253,7 +273,8 @@ fn test_multiedge_lookup_helpers() {
     assert!(g.incoming_relations("missing").is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_walk() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
@@ -266,7 +287,8 @@ fn test_walk() {
     assert_eq!(path[1].relation, "located-in");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_walk_picks_highest_confidence() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "language-of", "French").with_confidence(0.84));
@@ -276,7 +298,8 @@ fn test_walk_picks_highest_confidence() {
     assert_eq!(dest, "French");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_walk_fails_on_missing_hop() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -284,7 +307,8 @@ fn test_walk_fails_on_missing_hop() {
     assert!(g.walk("France", &["capital-of", "currency"]).is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_search() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -301,7 +325,8 @@ fn test_search() {
     assert!(results.is_empty());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_search_max_results() {
     let mut g = Graph::new();
     for i in 0..20 {
@@ -312,7 +337,8 @@ fn test_search_max_results() {
     assert_eq!(results.len(), 5);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_search_tie_order_is_insertion_order() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("Entity C", "rel", "Target"));
@@ -324,7 +350,8 @@ fn test_search_tie_order_is_insertion_order() {
     assert_eq!(subjects, vec!["Entity C", "Entity A", "Entity B"]);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_subgraph() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -347,7 +374,8 @@ fn test_subgraph() {
     assert!(!sub1.exists("Germany", "capital-of", "Berlin"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_subgraph_unknown_entity() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -357,7 +385,8 @@ fn test_subgraph_unknown_entity() {
 
 // ── Count ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_count() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_source(SourceType::Parametric));
@@ -378,7 +407,8 @@ fn test_count() {
 
 // ── Node ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_node() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris"));
@@ -399,7 +429,8 @@ fn test_node() {
 
 // ── Stats ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_stats() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
@@ -414,7 +445,8 @@ fn test_stats() {
     assert!((stats.avg_degree - 1.0).abs() < 0.001);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_stats_empty() {
     let g = Graph::new();
     let stats = g.stats();
@@ -424,7 +456,8 @@ fn test_stats_empty() {
     assert!((stats.avg_confidence - 0.0).abs() < f64::EPSILON);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_connected_components() {
     let mut g = Graph::new();
     // Component 1: France <-> Paris
@@ -437,7 +470,8 @@ fn test_connected_components() {
     assert_eq!(stats.connected_components, 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_single_component() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("A", "r", "B"));
@@ -450,7 +484,8 @@ fn test_single_component() {
 
 // ── List accessors ──
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_list_relations() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "currency", "Euro"));
@@ -460,7 +495,8 @@ fn test_list_relations() {
     assert_eq!(g.list_relations(), vec!["capital-of", "currency"]);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_list_entities() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("Paris", "located-in", "France"));
@@ -472,7 +508,8 @@ fn test_list_entities() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_nodes_are_sorted_by_name() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("Paris", "located-in", "France"));

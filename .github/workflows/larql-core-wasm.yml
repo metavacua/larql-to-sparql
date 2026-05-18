@@ -1,0 +1,126 @@
+# larql-core WASM CI
+#
+# Mirrors larql-core.yml for wasm32-unknown-unknown. Uses wasm-pack test --node
+# and --firefox --headless as the execution environments instead of cargo test.
+# fail-fast is false intentionally: all failures must be visible.
+#
+# Tests that use std::fs or std::env::temp_dir() will compile but panic at
+# runtime in wasm32 — that is the expected signal, not a CI misconfiguration.
+
+name: larql-core-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-core-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-core-wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-core-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-core-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-core -- --check
+
+      - name: Check (no default features)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-core --target wasm32-unknown-unknown --no-default-features
+
+      - name: Check (msgpack feature)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-core --target wasm32-unknown-unknown --no-default-features --features msgpack
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-core --target wasm32-unknown-unknown --no-default-features -- -D warnings
+
+      - name: wasm-pack test · node · no default features
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test crates/larql-core --node -- --no-default-features
+
+      - name: wasm-pack test · node · msgpack feature
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test crates/larql-core --node -- --no-default-features --features msgpack
+
+      - name: wasm-pack test · firefox · no default features
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test crates/larql-core --firefox --headless -- --no-default-features
+
+      - name: wasm-pack test · firefox · msgpack feature
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test crates/larql-core --firefox --headless -- --no-default-features --features msgpack
+
+      - name: Check examples (compile only)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-core --target wasm32-unknown-unknown --examples --no-default-features
+
+      - name: Check benches (compile only)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-core --target wasm32-unknown-unknown --benches --no-default-features

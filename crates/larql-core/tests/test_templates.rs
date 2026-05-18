@@ -1,6 +1,10 @@
 use larql_core::engine::templates::{PromptTemplate, TemplateRegistry};
 
-#[test]
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_empty_registry() {
     let reg = TemplateRegistry::new();
     assert!(reg.all().is_empty());
@@ -9,7 +13,8 @@ fn test_empty_registry() {
     assert!(reg.get("anything").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_register_and_get() {
     let mut reg = TemplateRegistry::new();
     reg.register(PromptTemplate {
@@ -26,7 +31,8 @@ fn test_register_and_get() {
     assert!(tmpl.multi_token);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_format_subject() {
     let tmpl = PromptTemplate {
         relation: "capital-of".to_string(),
@@ -43,7 +49,8 @@ fn test_format_subject() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_format_no_reverse() {
     let tmpl = PromptTemplate {
         relation: "r".to_string(),
@@ -56,7 +63,8 @@ fn test_format_no_reverse() {
     assert!(tmpl.format_reverse("anything").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_json_roundtrip() {
     let mut reg = TemplateRegistry::new();
     reg.register(PromptTemplate {
@@ -86,7 +94,8 @@ fn test_json_roundtrip() {
     assert!(cap.multi_token);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_load_from_example_file() {
     let contents = std::fs::read_to_string("../../examples/templates.json").unwrap();
     let value: serde_json::Value = serde_json::from_str(&contents).unwrap();

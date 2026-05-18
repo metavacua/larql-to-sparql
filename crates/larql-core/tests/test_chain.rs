@@ -1,7 +1,11 @@
 use larql_core::engine::mock_provider::MockProvider;
 use larql_core::*;
 
-#[test]
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_single_token() {
     let provider = MockProvider::with_knowledge(vec![(
         "The capital of France is".into(),
@@ -15,7 +19,8 @@ fn test_chain_single_token() {
     assert!((result.avg_probability() - 0.89).abs() < 0.001);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_stops_on_low_confidence() {
     let provider = MockProvider::with_knowledge(vec![("prompt".into(), "answer".into(), 0.1)]);
 
@@ -24,7 +29,8 @@ fn test_chain_stops_on_low_confidence() {
     assert_eq!(result.num_passes, 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_stops_on_empty_response() {
     let provider = MockProvider::new(); // no knowledge
 
@@ -33,7 +39,8 @@ fn test_chain_stops_on_empty_response() {
     assert_eq!(result.num_passes, 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_respects_custom_stop_tokens() {
     let provider = MockProvider::with_knowledge(vec![("prompt".into(), "Paris|".into(), 0.9)]);
 
@@ -42,7 +49,8 @@ fn test_chain_respects_custom_stop_tokens() {
     assert_eq!(result.num_passes, 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_result_min_probability() {
     let result = ChainResult {
         answer: "test".to_string(),
@@ -55,7 +63,8 @@ fn test_chain_result_min_probability() {
     assert!((result.avg_probability() - 0.7).abs() < f64::EPSILON);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_chain_result_empty() {
     let result = ChainResult {
         answer: String::new(),

@@ -1,6 +1,10 @@
 use larql_core::*;
 
-#[test]
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_checkpoint_write_and_replay() {
     let path = std::env::temp_dir().join("test_checkpoint.log");
     // Clean up from any prior run
@@ -25,7 +29,8 @@ fn test_checkpoint_write_and_replay() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_checkpoint_append_across_sessions() {
     let path = std::env::temp_dir().join("test_checkpoint_append.log");
     std::fs::remove_file(&path).ok();
@@ -54,7 +59,8 @@ fn test_checkpoint_append_across_sessions() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_checkpoint_empty_file() {
     let path = std::env::temp_dir().join("test_checkpoint_empty.log");
     std::fs::remove_file(&path).ok();
@@ -66,7 +72,8 @@ fn test_checkpoint_empty_file() {
     std::fs::remove_file(&path).ok();
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_checkpoint_preserves_metadata() {
     let path = std::env::temp_dir().join("test_checkpoint_meta.log");
     std::fs::remove_file(&path).ok();

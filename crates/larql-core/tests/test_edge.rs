@@ -2,7 +2,11 @@ use std::collections::HashSet;
 
 use larql_core::*;
 
-#[test]
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_edge_new_defaults() {
     let e = Edge::new("France", "capital-of", "Paris");
     assert_eq!(e.subject, "France");
@@ -14,7 +18,8 @@ fn test_edge_new_defaults() {
     assert!(e.injection.is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_edge_builder() {
     let e = Edge::new("France", "capital-of", "Paris")
         .with_confidence(0.89)
@@ -30,7 +35,8 @@ fn test_edge_builder() {
     assert_eq!(meta["passes"], 3);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_confidence_clamped() {
     let high = Edge::new("A", "r", "B").with_confidence(1.5);
     assert!((high.confidence - 1.0).abs() < f64::EPSILON);
@@ -39,21 +45,24 @@ fn test_confidence_clamped() {
     assert!((low.confidence - 0.0).abs() < f64::EPSILON);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_edge_equality_ignores_confidence() {
     let e1 = Edge::new("France", "capital-of", "Paris").with_confidence(0.89);
     let e2 = Edge::new("France", "capital-of", "Paris").with_confidence(0.50);
     assert_eq!(e1, e2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_edge_equality_different_triple() {
     let e1 = Edge::new("France", "capital-of", "Paris");
     let e2 = Edge::new("France", "capital-of", "Lyon");
     assert_ne!(e1, e2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_edge_hash_consistency() {
     let e1 = Edge::new("France", "capital-of", "Paris").with_confidence(0.89);
     let e2 = Edge::new("France", "capital-of", "Paris").with_confidence(0.50);
@@ -64,7 +73,8 @@ fn test_edge_hash_consistency() {
     assert_eq!(set.len(), 1); // same triple = same hash
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_triple() {
     let e = Edge::new("France", "capital-of", "Paris");
     let t = e.triple();
@@ -73,7 +83,8 @@ fn test_triple() {
     assert_eq!(t.2, "Paris");
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_compact_roundtrip() {
     let original = Edge::new("France", "capital-of", "Paris")
         .with_confidence(0.89)
@@ -96,14 +107,16 @@ fn test_compact_roundtrip() {
     assert!(restored.metadata.is_some());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_compact_unknown_source_omitted() {
     let e = Edge::new("A", "r", "B");
     let compact = larql_core::core::edge::CompactEdge::from(&e);
     assert!(compact.src.is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_compact_json_serialization() {
     let e = Edge::new("France", "capital-of", "Paris")
         .with_confidence(0.89)
@@ -122,7 +135,8 @@ fn test_compact_json_serialization() {
     assert!(json.get("inj").is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn test_source_type_as_str() {
     assert_eq!(SourceType::Parametric.as_str(), "parametric");
     assert_eq!(SourceType::Document.as_str(), "document");
