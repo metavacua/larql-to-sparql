@@ -194,7 +194,11 @@ pub fn default_should_follow_entity(text: &str) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn test_valid_entity() {
         assert!(default_should_follow_entity("France"));
         assert!(default_should_follow_entity("Paris"));
