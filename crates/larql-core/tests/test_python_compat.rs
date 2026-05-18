@@ -1,11 +1,8 @@
 use larql_core::*;
 
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
-
 /// Load the example graph (matches Python format) and verify every field.
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_load_python_produced_graph() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -21,8 +18,8 @@ fn test_load_python_produced_graph() {
     assert!(g.exists("Berlin", "located-in", "Germany"));
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_confidence() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -35,8 +32,8 @@ fn test_python_graph_confidence() {
     assert!((paris_loc[0].confidence - 0.98).abs() < 0.001);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_source() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -45,8 +42,8 @@ fn test_python_graph_source() {
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_schema() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -62,8 +59,8 @@ fn test_python_graph_schema() {
     assert!(cap.reversible);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_type_rules() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
 
@@ -78,8 +75,8 @@ fn test_python_graph_type_rules() {
     assert_eq!(paris.node_type, Some("city".to_string()));
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_stats() {
     let g = load("../../examples/gemma_4b_knowledge.json").unwrap();
     let stats = g.stats();
@@ -91,8 +88,8 @@ fn test_python_graph_stats() {
 }
 
 /// Save the Python graph as JSON, reload, verify identical.
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_python_graph_json_roundtrip() {
     let original = load("../../examples/gemma_4b_knowledge.json").unwrap();
     let path = std::env::temp_dir().join("test_python_compat.larql.json");
@@ -115,8 +112,8 @@ fn test_python_graph_json_roundtrip() {
 }
 
 /// Save the Python graph as MessagePack, reload, verify identical.
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "msgpack")]
 fn test_python_graph_msgpack_roundtrip() {
     let original = load("../../examples/gemma_4b_knowledge.json").unwrap();

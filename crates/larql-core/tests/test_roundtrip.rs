@@ -62,8 +62,8 @@ fn test_json_bytes_roundtrip() {
     assert_graphs_equal(&g, &restored);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_json_file_roundtrip() {
     let g = sample_graph();
     let path = std::env::temp_dir().join("test_roundtrip.larql.json");
@@ -156,8 +156,8 @@ fn test_msgpack_bytes_roundtrip() {
     assert_graphs_equal(&g, &restored);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg(feature = "msgpack")]
 fn test_msgpack_file_roundtrip() {
     let g = sample_graph();

@@ -94,8 +94,8 @@ fn test_json_roundtrip() {
     assert!(cap.multi_token);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_load_from_example_file() {
     let contents = std::fs::read_to_string("../../examples/templates.json").unwrap();
     let value: serde_json::Value = serde_json::from_str(&contents).unwrap();

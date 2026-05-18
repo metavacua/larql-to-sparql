@@ -330,8 +330,8 @@ fn test_path_result_nodes_explored() {
 
 // ── CSV I/O ──
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_csv_roundtrip() {
     let g = geo_graph();
     let path = std::env::temp_dir().join("test_csv_roundtrip.csv");
@@ -347,8 +347,8 @@ fn test_csv_roundtrip() {
     std::fs::remove_file(&path).ok();
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_csv_preserves_confidence() {
     let mut g = Graph::new();
     g.add_edge(
@@ -368,8 +368,8 @@ fn test_csv_preserves_confidence() {
     std::fs::remove_file(&path).ok();
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_csv_roundtrip_quoted_fields() {
     let mut g = Graph::new();
     g.add_edge(Edge::new(
@@ -390,8 +390,8 @@ fn test_csv_roundtrip_quoted_fields() {
     std::fs::remove_file(&path).ok();
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn test_csv_format() {
     let mut g = Graph::new();
     g.add_edge(Edge::new("France", "capital-of", "Paris").with_confidence(0.89));
