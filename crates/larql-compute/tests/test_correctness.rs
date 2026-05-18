@@ -6,7 +6,7 @@
 //! larql-compute-test-integration` or `cargo test -p larql-compute
 //! --features heavy_tests`.
 #![cfg(feature = "heavy_tests")]
-
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::cpu::q4::quantize_q4_0;

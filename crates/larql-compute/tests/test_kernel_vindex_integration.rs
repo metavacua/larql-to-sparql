@@ -11,7 +11,7 @@
 //! pinning down composition bugs that individual shader tests miss.
 
 #![cfg(all(feature = "metal", target_os = "macos"))]
-
+#![cfg(not(target_arch = "wasm32"))]
 extern crate blas_src;
 
 use larql_compute::prelude::*;
