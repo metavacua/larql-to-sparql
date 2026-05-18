@@ -17,26 +17,44 @@
 //! is supported for JSON only; binary multi-shard requests are rejected with
 //! HTTP 400 (use the batched JSON format or route per-shard manually).
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_router::grid;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_router::rebalancer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::body::Bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{header, StatusCode};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::routing::post;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::{Json, Router};
+#[cfg(not(target_arch = "wasm32"))]
 use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
 use tonic::transport::Server as GrpcServer;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::{info, warn};
 
+#[cfg(not(target_arch = "wasm32"))]
 use grid::{GridServiceImpl, GridState};
+#[cfg(not(target_arch = "wasm32"))]
 use larql_router_protocol::GridServiceServer;
 
 // ── Binary wire format constants ───────────────────────────────────────────────
@@ -46,6 +64,7 @@ const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 
 // ── CLI ────────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser)]
 #[command(
     name = "larql-router",
@@ -179,6 +198,7 @@ pub(crate) fn peek_binary(body: &[u8]) -> Option<Vec<usize>> {
 
 // ── App state ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 struct AppState {
     /// Static shards from --shards (may be empty).
     static_shards: Vec<Shard>,
@@ -187,6 +207,7 @@ struct AppState {
     client: reqwest::Client,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AppState {
     /// Resolve all layers in one lock acquisition.
     /// Returns Ok(layer → url) or Err(first missing layer).
@@ -233,6 +254,7 @@ impl AppState {
 
 // ── Route handler ──────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_walk_ffn(
     State(state): State<Arc<AppState>>,
     request: axum::extract::Request,
@@ -251,6 +273,7 @@ async fn handle_walk_ffn(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_walk_ffn_inner(
     state: Arc<AppState>,
     request: axum::extract::Request,
@@ -404,6 +427,7 @@ async fn handle_walk_ffn_inner(
 
 /// Forward raw bytes to a shard, passing the Content-Type header through.
 /// The shard's response status and Content-Type are preserved unchanged.
+#[cfg(not(target_arch = "wasm32"))]
 async fn proxy_raw(
     client: &reqwest::Client,
     base_url: &str,
@@ -438,6 +462,7 @@ async fn proxy_raw(
         .unwrap())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_health() -> Json<Value> {
     Json(serde_json::json!({"status": "ok"}))
 }
@@ -445,6 +470,7 @@ async fn handle_health() -> Json<Value> {
 /// Proxy /v1/stats to the first reachable shard so that clients connecting
 /// via RemoteWalkBackend (which reads hidden_size from /v1/stats) work
 /// transparently through the router.
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_stats(State(state): State<Arc<AppState>>) -> Response {
     // Collect candidate shard URLs: grid shards first, then static.
     let mut candidates: Vec<String> = Vec::new();
@@ -483,6 +509,7 @@ async fn handle_stats(State(state): State<Arc<AppState>>) -> Response {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Accept both `larql-router <args>` and `larql-router route <args>`.
@@ -602,6 +629,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     Ok(())
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Tests

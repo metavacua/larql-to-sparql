@@ -28,9 +28,9 @@ name: quality
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, ci/workflows-complete]
+    branches: [main]
   push:
-    branches: [main, ci/workflows-complete]
+    branches: [main]
   workflow_dispatch:
   schedule:
     # Weekly RustSec advisory refresh against the committed lockfile, so

@@ -11,6 +11,7 @@ mod lifecycle;
 mod memit_persist;
 mod mutation;
 mod query;
+#[cfg(not(target_arch = "wasm32"))]
 mod remote;
 mod trace;
 mod tuning;
@@ -106,6 +107,7 @@ impl Session {
 
     pub fn execute(&mut self, stmt: &Statement) -> Result<Vec<String>, LqlError> {
         // Remote backend: forward supported queries via HTTP.
+        #[cfg(not(target_arch = "wasm32"))]
         if self.is_remote() {
             return self.execute_remote(stmt);
         }
@@ -288,6 +290,7 @@ impl Session {
     }
 
     /// Execute a statement against a remote backend.
+    #[cfg(not(target_arch = "wasm32"))]
     fn execute_remote(&mut self, stmt: &Statement) -> Result<Vec<String>, LqlError> {
         match stmt {
             Statement::Use { target } => self.exec_use(target),
@@ -501,6 +504,11 @@ impl Session {
             }
             None => Err(LqlError::Execution(format!("patch not found: {path}"))),
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn is_remote(&self) -> bool {
+        false
     }
 
     /// Bump the LSM epoch + minor/major mutation counters. Called after

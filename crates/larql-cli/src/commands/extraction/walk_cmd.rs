@@ -26,8 +26,10 @@ fn rss_mb() -> f64 {
 use clap::Args;
 use larql_inference::{
     predict_with_ffn, predict_with_router, vindex::WalkFfn, InferenceModel, LayerFfnRouter,
-    LayerShardedBackend, ModelWeights, SparseFfn, WeightFfn,
+    ModelWeights, SparseFfn, WeightFfn,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::LayerShardedBackend;
 use larql_vindex::{
     load_vindex_embeddings, load_vindex_tokenizer, ndarray, tokenizers, IndexLoadCallbacks,
     SilentLoadCallbacks, VectorIndex,
@@ -413,6 +415,7 @@ fn run_with_vindex_weights(
         // RSS now = attn weights + embeddings + norms. FFN payload (gate_vectors,
         // interleaved_q4k) is demand-paged; pages fault in during inference.
         vlog!(verbose, "  RSS after weights: {:.1} GB", rss_mb() / 1024.0);
+        #[cfg(not(target_arch = "wasm32"))]
         if args.ffn_remote.is_some() {
             return run_predict_q4k_remote(&mut weights, &tokenizer, args, vindex_path);
         }
@@ -607,6 +610,7 @@ fn run_predict_q4k(
 /// Q4K dequant. So instead of routing through `run_predict_remote` we call
 /// `predict_q4k_with_ffn` directly with a `RemoteWalkBackend` — that path
 /// dequantises only Q/K/V/O per layer and skips the FFN dequant entirely.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_predict_q4k_remote(
     weights: &mut ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -741,6 +745,7 @@ fn run_predict_inner(
     // Remote FFN short-circuit: attention runs locally, FFN hits the server
     // per layer. Mutually exclusive with --compare (the comparison backends
     // need local FFN weights to diff against).
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(ref url) = args.ffn_remote {
         if args.compare {
             return Err("--compare is incompatible with --ffn-remote \
@@ -888,6 +893,7 @@ fn run_predict_inner(
 /// backend and `crates/larql-server/src/routes/walk_ffn.rs` for the
 /// server endpoint.
 ///
+#[cfg(not(target_arch = "wasm32"))]
 fn run_predict_remote(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,

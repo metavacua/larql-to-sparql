@@ -1,0 +1,193 @@
+# larql-boundary cross-platform CI
+#
+# Runs fmt + check + clippy + tests + bench test-mode on Linux, Windows, and macOS.
+# No model weights or MLX required — the crate is pure Rust.
+#   - Linux   (x86_64-unknown-linux-gnu)
+#   - Windows (x86_64-pc-windows-msvc)
+#   - macOS   (aarch64-apple-darwin)
+
+name: larql-boundary
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-boundary/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-boundary.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-boundary/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-boundary.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: test · ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            platform: ubuntu
+            target: x86_64-unknown-linux-gnu
+
+          - name: windows-latest
+            runner: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+
+          - name: macos-15-arm64
+            runner: macos-15
+            platform: macos
+            target: aarch64-apple-darwin
+
+          - name: android-aarch64
+            runner: ubuntu-24.04
+            platform: android
+            target: aarch64-linux-android
+
+          - name: android-armv7
+            runner: ubuntu-24.04
+            platform: android
+            target: armv7-linux-androideabi
+
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Android NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+          link-to-sdk: true
+
+      - name: Add Android NDK to PATH
+        if: matrix.platform == 'android'
+        run: echo "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Add Android target
+        if: matrix.platform == 'android'
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Set Android NDK compiler vars (aarch64)
+        if: matrix.platform == 'android' && matrix.target == 'aarch64-linux-android'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CC=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_CXX=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_BIN}/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set Android NDK compiler vars (armv7)
+        if: matrix.platform == 'android' && matrix.target == 'armv7-linux-androideabi'
+        run: |
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CC=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_CXX=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_AR=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+          echo "CC_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang" >> $GITHUB_ENV
+          echo "CXX_armv7_linux_androideabi=${NDK_BIN}/armv7a-linux-androideabi21-clang++" >> $GITHUB_ENV
+          echo "AR_armv7_linux_androideabi=${NDK_BIN}/llvm-ar" >> $GITHUB_ENV
+
+      - name: Set up QEMU for Android emulation
+        if: matrix.platform == 'android'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Enable static CRT and redirect libc++_shared for Android
+        if: matrix.platform == 'android'
+        run: |
+          echo "RUSTFLAGS=-C target-feature=+crt-static -C link-arg=-static" >> $GITHUB_ENV
+          echo "TMPDIR=/tmp" >> $GITHUB_ENV
+          NDK_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          LIBUNWIND_AARCH64=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/aarch64*" | head -1)
+          LIBUNWIND_ARM=$(find "${ANDROID_NDK_HOME}" -name "libunwind.a" -path "*/linux/arm*" ! -path "*/aarch64*" | head -1)
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_static.a ${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++abi.a ${LIBUNWIND_AARCH64})" \
+            > "${NDK_SYSROOT}/usr/lib/aarch64-linux-android/libc++_shared.a"
+          echo "GROUP(${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_static.a ${LIBUNWIND_ARM})" \
+            > "${NDK_SYSROOT}/usr/lib/arm-linux-androideabi/libc++_shared.a"
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-boundary-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-boundary-
+
+      - name: Format check
+        run: cargo fmt -p larql-boundary -- --check
+
+      - name: Check (all targets)
+        run: cargo check -p larql-boundary --target ${{ matrix.target }} --all-targets
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy -p larql-boundary --target ${{ matrix.target }} --all-targets -- -D warnings
+
+      - name: Unit + integration tests
+        if: matrix.platform != 'android'
+        run: cargo test -p larql-boundary --target ${{ matrix.target }}
+
+      - name: Unit + integration tests (Android)
+        if: matrix.platform == 'android'
+        run: cargo test -p larql-boundary --target ${{ matrix.target }} --lib --tests
+
+      - name: Test benchmarks (compile + smoke)
+        run: cargo test -p larql-boundary --target ${{ matrix.target }} --benches
+
+      - name: Run examples
+        run: |
+          cargo run -p larql-boundary --target ${{ matrix.target }} --example encode_decode
+          cargo run -p larql-boundary --target ${{ matrix.target }} --example gate_decision
+
+  coverage:
+    name: coverage · ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage summary
+        run: cargo llvm-cov --package larql-boundary --summary-only

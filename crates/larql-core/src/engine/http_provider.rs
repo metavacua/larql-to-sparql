@@ -1,21 +1,21 @@
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 use reqwest::blocking::Client;
 
 use super::provider::*;
 
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 60;
 
 /// Connects to any OpenAI-compatible completions API.
 /// Works with: ollama, vLLM, llama.cpp server, LM Studio.
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub struct HttpProvider {
     client: Client,
     base_url: String,
     name: String,
 }
 
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 impl HttpProvider {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
@@ -39,7 +39,7 @@ impl HttpProvider {
     }
 }
 
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 impl ModelProvider for HttpProvider {
     fn model_name(&self) -> &str {
         &self.name
