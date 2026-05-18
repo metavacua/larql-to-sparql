@@ -103,7 +103,7 @@ jobs:
       - name: wasm-pack test · firefox
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test --firefox --headless crates/larql-core
+        run: wasm-pack test --firefox --headless crates/larql-core --features browser-tests
 
       - name: Check examples (compile only)
         env:

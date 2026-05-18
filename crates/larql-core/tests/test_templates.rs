@@ -1,3 +1,6 @@
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_core::engine::templates::{PromptTemplate, TemplateRegistry};
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

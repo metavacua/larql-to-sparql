@@ -1,5 +1,8 @@
 //! Tests for connected components and advanced walk strategies.
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-tests"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_core::*;
 
 fn geo_graph() -> Graph {
