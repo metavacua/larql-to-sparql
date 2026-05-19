@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Add `larql-lql-core` crate: W_pure LQL AST + lexer + parser extracted from `larql-lql`.
+  Depends only on `thiserror`; compiles for `wasm32-unknown-unknown` without cfg guards.
+  `larql-lql` re-exports the public surface for backward compatibility.
+  Introduces formal WASM-portability tier classification in AGENTS.md (W_pure / W_compat / Native).
+- Add `larql-lql-core-wasm.yml` CI workflow enforcing the W_pure invariant on every push.
 - Add Gemma 4 GGUF support + fix column-major loading and Q4_K dequantization (#1)
 - DeepSeekV4Arch — V4 tensor naming (no model. prefix, ffn, w1/w2/w3)
 - MXFP4-aware streaming gate_vectors path

@@ -1,13 +1,15 @@
-pub mod ast;
-pub mod error;
+// AST, lexer, and parser live in larql-lql-core (WASM-pure).
+// Re-exported here for backward compatibility.
+pub use larql_lql_core::ast;
+pub use larql_lql_core::error;
+pub use larql_lql_core::parser;
+pub use larql_lql_core::Statement;
+pub use larql_lql_core::LqlError;
+pub use larql_lql_core::parse;
+
 pub mod executor;
-pub(crate) mod lexer;
-pub mod parser;
 pub mod relations;
 pub mod repl;
 
-pub use ast::Statement;
-pub use error::LqlError;
 pub use executor::Session;
-pub use parser::parse;
 pub use repl::{run_batch, run_repl, run_statement};

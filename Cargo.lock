@@ -2189,6 +2189,7 @@ dependencies = [
  "larql-compute",
  "larql-core",
  "larql-inference",
+ "larql-lql-core",
  "larql-models",
  "larql-vindex",
  "mockito",
@@ -2197,6 +2198,14 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "larql-lql-core"
+version = "0.1.0"
+dependencies = [
  "thiserror 2.0.18",
  "wasm-bindgen-test",
 ]

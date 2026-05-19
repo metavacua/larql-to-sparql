@@ -23,7 +23,9 @@ larql-vindex      vindex lifecycle: extract, load, query, mutate, patch, save, V
 larql-core        graph algorithms (merge, diff, BFS, pagerank, shortest-path)
 larql-inference   forward pass, BLAS-fused attention, Metal GPU, WalkFfn, trace
     ↓
-larql-lql         lexer/parser/executor/REPL + USE REMOTE client
+larql-lql-core    LQL AST + lexer + parser (WASM-pure: only thiserror dep, no cfg guards)
+    ↓
+larql-lql         LQL executor + REPL + USE REMOTE client (depends on larql-lql-core)
     ↓
 larql-server      HTTP + gRPC server serving vindexes
 larql-cli         top-level `larql` binary (every subcommand lives in commands/)
@@ -37,6 +39,75 @@ model-compute         bounded native kernels (arithmetic/datetime); wasmi-hosted
                       backend preserved for REUSE compliance (desktop only,
                       feature: `wasm-jit`)
 ```
+
+## WASM portability tiers
+
+The workspace is partitioned into three formal tiers using a predicate system:
+
+**Predicates** (properties of a crate's own source and direct Cargo deps):
+
+| Symbol | Meaning |
+|--------|---------|
+| `Pᵢₒ`   | Requires file I/O (mmap, disk reads/writes) |
+| `Pₙₑₜ`  | Requires network I/O (HTTP/gRPC) |
+| `P_gpu` | Requires hardware accelerator (Metal, BLAS, CUDA) |
+| `P_ffi` | Links a C library or foreign-language FFI (onig, BLAS-C, PyO3) |
+| `Pᵣₜ`   | Requires async runtime (Tokio reactor) |
+| `P_repl`| Requires interactive terminal (rustyline) |
+| `Pᵤ`    | Pure: no side-effects beyond allocation |
+
+**Tier 1 — W_pure** (`Pᵤ ∧ ¬Pᵢₒ ∧ ¬Pₙₑₜ ∧ ¬P_gpu ∧ ¬P_ffi ∧ ¬Pᵣₜ ∧ ¬P_repl`):
+No cfg guards in own source. Compiles for `wasm32-unknown-unknown` without `--no-default-features`.
+These form a proper closed subcategory W ⊆ C (the full workspace dependency category).
+
+- `larql-boundary` — codec types
+- `larql-models` — model config + architecture types
+- **`larql-lql-core`** — LQL AST, lexer, parser (dep: thiserror only)
+- `larql-wasm` — WASM graph bindings
+
+**Tier 2 — W_compat** (compiles for wasm32 via `#[cfg]` gates in own source):
+Not W_pure but usable from wasm32 targets. The cfg gates suppress native-only paths.
+
+- `larql-core` — graph algorithms (`http` feature off by default)
+- `larql-vindex` — vindex I/O (`remote` feature off by default)
+- `larql-compute` — CPU/Metal backends (BLAS gated)
+- `larql-inference` — forward pass (tonic, reqwest gated)
+- `larql-kv` — KV store (BLAS gated)
+- `larql-lql` — executor + REPL (rustyline, blocking reqwest gated)
+- `larql-browser-cli` — WASM cdylib entry point (depends on Tier 2 for LqlSession)
+- `model-compute` — bounded kernels (native backends gated)
+
+**Tier 3 — Native-only** (does not compile for wasm32):
+
+| Crate | Class | Blocking predicate(s) |
+|-------|-------|-----------------------|
+| `larql-server` | Σ_server | `Pₙₑₜ ∧ Pᵣₜ` (axum, tokio, tonic) |
+| `larql-router` | Σ_server | `Pₙₑₜ ∧ Pᵣₜ` (axum, tokio, tonic) |
+| `larql-router-protocol` | Σ_server | `Pᵣₜ` (tokio, tonic gRPC) |
+| `larql-cli` | Σ_cli | binary entry point, `P_repl` (rustyline), `P_ffi` |
+| `larql-python` | Σ_ffi | `P_ffi` (PyO3 language binding) |
+| `kv-cache-benchmark` | Σ_bench | `Pₙₑₜ` (reqwest blocking), `P_ffi` (onig) |
+| `larql-experts` | Σ_domain | domain expert sub-models (no WASM path) |
+
+**Dependency graph (objects = crates, morphisms = Cargo deps):**
+
+```
+W_pure subcategory (closed under ←):
+  larql-browser-cli ← larql-lql ← larql-lql-core  ← (thiserror)
+                                                    ← (no other deps)
+
+W_compat layer (compile for wasm32, have cfg gates):
+  larql-lql ← larql-vindex ← larql-models
+           ← larql-inference ← larql-compute
+           ← larql-core
+
+Native layer (Tier 3 → W_compat → W_pure):
+  larql-cli, larql-server, larql-router → larql-lql → larql-lql-core
+```
+
+**CI enforcement:** `.github/workflows/larql-lql-core-wasm.yml` runs
+`cargo check -p larql-lql-core --target wasm32-unknown-unknown` (no `--no-default-features`).
+A native dep or cfg guard in `larql-lql-core` will fail this job.
 
 **`model-compute` never imports `larql-*`.** Dependency flow is one-way:
 LARQL may consume it (e.g. for compile-time `sum(1..100)` resolution); it

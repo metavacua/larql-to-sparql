@@ -7,6 +7,7 @@ license.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
 [dependencies]
+larql-lql-core = { path = "../larql-lql-core" }
 larql-compute = { path = "../larql-compute" }
 larql-core = { path = "../larql-core" }
 larql-inference = { path = "../larql-inference" }

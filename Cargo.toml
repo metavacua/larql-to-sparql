@@ -8,6 +8,8 @@ members = [
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-kv",
+    # WASM-pure parsing surface (AST + lexer + parser, no executor, no I/O)
+    "crates/larql-lql-core",
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",
@@ -31,6 +33,7 @@ default-members = [
     "crates/larql-vindex",
     "crates/larql-inference",
     "crates/larql-kv",
+    "crates/larql-lql-core",
     "crates/larql-lql",
     "crates/larql-cli",
     "crates/larql-server",

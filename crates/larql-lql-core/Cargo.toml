@@ -1,0 +1,13 @@
+[package]
+name = "larql-lql-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LQL AST, lexer, and parser — WASM-pure parsing surface (no executor, no I/O)"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

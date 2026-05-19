@@ -1,0 +1,103 @@
+# larql-lql-core WASM CI
+#
+# larql-lql-core is W_pure: it contains only the LQL AST, lexer, and parser.
+# Its only dependency is `thiserror`. It carries no cfg guards in its own
+# source and compiles to wasm32-unknown-unknown without --no-default-features.
+#
+# This workflow enforces the W_pure invariant: if any native dep or cfg guard
+# is introduced, `cargo check --target wasm32-unknown-unknown` will fail here.
+
+name: larql-lql-core-wasm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-lql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-lql-core-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-lql-core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-lql-core-wasm.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  test:
+    name: wasm · ${{ matrix.mode.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - name: serial
+            toolchain: stable
+            rustflags: ''
+          - name: parallel
+            toolchain: nightly
+            rustflags: '-C target-feature=+atomics,+bulk-memory,+mutable-globals'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (${{ matrix.mode.toolchain }}) + wasm32 target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.mode.toolchain }}
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32-cargo-lql-core-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm32-cargo-lql-core-${{ matrix.mode.name }}-
+
+      - name: Format check
+        run: cargo fmt -p larql-lql-core -- --check
+
+      - name: Check (W_pure invariant — no cfg guards, no native deps)
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo check -p larql-lql-core --target wasm32-unknown-unknown
+
+      - name: Clippy
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: cargo clippy -p larql-lql-core --target wasm32-unknown-unknown -- -D warnings
+
+      - name: wasm-pack test · node
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --node crates/larql-lql-core
+
+      - name: wasm-pack test · firefox
+        env:
+          RUSTFLAGS: ${{ matrix.mode.rustflags }}
+        run: wasm-pack test --firefox --headless crates/larql-lql-core
