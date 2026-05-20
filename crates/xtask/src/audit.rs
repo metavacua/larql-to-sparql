@@ -8,7 +8,7 @@
 //! Always exits 0 — purely informational.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Audit result for a single crate.
 #[derive(Debug, Default)]
@@ -16,6 +16,8 @@ pub struct AuditResult {
     pub crate_name: String,
     pub accessible: Vec<String>,
     pub native_only: Vec<String>,
+    /// Resolved file paths per accessible module — cached to avoid recomputation.
+    pub accessible_paths: Vec<Vec<PathBuf>>,
     /// (file, line, pattern) for runtime-trap candidates in accessible modules.
     pub trap_candidates: Vec<(String, usize, String)>,
     /// Level-4 unit counterwit­nesses: (file, line, fn_name).
@@ -32,11 +34,7 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
                 continue;
             }
         }
-        // Only workspace members
-        if !meta
-            .workspace_members
-            .contains(&pkg.id)
-        {
+        if !meta.workspace_members.contains(&pkg.id) {
             continue;
         }
         let result = audit_crate(&pkg.name, pkg.manifest_path.parent().unwrap().as_std_path())?;
@@ -60,15 +58,13 @@ pub(crate) fn audit_crate(crate_name: &str, crate_root: &Path) -> Result<AuditRe
     classify_modules(&src, &mut result);
 
     let src_dir = crate_root.join("src");
-
-    // Compute paths once; reused for trap scanning and counterwit collection.
-    let accessible_paths: Vec<Vec<std::path::PathBuf>> = result
+    result.accessible_paths = result
         .accessible
         .iter()
         .map(|m| module_paths(&src_dir, m))
         .collect();
 
-    // ── Runtime-trap candidates in wasm32-accessible modules ──────────────────
+    // ── Single pass: runtime-trap candidates + unit counterwit­nesses ─────────
     let trap_patterns = [
         "std::time::Instant",
         "std::thread::",
@@ -76,34 +72,58 @@ pub(crate) fn audit_crate(crate_name: &str, crate_root: &Path) -> Result<AuditRe
         "std::net::",
         "std::process::",
     ];
-    for mod_paths in &accessible_paths {
+    for mod_paths in &result.accessible_paths {
         for path in mod_paths {
             if let Ok(content) = std::fs::read_to_string(path) {
-                for (line_no, line) in content.lines().enumerate() {
-                    for pat in &trap_patterns {
-                        if line.contains(pat) {
-                            result.trap_candidates.push((
-                                path.display().to_string(),
-                                line_no + 1,
-                                pat.to_string(),
-                            ));
-                        }
-                    }
-                }
+                scan_file(
+                    path,
+                    &content,
+                    &trap_patterns,
+                    &mut result.trap_candidates,
+                    &mut result.unit_counterwits,
+                );
             }
         }
     }
 
-    // ── Level-4: unit counterwit­nesses (cfg-gated test fns in src/) ──────────
-    collect_unit_counterwits(&accessible_paths, &mut result.unit_counterwits)?;
-
     // ── Level-4: integration test counterwit­nesses (tests/ top-level cfg) ────
     let tests_dir = crate_root.join("tests");
     if tests_dir.exists() {
-        collect_integ_counterwits(&tests_dir, &mut result.integ_counterwits)?;
+        collect_integ_counterwits(&tests_dir, &mut result.integ_counterwits);
     }
 
     Ok(result)
+}
+
+/// Single-pass scan: trap patterns + cfg-gated unit counterwit­nesses.
+fn scan_file(
+    path: &Path,
+    content: &str,
+    trap_patterns: &[&str],
+    trap_out: &mut Vec<(String, usize, String)>,
+    cw_out: &mut Vec<(String, usize, String)>,
+) {
+    let path_str = path.display().to_string();
+    let lines: Vec<&str> = content.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        for pat in trap_patterns {
+            if trimmed.contains(pat) {
+                trap_out.push((path_str.clone(), i + 1, pat.to_string()));
+            }
+        }
+        if trimmed == "#[cfg(not(target_arch = \"wasm32\"))]" {
+            if let Some(next) = lines.get(i + 1) {
+                let nt = next.trim();
+                if nt == "#[test]" || nt.starts_with("fn ") || nt.starts_with("pub fn ") {
+                    let fn_name = extract_fn_name(nt)
+                        .or_else(|| lines.get(i + 2).and_then(|l| extract_fn_name(l.trim())))
+                        .unwrap_or_else(|| "<unknown>".to_owned());
+                    cw_out.push((path_str.clone(), i + 1, fn_name));
+                }
+            }
+        }
+    }
 }
 
 /// Scan `src/lib.rs` and classify `pub mod` declarations.
@@ -125,7 +145,7 @@ fn classify_modules(src: &str, result: &mut AuditResult) {
                 result.accessible.push(mod_name.to_owned());
             }
         }
-        // Reset gate tracker on any non-blank, non-cfg-attr, non-comment line
+        // Reset gate tracker on any non-blank, non-comment line
         if !trimmed.is_empty() && !trimmed.starts_with("//") {
             prev_was_cfg_gate = false;
         }
@@ -133,7 +153,7 @@ fn classify_modules(src: &str, result: &mut AuditResult) {
 }
 
 /// Return file paths that could contain module `name` (file or directory).
-pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<std::path::PathBuf> {
+pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<PathBuf> {
     let mut paths = vec![];
     let file = src_dir.join(format!("{name}.rs"));
     if file.exists() {
@@ -141,13 +161,12 @@ pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<std::path::PathBuf
     }
     let dir = src_dir.join(name);
     if dir.is_dir() {
-        // Recursively collect all .rs files in the module directory.
         collect_rs_files(&dir, &mut paths);
     }
     paths
 }
 
-pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -160,38 +179,7 @@ pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
-/// Collect unit-test counterwit­nesses: `#[cfg(not(target_arch = "wasm32"))]`
-/// immediately followed by `#[test]` or `fn ...` inside accessible modules.
-fn collect_unit_counterwits(
-    accessible_paths: &[Vec<std::path::PathBuf>],
-    out: &mut Vec<(String, usize, String)>,
-) -> Result<()> {
-    for paths in accessible_paths {
-        for path in paths {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                let lines: Vec<&str> = content.lines().collect();
-                for (i, line) in lines.iter().enumerate() {
-                    if line.trim() == "#[cfg(not(target_arch = \"wasm32\"))]" {
-                        if let Some(next) = lines.get(i + 1) {
-                            let nt = next.trim();
-                            if nt == "#[test]" || nt.starts_with("fn ") || nt.starts_with("pub fn ") {
-                                // Try to extract the fn name from this or next line
-                                let fn_name = extract_fn_name(nt)
-                                    .or_else(|| lines.get(i + 2).and_then(|l| extract_fn_name(l.trim())))
-                                    .unwrap_or_else(|| "<unknown>".to_owned());
-                                out.push((path.display().to_string(), i + 1, fn_name));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn extract_fn_name(line: &str) -> Option<String> {
-    // Match: `fn foo(` or `pub fn foo(`
     let rest = line.strip_prefix("pub fn ").or_else(|| line.strip_prefix("fn "))?;
     let name = rest.split('(').next()?;
     Some(name.trim().to_owned())
@@ -199,7 +187,7 @@ fn extract_fn_name(line: &str) -> Option<String> {
 
 /// Collect integration-test counterwit­nesses: `.rs` files in `tests/` that
 /// begin with `#![cfg(not(target_arch = "wasm32"))]`.
-fn collect_integ_counterwits(tests_dir: &Path, out: &mut Vec<String>) -> Result<()> {
+fn collect_integ_counterwits(tests_dir: &Path, out: &mut Vec<String>) {
     if let Ok(entries) = std::fs::read_dir(tests_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -208,8 +196,8 @@ fn collect_integ_counterwits(tests_dir: &Path, out: &mut Vec<String>) -> Result<
             }
             if let Ok(content) = std::fs::read_to_string(&path) {
                 for line in content.lines().take(5) {
-                    if line.trim().contains("cfg(not(target_arch = \"wasm32\"))")
-                        && line.trim().starts_with("#!")
+                    if line.trim().starts_with("#!")
+                        && line.trim().contains("cfg(not(target_arch = \"wasm32\"))")
                     {
                         out.push(path.display().to_string());
                         break;
@@ -218,7 +206,6 @@ fn collect_integ_counterwits(tests_dir: &Path, out: &mut Vec<String>) -> Result<
             }
         }
     }
-    Ok(())
 }
 
 fn print_audit(r: &AuditResult) {
@@ -227,8 +214,10 @@ fn print_audit(r: &AuditResult) {
         println!("  (no lib.rs found or no pub mod declarations)");
         return;
     }
-    println!("  WASM32-ACCESSIBLE: {}", r.accessible.join(", ").or_empty());
-    println!("  NATIVE-ONLY:       {}", r.native_only.join(", ").or_empty());
+    let accessible = if r.accessible.is_empty() { "(none)".to_owned() } else { r.accessible.join(", ") };
+    let native_only = if r.native_only.is_empty() { "(none)".to_owned() } else { r.native_only.join(", ") };
+    println!("  WASM32-ACCESSIBLE: {accessible}");
+    println!("  NATIVE-ONLY:       {native_only}");
     if r.trap_candidates.is_empty() {
         println!("  RUNTIME-TRAP CANDIDATES: (none)");
     } else {
@@ -247,14 +236,5 @@ fn print_audit(r: &AuditResult) {
     }
     for f in &r.integ_counterwits {
         println!("    {f}  [integration]");
-    }
-}
-
-trait OrEmpty {
-    fn or_empty(&self) -> &str;
-}
-impl OrEmpty for String {
-    fn or_empty(&self) -> &str {
-        if self.is_empty() { "(none)" } else { self }
     }
 }
