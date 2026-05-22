@@ -187,21 +187,34 @@ fn apply_norm_for_ffn(weights: &ModelWeights, h_post_attn: &[f32], layer: usize)
     normed.row(0).to_vec()
 }
 
+/// Apply the post-FFN normalisation that the local forward path
+/// applies to a layer's FFN output before the residual add.
+///
+/// Remote FFN servers return the raw FFN result; the caller is
+/// responsible for the matching post-norm so that remote and local
+/// paths stay bit-equivalent. Three cases:
+///   * arch has no post-norms (older Llama/Mistral-style) → pass
+///     through unchanged. Checked first because the default
+///     `post_feedforward_layernorm_key` impl returns `Some` for
+///     every arch, so without this gate every pre-norm arch would
+///     get an unwanted identity-weight RMS norm and diverge from
+///     the local forward path.
+///   * arch advertises a `post_feedforward_layernorm_key` for this
+///     layer → apply that named norm.
+///   * arch has post-norms but no per-layer key → identity-weight
+///     RMS norm.
 fn apply_post_ffn_norm(weights: &ModelWeights, ffn_out: &[f32], layer: usize) -> Vec<f32> {
     let arch = &*weights.arch;
+    if !arch.has_post_norms() {
+        return ffn_out.to_vec();
+    }
     let norm_offset = arch.norm_weight_offset();
     let key = arch.post_feedforward_layernorm_key(layer);
     let h = ndarray::Array2::from_shape_vec((1, ffn_out.len()), ffn_out.to_vec())
         .expect("apply_post_ffn_norm: shape error");
     let normed = match key {
         Some(ref k) => apply_norm(weights, &h, k, norm_offset),
-        None => {
-            if arch.has_post_norms() {
-                rms_norm(&h, None, norm_offset)
-            } else {
-                return ffn_out.to_vec();
-            }
-        }
+        None => rms_norm(&h, None, norm_offset),
     };
     normed.row(0).to_vec()
 }
@@ -442,4 +455,93 @@ pub fn generate_with_remote_ffn_batch(
         decode_ms,
         ffn_rtt_ms,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_norm_for_ffn, apply_post_ffn_norm};
+    use larql_models::test_fixtures::{make_gemma3_test_weights, make_test_weights};
+
+    fn approx_eq(a: &[f32], b: &[f32], tol: f32) -> bool {
+        a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= tol)
+    }
+
+    // ── apply_post_ffn_norm ─────────────────────────────────────────
+
+    #[test]
+    fn apply_post_ffn_norm_passthrough_when_arch_has_no_post_norms() {
+        // TinyModel arch reports `has_post_norms() == false`. The
+        // helper must short-circuit and return the input verbatim:
+        // remote FFN servers running against pre-Gemma-style archs
+        // see the FFN output flow straight into the residual add.
+        let w = make_test_weights();
+        let hidden = w.hidden_size;
+        let ffn_out: Vec<f32> = (0..hidden).map(|i| i as f32 - 7.0).collect();
+        let out = apply_post_ffn_norm(&w, &ffn_out, 0);
+        assert_eq!(out, ffn_out);
+    }
+
+    #[test]
+    fn apply_post_ffn_norm_applies_named_norm_when_key_present() {
+        // Gemma 3 arch supplies `post_feedforward_layernorm_key` for
+        // every layer; the helper must route through `apply_norm`.
+        // With identity-weight norms the output is RMS-normalised
+        // (variance scaled) but distinct from a non-unit-RMS input —
+        // "norm never ran" is the exact bug this helper closes for
+        // remote FFN paths on post-norm archs.
+        let w = make_gemma3_test_weights();
+        let hidden = w.hidden_size;
+        let ffn_out: Vec<f32> = (0..hidden).map(|i| (i as f32) * 0.5 + 1.0).collect();
+        let out = apply_post_ffn_norm(&w, &ffn_out, 0);
+        assert_eq!(out.len(), hidden);
+        assert!(
+            !approx_eq(&out, &ffn_out, 1e-6),
+            "post-FFN norm must transform the input on a post-norm arch"
+        );
+        let rms = (out.iter().map(|x| x * x).sum::<f32>() / hidden as f32).sqrt();
+        assert!(
+            (rms - 1.0).abs() < 1e-3,
+            "identity-weight post-FFN norm should rescale to unit RMS (got {rms})"
+        );
+    }
+
+    #[test]
+    fn apply_post_ffn_norm_layer_keys_distinct_per_layer() {
+        // Per-layer key lookup: both layers must succeed and produce
+        // hidden-sized output. Regression surface is a hardcoded
+        // layer index in the helper.
+        let w = make_gemma3_test_weights();
+        let ffn_out: Vec<f32> = vec![0.25; w.hidden_size];
+        let out0 = apply_post_ffn_norm(&w, &ffn_out, 0);
+        let out1 = apply_post_ffn_norm(&w, &ffn_out, 1);
+        assert_eq!(out0.len(), w.hidden_size);
+        assert_eq!(out1.len(), w.hidden_size);
+    }
+
+    // ── apply_norm_for_ffn (parallel helper, previously untested) ───
+
+    #[test]
+    fn apply_norm_for_ffn_uses_pre_feedforward_key_on_post_norm_arch() {
+        // Post-norm archs (Gemma 3) route the pre-FFN norm through
+        // `pre_feedforward_layernorm`, not `post_attention_layernorm`.
+        // Local forward and remote-FFN caller must agree.
+        let w = make_gemma3_test_weights();
+        let h_post_attn: Vec<f32> = (0..w.hidden_size).map(|i| i as f32 * 0.3).collect();
+        let out = apply_norm_for_ffn(&w, &h_post_attn, 0);
+        assert_eq!(out.len(), w.hidden_size);
+        let rms = (out.iter().map(|x| x * x).sum::<f32>() / w.hidden_size as f32).sqrt();
+        assert!((rms - 1.0).abs() < 1e-3, "expected unit-RMS, got {rms}");
+    }
+
+    #[test]
+    fn apply_norm_for_ffn_uses_post_attention_key_on_pre_norm_arch() {
+        // Pre-norm archs (TinyModel, Llama/Mistral layout) route the
+        // pre-FFN norm through `post_attention_layernorm`. The
+        // identity-weight fixture means we mainly assert shape and
+        // that the call doesn't panic on the key the function selected.
+        let w = make_test_weights();
+        let h_post_attn: Vec<f32> = (0..w.hidden_size).map(|i| (i as f32 - 5.0) * 0.4).collect();
+        let out = apply_norm_for_ffn(&w, &h_post_attn, 0);
+        assert_eq!(out.len(), w.hidden_size);
+    }
 }
