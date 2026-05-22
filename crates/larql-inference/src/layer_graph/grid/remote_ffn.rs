@@ -107,19 +107,25 @@ pub fn generate_with_remote_ffn(
         let step_ffn_cell = std::cell::Cell::new(0.0f64);
         let mut moe_fn = |layer: usize, h_post_attn: &[f32]| -> Vec<f32> {
             let t_ffn = std::time::Instant::now();
-            let result = if hidden % crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS == 0 {
-                let h_ffn = apply_norm_for_ffn(weights, h_post_attn, layer);
-                let q8k = quantize_x_to_q8k(&h_ffn);
+            // Pre-norm once, regardless of dispatch branch. The remote
+            // FFN server expects pre-normed input (matches local forward
+            // contract) and the previous code skipped pre-norm in the
+            // f32 fallback paths — see chrishayuk/larql#114 (zero
+            // hidden states on multi-token decode).
+            let h_normed = apply_norm_for_ffn(weights, h_post_attn, layer);
+            let raw_out = if hidden % crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS == 0 {
+                let q8k = quantize_x_to_q8k(&h_normed);
                 remote.forward_single_q8k(layer, &q8k).unwrap_or_else(|| {
-                    let x = ndarray::Array2::from_shape_vec((1, hidden), h_post_attn.to_vec())
+                    let x = ndarray::Array2::from_shape_vec((1, hidden), h_normed.clone())
                         .expect("shape must match hidden");
                     remote.forward(layer, &x).row(0).to_vec()
                 })
             } else {
-                let x = ndarray::Array2::from_shape_vec((1, hidden), h_post_attn.to_vec())
+                let x = ndarray::Array2::from_shape_vec((1, hidden), h_normed.clone())
                     .expect("shape must match hidden");
                 remote.forward(layer, &x).row(0).to_vec()
             };
+            let result = apply_post_ffn_norm(weights, &raw_out, layer);
             step_ffn_cell.set(step_ffn_cell.get() + t_ffn.elapsed().as_secs_f64() * 1000.0);
             result
         };
@@ -219,32 +225,58 @@ fn apply_post_ffn_norm(weights: &ModelWeights, ffn_out: &[f32], layer: usize) ->
     normed.row(0).to_vec()
 }
 
+/// Pre-norm every layer's residual once, before the FFN dispatch.
+///
+/// Pulled out of `dispatch_ffn_with_q8k_fallback` and the streaming
+/// decode loop so the composition is unit-testable independently of
+/// the remote transport. Both branches of the dispatch (Q8K direct,
+/// f32 fallback) consume the same pre-normed buffer — the previous
+/// code only pre-normed in the Q8K branch, leaving the f32 fallback
+/// sending raw residuals to the remote FFN (chrishayuk/larql#114).
+fn prenorm_layers(weights: &ModelWeights, h_capture: &[Vec<f32>]) -> Vec<Vec<f32>> {
+    h_capture
+        .iter()
+        .enumerate()
+        .map(|(layer, h)| apply_norm_for_ffn(weights, h, layer))
+        .collect()
+}
+
+/// Post-norm every layer's raw FFN output before it goes back into
+/// the residual stream. Mirrors what the local forward path does and
+/// keeps remote-FFN output bit-equivalent on post-norm archs
+/// (Gemma 3 / 4). No-op on pre-norm archs — `apply_post_ffn_norm`
+/// short-circuits via `has_post_norms`.
+fn postnorm_layers(weights: &ModelWeights, raw_results: Vec<Vec<f32>>) -> Vec<Vec<f32>> {
+    raw_results
+        .into_iter()
+        .enumerate()
+        .map(|(layer, out)| apply_post_ffn_norm(weights, &out, layer))
+        .collect()
+}
+
 fn dispatch_ffn_with_q8k_fallback(
     remote: &LayerShardedBackend,
     weights: &ModelWeights,
     h_capture: &[Vec<f32>],
 ) -> Vec<Vec<f32>> {
     let hidden = h_capture.first().map(|v| v.len()).unwrap_or(0);
-    if hidden == 0 || !hidden.is_multiple_of(crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS) {
-        return remote.forward_predispatch_all(h_capture);
-    }
+    let h_normed = prenorm_layers(weights, h_capture);
 
-    let q8k_all: Vec<Q8KActivation> = h_capture
-        .iter()
-        .enumerate()
-        .map(|(layer, h)| {
-            let h_ffn = apply_norm_for_ffn(weights, h, layer);
-            quantize_x_to_q8k(&h_ffn)
-        })
-        .collect();
-
-    let results = remote.forward_predispatch_all_q8k(&q8k_all);
-    let any_zero_result = results.iter().any(|v| v.iter().all(|&x| x == 0.0));
-    if any_zero_result {
-        remote.forward_predispatch_all(h_capture)
+    let raw_results = if hidden == 0 || !hidden.is_multiple_of(crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS)
+    {
+        remote.forward_predispatch_all(&h_normed)
     } else {
-        results
-    }
+        let q8k_all: Vec<Q8KActivation> = h_normed.iter().map(|h| quantize_x_to_q8k(h)).collect();
+        let results = remote.forward_predispatch_all_q8k(&q8k_all);
+        let any_zero_result = results.iter().any(|v| v.iter().all(|&x| x == 0.0));
+        if any_zero_result {
+            remote.forward_predispatch_all(&h_normed)
+        } else {
+            results
+        }
+    };
+
+    postnorm_layers(weights, raw_results)
 }
 
 /// Batch pre-dispatch variant of [`generate_with_remote_ffn`].
@@ -543,5 +575,117 @@ mod tests {
         let h_post_attn: Vec<f32> = (0..w.hidden_size).map(|i| (i as f32 - 5.0) * 0.4).collect();
         let out = apply_norm_for_ffn(&w, &h_post_attn, 0);
         assert_eq!(out.len(), w.hidden_size);
+    }
+
+    // ── prenorm_layers / postnorm_layers composition ────────────────
+
+    use super::{postnorm_layers, prenorm_layers};
+
+    #[test]
+    fn prenorm_layers_applies_pre_norm_per_layer() {
+        // Multi-layer pre-norm pass over a synthetic h_capture.
+        // Output length must match input, and each layer's vector
+        // must individually be unit-RMS (identity-weight RMS norm
+        // in the Gemma 3 fixture).
+        let w = make_gemma3_test_weights();
+        let hidden = w.hidden_size;
+        let h_capture: Vec<Vec<f32>> = (0..w.num_layers)
+            .map(|l| (0..hidden).map(|i| (l + i) as f32 * 0.25 + 1.0).collect())
+            .collect();
+        let normed = prenorm_layers(&w, &h_capture);
+        assert_eq!(normed.len(), w.num_layers);
+        for (l, v) in normed.iter().enumerate() {
+            assert_eq!(v.len(), hidden);
+            let rms = (v.iter().map(|x| x * x).sum::<f32>() / hidden as f32).sqrt();
+            assert!(
+                (rms - 1.0).abs() < 1e-3,
+                "layer {l} prenorm should rescale to unit RMS, got {rms}"
+            );
+        }
+    }
+
+    #[test]
+    fn postnorm_layers_applies_post_norm_per_layer_on_post_norm_arch() {
+        // Multi-layer post-norm pass: raw FFN outputs come back from
+        // the remote, helper applies the per-layer post-norm so the
+        // residual add sees the same input the local forward path
+        // would produce.
+        let w = make_gemma3_test_weights();
+        let hidden = w.hidden_size;
+        let raw: Vec<Vec<f32>> = (0..w.num_layers)
+            .map(|l| (0..hidden).map(|i| (l + i) as f32 * 0.5 + 2.0).collect())
+            .collect();
+        let post = postnorm_layers(&w, raw);
+        assert_eq!(post.len(), w.num_layers);
+        for (l, v) in post.iter().enumerate() {
+            assert_eq!(v.len(), hidden);
+            let rms = (v.iter().map(|x| x * x).sum::<f32>() / hidden as f32).sqrt();
+            assert!(
+                (rms - 1.0).abs() < 1e-3,
+                "layer {l} postnorm should rescale to unit RMS, got {rms}"
+            );
+        }
+    }
+
+    #[test]
+    fn postnorm_layers_is_identity_on_pre_norm_arch() {
+        // TinyModel reports `has_post_norms() == false`. The helper
+        // must short-circuit each layer to passthrough so the remote
+        // FFN's raw output flows straight into the residual add.
+        // Regression surface: if the per-layer short-circuit ever
+        // gets gated wrong, a pre-norm-arch remote-FFN run silently
+        // gets identity-RMS normalised and diverges from local.
+        let w = make_test_weights();
+        let raw: Vec<Vec<f32>> = (0..w.num_layers)
+            .map(|l| (0..w.hidden_size).map(|i| (l + i) as f32).collect())
+            .collect();
+        let raw_clone = raw.clone();
+        let post = postnorm_layers(&w, raw);
+        assert_eq!(post, raw_clone);
+    }
+
+    #[test]
+    fn ffn_norm_round_trip_dispatches_pre_normed_input_and_post_norms_output() {
+        // End-to-end shape of the decode-path composition: the
+        // dispatch closure (stand-in for the remote FFN) sees a
+        // pre-normed buffer, and the caller post-norms its return
+        // before the residual add. This is the contract that
+        // chrishayuk/larql#114 violated when the f32 fallback
+        // branches sent raw residuals.
+        let w = make_gemma3_test_weights();
+        let hidden = w.hidden_size;
+        let h_post_attn: Vec<f32> = (0..hidden).map(|i| (i as f32) * 0.3 + 1.5).collect();
+
+        // Mirror exactly what the decode moe_fn does, with an
+        // identity-mapping dispatch closure. `seen_input` captures
+        // what the "remote" was handed.
+        let h_normed = apply_norm_for_ffn(&w, &h_post_attn, 0);
+        let seen_input = h_normed.clone();
+        let raw_out = h_normed.clone(); // identity dispatch
+        let result = apply_post_ffn_norm(&w, &raw_out, 0);
+
+        // Pre-normed input: dispatch sees unit-RMS, not the raw h.
+        let in_rms = (seen_input.iter().map(|x| x * x).sum::<f32>() / hidden as f32).sqrt();
+        assert!(
+            (in_rms - 1.0).abs() < 1e-3,
+            "dispatch must see pre-normed input (unit-RMS), got {in_rms}"
+        );
+
+        // Post-normed output: result is unit-RMS too (identity
+        // dispatch fed unit-RMS through, post-norm on Gemma 3 keeps
+        // it unit-RMS).
+        let out_rms = (result.iter().map(|x| x * x).sum::<f32>() / hidden as f32).sqrt();
+        assert!(
+            (out_rms - 1.0).abs() < 1e-3,
+            "post-normed output should be unit-RMS, got {out_rms}"
+        );
+
+        // And the result differs from the raw h_post_attn — without
+        // the round-trip norms, an identity-dispatch would return
+        // exactly h_post_attn.
+        assert_ne!(
+            &result, &h_post_attn,
+            "decode-path round-trip must transform the residual, not echo it"
+        );
     }
 }
