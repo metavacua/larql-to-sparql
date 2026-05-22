@@ -54,9 +54,11 @@ pub fn generate_with_remote_ffn(
         let x_tok: Vec<f32> = tok_embed.as_slice().unwrap_or(&[]).to_vec();
 
         let mut moe_fn = |layer: usize, h_post_attn: &[f32]| -> Vec<f32> {
-            let x = ndarray::Array2::from_shape_vec((1, hidden), h_post_attn.to_vec())
+            let h_normed = apply_norm_for_ffn(weights, h_post_attn, layer);
+            let x = ndarray::Array2::from_shape_vec((1, hidden), h_normed)
                 .expect("shape must match hidden");
-            remote.forward(layer, &x).row(0).to_vec()
+            let raw_out = remote.forward(layer, &x).row(0).to_vec();
+            apply_post_ffn_norm(weights, &raw_out, layer)
         };
 
         let h = backend.decode_token_with_moe(&layers, &x_tok, hidden, intermediate, &mut moe_fn);
@@ -181,6 +183,25 @@ fn apply_norm_for_ffn(weights: &ModelWeights, h_post_attn: &[f32], layer: usize)
     let normed = match pre_ffn_key {
         Some(ref key) => apply_norm(weights, &h, key, norm_offset),
         None => rms_norm(&h, None, norm_offset),
+    };
+    normed.row(0).to_vec()
+}
+
+fn apply_post_ffn_norm(weights: &ModelWeights, ffn_out: &[f32], layer: usize) -> Vec<f32> {
+    let arch = &*weights.arch;
+    let norm_offset = arch.norm_weight_offset();
+    let key = arch.post_feedforward_layernorm_key(layer);
+    let h = ndarray::Array2::from_shape_vec((1, ffn_out.len()), ffn_out.to_vec())
+        .expect("apply_post_ffn_norm: shape error");
+    let normed = match key {
+        Some(ref k) => apply_norm(weights, &h, k, norm_offset),
+        None => {
+            if arch.has_post_norms() {
+                rms_norm(&h, None, norm_offset)
+            } else {
+                return ffn_out.to_vec();
+            }
+        }
     };
     normed.row(0).to_vec()
 }
