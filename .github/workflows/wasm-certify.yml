@@ -96,7 +96,8 @@ jobs:
 
       - name: Install geckodriver
         run: |
-          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+          VER=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/mozilla/geckodriver/releases/latest \
             | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
           curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
             | sudo tar xz -C /usr/local/bin/
@@ -153,7 +154,8 @@ jobs:
 
       - name: Install geckodriver
         run: |
-          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+          VER=$(curl -fsSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/mozilla/geckodriver/releases/latest \
             | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
           curl -fsSL \
             "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
