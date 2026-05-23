@@ -58,13 +58,20 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy, rustfmt
 
-      - name: Install wasm-pack
+      - name: Install wasm-bindgen-cli
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          tool: wasm-bindgen-cli@0.2.121
 
       - name: Install Firefox
         uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
 
       - name: Cache cargo registry + build artefacts
         uses: actions/cache@v5
@@ -95,12 +102,12 @@ jobs:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
         run: cargo clippy -p model-compute --target wasm32-unknown-unknown --no-default-features --features wasm -- -D warnings
 
-      - name: wasm-pack test · node
+      - name: cargo test · wasm32 (dynamic)
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test --node crates/model-compute --no-default-features --features wasm
+        run: cargo test -p model-compute --target wasm32-unknown-unknown --no-default-features --features wasm
 
-      - name: wasm-pack test · firefox
+      - name: cargo test · wasm32 · firefox (static)
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
-        run: wasm-pack test --firefox --headless crates/model-compute --no-default-features --features wasm,browser-tests
+        run: cargo test -p model-compute --target wasm32-unknown-unknown --no-default-features --features wasm,browser-tests

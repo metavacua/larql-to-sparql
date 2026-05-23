@@ -18,3 +18,9 @@ ar = "llvm-ar"
 [target.armv7-linux-androideabi]
 linker = "armv7a-linux-androideabi21-clang"
 ar = "llvm-ar"
+
+# wasm32 test runner — dispatches `cargo test --target wasm32-unknown-unknown`
+# through wasm-bindgen-test-runner (Node.js mode by default).
+# Firefox/browser mode: set WASM_BINDGEN_TEST_BROWSER=firefox at invocation time.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

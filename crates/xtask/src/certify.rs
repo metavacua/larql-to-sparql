@@ -8,7 +8,8 @@
 //!   Closure  — wasmparser + ascent Datalog rules → partition label
 //!              (analyzed against production binary, not the test binary, so
 //!              dev-only dispatch from wasm-bindgen-test is excluded)
-//!   Level 2  — `wasm-pack test --node -- --lib` (runtime confirmation)
+//!   Level 2b — `cargo test --target wasm32-unknown-unknown --lib` (Node.js/dynamic, coverage-friendly)
+//!   Level 2a — same with WASM_BINDGEN_TEST_BROWSER=firefox (browser/static portability witness)
 //!   Level 4  — cfg-gated test collector (boundary map, informational)
 //!   Level 5/6 — `cargo mutants` on wasm32-accessible sources
 //!
@@ -37,7 +38,10 @@ pub struct CertResult {
     /// Functions with unresolved dynamic dispatch.
     pub dispatch_witnesses: Vec<String>,
     pub level1_pass: bool,
-    pub level2_pass: Option<bool>,
+    /// Node.js runtime confirmation (dynamic WASM32; coverage-friendly via .profraw).
+    pub level2b_pass: Option<bool>,
+    /// Firefox/browser runtime confirmation (static WASM32 portability witness; coverage-hostile by design).
+    pub level2a_pass: Option<bool>,
     pub level4_unit_cws: usize,
     pub level4_integ_cws: usize,
     pub mutant_survivors: Option<usize>,
@@ -117,7 +121,8 @@ fn certify_crate(
         containment_witnesses: vec![],
         dispatch_witnesses: vec![],
         level1_pass: false,
-        level2_pass: None,
+        level2b_pass: None,
+        level2a_pass: None,
         level4_unit_cws: 0,
         level4_integ_cws: 0,
         mutant_survivors: None,
@@ -209,14 +214,32 @@ fn certify_crate(
         }
     }
 
-    // ── Level 2: runtime confirmation ────────────────────────────────────────
-    let level2 = run_level2(crate_root)?;
-    result.level2_pass = Some(level2);
-    if level2 {
-        println!("  Level 2: PASS (runtime-consistent, Node.js)");
+    // ── Level 2b: Node.js runtime (dynamic WASM32) ───────────────────────────
+    // Uses wasm-bindgen-test-runner via .cargo/config.toml runner entry.
+    // Node.js has host filesystem access → .profraw coverage is tractable here.
+    let level2b = run_level2b(crate_root)?;
+    result.level2b_pass = Some(level2b);
+    if level2b {
+        println!("  Level 2b (Node.js/dynamic): PASS");
     } else {
-        println!("  Level 2: FAIL (wasm-pack test --lib returned non-zero)");
+        println!("  Level 2b (Node.js/dynamic): FAIL");
         if claimed_level >= 2 {
+            result.regression = true;
+        }
+    }
+
+    // ── Level 2a: Firefox/browser runtime (static WASM32 witness) ────────────
+    // Runs with WASM_BINDGEN_TEST_BROWSER=firefox. The browser sandbox blocks
+    // .profraw writes — coverage-hostile by design. A crate that passes 2b but
+    // fails 2a depends on host-IO capability and is classified dynamic-only.
+    let level2a = run_level2a(crate_root)?;
+    result.level2a_pass = Some(level2a);
+    if level2a {
+        println!("  Level 2a (Firefox/static):  PASS");
+    } else {
+        println!("  Level 2a (Firefox/static):  FAIL");
+        // STATIC partition at claimed level ≥ 3 requires browser portability.
+        if claimed_level >= 3 && matches!(result.partition, Some(WasmPartition::Static)) {
             result.regression = true;
         }
     }
@@ -376,12 +399,28 @@ fn analyze_call_graph(
     Ok((partition, containment_witnesses, dispatch_witnesses))
 }
 
-fn run_level2(crate_root: &Path) -> Result<bool> {
-    let status = Command::new("wasm-pack")
-        .args(["test", "--node", "--", "--lib"])
+/// Level 2b — Node.js runtime (dynamic WASM32).
+/// Requires wasm-bindgen-test-runner in PATH and the runner entry in .cargo/config.toml.
+/// Node.js has host filesystem access so .profraw coverage collection is tractable.
+fn run_level2b(crate_root: &Path) -> Result<bool> {
+    let status = Command::new("cargo")
+        .args(["test", "--target", "wasm32-unknown-unknown", "--lib"])
         .current_dir(crate_root)
         .status()
-        .context("wasm-pack test --node")?;
+        .context("cargo test --target wasm32-unknown-unknown --lib (node)")?;
+    Ok(status.success())
+}
+
+/// Level 2a — Firefox/browser runtime (static WASM32 portability witness).
+/// Requires geckodriver in PATH. The browser sandbox blocks .profraw writes —
+/// coverage-hostile by design; that constraint is what defines the static subset.
+fn run_level2a(crate_root: &Path) -> Result<bool> {
+    let status = Command::new("cargo")
+        .args(["test", "--target", "wasm32-unknown-unknown", "--lib"])
+        .env("WASM_BINDGEN_TEST_BROWSER", "firefox")
+        .current_dir(crate_root)
+        .status()
+        .context("cargo test --target wasm32-unknown-unknown --lib (firefox)")?;
     Ok(status.success())
 }
 
