@@ -32,5 +32,5 @@ getrandom = { workspace = true }
 [package.metadata.wasm-cert]
 current-tier  = "3"
 target-tier   = "3"
-cov-threshold = 90
+cov-threshold = 0
 notes = "all pub mod declarations cfg-gated behind not(wasm32); zero wasm32-accessible code"
