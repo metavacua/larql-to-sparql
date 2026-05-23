@@ -273,7 +273,7 @@ fn certify_crate(
 
     // ── llvm-cov gate ─────────────────────────────────────────────────────────
     let threshold_opt = (cov_threshold > 0).then_some(cov_threshold);
-    match run_llvm_cov(crate_name, crate_root, threshold_opt) {
+    match run_wasm_coverage(crate_name, crate_root, threshold_opt) {
         Ok((pct, pass)) => {
             result.level2_cov_pct = Some(pct);
             if let Some(t) = threshold_opt {
@@ -515,18 +515,23 @@ fn run_level2_firefox(crate_root: &Path) -> Result<bool> {
     Ok(status.success())
 }
 
-/// Run llvm-cov on the host target. Returns `(pct, pass)`.
+/// Run wasm32 coverage via the wasm-bindgen-test native profraw pipeline.
 ///
-/// wasm32 source-based coverage is impossible on stable (no profiler_builtins for
-/// wasm32-unknown-unknown). Coverage is measured on the host using the dual
-/// `cfg_attr(not(target_arch = "wasm32"), test)` tests. Runtime correctness on
-/// wasm32 is confirmed by the Node.js and Firefox test runs.
+/// Invokes `cargo llvm-cov --target wasm32-unknown-unknown` which compiles with
+/// `-C instrument-coverage`, runs tests through wasm-bindgen-test-runner (Node.js),
+/// and collects the `.profraw` files the runner generates natively — bypassing
+/// the JavaScript coverage ecosystem entirely.
 ///
 /// `threshold = Some(n)` adds `--fail-under-lines n` and gates on exit code.
 /// `threshold = None` is informational; `pass` is always `true`.
-/// Fails loudly if cargo-llvm-cov is not installed.
-fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> Result<(f32, bool)> {
-    let mut args = vec!["llvm-cov", "-p", crate_name, "--summary-only"];
+/// Fails loudly if cargo-llvm-cov or llvm-tools-preview is not installed.
+fn run_wasm_coverage(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> Result<(f32, bool)> {
+    let mut args = vec![
+        "llvm-cov",
+        "--target", "wasm32-unknown-unknown",
+        "-p", crate_name,
+        "--summary-only",
+    ];
     let threshold_str;
     if let Some(t) = threshold {
         threshold_str = t.to_string();
@@ -538,12 +543,13 @@ fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> R
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context("cargo llvm-cov")?;
+        .context("cargo llvm-cov --target wasm32-unknown-unknown")?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("no such command") || stderr.contains("Unknown command") {
         anyhow::bail!(
             "cargo-llvm-cov is not installed — required for the coverage gate.\n\
-             Install with: cargo install cargo-llvm-cov --locked"
+             Install: cargo install cargo-llvm-cov --locked\n\
+             Also: rustup component add llvm-tools-preview"
         );
     }
     let pass = threshold.map_or(true, |_| output.status.success());

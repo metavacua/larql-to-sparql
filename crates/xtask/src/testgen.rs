@@ -135,8 +135,15 @@ fn arg_literal(v: &ArgValue) -> String {
 pub fn generate(facts: &WasmFacts) -> Vec<TestCase> {
     let mut cases = Vec::new();
 
-    for (export_name, _func_idx, params, results) in &facts.exports_typed {
+    for (export_name, func_idx, params, results) in &facts.exports_typed {
         if !is_rust_ident(export_name) {
+            continue;
+        }
+        // Skip wasm-bindgen method exports. Their internal Rust name (from the
+        // name section) contains "::", indicating a method such as Foo::bar
+        // rather than a free function. Such exports are not directly callable
+        // from integration test code using the export name.
+        if facts.names.get(func_idx).map_or(false, |n| n.contains("::")) {
             continue;
         }
         if params.iter().any(|t| !is_scalar(t)) {

@@ -4,6 +4,7 @@
 //! in-process to the full router with no network socket. Every test builds a
 //! synthetic in-memory VectorIndex (1 layer, 3 features, hidden=4).
 
+#![cfg(not(target_arch = "wasm32"))]
 #![allow(dead_code, unused_imports)]
 
 use std::collections::HashMap;

@@ -80,6 +80,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: llvm-tools-preview
 
       - name: Install wasm-bindgen-cli, cargo-mutants, cargo-llvm-cov
         uses: taiki-e/install-action@v2
