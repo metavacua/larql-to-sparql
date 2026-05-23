@@ -47,7 +47,7 @@ jobs:
     outputs:
       crates: ${{ steps.list.outputs.crates }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: List wasm-certifiable crates
         id: list
@@ -74,7 +74,7 @@ jobs:
         crate: ${{ fromJson(needs.discover.outputs.crates) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust (stable) + wasm32 target
         uses: dtolnay/rust-toolchain@stable
@@ -98,7 +98,7 @@ jobs:
             | sudo tar xz -C /usr/local/bin/
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -121,13 +121,13 @@ jobs:
     if: always()
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry + build artefacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
