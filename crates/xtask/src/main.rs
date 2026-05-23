@@ -35,6 +35,12 @@ enum Command {
         /// Written to target/wasm-cert/{crate}-extraction.json.
         #[arg(long)]
         extraction_graph: bool,
+        /// Certify under the atomics ABI (+atomics,+bulk-memory,+mutable-globals).
+        /// Requires nightly toolchain with rust-src component (-Z build-std).
+        /// Skips Node.js runtime (no Web Worker support) and mutation gate.
+        /// Used by the certify-parallel CI job to verify parallel-safe subsets.
+        #[arg(long)]
+        parallel: bool,
     },
 
     /// Print per-crate certification status table (reads manifests + last run).
@@ -76,8 +82,8 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::WasmCertify { crate_name, extraction_graph } => {
-            certify::run(crate_name.as_deref(), extraction_graph)
+        Command::WasmCertify { crate_name, extraction_graph, parallel } => {
+            certify::run(crate_name.as_deref(), extraction_graph, parallel)
         }
         Command::WasmStatus { json } => status::run(json),
         Command::WasmAudit { crate_name } => audit::run(crate_name.as_deref()),

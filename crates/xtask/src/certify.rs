@@ -52,7 +52,7 @@ pub struct CertResult {
 }
 
 /// Run the certification cascade for one or all workspace members.
-pub fn run(crate_name: Option<&str>, extraction_graph: bool) -> Result<()> {
+pub fn run(crate_name: Option<&str>, extraction_graph: bool, parallel: bool) -> Result<()> {
     crate::new_crate_detector::run()?;
 
     let meta = crate::status::workspace_meta()?;
@@ -77,6 +77,10 @@ pub fn run(crate_name: Option<&str>, extraction_graph: bool) -> Result<()> {
         let target_tier = cert.target_tier;
         let cov_threshold = cert.cov_threshold;
 
+        // When running in parallel/atomics mode, activate the crate's "parallel" feature
+        // if it exists (e.g. wasm-bindgen-rayon in larql-wasm).
+        let has_parallel_feature = parallel && pkg.features.contains_key("parallel");
+
         let result = certify_crate(
             &pkg.name,
             &crate_root,
@@ -84,6 +88,8 @@ pub fn run(crate_name: Option<&str>, extraction_graph: bool) -> Result<()> {
             target_tier,
             cov_threshold,
             &pkg.targets,
+            parallel,
+            has_parallel_feature,
         )?;
         print_result(&result);
 
@@ -124,7 +130,10 @@ fn certify_crate(
     target_tier: WasmTier,
     cov_threshold: u8,
     targets: &[cargo_metadata::Target],
+    parallel: bool,
+    has_parallel_feature: bool,
 ) -> Result<CertResult> {
+    let extra_features: Option<&str> = has_parallel_feature.then_some("parallel");
     println!("\n──── {crate_name} (tier {claimed_tier} → target {target_tier}) ────");
 
     let mut result = CertResult {
@@ -166,7 +175,7 @@ fn certify_crate(
     }
 
     // ── Tier 1: compile check ─────────────────────────────────────────────────
-    let level1_errors = run_level1(crate_name)?;
+    let level1_errors = run_level1(crate_name, parallel, extra_features)?;
     result.level1_pass = level1_errors.is_empty();
     if !result.level1_pass {
         println!("  TIER-1 FAIL (compile errors):");
@@ -181,7 +190,7 @@ fn certify_crate(
     println!("  Tier 1: PASS (compile-consistent)");
 
     // ── Build wasm production binary (no dev-deps) ───────────────────────────
-    let wasm_bin = build_wasm_production_binary(crate_name, crate_root)?;
+    let wasm_bin = build_wasm_production_binary(crate_name, crate_root, parallel, extra_features)?;
 
     // Read bytes once; shared by testgen and call-graph analysis below.
     let wasm_bytes: Option<Vec<u8>> = wasm_bin
@@ -260,15 +269,21 @@ fn certify_crate(
     }
 
     // ── Tier 2: Node.js runtime (includes wasm-testgen structural tests) ──────
-    let level2 = run_level2_node(crate_root)?;
-    result.level2_pass = Some(level2);
-    if level2 {
-        println!("  Tier 2 (Node.js): PASS");
-    } else {
-        println!("  Tier 2 (Node.js): FAIL");
-        if claimed_tier >= WasmTier::Level2 {
-            result.regression = true;
+    // Skipped in parallel/atomics mode: Node.js lacks the `self` global that
+    // Web Workers require; Firefox is the sole valid runtime for the atomics path.
+    if !parallel {
+        let level2 = run_level2_node(crate_root)?;
+        result.level2_pass = Some(level2);
+        if level2 {
+            println!("  Tier 2 (Node.js): PASS");
+        } else {
+            println!("  Tier 2 (Node.js): FAIL");
+            if claimed_tier >= WasmTier::Level2 {
+                result.regression = true;
+            }
         }
+    } else {
+        println!("  Tier 2 (Node.js): skipped (parallel/atomics — no Web Worker support in Node.js)");
     }
 
     // ── llvm-cov gate ─────────────────────────────────────────────────────────
@@ -306,7 +321,10 @@ fn certify_crate(
     );
 
     let accessible_files = accessible_source_files(crate_root, &audit.accessible);
-    if !accessible_files.is_empty() {
+    // Mutation gate is skipped in parallel/atomics mode: cargo mutants invokes the
+    // full test suite for every mutant; rebuild-std makes this prohibitively slow.
+    // Mutation adequacy is already verified by the serial certify job.
+    if !parallel && !accessible_files.is_empty() {
         match run_mutants(crate_root, &accessible_files) {
             Ok(survivors) => {
                 result.mutant_survivors = Some(survivors);
@@ -324,10 +342,12 @@ fn certify_crate(
                 eprintln!("  warning: mutation testing failed: {e}");
             }
         }
+    } else if parallel {
+        println!("  Mutation: skipped (parallel/atomics — rebuild-std makes this prohibitively slow)");
     }
 
     // ── Tier 3: Firefox runtime (static portability witness) ─────────────────
-    let level3_firefox = run_level2_firefox(crate_root)?;
+    let level3_firefox = run_level2_firefox(crate_root, parallel, extra_features)?;
     result.level2_firefox_pass = Some(level3_firefox);
     if level3_firefox {
         println!("  Tier 3 (Firefox): PASS");
@@ -421,22 +441,33 @@ fn analyze_call_graph(_crate_name: &str, wasm_bytes: &[u8]) -> Result<CallGraphA
     })
 }
 
-fn run_level1(crate_name: &str) -> Result<Vec<String>> {
-    let output = Command::new("cargo")
-        .args([
-            "check",
-            "--target",
-            "wasm32-unknown-unknown",
-            "--message-format",
-            "json",
-            "-p",
-            crate_name,
-            "--lib",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .context("cargo check")?;
+fn run_level1(crate_name: &str, parallel: bool, extra_features: Option<&str>) -> Result<Vec<String>> {
+    let mut args: Vec<&str> = vec![];
+    if parallel {
+        args.extend_from_slice(&["-Z", "build-std=panic_abort,std"]);
+    }
+    args.extend_from_slice(&[
+        "check",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--message-format",
+        "json",
+        "-p",
+        crate_name,
+        "--lib",
+    ]);
+    if let Some(f) = extra_features {
+        args.extend_from_slice(&["--features", f]);
+    }
+    let mut cmd = Command::new("cargo");
+    cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::null());
+    if parallel {
+        cmd.env(
+            "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+            "-C target-feature=+atomics,+bulk-memory,+mutable-globals",
+        );
+    }
+    let output = cmd.output().context("cargo check")?;
 
     let mut errors = vec![];
     for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -456,25 +487,43 @@ fn run_level1(crate_name: &str) -> Result<Vec<String>> {
     Ok(errors)
 }
 
-fn build_wasm_production_binary(crate_name: &str, crate_root: &Path) -> Result<Option<PathBuf>> {
-    let output = Command::new("cargo")
-        .args([
-            "rustc",
-            "--target",
-            "wasm32-unknown-unknown",
-            "--message-format",
-            "json",
-            "-p",
-            crate_name,
-            "--lib",
-            "--crate-type",
-            "cdylib",
-        ])
+fn build_wasm_production_binary(
+    crate_name: &str,
+    crate_root: &Path,
+    parallel: bool,
+    extra_features: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let mut args: Vec<&str> = vec![];
+    if parallel {
+        args.extend_from_slice(&["-Z", "build-std=panic_abort,std"]);
+    }
+    args.extend_from_slice(&[
+        "rustc",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--message-format",
+        "json",
+        "-p",
+        crate_name,
+        "--lib",
+        "--crate-type",
+        "cdylib",
+    ]);
+    if let Some(f) = extra_features {
+        args.extend_from_slice(&["--features", f]);
+    }
+    let mut cmd = Command::new("cargo");
+    cmd.args(&args)
         .current_dir(crate_root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .context("cargo rustc --crate-type cdylib")?;
+        .stderr(Stdio::null());
+    if parallel {
+        cmd.env(
+            "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+            "-C target-feature=+atomics,+bulk-memory,+mutable-globals",
+        );
+    }
+    let output = cmd.output().context("cargo rustc --crate-type cdylib")?;
 
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) {
@@ -505,11 +554,26 @@ fn run_level2_node(crate_root: &Path) -> Result<bool> {
 }
 
 /// Tier 3 Firefox/browser runtime portability witness.
-fn run_level2_firefox(crate_root: &Path) -> Result<bool> {
-    let status = Command::new("cargo")
-        .args(["test", "--target", "wasm32-unknown-unknown"])
+fn run_level2_firefox(crate_root: &Path, parallel: bool, extra_features: Option<&str>) -> Result<bool> {
+    let mut args: Vec<&str> = vec![];
+    if parallel {
+        args.extend_from_slice(&["-Z", "build-std=panic_abort,std"]);
+    }
+    args.extend_from_slice(&["test", "--target", "wasm32-unknown-unknown"]);
+    if let Some(f) = extra_features {
+        args.extend_from_slice(&["--features", f]);
+    }
+    let mut cmd = Command::new("cargo");
+    cmd.args(&args)
         .env("WASM_BINDGEN_TEST_BROWSER", "firefox")
-        .current_dir(crate_root)
+        .current_dir(crate_root);
+    if parallel {
+        cmd.env(
+            "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
+            "-C target-feature=+atomics,+bulk-memory,+mutable-globals",
+        );
+    }
+    let status = cmd
         .status()
         .context("cargo test --target wasm32-unknown-unknown (firefox)")?;
     Ok(status.success())

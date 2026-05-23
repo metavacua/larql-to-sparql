@@ -1,9 +1,9 @@
 # wasm-certify.yml — per-crate wasm32 certification cascade
 #
 # A `discover` job enumerates every workspace member that carries
-# `[package.metadata.wasm-cert]`, then fans out into one `certify` job per
-# crate.  Each job runs the full cascade independently:
+# `[package.metadata.wasm-cert]`, then fans out into parallel certification jobs:
 #
+# certify (stable, serial ABI):
 #   Tier 1    — cargo check --target wasm32-unknown-unknown
 #   Build     — cargo rustc --crate-type cdylib (production binary)
 #   testgen   — structural tests from wasm exports → tests/wasm_generated.rs
@@ -12,6 +12,10 @@
 #   Coverage  — cargo llvm-cov on host (dual cfg_attr tests)
 #   Mutation  — cargo mutants on wasm32-accessible modules
 #   Tier 3    — Firefox runtime + Reification (F_defined = F_reachable)
+#
+# certify-parallel (nightly, atomics ABI: +atomics,+bulk-memory,+mutable-globals):
+#   Same cascade with -Z build-std=panic_abort,std; skips Node.js (no Web Workers)
+#   and mutation gate (rebuild-std cost).  Verifies STATIC subsets are Web Worker safe.
 #
 # Exit code is non-zero only when a crate regresses below its current-tier.
 # fail-fast: false — all crate results remain visible on failure.
@@ -113,10 +117,68 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cargo xtask wasm-certify --crate-name ${{ matrix.crate }}
 
+  # ── One parallel/atomics certification job per crate (nightly) ────────────
+  certify-parallel:
+    name: certify-parallel · ${{ matrix.crate }}
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (nightly) + wasm32 target + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src,llvm-tools-preview
+
+      - name: Install wasm-bindgen-cli, cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121,cargo-llvm-cov
+
+      - name: Install Firefox
+        uses: browser-actions/setup-firefox@v1
+
+      - name: Install geckodriver
+        run: |
+          VER=$(curl -fsSL https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"(v[^"]+)".*/\1/')
+          curl -fsSL \
+            "https://github.com/mozilla/geckodriver/releases/download/${VER}/geckodriver-${VER}-linux64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin/
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-parallel-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-parallel-${{ matrix.crate }}-
+
+      - name: Certify (parallel/atomics) ${{ matrix.crate }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo xtask wasm-certify --crate-name ${{ matrix.crate }} --parallel
+
   # ── Workspace-wide status table → job summary ──────────────────────────────
   summary:
     name: wasm-status
-    needs: certify
+    needs: [certify, certify-parallel]
     runs-on: ubuntu-24.04
     if: always()
 
