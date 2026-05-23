@@ -98,7 +98,7 @@ pub fn run(crate_name: Option<&str>, extraction_graph: bool, parallel: bool) -> 
         }
 
         if extraction_graph {
-            emit_extraction_graph(&result, &crate_root)?;
+            emit_extraction_graph(&result, meta.workspace_root.as_std_path())?;
         }
 
         let conclusion = if result.regression {
@@ -368,7 +368,7 @@ fn certify_crate(
             result.regression = true;
         }
         // Counterwitness gate: non-trivial native-only boundary must have proof.
-        if audit.native_only.len() > 0 && result.level4_unit_cws == 0 && result.level4_integ_cws == 0 {
+        if !audit.native_only.is_empty() && result.level4_unit_cws == 0 && result.level4_integ_cws == 0 {
             println!(
                 "  Tier 3 boundary: FAIL ({} native-only module(s), zero counterwitnesses)",
                 audit.native_only.len()
@@ -524,6 +524,10 @@ fn build_wasm_production_binary(
         );
     }
     let output = cmd.output().context("cargo rustc --crate-type cdylib")?;
+    if !output.status.success() {
+        eprintln!("  warning: cdylib build failed for {crate_name} (exit {}); testgen and call-graph analysis skipped", output.status);
+        return Ok(None);
+    }
 
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if let Ok(msg) = serde_json::from_str::<serde_json::Value>(line) {
@@ -621,12 +625,12 @@ fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> R
 fn parse_llvm_cov_pct(output: &str) -> f32 {
     // cargo-llvm-cov --summary-only table format:
     //   TOTAL  <regions> <miss-r> <r-cov%>  <fns> <miss-f> <f-cov%>  <lines> <miss-l> <l-cov%> ...
-    // The line coverage % is the 10th whitespace-separated token (index 9) on the TOTAL row.
+    // After consuming "TOTAL" with parts.next(), the remaining tokens are 0-based.
+    // Index 8 = line coverage % (regions[0..2], fns[3..5], lines[6..8]).
     for line in output.lines() {
         let mut parts = line.split_whitespace();
         if parts.next() == Some("TOTAL") {
             let tokens: Vec<&str> = parts.collect();
-            // index 8 = line coverage % (0-based after "TOTAL")
             if let Some(pct_str) = tokens.get(8) {
                 if let Ok(pct) = pct_str.trim_end_matches('%').parse::<f32>() {
                     return pct;
@@ -672,7 +676,7 @@ fn accessible_source_files(crate_root: &Path, accessible: &[String]) -> Vec<Path
         .collect()
 }
 
-fn emit_extraction_graph(result: &CertResult, crate_root: &Path) -> Result<()> {
+fn emit_extraction_graph(result: &CertResult, workspace_root: &Path) -> Result<()> {
     let has_tier3_blockers = matches!(
         result.partition,
         Some(WasmPartition::Native | WasmPartition::Dynamic)
@@ -683,7 +687,7 @@ fn emit_extraction_graph(result: &CertResult, crate_root: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let target_dir = crate_root.join("../../target/wasm-cert");
+    let target_dir = workspace_root.join("target/wasm-cert");
     std::fs::create_dir_all(&target_dir).ok();
     let dest = target_dir.join(format!("{}-extraction.json", result.crate_name));
 
