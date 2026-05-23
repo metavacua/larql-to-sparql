@@ -51,6 +51,7 @@ getrandom = { workspace = true }
 tokenizers = { version = "0.21", default-features = false, features = ["unstable_wasm"] }
 
 [package.metadata.wasm-cert]
-claimed-level = 0
-diagonalization-gate = "native-host"
+current-tier  = "0"
+target-tier   = "0"
+cov-threshold = 0
 notes = "binary crate; host OS/IO layer; NATIVE"

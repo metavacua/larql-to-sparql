@@ -82,6 +82,7 @@ getrandom = { workspace = true }
 wasm-bindgen-test = "0.3"
 
 [package.metadata.wasm-cert]
-claimed-level = 2
-diagonalization-gate = "dynamic-partition"
+current-tier  = "2"
+target-tier   = "3"
+cov-threshold = 80
 notes = "DYNAMIC: test binary includes wasm-bindgen-test async/closure dispatch; production modules are static"

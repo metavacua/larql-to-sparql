@@ -168,6 +168,7 @@ tokenizers = { version = "0.21", default-features = false, features = ["unstable
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
 [package.metadata.wasm-cert]
-claimed-level = 2
-diagonalization-gate = "manual-review"
+current-tier  = "2"
+target-tier   = "3"
+cov-threshold = 0
 notes = "35+ files with fs/net/process traps ungated; zero wasm runtime tests"

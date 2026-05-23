@@ -18,13 +18,15 @@ pub struct WasmFacts {
     pub calls: Vec<(u32, u32)>,
     /// Function indices that contain at least one call_indirect.
     pub indirect_calls: Vec<u32>,
-    /// Function indices whose bodies contain inline asm (wasm `unreachable`
-    /// emitted by `asm!` blocks is not detectable here; asm! compiles to LLVM
-    /// which is then lowered — we detect via import names instead).
-    pub inline_asm: Vec<u32>,
     /// Import entries that are NOT in the intrinsic whitelist.
     /// `(module, name, func_index)`
     pub non_intrinsic_imports: Vec<(String, String, u32)>,
+    /// Non-intrinsic imports classified as local capability (fs/IPC/LAN).
+    /// `(module, name, func_index)`
+    pub local_imports: Vec<(String, String, u32)>,
+    /// Non-intrinsic imports classified as remote capability (WAN/HTTP/WS).
+    /// `(module, name, func_index)`
+    pub remote_imports: Vec<(String, String, u32)>,
     /// Export entries that are functions — the call graph roots.
     /// `(name, func_index)`
     pub roots: Vec<(String, u32)>,
@@ -32,9 +34,25 @@ pub struct WasmFacts {
     pub names: HashMap<u32, String>,
     /// Total number of imported functions (to offset local function indices).
     pub num_imports: u32,
+    /// Total function count: imported + locally defined. Used for orphan analysis.
+    pub total_func_count: u32,
     /// Typed exports: (export_name, func_idx, param_types, result_types).
     /// Populated when TypeSection and FunctionSection are both present.
     pub exports_typed: Vec<(String, u32, Vec<ValType>, Vec<ValType>)>,
+}
+
+const LOCAL_CAPABILITY_PATTERNS: &[&str] = &[
+    "readfile", "writefile", "appendfile", "open", "close", "stat", "fstat",
+    "lstat", "mkdir", "rmdir", "unlink", "rename", "readdir", "spawn", "exec",
+    "fork", "pipe", "socket", "bind", "listen", "accept", "connect",
+    "send", "recv", "sendto", "recvfrom",
+];
+
+/// Returns true if the import name matches local-capability patterns (fs/IPC/LAN).
+/// Conservative: anything not matching local patterns is classified as remote.
+fn is_local_capability(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    LOCAL_CAPABILITY_PATTERNS.iter().any(|p| n.contains(p))
 }
 
 /// Module/name patterns that are part of the wasm-bindgen + getrandom intrinsic
@@ -60,9 +78,13 @@ fn register_import(
         let idx = *count;
         *count += 1;
         if !is_intrinsic(module, name) {
-            facts
-                .non_intrinsic_imports
-                .push((module.to_owned(), name.to_owned(), idx));
+            let entry = (module.to_owned(), name.to_owned(), idx);
+            if is_local_capability(name) {
+                facts.local_imports.push(entry.clone());
+            } else {
+                facts.remote_imports.push(entry.clone());
+            }
+            facts.non_intrinsic_imports.push(entry);
         }
     }
 }
@@ -178,6 +200,9 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
             _ => {}
         }
     }
+
+    // Total function space for orphan analysis.
+    facts.total_func_count = facts.num_imports + local_func_idx;
 
     // Join exports with type signatures.
     for (name, func_idx) in &facts.roots {

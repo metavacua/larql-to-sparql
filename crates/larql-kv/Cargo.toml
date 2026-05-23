@@ -64,6 +64,7 @@ name = "engine_ladder"
 getrandom = { workspace = true }
 
 [package.metadata.wasm-cert]
-claimed-level = 2
-diagonalization-gate = "dynamic-partition"
+current-tier  = "2"
+target-tier   = "3"
+cov-threshold = 80
 notes = "call_indirect present; L2 PASS; DYNAMIC partition"

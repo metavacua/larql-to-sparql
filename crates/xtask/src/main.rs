@@ -23,14 +23,18 @@ struct Cli {
 enum Command {
     /// Run the wasm32 certification cascade for workspace members.
     ///
-    /// Levels run in order: 1 (compile), call-graph closure, 2 (runtime
-    /// confirmation), 4 (boundary map), 5/6 (mutation).  All results are
-    /// reported regardless of pass/fail.  Exit code is non-zero only when a
-    /// crate regresses below its claimed-level.
+    /// Tiers run in order: 1 (compile), call-graph closure, 2 (Node.js runtime,
+    /// coverage, mutation), 3 (Firefox, Reification, counterwitness).  All results
+    /// are reported regardless of pass/fail.  Exit code is non-zero only when a
+    /// crate regresses below its current-tier.
     WasmCertify {
         /// Certify only this crate (default: all workspace members).
         #[arg(long)]
         crate_name: Option<String>,
+        /// Emit a structured JSON extraction recipe for crates that fail Tier 3.
+        /// Written to target/wasm-cert/{crate}-extraction.json.
+        #[arg(long)]
+        extraction_graph: bool,
     },
 
     /// Print per-crate certification status table (reads manifests + last run).
@@ -72,7 +76,9 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::WasmCertify { crate_name } => certify::run(crate_name.as_deref()),
+        Command::WasmCertify { crate_name, extraction_graph } => {
+            certify::run(crate_name.as_deref(), extraction_graph)
+        }
         Command::WasmStatus { json } => status::run(json),
         Command::WasmAudit { crate_name } => audit::run(crate_name.as_deref()),
         Command::WasmTestgen { package, out_dir, profile } => {

@@ -204,14 +204,15 @@ pub fn emit_test_file(crate_name: &str, cases: &[TestCase]) -> String {
     out.push('\n');
     out.push_str("#![cfg(target_arch = \"wasm32\")]\n");
     out.push('\n');
-    out.push_str("use wasm_bindgen_test::*;\n");
-    out.push_str(&format!("use {crate_ident}::*;\n"));
-    out.push('\n');
 
     if cases.is_empty() {
         out.push_str("// No testable exports found (no scalar-typed public exports).\n");
         return out;
     }
+
+    out.push_str("use wasm_bindgen_test::*;\n");
+    out.push_str(&format!("use {crate_ident}::*;\n"));
+    out.push('\n');
 
     for case in cases {
         let args_lit = case.args.iter().map(|a| arg_literal(a)).collect::<Vec<_>>().join(", ");
@@ -226,6 +227,28 @@ pub fn emit_test_file(crate_name: &str, cases: &[TestCase]) -> String {
     }
 
     out
+}
+
+/// Build, generate, and write `tests/wasm_generated.rs` given an already-built wasm binary.
+///
+/// Called by `certify.rs` after the production cdylib is compiled, so testgen
+/// reuses the artifact rather than triggering a second build.
+pub fn generate_for_package(
+    package: &str,
+    wasm_bytes: &[u8],
+    crate_root: &std::path::Path,
+) -> anyhow::Result<usize> {
+    use anyhow::Context as _;
+    let facts = crate::wasm_facts::extract(wasm_bytes)?;
+    let cases = generate(&facts);
+    let source = emit_test_file(package, &cases);
+    let tests_dir = crate_root.join("tests");
+    std::fs::create_dir_all(&tests_dir)
+        .with_context(|| format!("creating {}", tests_dir.display()))?;
+    let dest = tests_dir.join("wasm_generated.rs");
+    std::fs::write(&dest, &source)
+        .with_context(|| format!("writing {}", dest.display()))?;
+    Ok(cases.len())
 }
 
 // Allow cloning ArgValue so diagonal rows can be built from &Vec<ArgValue>.

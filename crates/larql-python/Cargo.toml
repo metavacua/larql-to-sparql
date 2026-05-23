@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 getrandom = { workspace = true }
 
 [package.metadata.wasm-cert]
-claimed-level = 0
-diagonalization-gate = "native-host"
+current-tier  = "0"
+target-tier   = "0"
+cov-threshold = 0
 notes = "cdylib (PyO3 FFI); host OS/IO layer; NATIVE"

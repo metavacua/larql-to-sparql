@@ -36,6 +36,7 @@ getrandom_03 = { workspace = true }
 wasm-bindgen-test = "0.3"
 
 [package.metadata.wasm-cert]
-claimed-level = 2
-diagonalization-gate = "manual-review"
+current-tier  = "2"
+target-tier   = "3"
+cov-threshold = 80
 notes = "cdylib entry point; zero wasm runtime tests yet"

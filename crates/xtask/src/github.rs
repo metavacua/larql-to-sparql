@@ -4,11 +4,6 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::process::Command;
 
-/// Returns true when running inside GitHub Actions.
-pub fn in_ci() -> bool {
-    std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
-}
-
 /// `OWNER/REPO` extracted from `GITHUB_REPOSITORY`.
 pub fn repo() -> Option<String> {
     std::env::var("GITHUB_REPOSITORY").ok()

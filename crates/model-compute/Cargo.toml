@@ -46,6 +46,7 @@ harness = false
 required-features = ["wasm"]
 
 [package.metadata.wasm-cert]
-claimed-level = 3
-diagonalization-gate = "static-partition"
+current-tier  = "3"
+target-tier   = "3"
+cov-threshold = 90
 notes = "pure compute; no call_indirect, no non-intrinsic imports; STATIC"
