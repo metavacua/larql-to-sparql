@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use wasmparser::{BinaryReaderError, Operator, Parser, Payload};
+use wasmparser::{BinaryReaderError, Operator, Parser, Payload, ValType};
 
 /// All Datalog facts extracted from a single wasm binary.
 #[derive(Default, Debug)]
@@ -32,6 +32,9 @@ pub struct WasmFacts {
     pub names: HashMap<u32, String>,
     /// Total number of imported functions (to offset local function indices).
     pub num_imports: u32,
+    /// Typed exports: (export_name, func_idx, param_types, result_types).
+    /// Populated when TypeSection and FunctionSection are both present.
+    pub exports_typed: Vec<(String, u32, Vec<ValType>, Vec<ValType>)>,
 }
 
 /// Module/name patterns that are part of the wasm-bindgen + getrandom intrinsic
@@ -71,6 +74,10 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
     // then locally defined functions in order of their code section entries.
     let mut import_func_count: u32 = 0;
     let mut local_func_idx: u32 = 0; // incremented as we process CodeSectionEntry
+
+    // For typed-export extraction: type_idx → (params, results); local func → type_idx.
+    let mut type_map: Vec<(Vec<ValType>, Vec<ValType>)> = Vec::new();
+    let mut func_types: Vec<u32> = Vec::new();
 
     for payload in Parser::new(0).parse_all(wasm_bytes) {
         let payload = payload.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
@@ -134,6 +141,29 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
                     }
                 }
             }
+            Payload::TypeSection(reader) => {
+                for rec_group in reader {
+                    let rec_group =
+                        rec_group.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
+                    for sub in rec_group.into_types() {
+                        if let wasmparser::CompositeInnerType::Func(ft) =
+                            sub.composite_type.inner
+                        {
+                            type_map
+                                .push((ft.params().to_vec(), ft.results().to_vec()));
+                        } else {
+                            // Non-func type (struct/array/cont): consume its slot.
+                            type_map.push((vec![], vec![]));
+                        }
+                    }
+                }
+            }
+            Payload::FunctionSection(reader) => {
+                for type_idx in reader {
+                    func_types
+                        .push(type_idx.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?);
+                }
+            }
             Payload::CustomSection(cs) => {
                 if let wasmparser::KnownCustom::Name(reader) = cs.as_known() {
                     for sub in reader.into_iter().flatten() {
@@ -146,6 +176,21 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
                 }
             }
             _ => {}
+        }
+    }
+
+    // Join exports with type signatures.
+    for (name, func_idx) in &facts.roots {
+        let local_idx = func_idx.saturating_sub(facts.num_imports) as usize;
+        if let Some(&type_idx) = func_types.get(local_idx) {
+            if let Some((params, results)) = type_map.get(type_idx as usize) {
+                facts.exports_typed.push((
+                    name.clone(),
+                    *func_idx,
+                    params.clone(),
+                    results.clone(),
+                ));
+            }
         }
     }
 
