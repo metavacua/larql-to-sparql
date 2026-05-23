@@ -273,7 +273,7 @@ fn certify_crate(
 
     // ── llvm-cov gate ─────────────────────────────────────────────────────────
     let threshold_opt = (cov_threshold > 0).then_some(cov_threshold);
-    match run_wasm_coverage(crate_name, crate_root, threshold_opt) {
+    match run_llvm_cov(crate_name, crate_root, threshold_opt) {
         Ok((pct, pass)) => {
             result.level2_cov_pct = Some(pct);
             if let Some(t) = threshold_opt {
@@ -515,23 +515,20 @@ fn run_level2_firefox(crate_root: &Path) -> Result<bool> {
     Ok(status.success())
 }
 
-/// Run wasm32 coverage via the wasm-bindgen-test native profraw pipeline.
+/// Measure host coverage using dual `cfg_attr(not(target_arch = "wasm32"), test)` tests.
 ///
-/// Invokes `cargo llvm-cov --target wasm32-unknown-unknown` which compiles with
-/// `-C instrument-coverage`, runs tests through wasm-bindgen-test-runner (Node.js),
-/// and collects the `.profraw` files the runner generates natively — bypassing
-/// the JavaScript coverage ecosystem entirely.
+/// `cargo-llvm-cov` does not support `--target wasm32-unknown-unknown` on stable — it
+/// redirects wasm32 users to the wasm-bindgen/minicov guide (nightly +
+/// `WASM_BINDGEN_UNSTABLE_TEST_PROFRAW_OUT`), which is Phase 2 work.
+/// Host coverage over dual-annotated tests is the correct stable-path approach: the
+/// same logic runs on both host and wasm32; runtime correctness on wasm32 is confirmed
+/// independently by the Node.js (Tier 2) and Firefox (Tier 3) test runs.
 ///
 /// `threshold = Some(n)` adds `--fail-under-lines n` and gates on exit code.
 /// `threshold = None` is informational; `pass` is always `true`.
 /// Fails loudly if cargo-llvm-cov or llvm-tools-preview is not installed.
-fn run_wasm_coverage(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> Result<(f32, bool)> {
-    let mut args = vec![
-        "llvm-cov",
-        "--target", "wasm32-unknown-unknown",
-        "-p", crate_name,
-        "--summary-only",
-    ];
+fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> Result<(f32, bool)> {
+    let mut args = vec!["llvm-cov", "-p", crate_name, "--summary-only"];
     let threshold_str;
     if let Some(t) = threshold {
         threshold_str = t.to_string();
@@ -543,7 +540,7 @@ fn run_wasm_coverage(crate_name: &str, crate_root: &Path, threshold: Option<u8>)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .context("cargo llvm-cov --target wasm32-unknown-unknown")?;
+        .context("cargo llvm-cov")?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("no such command") || stderr.contains("Unknown command") {
         anyhow::bail!(
