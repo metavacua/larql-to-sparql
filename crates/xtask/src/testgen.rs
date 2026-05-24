@@ -28,19 +28,23 @@ pub enum ArgValue {
 
 fn canonical_vals(ty: &ValType) -> Vec<ArgValue> {
     match ty {
+        // wasm32 uses I32 for both Rust i32 and u32 (sign information is lost).
+        // Use only non-negative values so the unsuffixed literal is valid for
+        // both signed and unsigned Rust parameter types.
         ValType::I32 => vec![
             ArgValue::I32(0),
             ArgValue::I32(1),
-            ArgValue::I32(-1),
+            ArgValue::I32(2),
+            ArgValue::I32(42),
             ArgValue::I32(i32::MAX),
-            ArgValue::I32(i32::MIN),
         ],
+        // Same reasoning for I64 / u64.
         ValType::I64 => vec![
             ArgValue::I64(0),
             ArgValue::I64(1),
-            ArgValue::I64(-1),
+            ArgValue::I64(2),
+            ArgValue::I64(42),
             ArgValue::I64(i64::MAX),
-            ArgValue::I64(i64::MIN),
         ],
         ValType::F32 => vec![
             ArgValue::F32(0.0_f32),
@@ -110,8 +114,10 @@ fn arg_suffix(v: &ArgValue) -> String {
 
 fn arg_literal(v: &ArgValue) -> String {
     match v {
-        ArgValue::I32(n) => format!("{n}_i32"),
-        ArgValue::I64(n) => format!("{n}_i64"),
+        // No type suffix — the value must be non-negative (see canonical_vals), so Rust
+        // can infer the correct integer type (i32, u32, i64, u64, …) from context.
+        ArgValue::I32(n) => format!("{n}"),
+        ArgValue::I64(n) => format!("{n}"),
         ArgValue::F32(n) => {
             if n.is_nan() { "f32::NAN".into() }
             else if n.is_infinite() {
