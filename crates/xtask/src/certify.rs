@@ -93,15 +93,13 @@ pub fn run(crate_name: Option<&str>, extraction_graph: bool, parallel: bool) -> 
             &pkg.targets,
             parallel,
             has_parallel_feature,
+            extraction_graph,
+            meta.workspace_root.as_std_path(),
         )?;
         print_result(&result);
 
         if result.regression {
             any_regression = true;
-        }
-
-        if extraction_graph {
-            emit_extraction_graph(&result, meta.workspace_root.as_std_path())?;
         }
 
         let conclusion = if result.regression {
@@ -135,6 +133,8 @@ fn certify_crate(
     targets: &[cargo_metadata::Target],
     parallel: bool,
     has_parallel_feature: bool,
+    extraction_graph: bool,
+    workspace_root: &Path,
 ) -> Result<CertResult> {
     let extra_features: Option<&str> = has_parallel_feature.then_some("parallel");
     println!("\n──── {crate_name} (tier {claimed_tier} → target {target_tier}) ────");
@@ -216,12 +216,13 @@ fn certify_crate(
     }
 
     // ── Call-graph closure analysis ──────────────────────────────────────────
+    let mut cg_analysis: Option<CallGraphAnalysis> = None;
     if let Some(ref bytes) = wasm_bytes {
         match analyze_call_graph(crate_name, bytes) {
             Ok(analysis) => {
                 result.partition = Some(analysis.partition);
-                result.containment_witnesses = analysis.containment_witnesses;
-                result.dispatch_witnesses = analysis.dispatch_witnesses;
+                result.containment_witnesses = analysis.containment_witnesses.clone();
+                result.dispatch_witnesses = analysis.dispatch_witnesses.clone();
                 result.orphaned_count = analysis.orphaned_count;
                 result.local_reachable_count = analysis.local_reachable_count;
                 result.remote_reachable_count = analysis.remote_reachable_count;
@@ -265,6 +266,7 @@ fn certify_crate(
                     }
                     WasmPartition::Static => {}
                 }
+                cg_analysis = Some(analysis);
             }
             Err(e) => {
                 eprintln!("  warning: call-graph analysis failed: {e}");
@@ -399,6 +401,11 @@ fn certify_crate(
         }
     }
 
+    // ── Extraction graph (--extraction-graph flag) ────────────────────────────
+    if extraction_graph {
+        emit_extraction_graph(&result, workspace_root, cg_analysis.as_ref(), &audit)?;
+    }
+
     Ok(result)
 }
 
@@ -409,26 +416,28 @@ struct CallGraphAnalysis {
     orphaned_count: usize,
     local_reachable_count: usize,
     remote_reachable_count: usize,
+    /// Full analysis result for split recipe generation.
+    full_result: crate::rules::AnalysisResult,
+    /// Full wasm facts (names, roots) for split recipe generation.
+    facts: crate::wasm_facts::WasmFacts,
 }
 
 fn analyze_call_graph(_crate_name: &str, wasm_bytes: &[u8]) -> Result<CallGraphAnalysis> {
-    let mut facts = crate::wasm_facts::extract(wasm_bytes)?;
+    let facts = crate::wasm_facts::extract(wasm_bytes)?;
 
     let non_intrinsic_indices: Vec<u32> =
         facts.non_intrinsic_imports.iter().map(|(_, _, idx)| *idx).collect();
     let local_indices: Vec<u32> = facts.local_imports.iter().map(|(_, _, idx)| *idx).collect();
     let remote_indices: Vec<u32> = facts.remote_imports.iter().map(|(_, _, idx)| *idx).collect();
     let roots: Vec<u32> = facts.roots.iter().map(|(_, idx)| *idx).collect();
-    let calls = std::mem::take(&mut facts.calls);
-    let indirect_calls = std::mem::take(&mut facts.indirect_calls);
     let total = facts.total_func_count;
 
     let result = crate::rules::analyze(
-        calls,
+        facts.calls.clone(),
         non_intrinsic_indices,
         local_indices,
         remote_indices,
-        indirect_calls,
+        facts.indirect_calls.clone(),
         roots,
         total,
     );
@@ -453,13 +462,19 @@ fn analyze_call_graph(_crate_name: &str, wasm_bytes: &[u8]) -> Result<CallGraphA
         })
         .collect();
 
+    let orphaned_count = result.orphaned_indices().len();
+    let local_reachable_count = result.local_reachable_indices().len();
+    let remote_reachable_count = result.remote_reachable_indices().len();
+
     Ok(CallGraphAnalysis {
         partition,
         containment_witnesses,
         dispatch_witnesses,
-        orphaned_count: result.orphaned_indices().len(),
-        local_reachable_count: result.local_reachable_indices().len(),
-        remote_reachable_count: result.remote_reachable_indices().len(),
+        orphaned_count,
+        local_reachable_count,
+        remote_reachable_count,
+        full_result: result,
+        facts,
     })
 }
 
@@ -726,7 +741,12 @@ fn accessible_source_files(crate_root: &Path, accessible: &[String]) -> Vec<Path
         .collect()
 }
 
-fn emit_extraction_graph(result: &CertResult, workspace_root: &Path) -> Result<()> {
+fn emit_extraction_graph(
+    result: &CertResult,
+    workspace_root: &Path,
+    cg: Option<&CallGraphAnalysis>,
+    audit: &crate::audit::AuditResult,
+) -> Result<()> {
     let has_tier3_blockers = matches!(
         result.partition,
         Some(WasmPartition::Native | WasmPartition::Dynamic)
@@ -740,6 +760,131 @@ fn emit_extraction_graph(result: &CertResult, workspace_root: &Path) -> Result<(
     let target_dir = workspace_root.join("target/wasm-cert");
     std::fs::create_dir_all(&target_dir).ok();
     let dest = target_dir.join(format!("{}-extraction.json", result.crate_name));
+
+    // ── Per-function analysis (when we have call-graph data) ──────────────────
+    let crate_ident = result.crate_name.replace('-', "_");
+    let (functions_json, source_modules_json, proposed_split_json) = if let Some(cg) = cg {
+        let facts = &cg.facts;
+        let ar = &cg.full_result;
+
+        let reachable: std::collections::HashSet<u32> = ar.reachable_indices().into_iter().collect();
+        let containment: std::collections::HashSet<u32> =
+            ar.containment_violation_indices().into_iter().collect();
+        let dispatch: std::collections::HashSet<u32> =
+            ar.dispatch_witness_indices().into_iter().collect();
+
+        // Build per-function list.
+        let mut funcs = Vec::new();
+        for idx in 0..facts.total_func_count {
+            let name = facts.names.get(&idx).cloned().unwrap_or_default();
+            let partition_label = if containment.contains(&idx) {
+                "NATIVE"
+            } else if dispatch.contains(&idx) {
+                "DYNAMIC"
+            } else if reachable.contains(&idx) {
+                "STATIC"
+            } else {
+                "UNREACHABLE"
+            };
+            if !name.is_empty() || reachable.contains(&idx) {
+                funcs.push(serde_json::json!({
+                    "index": idx,
+                    "name": name,
+                    "reachable_from_exports": reachable.contains(&idx),
+                    "partition": partition_label,
+                }));
+            }
+        }
+
+        // Build source module → partition tier map.
+        let fn_partition = |idx: u32| -> &str {
+            if containment.contains(&idx) { "NATIVE" }
+            else if dispatch.contains(&idx) { "DYNAMIC" }
+            else if reachable.contains(&idx) { "STATIC" }
+            else { "UNREACHABLE" }
+        };
+        let worst_partition = |a: &str, b: &str| -> &'static str {
+            match (a, b) {
+                _ if a == "NATIVE" || b == "NATIVE" => "NATIVE",
+                _ if a == "DYNAMIC" || b == "DYNAMIC" => "DYNAMIC",
+                _ if a == "STATIC" || b == "STATIC" => "STATIC",
+                _ => "UNREACHABLE",
+            }
+        };
+
+        let mut source_mods = Vec::new();
+        let mut static_mods: Vec<String> = Vec::new();
+        let mut dynamic_mods: Vec<String> = Vec::new();
+        let mut native_mods: Vec<String> = Vec::new();
+
+        // All native-only modules → NATIVE.
+        for m in &audit.native_only {
+            native_mods.push(m.clone());
+            source_mods.push(serde_json::json!({
+                "module": m,
+                "classification": "native_only",
+                "tier": "NATIVE",
+                "functions": [],
+            }));
+        }
+
+        // Accessible modules: correlate wasm function names with module name.
+        for m in &audit.accessible {
+            let prefix_full = format!("{crate_ident}::{m}::");
+            let prefix_short = format!("{m}::");
+            let mut mod_fns: Vec<serde_json::Value> = Vec::new();
+            let mut tier = "UNREACHABLE";
+            for idx in 0..facts.total_func_count {
+                if let Some(name) = facts.names.get(&idx) {
+                    if name.starts_with(&prefix_full) || name.starts_with(&prefix_short) {
+                        let p = fn_partition(idx);
+                        tier = worst_partition(tier, p);
+                        mod_fns.push(serde_json::json!({
+                            "index": idx,
+                            "name": name,
+                            "partition": p,
+                        }));
+                    }
+                }
+            }
+            let tier_owned = tier.to_owned();
+            match tier_owned.as_str() {
+                "NATIVE" => native_mods.push(m.clone()),
+                "DYNAMIC" => dynamic_mods.push(m.clone()),
+                "STATIC" => static_mods.push(m.clone()),
+                _ => {}
+            }
+            source_mods.push(serde_json::json!({
+                "module": m,
+                "classification": "accessible",
+                "tier": tier_owned,
+                "functions": mod_fns,
+            }));
+        }
+
+        let split_note = format!(
+            "static_modules → {}-wasm-core; dynamic_modules → {}-wasm; native_modules → stay in original crate",
+            result.crate_name, result.crate_name
+        );
+        let split = serde_json::json!({
+            "static_modules": static_mods,
+            "dynamic_modules": dynamic_mods,
+            "native_modules": native_mods,
+            "note": split_note,
+        });
+
+        (
+            serde_json::Value::Array(funcs),
+            serde_json::Value::Array(source_mods),
+            split,
+        )
+    } else {
+        (
+            serde_json::json!(null),
+            serde_json::json!(null),
+            serde_json::json!(null),
+        )
+    };
 
     let graph = serde_json::json!({
         "crate": result.crate_name,
@@ -761,6 +906,9 @@ fn emit_extraction_graph(result: &CertResult, workspace_root: &Path) -> Result<(
         },
         "containment_witnesses": result.containment_witnesses,
         "dispatch_witnesses": result.dispatch_witnesses,
+        "functions": functions_json,
+        "source_modules": source_modules_json,
+        "proposed_split": proposed_split_json,
     });
 
     std::fs::write(&dest, serde_json::to_string_pretty(&graph)?)?;

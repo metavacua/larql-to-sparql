@@ -211,6 +211,10 @@ impl AnalysisResult {
         self.prog.remote_reachable.iter().map(|(idx,)| *idx).collect()
     }
 
+    pub fn reachable_indices(&self) -> Vec<u32> {
+        self.prog.is_reachable.iter().map(|(idx,)| *idx).collect()
+    }
+
     /// Assign the stable-path partition label (no MIR facts available).
     pub fn partition_stable(&self) -> WasmPartition {
         if !self.is_sandbox_contained() {
