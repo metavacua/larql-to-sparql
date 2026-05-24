@@ -45,8 +45,5 @@ name = "wasm_dispatch"
 harness = false
 required-features = ["wasm"]
 
-[package.metadata.wasm-cert]
-current-tier  = "3"
-target-tier   = "3"
-cov-threshold = 90
-notes = "pure compute; no call_indirect, no non-intrinsic imports; STATIC"
+[package.metadata.wasm]
+safe = true

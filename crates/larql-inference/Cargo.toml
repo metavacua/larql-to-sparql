@@ -65,7 +65,6 @@ wasmtime-wasi = { version = ">=36.0.7", optional = true }
 # native 64-bit atomic ops).
 portable-atomic = "1"
 
-
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
@@ -167,8 +166,5 @@ tokenizers = { version = "0.21", default-features = false, features = ["unstable
 # Async HTTP without blocking API or ring TLS (uses browser fetch).
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 0
-notes = "35+ files with fs/net/process traps ungated; zero wasm runtime tests"
+[package.metadata.wasm]
+split-candidate = true

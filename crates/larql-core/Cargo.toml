@@ -55,8 +55,5 @@ name = "graph_demo"
 [[example]]
 name = "serialization_demo"
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 80
-notes = "call_indirect present; L2 PASS; DYNAMIC partition"
+[package.metadata.wasm]
+split-candidate = true

@@ -230,20 +230,3 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
     Ok(facts)
 }
 
-/// Build a human-readable label for a function index.
-pub fn label(facts: &WasmFacts, idx: u32) -> String {
-    if let Some(name) = facts.names.get(&idx) {
-        return name.clone();
-    }
-    if idx < facts.num_imports {
-        // Find import by index
-        for (module, name, func_idx) in &facts.non_intrinsic_imports {
-            if *func_idx == idx {
-                return format!("{module}::{name}");
-            }
-        }
-        format!("import#{idx}")
-    } else {
-        format!("func#{idx}")
-    }
-}

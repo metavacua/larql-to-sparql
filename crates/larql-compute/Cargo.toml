@@ -41,7 +41,6 @@ openblas-src = { version = "0.10", features = ["system"] }
 # Android: Minimal blas-src without external dependencies.
 blas-src = { version = "0.10", default-features = false }
 
-
 [features]
 default = []
 metal = ["dep:metal", "dep:objc"]
@@ -136,8 +135,5 @@ unexpected_cfgs = { level = "allow", check-cfg = [] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 80
-notes = "pure computation; 156 wasm runtime tests; no OS/IO deps"
+[package.metadata.wasm]
+split-candidate = true

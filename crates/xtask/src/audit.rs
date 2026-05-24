@@ -1,114 +1,32 @@
-//! Surface auditor: wasm32-accessible module classification + Level-4 boundary map.
+//! Source-level module classifier.
 //!
-//! Scans `src/lib.rs` to determine which `pub mod` declarations are wasm32-
-//! accessible (not immediately preceded by `#[cfg(not(target_arch = "wasm32"))]`).
-//! Then greps those modules for runtime-trap patterns and collects cfg-gated
-//! tests as Level-4 compactness counterwit­nesses.
-//!
-//! Always exits 0 — purely informational.
+//! Reads src/lib.rs and partitions `pub mod` declarations into wasm32-accessible
+//! (no immediately-preceding cfg-not-wasm32 gate) vs. native-only.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Audit result for a single crate.
+/// Classification of a crate's source modules.
 #[derive(Debug, Default)]
-pub struct AuditResult {
-    pub crate_name: String,
+pub struct Modules {
+    /// pub mod declarations reachable from wasm32.
     pub accessible: Vec<String>,
+    /// pub mod declarations behind #[cfg(not(target_arch = "wasm32"))].
     pub native_only: Vec<String>,
-    /// (file, line, pattern) for runtime-trap candidates in accessible modules.
-    pub trap_candidates: Vec<(String, usize, String)>,
-    /// Level-4 unit counterwit­nesses: (file, line, fn_name).
-    pub unit_counterwits: Vec<(String, usize, String)>,
-    /// Level-4 integration counterwit­nesses: file paths.
-    pub integ_counterwits: Vec<String>,
 }
 
-pub fn run(crate_name: Option<&str>) -> Result<()> {
-    let meta = crate::status::workspace_meta()?;
-    for pkg in &meta.packages {
-        if let Some(name) = crate_name {
-            if pkg.name != name {
-                continue;
-            }
-        }
-        // Only workspace members
-        if !meta
-            .workspace_members
-            .contains(&pkg.id)
-        {
-            continue;
-        }
-        let result = audit_crate(&pkg.name, pkg.manifest_path.parent().unwrap().as_std_path())?;
-        print_audit(&result);
-    }
-    Ok(())
-}
+/// Classify modules for a single crate.
+pub fn classify(_crate_name: &str, crate_root: &Path) -> Result<Modules> {
+    let mut result = Modules::default();
 
-pub(crate) fn audit_crate(crate_name: &str, crate_root: &Path) -> Result<AuditResult> {
-    let mut result = AuditResult {
-        crate_name: crate_name.to_owned(),
-        ..Default::default()
-    };
-
-    // ── Module classification ─────────────────────────────────────────────────
     let lib_rs = crate_root.join("src/lib.rs");
     if !lib_rs.exists() {
         return Ok(result);
     }
+
     let src = std::fs::read_to_string(&lib_rs)?;
-    classify_modules(&src, &mut result);
-
-    let src_dir = crate_root.join("src");
-
-    // Compute paths once; reused for trap scanning and counterwit collection.
-    let accessible_paths: Vec<Vec<std::path::PathBuf>> = result
-        .accessible
-        .iter()
-        .map(|m| module_paths(&src_dir, m))
-        .collect();
-
-    // ── Runtime-trap candidates in wasm32-accessible modules ──────────────────
-    let trap_patterns = [
-        "std::time::Instant",
-        "std::thread::",
-        "std::fs::",
-        "std::net::",
-        "std::process::",
-    ];
-    for mod_paths in &accessible_paths {
-        for path in mod_paths {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                for (line_no, line) in content.lines().enumerate() {
-                    for pat in &trap_patterns {
-                        if line.contains(pat) {
-                            result.trap_candidates.push((
-                                path.display().to_string(),
-                                line_no + 1,
-                                pat.to_string(),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Level-4: unit counterwit­nesses (cfg-gated test fns in src/) ──────────
-    collect_unit_counterwits(&accessible_paths, &mut result.unit_counterwits)?;
-
-    // ── Level-4: integration test counterwit­nesses (tests/ top-level cfg) ────
-    let tests_dir = crate_root.join("tests");
-    if tests_dir.exists() {
-        collect_integ_counterwits(&tests_dir, &mut result.integ_counterwits)?;
-    }
-
-    Ok(result)
-}
-
-/// Scan `src/lib.rs` and classify `pub mod` declarations.
-fn classify_modules(src: &str, result: &mut AuditResult) {
     let mut prev_was_cfg_gate = false;
+
     for line in src.lines() {
         let trimmed = line.trim();
         if trimmed == "#[cfg(not(target_arch = \"wasm32\"))]" {
@@ -125,15 +43,16 @@ fn classify_modules(src: &str, result: &mut AuditResult) {
                 result.accessible.push(mod_name.to_owned());
             }
         }
-        // Reset gate tracker on any non-blank, non-cfg-attr, non-comment line
         if !trimmed.is_empty() && !trimmed.starts_with("//") {
             prev_was_cfg_gate = false;
         }
     }
+
+    Ok(result)
 }
 
 /// Return file paths that could contain module `name` (file or directory).
-pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<std::path::PathBuf> {
+pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<PathBuf> {
     let mut paths = vec![];
     let file = src_dir.join(format!("{name}.rs"));
     if file.exists() {
@@ -141,13 +60,12 @@ pub(crate) fn module_paths(src_dir: &Path, name: &str) -> Vec<std::path::PathBuf
     }
     let dir = src_dir.join(name);
     if dir.is_dir() {
-        // Recursively collect all .rs files in the module directory.
         collect_rs_files(&dir, &mut paths);
     }
     paths
 }
 
-pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -157,104 +75,5 @@ pub(crate) fn collect_rs_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
                 out.push(path);
             }
         }
-    }
-}
-
-/// Collect unit-test counterwit­nesses: `#[cfg(not(target_arch = "wasm32"))]`
-/// immediately followed by `#[test]` or `fn ...` inside accessible modules.
-fn collect_unit_counterwits(
-    accessible_paths: &[Vec<std::path::PathBuf>],
-    out: &mut Vec<(String, usize, String)>,
-) -> Result<()> {
-    for paths in accessible_paths {
-        for path in paths {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                let lines: Vec<&str> = content.lines().collect();
-                for (i, line) in lines.iter().enumerate() {
-                    if line.trim() == "#[cfg(not(target_arch = \"wasm32\"))]" {
-                        if let Some(next) = lines.get(i + 1) {
-                            let nt = next.trim();
-                            if nt == "#[test]" || nt.starts_with("fn ") || nt.starts_with("pub fn ") {
-                                // Try to extract the fn name from this or next line
-                                let fn_name = extract_fn_name(nt)
-                                    .or_else(|| lines.get(i + 2).and_then(|l| extract_fn_name(l.trim())))
-                                    .unwrap_or_else(|| "<unknown>".to_owned());
-                                out.push((path.display().to_string(), i + 1, fn_name));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn extract_fn_name(line: &str) -> Option<String> {
-    // Match: `fn foo(` or `pub fn foo(`
-    let rest = line.strip_prefix("pub fn ").or_else(|| line.strip_prefix("fn "))?;
-    let name = rest.split('(').next()?;
-    Some(name.trim().to_owned())
-}
-
-/// Collect integration-test counterwit­nesses: `.rs` files in `tests/` that
-/// begin with `#![cfg(not(target_arch = "wasm32"))]`.
-fn collect_integ_counterwits(tests_dir: &Path, out: &mut Vec<String>) -> Result<()> {
-    if let Ok(entries) = std::fs::read_dir(tests_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-                continue;
-            }
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                for line in content.lines().take(5) {
-                    if line.trim().contains("cfg(not(target_arch = \"wasm32\"))")
-                        && line.trim().starts_with("#!")
-                    {
-                        out.push(path.display().to_string());
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn print_audit(r: &AuditResult) {
-    println!("\n=== {} ===", r.crate_name);
-    if r.accessible.is_empty() && r.native_only.is_empty() {
-        println!("  (no lib.rs found or no pub mod declarations)");
-        return;
-    }
-    println!("  WASM32-ACCESSIBLE: {}", r.accessible.join(", ").or_empty());
-    println!("  NATIVE-ONLY:       {}", r.native_only.join(", ").or_empty());
-    if r.trap_candidates.is_empty() {
-        println!("  RUNTIME-TRAP CANDIDATES: (none)");
-    } else {
-        println!("  RUNTIME-TRAP CANDIDATES:");
-        for (f, l, p) in &r.trap_candidates {
-            println!("    {f}:{l}  {p}");
-        }
-    }
-    println!(
-        "  LEVEL-4 COUNTERWIT­NESSES: {}u + {}i",
-        r.unit_counterwits.len(),
-        r.integ_counterwits.len()
-    );
-    for (f, l, name) in &r.unit_counterwits {
-        println!("    {f}:{l}  fn {name}  [unit]");
-    }
-    for f in &r.integ_counterwits {
-        println!("    {f}  [integration]");
-    }
-}
-
-trait OrEmpty {
-    fn or_empty(&self) -> &str;
-}
-impl OrEmpty for String {
-    fn or_empty(&self) -> &str {
-        if self.is_empty() { "(none)" } else { self }
     }
 }

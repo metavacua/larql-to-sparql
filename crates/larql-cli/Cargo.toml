@@ -49,9 +49,3 @@ tokenizers = "0.21"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
 tokenizers = { version = "0.21", default-features = false, features = ["unstable_wasm"] }
-
-[package.metadata.wasm-cert]
-current-tier  = "0"
-target-tier   = "0"
-cov-threshold = 0
-notes = "binary crate; host OS/IO layer; NATIVE"

@@ -81,8 +81,5 @@ getrandom = { workspace = true }
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 80
-notes = "DYNAMIC: test binary includes wasm-bindgen-test async/closure dispatch; production modules are static"
+[package.metadata.wasm]
+split-candidate = true

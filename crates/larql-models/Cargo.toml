@@ -32,8 +32,5 @@ criterion = "0.5"
 name = "models"
 harness = false
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 0
-notes = "fs traps in detect/loading modules; compile-consistent only"
+[package.metadata.wasm]
+split-candidate = true

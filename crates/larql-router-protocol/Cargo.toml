@@ -29,8 +29,5 @@ tokio-stream = "0.1"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
 
-[package.metadata.wasm-cert]
-current-tier  = "3"
-target-tier   = "3"
-cov-threshold = 0
-notes = "all pub mod declarations cfg-gated behind not(wasm32); zero wasm32-accessible code"
+[package.metadata.wasm]
+safe = true

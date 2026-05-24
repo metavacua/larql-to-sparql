@@ -33,8 +33,5 @@ getrandom_03 = { workspace = true }
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 
-[package.metadata.wasm-cert]
-current-tier  = "2"
-target-tier   = "3"
-cov-threshold = 80
-notes = "cdylib entry point; zero wasm runtime tests yet"
+[package.metadata.wasm]
+split-candidate = true

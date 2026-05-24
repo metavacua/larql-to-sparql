@@ -1,0 +1,200 @@
+# wasm-check.yml — wasm32 containment check + mutation gate
+#
+# discover → per-crate matrix jobs:
+#   check   — cargo xtask wasm-check (WASM-SAFE or NATIVE)
+#   mutate  — cargo xtask wasm-mutate (zero survivors required)
+#   node    — cargo test --target wasm32-unknown-unknown (WASM-SAFE crates only)
+# summary → markdown table of check results
+#
+# Exit code is non-zero only when wasm-mutate finds surviving mutants.
+# NATIVE crates report their blocking imports but do not fail the pipeline.
+# Originals are never modified; run their test suites to detect regressions
+# after creating new larql-{crate}-wasm32uu / larql-{crate}-OS subcrates.
+
+name: wasm-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/wasm-check.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/wasm-check.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  # ── Enumerate crates with [package.metadata.wasm] ──────────────────────────
+  discover:
+    name: discover crates
+    runs-on: ubuntu-24.04
+    outputs:
+      crates: ${{ steps.list.outputs.crates }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: List wasm-tagged crates
+        id: list
+        run: |
+          CRATES=$(cargo metadata --no-deps --format-version 1 | \
+            jq -c '[.packages[] | select(.metadata.wasm != null) | .name]')
+          echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
+
+  # ── Containment check ──────────────────────────────────────────────────────
+  check:
+    name: check · ${{ matrix.crate }}
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-check-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-check-${{ matrix.crate }}-
+
+      - name: wasm-check ${{ matrix.crate }}
+        run: cargo xtask wasm-check --crate-name ${{ matrix.crate }}
+
+  # ── Mutation gate ──────────────────────────────────────────────────────────
+  mutate:
+    name: mutate · ${{ matrix.crate }}
+    needs: [discover, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-mutate-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-mutate-${{ matrix.crate }}-
+
+      - name: wasm-mutate ${{ matrix.crate }}
+        run: cargo xtask wasm-mutate --crate-name ${{ matrix.crate }}
+
+  # ── Node.js runtime test (WASM-SAFE crates only) ───────────────────────────
+  node:
+    name: node · ${{ matrix.crate }}
+    needs: [discover, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.121
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-node-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-node-${{ matrix.crate }}-
+
+      - name: Node.js test ${{ matrix.crate }}
+        run: |
+          # Only run for crates confirmed WASM-SAFE (safe = true in metadata)
+          SAFE=$(cargo metadata --no-deps --format-version 1 | \
+            jq -r --arg c "${{ matrix.crate }}" \
+            '.packages[] | select(.name == $c) | .metadata.wasm.safe // false')
+          if [ "$SAFE" = "true" ]; then
+            cargo test -p ${{ matrix.crate }} --target wasm32-unknown-unknown
+          else
+            echo "${{ matrix.crate }}: NATIVE — skipping Node.js test"
+          fi
+
+  # ── Summary table ─────────────────────────────────────────────────────────
+  summary:
+    name: wasm-summary
+    needs: [check, mutate, node]
+    runs-on: ubuntu-24.04
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-summary-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-summary-
+
+      - name: wasm-check summary → job summary
+        run: cargo xtask wasm-check >> "$GITHUB_STEP_SUMMARY"

@@ -41,9 +41,3 @@ harness = false
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
-
-[package.metadata.wasm-cert]
-current-tier  = "0"
-target-tier   = "0"
-cov-threshold = 0
-notes = "bench binary; host OS/IO layer; NATIVE"

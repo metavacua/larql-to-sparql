@@ -25,9 +25,3 @@ serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true }
-
-[package.metadata.wasm-cert]
-current-tier  = "0"
-target-tier   = "0"
-cov-threshold = 0
-notes = "cdylib (PyO3 FFI); host OS/IO layer; NATIVE"
