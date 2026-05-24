@@ -39,19 +39,24 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
 
         let files = accessible_files(&crate_root, &audit.accessible);
         if files.is_empty() {
-            println!("{}: no accessible source files — skip", pkg.name);
+            println!("{}: no accessible source files found — skip", pkg.name);
             continue;
         }
 
-        print!("  {}: mutating {} file(s)... ", pkg.name, files.len());
+        println!("{}: mutating {} wasm32-accessible file(s):", pkg.name, files.len());
+        for f in &files {
+            let rel = f.strip_prefix(&crate_root).unwrap_or(f.as_path());
+            println!("    {}", rel.display());
+        }
+
         match mutate_one(&crate_root, &files) {
-            Ok(0) => println!("Survivors: 0 — PASS"),
+            Ok(0) => println!("{}: Survivors: 0 — PASS", pkg.name),
             Ok(n) => {
-                println!("Survivors: {n} — FAIL");
+                println!("{}: Survivors: {n} — FAIL", pkg.name);
                 any_fail = true;
             }
             Err(e) => {
-                println!("ERROR: {e}");
+                println!("{}: ERROR: {e}", pkg.name);
                 any_fail = true;
             }
         }
@@ -73,8 +78,18 @@ fn mutate_one(crate_root: &Path, files: &[PathBuf]) -> Result<usize> {
     cmd.current_dir(crate_root);
 
     let output = cmd.output().context("cargo mutants")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let survivors = stdout
+
+    // Forward cargo-mutants output so CI logs show what was actually tested.
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+    if !stdout_str.is_empty() {
+        print!("{stdout_str}");
+    }
+    if !stderr_str.is_empty() {
+        eprint!("{stderr_str}");
+    }
+
+    let survivors = stdout_str
         .lines()
         .filter(|l| l.contains("mutant survived") || l.contains("SURVIVED"))
         .count();

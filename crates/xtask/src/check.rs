@@ -69,15 +69,13 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
 
 fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<CheckResult> {
     if confirmed_safe {
-        println!("  {name}: checking (confirmed safe in metadata)...");
-        return Ok(CheckResult {
-            crate_name: name.to_owned(),
-            safe: true,
-            blockers: vec![],
-        });
+        print!("  {name}: checking (pre-confirmed safe in metadata)... ");
+    } else {
+        print!("  {name}: checking... ");
     }
-
-    print!("  {name}: checking... ");
+    // Flush the partial line so it appears before the potentially-slow build.
+    use std::io::Write;
+    std::io::stdout().flush().ok();
 
     // Step 1: cargo check
     if !cargo_check_wasm(name)? {
@@ -115,7 +113,14 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
     let analysis = crate::rules::analyze(facts.calls.clone(), non_intrinsic, roots);
 
     if analysis.is_sandbox_contained() {
-        println!("WASM-SAFE");
+        println!(
+            "WASM-SAFE  (binary: {} B, {} fns, {} call edges, {} exports, {} imports)",
+            bytes.len(),
+            facts.total_func_count,
+            facts.calls.len(),
+            facts.roots.len(),
+            facts.num_imports,
+        );
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: true,

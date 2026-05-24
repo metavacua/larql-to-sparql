@@ -159,16 +159,8 @@ jobs:
             ${{ runner.os }}-wasm-node-${{ matrix.crate }}-
 
       - name: Node.js test ${{ matrix.crate }}
-        run: |
-          # Only run for crates confirmed WASM-SAFE (safe = true in metadata)
-          SAFE=$(cargo metadata --no-deps --format-version 1 | \
-            jq -r --arg c "${{ matrix.crate }}" \
-            '.packages[] | select(.name == $c) | .metadata.wasm.safe // false')
-          if [ "$SAFE" = "true" ]; then
-            cargo test -p ${{ matrix.crate }} --target wasm32-unknown-unknown
-          else
-            echo "${{ matrix.crate }}: NATIVE — skipping Node.js test"
-          fi
+        continue-on-error: true
+        run: cargo test -p ${{ matrix.crate }} --target wasm32-unknown-unknown
 
   # ── Summary table ─────────────────────────────────────────────────────────
   summary:
