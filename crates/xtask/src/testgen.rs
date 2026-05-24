@@ -141,6 +141,18 @@ fn arg_literal(v: &ArgValue) -> String {
 pub fn generate(facts: &WasmFacts) -> Vec<TestCase> {
     let mut cases = Vec::new();
 
+    // wasm-bindgen method wrappers follow the naming convention
+    // `{type_name_lower}_{method_name}`. Detect type prefixes by looking for
+    // exports that end with `_new` (wasm-bindgen constructors), then skip any
+    // export that starts with a known type prefix.
+    let type_prefixes: std::collections::HashSet<String> = facts
+        .roots
+        .iter()
+        .filter_map(|(name, _)| {
+            name.strip_suffix("_new").map(|p| format!("{p}_"))
+        })
+        .collect();
+
     for (export_name, func_idx, params, results) in &facts.exports_typed {
         if !is_rust_ident(export_name) {
             continue;
@@ -150,6 +162,12 @@ pub fn generate(facts: &WasmFacts) -> Vec<TestCase> {
         // rather than a free function. Such exports are not directly callable
         // from integration test code using the export name.
         if facts.names.get(func_idx).map_or(false, |n| n.contains("::")) {
+            continue;
+        }
+        // Skip wasm-bindgen method wrappers detected via type prefix.
+        // Any export starting with a known type prefix (e.g. "graphsession_")
+        // is a method wrapper, not a free function.
+        if type_prefixes.iter().any(|p| export_name.starts_with(p.as_str())) {
             continue;
         }
         if params.iter().any(|t| !is_scalar(t)) {
