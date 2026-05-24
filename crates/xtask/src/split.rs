@@ -67,9 +67,10 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
         analysis.containment_violation_indices().into_iter().collect();
 
     let crate_ident = crate_name.replace('-', "_");
-    let mut pure_modules: Vec<String> = vec![];
+    let mut binary_pure: Vec<String> = vec![];
     let mut native_modules: Vec<String> = vec![];
 
+    // Pass 1: binary containment — modules whose functions are tainted by OS imports.
     for m in &audit.accessible {
         let prefix = format!("{crate_ident}::{m}::");
         let is_contaminated = facts
@@ -81,11 +82,63 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
         if is_contaminated {
             native_modules.push(m.clone());
         } else {
-            pure_modules.push(m.clone());
+            binary_pure.push(m.clone());
         }
     }
 
-    // Derive new crate names from the naming convention.
+    // Pass 2: source-level trap scan on binary-pure modules.
+    // On wasm32-unknown-unknown, std::fs/net/process/thread compile to runtime
+    // panics with no host imports — binary containment cannot detect them.
+    const TRAP_PATTERNS: &[&str] = &[
+        "std::fs::",
+        "std::net::",
+        "std::process::",
+        "std::thread::",
+    ];
+    let src_dir = crate_root.join("src");
+    let mut pure_modules: Vec<String> = vec![];
+    let mut trap_modules: Vec<(String, Vec<String>)> = vec![];
+
+    for m in binary_pure {
+        let files = crate::audit::module_paths(&src_dir, &m);
+        let mut traps: Vec<String> = vec![];
+
+        for file in &files {
+            let Ok(src) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            let rel = file
+                .strip_prefix(&src_dir)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| file.display().to_string());
+            let mut prev_cfg_gate = false;
+            for (lineno, line) in src.lines().enumerate() {
+                let trimmed = line.trim();
+                if trimmed == "#[cfg(not(target_arch = \"wasm32\"))]" {
+                    prev_cfg_gate = true;
+                    continue;
+                }
+                if !prev_cfg_gate && !trimmed.starts_with("//") {
+                    for pat in TRAP_PATTERNS {
+                        if trimmed.contains(pat) {
+                            traps.push(format!("{}:{}", rel, lineno + 1));
+                            break;
+                        }
+                    }
+                }
+                if !trimmed.is_empty() && !trimmed.starts_with("//") {
+                    prev_cfg_gate = false;
+                }
+            }
+        }
+
+        if traps.is_empty() {
+            pure_modules.push(m);
+        } else {
+            trap_modules.push((m, traps));
+        }
+    }
+
     let (wasm32uu_name, os_name) = derive_split_names(crate_name);
 
     println!(
@@ -100,13 +153,30 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
         }
     }
 
+    if !trap_modules.is_empty() {
+        println!("  {} (needs refactoring — ungated runtime traps):", os_name);
+        for (m, trap_locs) in &trap_modules {
+            let sample = trap_locs
+                .iter()
+                .take(2)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let extra = if trap_locs.len() > 2 {
+                format!(", +{} more", trap_locs.len() - 2)
+            } else {
+                String::new()
+            };
+            println!("    ~ {m}  (runtime traps: {sample}{extra})");
+        }
+    }
+
     println!("  {} (NATIVE lib + [[bin]]):", os_name);
     if native_modules.is_empty() {
         println!("    (no OS-dependent accessible modules)");
     } else {
         for m in &native_modules {
             print!("    + {m}");
-            // Show which OS imports block it (up to 2).
             let prefix = format!("{crate_ident}::{m}::");
             let blockers: Vec<String> = facts
                 .non_intrinsic_imports
@@ -129,7 +199,9 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
     }
 
     if !audit.native_only.is_empty() {
-        println!("  cfg-gated (already native-only in original, copy as-is to {os_name}):");
+        println!(
+            "  cfg-gated (already native-only in original, copy as-is to {os_name}):"
+        );
         for m in &audit.native_only {
             println!("    + {m}");
         }
