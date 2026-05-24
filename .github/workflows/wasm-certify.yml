@@ -144,10 +144,10 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rust-src,llvm-tools-preview
 
-      - name: Install wasm-bindgen-cli, cargo-llvm-cov
+      - name: Install wasm-bindgen-cli, cargo-mutants, cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen-cli@0.2.121,cargo-llvm-cov
+          tool: wasm-bindgen-cli@0.2.121,cargo-mutants,cargo-llvm-cov
 
       - name: Install Firefox
         uses: browser-actions/setup-firefox@v1

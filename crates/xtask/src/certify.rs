@@ -47,7 +47,10 @@ pub struct CertResult {
     pub level2_cov_pct: Option<f32>,
     pub level4_unit_cws: usize,
     pub level4_integ_cws: usize,
-    pub mutant_survivors: Option<usize>,
+    /// Surviving mutants on the host target (dual-annotated test suite).
+    pub mutant_survivors_host: Option<usize>,
+    /// Surviving mutants on wasm32 target.
+    pub mutant_survivors_wasm: Option<usize>,
     pub regression: bool,
 }
 
@@ -154,7 +157,8 @@ fn certify_crate(
         level2_cov_pct: None,
         level4_unit_cws: 0,
         level4_integ_cws: 0,
-        mutant_survivors: None,
+        mutant_survivors_host: None,
+        mutant_survivors_wasm: None,
         regression: false,
     };
 
@@ -321,29 +325,47 @@ fn certify_crate(
     );
 
     let accessible_files = accessible_source_files(crate_root, &audit.accessible);
-    // Mutation gate is skipped in parallel/atomics mode: cargo mutants invokes the
-    // full test suite for every mutant; rebuild-std makes this prohibitively slow.
-    // Mutation adequacy is already verified by the serial certify job.
-    if !parallel && !accessible_files.is_empty() {
-        match run_mutants(crate_root, &accessible_files) {
+    if !accessible_files.is_empty() {
+        // Host pass — exercises the full dual-annotated test suite.
+        match run_mutants(crate_root, &accessible_files, None) {
             Ok(survivors) => {
-                result.mutant_survivors = Some(survivors);
+                result.mutant_survivors_host = Some(survivors);
                 if survivors == 0 {
-                    println!("  Mutation: PASS (0 surviving mutants)");
+                    println!("  Mutation (host): PASS (0 surviving mutants)");
                 } else {
-                    println!("  Mutation: {survivors} surviving mutant(s)");
-                    // Mutation adequacy is required at Tier 2+.
+                    println!("  Mutation (host): {survivors} surviving mutant(s)");
                     if claimed_tier >= WasmTier::Level2 {
                         result.regression = true;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("  warning: mutation testing failed: {e}");
+                eprintln!("  error: mutation testing (host) failed: {e}");
+                if claimed_tier >= WasmTier::Level2 {
+                    result.regression = true;
+                }
             }
         }
-    } else if parallel {
-        println!("  Mutation: skipped (parallel/atomics — rebuild-std makes this prohibitively slow)");
+        // wasm32 pass — exercises the wasm32 runtime test suite directly.
+        match run_mutants(crate_root, &accessible_files, Some("wasm32-unknown-unknown")) {
+            Ok(survivors) => {
+                result.mutant_survivors_wasm = Some(survivors);
+                if survivors == 0 {
+                    println!("  Mutation (wasm32): PASS (0 surviving mutants)");
+                } else {
+                    println!("  Mutation (wasm32): {survivors} surviving mutant(s)");
+                    if claimed_tier >= WasmTier::Level2 {
+                        result.regression = true;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("  error: mutation testing (wasm32) failed: {e}");
+                if claimed_tier >= WasmTier::Level2 {
+                    result.regression = true;
+                }
+            }
+        }
     }
 
     // ── Tier 3: Firefox runtime (static portability witness) ─────────────────
@@ -641,19 +663,25 @@ fn parse_llvm_cov_pct(output: &str) -> f32 {
     0.0
 }
 
-fn run_mutants(crate_root: &Path, accessible_files: &[PathBuf]) -> Result<usize> {
+/// Run cargo-mutants against `accessible_files`.
+///
+/// `target` is `None` for a host run (full dual-annotated test suite) or
+/// `Some("wasm32-unknown-unknown")` for a wasm32 run (wasm runtime tests only).
+/// Both passes are required; a survivor on either target is a regression.
+fn run_mutants(
+    crate_root: &Path,
+    accessible_files: &[PathBuf],
+    target: Option<&str>,
+) -> Result<usize> {
     let mut cmd = Command::new("cargo");
     cmd.arg("mutants").arg("--no-shuffle");
     for f in accessible_files {
         cmd.args(["--file", &f.display().to_string()]);
     }
-    cmd.args([
-        "--test-tool",
-        "cargo",
-        "--",
-        "--target",
-        "wasm32-unknown-unknown",
-    ]);
+    cmd.args(["--test-tool", "cargo"]);
+    if let Some(t) = target {
+        cmd.args(["--", "--target", t]);
+    }
     cmd.arg("--timeout").arg("300");
     cmd.current_dir(crate_root);
 
@@ -705,7 +733,8 @@ fn emit_extraction_graph(result: &CertResult, workspace_root: &Path) -> Result<(
             "node_pass": result.level2_pass,
             "firefox_pass": result.level2_firefox_pass,
             "coverage_pct": result.level2_cov_pct,
-            "mutant_survivors": result.mutant_survivors,
+            "mutant_survivors_host": result.mutant_survivors_host,
+            "mutant_survivors_wasm": result.mutant_survivors_wasm,
             "counterwitnesses": result.level4_unit_cws + result.level4_integ_cws,
         },
         "containment_witnesses": result.containment_witnesses,
