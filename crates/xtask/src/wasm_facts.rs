@@ -144,21 +144,29 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
                 let func_idx = facts.num_imports + local_func_idx;
                 local_func_idx += 1;
 
-                let mut ops = body
+                // Iterate every operator in the function body without early
+                // termination.  `End` closes blocks/loops/ifs as well as the
+                // function itself — breaking on the first `End` would stop
+                // scanning at the first nested control structure, missing any
+                // calls that follow it.
+                for op in body
                     .get_operators_reader()
-                    .map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
-                loop {
-                    let op = ops
-                        .read()
-                        .map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
-                    match op {
-                        Operator::Call { function_index } => {
+                    .map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?
+                    .into_iter()
+                {
+                    match op.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))? {
+                        // Static direct calls (including tail-call variants).
+                        Operator::Call { function_index }
+                        | Operator::ReturnCall { function_index } => {
                             facts.calls.push((func_idx, function_index));
                         }
-                        Operator::CallIndirect { .. } => {
+                        // Dynamic dispatch: table-indirect and reference-typed calls.
+                        Operator::CallIndirect { .. }
+                        | Operator::ReturnCallIndirect { .. }
+                        | Operator::CallRef { .. }
+                        | Operator::ReturnCallRef { .. } => {
                             facts.indirect_calls.push(func_idx);
                         }
-                        Operator::End => break,
                         _ => {}
                     }
                 }
