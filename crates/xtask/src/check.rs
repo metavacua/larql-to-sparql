@@ -171,6 +171,11 @@ fn cargo_check_wasm(crate_name: &str) -> Result<bool> {
             }
         }
     }
+    // Catch non-JSON failures: manifest errors, linker errors, OOM.
+    // These exit non-zero but emit nothing parseable to stdout (stderr is discarded).
+    if !output.status.success() {
+        return Ok(false);
+    }
     Ok(true)
 }
 

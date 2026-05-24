@@ -114,3 +114,37 @@ fn multiple_sessions_are_independent() {
     let _s2 = LqlSession::new();
     // Two sessions coexist without interference.
 }
+
+// ── File-IO command empirical tests ──────────────────────────────────────────
+// These tests verify the doc claim in lib.rs:
+//   "File-IO commands will return a meaningful error rather than panic."
+// If any of these tests panic (wasm instance trap), CI is the empirical record
+// that the executor's std::fs paths are reached before the error return.
+
+#[wasm_bindgen_test]
+fn session_use_path_is_err_not_panic() {
+    let mut s = LqlSession::new();
+    let result = s.execute("USE /tmp/nonexistent.vindex");
+    assert!(result.is_err(), "expected Err (file-IO unavailable on wasm32), got Ok");
+}
+
+#[wasm_bindgen_test]
+fn session_extract_is_err_not_panic() {
+    let mut s = LqlSession::new();
+    let result = s.execute("EXTRACT /tmp/foo");
+    assert!(result.is_err(), "expected Err (file-IO unavailable on wasm32), got Ok");
+}
+
+#[wasm_bindgen_test]
+fn session_compile_is_err_not_panic() {
+    let mut s = LqlSession::new();
+    let result = s.execute("COMPILE /tmp/foo");
+    assert!(result.is_err(), "expected Err (file-IO unavailable on wasm32), got Ok");
+}
+
+#[wasm_bindgen_test]
+fn session_save_patch_is_err_not_panic() {
+    let mut s = LqlSession::new();
+    let result = s.execute("SAVE PATCH /tmp/foo.patch");
+    assert!(result.is_err(), "expected Err (file-IO unavailable on wasm32), got Ok");
+}

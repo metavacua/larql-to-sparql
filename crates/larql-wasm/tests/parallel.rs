@@ -10,6 +10,8 @@
 
 use wasm_bindgen_test::*;
 
+wasm_bindgen_test_configure!(run_in_browser);
+
 use larql_wasm::GraphSession;
 
 /// The thread pool is initialised by the browser runner before each test.

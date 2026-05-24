@@ -47,9 +47,12 @@ pub fn parse_shards(spec: &str) -> Result<Vec<Shard>, String> {
         if end < start {
             return Err(format!("end ({end}) must be >= start ({start})"));
         }
+        let layer_end = end
+            .checked_add(1)
+            .ok_or_else(|| format!("end ({end}) overflows usize"))?;
         shards.push(Shard {
             layer_start: start,
-            layer_end: end + 1,
+            layer_end,
             url: url.trim().to_string(),
         });
     }

@@ -91,9 +91,15 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry and target
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v5
         with:
-          shared-key: ubuntu-wasm-${{ matrix.crate.name }}-${{ matrix.mode.name }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-${{ matrix.crate.name }}-${{ matrix.mode.name }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-${{ matrix.crate.name }}-${{ matrix.mode.name }}-
 
       - name: Check (serial)
         if: matrix.mode.name == 'serial'

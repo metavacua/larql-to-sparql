@@ -89,11 +89,17 @@ fn mutate_one(crate_root: &Path, files: &[PathBuf]) -> Result<usize> {
         eprint!("{stderr_str}");
     }
 
-    let survivors = stdout_str
-        .lines()
-        .filter(|l| l.contains("mutant survived") || l.contains("SURVIVED"))
-        .count();
-    Ok(survivors)
+    // cargo-mutants exit codes:
+    //   0 — all mutants caught (clean)
+    //   1 — internal error / tool crash
+    //   2 — one or more mutants survived (survivors reported as "NOT CAUGHT" in output)
+    match output.status.code() {
+        Some(0) => Ok(0),
+        Some(2) => Ok(1), // ≥1 survivor; exact count is advisory, non-zero triggers FAIL
+        Some(1) => anyhow::bail!("cargo mutants exited with error (code 1) — check logs above"),
+        Some(n) => anyhow::bail!("cargo mutants exited with unexpected code {n}"),
+        None => anyhow::bail!("cargo mutants terminated by signal"),
+    }
 }
 
 fn accessible_files(crate_root: &Path, accessible: &[String]) -> Vec<PathBuf> {
