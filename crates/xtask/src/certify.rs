@@ -618,7 +618,7 @@ fn run_level2_firefox(crate_root: &Path, parallel: bool, extra_features: Option<
 /// `threshold = None` is informational; `pass` is always `true`.
 /// Fails loudly if cargo-llvm-cov or llvm-tools-preview is not installed.
 fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> Result<(f32, bool)> {
-    let mut args = vec!["llvm-cov", "-p", crate_name, "--summary-only"];
+    let mut args = vec!["llvm-cov", "-p", crate_name, "--summary-only", "--color", "never"];
     let threshold_str;
     if let Some(t) = threshold {
         threshold_str = t.to_string();
@@ -631,16 +631,38 @@ fn run_llvm_cov(crate_name: &str, crate_root: &Path, threshold: Option<u8>) -> R
         .stderr(Stdio::piped())
         .output()
         .context("cargo llvm-cov")?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("no such command") || stderr.contains("Unknown command") {
+    let stderr_raw = String::from_utf8_lossy(&output.stderr);
+    if stderr_raw.contains("no such command") || stderr_raw.contains("Unknown command") {
         anyhow::bail!(
             "cargo-llvm-cov is not installed — required for the coverage gate.\n\
              Install: cargo install cargo-llvm-cov --locked\n\
              Also: rustup component add llvm-tools-preview"
         );
     }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pct = parse_llvm_cov_pct(&stdout);
     let pass = threshold.map_or(true, |_| output.status.success());
-    let pct = parse_llvm_cov_pct(&String::from_utf8_lossy(&output.stdout));
+
+    // Emit diagnostics when coverage is 0.0% so CI logs reveal the root cause.
+    if pct == 0.0 {
+        if !stderr_raw.is_empty() {
+            eprintln!("  [llvm-cov stderr for {crate_name} (exit {})]:", output.status);
+            for line in stderr_raw.lines().take(40) {
+                eprintln!("    {line}");
+            }
+        }
+        // Print the TOTAL line (or note its absence) so we can see the exact format.
+        let total_lines: Vec<&str> = stdout.lines().filter(|l| l.contains("TOTAL")).collect();
+        if total_lines.is_empty() {
+            eprintln!("  [llvm-cov stdout for {crate_name}]: no TOTAL line — full stdout (exit {}):", output.status);
+            for line in stdout.lines().take(20) {
+                eprintln!("    {line}");
+            }
+        } else {
+            eprintln!("  [llvm-cov TOTAL line for {crate_name}]: {}", total_lines[0]);
+        }
+    }
+
     Ok((pct, pass))
 }
 
