@@ -370,7 +370,7 @@ impl VectorIndex {
 // `set_gate_cache_max_layers` to bound RSS on long-running servers.
 // ══════════════════════════════════════════════════════════════
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod gate_cache_lru_tests {
     use crate::config::dtype::StorageDtype;
     use crate::index::core::VectorIndex;

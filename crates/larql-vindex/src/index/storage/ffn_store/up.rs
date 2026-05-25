@@ -10,8 +10,10 @@ use std::sync::Arc;
 use crate::error::VindexError;
 use crate::format::filenames::UP_FEATURES_BIN;
 use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_demand_paged;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load feature-major up vectors from up_features.bin.
     pub fn load_up_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {

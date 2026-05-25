@@ -13,25 +13,26 @@
 //! kernels dispatch on `VectorIndex::fp4_storage.is_some()` rather than
 //! filename sniffing.
 
-use std::path::Path;
-use std::sync::Arc;
-
 use larql_models::quant::fp4_block::{
     decode_fp4_feature, decode_fp8_feature, fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
 };
 
+use bytes::Bytes;
+
 use crate::config::types::{Fp4Config, Precision, ProjectionFormat};
 use crate::error::VindexError;
 
-/// Per-projection mmap + byte-layout metadata.
+/// Per-projection byte storage + byte-layout metadata.
+/// WASM-safe: uses `Bytes` instead of `Arc<Mmap>` so loaders can provide
+/// heap-backed buffers on wasm32 and mmap-backed buffers on native.
 pub struct Fp4Storage {
     /// The manifest as loaded from `index.json.fp4`.
     pub manifest: Fp4Config,
-    /// Per-projection mmap handle (None when precision is f16/f32 — that
-    /// path stays on the legacy mmap fields of `VectorIndex`).
-    pub gate_mmap: Option<Arc<memmap2::Mmap>>,
-    pub up_mmap: Option<Arc<memmap2::Mmap>>,
-    pub down_mmap: Option<Arc<memmap2::Mmap>>,
+    /// Per-projection byte buffer (None when precision is f16/f32 — that
+    /// path stays on the legacy mmap/gate_bytes fields of `VectorIndex`).
+    pub gate_bytes: Option<Bytes>,
+    pub up_bytes: Option<Bytes>,
+    pub down_bytes: Option<Bytes>,
     /// Per-layer feature count — duplicated here so the storage is
     /// self-contained when the row accessor runs.
     pub layer_features: Vec<usize>,
@@ -40,20 +41,61 @@ pub struct Fp4Storage {
 }
 
 impl Fp4Storage {
+    /// Construct from pre-loaded `Bytes` buffers.
+    /// WASM loaders call this directly; native loaders use `load()`.
+    pub fn from_bytes(
+        manifest: Fp4Config,
+        gate_bytes: Option<Bytes>,
+        up_bytes: Option<Bytes>,
+        down_bytes: Option<Bytes>,
+        layer_features: Vec<usize>,
+        hidden: usize,
+    ) -> Result<Self, VindexError> {
+        Self::validate_file_size(
+            &manifest.projections.gate,
+            gate_bytes.as_deref(),
+            &layer_features,
+            hidden,
+        )?;
+        Self::validate_file_size(
+            &manifest.projections.up,
+            up_bytes.as_deref(),
+            &layer_features,
+            hidden,
+        )?;
+        Self::validate_file_size(
+            &manifest.projections.down,
+            down_bytes.as_deref(),
+            &layer_features,
+            hidden,
+        )?;
+        Ok(Self {
+            manifest,
+            gate_bytes,
+            up_bytes,
+            down_bytes,
+            layer_features,
+            hidden,
+        })
+    }
+
     /// Load each projection's data file per the manifest. Files with
-    /// precision = f16/f32 are left unmapped (None) — caller still reads
+    /// precision = f16/f32 are left empty (None) — caller still reads
     /// those from the legacy `gate_vectors.bin` / `up_features.bin` /
     /// `down_features.bin` path.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(
-        dir: &Path,
+        dir: &std::path::Path,
         manifest: Fp4Config,
         layer_features: Vec<usize>,
         hidden: usize,
     ) -> Result<Self, VindexError> {
-        fn mmap_if_quant(
-            dir: &Path,
+        use std::sync::Arc;
+
+        fn read_if_quant(
+            dir: &std::path::Path,
             proj: &ProjectionFormat,
-        ) -> Result<Option<Arc<memmap2::Mmap>>, VindexError> {
+        ) -> Result<Option<Bytes>, VindexError> {
             match proj.precision {
                 Precision::Fp4 | Precision::Fp8 => {
                     let path = dir.join(&proj.file);
@@ -68,53 +110,40 @@ impl Fp4Storage {
                             VindexError::Parse(format!("mmap {}: {e}", path.display()))
                         })?
                     };
-                    Ok(Some(Arc::new(mmap)))
+                    // Convert Arc<Mmap> → Bytes so the struct is mmap-agnostic.
+                    struct ArcMmapOwner(Arc<memmap2::Mmap>);
+                    impl AsRef<[u8]> for ArcMmapOwner {
+                        fn as_ref(&self) -> &[u8] {
+                            &self.0
+                        }
+                    }
+                    let arc = Arc::new(mmap);
+                    Ok(Some(Bytes::from_owner(ArcMmapOwner(arc))))
                 }
                 Precision::F16 | Precision::F32 => Ok(None),
             }
         }
 
-        let gate_mmap = mmap_if_quant(dir, &manifest.projections.gate)?;
-        let up_mmap = mmap_if_quant(dir, &manifest.projections.up)?;
-        let down_mmap = mmap_if_quant(dir, &manifest.projections.down)?;
-
-        // Validate sizes for each loaded projection.
-        Self::validate_file_size(
-            &manifest.projections.gate,
-            gate_mmap.as_deref(),
-            &layer_features,
-            hidden,
-        )?;
-        Self::validate_file_size(
-            &manifest.projections.up,
-            up_mmap.as_deref(),
-            &layer_features,
-            hidden,
-        )?;
-        Self::validate_file_size(
-            &manifest.projections.down,
-            down_mmap.as_deref(),
-            &layer_features,
-            hidden,
-        )?;
-
-        Ok(Self {
+        let gate_bytes = read_if_quant(dir, &manifest.projections.gate)?;
+        let up_bytes = read_if_quant(dir, &manifest.projections.up)?;
+        let down_bytes = read_if_quant(dir, &manifest.projections.down)?;
+        Self::from_bytes(
             manifest,
-            gate_mmap,
-            up_mmap,
-            down_mmap,
+            gate_bytes,
+            up_bytes,
+            down_bytes,
             layer_features,
             hidden,
-        })
+        )
     }
 
     fn validate_file_size(
         proj: &ProjectionFormat,
-        mmap: Option<&memmap2::Mmap>,
+        bytes: Option<&[u8]>,
         layer_features: &[usize],
         hidden: usize,
     ) -> Result<(), VindexError> {
-        let Some(mmap) = mmap else {
+        let Some(bytes) = bytes else {
             return Ok(());
         };
         let per_feat = match proj.precision {
@@ -123,11 +152,11 @@ impl Fp4Storage {
             _ => return Ok(()),
         };
         let total: usize = layer_features.iter().sum::<usize>() * per_feat;
-        if mmap.len() != total {
+        if bytes.len() != total {
             return Err(VindexError::Parse(format!(
                 "{}: size {} != expected {}",
                 proj.file,
-                mmap.len(),
+                bytes.len(),
                 total
             )));
         }
@@ -144,12 +173,12 @@ impl Fp4Storage {
         }
     }
 
-    /// Per-component mmap.
-    fn mmap_for(&self, component: usize) -> Option<&memmap2::Mmap> {
+    /// Per-component byte slice.
+    fn mmap_for(&self, component: usize) -> Option<&[u8]> {
         match component {
-            0 => self.gate_mmap.as_deref(),
-            1 => self.up_mmap.as_deref(),
-            2 => self.down_mmap.as_deref(),
+            0 => self.gate_bytes.as_deref(),
+            1 => self.up_bytes.as_deref(),
+            2 => self.down_bytes.as_deref(),
             _ => None,
         }
     }
@@ -262,9 +291,9 @@ impl std::fmt::Debug for Fp4Storage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Fp4Storage")
             .field("manifest", &self.manifest)
-            .field("gate_mmap", &self.gate_mmap.as_ref().map(|m| m.len()))
-            .field("up_mmap", &self.up_mmap.as_ref().map(|m| m.len()))
-            .field("down_mmap", &self.down_mmap.as_ref().map(|m| m.len()))
+            .field("gate_bytes", &self.gate_bytes.as_ref().map(|b| b.len()))
+            .field("up_bytes", &self.up_bytes.as_ref().map(|b| b.len()))
+            .field("down_bytes", &self.down_bytes.as_ref().map(|b| b.len()))
             .field("num_layers", &self.layer_features.len())
             .field("hidden", &self.hidden)
             .finish()
@@ -412,9 +441,9 @@ mod tests {
         assert!(matches!(storage.precision(2), Some(Precision::Fp8)));
         assert!(storage.precision(3).is_none(), "component > 2 must be None");
 
-        assert!(storage.gate_mmap.is_some());
-        assert!(storage.up_mmap.is_some());
-        assert!(storage.down_mmap.is_some());
+        assert!(storage.gate_bytes.is_some());
+        assert!(storage.up_bytes.is_some());
+        assert!(storage.down_bytes.is_some());
     }
 
     #[test]
@@ -635,8 +664,8 @@ mod tests {
 
         let storage = Fp4Storage::load(&tmp.0, cfg, vec![2], hidden).unwrap();
         assert!(
-            storage.down_mmap.is_none(),
-            "f16 down must not be mmap'd by Fp4Storage"
+            storage.down_bytes.is_none(),
+            "f16 down must not be loaded by Fp4Storage"
         );
         assert!(
             !storage.dequant_row_into(0, 2, 0, &mut vec![0.0f32; hidden]),

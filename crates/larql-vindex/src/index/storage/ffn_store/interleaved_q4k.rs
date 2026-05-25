@@ -11,21 +11,29 @@
 //! `q4k_ffn_layer` whole-layer dequant cache. The legacy interleaved
 //! path stays available as the fallback when the sidecar is absent.
 
-use std::sync::Arc;
+use super::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
 
+// ── OS-only: file loading uses mmap + safetensors ────────────────────────────
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::filenames::{
     DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
     INTERLEAVED_Q4K_MANIFEST_JSON,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::weights::Q4kManifestEntry;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_demand_paged;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
-#[cfg(unix)]
+#[cfg(all(not(target_arch = "wasm32"), unix))]
 use super::FFN_DOWN;
-use super::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
 
 /// Read + typed-deserialise a Q4_K manifest JSON file. Validates each
 /// entry's format tag against `quant::registry`. `display_name` is the
@@ -33,6 +41,7 @@ use super::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
 /// manifest broke. Centralised so both `load_interleaved_q4k` and
 /// `load_down_features_q4k` go through the same parse + validation
 /// path.
+#[cfg(not(target_arch = "wasm32"))]
 fn read_q4k_manifest(
     path: &std::path::Path,
     display_name: &str,
@@ -52,6 +61,7 @@ fn read_q4k_manifest(
     Ok(entries)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load Q4_K/Q6_K interleaved FFN data (Ollama-compatible, matches attn format).
     ///

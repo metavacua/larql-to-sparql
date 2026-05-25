@@ -23,6 +23,8 @@ members = [
     "crates/larql-wasm",
     # Browser CLI — LQL session and inference surface compiled to WASM
     "crates/larql-browser-cli",
+    # VIndex WASM32 bindings — compressed subgraph KNN in the browser
+    "crates/larql-vindex-wasm32uu",
     # Build and certification automation (not in default-members)
     "crates/xtask",
 ]

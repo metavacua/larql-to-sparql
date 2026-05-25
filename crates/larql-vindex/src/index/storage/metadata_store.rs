@@ -6,13 +6,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::index::types::{DownMetaMmap, FeatureMeta};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::types::DownMetaMmap;
+use crate::index::types::FeatureMeta;
 
 #[derive(Clone)]
 pub struct MetadataStore {
     /// Per-layer, per-feature output token metadata (heap mode).
     pub down_meta: Vec<Option<Vec<Option<FeatureMeta>>>>,
-    /// Mmap'd down_meta.bin (zero-copy mode).
+    /// Mmap'd down_meta.bin (zero-copy mode). Not available on wasm32.
+    #[cfg(not(target_arch = "wasm32"))]
     pub down_meta_mmap: Option<Arc<DownMetaMmap>>,
     /// Down vector overrides — `(layer, feature) → hidden_size f32`.
     pub down_overrides: HashMap<(usize, usize), Vec<f32>>,
@@ -24,6 +27,7 @@ impl MetadataStore {
     pub fn empty(num_layers: usize) -> Self {
         Self {
             down_meta: vec![None; num_layers],
+            #[cfg(not(target_arch = "wasm32"))]
             down_meta_mmap: None,
             down_overrides: HashMap::new(),
             up_overrides: HashMap::new(),

@@ -57,6 +57,7 @@ const _: () = assert!(
 /// (0.5625 B/elem in both formats) made silent format mismatches invisible
 /// to file-size validation; checking the manifest's `kind` discriminator
 /// catches the mismatch at load-time.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_lm_head_manifest_kind(dir: &std::path::Path) -> Option<String> {
     let manifest_path = dir.join(WEIGHT_MANIFEST_JSON);
     let text = std::fs::read_to_string(&manifest_path).ok()?;

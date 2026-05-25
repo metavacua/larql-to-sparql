@@ -2494,6 +2494,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-vindex-wasm32uu"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "js-sys",
+ "larql-vindex",
+ "ndarray",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "larql-wasm"
 version = "0.1.0"
 dependencies = [

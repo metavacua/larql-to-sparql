@@ -33,6 +33,7 @@ impl VectorIndex {
             return Some(meta);
         }
         // Mmap path (production — zero heap, no mutations)
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref dm) = self.metadata.down_meta_mmap {
             return dm.feature_meta(layer, feature);
         }
@@ -141,6 +142,7 @@ impl VectorIndex {
 
     /// Total down metadata entries loaded across all layers.
     pub fn total_down_meta(&self) -> usize {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref dm) = self.metadata.down_meta_mmap {
             return dm.total_features();
         }

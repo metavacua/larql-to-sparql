@@ -2,13 +2,19 @@
 //! Model loading (safetensors/GGUF) is in larql-models.
 
 pub mod checksums;
+// down_meta loading uses mmap — OS-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod down_meta;
 pub mod filenames;
 pub mod fp4_codec;
 #[cfg(all(not(target_arch = "wasm32"), feature = "remote"))]
 pub mod huggingface;
+// load uses mmap + std::fs — OS-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod load;
 pub mod quant;
+// weights uses safetensors (ZIP-based) — OS-only.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod weights;
 
 // Back-compat alias — `format::fp4_storage` was renamed to `fp4_codec`

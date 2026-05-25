@@ -1,0 +1,28 @@
+[package]
+name = "larql-vindex-wasm32uu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WASM32 bindings for larql-vindex — compressed subgraph KNN and metadata queries in the browser / Node.js"
+keywords = ["wasm", "vindex", "knowledge-graph", "webassembly"]
+categories = ["wasm", "web-programming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+larql-vindex = { path = "../larql-vindex", default-features = false }
+wasm-bindgen = "0.2"
+js-sys        = "0.3"
+serde_json    = { workspace = true }
+ndarray       = "0.16"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom_03 = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm]
+split-candidate = true

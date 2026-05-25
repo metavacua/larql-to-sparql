@@ -10,8 +10,10 @@ use std::sync::Arc;
 use crate::error::VindexError;
 use crate::format::filenames::INTERLEAVED_BIN;
 use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_demand_paged;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load interleaved FFN data: [gate|up|down] per layer in one contiguous file.
     /// Eliminates TLB thrash from 3 separate mmap files.

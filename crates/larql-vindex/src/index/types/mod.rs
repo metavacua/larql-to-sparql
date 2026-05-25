@@ -109,6 +109,8 @@ pub struct GateQ4Slice {
 }
 
 /// Mmap'd down_meta.bin — reads individual feature records on demand.
+/// Not available on wasm32 (mmap requires OS file descriptors).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct DownMetaMmap {
     pub(crate) mmap: std::sync::Arc<memmap2::Mmap>,
@@ -118,6 +120,7 @@ pub struct DownMetaMmap {
     pub(crate) tokenizer: std::sync::Arc<tokenizers::Tokenizer>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DownMetaMmap {
     fn record_size(&self) -> usize {
         8 + self.top_k_count * 8

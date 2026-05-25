@@ -12,8 +12,10 @@ use crate::error::VindexError;
 use crate::format::filenames::GATE_VECTORS_Q4_BIN;
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_optimized;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load Q4_0 gate vectors from gate_vectors_q4.bin.
     ///

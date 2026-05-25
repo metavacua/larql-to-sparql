@@ -38,6 +38,7 @@ pub struct RouteResult {
 impl RouterIndex {
     /// Load router weights from a vindex directory.
     /// Returns None if router_weights.bin doesn't exist (dense model).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(dir: &Path, config: &crate::config::VindexConfig) -> Option<Self> {
         let path = dir.join(ROUTER_WEIGHTS_BIN);
         if !path.exists() {

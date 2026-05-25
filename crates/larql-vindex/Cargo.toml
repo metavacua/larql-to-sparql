@@ -35,9 +35,8 @@ sha2 = "0.10"
 # base64 encoding for the HF preupload file-sample field.
 base64 = "0.22"
 
-# Model weights (for safetensors loading during extract)
-safetensors = "0.7"
-memmap2 = "0.9"
+# Model weights and memory-mapped I/O — OS-only; not available on wasm32.
+# See [target.'cfg(not(target_arch = "wasm32"))'.dependencies] below.
 
 # Refcounted, slice-cheap byte handle returned by the `VindexStorage`
 # trait. `Bytes::from_owner(Arc<Mmap>)` is zero-copy from the existing
@@ -52,6 +51,10 @@ bytes = "1"
 libc = "0.2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# mmap-based file I/O — requires OS file descriptors (no WASM syscall).
+memmap2 = "0.9"
+# Weight loading via safetensors (ZIP-based) — requires std::fs.
+safetensors = "0.7"
 # Tokenizer — onig/Oniguruma backend; not wasm-safe (wasm32 uses unstable_wasm below).
 tokenizers = "0.21"
 # Blocking HTTP with ring-based TLS — incompatible with wasm32. Optional: activated

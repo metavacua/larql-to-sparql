@@ -19,15 +19,23 @@ pub use parser::{
     parse_vindexfile, parse_vindexfile_str, Vindexfile, VindexfileDirective, VindexfileStage,
 };
 
+// build_from_vindexfile uses load_vindex (OS-only mmap path) — not available on wasm32.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::load::load_vindex_config;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::core::SilentLoadCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::patch::core::{PatchedVindex, VindexPatch};
 
 /// Build result from processing a Vindexfile.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct VindexfileBuild {
     /// The built vindex (base + all patches/edits baked down).
     pub index: VectorIndex,
@@ -38,12 +46,14 @@ pub struct VindexfileBuild {
 }
 
 /// One layer in the build history.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct BuildLayer {
     pub directive: String,
     pub features_modified: usize,
 }
 
 /// Execute a Vindexfile: load base, apply patches, run edits, produce a clean VectorIndex.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn build_from_vindexfile(
     vf: &Vindexfile,
     stage: Option<&str>,
@@ -181,6 +191,7 @@ pub fn build_from_vindexfile(
 /// Resolve a path from a Vindexfile directive.
 /// Handles: local paths, `hf://` URLs (downloads + caches via the
 /// HuggingFace resolver), `https://` URLs (still TODO).
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_vindexfile_path(
     path: &str,
     working_dir: &Path,

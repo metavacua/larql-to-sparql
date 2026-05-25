@@ -109,6 +109,7 @@ impl VectorIndex {
     /// heap. For fine-grained inference prefer [`Self::q4k_ffn_row_into`],
     /// which decodes a single feature into a caller-provided buffer
     /// without populating the cache.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn q4k_ffn_layer(
         &self,
         layer: usize,
@@ -180,6 +181,7 @@ impl VectorIndex {
     /// Superseded by `q4k_down_feature_scaled_add` when
     /// `down_features_q4k.bin` is present (W2). Stays here as the
     /// fallback for legacy vindexes.
+    #[cfg(not(target_arch = "wasm32"))]
     #[inline]
     pub fn q4k_ffn_row_scaled_add_via_cache(
         &self,
@@ -219,6 +221,7 @@ impl VectorIndex {
     /// the layer index is out of range.  A `None` stored by `get_or_init`
     /// is permanent for this instance; callers must fall back to fresh
     /// dequant in that case.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn q4k_ffn_layer_once(&self, layer: usize, component: usize) -> Option<Arc<Vec<f32>>> {
         if component > 2 {
             return None;
