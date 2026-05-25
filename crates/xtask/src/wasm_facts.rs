@@ -42,10 +42,32 @@ pub struct WasmFacts {
 }
 
 const LOCAL_CAPABILITY_PATTERNS: &[&str] = &[
-    "readfile", "writefile", "appendfile", "open", "close", "stat", "fstat",
-    "lstat", "mkdir", "rmdir", "unlink", "rename", "readdir", "spawn", "exec",
-    "fork", "pipe", "socket", "bind", "listen", "accept", "connect",
-    "send", "recv", "sendto", "recvfrom",
+    "readfile",
+    "writefile",
+    "appendfile",
+    "open",
+    "close",
+    "stat",
+    "fstat",
+    "lstat",
+    "mkdir",
+    "rmdir",
+    "unlink",
+    "rename",
+    "readdir",
+    "spawn",
+    "exec",
+    "fork",
+    "pipe",
+    "socket",
+    "bind",
+    "listen",
+    "accept",
+    "connect",
+    "send",
+    "recv",
+    "sendto",
+    "recvfrom",
 ];
 
 /// Returns true if the import name matches local-capability patterns (fs/IPC/LAN).
@@ -109,18 +131,38 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
                     let item = item.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
                     match item {
                         wasmparser::Imports::Single(_offset, import) => {
-                            register_import(&mut facts, &mut import_func_count, import.module, import.name, import.ty);
+                            register_import(
+                                &mut facts,
+                                &mut import_func_count,
+                                import.module,
+                                import.name,
+                                import.ty,
+                            );
                         }
                         wasmparser::Imports::Compact1 { module, items } => {
                             for compact_item in items {
-                                let ci = compact_item.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
-                                register_import(&mut facts, &mut import_func_count, module, ci.name, ci.ty);
+                                let ci = compact_item
+                                    .map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
+                                register_import(
+                                    &mut facts,
+                                    &mut import_func_count,
+                                    module,
+                                    ci.name,
+                                    ci.ty,
+                                );
                             }
                         }
                         wasmparser::Imports::Compact2 { module, ty, names } => {
                             for name in names {
-                                let name = name.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
-                                register_import(&mut facts, &mut import_func_count, module, name, ty);
+                                let name =
+                                    name.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
+                                register_import(
+                                    &mut facts,
+                                    &mut import_func_count,
+                                    module,
+                                    name,
+                                    ty,
+                                );
                             }
                         }
                     }
@@ -129,8 +171,7 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
             }
             Payload::ExportSection(reader) => {
                 for export in reader {
-                    let export =
-                        export.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
+                    let export = export.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
                     if let wasmparser::ExternalKind::Func = export.kind {
                         facts.roots.push((export.name.to_owned(), export.index));
                     }
@@ -176,11 +217,8 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
                     let rec_group =
                         rec_group.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
                     for sub in rec_group.into_types() {
-                        if let wasmparser::CompositeInnerType::Func(ft) =
-                            sub.composite_type.inner
-                        {
-                            type_map
-                                .push((ft.params().to_vec(), ft.results().to_vec()));
+                        if let wasmparser::CompositeInnerType::Func(ft) = sub.composite_type.inner {
+                            type_map.push((ft.params().to_vec(), ft.results().to_vec()));
                         } else {
                             // Non-func type (struct/array/cont): consume its slot.
                             type_map.push((vec![], vec![]));
@@ -229,4 +267,3 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
 
     Ok(facts)
 }
-

@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  # ── Enumerate crates with [package.metadata.wasm] ──────────────────────────
+  # ── Enumerate all workspace crates (excluding build-tool xtask) ───────────
   discover:
     name: discover crates
     runs-on: ubuntu-24.04
@@ -45,11 +45,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: List wasm-tagged crates
+      - name: List all workspace crates
         id: list
         run: |
           CRATES=$(cargo metadata --no-deps --format-version 1 | \
-            jq -c '[.packages[] | select(.metadata.wasm != null) | .name]')
+            jq -c '[.packages[] | select(.name != "xtask") | .name]')
           echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
 
   # ── Containment check ──────────────────────────────────────────────────────

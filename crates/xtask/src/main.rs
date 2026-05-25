@@ -10,13 +10,17 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "xtask", about = "larql-to-sparql build and wasm32 analysis tasks")]
+#[command(
+    name = "xtask",
+    about = "larql-to-sparql build and wasm32 analysis tasks"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
 enum Command {
     /// Check workspace crates for wasm32 containment (WASM-SAFE or NATIVE).
     ///

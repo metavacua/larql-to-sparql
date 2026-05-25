@@ -63,8 +63,10 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
     let analysis = crate::rules::analyze(facts.calls.clone(), non_intrinsic, roots);
 
     // Functions reachable from exports that have OS imports in their call chain.
-    let contaminated: HashSet<u32> =
-        analysis.containment_violation_indices().into_iter().collect();
+    let contaminated: HashSet<u32> = analysis
+        .containment_violation_indices()
+        .into_iter()
+        .collect();
 
     let crate_ident = crate_name.replace('-', "_");
     let mut binary_pure: Vec<String> = vec![];
@@ -89,12 +91,7 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
     // Pass 2: source-level trap scan on binary-pure modules.
     // On wasm32-unknown-unknown, std::fs/net/process/thread compile to runtime
     // panics with no host imports — binary containment cannot detect them.
-    const TRAP_PATTERNS: &[&str] = &[
-        "std::fs::",
-        "std::net::",
-        "std::process::",
-        "std::thread::",
-    ];
+    const TRAP_PATTERNS: &[&str] = &["std::fs::", "std::net::", "std::process::", "std::thread::"];
     let src_dir = crate_root.join("src");
     let mut pure_modules: Vec<String> = vec![];
     let mut trap_modules: Vec<(String, Vec<String>)> = vec![];
@@ -183,10 +180,7 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
                 .iter()
                 .filter(|(_, _, idx)| {
                     contaminated.contains(idx)
-                        || facts
-                            .names
-                            .get(idx)
-                            .map_or(false, |n| n.starts_with(&prefix))
+                        || facts.names.get(idx).is_some_and(|n| n.starts_with(&prefix))
                 })
                 .take(2)
                 .map(|(module, sym, _)| format!("{}::{}", module, sym))
@@ -199,9 +193,7 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
     }
 
     if !audit.native_only.is_empty() {
-        println!(
-            "  cfg-gated (already native-only in original, copy as-is to {os_name}):"
-        );
+        println!("  cfg-gated (already native-only in original, copy as-is to {os_name}):");
         for m in &audit.native_only {
             println!("    + {m}");
         }
@@ -217,14 +209,8 @@ fn split_one(crate_name: &str, crate_root: &Path) -> Result<()> {
 
 fn derive_split_names(crate_name: &str) -> (String, String) {
     if let Some(rest) = crate_name.strip_prefix("larql-") {
-        (
-            format!("larql-{rest}-wasm32uu"),
-            format!("larql-{rest}-OS"),
-        )
+        (format!("larql-{rest}-wasm32uu"), format!("larql-{rest}-OS"))
     } else {
-        (
-            format!("{crate_name}-wasm32uu"),
-            format!("{crate_name}-OS"),
-        )
+        (format!("{crate_name}-wasm32uu"), format!("{crate_name}-OS"))
     }
 }

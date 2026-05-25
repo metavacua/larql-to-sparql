@@ -83,7 +83,10 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: false,
-            blockers: vec![("compile".into(), "cargo check --target wasm32 failed".into())],
+            blockers: vec![(
+                "compile".into(),
+                "cargo check --target wasm32 failed".into(),
+            )],
         });
     }
 
@@ -94,13 +97,16 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: false,
-            blockers: vec![("build".into(), "cargo rustc --crate-type cdylib failed".into())],
+            blockers: vec![(
+                "build".into(),
+                "cargo rustc --crate-type cdylib failed".into(),
+            )],
         });
     };
 
     // Step 3: extract facts + call-graph containment analysis
-    let bytes = std::fs::read(&wasm_path)
-        .with_context(|| format!("reading {}", wasm_path.display()))?;
+    let bytes =
+        std::fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let facts = crate::wasm_facts::extract(&bytes)?;
 
     let non_intrinsic: Vec<u32> = facts
@@ -129,8 +135,10 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
     }
 
     // Collect the actual import symbols that are reachable containment violations.
-    let violation_set: std::collections::HashSet<u32> =
-        analysis.containment_violation_indices().into_iter().collect();
+    let violation_set: std::collections::HashSet<u32> = analysis
+        .containment_violation_indices()
+        .into_iter()
+        .collect();
 
     let blockers: Vec<(String, String)> = facts
         .non_intrinsic_imports
@@ -139,7 +147,10 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
         .map(|(module, sym, _)| (module.clone(), sym.clone()))
         .collect();
 
-    println!("NATIVE ({} host import(s) reachable from exports)", blockers.len());
+    println!(
+        "NATIVE ({} host import(s) reachable from exports)",
+        blockers.len()
+    );
     Ok(CheckResult {
         crate_name: name.to_owned(),
         safe: false,

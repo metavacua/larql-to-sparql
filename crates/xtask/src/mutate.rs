@@ -43,7 +43,11 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
             continue;
         }
 
-        println!("{}: mutating {} wasm32-accessible file(s):", pkg.name, files.len());
+        println!(
+            "{}: mutating {} wasm32-accessible file(s):",
+            pkg.name,
+            files.len()
+        );
         for f in &files {
             let rel = f.strip_prefix(&crate_root).unwrap_or(f.as_path());
             println!("    {}", rel.display());

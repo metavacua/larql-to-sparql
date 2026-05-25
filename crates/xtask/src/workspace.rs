@@ -58,7 +58,10 @@ pub fn build_cdylib(crate_name: &str, crate_root: &Path) -> Result<Option<PathBu
 
 /// True if the crate declares [package.metadata.wasm].
 pub fn has_wasm_meta(pkg: &Package) -> bool {
-    pkg.metadata.as_object().and_then(|m| m.get("wasm")).is_some()
+    pkg.metadata
+        .as_object()
+        .and_then(|m| m.get("wasm"))
+        .is_some()
 }
 
 /// True if [package.metadata.wasm] safe = true is set (pre-confirmed WASM-SAFE).

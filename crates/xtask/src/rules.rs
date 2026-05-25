@@ -3,6 +3,11 @@
 //! Determines whether any non-intrinsic host import is reachable from at least
 //! one export root (containment violation = NATIVE; none = WASM-SAFE).
 
+// ascent! generates .clone() calls on u32 tuple fields — suppress the lint
+// for the whole module rather than at the macro call site (outer attrs don't
+// propagate into macro-expanded items).
+#![allow(clippy::clone_on_copy)]
+
 use ascent::ascent;
 
 ascent! {
@@ -62,7 +67,6 @@ impl AnalysisResult {
             .map(|(idx,)| *idx)
             .collect()
     }
-
 }
 
 /// Run containment analysis given extracted wasm facts.
@@ -71,10 +75,12 @@ pub fn analyze(
     non_intrinsic_imports: Vec<u32>,
     roots: Vec<u32>,
 ) -> AnalysisResult {
-    let mut prog = AscentProgram::default();
-    prog.calls = calls;
-    prog.is_non_intrinsic_import = non_intrinsic_imports.into_iter().map(|x| (x,)).collect();
-    prog.is_root = roots.into_iter().map(|x| (x,)).collect();
+    let mut prog = AscentProgram {
+        calls,
+        is_non_intrinsic_import: non_intrinsic_imports.into_iter().map(|x| (x,)).collect(),
+        is_root: roots.into_iter().map(|x| (x,)).collect(),
+        ..Default::default()
+    };
     prog.run();
     AnalysisResult { prog }
 }

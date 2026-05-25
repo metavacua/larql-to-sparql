@@ -43,8 +43,14 @@ fn arith_factorial() {
 fn arith_factorial_out_of_range() {
     use model_compute::native::KernelError;
     let k = ArithmeticKernel;
-    assert!(matches!(k.invoke("factorial(21)").unwrap_err(), KernelError::OutOfRange(_)));
-    assert!(matches!(k.invoke("factorial(-1)").unwrap_err(), KernelError::OutOfRange(_)));
+    assert!(matches!(
+        k.invoke("factorial(21)").unwrap_err(),
+        KernelError::OutOfRange(_)
+    ));
+    assert!(matches!(
+        k.invoke("factorial(-1)").unwrap_err(),
+        KernelError::OutOfRange(_)
+    ));
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -83,7 +89,10 @@ fn arith_empty_range_sum_zero() {
 fn arith_range_too_large_rejected() {
     use model_compute::native::KernelError;
     let k = ArithmeticKernel;
-    assert!(matches!(k.invoke("sum(0..200000000)").unwrap_err(), KernelError::OutOfRange(_)));
+    assert!(matches!(
+        k.invoke("sum(0..200000000)").unwrap_err(),
+        KernelError::OutOfRange(_)
+    ));
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -91,7 +100,10 @@ fn arith_range_too_large_rejected() {
 fn arith_reversed_range_rejected() {
     use model_compute::native::KernelError;
     let k = ArithmeticKernel;
-    assert!(matches!(k.invoke("sum(10..5)").unwrap_err(), KernelError::OutOfRange(_)));
+    assert!(matches!(
+        k.invoke("sum(10..5)").unwrap_err(),
+        KernelError::OutOfRange(_)
+    ));
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -100,7 +112,10 @@ fn arith_identifier_prefix_no_match() {
     use model_compute::native::KernelError;
     let k = ArithmeticKernel;
     // "summary" must NOT trigger the sum() aggregate
-    assert!(matches!(k.invoke("summary(1..10)").unwrap_err(), KernelError::Eval(_)));
+    assert!(matches!(
+        k.invoke("summary(1..10)").unwrap_err(),
+        KernelError::Eval(_)
+    ));
 }
 
 // ── DateTimeKernel ────────────────────────────────────────────────────────────
@@ -109,8 +124,14 @@ fn arith_identifier_prefix_no_match() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn datetime_days_between() {
     let k = DateTimeKernel;
-    assert_eq!(k.invoke("days_between(2026-01-01, 2026-04-16)").unwrap(), "105");
-    assert_eq!(k.invoke("days_between(2024-01-01, 2024-01-01)").unwrap(), "0");
+    assert_eq!(
+        k.invoke("days_between(2026-01-01, 2026-04-16)").unwrap(),
+        "105"
+    );
+    assert_eq!(
+        k.invoke("days_between(2024-01-01, 2024-01-01)").unwrap(),
+        "0"
+    );
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -172,7 +193,8 @@ fn registry_dispatch_arithmetic() {
 fn registry_dispatch_datetime() {
     let r = KernelRegistry::with_defaults();
     assert_eq!(
-        r.invoke("datetime", "days_between(2026-01-01, 2026-04-16)").unwrap(),
+        r.invoke("datetime", "days_between(2026-01-01, 2026-04-16)")
+            .unwrap(),
         "105"
     );
 }
