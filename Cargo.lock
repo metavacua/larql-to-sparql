@@ -2492,6 +2492,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "larql-vindex-os"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "criterion",
+ "hf-hub",
+ "larql-compute",
+ "larql-core",
+ "larql-models",
+ "larql-vindex-wasi",
+ "libc",
+ "memmap2",
+ "mockito",
+ "ndarray",
+ "portable-atomic",
+ "rand 0.8.6",
+ "rayon",
+ "reqwest",
+ "safetensors",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokenizers",
+]
+
+[[package]]
+name = "larql-vindex-wasi"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "larql-compute",
+ "larql-core",
+ "larql-models",
+ "larql-vindex-wasm32uu",
+ "ndarray",
+ "portable-atomic",
+ "rand 0.8.6",
+ "safetensors",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "larql-vindex-wasm32uu"
 version = "0.1.0"
 dependencies = [

@@ -18,7 +18,7 @@ serde_json   = { workspace = true }
 # f16 decode for gate_vectors.bin (no std::io, pure arithmetic)
 half         = { version = "2", default-features = false }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
 getrandom_03 = { workspace = true }
 
 [dev-dependencies]

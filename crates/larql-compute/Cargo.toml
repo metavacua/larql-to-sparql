@@ -132,7 +132,7 @@ harness = false
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [] }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
 getrandom = { workspace = true }
 
 [package.metadata.wasm]

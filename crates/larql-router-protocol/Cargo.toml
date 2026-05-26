@@ -26,7 +26,7 @@ tonic = "0.13"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
 getrandom = { workspace = true }
 
 [package.metadata.wasm]
