@@ -1,13 +1,15 @@
 //! wasm32 containment check.
 //!
 //! For each workspace crate with [package.metadata.wasm], reports one of:
-//! - WASM-SAFE  — cdylib compiled, has ≥1 export, no non-intrinsic host
-//!                imports reachable from any export root.
-//! - WASM-VOID  — cdylib compiled but has 0 exports. Containment is
-//!                vacuously true (no roots → no reachability) which is NOT
-//!                a meaningful safety guarantee. Treated as a hard failure.
-//! - NATIVE     — cdylib has non-intrinsic host imports reachable from
-//!                at least one export (OS syscalls, sockets, file I/O, …).
+//! - WASM-SAFE       — cdylib compiled, has ≥1 export, no non-intrinsic host
+//!   imports reachable from any export root.
+//! - WASM-VOID       — cdylib compiled but has 0 exports of any kind.
+//!   Containment is vacuously true (no roots → no reachability)
+//!   which is NOT a meaningful safety guarantee. Hard failure.
+//! - WASM-CHECK-PASS — lib-only crate (no cdylib target), compiles for wasm32.
+//!   No call-graph analysis performed.
+//! - NATIVE          — cdylib has non-intrinsic host imports reachable from
+//!   at least one export, OR cargo check failed.
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -16,6 +18,8 @@ use std::process::{Command, Stdio};
 pub struct CheckResult {
     pub crate_name: String,
     pub safe: bool,
+    /// True if the crate passed wasm32 compilation as a plain lib (no cdylib analysis).
+    pub lib_only_pass: bool,
     /// Non-intrinsic imports reachable from exports that block WASM-SAFE status.
     pub blockers: Vec<(String, String)>,
 }
@@ -42,6 +46,7 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
             rows.push(CheckResult {
                 crate_name: pkg.name.clone(),
                 safe: false,
+                lib_only_pass: false,
                 blockers: vec![("(none)".into(), "no lib target".into())],
             });
             continue;
@@ -53,8 +58,8 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
             .unwrap()
             .as_std_path()
             .to_path_buf();
-        let confirmed = crate::workspace::is_confirmed_safe(pkg);
-        let result = check_one(&pkg.name, &crate_root, confirmed)?;
+        let is_cdylib = crate::workspace::is_cdylib_crate(pkg);
+        let result = check_one(&pkg.name, &crate_root, is_cdylib)?;
         rows.push(result);
     }
 
@@ -68,26 +73,30 @@ pub fn run(crate_name: Option<&str>) -> Result<()> {
     }
 
     let safe_count = rows.iter().filter(|r| r.safe).count();
-    println!("\n{}/{} crates WASM-SAFE", safe_count, rows.len());
+    let lib_pass_count = rows.iter().filter(|r| r.lib_only_pass).count();
+    println!(
+        "\n{}/{} crates WASM-SAFE, {}/{} lib-only WASM-CHECK-PASS",
+        safe_count,
+        rows.len(),
+        lib_pass_count,
+        rows.len()
+    );
     Ok(())
 }
 
-fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<CheckResult> {
-    if confirmed_safe {
-        print!("  {name}: checking (pre-confirmed safe in metadata)... ");
-    } else {
-        print!("  {name}: checking... ");
-    }
-    // Flush the partial line so it appears before the potentially-slow build.
+fn check_one(name: &str, crate_root: &Path, is_cdylib: bool) -> Result<CheckResult> {
     use std::io::Write;
+
+    print!("  {name}: checking... ");
     std::io::stdout().flush().ok();
 
-    // Step 1: cargo check
+    // Step 1 (all crates): cargo check --target wasm32-unknown-unknown
     if !cargo_check_wasm(name)? {
         println!("NATIVE (compile error)");
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: false,
+            lib_only_pass: false,
             blockers: vec![(
                 "compile".into(),
                 "cargo check --target wasm32 failed".into(),
@@ -95,13 +104,26 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
         });
     }
 
-    // Step 2: build cdylib
+    // Step 2: for lib-only crates there is no cdylib surface to analyse.
+    // "Compiles for wasm32" is the complete verdict.
+    if !is_cdylib {
+        println!("WASM-CHECK-PASS (lib, no cdylib surface)");
+        return Ok(CheckResult {
+            crate_name: name.to_owned(),
+            safe: false,
+            lib_only_pass: true,
+            blockers: vec![],
+        });
+    }
+
+    // Step 3: build cdylib for call-graph analysis
     let wasm_path = crate::workspace::build_cdylib(name, crate_root)?;
     let Some(wasm_path) = wasm_path else {
         println!("NATIVE (cdylib build failed)");
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: false,
+            lib_only_pass: false,
             blockers: vec![(
                 "build".into(),
                 "cargo rustc --crate-type cdylib failed".into(),
@@ -109,27 +131,25 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
         });
     };
 
-    // Step 3: extract facts + call-graph containment analysis
+    // Step 4: extract facts + call-graph containment analysis
     let bytes =
         std::fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let facts = crate::wasm_facts::extract(&bytes)?;
 
-    // A binary with no exports passes containment vacuously: the Datalog
-    // rules have no root nodes, so no violation can be reached, and
-    // `is_sandbox_contained()` returns true regardless of what the binary
-    // actually does.  This is NOT WASM-SAFE — it means the crate compiled
-    // to an empty-surface binary that exposes no callable entry points and
-    // is therefore unusable as a WASM module.  Treat it as a hard failure
-    // ("WASM-VOID") distinct from both WASM-SAFE and NATIVE.
-    if facts.roots.is_empty() {
+    // A binary with no exports of any kind passes containment vacuously:
+    // the Datalog rules have no root nodes, so no violation can be reached.
+    // This is NOT WASM-SAFE — the binary exposes no callable surface.
+    // Treat it as WASM-VOID, a hard failure distinct from both WASM-SAFE and NATIVE.
+    if !facts.has_any_export() {
         println!(
-            "WASM-VOID  (binary: {} B, {} fns — 0 exports, vacuously contained)",
+            "WASM-VOID  (binary: {} B, {} fns — 0 exports of any kind, vacuously contained)",
             bytes.len(),
             facts.total_func_count,
         );
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: false,
+            lib_only_pass: false,
             blockers: vec![(
                 "(exports)".into(),
                 "0 wasm exports — binary has no callable surface (WASM-VOID, not WASM-SAFE)".into(),
@@ -147,17 +167,23 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
     let analysis = crate::rules::analyze(facts.calls.clone(), non_intrinsic, roots);
 
     if analysis.is_sandbox_contained() {
+        let non_fn_exports = facts.memory_exports.len()
+            + facts.table_exports.len()
+            + facts.global_exports.len()
+            + facts.tag_exports.len();
         println!(
-            "WASM-SAFE  (binary: {} B, {} fns, {} call edges, {} exports, {} imports)",
+            "WASM-SAFE  (binary: {} B, {} fns, {} call edges, {} fn-exports, {} non-fn-exports, {} imports)",
             bytes.len(),
             facts.total_func_count,
             facts.calls.len(),
             facts.roots.len(),
+            non_fn_exports,
             facts.num_imports,
         );
         return Ok(CheckResult {
             crate_name: name.to_owned(),
             safe: true,
+            lib_only_pass: false,
             blockers: vec![],
         });
     }
@@ -182,6 +208,7 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
     Ok(CheckResult {
         crate_name: name.to_owned(),
         safe: false,
+        lib_only_pass: false,
         blockers,
     })
 }
@@ -221,6 +248,8 @@ fn cargo_check_wasm(crate_name: &str) -> Result<bool> {
 fn print_result(r: &CheckResult) {
     if r.safe {
         println!("{}: WASM-SAFE", r.crate_name);
+    } else if r.lib_only_pass {
+        println!("{}: WASM-CHECK-PASS", r.crate_name);
     } else {
         println!("{}: NATIVE", r.crate_name);
         for (module, sym) in r.blockers.iter().take(5) {

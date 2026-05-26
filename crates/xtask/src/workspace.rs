@@ -64,14 +64,9 @@ pub fn has_wasm_meta(pkg: &Package) -> bool {
         .is_some()
 }
 
-/// True if [package.metadata.wasm] safe = true is set (pre-confirmed WASM-SAFE).
-pub fn is_confirmed_safe(pkg: &Package) -> bool {
-    pkg.metadata
-        .as_object()
-        .and_then(|m| m.get("wasm"))
-        .and_then(|w| w.get("safe"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+/// True if the crate declares a cdylib target in its Cargo.toml.
+pub fn is_cdylib_crate(pkg: &Package) -> bool {
+    pkg.targets.iter().any(|t| t.is_cdylib())
 }
 
 /// True if [package.metadata.wasm] split-candidate = true.

@@ -30,6 +30,11 @@ pub struct WasmFacts {
     /// Export entries that are functions — the call graph roots.
     /// `(name, func_index)`
     pub roots: Vec<(String, u32)>,
+    /// Non-function exports: memory, table, global, tag.
+    pub memory_exports: Vec<String>,
+    pub table_exports: Vec<String>,
+    pub global_exports: Vec<String>,
+    pub tag_exports: Vec<String>,
     /// `func_index → human-readable name` (from the name section, if present).
     pub names: HashMap<u32, String>,
     /// Total number of imported functions (to offset local function indices).
@@ -39,6 +44,17 @@ pub struct WasmFacts {
     /// Typed exports: (export_name, func_idx, param_types, result_types).
     /// Populated when TypeSection and FunctionSection are both present.
     pub exports_typed: Vec<(String, u32, Vec<ValType>, Vec<ValType>)>,
+}
+
+impl WasmFacts {
+    /// True if the binary exposes any export surface (function, memory, table, global, or tag).
+    pub fn has_any_export(&self) -> bool {
+        !self.roots.is_empty()
+            || !self.memory_exports.is_empty()
+            || !self.table_exports.is_empty()
+            || !self.global_exports.is_empty()
+            || !self.tag_exports.is_empty()
+    }
 }
 
 const LOCAL_CAPABILITY_PATTERNS: &[&str] = &[
@@ -172,8 +188,27 @@ pub fn extract(wasm_bytes: &[u8]) -> Result<WasmFacts> {
             Payload::ExportSection(reader) => {
                 for export in reader {
                     let export = export.map_err(|e: BinaryReaderError| anyhow::anyhow!("{e}"))?;
-                    if let wasmparser::ExternalKind::Func = export.kind {
-                        facts.roots.push((export.name.to_owned(), export.index));
+                    let name = export.name.to_owned();
+                    match export.kind {
+                        wasmparser::ExternalKind::Func => {
+                            facts.roots.push((name, export.index));
+                        }
+                        wasmparser::ExternalKind::Memory => {
+                            facts.memory_exports.push(name);
+                        }
+                        wasmparser::ExternalKind::Table => {
+                            facts.table_exports.push(name);
+                        }
+                        wasmparser::ExternalKind::Global => {
+                            facts.global_exports.push(name);
+                        }
+                        wasmparser::ExternalKind::Tag => {
+                            facts.tag_exports.push(name);
+                        }
+                        wasmparser::ExternalKind::FuncExact => {
+                            // Exact-type function export — treat same as Func for root tracking.
+                            facts.roots.push((name, export.index));
+                        }
                     }
                 }
             }

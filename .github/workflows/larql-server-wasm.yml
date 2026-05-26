@@ -23,23 +23,23 @@
 name: larql-server-wasm
 
 on:
-#  push:
-#    branches: [main]
-#    paths:
-#      - 'crates/larql-server/**'
-#      - 'crates/larql-router-protocol/**'
-#      - 'Cargo.toml'
-#      - 'Cargo.lock'
-#      - '.github/workflows/larql-server-wasm.yml'
-#  pull_request:
-#    types: [opened, synchronize, reopened, ready_for_review]
-#    branches: [main]
-#    paths:
-#      - 'crates/larql-server/**'
-#      - 'crates/larql-router-protocol/**'
-#      - 'Cargo.toml'
-#      - 'Cargo.lock'
-#      - '.github/workflows/larql-server-wasm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'crates/larql-server/**'
+      - 'crates/larql-router-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-server-wasm.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths:
+      - 'crates/larql-server/**'
+      - 'crates/larql-router-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/larql-server-wasm.yml'
   workflow_dispatch: {}
 
 permissions:
@@ -134,13 +134,10 @@ jobs:
       # ── Step 3: Counterwit­ness — native-only boundary signal ─────────────────
       # Without --lib, cargo test also compiles tests/ integration tests. Those
       # files import native-only modules (axum, tokio, session, band_utils…)
-      # and produce compile errors (E0432 / E0433). This is the EXPECTED
-      # empirical signal that documents the compile-time boundary between the
-      # wasm32 subset and the native-only superset. continue-on-error: true
-      # preserves the failures as visible CI evidence without blocking the job.
+      # and produce compile errors (E0432 / E0433). This is the empirical signal
+      # that documents the compile-time boundary: a hard failure, not a soft advisory.
 
-      - name: counterwit­ness · integration-test boundary (expected compile errors)
-        continue-on-error: true
+      - name: counterwit­ness · integration-test boundary (compile errors = hard fail)
         env:
           RUSTFLAGS: ${{ matrix.mode.rustflags }}
         run: cargo test -p larql-server --target wasm32-unknown-unknown
