@@ -12,7 +12,7 @@
 
 mod collection;
 mod repo;
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod test_support;
 
 use crate::error::VindexError;
@@ -57,7 +57,7 @@ pub fn ensure_collection(
     Ok(format!("{}/collections/{slug}", hf_base()))
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::super::is_hf_path;
     use super::test_support::TestEnvGuard;

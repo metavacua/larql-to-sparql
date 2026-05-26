@@ -80,17 +80,11 @@ pub struct MmapStorage {
     /// on a Bytes pointer would be unsafe for heap-backed entries
     /// (the synth lm_head). Heap-backed entries are not added to this
     /// list — only file-backed mmaps are, so iterating is safe.
-    /// Not present on wasm32: madvise is a no-op there.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) mmap_handles: Vec<Arc<memmap2::Mmap>>,
 }
 
 impl Sealed for MmapStorage {}
 
-// ── OS-only mmap setters ──────────────────────────────────────────────────
-// All methods in this impl block take `Arc<memmap2::Mmap>` — only available
-// on non-wasm32 targets where file-backed mmaps are supported.
-#[cfg(not(target_arch = "wasm32"))]
 impl MmapStorage {
     // ── Per-field setters (loader-side mutation) ───────────────────────
     //
@@ -197,6 +191,13 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    /// Set the lm_head Q4 from in-RAM synthesised bytes (the f16
+    /// embeddings → Q4 fallback path). Does **not** register a
+    /// `mmap_handles` entry — the synth bytes live on the heap.
+    pub fn set_lm_head_q4_synth(&mut self, bytes: Arc<Vec<u8>>) {
+        self.lm_head_q4 = Some(Bytes::from_owner(ArcAsBytes(bytes)));
+    }
+
     /// Set the gate vectors mmap + dtype + per-layer slices.
     pub fn set_gate_vectors(
         &mut self,
@@ -222,17 +223,6 @@ impl MmapStorage {
     /// heap-backed setters skip it.
     fn register_mmap(&mut self, mmap: &Arc<memmap2::Mmap>) {
         self.mmap_handles.push(Arc::clone(mmap));
-    }
-} // end #[cfg(not(target_arch = "wasm32"))] impl MmapStorage
-
-// ── WASM-safe inherent methods (heap setters, accessors, constructors) ────────
-impl MmapStorage {
-    /// Set the lm_head Q4 from in-RAM synthesised bytes (the f16
-    /// embeddings → Q4 fallback path). Does **not** register a
-    /// `mmap_handles` entry — the synth bytes live on the heap.
-    /// WASM-safe: no mmap required.
-    pub fn set_lm_head_q4_synth(&mut self, bytes: Arc<Vec<u8>>) {
-        self.lm_head_q4 = Some(Bytes::from_owner(ArcAsBytes(bytes)));
     }
 
     // ── Gate-related concrete accessors ────────────────────────────────
@@ -342,39 +332,6 @@ impl MmapStorage {
         self.interleaved_f32.as_ref()
     }
 
-    /// Construct storage from pre-loaded `Bytes` buffers — the primary
-    /// WASM32 loading path. `Arc<Mmap>` setters are unavailable on
-    /// wasm32, so JS callers provide fetched byte buffers directly.
-    ///
-    /// `hidden_size` is required for per-layer slice arithmetic;
-    /// `gate_slices` describes per-layer offsets and feature counts.
-    /// All other buffers are optional — supply what the query operations
-    /// you need actually require.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_bytes(
-        hidden_size: usize,
-        gate: Option<Bytes>,
-        gate_dtype: StorageDtype,
-        gate_slices: Vec<crate::index::types::GateLayerSlice>,
-        interleaved_q4k: Option<Bytes>,
-        interleaved_q4k_manifest: Option<Vec<(usize, usize, String)>>,
-        lm_head_f16: Option<Bytes>,
-        lm_head_f32: Option<Bytes>,
-    ) -> Self {
-        Self {
-            gate_bytes: gate,
-            gate_dtype,
-            gate_slices,
-            interleaved_q4k,
-            interleaved_q4k_manifest,
-            lm_head_f16,
-            lm_head_f32,
-            #[cfg(not(target_arch = "wasm32"))]
-            mmap_handles: Vec::new(),
-            ..Self::empty(hidden_size)
-        }
-    }
-
     /// Inert empty wrapper — every `Option` is `None`. Used by
     /// `VectorIndex::empty()` and tests. Constructed without any of
     /// the substore types so callers don't have to fabricate empty
@@ -404,17 +361,26 @@ impl MmapStorage {
             gate_q4_bytes: None,
             gate_q4_slices: Vec::new(),
             hidden_size,
-            #[cfg(not(target_arch = "wasm32"))]
             mmap_handles: Vec::new(),
         }
     }
 
-    /// Drop resident pages for every mmap'd file held by this storage.
-    /// Best-effort `madvise(MADV_DONTNEED)`. No-op on wasm32 (no mmap handles).
+    /// Drop resident pages for every mmap'd file held by this
+    /// storage. Best-effort `madvise(MADV_DONTNEED)`. On Linux this
+    /// immediately drops clean pages from RSS; on Darwin
+    /// `MADV_DONTNEED` is advisory and the kernel may delay.
+    ///
+    /// **Heap-backed entries are not advised** — `mmap_handles` only
+    /// contains file-backed `Arc<Mmap>` handles. The synth lm_head
+    /// (heap `Arc<Vec<u8>>`) stays resident.
     pub fn release_pages(&self) {
-        #[cfg(all(not(target_arch = "wasm32"), unix))]
+        #[cfg(unix)]
         {
             use memmap2::UncheckedAdvice;
+            // SAFETY: `unchecked_advise` requires no live references into
+            // the mmap during the call. Production callers (the walk-ffn
+            // server handler) call this after the per-request borrow has
+            // dropped — see `gate_accessors::release_mmap_pages`.
             for handle in &self.mmap_handles {
                 unsafe {
                     let _ = handle.unchecked_advise(UncheckedAdvice::DontNeed);
@@ -426,8 +392,7 @@ impl MmapStorage {
 
 /// `Arc<Mmap>` → `Bytes` via `Bytes::from_owner`. Zero-copy: the
 /// `Bytes` keeps the `Arc<Mmap>` alive for the lifetime of any
-/// outstanding slices. Only available on non-wasm32 (mmap is OS-only).
-#[cfg(not(target_arch = "wasm32"))]
+/// outstanding slices.
 fn arc_mmap_to_bytes(arc: &Arc<memmap2::Mmap>) -> Bytes {
     Bytes::from_owner(ArcAsBytes(arc.clone()))
 }
@@ -612,7 +577,7 @@ impl VindexStorage for MmapStorage {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::index::types::GateLayerSlice;

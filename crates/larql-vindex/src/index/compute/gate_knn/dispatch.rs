@@ -305,7 +305,6 @@ impl VectorIndex {
     ///
     /// The residency manager tracks which layers are pinned.
     /// More memory budget → more pinned layers → faster walk.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn gate_knn_adaptive(
         &self,
         layer: usize,
@@ -345,7 +344,6 @@ impl VectorIndex {
     /// Works with any backend: CPU C kernel, Metal GPU, CUDA, WASM.
     ///
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn gate_knn_q4(
         &self,
         layer: usize,
@@ -377,7 +375,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     //! Inline coverage of the dispatch entry points. Exercises the
     //! heap-only and empty-index branches end-to-end so the fast-path

@@ -14,10 +14,8 @@
 //!
 //! Carved out of `ffn_store.rs` in the 2026-04-25 modularity pass.
 
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use super::FFN_DOWN;
 use crate::index::core::VectorIndex;
 
@@ -72,7 +70,6 @@ impl VectorIndex {
     /// has grown beyond `q4k_ffn_cache_max_layers`. Must be called
     /// with `cache` already locked by the caller; `just_inserted` is
     /// true when this call just dequantised a fresh layer.
-    #[cfg(not(target_arch = "wasm32"))]
     fn touch_q4k_ffn_cache_lru(
         &self,
         layer: usize,
@@ -112,7 +109,6 @@ impl VectorIndex {
     /// heap. For fine-grained inference prefer [`Self::q4k_ffn_row_into`],
     /// which decodes a single feature into a caller-provided buffer
     /// without populating the cache.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn q4k_ffn_layer(
         &self,
         layer: usize,
@@ -184,7 +180,6 @@ impl VectorIndex {
     /// Superseded by `q4k_down_feature_scaled_add` when
     /// `down_features_q4k.bin` is present (W2). Stays here as the
     /// fallback for legacy vindexes.
-    #[cfg(not(target_arch = "wasm32"))]
     #[inline]
     pub fn q4k_ffn_row_scaled_add_via_cache(
         &self,
@@ -224,7 +219,6 @@ impl VectorIndex {
     /// the layer index is out of range.  A `None` stored by `get_or_init`
     /// is permanent for this instance; callers must fall back to fresh
     /// dequant in that case.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn q4k_ffn_layer_once(&self, layer: usize, component: usize) -> Option<Arc<Vec<f32>>> {
         if component > 2 {
             return None;
@@ -267,7 +261,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     //! Cache-path-only coverage. The dequant happy path lives in
     //! `tests/test_vindex_to_q4k.rs` end-to-end fixtures; here we

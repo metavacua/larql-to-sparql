@@ -1,10 +1,7 @@
-#![cfg(not(target_arch = "wasm32"))]
-
 use larql_vindex::walker::utils::*;
 use larql_vindex::walker::weight_walker::ThresholdCounts;
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_round4() {
     assert_eq!(round4(0.123456789), 0.1235);
     assert_eq!(round4(1.0), 1.0);
@@ -13,8 +10,7 @@ fn test_round4() {
     assert_eq!(round4(0.99999), 1.0);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_partial_top_k_basic() {
     let data = vec![1.0, 5.0, 3.0, 4.0, 2.0];
     let top3 = partial_top_k(&data, 3);
@@ -24,8 +20,7 @@ fn test_partial_top_k_basic() {
     assert_eq!(top3[2], (2, 3.0));
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_partial_top_k_k_larger_than_data() {
     let data = vec![1.0, 2.0];
     let top5 = partial_top_k(&data, 5);
@@ -34,24 +29,21 @@ fn test_partial_top_k_k_larger_than_data() {
     assert_eq!(top5[1], (0, 1.0));
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_partial_top_k_empty() {
     let data: Vec<f32> = vec![];
     let top = partial_top_k(&data, 3);
     assert!(top.is_empty());
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_partial_top_k_k_zero() {
     let data = vec![1.0, 2.0, 3.0];
     let top = partial_top_k(&data, 0);
     assert!(top.is_empty());
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_partial_top_k_column() {
     let matrix = ndarray::array![[1.0f32, 4.0], [3.0, 2.0], [5.0, 6.0]];
     // Column 0: [1, 3, 5] → top-2 = [(2, 5.0), (1, 3.0)]
@@ -67,8 +59,7 @@ fn test_partial_top_k_column() {
     assert_eq!(top[1], (0, 4.0));
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_top_entities() {
     let mut counts = std::collections::HashMap::new();
     counts.insert("France".to_string(), (10, 5.0)); // avg conf = 0.5
@@ -85,16 +76,14 @@ fn test_top_entities() {
     assert_eq!(top2[1].1, 10);
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_top_entities_empty() {
     let counts = std::collections::HashMap::new();
     let top = top_entities(&counts, 5);
     assert!(top.is_empty());
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn test_count_threshold() {
     let mut t = ThresholdCounts::default();
 
@@ -115,7 +104,6 @@ fn test_count_threshold() {
     assert_eq!(t.t_01, 2); // below 0.01
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn test_current_date_format() {
     let date = current_date();

@@ -1,6 +1,5 @@
 //! Tests for the larql-vindex crate.
 
-#![cfg(not(target_arch = "wasm32"))]
 use larql_vindex::format::filenames::*;
 use larql_vindex::{
     FeatureMeta, GateIndex, PatchOverrides, VectorIndex, VindexConfig, VindexLayerInfo,

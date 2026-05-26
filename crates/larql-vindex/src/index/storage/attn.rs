@@ -5,26 +5,19 @@
 //! manifests. Mirrors the FFN walk plumbing in `super::walk`; lives in
 //! its own file so attention storage isn't tangled with FFN storage.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
+use crate::error::VindexError;
+use crate::format::filenames::*;
+use crate::mmap_util::mmap_optimized;
+
+use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
 
 /// Number of attention projection tensors recorded per layer in every
 /// `attn_weights_*.bin` manifest: Q, K, V, O — in that order.
 pub(crate) const ATTN_TENSORS_PER_LAYER: usize = 4;
 
-// ── Attention weight loaders (OS-only: uses mmap + file I/O) ─────────────────
-#[cfg(not(target_arch = "wasm32"))]
-use crate::error::VindexError;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::format::filenames::*;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::index::core::VectorIndex;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::mmap_util::mmap_optimized;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
-
-#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load Q8 attention weights + manifest for GPU full pipeline.
     pub fn load_attn_q8(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -239,7 +232,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -24,11 +24,9 @@ use larql_models::quant::ggml::{
     Q4_0_BLOCK_BYTES, Q4_0_BLOCK_ELEMS, Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::format::filenames::*;
 
 mod knn;
-#[cfg(not(target_arch = "wasm32"))]
 mod loaders;
 
 /// Numerator/denominator used to back-derive `vocab_size` from a Q4-packed
@@ -59,7 +57,6 @@ const _: () = assert!(
 /// (0.5625 B/elem in both formats) made silent format mismatches invisible
 /// to file-size validation; checking the manifest's `kind` discriminator
 /// catches the mismatch at load-time.
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn read_lm_head_manifest_kind(dir: &std::path::Path) -> Option<String> {
     let manifest_path = dir.join(WEIGHT_MANIFEST_JSON);
     let text = std::fs::read_to_string(&manifest_path).ok()?;
@@ -71,7 +68,7 @@ pub(super) fn read_lm_head_manifest_kind(dir: &std::path::Path) -> Option<String
         .map(|e| e.kind)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::index::core::VectorIndex;

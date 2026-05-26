@@ -9,10 +9,8 @@ use std::sync::Arc;
 use crate::error::VindexError;
 use crate::format::filenames::INTERLEAVED_Q4_BIN;
 use crate::index::core::VectorIndex;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_demand_paged;
 
-#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load Q4_0 interleaved FFN data.
     pub fn load_interleaved_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -99,7 +97,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     //! Round-trip coverage of the Q4_0 interleaved [gate|up|down]
     //! reader. Uses real `quantize_q4_0` so the dequant chain runs

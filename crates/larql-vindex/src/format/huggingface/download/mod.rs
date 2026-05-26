@@ -501,7 +501,7 @@ where
     })
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     //! Unit tests for the hf_hub-bound functions — pure helpers tested
     //! in `helpers.rs`.

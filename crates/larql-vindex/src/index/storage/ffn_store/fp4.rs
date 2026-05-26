@@ -14,8 +14,7 @@ impl VectorIndex {
     /// the manifest is absent (vindexes extracted before exp 26 don't
     /// have one). Returns an error only on filesystem issues or
     /// malformed manifests (e.g. file sizes that don't match the
-    /// per-layer feature counts). OS-only: uses mmap.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// per-layer feature counts).
     pub fn load_fp4_storage(
         &mut self,
         dir: &std::path::Path,

@@ -193,7 +193,7 @@ pub fn load_reference_databases() -> ReferenceDatabases {
     result
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

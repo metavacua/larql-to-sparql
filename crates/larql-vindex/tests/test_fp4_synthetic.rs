@@ -10,7 +10,6 @@
 //! points that doesn't depend on a developer having converted the
 //! reference vindex. Complements the real-fixture integration test.
 
-#![cfg(not(target_arch = "wasm32"))]
 use larql_vindex::format::filenames::*;
 use std::path::Path;
 

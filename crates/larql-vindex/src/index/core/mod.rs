@@ -33,14 +33,10 @@ use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
 // keep using `crate::index::core::{VectorIndex, FeatureMeta, …}` paths.
 pub use super::types::*;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod fp4_ffn;
-#[cfg(not(target_arch = "wasm32"))]
 mod gate_lookup;
-#[cfg(not(target_arch = "wasm32"))]
 mod native_ffn;
 mod patch_overrides;
-#[cfg(not(target_arch = "wasm32"))]
 mod quantized_ffn;
 
 /// The full model as a local vector index.
@@ -133,8 +129,6 @@ impl VectorIndex {
 
     /// Build a zero-copy mmap-mode index — gate vectors come from the
     /// supplied mmap; down_meta is optionally mmap'd too.
-    /// Only available on non-wasm32 (mmap requires OS file descriptors).
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_mmap(
         gate_mmap: memmap2::Mmap,
         gate_slices: Vec<GateLayerSlice>,
@@ -181,13 +175,12 @@ impl VectorIndex {
     }
 
     /// Set the owned layer range (used by `load_vindex_with_range`).
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_layer_range(&mut self, range: (usize, usize)) {
         self.layer_range = Some(range);
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod refactor_tests {
     //! Coverage for the `empty()` / `new()` / `new_mmap()` / `Clone`
     //! refactor. Each substore handles its own Clone semantics; these
@@ -429,9 +422,9 @@ mod refactor_tests {
         let manifest = Fp4Config::option_b_default();
         let storage = Fp4Storage {
             manifest,
-            gate_bytes: None,
-            up_bytes: None,
-            down_bytes: None,
+            gate_mmap: None,
+            up_mmap: None,
+            down_mmap: None,
             layer_features: vec![4, 4],
             hidden: 256,
         };
@@ -474,9 +467,9 @@ mod refactor_tests {
 
         let storage = Fp4Storage {
             manifest: Fp4Config::option_b_default(),
-            gate_bytes: None,
-            up_bytes: None,
-            down_bytes: None,
+            gate_mmap: None,
+            up_mmap: None,
+            down_mmap: None,
             layer_features: vec![10240, 10240, 10240],
             hidden: 2560,
         };
@@ -496,9 +489,9 @@ mod refactor_tests {
 
         let storage = Fp4Storage {
             manifest: Fp4Config::option_b_default(),
-            gate_bytes: None,
-            up_bytes: None,
-            down_bytes: None,
+            gate_mmap: None,
+            up_mmap: None,
+            down_mmap: None,
             layer_features: vec![6144, 12288, 6144, 12288],
             hidden: 1536,
         };
@@ -520,9 +513,9 @@ mod refactor_tests {
         v.gate.gate_vectors[0] = Some(Array2::<f32>::zeros((8, 256)));
         let storage = Fp4Storage {
             manifest: Fp4Config::option_b_default(),
-            gate_bytes: None,
-            up_bytes: None,
-            down_bytes: None,
+            gate_mmap: None,
+            up_mmap: None,
+            down_mmap: None,
             layer_features: vec![16, 16],
             hidden: 256,
         };

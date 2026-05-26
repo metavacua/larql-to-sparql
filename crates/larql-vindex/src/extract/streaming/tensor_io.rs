@@ -132,7 +132,7 @@ pub(super) fn normalize_key(key: &str, prefixes: &[&str]) -> String {
     key.to_string()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;

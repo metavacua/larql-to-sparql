@@ -97,7 +97,7 @@ pub(super) fn create_hf_repo(
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

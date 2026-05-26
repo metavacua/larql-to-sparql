@@ -12,14 +12,10 @@ use larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::core::VectorIndex;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_optimized;
 
-#[cfg(not(target_arch = "wasm32"))]
-use super::read_lm_head_manifest_kind;
-use super::{Q4_BYTES_PER_ELEM_DEN, Q4_BYTES_PER_ELEM_NUM};
+use super::{read_lm_head_manifest_kind, Q4_BYTES_PER_ELEM_DEN, Q4_BYTES_PER_ELEM_NUM};
 
-#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load Q4 lm_head for GPU logits (replaces CPU f32 lm_head KNN).
     ///

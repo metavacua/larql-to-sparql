@@ -54,7 +54,7 @@ pub(super) fn empty_embeddings(callbacks: &mut dyn IndexLoadCallbacks) -> Array2
     arr
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::dtype::StorageDtype;

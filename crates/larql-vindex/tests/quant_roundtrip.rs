@@ -14,11 +14,6 @@
 //! quantisation noise but tight enough that a real codec break trips
 //! the assertion.
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen_test::wasm_bindgen_test;
-#[cfg(target_arch = "wasm32")]
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
-
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 use larql_models::quant::ggml::{dequantize_q4_0, dequantize_q4_k, dequantize_q6_k, quantize_q4_0};
 
@@ -72,8 +67,7 @@ fn assert_close(decoded: &[f32], original: &[f32], max_err: f32, format: &str) {
 
 // ── Q4_0 ────────────────────────────────────────────────────────────────
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q4_0_roundtrip_one_block() {
     // Q4_0 super-block = 32 elements, 18 bytes.
     let original = synth_block(32, 0xa110c8);
@@ -88,8 +82,7 @@ fn q4_0_roundtrip_one_block() {
     assert_close(&decoded, &original, 0.20, "Q4_0");
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q4_0_roundtrip_many_blocks() {
     let original = synth_block(32 * 64, 0xface);
     let encoded = quantize_q4_0(&original);
@@ -99,8 +92,7 @@ fn q4_0_roundtrip_many_blocks() {
 
 // ── Q4_K ────────────────────────────────────────────────────────────────
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q4_k_roundtrip_one_block() {
     // Q4_K super-block = 256 elements, 144 bytes (12 packed scales/mins
     // + 128 nibble bytes + 4 byte scale).
@@ -115,8 +107,7 @@ fn q4_k_roundtrip_one_block() {
     assert_close(&decoded, &original, 0.06, "Q4_K");
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q4_k_roundtrip_many_blocks() {
     // 4 super-blocks = 1024 elements (matches a typical hidden=1024 row).
     let original = synth_block(256 * 4, 0xdead);
@@ -127,8 +118,7 @@ fn q4_k_roundtrip_many_blocks() {
 
 // ── Q6_K ────────────────────────────────────────────────────────────────
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q6_k_roundtrip_one_block() {
     // Q6_K super-block = 256 elements, 210 bytes (192 bytes for 6-bit
     // packed values + 16 sub-block scales + 2-byte d).
@@ -142,8 +132,7 @@ fn q6_k_roundtrip_one_block() {
     assert_close(&decoded, &original, 0.025, "Q6_K");
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q6_k_roundtrip_many_blocks() {
     let original = synth_block(256 * 8, 0x42);
     let encoded = quantize_q6_k(&original);
@@ -157,8 +146,7 @@ fn q6_k_roundtrip_many_blocks() {
 /// Catches a regression where a Q6_K kernel accidentally falls back
 /// to Q4_K precision — the byte length would still be correct but the
 /// reconstructed values would be coarser.
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[test]
 fn q6_k_more_accurate_than_q4_k() {
     let original = synth_block(256, 0x006b_ea74_u64);
     let q4 = dequantize_q4_k(&quantize_q4_k(&original), 256).unwrap();

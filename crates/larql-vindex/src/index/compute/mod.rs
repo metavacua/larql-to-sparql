@@ -4,7 +4,6 @@
 
 pub mod gate_knn;
 pub mod hnsw;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod q4k_dispatch;
 pub mod router;
 

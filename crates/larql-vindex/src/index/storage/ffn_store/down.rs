@@ -10,10 +10,8 @@ use std::sync::Arc;
 use crate::error::VindexError;
 use crate::format::filenames::DOWN_FEATURES_BIN;
 use crate::index::core::VectorIndex;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::mmap_util::mmap_demand_paged;
 
-#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Load feature-major down vectors from down_features.bin.
     pub fn load_down_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -86,7 +84,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     //! Round-trip coverage of the feature-major down loader. Each test
     //! writes a small `down_features.bin` to a tempdir, mmaps it through

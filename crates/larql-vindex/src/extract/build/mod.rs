@@ -281,7 +281,7 @@ pub fn build_vindex(
     Ok(())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use ndarray::ArcArray2;
     use std::collections::HashMap;

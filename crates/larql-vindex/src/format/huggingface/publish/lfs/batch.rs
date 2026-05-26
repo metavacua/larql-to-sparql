@@ -90,7 +90,7 @@ pub(super) fn parse_lfs_batch_response(
     })
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::super::test_support::EnvBaseGuard;
     use super::*;

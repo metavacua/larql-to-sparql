@@ -14,27 +14,20 @@
 //! loaded `VectorIndex`) live elsewhere — see
 //! `crate::index::fp4_storage` and `crate::format::fp4_storage`.
 
-pub mod registry;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub mod convert;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod convert_q4k;
-#[cfg(not(target_arch = "wasm32"))]
+pub mod registry;
 pub mod scan;
 
 pub use registry::{lookup, QuantFormatInfo, QUANT_FORMATS};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use convert::{
     vindex_to_fp4, Fp4ConvertConfig, Fp4ConvertReport, Policy, ProjectionAction, ProjectionOutcome,
 };
-#[cfg(not(target_arch = "wasm32"))]
 pub use convert_q4k::{
     add_feature_major_down, vindex_to_q4k, AddFeatureMajorDownReport, Q4kConvertConfig,
     Q4kConvertReport,
 };
-#[cfg(not(target_arch = "wasm32"))]
 pub use scan::{
     scan_projection, scan_vindex, BucketQuantiles, ComplianceThreshold, Dtype, GranularityStats,
     LayerStats, ProjectionReport, ScanConfig, VindexComplianceReport, PROJECTIONS,

@@ -4,7 +4,6 @@
 //! modified vindex back to disk. NDJSON heap loaders live in the
 //! sibling `loaders` module.
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod loaders;
 
 use std::io::{BufWriter, Write};
@@ -152,7 +151,6 @@ impl VectorIndex {
     /// If all slots have metadata, returns the weakest feature (lowest c_score).
     pub fn find_free_feature(&self, layer: usize) -> Option<usize> {
         // Mmap path: scan on demand
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref dm) = self.metadata.down_meta_mmap {
             let nf = dm.num_features(layer);
             if nf == 0 {
@@ -252,7 +250,6 @@ impl VectorIndex {
     /// Write down_meta to disk as binary format (down_meta.bin).
     /// JSONL is no longer written — use `larql dump-meta` for human-readable output.
     /// Loading still falls back to JSONL for v1 compat if binary is absent.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_down_meta(&self, dir: &Path) -> Result<usize, VindexError> {
         let down_meta = self.materialize_down_meta();
         let max_top_k = down_meta
@@ -266,7 +263,6 @@ impl VectorIndex {
         crate::format::down_meta::write_binary(dir, &down_meta, max_top_k)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn materialize_down_meta(&self) -> Vec<Option<Vec<Option<FeatureMeta>>>> {
         let mut out = Vec::with_capacity(self.num_layers);
         for layer in 0..self.num_layers {
@@ -403,7 +399,6 @@ impl VectorIndex {
 
     /// Save the full vindex (gate_vectors.bin + down_meta.jsonl + index.json).
     /// Updates the config's layer info to match current state.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_vindex(&self, dir: &Path, config: &mut VindexConfig) -> Result<(), VindexError> {
         let layer_infos = self.save_gate_vectors_with_config(dir, config)?;
         config.layers = layer_infos;

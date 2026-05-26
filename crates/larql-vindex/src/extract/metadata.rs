@@ -49,7 +49,7 @@ pub fn snapshot_hf_metadata(source_dir: &Path, output_dir: &Path) -> std::io::Re
     Ok(copied)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
