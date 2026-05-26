@@ -216,7 +216,7 @@ fn check_one(name: &str, crate_root: &Path, is_cdylib: bool) -> Result<CheckResu
 fn cargo_check_wasm(crate_name: &str) -> Result<bool> {
     let output = Command::new("cargo")
         .args([
-            "check",
+            "build",
             "--target",
             "wasm32-unknown-unknown",
             "--message-format",
