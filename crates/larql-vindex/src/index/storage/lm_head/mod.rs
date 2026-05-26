@@ -24,9 +24,11 @@ use larql_models::quant::ggml::{
     Q4_0_BLOCK_BYTES, Q4_0_BLOCK_ELEMS, Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::filenames::*;
 
 mod knn;
+#[cfg(not(target_arch = "wasm32"))]
 mod loaders;
 
 /// Numerator/denominator used to back-derive `vocab_size` from a Q4-packed

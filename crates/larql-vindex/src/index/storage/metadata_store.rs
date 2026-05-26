@@ -4,6 +4,7 @@
 //! Carved out of `VectorIndex` in the 2026-04-25 reorg.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -11,6 +11,7 @@ pub mod knn_store;
 pub mod knn_store_io;
 pub mod overlay;
 pub mod overlay_apply;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod overlay_gate_trait;
 pub mod refine;
 

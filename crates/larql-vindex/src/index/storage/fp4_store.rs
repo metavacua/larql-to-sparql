@@ -305,7 +305,7 @@ impl std::fmt::Debug for Fp4Storage {
 /// `manifest.block_elements == BLOCK_ELEMENTS as u32`.
 pub const V1_BLOCK_ELEMENTS: u32 = BLOCK_ELEMENTS as u32;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::config::types::{ComplianceGate, Fp4Config as Cfg, Projections};

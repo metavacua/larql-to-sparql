@@ -341,8 +341,8 @@ impl VectorIndex {
 // panic and leaves the index usable for subsequent queries.
 // ══════════════════════════════════════════════════════════════
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod release_pages_tests;
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod accessor_tests;

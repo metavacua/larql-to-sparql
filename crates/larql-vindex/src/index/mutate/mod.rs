@@ -4,6 +4,7 @@
 //! modified vindex back to disk. NDJSON heap loaders live in the
 //! sibling `loaders` module.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod loaders;
 
 use std::io::{BufWriter, Write};

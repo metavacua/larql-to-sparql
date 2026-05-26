@@ -33,10 +33,14 @@ use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
 // keep using `crate::index::core::{VectorIndex, FeatureMeta, …}` paths.
 pub use super::types::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 mod fp4_ffn;
+#[cfg(not(target_arch = "wasm32"))]
 mod gate_lookup;
+#[cfg(not(target_arch = "wasm32"))]
 mod native_ffn;
 mod patch_overrides;
+#[cfg(not(target_arch = "wasm32"))]
 mod quantized_ffn;
 
 /// The full model as a local vector index.
@@ -177,6 +181,7 @@ impl VectorIndex {
     }
 
     /// Set the owned layer range (used by `load_vindex_with_range`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_layer_range(&mut self, range: (usize, usize)) {
         self.layer_range = Some(range);
     }

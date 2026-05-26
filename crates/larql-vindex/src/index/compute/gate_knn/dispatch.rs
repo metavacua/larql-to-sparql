@@ -305,6 +305,7 @@ impl VectorIndex {
     ///
     /// The residency manager tracks which layers are pinned.
     /// More memory budget → more pinned layers → faster walk.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn gate_knn_adaptive(
         &self,
         layer: usize,
@@ -376,7 +377,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     //! Inline coverage of the dispatch entry points. Exercises the
     //! heap-only and empty-index branches end-to-end so the fast-path

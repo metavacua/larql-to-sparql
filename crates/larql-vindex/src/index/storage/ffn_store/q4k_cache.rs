@@ -14,8 +14,10 @@
 //!
 //! Carved out of `ffn_store.rs` in the 2026-04-25 modularity pass.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::FFN_DOWN;
 use crate::index::core::VectorIndex;
 
@@ -70,6 +72,7 @@ impl VectorIndex {
     /// has grown beyond `q4k_ffn_cache_max_layers`. Must be called
     /// with `cache` already locked by the caller; `just_inserted` is
     /// true when this call just dequantised a fresh layer.
+    #[cfg(not(target_arch = "wasm32"))]
     fn touch_q4k_ffn_cache_lru(
         &self,
         layer: usize,
@@ -264,7 +267,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     //! Cache-path-only coverage. The dequant happy path lives in
     //! `tests/test_vindex_to_q4k.rs` end-to-end fixtures; here we

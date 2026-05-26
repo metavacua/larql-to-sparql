@@ -1,4 +1,5 @@
 //! Coverage for `impl GateIndex for PatchedVindex`.
+#![cfg(not(target_arch = "wasm32"))]
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_test::wasm_bindgen_test;

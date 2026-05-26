@@ -46,13 +46,20 @@ pub(crate) const FFN_DOWN: usize = 2;
 type Q4kFfnOnceSlot = std::sync::OnceLock<Option<Arc<Vec<f32>>>>;
 type Q4kFfnOnceLayer = [Q4kFfnOnceSlot; FFN_COMPONENTS_PER_LAYER];
 
+#[cfg(not(target_arch = "wasm32"))]
 mod down;
+#[cfg(not(target_arch = "wasm32"))]
 mod fp4;
+#[cfg(not(target_arch = "wasm32"))]
 mod gate_q4;
+#[cfg(not(target_arch = "wasm32"))]
 mod interleaved;
+#[cfg(not(target_arch = "wasm32"))]
 mod interleaved_q4;
+#[cfg(not(target_arch = "wasm32"))]
 mod interleaved_q4k;
 mod q4k_cache;
+#[cfg(not(target_arch = "wasm32"))]
 mod up;
 
 // ── FfnStore composed-substore ─────────────────────────────────────────
@@ -146,6 +153,7 @@ impl VectorIndex {
     /// — the latter is wrong when `layers[].num_features` varies (MoE
     /// shards with per-layer expert counts), and the prefix sum collapses
     /// to the same value for constant-feature dense models.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn ffn_layer_byte_offset(&self, layer: usize, matrices_per_layer: usize) -> usize {
         let mut floats: usize = 0;
         for l in 0..layer {

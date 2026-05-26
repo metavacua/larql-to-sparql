@@ -6,10 +6,12 @@
 //!
 //! Used by MoE DESCRIBE to show which experts activate for an entity.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use ndarray::{Array1, Array2};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::filenames::ROUTER_WEIGHTS_BIN;
 
 /// MoE router weights for all layers.

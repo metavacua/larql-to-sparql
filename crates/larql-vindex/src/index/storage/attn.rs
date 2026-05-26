@@ -5,6 +5,7 @@
 //! manifests. Mirrors the FFN walk plumbing in `super::walk`; lives in
 //! its own file so attention storage isn't tangled with FFN storage.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::storage::vindex_storage::VindexStorage;
 
 /// Number of attention projection tensors recorded per layer in every

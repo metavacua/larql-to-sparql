@@ -212,7 +212,7 @@ impl VectorIndex {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     //! Inline coverage of `gate_scores_batch`. Heap and f16-mmap
     //! happy paths plus the empty-input + missing-data fall-throughs.
