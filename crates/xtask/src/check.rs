@@ -1,8 +1,13 @@
 //! wasm32 containment check.
 //!
-//! For each workspace crate with [package.metadata.wasm], reports WASM-SAFE
-//! or NATIVE based on whether the cdylib binary imports any non-intrinsic
-//! host symbols reachable from exports.
+//! For each workspace crate with [package.metadata.wasm], reports one of:
+//! - WASM-SAFE  — cdylib compiled, has ≥1 export, no non-intrinsic host
+//!                imports reachable from any export root.
+//! - WASM-VOID  — cdylib compiled but has 0 exports. Containment is
+//!                vacuously true (no roots → no reachability) which is NOT
+//!                a meaningful safety guarantee. Treated as a hard failure.
+//! - NATIVE     — cdylib has non-intrinsic host imports reachable from
+//!                at least one export (OS syscalls, sockets, file I/O, …).
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -108,6 +113,29 @@ fn check_one(name: &str, crate_root: &Path, confirmed_safe: bool) -> Result<Chec
     let bytes =
         std::fs::read(&wasm_path).with_context(|| format!("reading {}", wasm_path.display()))?;
     let facts = crate::wasm_facts::extract(&bytes)?;
+
+    // A binary with no exports passes containment vacuously: the Datalog
+    // rules have no root nodes, so no violation can be reached, and
+    // `is_sandbox_contained()` returns true regardless of what the binary
+    // actually does.  This is NOT WASM-SAFE — it means the crate compiled
+    // to an empty-surface binary that exposes no callable entry points and
+    // is therefore unusable as a WASM module.  Treat it as a hard failure
+    // ("WASM-VOID") distinct from both WASM-SAFE and NATIVE.
+    if facts.roots.is_empty() {
+        println!(
+            "WASM-VOID  (binary: {} B, {} fns — 0 exports, vacuously contained)",
+            bytes.len(),
+            facts.total_func_count,
+        );
+        return Ok(CheckResult {
+            crate_name: name.to_owned(),
+            safe: false,
+            blockers: vec![(
+                "(exports)".into(),
+                "0 wasm exports — binary has no callable surface (WASM-VOID, not WASM-SAFE)".into(),
+            )],
+        });
+    }
 
     let non_intrinsic: Vec<u32> = facts
         .non_intrinsic_imports

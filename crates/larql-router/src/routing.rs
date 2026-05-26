@@ -1,6 +1,6 @@
 //! Pure routing helpers — architecture-independent, compiles to wasm32.
 //!
-//! Extracted from main.rs so that wasm-pack can test these on wasm32.
+//! Extracted from main.rs so these can be tested on wasm32 via cargo test --target wasm32-unknown-unknown.
 
 /// Sentinel value that marks the start of a batch binary request header.
 pub const BATCH_MARKER: u32 = 0xFFFF_FFFF;
