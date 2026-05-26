@@ -1,16 +1,16 @@
 # wasm-check.yml — wasm32 containment check + mutation gate
 #
 # discover → per-crate matrix jobs:
-#   check   — cargo xtask wasm-check (WASM-SAFE or NATIVE)
+#   check   — cargo xtask wasm-check (WASM-SAFE, WASM-VOID, or NATIVE); always exits 0
+#             (containment analysis is a measurement, not a gate)
 #   mutate  — cargo xtask wasm-mutate (zero survivors required); runs regardless of check result
-#   node    — cargo test --target wasm32-unknown-unknown (all crates attempted;
-#             failure is an error for wasm.safe=true crates, continue-on-error for others)
+#   node    — cargo test --target wasm32-unknown-unknown; job outcome = test outcome
+#             (failure means compilation failed or tests failed — no soft-fail gate)
 # summary → markdown table of check results
 #
-# Exit code is non-zero only when wasm-mutate finds surviving mutants.
-# NATIVE crates report their blocking imports but do not fail the pipeline.
-# Originals are never modified; run their test suites to detect regressions
-# after creating new larql-{crate}-wasm32uu / larql-{crate}-OS subcrates.
+# The node job is the empirical oracle: if cargo test exits non-zero, the job
+# is red. No crate-level overrides, no "expected" classification, no safe=true
+# bypass. The check job reports NATIVE/WASM-VOID/WASM-SAFE as observed facts.
 
 name: wasm-check
 
@@ -127,7 +127,7 @@ jobs:
       - name: wasm-mutate ${{ matrix.crate }}
         run: cargo xtask wasm-mutate --crate-name ${{ matrix.crate }}
 
-  # ── Node.js runtime test (WASM-SAFE crates only) ───────────────────────────
+  # ── Node.js runtime test (all crates; job outcome = cargo test exit code) ───
   node:
     name: node · ${{ matrix.crate }}
     needs: [discover, check]
@@ -164,21 +164,7 @@ jobs:
             ${{ runner.os }}-wasm-node-${{ matrix.crate }}-
 
       - name: Node.js test ${{ matrix.crate }}
-        id: node_test
-        continue-on-error: true
         run: cargo test -p ${{ matrix.crate }} --target wasm32-unknown-unknown
-
-      - name: Fail if wasm.safe crate failed node test
-        if: steps.node_test.outcome == 'failure'
-        run: |
-          SAFE=$(cargo metadata --no-deps --format-version 1 | \
-            jq -r --arg c "${{ matrix.crate }}" \
-            '.packages[] | select(.name == $c) | .metadata.wasm.safe // false')
-          if [ "$SAFE" = "true" ]; then
-            echo "::error::${{ matrix.crate }} has [package.metadata.wasm] safe=true but node test failed"
-            exit 1
-          fi
-          echo "${{ matrix.crate }}: node test failed (NATIVE — expected, not a gate)"
 
   # ── Summary table ─────────────────────────────────────────────────────────
   summary:
