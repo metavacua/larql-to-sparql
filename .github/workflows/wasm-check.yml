@@ -166,10 +166,50 @@ jobs:
       - name: Node.js test ${{ matrix.crate }}
         run: cargo test -p ${{ matrix.crate }} --target wasm32-unknown-unknown
 
+  # ── WASI lib build (wasm32-wasip1 compile oracle) ─────────────────────────
+  # Runs cargo build --lib for every crate against wasm32-wasip1.
+  # Job outcome = cargo build exit code: red means this crate cannot compile
+  # for WASI, green means it can. No test runner needed — compile success is
+  # the signal. This is the empirical oracle for which crates belong in
+  # larql-vindex-wasi vs larql-vindex-os.
+  wasip1:
+    name: wasip1 · ${{ matrix.crate }}
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32-wasip1 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasip1-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasip1-${{ matrix.crate }}-
+
+      - name: WASI lib build ${{ matrix.crate }}
+        run: cargo build -p ${{ matrix.crate }} --lib --target wasm32-wasip1
+
   # ── Summary table ─────────────────────────────────────────────────────────
   summary:
     name: wasm-summary
-    needs: [check, mutate, node]
+    needs: [check, mutate, node, wasip1]
     runs-on: ubuntu-24.04
     if: always()
 
