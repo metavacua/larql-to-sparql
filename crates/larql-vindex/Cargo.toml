@@ -74,6 +74,10 @@ metal = ["larql-compute/metal"]
 remote = ["dep:reqwest", "dep:hf-hub"]
 # Opt-in gate for the Firefox browser-based wasm_bindgen_test runner.
 browser-tests = []
+# Marker feature for OS-only examples (use memmap2/safetensors/std::fs).
+# Examples with required-features = ["native"] are skipped on wasm32
+# builds where this feature is never enabled.
+native = []
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -89,8 +93,80 @@ mockito = "1.7"
 serial_test = "3.2"
 
 [[example]]
+name = "bench_gate_dequant"
+required-features = ["native"]
+
+[[example]]
+name = "build_attn_q8"
+required-features = ["native"]
+
+[[example]]
+name = "build_convert_gates_f32"
+required-features = ["native"]
+
+[[example]]
+name = "build_down_features"
+required-features = ["native"]
+
+[[example]]
+name = "build_gate_q4"
+required-features = ["native"]
+
+[[example]]
+name = "build_interleaved"
+required-features = ["native"]
+
+[[example]]
+name = "build_lm_head_q4"
+required-features = ["native"]
+
+[[example]]
+name = "build_q4k_weights"
+required-features = ["native"]
+
+[[example]]
+name = "build_up_features"
+required-features = ["native"]
+
+[[example]]
 name = "demo_features"
 required-features = ["remote"]
+
+[[example]]
+name = "demo_memit_solve"
+required-features = ["native"]
+
+[[example]]
+name = "diff_ple_quantization"
+required-features = ["native"]
+
+[[example]]
+name = "fp4_convert"
+required-features = ["native"]
+
+[[example]]
+name = "fp4_q1_scan"
+required-features = ["native"]
+
+[[example]]
+name = "fp4_verify"
+required-features = ["native"]
+
+[[example]]
+name = "mmap_demo"
+required-features = ["native"]
+
+[[example]]
+name = "patch_lm_head_q4k"
+required-features = ["native"]
+
+[[example]]
+name = "q4k_demo"
+required-features = ["native"]
+
+[[example]]
+name = "walker_demo"
+required-features = ["native"]
 
 [[bench]]
 name = "vindex_ops"
