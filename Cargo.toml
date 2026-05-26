@@ -25,6 +25,9 @@ members = [
     "crates/larql-browser-cli",
     # VIndex WASM32 bindings — compressed subgraph KNN in the browser
     "crates/larql-vindex-wasm32uu",
+    # VIndex subcrate trio (split from larql-vindex by capability tier)
+    "crates/larql-vindex-wasi",
+    "crates/larql-vindex-os",
     # Build and certification automation (not in default-members)
     "crates/xtask",
 ]

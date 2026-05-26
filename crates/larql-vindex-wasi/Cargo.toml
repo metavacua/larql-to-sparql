@@ -1,0 +1,56 @@
+[package]
+name = "larql-vindex-wasi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vindex WASI layer — std::fs I/O, safetensors loading. Compiles for wasm32-wasip1 and native. No C deps, no mmap, no sockets."
+keywords = ["wasm", "vindex", "wasi", "knowledge-graph"]
+categories = ["wasm", "science"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+larql-vindex-wasm32uu = { path = "../larql-vindex-wasm32uu" }
+larql-core = { path = "../larql-core", default-features = false }
+larql-models = { path = "../larql-models" }
+larql-compute = { path = "../larql-compute" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Matrix types (all compute via larql-compute)
+ndarray = "0.16"
+
+# RNG — getrandom supports WASI natively
+rand = "0.8"
+
+# Portable 64-bit atomics
+portable-atomic = "1"
+
+# Checksums
+sha2 = "0.10"
+
+# base64 encoding
+base64 = "0.22"
+
+# Byte handles
+bytes = "1"
+
+# Pure-Rust tensor format; uses std::fs which WASI provides
+safetensors = "0.7"
+
+# Not included (incompatible with wasm32-wasip1):
+#   tokenizers  — C backend (onig_sys)
+#   memmap2     — OS mmap() syscall
+#   hf-hub      — OS sockets
+#   reqwest     — OS sockets + TLS
+#   libc        — unix-only
+#   rayon       — OS threads (absent in wasip1)
+
+[dev-dependencies]
+tempfile = "3"
+
+[package.metadata.wasm]
+split-candidate = true
