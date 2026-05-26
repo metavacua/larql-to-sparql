@@ -46,4 +46,4 @@ harness = false
 required-features = ["wasm"]
 
 [package.metadata.wasm]
-safe = true
+split-candidate = true

@@ -30,4 +30,4 @@ tokio-stream = "0.1"
 getrandom = { workspace = true }
 
 [package.metadata.wasm]
-safe = true
+split-candidate = true
