@@ -16,5 +16,3 @@ thiserror = { workspace = true }
 # Types for regression gate: compare native gate_knn with wasm-boundary result
 larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib" }
 
-[package.metadata.wasm]
-# Host-only; never compiled for wasm32 targets

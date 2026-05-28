@@ -12,7 +12,7 @@ categories = ["no-std", "wasm"]
 crate-type = ["rlib"]
 
 [dependencies]
-serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
 # f16 decode for gate vectors — no_std safe with default-features = false
 half = { version = "2", default-features = false }
 # Software float math for no_std targets (wasm32v1-none has no platform libm).
