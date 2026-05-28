@@ -130,11 +130,24 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # ── Cache ─────────────────────────────────────────────────────────────
+      # Swatinem/rust-cache@v2 uses zstd -T0 (all-CPU compression) in its
+      # post-job step, which can exceed the GitHub cache API upload window on
+      # Windows for crates with larger build graphs (observed: larql-models
+      # Windows, run 26594114167 — all 328 tests passed, cache save failed).
+      # actions/cache@v5 gives per-OS path control and more reliable uploads.
 
       - name: Cache cargo registry and build artefacts
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v5
         with:
-          shared-key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.crate }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-${{ matrix.crate }}-
+            ${{ runner.os }}-${{ matrix.target }}-
 
       # ── Checks (fmt once per crate on ubuntu) ─────────────────────────────
 
@@ -196,9 +209,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry and build artefacts
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v5
         with:
-          shared-key: wasm-${{ matrix.crate }}-${{ matrix.runtime }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: wasm-${{ matrix.crate }}-${{ matrix.runtime }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            wasm-${{ matrix.crate }}-${{ matrix.runtime }}-
+            wasm-${{ matrix.crate }}-
 
       # ── wasm32v1-none: compile check at strictest WASM baseline ───────────
       # wasm32v1-none is WASM MVP 1.0 (no atomics, no SIMD, no multi-memory).
