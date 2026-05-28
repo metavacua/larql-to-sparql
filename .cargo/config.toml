@@ -28,3 +28,10 @@ ar = "llvm-ar"
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+# wasm32-wasip1 test runner — dispatches `cargo test --target wasm32-wasip1`
+# through wasmtime in WASI Preview 1 mode. Install wasmtime before use:
+#   curl https://wasmtime.dev/install.sh -sSf | bash
+# Used by the wasip1-test CI job in .github/workflows/wasm-check.yml.
+[target.wasm32-wasip1]
+runner = "wasmtime --"
