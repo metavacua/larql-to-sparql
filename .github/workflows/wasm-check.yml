@@ -45,15 +45,26 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       crates: ${{ steps.list.outputs.crates }}
+      lib_crates: ${{ steps.list.outputs.lib_crates }}
+      bin_crates: ${{ steps.list.outputs.bin_crates }}
     steps:
       - uses: actions/checkout@v6
 
       - name: List all workspace crates
         id: list
         run: |
-          CRATES=$(cargo metadata --no-deps --format-version 1 | \
-            jq -c '[.packages[] | select(.name != "xtask") | .name]')
+          META=$(cargo metadata --no-deps --format-version 1)
+          # All crates except the build tool
+          CRATES=$(echo "$META" | jq -c '[.packages[] | select(.name != "xtask") | .name]')
+          # Crates that have at least one lib target (rlib/cdylib/etc.) — used for --lib builds
+          LIB_CRATES=$(echo "$META" | jq -c \
+            '[.packages[] | select(.name != "xtask") | select(any(.targets[]; .kind[] == "lib")) | .name]')
+          # Crates that have at least one bin target — used for --bins builds
+          BIN_CRATES=$(echo "$META" | jq -c \
+            '[.packages[] | select(.name != "xtask") | select(any(.targets[]; .kind[] == "bin")) | .name]')
           echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
+          echo "lib_crates=$LIB_CRATES" >> "$GITHUB_OUTPUT"
+          echo "bin_crates=$BIN_CRATES" >> "$GITHUB_OUTPUT"
 
   # ── Containment check ──────────────────────────────────────────────────────
   check:
@@ -182,7 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+        crate: ${{ fromJson(needs.discover.outputs.lib_crates) }}
 
     steps:
       - uses: actions/checkout@v6
@@ -220,7 +231,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+        crate: ${{ fromJson(needs.discover.outputs.lib_crates) }}
 
     steps:
       - uses: actions/checkout@v6
@@ -258,7 +269,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+        crate: ${{ fromJson(needs.discover.outputs.bin_crates) }}
 
     steps:
       - uses: actions/checkout@v6
@@ -294,7 +305,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+        crate: ${{ fromJson(needs.discover.outputs.lib_crates) }}
 
     steps:
       - uses: actions/checkout@v6
@@ -333,7 +344,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+        crate: ${{ fromJson(needs.discover.outputs.bin_crates) }}
 
     steps:
       - uses: actions/checkout@v6
