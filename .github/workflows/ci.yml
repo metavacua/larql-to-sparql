@@ -233,40 +233,54 @@ jobs:
         if: matrix.runtime == 'wasm32v1-none'
         run: cargo check ${{ matrix.cargo_package }} --target wasm32v1-none --all-targets
 
-      # ── wasmi: run tests via the embedded wasmi interpreter ───────────────
-      # Crates without a 'wasm' feature will fail — that is the expected signal.
+      # ── wasmi: compile to wasm32v1-none, execute in wasmi interpreter ────────
+      # Correct design: the wasmi column builds the crate as a wasm32v1-none
+      # binary and runs it inside the wasmi interpreter. Expected to fail for
+      # all crates until they are made no_std (category A in wasm-inventory.md).
+      # The previous design ran `--features wasm` in native Rust, which only
+      # tested model-compute's wasmi host — not WASM code running in wasmi.
 
-      - name: Test (wasmi)
+      - name: Install wasmi-cli (wasmi)
         if: matrix.runtime == 'wasmi'
-        run: cargo test ${{ matrix.cargo_package }} --no-default-features --features wasm
+        run: cargo install wasmi-cli --locked
 
-      # ── node: build to wasm32-wasip1, validate, run via Node.js WASI ──────
+      - name: Add wasm32v1-none target (wasmi)
+        if: matrix.runtime == 'wasmi'
+        run: rustup target add wasm32v1-none
 
-      - name: Install wasmtime (node runner)
+      - name: Test in wasmi (wasmi)
+        if: matrix.runtime == 'wasmi'
+        # CARGO_TARGET_WASM32V1_NONE_RUNNER invokes `wasmi run --` for each
+        # test binary produced by cargo test. Failures here = crate needs no_std.
+        env:
+          CARGO_TARGET_WASM32V1_NONE_RUNNER: wasmi run --
+        run: cargo test ${{ matrix.cargo_package }} --target wasm32v1-none
+
+      # ── node: wasm-bindgen-test-runner on wasm32-unknown-unknown, Node.js ──
+      # wasm32-unknown-unknown is used (not wasm32v1-none) because
+      # wasm-bindgen-test-runner requires the JS/unknown target for its glue.
+      # Crates without #[wasm_bindgen_test] tests compile; runner reports 0
+      # tests and exits 0. Crates that fail getrandom's "js" feature check
+      # (category E in wasm-inventory.md) fail at compile time — expected signal.
+      # Node.js 22 is pre-installed on ubuntu-24.04 runners.
+
+      - name: Install wasm-bindgen-cli (node)
         if: matrix.runtime == 'node'
-        run: curl -fsSL https://wasmtime.dev/install.sh | bash
+        run: cargo install wasm-bindgen-cli --locked
 
-      - name: Install wasm-tools (node validation)
+      - name: Add wasm32-unknown-unknown target (node)
         if: matrix.runtime == 'node'
-        run: cargo install wasm-tools --locked
+        run: rustup target add wasm32-unknown-unknown
 
-      - name: Add wasm32-wasip1 target (node)
+      - name: Test in Node.js (node)
         if: matrix.runtime == 'node'
-        run: rustup target add wasm32-wasip1
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: cargo test ${{ matrix.cargo_package }} --target wasm32-unknown-unknown
 
-      - name: Build wasm32-wasip1 (node)
-        if: matrix.runtime == 'node'
-        run: cargo build ${{ matrix.cargo_package }} --target wasm32-wasip1 --release
-
-      - name: Validate WASM binaries (node)
-        if: matrix.runtime == 'node'
-        run: |
-          find target/wasm32-wasip1/release -maxdepth 1 -name '*.wasm' | while read f; do
-            echo "Validating $f"
-            wasm-tools validate "$f"
-          done
-
-      # ── firefox: build to wasm32-unknown-unknown, test via wasm-bindgen ───
+      # ── firefox: wasm-bindgen-test-runner + headless Firefox ──────────────
+      # Same wasm32-unknown-unknown target as node; runner is told to use the
+      # browser backend. geckodriver is pre-installed on ubuntu-24.04 runners.
 
       - name: Install wasm-bindgen-cli (firefox)
         if: matrix.runtime == 'firefox'
@@ -282,9 +296,13 @@ jobs:
         if: matrix.runtime == 'firefox'
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Test in Firefox (firefox)
+      - name: Test in Firefox headless (firefox)
         if: matrix.runtime == 'firefox'
-        run: cargo test ${{ matrix.cargo_package }} --target wasm32-unknown-unknown
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: >
+          cargo test ${{ matrix.cargo_package }} --target wasm32-unknown-unknown
+          -- --browser --headless --firefox
 
       # ── pyodide: compile to wasm32-unknown-emscripten (larql-python only) ─
 
