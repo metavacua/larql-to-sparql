@@ -91,6 +91,13 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.native_matrix) }}
 
+    env:
+      # macOS runners ship Python 3.14; PyO3 0.24.2 caps at 3.13.
+      # ABI3 forward-compatibility builds against the stable ABI so the
+      # extension works on Python ≥ 3.x without per-version wheels.
+      # Remove once PyO3 is updated to support Python 3.14 natively.
+      PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+
     steps:
       - uses: actions/checkout@v6
 
