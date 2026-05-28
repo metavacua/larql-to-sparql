@@ -106,6 +106,15 @@ pub use cpu::ops::moe::{quantize_x_to_q8k, Q8KActivation};
 pub use cpu::ops::vector::{cosine, dot, norm};
 pub use cpu::CpuBackend;
 
+/// Portable no_std slice-based linalg (`&[f32]` interface, no BLAS).
+///
+/// Complements the BLAS-backed `dot`/`norm`/`cosine` at the crate root
+/// (which take `&ArrayView1<f32>`). Use this module in code that must
+/// compile for wasm32v1-none or any target without a BLAS backend.
+pub mod linalg {
+    pub use larql_wasm32v1_none_lib::linalg::{cosine, dot, norm};
+}
+
 /// Read and clear the per-stage timings stored after the most recent
 /// Metal decode step. Returns `None` when `LARQL_PROFILE_SPLIT` is unset
 /// or no step has run yet. Used by the generate loop to accumulate
