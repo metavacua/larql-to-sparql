@@ -323,6 +323,51 @@ jobs:
           --target wasm32-unknown-emscripten
           --release
 
+# ── Gate jobs ─────────────────────────────────────────────────────────────────
+#
+# Branch protection should require ONLY "native ✓".
+# "wasm boundary ✓" is a stable informational check — it always passes so it
+# provides a consistent entry in the PR status list without blocking merges.
+# See .github/wasm-inventory.md for the per-cell roadmap.
+
+  native-gate:
+    name: native ✓
+    needs: [native-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Assert all native jobs succeeded
+        shell: bash
+        run: |
+          result="${{ needs.native-test.result }}"
+          if [[ "$result" != "success" ]]; then
+            echo "native-test result: $result  (expected: success)"
+            echo "See individual native-test job logs for failure details."
+            exit 1
+          fi
+
+  wasm-boundary:
+    name: wasm boundary ✓
+    needs: [wasm-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Boundary scan complete (informational)
+        run: |
+          echo "WASM boundary scan complete."
+          echo "Consult .github/wasm-inventory.md for per-cell status and remediation roadmap."
+          echo "No wasm-check job gates merges; see 'native ✓' for the required gate."
+
 # ── Coverage (informational, ubuntu only) ─────────────────────────────────────
 
   coverage:
