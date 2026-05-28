@@ -1,0 +1,20 @@
+[package]
+name = "larql-wasmi-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Wasmi-based host runtime for the larql-wasm32v1-none module — alloc-write-solve-read ABI"
+keywords = ["wasm", "wasmi", "kernel", "no_std"]
+categories = ["wasm"]
+
+[dependencies]
+wasmi = "1"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Types for regression gate: compare native gate_knn with wasm-boundary result
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib" }
+
+[package.metadata.wasm]
+# Host-only; never compiled for wasm32 targets

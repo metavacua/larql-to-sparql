@@ -31,6 +31,8 @@ members = [
     # no_std portable core (wasm32v1-none tier) + compile oracle binary
     "crates/larql-wasm32v1-none-lib",
     "crates/larql-wasm32v1-none-bin",
+    # Wasmi host library — embeds and calls the wasm32v1-none module
+    "crates/larql-wasmi-host",
     # Build and certification automation (not in default-members)
     "crates/xtask",
 ]
