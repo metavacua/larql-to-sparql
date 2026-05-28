@@ -15,8 +15,9 @@ crate-type = ["cdylib", "rlib"]
 wasm-bindgen = "0.2"
 serde        = { version = "1", features = ["derive"] }
 serde_json   = { workspace = true }
-# f16 decode for gate_vectors.bin (no std::io, pure arithmetic)
-half         = { version = "2", default-features = false }
+# Pure gate-KNN compute + f16 decode from the no_std portable core.
+# serde feature enables derives on StorageDtype (used in JSON config parsing).
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib", features = ["serde"] }
 
 [target.'cfg(all(target_arch = "wasm32", not(target_os = "wasi")))'.dependencies]
 getrandom_03 = { workspace = true }

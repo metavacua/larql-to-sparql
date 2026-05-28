@@ -2,38 +2,34 @@
 //!
 //! This crate is **entirely standalone** — it does not depend on
 //! `larql-vindex`. It owns the minimal subset of config types and
-//! computation needed for the wasm32 surface:
+//! wasm-bindgen surface needed for the wasm32 tier:
 //!
 //! 1. A lightweight `VindexConfig` (mirrors the shape of `index.json`).
-//! 2. A pure in-memory `GateIndex` that decodes f32/f16 bytes and runs
-//!    brute-force dot-product KNN on pre-loaded gate vectors.
-//! 3. A `wasm_bindgen` `VindexSession` that wraps both.
+//! 2. A `wasm_bindgen` `VindexSession` that wraps the pure-compute
+//!    `GateIndex` from `larql-wasm32v1-none-lib`.
 //!
 //! The native `larql-vindex` crate is not modified. All changes needed
-//! to produce a valid wasm32 object live here.
+//! to produce a valid wasm32 object live here or in larql-wasm32v1-none-lib.
 
 use wasm_bindgen::prelude::*;
+use larql_wasm32v1_none_lib::gate::{
+    decode::StorageDtype,
+    index::GateIndex,
+    knn::gate_knn,
+};
 
 // ── Config types (subset of index.json) ──────────────────────────────────────
 
-/// Storage precision used in `gate_vectors.bin`.
-#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum StorageDtype {
-    #[default]
-    F32,
-    F16,
-}
+// StorageDtype is re-exported from larql-wasm32v1-none-lib (with serde enabled).
+// Re-export it here so callers that import from this crate can use it.
+pub use larql_wasm32v1_none_lib::gate::decode::StorageDtype as GateStorageDtype;
 
 /// Per-layer layout entry from `index.json`.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize, Debug)]
 pub struct VindexLayerInfo {
     pub layer: usize,
-    /// Number of gate features stored for this layer.
     pub num_features: usize,
-    /// Byte offset into `gate_vectors.bin`.
     pub offset: u64,
-    /// Byte length in `gate_vectors.bin`.
     pub length: u64,
 }
 
@@ -42,106 +38,13 @@ pub struct VindexLayerInfo {
 /// native toolchain round-trips correctly.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize, Debug)]
 pub struct VindexConfig {
-    /// Original model name.
     pub model: String,
-    /// Number of transformer layers.
     pub num_layers: usize,
-    /// Hidden dimension.
     pub hidden_size: usize,
-    /// Storage precision for gate vectors.
     #[serde(default)]
     pub dtype: StorageDtype,
-    /// Per-layer layout.
     #[serde(default)]
     pub layers: Vec<VindexLayerInfo>,
-}
-
-// ── Pure gate KNN ─────────────────────────────────────────────────────────────
-
-/// In-memory gate index. Holds one flat f32 array per layer.
-struct GateIndex {
-    hidden_size: usize,
-    /// `data[layer]` = flat `num_features × hidden_size` f32 row-major.
-    data: Vec<Option<Vec<f32>>>,
-    /// `num_features[layer]` matches `data[layer].len() / hidden_size`.
-    num_features: Vec<usize>,
-}
-
-impl GateIndex {
-    fn new(num_layers: usize, hidden_size: usize) -> Self {
-        Self {
-            hidden_size,
-            data: vec![None; num_layers],
-            num_features: vec![0; num_layers],
-        }
-    }
-
-    fn load_layer(&mut self, layer: usize, raw: &[u8], dtype: StorageDtype) {
-        let floats = decode_floats(raw, dtype);
-        if self.hidden_size == 0 || floats.len() < self.hidden_size {
-            return;
-        }
-        let nf = floats.len() / self.hidden_size;
-        self.num_features[layer] = nf;
-        self.data[layer] = Some(floats);
-    }
-
-    /// Brute-force dot-product KNN. Returns `(feature_idx, score)` sorted
-    /// by descending absolute score, capped at `k`.
-    fn gate_knn(&self, layer: usize, query: &[f32], k: usize) -> Vec<(usize, f32)> {
-        let Some(vecs) = self.data.get(layer).and_then(|v| v.as_ref()) else {
-            return vec![];
-        };
-        let h = self.hidden_size;
-        if h == 0 || query.len() < h {
-            return vec![];
-        }
-        let nf = vecs.len() / h;
-        let mut scores: Vec<(usize, f32)> = (0..nf)
-            .map(|i| {
-                let row = &vecs[i * h..(i + 1) * h];
-                let dot: f32 = row.iter().zip(query.iter()).map(|(a, b)| a * b).sum();
-                (i, dot)
-            })
-            .collect();
-        scores.sort_by(|a, b| {
-            b.1.abs()
-                .partial_cmp(&a.1.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        scores.truncate(k);
-        scores
-    }
-
-    fn num_features(&self, layer: usize) -> usize {
-        self.num_features.get(layer).copied().unwrap_or(0)
-    }
-
-    fn total_gate_vectors(&self) -> usize {
-        self.num_features.iter().sum()
-    }
-}
-
-// ── f32 / f16 decode ─────────────────────────────────────────────────────────
-
-fn decode_floats(data: &[u8], dtype: StorageDtype) -> Vec<f32> {
-    match dtype {
-        StorageDtype::F32 => {
-            let n = data.len() / 4;
-            (0..n)
-                .map(|i| f32::from_le_bytes(data[i * 4..i * 4 + 4].try_into().unwrap()))
-                .collect()
-        }
-        StorageDtype::F16 => {
-            let n = data.len() / 2;
-            (0..n)
-                .map(|i| {
-                    let bytes: [u8; 2] = data[i * 2..i * 2 + 2].try_into().unwrap();
-                    half::f16::from_le_bytes(bytes).to_f32()
-                })
-                .collect()
-        }
-    }
 }
 
 // ── wasm_bindgen surface ──────────────────────────────────────────────────────
@@ -195,7 +98,7 @@ impl VindexSession {
     /// Returns a JSON array `[{"feature": N, "score": F}, ...]` ordered by
     /// descending absolute score, capped at `k`.
     pub fn gate_knn(&self, layer: u32, query_f32: &[f32], k: u32) -> String {
-        let results = self.gate.gate_knn(layer as usize, query_f32, k as usize);
+        let results = gate_knn(&self.gate, layer as usize, query_f32, k as usize);
         let items: Vec<serde_json::Value> = results
             .iter()
             .map(|(feat, score)| serde_json::json!({"feature": feat, "score": score}))
@@ -220,7 +123,7 @@ impl VindexSession {
 
     /// Number of gate features loaded for `layer` (0 if not loaded).
     pub fn num_features(&self, layer: u32) -> u32 {
-        self.gate.num_features(layer as usize) as u32
+        self.gate.layer_num_features(layer as usize) as u32
     }
 
     /// Model name from the config.
@@ -272,39 +175,5 @@ mod tests {
         let back: serde_json::Value = serde_json::from_str(&s.config()).unwrap();
         assert_eq!(back["num_layers"], 4);
         assert_eq!(back["hidden_size"], 8);
-    }
-
-    #[wasm_bindgen_test]
-    fn decode_f32_roundtrip() {
-        let data = vec![1.0f32, -2.5, 3.14];
-        let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
-        let decoded = decode_floats(&bytes, StorageDtype::F32);
-        assert_eq!(decoded.len(), 3);
-        assert!((decoded[0] - 1.0).abs() < 1e-6);
-        assert!((decoded[1] - (-2.5)).abs() < 1e-6);
-    }
-
-    #[wasm_bindgen_test]
-    fn decode_f16_roundtrip() {
-        let orig = 1.5f32;
-        let half_bytes = half::f16::from_f32(orig).to_le_bytes();
-        let decoded = decode_floats(&half_bytes, StorageDtype::F16);
-        assert_eq!(decoded.len(), 1);
-        assert!((decoded[0] - orig).abs() < 0.01);
-    }
-
-    #[wasm_bindgen_test]
-    fn gate_knn_returns_top_k() {
-        let mut gate = GateIndex::new(1, 2);
-        // Two features: [1,0] and [0,1]. Query [1,0] → feature 0 scores 1.0.
-        let raw: Vec<u8> = [1.0f32, 0.0, 0.0, 1.0]
-            .iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect();
-        gate.load_layer(0, &raw, StorageDtype::F32);
-        let results = gate.gate_knn(0, &[1.0, 0.0], 2);
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].0, 0);
-        assert!((results[0].1 - 1.0).abs() < 1e-6);
     }
 }
