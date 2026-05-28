@@ -30,7 +30,7 @@ pub mod wire;
 pub use error::LarqlHostError;
 pub use wire::{Dtype, KnnResult, LayerData};
 
-use wasmi::{Config, Engine, Instance, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder};
+use wasmi::{Config, Engine, Instance, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
 
 // ABI export names — identical to model-compute's constants
 const WASM_MEMORY: &str = "memory";
@@ -106,6 +106,12 @@ pub struct LarqlCoreSession<'m> {
     store: Store<State>,
     instance: Instance,
     _module: &'m Module,
+    // Cached ABI typed funcs — stable after instantiation, resolved once.
+    alloc_fn: TypedFunc<u32, i32>,
+    solve_fn: TypedFunc<(i32, u32), u32>,
+    sol_ptr_fn: TypedFunc<(), i32>,
+    sol_len_fn: TypedFunc<(), u32>,
+    dealloc_fn: Option<TypedFunc<(i32, u32), ()>>,
 }
 
 struct State {
@@ -127,7 +133,21 @@ impl<'m> LarqlCoreSession<'m> {
             .instantiate_and_start(&mut store, module)
             .map_err(|e| LarqlHostError::Instantiate(e.to_string()))?;
 
-        Ok(Self { store, instance, _module: module })
+        let alloc_fn = instance
+            .get_typed_func::<u32, i32>(&store, WASM_ALLOC)
+            .map_err(|_| LarqlHostError::MissingExport(WASM_ALLOC.into()))?;
+        let solve_fn = instance
+            .get_typed_func::<(i32, u32), u32>(&store, WASM_SOLVE)
+            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLVE.into()))?;
+        let sol_ptr_fn = instance
+            .get_typed_func::<(), i32>(&store, WASM_SOLUTION_PTR)
+            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLUTION_PTR.into()))?;
+        let sol_len_fn = instance
+            .get_typed_func::<(), u32>(&store, WASM_SOLUTION_LEN)
+            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLUTION_LEN.into()))?;
+        let dealloc_fn = instance.get_typed_func::<(i32, u32), ()>(&store, WASM_DEALLOC).ok();
+
+        Ok(Self { store, instance, _module: module, alloc_fn, solve_fn, sol_ptr_fn, sol_len_fn, dealloc_fn })
     }
 
     /// Fuel remaining after the last call.
@@ -182,26 +202,9 @@ impl<'m> LarqlCoreSession<'m> {
     fn call_solve(&mut self, input: &[u8]) -> Result<Vec<u8>, LarqlHostError> {
         let memory = self.memory()?;
 
-        let alloc_fn = self
-            .instance
-            .get_typed_func::<u32, i32>(&self.store, WASM_ALLOC)
-            .map_err(|_| LarqlHostError::MissingExport(WASM_ALLOC.into()))?;
-        let solve_fn = self
-            .instance
-            .get_typed_func::<(i32, u32), u32>(&self.store, WASM_SOLVE)
-            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLVE.into()))?;
-        let sol_ptr_fn = self
-            .instance
-            .get_typed_func::<(), i32>(&self.store, WASM_SOLUTION_PTR)
-            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLUTION_PTR.into()))?;
-        let sol_len_fn = self
-            .instance
-            .get_typed_func::<(), u32>(&self.store, WASM_SOLUTION_LEN)
-            .map_err(|_| LarqlHostError::MissingExport(WASM_SOLUTION_LEN.into()))?;
-
         // 1. alloc(len) — reserve input buffer in guest
         let in_len = input.len() as u32;
-        let in_ptr = alloc_fn
+        let in_ptr = self.alloc_fn
             .call(&mut self.store, in_len)
             .map_err(|e| trap_or_fuel(WASM_ALLOC, e))?;
         let in_offset = checked_ptr(in_ptr, input.len(), &memory, &self.store)?;
@@ -211,7 +214,7 @@ impl<'m> LarqlCoreSession<'m> {
             .copy_from_slice(input);
 
         // 3. solve(ptr, len) — guest processes and writes response
-        let status = solve_fn
+        let status = self.solve_fn
             .call(&mut self.store, (in_ptr, in_len))
             .map_err(|e| trap_or_fuel(WASM_SOLVE, e))?;
         if status != 0 {
@@ -219,20 +222,18 @@ impl<'m> LarqlCoreSession<'m> {
         }
 
         // 4. read solution_ptr + solution_len, copy output
-        let out_ptr = sol_ptr_fn
+        let out_ptr = self.sol_ptr_fn
             .call(&mut self.store, ())
             .map_err(|e| trap_or_fuel(WASM_SOLUTION_PTR, e))?;
-        let out_len = sol_len_fn
+        let out_len = self.sol_len_fn
             .call(&mut self.store, ())
             .map_err(|e| trap_or_fuel(WASM_SOLUTION_LEN, e))?;
 
         let out_offset = checked_ptr(out_ptr, out_len as usize, &memory, &self.store)?;
         let out = memory.data(&self.store)[out_offset..out_offset + out_len as usize].to_vec();
 
-        // 5. free the input buffer (optional; leaves the output alive until next call)
-        if let Ok(dealloc_fn) =
-            self.instance.get_typed_func::<(i32, u32), ()>(&self.store, WASM_DEALLOC)
-        {
+        // 5. free the input buffer (cached dealloc, absent means input leaks intentionally)
+        if let Some(dealloc_fn) = self.dealloc_fn {
             let _ = dealloc_fn.call(&mut self.store, (in_ptr, in_len));
         }
 

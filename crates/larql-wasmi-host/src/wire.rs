@@ -32,7 +32,17 @@ pub fn encode_gate_knn(
     query: &[f32],
     k: u32,
 ) -> Vec<u8> {
-    let mut buf = Vec::new();
+    let cap = {
+        let mut n = 1 + 4 + 4; // opcode + hidden_size + num_layers
+        for layer in layers {
+            n += 1; // has_data flag
+            if let Some(l) = layer {
+                n += 4 + 1 + l.bytes.len(); // num_features + dtype + gate data
+            }
+        }
+        n + 4 + 4 + query.len() * 4 + 4 // query_layer + query_len + query + k
+    };
+    let mut buf = Vec::with_capacity(cap);
     buf.push(0x04); // opcode
     buf.extend_from_slice(&hidden_size.to_le_bytes());
     buf.extend_from_slice(&(layers.len() as u32).to_le_bytes());

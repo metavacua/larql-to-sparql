@@ -5,10 +5,10 @@
 //! | Export         | Signature               | Purpose                         |
 //! |---------------|-------------------------|---------------------------------|
 //! | `alloc`       | `(i32) -> i32`          | Guest malloc; returns pointer   |
-//! | `dealloc`     | `(i32, i32) -> ()`      | Guest free                      |
-//! | `solve`       | `(i32, i32) -> i32`     | Dispatch request; 0 = ok        |
+//! | `dealloc`     | `(i32, u32) -> ()`      | Guest free                      |
+//! | `solve`       | `(i32, u32) -> u32`     | Dispatch request; 0 = ok        |
 //! | `solution_ptr`| `() -> i32`             | Pointer to last response        |
-//! | `solution_len`| `() -> i32`             | Length of last response         |
+//! | `solution_len`| `() -> u32`             | Length of last response         |
 //!
 //! # Wire protocol
 //!
@@ -100,13 +100,15 @@ pub extern "C" fn dealloc(ptr: i32, size: u32) {
 #[no_mangle]
 pub extern "C" fn solve(ptr: i32, len: u32) -> u32 {
     let input = unsafe { core::slice::from_raw_parts(ptr as *const u8, len as usize) };
-    let mut response = wire::dispatch(input);
-    response.shrink_to_fit();
+    // into_boxed_slice() guarantees capacity == len, so free_solution() can
+    // reconstruct the exact layout via Box::from_raw without UB.
+    let boxed = wire::dispatch(input).into_boxed_slice();
+    let response_len = boxed.len();
+    let response_ptr = ::alloc::boxed::Box::into_raw(boxed) as *mut u8;
     unsafe {
         free_solution();
-        SOLUTION_PTR = response.as_mut_ptr();
-        SOLUTION_LEN = response.len();
-        core::mem::forget(response);
+        SOLUTION_PTR = response_ptr;
+        SOLUTION_LEN = response_len;
     }
     0
 }
@@ -126,13 +128,14 @@ pub extern "C" fn solution_len() -> u32 {
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 unsafe fn free_solution() {
-    if !SOLUTION_PTR.is_null() && SOLUTION_LEN > 0 {
-        if let Ok(layout) = Layout::from_size_align(SOLUTION_LEN, 1) {
-            heap_dealloc(SOLUTION_PTR, layout);
-        }
+    if !SOLUTION_PTR.is_null() {
+        // Reconstruct the Box<[u8]> we created via into_boxed_slice() + into_raw().
+        // The slice fat-pointer (ptr, len) gives Box the correct layout for dealloc.
+        let slice = core::slice::from_raw_parts_mut(SOLUTION_PTR, SOLUTION_LEN);
+        drop(::alloc::boxed::Box::from_raw(slice as *mut [u8]));
+        SOLUTION_PTR = core::ptr::null_mut();
+        SOLUTION_LEN = 0;
     }
-    SOLUTION_PTR = core::ptr::null_mut();
-    SOLUTION_LEN = 0;
 }
 
 // ── Wire protocol implementation ─────────────────────────────────────────────
