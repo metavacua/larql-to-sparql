@@ -28,6 +28,9 @@ members = [
     # VIndex subcrate trio (split from larql-vindex by capability tier)
     "crates/larql-vindex-wasi",
     "crates/larql-vindex-os",
+    # no_std portable core (wasm32v1-none tier) + compile oracle binary
+    "crates/larql-wasm32v1-none-lib",
+    "crates/larql-wasm32v1-none-bin",
     # Build and certification automation (not in default-members)
     "crates/xtask",
 ]

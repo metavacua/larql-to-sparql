@@ -1,0 +1,24 @@
+[package]
+name = "larql-wasm32v1-none-bin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "no_std wasm32v1-none binary — compile oracle and smoke test for larql-wasm32v1-none-lib"
+keywords = ["wasm", "no_std", "vindex"]
+categories = ["no-std", "wasm"]
+
+[[bin]]
+name = "larql-wasm32v1-none"
+path = "src/main.rs"
+
+[dependencies]
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib" }
+
+# Heap allocator for wasm32 targets (no OS malloc available).
+# dlmalloc ships its own global allocator when the `global` feature is on.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", features = ["global"] }
+
+[package.metadata.wasm]
+split-candidate = true

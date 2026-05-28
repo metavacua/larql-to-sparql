@@ -1,0 +1,27 @@
+[package]
+name = "larql-wasm32v1-none-lib"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "no_std portable core — boundary codec, gate-KNN compute, linalg primitives"
+keywords = ["wasm", "no_std", "vindex", "knowledge-graph"]
+categories = ["no-std", "wasm"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+# f16 decode for gate vectors — no_std safe with default-features = false
+half = { version = "2", default-features = false }
+# Software float math for no_std targets (wasm32v1-none has no platform libm).
+# Provides sqrtf, expf, logf, roundf etc. as free functions.
+libm = { version = "0.2", default-features = false }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[package.metadata.wasm]
+split-candidate = true
