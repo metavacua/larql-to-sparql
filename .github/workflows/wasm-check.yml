@@ -206,10 +206,160 @@ jobs:
       - name: WASI lib build ${{ matrix.crate }}
         run: cargo build -p ${{ matrix.crate }} --lib --target wasm32-wasip1
 
+  # ── wasm32v1-none lib build oracle ────────────────────────────────────────
+  # Runs cargo build --lib for every crate against wasm32v1-none.
+  # Green = crate compiles with no_std + no host imports. This is the
+  # empirical signal for which crates belong in larql-wasm32v1-none-lib.
+  wasm32v1none-lib:
+    name: wasm32v1none-lib · ${{ matrix.crate }}
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32v1-none target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32v1none-lib-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm32v1none-lib-${{ matrix.crate }}-
+
+      - name: wasm32v1-none lib build ${{ matrix.crate }}
+        run: cargo build -p ${{ matrix.crate }} --lib --target wasm32v1-none
+
+  # ── wasm32v1-none binary build oracle ─────────────────────────────────────
+  # Runs cargo build --bins for every crate against wasm32v1-none.
+  # Green = crate ships a no_std binary with zero host imports.
+  # Only larql-wasm32v1-none-bin is expected green; all others will be red
+  # (no [[bin]] targets or non-portable deps) — that red is the signal.
+  wasm32v1none-bin:
+    name: wasm32v1none-bin · ${{ matrix.crate }}
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32v1-none target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm32v1none-bin-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm32v1none-bin-${{ matrix.crate }}-
+
+      - name: wasm32v1-none bin build ${{ matrix.crate }}
+        run: cargo build -p ${{ matrix.crate }} --bins --target wasm32v1-none
+
+  # ── WASI runtime test (cargo test via wasmtime) ────────────────────────────
+  # Runs cargo test --target wasm32-wasip1 via the wasmtime runner configured
+  # in .cargo/config.toml. Green = tests pass inside a WASI runtime.
+  wasip1-test:
+    name: wasip1-test · ${{ matrix.crate }}
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32-wasip1 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Install wasmtime
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasmtime
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasip1-test-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasip1-test-${{ matrix.crate }}-
+
+      - name: WASI runtime test ${{ matrix.crate }}
+        run: cargo test -p ${{ matrix.crate }} --target wasm32-wasip1
+
+  # ── WASI binary build oracle ───────────────────────────────────────────────
+  wasip1-bin:
+    name: wasip1-bin · ${{ matrix.crate }}
+    needs: [discover, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJson(needs.discover.outputs.crates) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (stable) + wasm32-wasip1 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache cargo registry + build artefacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasip1-bin-${{ matrix.crate }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasip1-bin-${{ matrix.crate }}-
+
+      - name: WASI binary build ${{ matrix.crate }}
+        run: cargo build -p ${{ matrix.crate }} --bins --target wasm32-wasip1
+
   # ── Summary table ─────────────────────────────────────────────────────────
   summary:
     name: wasm-summary
-    needs: [check, mutate, node, wasip1]
+    needs: [check, mutate, node, wasip1, wasm32v1none-lib, wasm32v1none-bin, wasip1-test, wasip1-bin]
     runs-on: ubuntu-24.04
     if: always()
 
