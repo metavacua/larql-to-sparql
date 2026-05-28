@@ -4,3 +4,6 @@ extern crate alloc;
 pub mod boundary;
 pub mod gate;
 pub mod linalg;
+
+#[cfg(target_arch = "wasm32")]
+pub mod abi;
