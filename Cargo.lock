@@ -2194,9 +2194,7 @@ name = "larql-boundary"
 version = "0.1.0"
 dependencies = [
  "criterion",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
+ "larql-wasm32v1-none-lib",
  "wasm-bindgen-test",
 ]
 

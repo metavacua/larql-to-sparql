@@ -60,8 +60,6 @@
 //! # Accuracy contract
 //!
 //! The accuracy contract is **top-1 token preservation**, not residual MSE.
-//! Residual MSE is dominated by the outlier saturation and does not predict
-//! downstream quality.
 //!
 //! Characterised by Exp 43 (30 prompts, layer 33, Gemma 3 4B):
 //!
@@ -71,34 +69,14 @@
 //!               KL    = ~2.0 nats
 //!               Contract: D- (ArgmaxNearEquivalentHighMargin)
 //! ```
-//!
-//! D-@high guarantees the first ~5 continuation tokens at 4.8% early-div
-//! (95% CI 1.6%–10.7%, n=62). Total divergence over 20 tokens is ~20%
-//! regardless of threshold — cascade compounds after the first wrong token.
-//! Use for boundary-to-fresh-decode, not for long uninterrupted continuation.
-//!
-//! # Performance (M3 Max)
-//!
-//! ```text
-//! bf16 encode  d=2560:    1.2 µs   (memory-bound, bit manipulation)
-//! bf16 decode  d=2560:    0.27 µs
-//! int8 encode  d=2560:    4.6 µs   (σ + clamp + quantize)
-//! int8 decode  d=2560:    0.23 µs
-//! metadata::compute:      517 µs   (log_softmax over 262K vocab — bottleneck)
-//! ```
-//!
-//! `metadata::compute` at 517 µs is 0.005% of the ~10 s boundary-arrival
-//! budget at 50 tok/s with 512-token chunks. Never on the critical path.
-//!
-//! See `benches/codec.rs` for full benchmark suite.
 
-pub mod codec;
-pub mod frame;
-pub mod gate;
-pub mod metadata;
+pub use larql_wasm32v1_none_lib::boundary::codec;
+pub use larql_wasm32v1_none_lib::boundary::frame;
+pub use larql_wasm32v1_none_lib::boundary::gate;
+pub use larql_wasm32v1_none_lib::boundary::metadata;
 
-pub use frame::{
+pub use larql_wasm32v1_none_lib::boundary::frame::{
     BoundaryAgreement, BoundaryCompression, BoundaryContract, BoundaryFrame, FallbackPolicy,
 };
-pub use gate::{BoundaryDecision, BoundaryGateConfig};
-pub use metadata::BoundaryMetadata;
+pub use larql_wasm32v1_none_lib::boundary::gate::{BoundaryDecision, BoundaryGateConfig};
+pub use larql_wasm32v1_none_lib::boundary::metadata::BoundaryMetadata;

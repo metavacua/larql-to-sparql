@@ -7,9 +7,8 @@ license.workspace = true
 description = "Confidence-gated BOUNDARY ref codec for LARQL"
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
+# Logic lives in larql-wasm32v1-none-lib; serde feature enables wire derives.
+larql-wasm32v1-none-lib = { path = "../larql-wasm32v1-none-lib", features = ["serde"] }
 
 [features]
 browser-tests = []
