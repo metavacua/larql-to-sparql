@@ -1,0 +1,10 @@
+[package]
+name = "larql-bridge-browser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Browser adapter for larql-bridge traits (fetch, IndexedDB, WebAssembly API)"
+
+[dependencies]
+larql-bridge = { workspace = true }

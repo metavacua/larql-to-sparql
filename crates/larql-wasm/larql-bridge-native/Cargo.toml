@@ -1,0 +1,10 @@
+[package]
+name = "larql-bridge-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native adapter for larql-bridge traits (reqwest, memmap2, wasmi, tokio)"
+
+[dependencies]
+larql-bridge = { workspace = true }
