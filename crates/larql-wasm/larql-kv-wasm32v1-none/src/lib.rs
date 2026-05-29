@@ -7,6 +7,10 @@
 //! Correctness contract: `prefill` and `decode_step` return the pre-lm_head
 //! hidden state (shape `[1, hidden_dim]`). The caller applies `final_norm +
 //! lm_head` to get logits — see `larql_inference::forward::hidden_to_raw_logits`.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 
 #[cfg(any(
     target_os = "linux",

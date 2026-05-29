@@ -39,6 +39,10 @@
 //!
 //! See `examples/mech_interp_demo.rs` for an end-to-end walkthrough on
 //! synthetic weights (no vindex required).
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 
 #[cfg(any(
     target_os = "linux",

@@ -1,7 +1,10 @@
 fn main() {
-    // Rebuild if anything under csrc/ changes (new .c, new .h, modified source).
-    // The cc crate only auto-tracks files passed to .file(); this widens the net so
-    // a new or modified C source always triggers recompilation of q4_dot.
+    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") { return; }
+    
+
+        // Rebuild if anything under csrc/ changes (new .c, new .h, modified source).
+        // The cc crate only auto-tracks files passed to .file(); this widens the net so
+        // a new or modified C source always triggers recompilation of q4_dot.
     println!("cargo:rerun-if-changed=csrc");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -16,4 +19,4 @@ fn main() {
     build.flag_if_supported("-mavx2");
 
     build.compile("q4_dot");
-}
+    }

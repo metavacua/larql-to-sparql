@@ -1,3 +1,7 @@
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 pub mod ast;
 pub mod error;
 pub mod executor;

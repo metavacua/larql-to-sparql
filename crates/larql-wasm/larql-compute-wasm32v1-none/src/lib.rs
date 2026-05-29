@@ -56,6 +56,10 @@
 //! - `metal`: Metal GPU backend (macOS only). Adds optimised Q4 shaders,
 //!   multi-layer pipeline, zero-copy mmap buffers.
 //! - `cuda`: (planned) CUDA GPU backend.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 
 #[cfg(any(
     target_os = "linux",

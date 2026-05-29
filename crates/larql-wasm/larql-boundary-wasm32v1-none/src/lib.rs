@@ -91,6 +91,10 @@
 //! budget at 50 tok/s with 512-token chunks. Never on the critical path.
 //!
 //! See `benches/codec.rs` for full benchmark suite.
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 
 pub mod codec;
 pub mod frame;

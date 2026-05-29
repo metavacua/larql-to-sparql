@@ -1,5 +1,9 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 // Architectural lints suppressed crate-wide:
 //
 //  - `too_many_arguments`: most command runners have wide signatures

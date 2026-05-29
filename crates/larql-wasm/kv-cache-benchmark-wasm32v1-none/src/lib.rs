@@ -1,5 +1,9 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 #![allow(clippy::single_range_in_vec_init)]
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
 
 pub mod accuracy;
 pub mod accuracy_suite;
