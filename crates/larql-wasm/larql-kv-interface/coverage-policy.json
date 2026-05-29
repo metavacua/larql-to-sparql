@@ -1,0 +1,18 @@
+{
+  "policy_note": "Default policy is 90% line coverage per source file. Files listed below carry inherited debt baselines from extraction-time (2026-05-09) — they MUST only ratchet upward toward 90%, never down. Run `make larql-kv-coverage-summary` to refresh; numbers are floored from the measured value to leave noise headroom. Last refresh: 2026-05-10 (post coverage push, 6 files left below 90%).",
+  "include_globs": [
+    "crates/larql-kv/src/*.rs",
+    "crates/larql-kv/src/**/*.rs"
+  ],
+  "exclude_globs": [],
+  "default_line_min_percent": 90.0,
+  "total_line_min_percent": 85.0,
+  "per_file_line_min_percent": {
+    "crates/larql-kv/src/engines/unlimited_context/engine.rs": 50.5,
+    "crates/larql-kv/src/engines/markov_residual/q4k.rs": 57.1,
+    "crates/larql-kv/src/engines/unlimited_context/extend.rs": 74.6,
+    "crates/larql-kv/src/engines/turbo_quant/engine.rs": 79.7,
+    "crates/larql-kv/src/engines/markov_residual/compute.rs": 80.6,
+    "crates/larql-kv/src/engines/apollo/store.rs": 89.7
+  }
+}

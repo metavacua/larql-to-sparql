@@ -1,0 +1,24 @@
+[package]
+name = "larql-python-interface"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Python bindings for LARQL knowledge graph engine and vindex"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+larql-core = { path = "larql-core-interface" }
+larql-inference = { path = "larql-inference-interface" }
+larql-models = { path = "larql-models-interface" }
+larql-vindex = { path = "larql-vindex-interface" }
+larql-lql = { path = "larql-lql-interface" }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+numpy = "0.24"
+ndarray = "0.16"
+memmap2 = "0.9"
+serde = { workspace = true }
+serde_json = { workspace = true }
