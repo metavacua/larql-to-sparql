@@ -9,9 +9,9 @@ keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-core = { path = "larql-core-interface", default-features = false }
-larql-models = { path = "larql-models-interface" }
-larql-compute = { path = "larql-compute-interface" }
+larql-core = { path = "../larql-core-interface", package = "larql-core-interface", default-features = false }
+larql-models = { path = "../larql-models-interface", package = "larql-models-interface" }
+larql-compute = { path = "../larql-compute-interface", package = "larql-compute-interface" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

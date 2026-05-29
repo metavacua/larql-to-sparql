@@ -7,11 +7,11 @@ license.workspace = true
 description = "LQL parser, executor, and REPL for LARQL"
 
 [dependencies]
-larql-compute = { path = "larql-compute-wasm32v1-none" }
-larql-core = { path = "larql-core-wasm32v1-none" }
-larql-inference = { path = "larql-inference-wasm32v1-none" }
-larql-models = { path = "larql-models-wasm32v1-none" }
-larql-vindex = { path = "larql-vindex-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 ndarray = "0.16"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rustyline = "15"

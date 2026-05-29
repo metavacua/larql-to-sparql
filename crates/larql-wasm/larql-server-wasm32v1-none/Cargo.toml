@@ -8,22 +8,22 @@ description = "HTTP server for vindex knowledge queries and inference"
 
 [lib]
 name = "larql_server"
-path = "lib.rs-wasm32v1-none"
+path = "../lib.rs-wasm32v1-none"
 
 [[bin]]
 name = "larql-server-wasm32v1-none"
-path = "main.rs-wasm32v1-none"
+path = "../main.rs-wasm32v1-none"
 
 [dependencies]
-larql-vindex = { path = "larql-vindex-wasm32v1-none" }
-larql-inference = { path = "larql-inference-wasm32v1-none" }
-larql-models = { path = "larql-models-wasm32v1-none" }
-larql-router-protocol = { path = "larql-router-protocol-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-router-protocol = { path = "../larql-router-protocol-wasm32v1-none", package = "larql-router-protocol-wasm32v1-none" }
 # Optional Metal backend for shard-side GPU experts (macOS).  When the
 # `metal-experts` feature is enabled, the server uses
 # `MetalBackend::run_experts_preselected_metal` to dispatch each layer's
 # selected experts on the GPU instead of running them per-expert on CPU.
-larql-compute = { path = "larql-compute-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
 
 axum = { version = "0.8", features = ["ws"] }
 half = "2"

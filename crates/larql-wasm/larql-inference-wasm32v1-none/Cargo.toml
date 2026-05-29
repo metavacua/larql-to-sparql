@@ -9,10 +9,10 @@ keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-models = { path = "larql-models-wasm32v1-none" }
-larql-compute = { path = "larql-compute-wasm32v1-none" }
-larql-core = { path = "larql-core-wasm32v1-none" }
-larql-vindex = { path = "larql-vindex-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -56,7 +56,7 @@ half = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
 prost = "0.13"
-larql-router-protocol = { path = "larql-router-protocol-wasm32v1-none" }
+larql-router-protocol = { path = "../larql-router-protocol-wasm32v1-none", package = "larql-router-protocol-wasm32v1-none" }
 async-stream = "0.3"
 futures = "0.3"
 
@@ -120,7 +120,7 @@ required-features = ["metal"]
 assert_approx_eq = "1"
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
-larql-kv = { path = "larql-kv-wasm32v1-none" }
+larql-kv = { path = "../larql-kv-wasm32v1-none", package = "larql-kv-wasm32v1-none" }
 
 [[bench]]
 name = "wire_codec"

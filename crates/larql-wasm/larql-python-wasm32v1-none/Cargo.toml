@@ -11,11 +11,11 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-larql-core = { path = "larql-core-wasm32v1-none" }
-larql-inference = { path = "larql-inference-wasm32v1-none" }
-larql-models = { path = "larql-models-wasm32v1-none" }
-larql-vindex = { path = "larql-vindex-wasm32v1-none" }
-larql-lql = { path = "larql-lql-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
+larql-lql = { path = "../larql-lql-wasm32v1-none", package = "larql-lql-wasm32v1-none" }
 pyo3 = { version = "0.24", features = ["extension-module"] }
 numpy = "0.24"
 ndarray = "0.16"

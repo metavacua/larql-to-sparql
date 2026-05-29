@@ -9,9 +9,9 @@ repository.workspace = true
 description = "Pluggable KV-cache engines for larql-inference (markov-rs, unlimited-context, turbo-quant, apollo)"
 
 [dependencies]
-larql-inference = { path = "larql-inference-wasm32v1-none" }
-larql-compute = { path = "larql-compute-wasm32v1-none" }
-larql-vindex = { path = "larql-vindex-wasm32v1-none" }
+larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
+larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

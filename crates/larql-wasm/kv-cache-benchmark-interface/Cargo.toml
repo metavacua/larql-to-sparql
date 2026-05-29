@@ -20,13 +20,13 @@ rand = "0.8"
 rand_distr = "0.4"
 
 # Always available: needed for the criterion bench (accuracy metrics, engine_kind).
-larql-inference = { path = "larql-inference-interface" }
-larql-kv = { path = "larql-kv-interface" }
-larql-compute = { path = "larql-compute-interface" }
+larql-inference = { path = "../larql-inference-interface", package = "larql-inference-interface" }
+larql-kv = { path = "../larql-kv-interface", package = "larql-kv-interface" }
+larql-compute = { path = "../larql-compute-interface", package = "larql-compute-interface" }
 
 # Optional: full real-model integration (real weights, vindex, tokenizer).
-larql-vindex = { path = "larql-vindex-interface", optional = true }
-larql-models = { path = "larql-models-interface", optional = true }
+larql-vindex = { path = "../larql-vindex-interface", package = "larql-vindex-interface", optional = true }
+larql-models = { path = "../larql-models-interface", package = "larql-models-interface", optional = true }
 ndarray = { version = "0.16", optional = true }
 tokenizers = { version = "0.21", optional = true }
 # `zip` for reading the .npz container in apollo11_store (uncompressed archives).

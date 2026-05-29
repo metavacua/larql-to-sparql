@@ -8,14 +8,14 @@ description = "Layer-sharding router for distributed larql-server deployments"
 
 [lib]
 name = "larql_router"
-path = "lib.rs-interface"
+path = "../lib.rs-interface"
 
 [[bin]]
 name = "larql-router-interface"
-path = "main.rs-interface"
+path = "../main.rs-interface"
 
 [dependencies]
-larql-router-protocol = { path = "larql-router-protocol-interface" }
+larql-router-protocol = { path = "../larql-router-protocol-interface", package = "larql-router-protocol-interface" }
 
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }

@@ -40,7 +40,9 @@ members = [
 version      = "0.1.0"
 edition      = "2021"
 rust-version = "1.88"
+authors      = ["Chris Hay", "Ian Douglas Lawrence Norman McLean"]
 license      = "Apache-2.0"
+repository   = "https://github.com/metavacua/larql-to-sparql"
 
 [workspace.dependencies]
 larql-bridge = { path = "larql-bridge" }

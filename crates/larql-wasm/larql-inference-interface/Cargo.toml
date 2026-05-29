@@ -9,10 +9,10 @@ keywords = ["transformer", "inference", "llm", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-models = { path = "larql-models-interface" }
-larql-compute = { path = "larql-compute-interface" }
-larql-core = { path = "larql-core-interface" }
-larql-vindex = { path = "larql-vindex-interface" }
+larql-models = { path = "../larql-models-interface", package = "larql-models-interface" }
+larql-compute = { path = "../larql-compute-interface", package = "larql-compute-interface" }
+larql-core = { path = "../larql-core-interface", package = "larql-core-interface" }
+larql-vindex = { path = "../larql-vindex-interface", package = "larql-vindex-interface" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -56,7 +56,7 @@ half = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 tonic = { version = "0.13", features = ["tls-ring", "tls-webpki-roots"] }
 prost = "0.13"
-larql-router-protocol = { path = "larql-router-protocol-interface" }
+larql-router-protocol = { path = "../larql-router-protocol-interface", package = "larql-router-protocol-interface" }
 async-stream = "0.3"
 futures = "0.3"
 
@@ -120,7 +120,7 @@ required-features = ["metal"]
 assert_approx_eq = "1"
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
-larql-kv = { path = "larql-kv-interface" }
+larql-kv = { path = "../larql-kv-interface", package = "larql-kv-interface" }
 
 [[bench]]
 name = "wire_codec"

@@ -9,9 +9,9 @@ keywords = ["transformer", "vindex", "knn", "interpretability"]
 categories = ["science"]
 
 [dependencies]
-larql-core = { path = "larql-core-wasm32v1-none", default-features = false }
-larql-models = { path = "larql-models-wasm32v1-none" }
-larql-compute = { path = "larql-compute-wasm32v1-none" }
+larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none", default-features = false }
+larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
+larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

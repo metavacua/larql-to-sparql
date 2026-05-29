@@ -11,11 +11,11 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-larql-core = { path = "larql-core-interface" }
-larql-inference = { path = "larql-inference-interface" }
-larql-models = { path = "larql-models-interface" }
-larql-vindex = { path = "larql-vindex-interface" }
-larql-lql = { path = "larql-lql-interface" }
+larql-core = { path = "../larql-core-interface", package = "larql-core-interface" }
+larql-inference = { path = "../larql-inference-interface", package = "larql-inference-interface" }
+larql-models = { path = "../larql-models-interface", package = "larql-models-interface" }
+larql-vindex = { path = "../larql-vindex-interface", package = "larql-vindex-interface" }
+larql-lql = { path = "../larql-lql-interface", package = "larql-lql-interface" }
 pyo3 = { version = "0.24", features = ["extension-module"] }
 numpy = "0.24"
 ndarray = "0.16"

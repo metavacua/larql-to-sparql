@@ -8,16 +8,16 @@ description = "CLI for LARQL knowledge graph extraction and querying"
 
 [[bin]]
 name = "larql"
-path = "main.rs-interface"
+path = "../main.rs-interface"
 
 [dependencies]
-larql-core = { path = "larql-core-interface" }
-larql-compute = { path = "larql-compute-interface" }
-larql-inference = { path = "larql-inference-interface" }
-larql-kv = { path = "larql-kv-interface" }
-larql-models = { path = "larql-models-interface" }
-larql-lql = { path = "larql-lql-interface" }
-larql-vindex = { path = "larql-vindex-interface" }
+larql-core = { path = "../larql-core-interface", package = "larql-core-interface" }
+larql-compute = { path = "../larql-compute-interface", package = "larql-compute-interface" }
+larql-inference = { path = "../larql-inference-interface", package = "larql-inference-interface" }
+larql-kv = { path = "../larql-kv-interface", package = "larql-kv-interface" }
+larql-models = { path = "../larql-models-interface", package = "larql-models-interface" }
+larql-lql = { path = "../larql-lql-interface", package = "larql-lql-interface" }
+larql-vindex = { path = "../larql-vindex-interface", package = "larql-vindex-interface" }
 clap = { version = "4", features = ["derive", "env"] }
 indicatif = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
