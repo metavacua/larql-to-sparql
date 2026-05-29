@@ -215,6 +215,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
+            ~/.cargo/bin
             target
           key: wasm-${{ matrix.crate }}-${{ matrix.runtime }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
@@ -240,9 +241,17 @@ jobs:
       # The previous design ran `--features wasm` in native Rust, which only
       # tested model-compute's wasmi host — not WASM code running in wasmi.
 
-      - name: Install wasmi-cli (wasmi)
+      - name: Install wasmi CLI (wasmi)
         if: matrix.runtime == 'wasmi'
-        run: cargo install wasmi-cli --locked
+        # wasmi_cli is not published to crates.io; install from the tagged
+        # release in the wasmi-labs/wasmi repo. The package name uses an
+        # underscore (wasmi_cli), matching the Cargo.toml package field.
+        # Pin to the same minor series as the wasmi library in Cargo.lock (1.x).
+        run: >
+          cargo install
+          --git https://github.com/wasmi-labs/wasmi.git
+          --tag v1.0.9
+          wasmi_cli
 
       - name: Add wasm32v1-none target (wasmi)
         if: matrix.runtime == 'wasmi'
@@ -250,10 +259,12 @@ jobs:
 
       - name: Test in wasmi (wasmi)
         if: matrix.runtime == 'wasmi'
-        # CARGO_TARGET_WASM32V1_NONE_RUNNER invokes `wasmi run --` for each
-        # test binary produced by cargo test. Failures here = crate needs no_std.
+        # Compiles each crate to wasm32v1-none and runs the test binary through
+        # wasmi. The runner value is `wasmi run` — the WASM module path is the
+        # first positional argument to `run`, so no `--` separator is needed.
+        # Failures here = crate needs no_std (category A in wasm-inventory.md).
         env:
-          CARGO_TARGET_WASM32V1_NONE_RUNNER: wasmi run --
+          CARGO_TARGET_WASM32V1_NONE_RUNNER: wasmi run
         run: cargo test ${{ matrix.cargo_package }} --target wasm32v1-none
 
       # ── node: wasm-bindgen-test-runner on wasm32-unknown-unknown, Node.js ──
