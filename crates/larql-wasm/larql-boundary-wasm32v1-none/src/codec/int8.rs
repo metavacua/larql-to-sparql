@@ -27,6 +27,9 @@
 //! `scale = clip / INT8_QMAX`, where `clip = CLIP_SIGMA × σ(r)`.
 //! The original value is recovered as `q as f32 × scale`.
 
+#[cfg(target_arch = "wasm32")]
+use alloc::vec::Vec;
+
 /// Number of bytes in the scale header.
 pub const SCALE_BYTES: usize = 4;
 
@@ -84,7 +87,11 @@ pub fn encode(r: &[f32]) -> Payload {
         .iter()
         .map(|&v| {
             let clipped = v.clamp(-clip, clip);
-            (clipped / scale).round().clamp(-INT8_QMAX, INT8_QMAX) as i8
+            #[cfg(target_arch = "wasm32")]
+            let rounded = libm::roundf(clipped / scale);
+            #[cfg(not(target_arch = "wasm32"))]
+            let rounded = (clipped / scale).round();
+            rounded.clamp(-INT8_QMAX, INT8_QMAX) as i8
         })
         .collect();
 
@@ -100,10 +107,19 @@ pub fn decode(payload: &Payload) -> Vec<f32> {
         .collect()
 }
 
+#[cfg(target_arch = "wasm32")]
 fn std_dev(r: &[f32]) -> f32 {
     let n = r.len() as f64;
     let mean: f64 = r.iter().map(|&v| v as f64).sum::<f64>() / n;
-    let var: f64 = r.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / n;
+    let var: f64 = r.iter().map(|&v| { let d = v as f64 - mean; d * d }).sum::<f64>() / n;
+    libm::sqrt(var) as f32
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn std_dev(r: &[f32]) -> f32 {
+    let n = r.len() as f64;
+    let mean: f64 = r.iter().map(|&v| v as f64).sum::<f64>() / n;
+    let var: f64 = r.iter().map(|&v| { let d = v as f64 - mean; d * d }).sum::<f64>() / n;
     var.sqrt() as f32
 }
 

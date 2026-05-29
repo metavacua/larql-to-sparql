@@ -4,6 +4,9 @@
 //! Same exponent range as float32 (max ≈ 3.4e38), so Gemma-class residuals
 //! (observed absmax ≈ 94 K–151 K) never overflow — unlike float16 (max 65 504).
 
+#[cfg(target_arch = "wasm32")]
+use alloc::vec::Vec;
+
 /// Number of bytes per encoded element.
 pub const BYTES_PER_ELEM: usize = 2;
 

@@ -50,6 +50,7 @@ serde        = { version = "1", default-features = false, features = ["derive", 
 serde_json   = { version = "1", default-features = false, features = ["alloc"] }
 thiserror    = { version = "2", default-features = false }
 hashbrown    = { version = "0.14", default-features = false, features = ["alloc"] }
+libm         = { version = "0.2", default-features = false }
 
 [profile.release]
 opt-level       = "s"

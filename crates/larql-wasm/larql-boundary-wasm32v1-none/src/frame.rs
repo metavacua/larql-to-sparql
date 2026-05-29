@@ -6,6 +6,9 @@
 //! Full serialisation (protobuf, HTTP JSON) is handled by `larql-server`.
 //! This module defines the canonical Rust representation.
 
+#[cfg(target_arch = "wasm32")]
+use alloc::{string::String, vec::Vec};
+
 // ── Enums ─────────────────────────────────────────────────────────────────
 
 /// Compression scheme applied to the residual payload.

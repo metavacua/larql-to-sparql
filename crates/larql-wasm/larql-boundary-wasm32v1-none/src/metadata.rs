@@ -20,6 +20,9 @@
 //!   thresholds in log-prob units so they transfer across positions and
 //!   model checkpoints.
 
+#[cfg(target_arch = "wasm32")]
+use alloc::vec::Vec;
+
 use crate::frame::BoundaryAgreement;
 
 /// All per-boundary confidence fields produced by Phase 2.
@@ -72,6 +75,9 @@ pub fn compute(raw_logits: &[f32], hat_logits: Option<&[f32]>) -> BoundaryMetada
 
     let raw_logit_margin = raw_logits[top1] - raw_logits[top2];
     let raw_log_prob_margin = log_probs[top1] - log_probs[top2];
+    #[cfg(target_arch = "wasm32")]
+    let raw_top1_prob = libm::expf(log_probs[top1]);
+    #[cfg(not(target_arch = "wasm32"))]
     let raw_top1_prob = log_probs[top1].exp();
 
     let (compressed_top1_token, boundary_agreement) = match hat_logits {
@@ -106,6 +112,9 @@ pub fn compute(raw_logits: &[f32], hat_logits: Option<&[f32]>) -> BoundaryMetada
 fn log_softmax(logits: &[f32]) -> Vec<f32> {
     let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let shifted: Vec<f32> = logits.iter().map(|&x| x - max).collect();
+    #[cfg(target_arch = "wasm32")]
+    let log_sum = libm::logf(shifted.iter().map(|&x| libm::expf(x)).sum::<f32>());
+    #[cfg(not(target_arch = "wasm32"))]
     let log_sum = shifted.iter().map(|&x| x.exp()).sum::<f32>().ln();
     shifted.iter().map(|&x| x - log_sum).collect()
 }
@@ -114,7 +123,7 @@ fn argmax(logits: &[f32]) -> usize {
     logits
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }
