@@ -10,9 +10,7 @@ categories = ["science"]
 
 [dependencies]
 # Matrix types — blas feature added per-platform below where a backend exists
-ndarray = "0.16"
 # MoE expert parallelism: top-k experts run independently per token.
-rayon = "1.10"
 # Wire-format constants (Q4_K_BLOCK_ELEMS, etc.) for padding decisions.
 # Tests/benches depend on it too — keep both lists in sync.
 larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
@@ -61,3 +59,7 @@ libc = "0.2"
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ndarray = "0.16"
+rayon = "1.10"

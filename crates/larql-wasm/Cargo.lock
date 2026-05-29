@@ -2008,7 +2008,6 @@ dependencies = [
 name = "kv-cache-benchmark-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "larql-compute-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-kv-wasm32v1-none",
@@ -2038,7 +2037,6 @@ dependencies = [
 name = "larql-boundary-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "libm",
  "serde",
  "serde_json",
@@ -2112,7 +2110,6 @@ dependencies = [
  "safetensors",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
 ]
@@ -2141,16 +2138,13 @@ version = "0.1.0"
 dependencies = [
  "blas-src",
  "cc",
- "criterion",
  "larql-models-wasm32v1-none",
  "libc",
- "memmap2",
  "metal",
  "ndarray",
  "objc",
  "openblas-src",
  "rayon",
- "serde_json",
 ]
 
 [[package]]
@@ -2170,8 +2164,6 @@ dependencies = [
 name = "larql-core-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
- "assert_approx_eq",
- "criterion",
  "reqwest",
  "rmp-serde",
  "serde",
@@ -2227,15 +2219,12 @@ name = "larql-inference-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_approx_eq",
  "async-stream",
  "blas-src",
- "criterion",
  "futures",
  "half",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
- "larql-kv-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-router-protocol-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
@@ -2254,7 +2243,6 @@ dependencies = [
  "safetensors",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
  "tokio",
@@ -2290,7 +2278,6 @@ name = "larql-kv-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
  "blas-src",
- "criterion",
  "larql-compute-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
@@ -2300,7 +2287,6 @@ dependencies = [
  "rand_distr",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "zip 2.4.2",
 ]
@@ -2328,13 +2314,11 @@ dependencies = [
 name = "larql-lql-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
- "mockito",
  "ndarray",
  "reqwest",
  "rustyline",
@@ -2361,13 +2345,11 @@ dependencies = [
 name = "larql-models-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "memmap2",
  "ndarray",
  "safetensors",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
 ]
 
@@ -2456,7 +2438,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
- "criterion",
  "futures",
  "futures-core",
  "larql-router-protocol-wasm32v1-none",
@@ -2468,7 +2449,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2544,7 +2524,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "tracing-subscriber",
  "utoipa",
  "utoipa-swagger-ui",
 ]
@@ -2584,14 +2563,12 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "criterion",
  "hf-hub",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "libc",
  "memmap2",
- "mockito",
  "ndarray",
  "portable-atomic",
  "rand 0.8.6",
@@ -2600,9 +2577,7 @@ dependencies = [
  "safetensors",
  "serde",
  "serde_json",
- "serial_test",
  "sha2",
- "tempfile",
  "thiserror 2.0.18",
  "tokenizers",
 ]
@@ -2910,12 +2885,10 @@ name = "model-compute-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "criterion",
  "evalexpr",
  "thiserror 2.0.18",
  "wasmi",
  "wasmtime",
- "wat",
 ]
 
 [[package]]

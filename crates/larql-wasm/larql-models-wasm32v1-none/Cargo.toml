@@ -9,12 +9,13 @@ keywords = ["transformer", "model-config", "llm", "architecture"]
 categories = ["data-structures"]
 
 [dependencies]
-ndarray = "0.16"
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 # Model weight loading
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ndarray = "0.16"
 safetensors = "0.7"
 memmap2 = "0.9"
-
+serde_json = { workspace = true }

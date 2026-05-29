@@ -16,9 +16,11 @@ larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-
 larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
 larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 larql-lql = { path = "../larql-lql-wasm32v1-none", package = "larql-lql-wasm32v1-none" }
+serde = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pyo3 = { version = "0.24", features = ["extension-module"] }
 numpy = "0.24"
 ndarray = "0.16"
 memmap2 = "0.9"
-serde = { workspace = true }
 serde_json = { workspace = true }
