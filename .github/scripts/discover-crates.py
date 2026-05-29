@@ -281,8 +281,14 @@ def wasm_matrix(crates: list[dict]) -> dict:
                         name = member_data.get("package", {}).get("name", member_dir.name)
                         # Only include -wasm32v1-none and -interface variants, skip bridge infrastructure
                         if name.endswith("-wasm32v1-none") or name.endswith("-interface"):
-                            crate_path = str(cargo_toml.parent.relative_to(ROOT))
-                            wasm_crates.append(build_crate_entry(cargo_toml, nested=False))
+                            entry = build_crate_entry(cargo_toml, nested=False)
+                            # Crates in crates/larql-wasm/ live in a nested workspace.
+                            # cargo -p NAME fails from the repo root; must pin the manifest.
+                            wasm_ws_rel = str(wasm_workspace_root.relative_to(ROOT))
+                            entry["cargo_package"] = (
+                                f"--manifest-path {wasm_ws_rel}/Cargo.toml -p {name}"
+                            )
+                            wasm_crates.append(entry)
                     except Exception:
                         pass
         except Exception:
