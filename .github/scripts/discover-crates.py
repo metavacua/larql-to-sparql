@@ -237,6 +237,8 @@ WASM_RUNTIMES = ["wasm32v1-none", "wasmi", "node", "firefox"]
 
 
 def native_matrix(crates: list[dict]) -> dict:
+    # For native, only include crates NOT from crates/larql-wasm/ (only original crates + larql-experts).
+    native_crates = [c for c in crates if not c["crate_path"].startswith("crates/larql-wasm/")]
     return {
         "include": [
             {
@@ -250,13 +252,39 @@ def native_matrix(crates: list[dict]) -> dict:
                 "cargo_package": c["cargo_package"],
                 "fmt_flags": c["fmt_flags"],
             }
-            for c in crates
+            for c in native_crates
             for platform in NATIVE_PLATFORMS
         ]
     }
 
 
 def wasm_matrix(crates: list[dict]) -> dict:
+    # For wasm, enumerate individual members of crates/larql-wasm/ with -wasm32v1-none or -interface suffix.
+    # Exclude bridge infrastructure (larql-bridge, larql-bridge-native, larql-bridge-browser).
+    wasm_crates: list[dict[str, Any]] = []
+
+    # If larql-wasm nested workspace is present, enumerate its members individually
+    wasm_workspace_root = ROOT / "crates" / "larql-wasm"
+    if wasm_workspace_root.exists():
+        try:
+            ws_data = _load(wasm_workspace_root / "Cargo.toml")
+            for member_glob in ws_data.get("workspace", {}).get("members", []):
+                for member_dir in sorted(wasm_workspace_root.glob(member_glob)):
+                    cargo_toml = member_dir / "Cargo.toml"
+                    if not cargo_toml.exists():
+                        continue
+                    try:
+                        member_data = _load(cargo_toml)
+                        name = member_data.get("package", {}).get("name", member_dir.name)
+                        # Only include -wasm32v1-none and -interface variants, skip bridge infrastructure
+                        if name.endswith("-wasm32v1-none") or name.endswith("-interface"):
+                            crate_path = str(cargo_toml.parent.relative_to(ROOT))
+                            wasm_crates.append(build_crate_entry(cargo_toml, nested=False))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     includes = [
         {
             "crate": c["name"],
@@ -265,12 +293,12 @@ def wasm_matrix(crates: list[dict]) -> dict:
             "cargo_package": c["cargo_package"],
             "runtime": runtime,
         }
-        for c in crates
+        for c in wasm_crates
         for runtime in WASM_RUNTIMES
     ]
-    # Extra pyodide/emscripten entry for larql-python
-    for c in crates:
-        if c["name"] == "larql-python":
+    # Extra pyodide/emscripten entry for larql-python-interface (pyo3 ABI)
+    for c in wasm_crates:
+        if c["name"] == "larql-python-interface":
             includes.append(
                 {
                     "crate": c["name"],
@@ -285,6 +313,8 @@ def wasm_matrix(crates: list[dict]) -> dict:
 
 
 def coverage_matrix(crates: list[dict]) -> dict:
+    # For coverage, only include crates NOT from crates/larql-wasm/ (only original crates + larql-experts).
+    coverage_crates = [c for c in crates if not c["crate_path"].startswith("crates/larql-wasm/")]
     return {
         "include": [
             {
@@ -293,7 +323,7 @@ def coverage_matrix(crates: list[dict]) -> dict:
                 "nested": c["nested"],
                 "cargo_package": c["cargo_package"],
             }
-            for c in crates
+            for c in coverage_crates
         ]
     }
 
