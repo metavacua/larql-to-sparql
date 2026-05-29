@@ -24,5 +24,4 @@ default = ["http", "msgpack"]
 http = ["dep:reqwest"]
 msgpack = ["dep:rmp-serde"]
 
-assert_approx_eq = "1"
 
