@@ -294,17 +294,22 @@ def wasm_matrix(crates: list[dict]) -> dict:
         except Exception:
             pass
 
-    includes = [
-        {
-            "crate": c["name"],
-            "crate_path": c["crate_path"],
-            "nested": c["nested"],
-            "cargo_package": c["cargo_package"],
-            "runtime": runtime,
-        }
-        for c in wasm_crates
-        for runtime in WASM_RUNTIMES
-    ]
+    # -wasm32v1-none crates: all four runtimes (kernel portability + test execution)
+    # -interface crates: only node + firefox (native std; wasm32v1-none/wasmi don't apply)
+    KERNEL_RUNTIMES = ["wasm32v1-none", "wasmi", "node", "firefox"]
+    INTERFACE_RUNTIMES = ["node", "firefox"]
+
+    includes = []
+    for c in wasm_crates:
+        runtimes = KERNEL_RUNTIMES if c["name"].endswith("-wasm32v1-none") else INTERFACE_RUNTIMES
+        for runtime in runtimes:
+            includes.append({
+                "crate": c["name"],
+                "crate_path": c["crate_path"],
+                "nested": c["nested"],
+                "cargo_package": c["cargo_package"],
+                "runtime": runtime,
+            })
     # Extra pyodide/emscripten entry for larql-python-interface (pyo3 ABI)
     for c in wasm_crates:
         if c["name"] == "larql-python-interface":

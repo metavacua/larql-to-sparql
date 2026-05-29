@@ -1,0 +1,15 @@
+#![cfg_attr(target_arch = "wasm32", no_std)]
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+
+pub mod commands;
+pub mod formatting;
+pub mod utils;
+
+/// WASM entry point: CLI dispatch for a host caller via bridge.
+/// Phase B will route through larql-bridge traits.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn larql_cli_dispatch(_cmd_ptr: u32, _cmd_len: u32) -> u32 {
+    0
+}

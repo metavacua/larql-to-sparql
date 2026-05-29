@@ -6,6 +6,13 @@ authors.workspace = true
 license.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
 
+[lib]
+name = "larql_cli_wasm32v1_none"
+
+[[bin]]
+name = "larql"
+path = "src/main.rs"
+
 [dependencies]
 larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
 larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
