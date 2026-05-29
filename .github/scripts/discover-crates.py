@@ -238,7 +238,10 @@ WASM_RUNTIMES = ["wasm32v1-none", "wasmi", "node", "firefox"]
 
 def native_matrix(crates: list[dict]) -> dict:
     # For native, only include crates NOT from crates/larql-wasm/ (only original crates + larql-experts).
-    native_crates = [c for c in crates if not c["crate_path"].startswith("crates/larql-wasm/")]
+    native_crates = [
+        c for c in crates
+        if not (c["crate_path"] == "crates/larql-wasm" or c["crate_path"].startswith("crates/larql-wasm/"))
+    ]
     return {
         "include": [
             {
@@ -314,7 +317,10 @@ def wasm_matrix(crates: list[dict]) -> dict:
 
 def coverage_matrix(crates: list[dict]) -> dict:
     # For coverage, only include crates NOT from crates/larql-wasm/ (only original crates + larql-experts).
-    coverage_crates = [c for c in crates if not c["crate_path"].startswith("crates/larql-wasm/")]
+    coverage_crates = [
+        c for c in crates
+        if not (c["crate_path"] == "crates/larql-wasm" or c["crate_path"].startswith("crates/larql-wasm/"))
+    ]
     return {
         "include": [
             {
