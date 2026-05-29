@@ -39,7 +39,6 @@ tokenizers = "0.21"
 # Used by `residual_diff::capture` to drive the backend-side per-layer
 # dump hooks into a private dir per call. dev-only would force every
 # crate consumer to pull tempfile in just to use the in-memory diff API.
-tempfile = "3"
 
 # Chat-template rendering (HF `tokenizer_config.json::chat_template` is Jinja).
 # `minijinja-contrib` ships `pycompat::unknown_method_callback` which gives us
@@ -73,7 +72,6 @@ wasmtime-wasi = { version = ">=36.0.7", optional = true }
 # native 64-bit atomic ops).
 portable-atomic = "1"
 
-
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
 blas-src = { version = "0.10", features = ["openblas"], default-features = false }
@@ -100,28 +98,3 @@ metal = ["larql-compute/metal"]
 # preserved loader_jit/caller_jit modules for REUSE compliance.
 expert-jit = ["dep:wasmtime", "dep:wasmtime-wasi"]
 
-[[example]]
-name = "cpu_gpu_diag"
-required-features = ["metal"]
-
-[[example]]
-name = "decode_vs_prefill"
-required-features = ["metal"]
-
-[[example]]
-name = "residual_diff"
-required-features = ["metal"]
-
-[[example]]
-name = "stage_bisect"
-required-features = ["metal"]
-
-[dev-dependencies]
-assert_approx_eq = "1"
-tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
-larql-kv = { path = "../larql-kv-wasm32v1-none", package = "larql-kv-wasm32v1-none" }
-
-[[bench]]
-name = "wire_codec"
-harness = false

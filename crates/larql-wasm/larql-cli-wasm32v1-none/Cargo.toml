@@ -6,10 +6,6 @@ authors.workspace = true
 license.workspace = true
 description = "CLI for LARQL knowledge graph extraction and querying"
 
-[[bin]]
-name = "larql"
-path = "../main.rs-wasm32v1-none"
-
 [dependencies]
 larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none" }
 larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
@@ -41,5 +37,3 @@ metal = [
     "larql-vindex/metal",
 ]
 
-[dev-dependencies]
-tempfile = "3"

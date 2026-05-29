@@ -10,10 +10,6 @@ description = "HTTP server for vindex knowledge queries and inference"
 name = "larql_server"
 path = "../lib.rs-wasm32v1-none"
 
-[[bin]]
-name = "larql-server-wasm32v1-none"
-path = "../main.rs-wasm32v1-none"
-
 [dependencies]
 larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
@@ -44,7 +40,6 @@ rayon = "1.10"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 clap = { version = "4", features = ["derive", "env"] }
 libc = "0.2"

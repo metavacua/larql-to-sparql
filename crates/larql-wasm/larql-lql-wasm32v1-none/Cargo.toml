@@ -26,22 +26,8 @@ default = []
 # with `--features metal` from this package.
 metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
 
-[dev-dependencies]
-criterion = "0.5"
 # Mocked HTTP server for testing the Remote backend's forwarders
 # without spinning up a real `larql-server`. Each test wires a
 # `mockito::Server`, points the session at it via `USE "<url>"`, and
 # asserts on the canned response.
-mockito = "1.7"
 
-[[bench]]
-name = "parser"
-harness = false
-
-[[bench]]
-name = "executor"
-harness = false
-
-[[bench]]
-name = "compile"
-harness = false

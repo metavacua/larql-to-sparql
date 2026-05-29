@@ -41,7 +41,6 @@ openblas-src = { version = "0.10", features = ["system"] }
 # Android: Minimal blas-src without external dependencies.
 blas-src = { version = "0.10", default-features = false }
 
-
 [features]
 default = []
 metal = ["dep:metal", "dep:objc"]
@@ -60,30 +59,5 @@ cc = "1.0"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[dev-dependencies]
-criterion = "0.5"
-serde_json = "1"
-memmap2 = "0.9"
-
-[[bench]]
-name = "matmul"
-harness = false
-
-[[bench]]
-name = "linalg"
-harness = false
-
-[[bench]]
-name = "quant_matvec"
-harness = false
-
-# `objc 0.2.x` (an abandoned-but-still-required transitive dep through
-# `metal`) uses `cfg(cargo-clippy)` inside its `msg_send!` / `sel_impl!`
-# macros. From rustc 1.95 onwards, `cargo-clippy` isn't a recognised
-# cfg name, so every macro expansion in our crate emits an
-# `unexpected_cfgs` warning that promotes to error under
-# `clippy -- -D warnings`. Function- and module-level `#[allow]` don't
-# reach into the macro expansion. Suppress crate-wide via the Cargo
-# `[lints]` table — the only place that reliably wires through.
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [] }

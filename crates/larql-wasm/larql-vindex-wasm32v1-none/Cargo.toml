@@ -60,56 +60,8 @@ libc = "0.2"
 default = []
 metal = ["larql-compute/metal"]
 
-[dev-dependencies]
-criterion = "0.5"
-tempfile = "3"
 # HTTP mocking for the publish trio (lfs / remote / upload).
 # `serial_test` because the tests set the LARQL_HF_TEST_BASE env var to
 # point at a per-test mockito server; env vars are process-global, so
 # parallel runs would race.
-mockito = "1.7"
-serial_test = "3.2"
 
-[[bench]]
-name = "vindex_ops"
-harness = false
-
-[[bench]]
-name = "vindex_scaling"
-harness = false
-
-[[bench]]
-name = "memit_solve"
-harness = false
-
-[[bench]]
-name = "extract_throughput"
-harness = false
-
-[[bench]]
-name = "q4k_vs_f32"
-harness = false
-
-[[bench]]
-name = "hnsw_decode"
-harness = false
-
-[[bench]]
-name = "q4k_cache"
-harness = false
-
-[[bench]]
-name = "cpu_vs_gpu"
-harness = false
-
-[[bench]]
-name = "walker_throughput"
-harness = false
-
-# Step 3 of the VindexStorage migration — perf gate before any
-# substore migration in step 4. Compares direct vs trait-static vs
-# trait-dyn dispatch on `interleaved_q4k_layer_data`. See the bench
-# file for the acceptance bar.
-[[bench]]
-name = "vindex_storage_dispatch"
-harness = false

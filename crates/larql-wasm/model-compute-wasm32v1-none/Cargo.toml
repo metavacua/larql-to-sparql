@@ -31,12 +31,4 @@ wasmi = { version = "1", optional = true }
 # Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
 wasmtime = { version = ">=36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
 
-[dev-dependencies]
-wat = "1"
-criterion = "0.5"
-wasmi = "1"
 
-[[bench]]
-name = "wasm_dispatch"
-harness = false
-required-features = ["wasm"]

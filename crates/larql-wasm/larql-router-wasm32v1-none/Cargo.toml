@@ -10,10 +10,6 @@ description = "Layer-sharding router for distributed larql-server deployments"
 name = "larql_router"
 path = "../lib.rs-wasm32v1-none"
 
-[[bin]]
-name = "larql-router-wasm32v1-none"
-path = "../main.rs-wasm32v1-none"
-
 [dependencies]
 larql-router-protocol = { path = "../larql-router-protocol-wasm32v1-none", package = "larql-router-protocol-wasm32v1-none" }
 
@@ -26,14 +22,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = { workspace = true }
 futures = "0.3"
 futures-core = "0.3"
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "routing"
-harness = false

@@ -14,18 +14,3 @@ thiserror = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 libm = { workspace = true }
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "codec"
-harness = false
-
-[[example]]
-name = "encode_decode"
-
-[[example]]
-name = "gate_decision"
-
-[[example]]
-name = "accuracy"

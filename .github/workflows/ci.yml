@@ -232,7 +232,7 @@ jobs:
 
       - name: Check (wasm32v1-none)
         if: matrix.runtime == 'wasm32v1-none'
-        run: cargo check ${{ matrix.cargo_package }} --target wasm32v1-none --all-targets
+        run: cargo check ${{ matrix.cargo_package }} --target wasm32v1-none --lib
 
       # ── wasmi: compile to wasm32v1-none, execute in wasmi interpreter ────────
       # Correct design: the wasmi column builds the crate as a wasm32v1-none

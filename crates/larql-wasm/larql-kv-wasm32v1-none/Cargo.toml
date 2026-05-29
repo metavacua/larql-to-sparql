@@ -45,13 +45,3 @@ blas-src = { version = "0.10", default-features = false }
 default = []
 metal = ["larql-compute/metal", "larql-inference/metal"]
 
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-tempfile = "3"
-
-[[bench]]
-name = "engine_decode"
-harness = false
-
-[[example]]
-name = "engine_ladder"
