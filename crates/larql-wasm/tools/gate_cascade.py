@@ -56,7 +56,7 @@ ERR = re.compile(
     r'^([^:\s]+\.rs):(\d+):\d+:\s+error(?:\[E\d+\])?:\s+'
     r'('
     r'unresolved import'
-    r'|cannot find (?:function|value|type|macro|module|trait)'
+    r'|cannot find (?:function|value|type|macro|module|trait|attribute|derive macro)'
     r'|no method named'
     r'|no function or associated item named'
     r'|not all trait items implemented'

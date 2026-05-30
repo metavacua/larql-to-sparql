@@ -146,10 +146,16 @@ def strip_old_imports(text: str) -> str:
 
 
 def find_insert_point(lines: list[str]) -> int:
-    """Insert after the module-level header — inner doc comments (`//!`), inner
-    attributes (`#![`), `use`, and `extern crate` lines — but BEFORE any
-    item-level doc comment (`///`) or outer attribute (`#[`), which belong to
-    the following item and must not be separated from it."""
+    """Insert after the module-level header and BEFORE the first item. Header =
+    blank lines, inner doc comments (`//!`), inner attributes (`#![ ... ]`,
+    possibly multi-line), plain `//` comments, `use`, and `extern crate`. Stop
+    at the first item-level doc comment (`///`), outer attribute (`#[`), or item
+    keyword — those belong to the following item and must not be split from it.
+
+    Critically, a plain `//` comment block or an `#![allow(...)]` inner attribute
+    that appears AFTER a leading comment must still count as header, or the
+    prelude (an item) gets inserted above them — pushing the inner attribute /
+    `//!` doc below an item (E0753 / "inner attribute not permitted")."""
     last_header = 0
     i = 0
     n = len(lines)
@@ -158,7 +164,18 @@ def find_insert_point(lines: list[str]) -> int:
         if s == '':
             i += 1
             continue  # blanks don't extend the header; insert lands before them
-        if s.startswith('//!') or s.startswith('#!['):
+        # Plain `//` comment or `//!` inner doc — header. (`///` is an OUTER doc
+        # that documents the next item: stop.)
+        if s.startswith('//') and not s.startswith('///'):
+            last_header = i + 1
+            i += 1
+            continue
+        # Inner attribute `#![ ... ]`, possibly spanning multiple lines.
+        if s.startswith('#!['):
+            depth = lines[i].count('[') - lines[i].count(']')
+            while depth > 0 and i + 1 < n:
+                i += 1
+                depth += lines[i].count('[') - lines[i].count(']')
             last_header = i + 1
             i += 1
             continue
