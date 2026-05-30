@@ -9,7 +9,7 @@ keywords = ["wasm", "kernel", "deterministic", "solver", "aot"]
 categories = ["wasm", "mathematics"]
 
 [features]
-default = ["native"]
+default = []
 native = ["dep:evalexpr", "dep:chrono"]
 wasm = ["dep:wasmi"]
 # Enable the original wasmtime JIT/AOT solver backend (desktop platforms only).

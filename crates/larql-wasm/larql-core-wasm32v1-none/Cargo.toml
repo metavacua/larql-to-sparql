@@ -18,7 +18,7 @@ thiserror = { workspace = true }
 rmp-serde = { version = "1", optional = true }
 
 [features]
-default = ["http", "msgpack"]
+default = []
 http = ["dep:reqwest"]
 msgpack = ["dep:rmp-serde"]
 
