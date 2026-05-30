@@ -25,8 +25,13 @@ build_running() { pgrep -f 'cargo |gate_cascade.py|pipeline.sh' >/dev/null 2>&1;
 freed_before=$(du -sk "$ROOT" 2>/dev/null | cut -f1)
 
 echo "── safe cleanup ──"
-# 1. Scratch pipeline logs.
-rm -f /tmp/*-pipe.log 2>/dev/null && echo "  removed /tmp/*-pipe.log"
+# 1. Scratch pipeline logs — but NOT while a pipeline is running (it is still
+#    writing to its log; deleting it loses live progress visibility).
+if build_running; then
+    echo "  skipped /tmp/*-pipe.log (a pipeline is running — logs are live)"
+else
+    rm -f /tmp/*-pipe.log 2>/dev/null && echo "  removed /tmp/*-pipe.log"
+fi
 
 # 2. Pipeline never builds these targets locally — drop their target subdirs.
 for unused in wasm32-unknown-unknown wasm32-wasip1 wasm32-unknown-emscripten; do
