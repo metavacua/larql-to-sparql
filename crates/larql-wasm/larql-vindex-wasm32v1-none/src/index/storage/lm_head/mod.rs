@@ -59,6 +59,7 @@ const _: () = assert!(
     "Q4_0 byte rate drift: 18/32 must equal 9/16",
 );
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read the manifest entry for `lm_head.weight` from `weight_manifest.json`,
 /// if the manifest exists and contains an entry for that key. Returns `None`
 /// when the manifest is absent (older vindexes) or doesn't list lm_head.
@@ -173,6 +174,7 @@ mod tests {
         assert_eq!(tokens.len(), 3, "no duplicate token ids in top-k output");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `synthesize_lm_head_q4` converts f16 embeddings to Q4_0 in RAM.
     ///
     /// Invariants:
@@ -254,6 +256,7 @@ mod tests {
         assert_eq!(ptr_before, ptr_after, "second call should not reallocate");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Regression: a vindex shipping `lm_head_q4.bin` but no `lm_head.bin`
     /// (the post-2026-04-26 Q4_K writer's default) used to leave
     /// `vocab_size = 0`. The Q4 lm_head fast path then silently bailed
@@ -286,6 +289,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Companion: when `vocab_size` is *already* set (by index.json or
     /// `load_lm_head`), `load_lm_head_q4` must not clobber it.
     #[test]
@@ -303,6 +307,7 @@ mod tests {
         assert_eq!(index.vocab_size, 999, "must not clobber preset vocab_size");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Companion: `load_lm_head_q4` is a no-op for vocab_size when the
     /// hidden_size is 0 (avoid div-by-zero / nonsense vocab).
     #[test]
@@ -319,6 +324,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Regression test for the gemma3-4b-v2 garbage-output bug (2026-04-27):
     /// `format/weights/write_q4k::write_model_weights_q4k` writes
     /// `lm_head_q4.bin` as **Q4_K** (144 B / 256 elems with sub-block
@@ -477,6 +483,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Helper: build a memmap2::Mmap-shaped byte source for tests. Writes
     /// to a tempfile and mmaps it back — the synth function holds an
     /// `Arc<Mmap>` so we can't fake it inline.
@@ -487,6 +494,7 @@ mod tests {
         unsafe { memmap2::Mmap::map(&f).unwrap() }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Architectural regression test: when `weight_manifest.json` lists
     /// `lm_head.weight` with `kind != tensor_q4k`, `load_lm_head_q4` must
     /// refuse to load. This is the bug class that produced silent garbage
@@ -528,6 +536,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Companion: when the manifest correctly tags lm_head as TENSOR_Q4K,
     /// loading proceeds normally.
     #[test]

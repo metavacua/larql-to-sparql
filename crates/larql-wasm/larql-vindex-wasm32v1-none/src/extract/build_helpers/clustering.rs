@@ -1,16 +1,5 @@
 //! Relation clustering pipeline — k-means + label + write
 //! `relation_clusters.json` / `feature_clusters.jsonl`.
-
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use larql_models::ModelWeights;
-
-use crate::error::VindexError;
-use crate::extract::callbacks::IndexBuildCallbacks;
-use crate::extract::constants::{MAX_RELATION_CLUSTERS, RELATION_KMEANS_ITERS};
-use crate::extract::stage_labels::STAGE_RELATION_CLUSTERS;
-use crate::format::filenames::{FEATURE_CLUSTERS_JSONL, RELATION_CLUSTERS_JSON};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +11,21 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::extract::callbacks::IndexBuildCallbacks;
+use crate::extract::constants::{MAX_RELATION_CLUSTERS, RELATION_KMEANS_ITERS};
+use crate::extract::stage_labels::STAGE_RELATION_CLUSTERS;
+use crate::format::filenames::{FEATURE_CLUSTERS_JSONL, RELATION_CLUSTERS_JSON};
 /// Collected data for relation clustering.
 pub(crate) struct ClusterData {
     pub directions: Vec<f32>,
@@ -32,6 +36,7 @@ pub(crate) struct ClusterData {
     pub output_tokens: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the clustering and labeling pipeline on collected cluster data.
 /// Writes `relation_clusters.json` and `feature_clusters.jsonl`.
 pub(crate) fn run_clustering_pipeline(
@@ -145,6 +150,7 @@ pub(crate) fn run_clustering_pipeline(
 mod tests {
     use super::super::test_support::{vocab_tokenizer, weights_with_embed};
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_clustering_pipeline_skips_empty_directions() {
         let toks = vocab_tokenizer(&[]);
@@ -171,6 +177,7 @@ mod tests {
         assert!(!tmp.path().join(FEATURE_CLUSTERS_JSONL).exists());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_clustering_pipeline_writes_outputs_for_non_empty_data() {
         // Synthetic two-cluster setup: 6 directions in 4-D, 3 along
@@ -244,6 +251,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_clustering_pipeline_errors_on_shape_mismatch() {
         let toks = vocab_tokenizer(&["x"]);

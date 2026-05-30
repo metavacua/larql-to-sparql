@@ -23,10 +23,6 @@
 //! `NativeFfnAccess`, `QuantizedFfnAccess`, `Fp4FfnAccess` — each live
 //! in a sibling module. Adding a new capability is one new sibling
 //! plus one `mod` line here.
-
-use ndarray::Array2;
-
-use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +34,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
 // Re-export all shared types from types.rs so external callers can
 // keep using `crate::index::core::{VectorIndex, FeatureMeta, …}` paths.
 pub use super::types::*;
@@ -47,6 +49,7 @@ mod native_ffn;
 mod patch_overrides;
 mod quantized_ffn;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// The full model as a local vector index.
 ///
 /// Composes four substores plus the small set of "shape" fields that
@@ -84,6 +87,7 @@ pub struct VectorIndex {
     pub storage: Arc<MmapStorage>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Clone for VectorIndex {
     /// Each substore owns its own Clone semantics — Arc'd mmaps share,
     /// mutex/rwlock caches reset, atomics carry their values across.
@@ -103,7 +107,9 @@ impl Clone for VectorIndex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Inert "nothing loaded" constructor. Every substore is freshly
     /// allocated at the right shape — adding a new field on a substore
     /// is a single edit there, not in `core.rs`.
@@ -120,6 +126,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from heap-allocated components (in-memory builds).
     pub fn new(
         gate_vectors: Vec<Option<Array2<f32>>>,
@@ -135,6 +142,7 @@ impl VectorIndex {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a zero-copy mmap-mode index — gate vectors come from the
     /// supplied mmap; down_meta is optionally mmap'd too.
     pub fn new_mmap(
@@ -250,6 +258,7 @@ mod refactor_tests {
         assert!(v.storage.lm_head_q4_bytes().is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn new_preserves_gate_and_down_meta_overrides_empty() {
         let gate = vec![Some(Array2::<f32>::zeros((2, 4))), None];
@@ -265,6 +274,7 @@ mod refactor_tests {
         assert!(v.ffn.fp4_storage.is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn new_mmap_sets_mmap_fields_and_defaults_rest() {
         let bytes = vec![0u8; 1024];
@@ -293,6 +303,7 @@ mod refactor_tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn clone_shares_arc_mmap_handles() {
         let tmp = std::env::temp_dir().join(format!("core_clone_{}", std::process::id()));
@@ -511,6 +522,7 @@ mod refactor_tests {
         assert_eq!(v.num_features(3), 12288);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn num_features_legacy_wins_when_gate_present() {
         use super::super::fp4_storage::Fp4Storage;

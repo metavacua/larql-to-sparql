@@ -10,11 +10,6 @@
 use larql_core::core::edge::Edge;
 use larql_core::core::enums::SourceType;
 use larql_core::core::graph::Graph;
-use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
-
-use super::utils::{count_threshold, decode_token, partial_top_k_column, top_entities};
-use crate::error::VindexError;
-use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +21,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::utils::{count_threshold, decode_token, partial_top_k_column, top_entities};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
 /// Result of walking a single layer.
 #[derive(Debug, Clone)]
 pub struct LayerResult {
@@ -96,6 +99,7 @@ impl WalkCallbacks for SilentWalkCallbacks {}
 
 // resolve_model_path is re-exported from crate::model via the import above.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A loaded model ready for weight walking.
 pub struct WeightWalker {
     weights: ModelWeights,
@@ -113,7 +117,9 @@ struct RawEdge {
     feature: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl WeightWalker {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(model: &str) -> Result<Self, VindexError> {
         let model_path = resolve_model_path(model)?;
         let weights = load_model_dir_validated(&model_path)?;
@@ -134,6 +140,7 @@ impl WeightWalker {
         self.weights.num_layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Walk a single layer's FFN weights into the graph.
     ///
     /// Confidence scoring:
@@ -346,6 +353,7 @@ impl WeightWalker {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience: load model and walk all (or selected) layers.
 pub fn walk_model(
     model: &str,
@@ -374,6 +382,7 @@ pub fn walk_model(
 mod tests {
     use super::super::test_fixture::create_mock_model;
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_ww_inline_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -381,6 +390,7 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -453,6 +463,7 @@ mod tests {
         assert!(WeightWalker::load("/nonexistent/larql/ww/path").is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_missing_tokenizer_errors() {
         let dir = fixture("ww_missing_tok");

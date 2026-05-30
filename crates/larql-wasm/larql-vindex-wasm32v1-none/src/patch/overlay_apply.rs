@@ -8,9 +8,6 @@
 
 use crate::index::types::DEFAULT_C_SCORE;
 use crate::index::FeatureMeta;
-
-use super::format::{decode_gate_vector, PatchOp, VindexPatch};
-use super::overlay::PatchedVindex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +19,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::format::{decode_gate_vector, PatchOp, VindexPatch};
+#[cfg(not(target_arch = "wasm32"))]
+use super::overlay::PatchedVindex;
+#[cfg(not(target_arch = "wasm32"))]
 impl PatchedVindex {
     /// Apply a patch. Operations are resolved into the override maps.
     pub fn apply_patch(&mut self, patch: VindexPatch) {

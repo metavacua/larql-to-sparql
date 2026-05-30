@@ -4,11 +4,6 @@
 //! straight into the mmap, no decode, no clone. Per-layer offsets go
 //! through `ffn_layer_byte_offset` so variable per-layer feature counts
 //! (MoE shards) address correctly.
-
-use crate::error::VindexError;
-use crate::format::filenames::DOWN_FEATURES_BIN;
-use crate::index::core::VectorIndex;
-use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +15,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::DOWN_FEATURES_BIN;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_demand_paged;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load feature-major down vectors from down_features.bin.
     pub fn load_down_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(DOWN_FEATURES_BIN);
@@ -67,6 +72,7 @@ impl VectorIndex {
         Some(data)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the full down matrix for a layer: [intermediate, hidden] zero-copy view.
     pub fn down_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let bytes = self.storage.down_features_view()?;
@@ -98,9 +104,11 @@ mod tests {
     //! writes a small `down_features.bin` to a tempdir, mmaps it through
     //! `load_down_features`, and asserts the zero-copy slice / layer-
     //! matrix views agree with the bytes we wrote.
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a `VectorIndex` with `num_features(layer) = intermediate` so
     /// the feature-major decode arithmetic has a non-zero intermediate
     /// to slice against.
@@ -116,6 +124,7 @@ mod tests {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write `floats` as raw f32 bytes into `dir/down_features.bin`.
     fn write_down_features(dir: &std::path::Path, floats: &[f32]) {
         let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();

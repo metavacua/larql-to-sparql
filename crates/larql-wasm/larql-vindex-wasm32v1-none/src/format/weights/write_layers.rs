@@ -13,13 +13,6 @@
 //!   [entry 0 gate+up] quant_format blocks, shape [2*inter, hidden]
 //!   [entry 0 down]    quant_format blocks, shape [hidden, inter_padded]
 //!   [entry 1 gate+up] ...
-
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use crate::format::filenames::{layer_weights_filename, LAYERS_DIR};
-use crate::VindexError;
-use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +24,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use crate::format::filenames::{layer_weights_filename, LAYERS_DIR};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::VindexError;
+use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
 /// Format tag written into the file header. Extend as new formats land.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +74,7 @@ pub struct LayerEntry {
 pub type LayerWeightOffsets = Vec<(usize, usize, usize, usize)>;
 pub type LayerWeightsHeader = (LayerWeightFormat, usize, usize, usize, LayerWeightOffsets);
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write `layers/layer_{L:02}.weights` for one layer.
 ///
 /// `entries`: one element for dense, `num_experts` elements for MoE.
@@ -144,6 +148,7 @@ pub fn bf16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Quantize an f32 slice to the specified format.
 /// Returns an error for declared-but-unimplemented formats instead of
 /// silently writing Q4_K bytes under the wrong header tag.
@@ -186,6 +191,7 @@ pub fn pad_cols_to_256(data: &[f32], out_rows: usize, in_cols: usize) -> (Vec<f3
     (v, padded)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build quantized entries for a dense FFN layer from f32 gate/up/down tensors.
 ///
 /// `gate_f32`: [inter, hidden], `up_f32`: [inter, hidden], `down_f32`: [hidden, inter].
@@ -211,6 +217,7 @@ pub fn quantize_dense_entry(
     Ok(LayerEntry { gate_up, down })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build quantized entries for one MoE layer from BF16-packed expert tensors.
 ///
 /// `gate_up_bf16`: [num_experts, 2*moe_inter, hidden] BF16.

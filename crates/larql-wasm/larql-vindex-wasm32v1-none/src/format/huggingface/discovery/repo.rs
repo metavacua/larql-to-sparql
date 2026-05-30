@@ -1,10 +1,14 @@
 //! Repo existence probes — cheap HEAD against the HF API.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::super::publish::get_hf_token;
+#[cfg(not(target_arch = "wasm32"))]
 use super::super::publish::protocol::hf_base;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Cheap HEAD probe — returns `Ok(true)` if the dataset repo exists and
 /// is readable, `Ok(false)` on 404, `Err` on other failures. Auth is
 /// optional; pass-through when available (lets callers see private
@@ -13,6 +17,7 @@ pub fn dataset_repo_exists(repo_id: &str) -> Result<bool, VindexError> {
     repo_exists(repo_id, "model")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn repo_exists(repo_id: &str, repo_type: &str) -> Result<bool, VindexError> {
     let token = get_hf_token().ok();
     let plural = if repo_type == "dataset" {

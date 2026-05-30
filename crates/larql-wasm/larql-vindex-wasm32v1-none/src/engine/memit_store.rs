@@ -10,10 +10,6 @@
 //! For production weight edits with covariance whitening + per-fact
 //! optimised target deltas (the validated v11 200/200 pipeline), see
 //! `larql-inference/src/forward/memit.rs`.
-
-use ndarray::{Array1, Array2};
-
-use larql_compute::cpu::ops::linalg::ridge_decomposition_solve;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +21,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::cpu::ops::linalg::ridge_decomposition_solve;
+#[cfg(not(target_arch = "wasm32"))]
 /// A single MEMIT compaction cycle's result.
 #[derive(Debug, Clone)]
 pub struct MemitCycle {
@@ -36,6 +39,7 @@ pub struct MemitCycle {
     pub max_off_diagonal: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A fact stored in L2 via MEMIT decomposition.
 #[derive(Debug, Clone)]
 pub struct MemitFact {
@@ -50,6 +54,7 @@ pub struct MemitFact {
     pub reconstruction_cos: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Persistent store for MEMIT-compacted facts across multiple cycles.
 #[derive(Debug, Default)]
 pub struct MemitStore {
@@ -57,11 +62,13 @@ pub struct MemitStore {
     next_cycle_id: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl MemitStore {
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_cycle(
         &mut self,
         layer: usize,
@@ -91,10 +98,12 @@ impl MemitStore {
         self.cycles.len()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn cycles(&self) -> &[MemitCycle] {
         &self.cycles
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Rehydrate a store from a previously-extracted cycle list, e.g.
     /// after loading a JSON snapshot from disk. `next_cycle_id` is set
     /// to one past the highest existing id so subsequent `add_cycle`
@@ -107,6 +116,7 @@ impl MemitStore {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Lookup all facts for an entity across all cycles.
     pub fn facts_for_entity(&self, entity: &str) -> Vec<&MemitFact> {
         let mut out = Vec::new();
@@ -120,6 +130,7 @@ impl MemitStore {
         out
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Lookup all facts matching (entity, relation) across all cycles.
     pub fn lookup(&self, entity: &str, relation: &str) -> Vec<&MemitFact> {
         let mut out = Vec::new();
@@ -136,6 +147,7 @@ impl MemitStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Result of a vanilla MEMIT solve — the dense weight delta plus
 /// per-fact decomposition diagnostics ready to feed `MemitStore`.
 #[derive(Debug, Clone)]
@@ -152,6 +164,7 @@ pub struct MemitSolveResult {
     pub frobenius_norm: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Vanilla MEMIT closed-form solve.
 ///
 /// Wraps `larql_compute::cpu::ops::linalg::ridge_decomposition_solve`
@@ -195,6 +208,7 @@ pub fn memit_solve(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cosine_sim_views(a: &ndarray::ArrayView1<f32>, b: &ndarray::ArrayView1<f32>) -> f32 {
     let dot = a.dot(b);
     let na = a.dot(a).sqrt();
@@ -205,6 +219,7 @@ fn cosine_sim_views(a: &ndarray::ArrayView1<f32>, b: &ndarray::ArrayView1<f32>) 
     dot / (na * nb)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Batched cross-similarity: `C[i,j] = cos(D.row(i), T.row(j))`. The
 /// matrix is computed as one BLAS sgemm over row-normalised D and T,
 /// then the max absolute off-diagonal value is returned. Replaces the
@@ -252,6 +267,7 @@ fn max_off_diagonal_batched(d_matrix: &Array2<f32>, targets: &Array2<f32>) -> f3
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_fact(entity: &str, relation: &str, target: &str) -> MemitFact {
         MemitFact {
             entity: entity.into(),
@@ -314,6 +330,7 @@ mod tests {
         assert_eq!(all.len(), 2);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn memit_solve_orthonormal_round_trip() {
         let n = 4;
@@ -333,6 +350,7 @@ mod tests {
         assert!(r.max_off_diagonal < 0.01, "off-diag {}", r.max_off_diagonal);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn memit_solve_populates_diagnostics() {
         let n = 3;
@@ -367,6 +385,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn memit_solve_feeds_store() {
         // Round-trip: solve, package into MemitFact, add to MemitStore, look up.

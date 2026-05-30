@@ -6,9 +6,6 @@
 //! Uses random projection to reduce dimensionality during graph construction
 //! and search traversal. Final candidates are scored with exact dot products
 //! by the caller. This makes the build practical at dim=2560.
-
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use core::cmp::Ordering;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +17,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use core::cmp::Ordering;
 /// Max-heap element (best score first).
 #[derive(Clone, Copy)]
 struct MaxScored {
@@ -70,6 +71,7 @@ impl Ord for MinScored {
 /// Full-dim dot products are only done for final candidate scoring.
 const PROJ_DIM: usize = 64;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// HNSW index for a single layer's gate vectors.
 ///
 /// The graph is built and traversed using random-projected vectors (dim=64).
@@ -90,7 +92,9 @@ pub struct HnswLayer {
     projected: Array2<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl HnswLayer {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build an HNSW index from gate vectors.
     ///
     /// `vectors`: [num_vectors, dim] matrix (used for random projection).
@@ -203,6 +207,7 @@ impl HnswLayer {
         index
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Search for top-K nearest neighbors.
     ///
     /// Uses projected vectors for graph traversal, then scores final candidates
@@ -255,6 +260,7 @@ impl HnswLayer {
         results
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Generate a random projection matrix [dim, proj_dim].
     /// Uses the same deterministic RNG for reproducibility.
     fn random_projection_matrix(dim: usize, proj_dim: usize) -> Array2<f32> {
@@ -269,11 +275,13 @@ impl HnswLayer {
 
     // ── Internals ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[inline(always)]
     fn dot(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
         larql_compute::dot(a, b)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn greedy_closest(
         &self,
         vectors: &ArrayView2<f32>,
@@ -302,6 +310,7 @@ impl HnswLayer {
         ep
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn search_level(
         &self,
         vectors: &ArrayView2<f32>,
@@ -399,6 +408,7 @@ impl HnswLayer {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn add_connection(
         &mut self,
         node: usize,

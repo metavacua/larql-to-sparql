@@ -2,14 +2,18 @@
 //!
 //! Delegation shim for the FP4 (exp-26) FFN access paths.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::VectorIndex;
 use crate::index::types::Fp4FfnAccess;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Fp4FfnAccess for VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     fn has_fp4_storage(&self) -> bool {
         VectorIndex::has_fp4_storage(self)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fp4_ffn_row_dot(
         &self,
         layer: usize,
@@ -20,6 +24,7 @@ impl Fp4FfnAccess for VectorIndex {
         VectorIndex::fp4_ffn_row_dot(self, layer, component, feat, x)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fp4_ffn_row_scaled_add(
         &self,
         layer: usize,
@@ -31,6 +36,7 @@ impl Fp4FfnAccess for VectorIndex {
         VectorIndex::fp4_ffn_row_scaled_add(self, layer, component, feat, alpha, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fp4_ffn_row_into(
         &self,
         layer: usize,

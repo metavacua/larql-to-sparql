@@ -1,12 +1,6 @@
 //! Attention OV / QK per-layer extraction methods.
 
 use larql_models::{TopKEntry, VectorRecord, COMPONENT_ATTN_OV, COMPONENT_ATTN_QK};
-
-use super::loader::VectorExtractor;
-use super::types::{ExtractCallbacks, ExtractConfig};
-use super::writer::VectorWriter;
-use crate::error::VindexError;
-use crate::walker::utils::{decode_token, partial_top_k};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,7 +12,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::loader::VectorExtractor;
+use super::types::{ExtractCallbacks, ExtractConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use super::writer::VectorWriter;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::walker::utils::{decode_token, partial_top_k};
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorExtractor {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extract attention OV circuit vectors for a single layer.
     ///
     /// For each KV head, computes OV = O_h @ V_h and stores the mean output
@@ -115,6 +121,7 @@ impl VectorExtractor {
         Ok(count)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extract attention Q/K mean direction vectors per head for a single layer.
     ///
     /// Each Q/K head's projection is (head_dim, hidden). We store the mean row
@@ -211,6 +218,7 @@ mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
     use larql_models::VectorFileHeader;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_attn_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -218,10 +226,12 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_writer(path: &std::path::Path) -> VectorWriter {
         let mut w = VectorWriter::create(path).unwrap();
         w.write_header(&VectorFileHeader {

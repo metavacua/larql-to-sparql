@@ -16,12 +16,6 @@
 //!
 //! Runtime application of patches lives in `super::overlay`
 //! (`PatchedVindex`).
-
-use std::path::Path;
-
-use serde::{Deserialize, Serialize};
-
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -33,6 +27,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
 // ═══════════════════════════════════════════════════════════════
 // Patch data types
 // ═══════════════════════════════════════════════════════════════
@@ -147,6 +149,7 @@ impl PatchOp {
 // ═══════════════════════════════════════════════════════════════
 
 impl VindexPatch {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write patch to a .vlp file.
     pub fn save(&self, path: &Path) -> Result<(), VindexError> {
         let json =
@@ -155,6 +158,7 @@ impl VindexPatch {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load patch from a .vlp file.
     pub fn load(path: &Path) -> Result<Self, VindexError> {
         let text = std::fs::read_to_string(path)?;
@@ -200,6 +204,7 @@ pub fn encode_gate_vector(vec: &[f32]) -> String {
     base64_encode(bytes)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode a base64 string back to f32 vector.
 pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
     let bytes = base64_decode(b64)?;
@@ -240,7 +245,9 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn base64_decode(input: &str) -> Result<Vec<u8>, VindexError> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn val(c: u8) -> Result<u32, VindexError> {
         match c {
             b'A'..=b'Z' => Ok((c - b'A') as u32),
@@ -505,6 +512,7 @@ mod tests {
         assert_eq!(loaded.operations.len(), 1);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_missing_file_returns_error() {
         let result = VindexPatch::load(std::path::Path::new("/nonexistent/path.vlp"));

@@ -1,8 +1,4 @@
 //! Public types for vector extraction — config, callbacks, summaries.
-
-use std::path::PathBuf;
-
-pub use larql_models::ALL_COMPONENTS;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +10,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+pub use larql_models::ALL_COMPONENTS;
 /// Configuration for vector extraction.
 pub struct ExtractConfig {
     pub components: Vec<String>,
@@ -50,6 +51,7 @@ pub trait ExtractCallbacks {
 pub struct SilentExtractCallbacks;
 impl ExtractCallbacks for SilentExtractCallbacks {}
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Summary of a full extraction run.
 pub struct ExtractSummary {
     pub components: Vec<ComponentSummary>,
@@ -57,6 +59,7 @@ pub struct ExtractSummary {
     pub elapsed_secs: f64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Summary for a single component.
 pub struct ComponentSummary {
     pub component: String,
@@ -87,6 +90,7 @@ mod tests {
         cb.on_component_done(COMPONENT_FFN_DOWN, 4);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn component_summary_fields_are_addressable() {
         let s = ComponentSummary {
@@ -101,6 +105,7 @@ mod tests {
         assert!((s.elapsed_secs - 0.5).abs() < 1e-9);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_summary_aggregates_components() {
         let s = ExtractSummary {

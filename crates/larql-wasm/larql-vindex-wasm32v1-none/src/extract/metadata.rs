@@ -8,8 +8,6 @@
 //! an otherwise-successful vindex build.
 
 use crate::format::filenames::*;
-
-use std::path::Path;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +19,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 /// Files we opportunistically copy from the HF source directory. Names
 /// match the upstream HF layout so a round-trip back to a HF-shaped model
 /// dir is possible without renaming.
@@ -41,6 +42,7 @@ pub const SNAPSHOT_FILES: &[&str] = &[
     "chat_template.jinja",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Copy each of [`SNAPSHOT_FILES`] from `source_dir` to `output_dir` when
 /// present. Returns the list of files actually copied (empty `Vec` is a
 /// valid outcome — GGUF sources have none of these). Errors only on I/O
@@ -62,6 +64,7 @@ pub fn snapshot_hf_metadata(source_dir: &Path, output_dir: &Path) -> std::io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
     #[test]
     fn copies_present_files_only() {

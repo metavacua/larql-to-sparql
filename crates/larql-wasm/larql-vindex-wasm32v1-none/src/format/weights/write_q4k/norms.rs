@@ -6,14 +6,6 @@
 //! Q4_K-style super-block quantisation noise would compound. Returns
 //! the running `Vec<WeightEntry>` (a single `weight_manifest.json`
 //! references everything written here plus the PLE / lm_head stages).
-
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-
-use super::super::write_f32::{kind, WeightEntry, WeightSource};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +17,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+
+use super::super::write_f32::{kind, WeightEntry, WeightSource};
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn write_norms_and_router(
     source: &dyn WeightSource,
     dir: &Path,

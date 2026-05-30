@@ -8,14 +8,6 @@
 //! `gate_override` reads from the patch overlay (not the base) and
 //! `gate_knn_batch` re-ranks per-row to surface inserted slots that
 //! the base path would miss.
-
-use ndarray::Array1;
-
-use crate::index::{
-    FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
-};
-
-use super::overlay::PatchedVindex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -27,7 +19,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+use crate::index::{
+    FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::overlay::PatchedVindex;
+#[cfg(not(target_arch = "wasm32"))]
 impl GateLookup for PatchedVindex {
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
     }
@@ -40,6 +44,7 @@ impl GateLookup for PatchedVindex {
         self.num_features(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_scores_batch(
         &self,
         layer: usize,
@@ -48,6 +53,7 @@ impl GateLookup for PatchedVindex {
         self.base.gate_scores_batch(layer, x)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_scores_batch_backend(
         &self,
         layer: usize,
@@ -57,6 +63,7 @@ impl GateLookup for PatchedVindex {
         self.base.gate_scores_batch_backend(layer, x, backend)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn_batch(&self, layer: usize, x: &ndarray::Array2<f32>, top_k: usize) -> Vec<usize> {
         // The base impl runs a BLAS gemm against the disk-side gate
         // matrix and ignores the patch overlay — so any feature with
@@ -81,6 +88,7 @@ impl GateLookup for PatchedVindex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PatchOverrides for PatchedVindex {
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.base.down_override(layer, feature)
@@ -104,6 +112,7 @@ impl PatchOverrides for PatchedVindex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl NativeFfnAccess for PatchedVindex {
     fn down_feature_vector(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.base.down_feature_vector(layer, feature)
@@ -113,10 +122,12 @@ impl NativeFfnAccess for PatchedVindex {
         self.base.has_down_features()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn down_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.down_layer_matrix(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.up_layer_matrix(layer)
     }
@@ -129,19 +140,23 @@ impl NativeFfnAccess for PatchedVindex {
         self.base.has_interleaved()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_gate(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.interleaved_gate(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_up(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.interleaved_up(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_down(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.base.interleaved_down(layer)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl QuantizedFfnAccess for PatchedVindex {
     fn has_interleaved_q4(&self) -> bool {
         self.base.has_interleaved_q4()
@@ -163,6 +178,7 @@ impl QuantizedFfnAccess for PatchedVindex {
         self.base.interleaved_q4k_layer_data(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_layer(&self, layer: usize, component: usize) -> Option<std::sync::Arc<Vec<f32>>> {
         self.base.q4k_ffn_layer(layer, component)
     }
@@ -226,6 +242,7 @@ impl QuantizedFfnAccess for PatchedVindex {
             .q4k_ffn_row_scaled_add(layer, component, feat, alpha, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_matmul_transb(
         &self,
         layer: usize,
@@ -239,6 +256,7 @@ impl QuantizedFfnAccess for PatchedVindex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Fp4FfnAccess for PatchedVindex {
     fn has_fp4_storage(&self) -> bool {
         self.base.has_fp4_storage()

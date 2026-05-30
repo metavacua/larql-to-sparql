@@ -1,11 +1,5 @@
 //! Post-PUT finalisation: verify the LFS object reached storage, then
 //! commit the pointer file via the HF NDJSON commit endpoint.
-
-use crate::error::VindexError;
-
-use super::super::protocol::{
-    hf_base, repo_type_plural, CONTENT_TYPE_LFS_JSON, CONTENT_TYPE_NDJSON, HASH_ALGO_SHA256,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +12,15 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::protocol::{
+    hf_base, repo_type_plural, CONTENT_TYPE_LFS_JSON, CONTENT_TYPE_NDJSON, HASH_ALGO_SHA256,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
 /// POST `{oid, size}` to the verify URL the LFS batch returned. HF uses
 /// this to confirm the object made it to storage intact before the
 /// commit references it.
@@ -50,6 +53,7 @@ pub(super) fn lfs_verify(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Commit a single LFS pointer into the repo via NDJSON. HF's commit
 /// API is one request per change set; we commit per file for simplicity
 /// (batching every file into one commit is a future optimisation).

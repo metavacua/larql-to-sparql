@@ -11,10 +11,6 @@
 //! [`CascadeTrie::find`] to resolve a probe path for a given model id; it
 //! consults `LARQL_PROBE_PATH` and `LARQL_PROBE_DIR` env overrides before
 //! falling back to caller-supplied search directories.
-
-use std::path::{Path, PathBuf};
-
-use serde::Deserialize;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +22,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 // ── Serialised probe format ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -63,6 +64,7 @@ pub struct CascadeTrie {
 }
 
 impl CascadeTrie {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load from a JSON file exported by `export_trie_probe.py`.
     pub fn load(path: &Path) -> Result<Self, Box<dyn core::error::Error>> {
         let text = std::fs::read_to_string(path)?;
@@ -144,6 +146,7 @@ impl CascadeTrie {
         format!("cascade_trie_{}_probe.json", Self::slug(model_id))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Resolve a probe path for `model_id` by searching a precedence chain.
     ///
     /// Search order:
@@ -165,6 +168,7 @@ impl CascadeTrie {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Pure version of [`Self::find`] — env-var values are passed in instead
     /// of read from the process environment. Exposed so tests can exercise
     /// the precedence chain without mutating shared env state (which would
@@ -222,6 +226,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_returns_none_when_nothing_matches() {
         // Don't pollute env: verify by passing only a non-existent dir.
@@ -230,6 +235,7 @@ mod tests {
         assert!(r.is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_resolves_from_extra_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -241,6 +247,7 @@ mod tests {
         assert_eq!(found, path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_extra_dirs_searched_in_order() {
         let first = tempfile::tempdir().expect("tempdir");
@@ -254,6 +261,7 @@ mod tests {
         assert_eq!(found, in_second);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_with_env_path_wins_over_dir_and_extra() {
         // env_path → returned regardless of env_dir / extra_dirs.
@@ -273,6 +281,7 @@ mod tests {
         assert_eq!(found, p);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_with_env_path_falls_through_when_missing() {
         // env_path set to a non-existent file → should not be returned;
@@ -292,6 +301,7 @@ mod tests {
         assert_eq!(found, resolved);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_with_env_dir_wins_over_extra() {
         // env_dir → preferred over extra_dirs.
@@ -313,6 +323,7 @@ mod tests {
         assert_eq!(found, in_env);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_with_env_dir_missing_filename_falls_through_to_extra() {
         // env_dir set but the filename isn't there → fall through to extra_dirs.
@@ -332,6 +343,7 @@ mod tests {
         assert_eq!(found, in_extra);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_with_env_returns_none_when_nothing_resolves() {
         let none = CascadeTrie::find_with_env(

@@ -10,16 +10,6 @@
 //! major Q4_K down vectors so per-feature decode skips the
 //! `q4k_ffn_layer` whole-layer dequant cache. The legacy interleaved
 //! path stays available as the fallback when the sidecar is absent.
-
-use crate::error::VindexError;
-use crate::format::filenames::{
-    DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
-    INTERLEAVED_Q4K_MANIFEST_JSON,
-};
-use crate::format::weights::Q4kManifestEntry;
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -32,10 +22,24 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::{
+    DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
+    INTERLEAVED_Q4K_MANIFEST_JSON,
+};
+use crate::format::weights::Q4kManifestEntry;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_demand_paged;
+
 #[cfg(unix)]
 use super::FFN_DOWN;
 use super::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read + typed-deserialise a Q4_K manifest JSON file. Validates each
 /// entry's format tag against `quant::registry`. `display_name` is the
 /// filename used in error messages so a parse failure reports which
@@ -61,7 +65,9 @@ fn read_q4k_manifest(
     Ok(entries)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4_K/Q6_K interleaved FFN data (Ollama-compatible, matches attn format).
     ///
     /// Also reads the optional `interleaved_q4k_manifest.json` sidecar emitted
@@ -108,6 +114,7 @@ impl VectorIndex {
         self.storage.has_interleaved_q4k()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load `down_features_q4k.bin` if present (W2 feature-major down).
     /// Silent no-op when the file is absent — older vindexes still work
     /// via the `q4k_ffn_layer` cache fallback. Idempotent.
@@ -192,6 +199,7 @@ impl VectorIndex {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Prefetch next layer's Q4_K/Q6_K FFN data into the page cache via
     /// MADV_WILLNEED. Counterpart of [`Self::prefetch_interleaved_q4_layer`].
     /// Issues one madvise spanning the layer's gate+up+down matrices.

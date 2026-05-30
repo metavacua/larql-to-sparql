@@ -1,10 +1,14 @@
+#[cfg(not(target_arch = "wasm32"))]
 use portable_atomic::AtomicU64;
 use core::sync::atomic::Ordering;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub struct Epoch(AtomicU64);
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Epoch {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn zero() -> Self {
         Self(AtomicU64::new(0))
     }
@@ -18,6 +22,7 @@ impl Epoch {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Epoch {
     fn default() -> Self {
         Self::zero()

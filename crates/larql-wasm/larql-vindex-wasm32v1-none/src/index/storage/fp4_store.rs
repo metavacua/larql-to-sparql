@@ -12,15 +12,6 @@
 //! Kept orthogonal to the legacy f16/f32 mmap path — loaders and walk
 //! kernels dispatch on `VectorIndex::fp4_storage.is_some()` rather than
 //! filename sniffing.
-
-use std::path::Path;
-
-use larql_models::quant::fp4_block::{
-    decode_fp4_feature, decode_fp8_feature, fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
-};
-
-use crate::config::types::{Fp4Config, Precision, ProjectionFormat};
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -33,6 +24,18 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_models::quant::fp4_block::{
+    decode_fp4_feature, decode_fp8_feature, fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
+};
+
+use crate::config::types::{Fp4Config, Precision, ProjectionFormat};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-projection mmap + byte-layout metadata.
 pub struct Fp4Storage {
     /// The manifest as loaded from `index.json.fp4`.
@@ -49,7 +52,9 @@ pub struct Fp4Storage {
     pub hidden: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Fp4Storage {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load each projection's data file per the manifest. Files with
     /// precision = f16/f32 are left unmapped (None) — caller still reads
     /// those from the legacy `gate_vectors.bin` / `up_features.bin` /
@@ -118,6 +123,7 @@ impl Fp4Storage {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn validate_file_size(
         proj: &ProjectionFormat,
         mmap: Option<&memmap2::Mmap>,
@@ -154,6 +160,7 @@ impl Fp4Storage {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Per-component mmap.
     fn mmap_for(&self, component: usize) -> Option<&memmap2::Mmap> {
         match component {
@@ -268,6 +275,7 @@ impl Fp4Storage {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl core::fmt::Debug for Fp4Storage {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Fp4Storage")
@@ -300,6 +308,7 @@ mod tests {
     struct TempDir(std::path::PathBuf);
     static TEMPDIR_SEQ: portable_atomic::AtomicU64 = portable_atomic::AtomicU64::new(0);
     impl TempDir {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(label: &str) -> Self {
             let base = std::env::temp_dir();
             let ts = std::time::SystemTime::now()
@@ -318,6 +327,7 @@ mod tests {
         }
     }
     impl Drop for TempDir {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
@@ -386,6 +396,7 @@ mod tests {
         assert!(err.is_err(), "expected error when FP4 files aren't on disk");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_validates_file_sizes() {
         let tmp = TempDir::new("badsize");

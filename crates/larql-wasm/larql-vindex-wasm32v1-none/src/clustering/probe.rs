@@ -3,10 +3,6 @@
 //! For each entity in the reference data, embed it, run gate KNN at each
 //! knowledge layer, and record which features activate. This gives confirmed
 //! (entity, feature) mappings — ground truth for pair-based relation labeling.
-
-use ndarray::Array1;
-
-use crate::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +14,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::VectorIndex;
 /// Result of probing: maps (layer, feature) → list of entity names that activate it.
 pub struct ProbeResult {
     /// (layer, feature) → entity names
@@ -28,6 +30,7 @@ pub struct ProbeResult {
     pub num_activations: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Probe a set of entities against a VectorIndex to find which features they activate.
 ///
 /// For each entity:
@@ -111,6 +114,7 @@ pub fn probe_entities(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Extract unique entity names from the reference triple files.
 pub fn extract_probe_entities(triples_path: &std::path::Path) -> Vec<String> {
     let mut entities = HashSet::new();
@@ -149,6 +153,7 @@ pub fn extract_probe_entities(triples_path: &std::path::Path) -> Vec<String> {
     sorted
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build confirmed (input_entity, output_token) pairs for each feature
 /// by combining probe results with down_meta output tokens.
 ///
@@ -194,6 +199,7 @@ pub fn build_confirmed_pairs(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_entities_from_json() {
         let dir = std::env::temp_dir().join("probe_test");
@@ -220,6 +226,7 @@ mod tests {
 
     use larql_models::TopKEntry;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn empty_tokenizer() -> tokenizers::Tokenizer {
         use tokenizers::models::wordlevel::WordLevel;
         use tokenizers::TokenizerBuilder;
@@ -269,6 +276,7 @@ mod tests {
 
     // ── extract_probe_entities ────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_entities_returns_empty_for_missing_file() {
         let path = std::path::Path::new("/tmp/does-not-exist-probe-test.json");
@@ -276,6 +284,7 @@ mod tests {
         assert!(entities.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_entities_returns_empty_for_invalid_json() {
         let tmp = tempfile::tempdir().unwrap();
@@ -284,6 +293,7 @@ mod tests {
         assert!(extract_probe_entities(&path).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_entities_filters_long_names_and_parens_and_urls() {
         let tmp = tempfile::tempdir().unwrap();
@@ -315,6 +325,7 @@ mod tests {
         assert!(!entities.iter().any(|e| e.len() < 2));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_entities_returns_sorted_unique_set() {
         let tmp = tempfile::tempdir().unwrap();
@@ -430,6 +441,7 @@ mod tests {
 
     // ── probe_entities ────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn probe_entities_returns_empty_result_on_empty_input() {
         let v = VectorIndex::empty(2, 4);
@@ -441,6 +453,7 @@ mod tests {
         assert_eq!(result.num_activations, 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn probe_entities_skips_unencodable_entities() {
         // The trivial WordLevel tokenizer with an empty vocab returns

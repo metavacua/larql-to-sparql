@@ -12,16 +12,6 @@
 //! In step 4 the substore byte-yielding accessors get rewritten to
 //! forward through `MmapStorage`. In step 5 the substore mmap fields
 //! drop entirely. Until then this is purely additive.
-
-use bytes::Bytes;
-
-use crate::config::dtype::StorageDtype;
-use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
-use crate::index::storage::ffn_store::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
-use crate::index::types::{GateLayerSlice, GateQ4Slice};
-
-use super::sealed::Sealed;
-use super::{BytesView, GateLayerView, VindexStorage};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -33,6 +23,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use bytes::Bytes;
+
+use crate::config::dtype::StorageDtype;
+use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
+use crate::index::storage::ffn_store::{DownFeaturesQ4kEntry, FFN_COMPONENTS_PER_LAYER};
+use crate::index::types::{GateLayerSlice, GateQ4Slice};
+
+use super::sealed::Sealed;
+#[cfg(not(target_arch = "wasm32"))]
+use super::{BytesView, GateLayerView, VindexStorage};
+#[cfg(not(target_arch = "wasm32"))]
 /// Parity wrapper over today's substore mmaps. Implements
 /// `VindexStorage` by cloning each substore's `Arc<Mmap>` (or
 /// `Arc<Vec<u8>>` for the synth lm_head) and converting once into a
@@ -91,8 +94,10 @@ pub struct MmapStorage {
     pub(crate) mmap_handles: Vec<Arc<memmap2::Mmap>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Sealed for MmapStorage {}
 
+#[cfg(not(target_arch = "wasm32"))]
 impl MmapStorage {
     // ── Per-field setters (loader-side mutation) ───────────────────────
     //
@@ -104,6 +109,7 @@ impl MmapStorage {
     // `VectorIndex::clone` (cheap refcount bump until a loader
     // mutates a clone, at which point the clone gets its own copy).
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the FFN interleaved Q4_K mmap + manifest. Each
     /// (offset, length, format_tag) triple in the manifest is one
     /// component (gate / up / down).
@@ -117,30 +123,35 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the FFN interleaved Q4_0 mmap (no manifest — uniform stride).
     pub fn set_interleaved_q4(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.interleaved_q4 = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the f32 feature-major up projections mmap (`up_features.bin`).
     pub fn set_up_features(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.up_features = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the f32 feature-major down projections mmap (`down_features.bin`).
     pub fn set_down_features(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.down_features = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the f32 interleaved [gate|up|down] FFN mmap (`interleaved.bin`).
     pub fn set_interleaved_f32(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.interleaved_f32 = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the W2 feature-major Q4_K down mmap + manifest.
     pub fn set_down_features_q4k(
         &mut self,
@@ -152,6 +163,7 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the attention Q4_K mmap + manifest.
     pub fn set_attn_q4k(
         &mut self,
@@ -163,6 +175,7 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the attention Q4_0 mmap + manifest.
     pub fn set_attn_q4(&mut self, mmap: Arc<memmap2::Mmap>, manifest: Option<Vec<(usize, usize)>>) {
         self.attn_q4 = Some(arc_mmap_to_bytes(&mmap));
@@ -170,6 +183,7 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the attention Q8 mmap + manifest.
     pub fn set_attn_q8(
         &mut self,
@@ -181,24 +195,28 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the lm_head f32 mmap.
     pub fn set_lm_head_f32(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.lm_head_f32 = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the lm_head f16 mmap (tied-embedding case).
     pub fn set_lm_head_f16(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.lm_head_f16 = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the lm_head Q4 from an mmap'd file.
     pub fn set_lm_head_q4_mmap(&mut self, mmap: Arc<memmap2::Mmap>) {
         self.lm_head_q4 = Some(arc_mmap_to_bytes(&mmap));
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the lm_head Q4 from in-RAM synthesised bytes (the f16
     /// embeddings → Q4 fallback path). Does **not** register a
     /// `mmap_handles` entry — the synth bytes live on the heap.
@@ -206,6 +224,7 @@ impl MmapStorage {
         self.lm_head_q4 = Some(Bytes::from_owner(ArcAsBytes(bytes)));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the gate vectors mmap + dtype + per-layer slices.
     pub fn set_gate_vectors(
         &mut self,
@@ -219,6 +238,7 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the Q4_0 gate vectors mmap + per-layer Q4 slices.
     pub fn set_gate_q4(&mut self, mmap: Arc<memmap2::Mmap>, slices: Vec<GateQ4Slice>) {
         self.gate_q4_bytes = Some(arc_mmap_to_bytes(&mmap));
@@ -226,6 +246,7 @@ impl MmapStorage {
         self.register_mmap(&mmap);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Register an `Arc<Mmap>` for the `release_pages()` (madvise)
     /// path. Called by every setter that takes a file-backed mmap;
     /// heap-backed setters skip it.
@@ -255,9 +276,11 @@ impl MmapStorage {
     pub fn gate_q4_layer_slice(&self, layer: usize) -> Option<&GateQ4Slice> {
         self.gate_q4_slices.get(layer)
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn gate_bytes_view(&self) -> Option<&Bytes> {
         self.gate_bytes.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn gate_q4_bytes_view(&self) -> Option<&Bytes> {
         self.gate_q4_bytes.as_ref()
     }
@@ -309,33 +332,42 @@ impl MmapStorage {
 
     // ── Whole-buffer view accessors (zero-atomic borrows) ──────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Borrow the FFN Q4_K interleaved buffer without paying a
     /// refcount bump. Use when the consumer needs the bytes for the
     /// duration of `&self` only (e.g., madvise, kernel dispatch).
     pub fn interleaved_q4k_whole_buffer_view(&self) -> Option<&Bytes> {
         self.interleaved_q4k.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn interleaved_q4_whole_buffer_view(&self) -> Option<&Bytes> {
         self.interleaved_q4.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn attn_q4_whole_buffer_view(&self) -> Option<&Bytes> {
         self.attn_q4.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn lm_head_f32_view(&self) -> Option<&Bytes> {
         self.lm_head_f32.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn lm_head_f16_view(&self) -> Option<&Bytes> {
         self.lm_head_f16.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn lm_head_q4_view(&self) -> Option<&Bytes> {
         self.lm_head_q4.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn up_features_view(&self) -> Option<&Bytes> {
         self.up_features.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn down_features_view(&self) -> Option<&Bytes> {
         self.down_features.as_ref()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn interleaved_f32_view(&self) -> Option<&Bytes> {
         self.interleaved_f32.as_ref()
     }
@@ -373,6 +405,7 @@ impl MmapStorage {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Drop resident pages for every mmap'd file held by this
     /// storage. Best-effort `madvise(MADV_DONTNEED)`. On Linux this
     /// immediately drops clean pages from RSS; on Darwin
@@ -398,6 +431,7 @@ impl MmapStorage {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `Arc<Mmap>` → `Bytes` via `Bytes::from_owner`. Zero-copy: the
 /// `Bytes` keeps the `Arc<Mmap>` alive for the lifetime of any
 /// outstanding slices.
@@ -418,6 +452,7 @@ impl<T: AsRef<[u8]> + Send + Sync + 'static> AsRef<[u8]> for ArcAsBytes<T> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Bounds-check (`offset + length <= bytes.len()`) and build a
 /// borrowed `BytesView`. Matches the defensive behavior of every
 /// substore accessor that consults a stale-or-corrupt manifest.
@@ -429,9 +464,11 @@ fn checked_view<'a>(bytes: &'a Bytes, offset: usize, length: usize) -> Option<By
     Some(BytesView::new(bytes, offset, length))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VindexStorage for MmapStorage {
     // ── FFN ───────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4k_layer_data(
         &self,
         layer: usize,
@@ -454,10 +491,12 @@ impl VindexStorage for MmapStorage {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4k_whole_buffer(&self) -> Option<Bytes> {
         self.interleaved_q4k.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_whole_buffer(&self) -> Option<Bytes> {
         self.interleaved_q4.clone()
     }
@@ -481,6 +520,7 @@ impl VindexStorage for MmapStorage {
 
     // ── Attention ─────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn attn_q4k_layer_data(
         &self,
         layer: usize,
@@ -502,10 +542,12 @@ impl VindexStorage for MmapStorage {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn attn_q4_whole_buffer(&self) -> Option<Bytes> {
         self.attn_q4.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn attn_q4_layer_slices(
         &self,
         layer: usize,
@@ -527,6 +569,7 @@ impl VindexStorage for MmapStorage {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn attn_q8_layer_data(
         &self,
         layer: usize,
@@ -557,14 +600,17 @@ impl VindexStorage for MmapStorage {
 
     // ── lm_head ───────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn lm_head_q4_bytes(&self) -> Option<Bytes> {
         self.lm_head_q4.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn lm_head_f16_bytes(&self) -> Option<Bytes> {
         self.lm_head_f16.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn lm_head_f32_bytes(&self) -> Option<Bytes> {
         self.lm_head_f32.clone()
     }
@@ -727,6 +773,7 @@ mod tests {
     // closest synthetic analogue of what loaders do; helper below
     // produces one with a known byte payload.
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn arc_mmap_from(payload: &[u8]) -> Arc<memmap2::Mmap> {
         let mut anon = memmap2::MmapMut::map_anon(payload.len()).expect("anon mmap");
         anon.copy_from_slice(payload);

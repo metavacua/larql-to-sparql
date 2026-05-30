@@ -9,6 +9,7 @@
 //!   load time. Gate KNN touches all pages during a linear scan but only a
 //!   logarithmic subset when HNSW is active.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create an mmap with SEQUENTIAL + WILLNEED hints — prefaults all pages.
 ///
 /// Use for files that will be read fully on every forward pass (embeddings,
@@ -25,6 +26,7 @@ pub unsafe fn mmap_optimized(file: &std::fs::File) -> Result<memmap2::Mmap, std:
     Ok(mmap)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create an mmap with RANDOM hint — no prefaulting, demand-paged only.
 ///
 /// Use for large sparse files (gate_vectors.bin, interleaved_q4k.bin) where
@@ -52,6 +54,7 @@ pub unsafe fn mmap_demand_paged(file: &std::fs::File) -> Result<memmap2::Mmap, s
     Ok(mmap)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply sequential + willneed hints to an existing mmap. Unix-only;
 /// on Windows the function is a no-op (the OS handles readahead).
 #[cfg_attr(not(unix), allow(unused_variables))]

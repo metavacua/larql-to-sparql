@@ -17,14 +17,6 @@
 //! via `<file>.tmp` rename. Removed by `Checkpoint::clear` once the
 //! whole extract succeeds — its presence in the output dir means a
 //! previous run was interrupted.
-
-use std::io::Write;
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
-
-use crate::config::VindexLayerInfo;
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -36,6 +28,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::VindexLayerInfo;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
 /// Checkpoint filename inside the output directory. Hidden so it
 /// doesn't clutter `ls` and so HF / vindex-loader code doesn't try to
 /// upload it.
@@ -92,6 +95,7 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Try to load a checkpoint from `<output_dir>/.extract_checkpoint.json`.
     /// Returns `Ok(None)` if no checkpoint is present (fresh run);
     /// `Ok(Some(...))` if one was found; `Err` only on actual parse
@@ -107,6 +111,7 @@ impl Checkpoint {
         Ok(Some(cp))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save atomically (`*.tmp` + rename).
     pub fn save(&self, output_dir: &Path) -> Result<(), VindexError> {
         let path = checkpoint_path(output_dir);
@@ -121,6 +126,7 @@ impl Checkpoint {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Remove the checkpoint file. Call after the whole extract
     /// succeeds so the next run treats the output dir as a finished
     /// vindex, not a half-finished one.
@@ -132,6 +138,7 @@ impl Checkpoint {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Mark `phase` complete and persist.
     pub fn mark(&mut self, phase: ExtractPhase, output_dir: &Path) -> Result<(), VindexError> {
         if !self.completed.contains(&phase) {
@@ -141,6 +148,7 @@ impl Checkpoint {
         self.save(output_dir)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Mark the gate phase complete and persist the `layer_infos`
     /// vector. The skip-on-resume path uses the persisted infos to
     /// rebuild the final `index.json` without re-running the gate
@@ -159,6 +167,7 @@ impl Checkpoint {
         self.completed.contains(&phase)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct a fresh checkpoint at the start of an extract run.
     pub fn fresh(model_dir: &Path, model_name: &str, num_layers: usize) -> Self {
         Self {
@@ -172,6 +181,7 @@ impl Checkpoint {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Decide whether a previously-loaded checkpoint is **valid for
     /// resume** in the current run. Validation rules:
     /// - same `model_dir` (re-extracting from a different source =
@@ -195,10 +205,12 @@ impl Checkpoint {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn checkpoint_path(output_dir: &Path) -> PathBuf {
     output_dir.join(CHECKPOINT_FILE)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn current_iso8601() -> String {
     // Bare-minimum ISO-8601 in UTC without pulling chrono in.
     let now = std::time::SystemTime::now()
@@ -238,6 +250,7 @@ fn days_to_ymd(z: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn tempdir(label: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "larql_checkpoint_{}_{}_{}",
@@ -252,6 +265,7 @@ mod tests {
         p
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn missing_checkpoint_loads_as_none() {
         let dir = tempdir("missing");
@@ -259,6 +273,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn round_trip_preserves_completed_phases() {
         let dir = tempdir("round");
@@ -276,6 +291,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn mark_is_idempotent() {
         let dir = tempdir("idem");
@@ -286,6 +302,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn clear_removes_file() {
         let dir = tempdir("clear");
@@ -297,6 +314,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compatibility_rejects_different_model() {
         let dir = tempdir("compat");

@@ -1,10 +1,5 @@
 //! Per-feature top whole-word token — the "what activates this
 //! feature" label used downstream by clustering.
-
-use larql_models::{FfnType, ModelWeights};
-use ndarray::Array2;
-
-use crate::extract::constants::GATE_TOP_TOKEN_BATCH;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +11,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::{FfnType, ModelWeights};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use crate::extract::constants::GATE_TOP_TOKEN_BATCH;
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute gate top tokens for features at a layer using whole-word
 /// embeddings. Returns one decoded whole-word token per feature.
 pub(crate) fn compute_gate_top_tokens(
@@ -72,6 +75,7 @@ mod tests {
     use super::super::test_support::{insert_tensor, vocab_tokenizer, weights_with_embed};
     use super::super::vocab::build_whole_word_vocab;
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_gate_top_tokens_returns_empty_strings_when_no_gate_tensor() {
         let toks = vocab_tokenizer(&["x"]);
@@ -83,6 +87,7 @@ mod tests {
         assert!(result.iter().all(|s| s.is_empty()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_gate_top_tokens_picks_argmax_word_per_feature() {
         // hidden=4, vocab has 4 whole-word tokens at ids 1..=4 plus
@@ -129,6 +134,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_gate_top_tokens_iterates_in_batches() {
         // num_features > GATE_TOP_TOKEN_BATCH forces multi-chunk

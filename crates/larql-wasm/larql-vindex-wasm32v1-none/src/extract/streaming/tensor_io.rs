@@ -9,12 +9,6 @@
 //!   `/dev/null` when `--drop-gate-vectors` is set).
 //! - `get_tensor_f32` reads a 2D tensor by key and dequantises to f32.
 //! - `normalize_key` strips a fixed prefix list from a tensor key.
-
-use std::io::{BufWriter, Write};
-
-use ndarray::Array2;
-
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,12 +20,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap'd safetensors file — kept alive for the duration of extraction.
 pub(super) struct MmapShard {
     pub(super) _file: std::fs::File,
     pub(super) mmap: memmap2::Mmap,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sink for gate-vector bytes. With `--drop-gate-vectors` the writer
 /// still walks every layer (so `layer_infos` is populated for
 /// `index.json`) but redirects bytes to `/dev/null` — they're
@@ -41,13 +46,16 @@ pub(super) enum GateSink {
     Discard(std::io::Sink),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Write for GateSink {
+    #[cfg(not(target_arch = "wasm32"))]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
             GateSink::File(f) => f.write(buf),
             GateSink::Discard(s) => s.write(buf),
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             GateSink::File(f) => f.flush(),
@@ -56,6 +64,7 @@ impl Write for GateSink {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Get a 2D tensor from mmap'd safetensors, dequantizing to f32.
 pub(super) fn get_tensor_f32(
     shards: &[MmapShard],
@@ -144,6 +153,7 @@ pub(super) fn normalize_key(key: &str, prefixes: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
     // ── Synthetic safetensors fixture ─────────────────────────────────────
     //
@@ -163,6 +173,7 @@ mod tests {
         bytes: Vec<u8>,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write `tensors` to a fresh `.safetensors` file in `dir`, mmap it,
     /// and return the `MmapShard` plus a `tensor_index` keyed by the
     /// tensor names (single-shard fixtures use the same name for the
@@ -211,6 +222,7 @@ mod tests {
 
     // ── get_tensor_f32 ────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_returns_none_when_key_missing() {
         let dir = tempfile::tempdir().unwrap();
@@ -227,6 +239,7 @@ mod tests {
         assert!(out.is_none(), "missing logical key must return Ok(None)");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_decodes_f32_tensor() {
         let dir = tempfile::tempdir().unwrap();
@@ -245,6 +258,7 @@ mod tests {
         assert_eq!(arr.as_slice().unwrap(), values);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_decodes_f16_tensor() {
         let dir = tempfile::tempdir().unwrap();
@@ -266,6 +280,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_decodes_bf16_tensor() {
         let dir = tempfile::tempdir().unwrap();
@@ -289,6 +304,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_returns_none_for_non_2d_tensor() {
         // 1D tensors aren't supported by the streaming gate-vector path —
@@ -307,6 +323,7 @@ mod tests {
         assert!(out.is_none(), "1D tensor must return Ok(None)");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_returns_none_for_non_float_dtype() {
         // I64 (or any other dtype the match arm doesn't list, with no
@@ -327,6 +344,7 @@ mod tests {
         assert!(out.is_none(), "I64 dtype must return Ok(None)");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_i8_without_scale_companion_returns_none() {
         // I8 .weight without an I8+F8_E8M0 companion must fall through to
@@ -348,6 +366,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_i8_with_wrong_scale_dtype_falls_through() {
         // The companion `.scale` exists but is BF16 instead of F8_E8M0 —
@@ -375,6 +394,7 @@ mod tests {
         assert!(out.is_none(), "BF16 scale companion must not trigger MXFP4");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_i8_with_bad_scale_shape_falls_through() {
         // Scale row count must match weight row count. Mismatch → bail.
@@ -400,6 +420,7 @@ mod tests {
         assert!(out.is_none(), "row-mismatch scale must abort MXFP4");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_i8_with_unsupported_group_size_falls_through() {
         // group_size = cols_unpacked / s_shape[1]. Allowed: {16, 32, 64,
@@ -427,6 +448,7 @@ mod tests {
         assert!(out.is_none(), "group_size=8 must abort MXFP4");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_tensor_f32_i8_mxfp4_dequantizes_when_companion_matches() {
         // The full MXFP4 happy path. MXFP4 packs 2 FP4 nibbles per byte,

@@ -13,7 +13,10 @@ pub mod epoch;
 pub mod memit_store;
 pub mod status;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use core::StorageEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use epoch::Epoch;
+#[cfg(not(target_arch = "wasm32"))]
 pub use memit_store::{memit_solve, MemitCycle, MemitFact, MemitSolveResult, MemitStore};
 pub use status::CompactStatus;

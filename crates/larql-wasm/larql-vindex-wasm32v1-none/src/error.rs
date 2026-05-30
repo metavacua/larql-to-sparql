@@ -1,6 +1,3 @@
-use std::path::PathBuf;
-
-use crate::config::ExtractLevel;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,6 +9,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use crate::config::ExtractLevel;
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 pub enum VindexError {
     #[error("not a directory: {0}")]
@@ -110,6 +112,7 @@ mod tests {
         assert!(s.contains("browse"), "{s}");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn io_error_from_converts() {
         let io = std::io::Error::new(std::io::ErrorKind::NotFound, "oops");

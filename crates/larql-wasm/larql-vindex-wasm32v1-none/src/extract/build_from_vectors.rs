@@ -1,16 +1,6 @@
 //! Build a .vindex from pre-extracted NDJSON vector files.
 
 use crate::extract::stage_labels::*;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::Path;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-
-use super::build::IndexBuildCallbacks;
-use crate::config::{
-    DownMetaRecord, DownMetaTopK, LayerBands, VindexConfig, VindexLayerInfo, VindexModelConfig,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +12,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufRead, BufReader, BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+
+use super::build::IndexBuildCallbacks;
+use crate::config::{
+    DownMetaRecord, DownMetaTopK, LayerBands, VindexConfig, VindexLayerInfo, VindexModelConfig,
+};
 
 const HEADER_MODEL: &str = "model";
 const HEADER_DIMENSION: &str = "dimension";
@@ -32,12 +35,14 @@ const HEADER_EMBED_SCALE: &str = "embed_scale";
 const HEADER_NUM_LAYERS: &str = "num_hidden_layers";
 const HEADER_HIDDEN_SIZE: &str = "hidden_size";
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_u64_field(obj: &serde_json::Value, field: &str) -> Result<u64, VindexError> {
     obj.get(field)
         .and_then(|v| v.as_u64())
         .ok_or_else(|| VindexError::Parse(format!("missing or non-integer '{field}' field")))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_f32_vector(obj: &serde_json::Value, field: &str) -> Result<Vec<f32>, VindexError> {
     obj.get(field)
         .and_then(|v| v.as_array())
@@ -58,6 +63,7 @@ struct VectorArchitecture {
     model_config: Option<VindexModelConfig>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a .vindex from already-extracted NDJSON vector files.
 ///
 /// Reads ffn_gate.vectors.jsonl, ffn_down.vectors.jsonl, and
@@ -370,6 +376,7 @@ pub fn build_vindex_from_vectors(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn vector_architecture_from_header(
     header: &serde_json::Value,
     hidden_size: usize,
@@ -410,6 +417,7 @@ fn vector_architecture_from_header(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn explicit_model_config(
     header: &serde_json::Value,
     hidden_size: usize,
@@ -438,6 +446,7 @@ fn explicit_model_config(
     Ok(None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn insert_shape_defaults(
     config: &mut serde_json::Map<String, serde_json::Value>,
     hidden_size: usize,
@@ -451,6 +460,7 @@ fn insert_shape_defaults(
         .or_insert_with(|| serde_json::json!(num_layers));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Try to find tokenizer.json near the vectors directory.
 fn find_tokenizer(vectors_dir: &Path) -> Option<std::path::PathBuf> {
     // Check parent directory

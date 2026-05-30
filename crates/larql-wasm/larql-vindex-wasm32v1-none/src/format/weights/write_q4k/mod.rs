@@ -16,19 +16,6 @@
 //! The orchestrator below threads the running `Vec<WeightEntry>`
 //! manifest through the norms → ple → lm_head trio, then emits a
 //! single `weight_manifest.json` and patches `index.json`.
-
-use std::path::Path;
-
-use serde::{Deserialize, Serialize};
-
-use crate::config::{FfnLayout, VindexConfig, VindexModelConfig};
-use crate::error::VindexError;
-use crate::extract::callbacks::IndexBuildCallbacks;
-use crate::extract::stage_labels::*;
-use crate::format::filenames::*;
-
-use super::capabilities::{ensure_standard_attention_supported, SURFACE_Q4K_WEIGHT_WRITER};
-use super::write_f32::WeightSource;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -40,6 +27,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::{FfnLayout, VindexConfig, VindexModelConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::extract::callbacks::IndexBuildCallbacks;
+use crate::extract::stage_labels::*;
+use crate::format::filenames::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::capabilities::{ensure_standard_attention_supported, SURFACE_Q4K_WEIGHT_WRITER};
+use super::write_f32::WeightSource;
 mod attn;
 mod ffn;
 mod lm_head;
@@ -148,6 +151,7 @@ pub struct Q4kWriteOptions {
     pub feature_major_down: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write model weights in Q4_K/Q6_K format, zero f32 intermediate on disk.
 ///
 /// Emits:
@@ -173,6 +177,7 @@ pub fn write_model_weights_q4k(
     write_model_weights_q4k_with_opts(source, dir, callbacks, Q4kWriteOptions::default())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Like [`write_model_weights_q4k`] but accepts a [`Q4kWriteOptions`] knob
 /// to toggle the FFN down-proj quantisation format and the
 /// feature-major-down emit.
@@ -209,6 +214,7 @@ pub fn write_model_weights_q4k_with_opts(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Patch `index.json` after all weight artefacts have landed:
 /// `has_model_weights=true`, `quant=Q4K`, optional `ffn_layout` for
 /// hybrid MoE, and a refreshed `model_config` from the architecture.

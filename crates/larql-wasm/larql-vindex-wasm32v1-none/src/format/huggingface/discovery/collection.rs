@@ -1,12 +1,6 @@
 //! HF collection list / create / item-add / fetch operations. The
 //! orchestrator (`ensure_collection`) lives in `mod.rs` and composes
 //! these primitives.
-
-use crate::error::VindexError;
-
-use super::super::publish::get_hf_token;
-use super::super::publish::protocol::hf_base;
-use super::CollectionItem;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +12,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::publish::get_hf_token;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::publish::protocol::hf_base;
+use super::CollectionItem;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn find_collection_slug(
     namespace: &str,
     title: &str,
@@ -59,6 +63,7 @@ pub(super) fn find_collection_slug(
     Ok(None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn create_collection(
     namespace: &str,
     title: &str,
@@ -113,6 +118,7 @@ pub(super) fn create_collection(
     )))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn add_collection_item(
     slug: &str,
     item: &CollectionItem,
@@ -151,6 +157,7 @@ pub fn add_collection_item(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fetch a collection by slug (or full collection URL) and return its
 /// items as `(type, id)` pairs — typically `("dataset", "owner/name")`.
 pub fn fetch_collection_items(slug_or_url: &str) -> Result<Vec<(String, String)>, VindexError> {

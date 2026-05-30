@@ -27,13 +27,19 @@ pub(super) mod protocol;
 mod remote;
 mod upload;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 use crate::format::filenames::*;
 
-use protocol::{hf_base, repo_type_plural, REPO_TYPE_DATASET, REPO_TYPE_MODEL};
+use protocol::{REPO_TYPE_DATASET, REPO_TYPE_MODEL};
+#[cfg(not(target_arch = "wasm32"))]
+use protocol::{hf_base, repo_type_plural};
+#[cfg(not(target_arch = "wasm32"))]
 use remote::{create_hf_repo, fetch_remote_lfs_oids};
+#[cfg(not(target_arch = "wasm32"))]
 use upload::upload_file_to_hf;
 
 /// Options controlling [`publish_vindex_with_opts`]. Kept as a struct so
@@ -68,6 +74,7 @@ impl PublishOptions {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Returns the HF API base URL for a repo:
 /// `{base}/api/{models|datasets}/{repo_id}`.
 #[allow(dead_code)]
@@ -77,6 +84,7 @@ fn hf_api_url(repo_type: &str, repo_id: &str, path: &str) -> String {
     format!("{base}/api/{plural}/{repo_id}/{path}")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Returns the web / git base URL for a repo.
 /// Models: `{base}/{repo_id}`, datasets: `{base}/datasets/{repo_id}`.
 pub(super) fn hf_repo_url(repo_type: &str, repo_id: &str) -> String {
@@ -88,6 +96,7 @@ pub(super) fn hf_repo_url(repo_type: &str, repo_id: &str) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Upload a local vindex directory to HuggingFace as a dataset repo.
 ///
 /// Equivalent to `publish_vindex_with_opts(dir, repo_id, &PublishOptions::default(), cb)`.
@@ -100,6 +109,7 @@ pub fn publish_vindex(
     publish_vindex_with_opts(vindex_dir, repo_id, &PublishOptions::default(), callbacks)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Upload a vindex directory with explicit options. See [`PublishOptions`].
 pub fn publish_vindex_with_opts(
     vindex_dir: &Path,
@@ -160,6 +170,7 @@ pub fn publish_vindex_with_opts(
     Ok(url)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Enumerate publishable files in a vindex directory: every file at the
 /// root plus every file in immediate subdirectories (e.g. `layers/`).
 /// Result is sorted by repo path so commits are reproducible.
@@ -222,6 +233,7 @@ pub trait PublishCallbacks {
 pub struct SilentPublishCallbacks;
 impl PublishCallbacks for SilentPublishCallbacks {}
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(in crate::format::huggingface) fn get_hf_token() -> Result<String, VindexError> {
     // Try environment variable first
     if let Ok(token) = std::env::var("HF_TOKEN") {
@@ -255,8 +267,10 @@ pub(in crate::format::huggingface) fn get_hf_token() -> Result<String, VindexErr
 mod tests {
     use super::*;
     use serial_test::serial;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Clear the test base-URL override so URL-builder tests see the
     /// production default. Saved/restored around the assertion to
     /// avoid leaking the change to other tests.
@@ -432,6 +446,7 @@ mod tests {
 
     // ─── get_hf_token ──────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn get_hf_token_reads_env_var() {
         // Process-wide env mutation is unsafe to do under cargo's parallel

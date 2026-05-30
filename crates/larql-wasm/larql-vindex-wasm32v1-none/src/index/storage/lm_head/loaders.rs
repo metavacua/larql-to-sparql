@@ -6,13 +6,6 @@
 //! KNN dispatch in `knn.rs` picks them up uniformly.
 
 use larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::index::core::VectorIndex;
-use crate::mmap_util::mmap_optimized;
-
-use super::{read_lm_head_manifest_kind, Q4_BYTES_PER_ELEM_DEN, Q4_BYTES_PER_ELEM_NUM};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -24,7 +17,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_optimized;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{read_lm_head_manifest_kind, Q4_BYTES_PER_ELEM_DEN, Q4_BYTES_PER_ELEM_NUM};
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4 lm_head for GPU logits (replaces CPU f32 lm_head KNN).
     ///
     /// When `weight_manifest.json` is present and lists `lm_head.weight`, the
@@ -81,6 +87,7 @@ impl VectorIndex {
         self.storage.has_lm_head_q4()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Synthesize Q4_0 lm_head in RAM from the f16 embeddings mmap.
     /// No-op if a Q4 source already exists or preconditions are not met.
     pub fn synthesize_lm_head_q4(&mut self) {
@@ -124,6 +131,7 @@ impl VectorIndex {
         Arc::make_mut(&mut self.storage).set_lm_head_q4_synth(Arc::new(q4k));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Adopt the vindex's f16 `embeddings.bin` mmap as an f16 view of the
     /// LM head. Safe only for tied-embedding models (Gemma 2/3/4, Llama
     /// when `tie_word_embeddings=true`) — the loader is responsible for
@@ -142,6 +150,7 @@ impl VectorIndex {
 
     // ── LM head (output projection) for vindex logits ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load lm_head from lm_head.bin for KNN logit lookup.
     pub fn load_lm_head(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(LM_HEAD_BIN);

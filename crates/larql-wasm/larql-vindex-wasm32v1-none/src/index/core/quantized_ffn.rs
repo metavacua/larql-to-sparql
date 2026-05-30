@@ -5,9 +5,6 @@
 //! scaled-add helpers. Two methods (`interleaved_q4_mmap_ref`,
 //! `interleaved_q4k_mmap_ref`) are real implementations because they
 //! reach directly into the `FfnStore` mmap handles.
-
-use super::VectorIndex;
-use crate::index::types::QuantizedFfnAccess;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,19 +16,27 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::VectorIndex;
+use crate::index::types::QuantizedFfnAccess;
+#[cfg(not(target_arch = "wasm32"))]
 impl QuantizedFfnAccess for VectorIndex {
     fn has_interleaved_q4(&self) -> bool {
         self.has_interleaved_q4()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_gate(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.interleaved_q4_gate(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_up(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.interleaved_q4_up(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_down(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.interleaved_q4_down(layer)
     }
@@ -60,14 +65,17 @@ impl QuantizedFfnAccess for VectorIndex {
         self.prefetch_interleaved_q4k_layer(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4k_layer_data(&self, layer: usize) -> Option<[(&[u8], &str); 3]> {
         VectorIndex::interleaved_q4k_layer_data(self, layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_layer(&self, layer: usize, component: usize) -> Option<std::sync::Arc<Vec<f32>>> {
         VectorIndex::q4k_ffn_layer(self, layer, component)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_row_into(
         &self,
         layer: usize,
@@ -78,6 +86,7 @@ impl QuantizedFfnAccess for VectorIndex {
         VectorIndex::q4k_ffn_row_into(self, layer, component, feat, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_row_dot(
         &self,
         layer: usize,
@@ -88,6 +97,7 @@ impl QuantizedFfnAccess for VectorIndex {
         VectorIndex::q4k_ffn_row_dot(self, layer, component, feat, x)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_row_scaled_add_via_cache(
         &self,
         layer: usize,
@@ -99,10 +109,12 @@ impl QuantizedFfnAccess for VectorIndex {
         VectorIndex::q4k_ffn_row_scaled_add_via_cache(self, layer, component, feat, alpha, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn has_down_features_q4k(&self) -> bool {
         VectorIndex::has_down_features_q4k(self)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_down_feature_scaled_add(
         &self,
         layer: usize,
@@ -113,6 +125,7 @@ impl QuantizedFfnAccess for VectorIndex {
         VectorIndex::q4k_down_feature_scaled_add(self, layer, feat, alpha, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_ffn_row_scaled_add(
         &self,
         layer: usize,
@@ -124,6 +137,7 @@ impl QuantizedFfnAccess for VectorIndex {
         VectorIndex::q4k_ffn_row_scaled_add(self, layer, component, feat, alpha, out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn q4k_matmul_transb(
         &self,
         layer: usize,

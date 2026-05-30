@@ -15,9 +15,13 @@ pub mod metadata_store;
 pub mod residency;
 pub mod vindex_storage;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn_store::FfnStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use gate_store::GateStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use metadata_store::MetadataStore;
+#[cfg(not(target_arch = "wasm32"))]
 pub use vindex_storage::{GateLayerView, MmapStorage, VindexStorage};
 
 pub use residency::{LayerState, ResidencyManager};

@@ -4,13 +4,6 @@
 //! Q4_0 format from `attn_weights_*.bin` files plus their JSON
 //! manifests. Mirrors the FFN walk plumbing in `super::walk`; lives in
 //! its own file so attention storage isn't tangled with FFN storage.
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::mmap_util::mmap_optimized;
-
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,11 +15,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_optimized;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
 /// Number of attention projection tensors recorded per layer in every
 /// `attn_weights_*.bin` manifest: Q, K, V, O — in that order.
 pub(crate) const ATTN_TENSORS_PER_LAYER: usize = 4;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q8 attention weights + manifest for GPU full pipeline.
     pub fn load_attn_q8(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(ATTN_WEIGHTS_Q8_BIN);
@@ -89,6 +94,7 @@ impl VectorIndex {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4_K/Q6_K attention weights for Ollama-compatible GPU pipeline.
     pub fn load_attn_q4k(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(ATTN_WEIGHTS_Q4K_BIN);
@@ -180,6 +186,7 @@ impl VectorIndex {
         Some(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4 attention weights + manifest for GPU full pipeline.
     pub fn load_attn_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(ATTN_WEIGHTS_Q4_BIN);
@@ -244,6 +251,7 @@ impl VectorIndex {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a minimal vindex directory with the given attn_weights_q4k.bin
     /// payload + manifest. Returns a `tempfile::TempDir` whose path can be
     /// passed straight to `load_attn_q4k`.
@@ -453,6 +461,7 @@ mod tests {
         assert!(idx.attn_q4k_layer_data(0).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `attn_q8_layer_data` must reject a manifest entry where
     /// `offset + vals_len + scales_len` overflows the mmap.
     #[test]
@@ -479,6 +488,7 @@ mod tests {
         assert!(idx.attn_q8_layer_data(0).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `attn_q4_layer_slices` must reject a manifest entry whose
     /// `offset + length` runs past the mmap.
     #[test]

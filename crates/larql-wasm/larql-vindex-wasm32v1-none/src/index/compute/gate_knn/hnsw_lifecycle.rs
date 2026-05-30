@@ -6,12 +6,6 @@
 //! mutex, build the HNSW outside the lock, install only if no other
 //! thread raced ahead. A duplicated build is cheaper than a corrupted
 //! cache.
-
-use ndarray::{Array1, ArrayView2};
-
-use crate::config::hnsw::HnswBuildConfig;
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +17,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, ArrayView2};
+
+use crate::config::hnsw::HnswBuildConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Enable HNSW search. Indexes are built lazily on first query per layer.
     ///
@@ -57,6 +60,7 @@ impl VectorIndex {
         Some((gate.data, gate.num_features))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a fresh HNSW for `layer` *without* holding the cache lock.
     /// Returns `None` when the layer has no gate data (caller decides
     /// what to do). Two callers race-safely concurrent on different
@@ -71,6 +75,7 @@ impl VectorIndex {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build an HNSW for a single `(layer, expert_id)` unit — i.e. the gate
     /// vectors for one expert's intermediate slice.  Index covers vectors
     /// `feat_start..feat_end` in the layer's global feature space; entries
@@ -119,6 +124,7 @@ impl VectorIndex {
         true
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Eager-build per-(layer, expert) HNSW units in parallel.  Equivalent of
     /// [`Self::warmup_hnsw_all_layers`] for the fine-grained shard layout —
     /// caller passes `(layer, feat_start, feat_end)` triples for every unit
@@ -150,6 +156,7 @@ impl VectorIndex {
         n
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Atomically install `hnsw` at `layer` if no other thread already
     /// did. A concurrent racer's index is dropped — the loss is one
     /// duplicated build, not a corrupted cache.
@@ -181,6 +188,7 @@ impl VectorIndex {
         true
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Eager-build HNSW for every layer, in parallel. One-shot startup
     /// helper for grid servers and interp pipelines that will query all
     /// layers — single call replaces N × ~76 ms lazy builds with one
@@ -215,6 +223,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN via HNSW: graph search instead of brute-force matmul.
     ///
     /// Re-rank uses a zero-copy view onto the gate data when the layer
@@ -286,6 +295,7 @@ impl VectorIndex {
         Some(candidates)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Per-(layer, expert) HNSW search.  Returns `None` when the unit index
     /// can't be built (empty slice, no gate data) or when gate matrix decode
     /// fails — caller falls back to the brute paths in `gate_knn_expert`.

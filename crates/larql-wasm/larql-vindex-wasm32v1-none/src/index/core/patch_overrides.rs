@@ -4,9 +4,6 @@
 //! per-feature override tables in `metadata`. Every other capability
 //! impl on `VectorIndex` is a delegation shim; this one is the actual
 //! implementation, because there's no inherent method to delegate to.
-
-use super::VectorIndex;
-use crate::index::types::PatchOverrides;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +15,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::VectorIndex;
+use crate::index::types::PatchOverrides;
+#[cfg(not(target_arch = "wasm32"))]
 impl PatchOverrides for VectorIndex {
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.metadata

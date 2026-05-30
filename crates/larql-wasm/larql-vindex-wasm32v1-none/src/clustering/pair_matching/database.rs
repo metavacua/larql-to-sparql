@@ -5,8 +5,6 @@
 //! `ReferenceDatabases` struct returned by `load_reference_databases`.
 //!
 //! Consumed by `super::labeling`.
-
-use std::path::Path;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +16,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 /// A reference database of (subject, object) pairs per relation type.
 #[derive(Default)]
 pub struct RelationDatabase {
@@ -48,6 +49,7 @@ impl RelationDatabase {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load from Wikidata triples JSON file.
     pub fn load_wikidata(path: &Path) -> Option<Self> {
         let text = std::fs::read_to_string(path).ok()?;
@@ -78,6 +80,7 @@ impl RelationDatabase {
         Some(db)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load from WordNet relations JSON file.
     pub fn load_wordnet(path: &Path) -> Option<Self> {
         let text = std::fs::read_to_string(path).ok()?;
@@ -156,6 +159,7 @@ pub struct ReferenceDatabases {
     pub wordnet: Option<RelationDatabase>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load all available reference databases from the data directory.
 pub fn load_reference_databases() -> ReferenceDatabases {
     let mut result = ReferenceDatabases {
@@ -205,6 +209,7 @@ pub fn load_reference_databases() -> ReferenceDatabases {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_triples(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, body).unwrap();
@@ -327,6 +332,7 @@ mod tests {
         assert!(db.lookup("a", "b").contains(&"rel"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_wikidata_returns_none_for_missing_file() {
         assert!(RelationDatabase::load_wikidata(Path::new("/tmp/_no_wd.json")).is_none());
@@ -382,6 +388,7 @@ mod tests {
         assert!(db.lookup("fast", "quick").contains(&"synonym"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_wordnet_returns_none_for_missing_file() {
         assert!(RelationDatabase::load_wordnet(Path::new("/tmp/_no_wn.json")).is_none());

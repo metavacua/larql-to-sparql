@@ -18,18 +18,6 @@
 //! FFN tensor from the source — a browse-only vindex doesn't have
 //! them. Callers without the full weights should extract with
 //! `--level inference` first.
-
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
-use crate::config::types::VindexConfig;
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::format::weights::{
-    load_model_weights, write_model_weights_q4k_with_opts, Q4kWriteOptions,
-};
-use crate::index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN};
-use crate::IndexLoadCallbacks;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -41,6 +29,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
+
+use crate::config::types::VindexConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::weights::{
+    load_model_weights, write_model_weights_q4k_with_opts, Q4kWriteOptions,
+};
+use crate::index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::IndexLoadCallbacks;
 
 #[derive(Debug, Clone, Default)]
 pub struct Q4kConvertConfig {
@@ -58,6 +63,7 @@ pub struct Q4kConvertConfig {
     pub force: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct Q4kConvertReport {
     pub src: PathBuf,
@@ -76,9 +82,12 @@ pub struct Q4kConvertReport {
 /// progress at the CLI level; we don't need the per-tensor pings
 /// here.
 struct SilentCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 impl IndexLoadCallbacks for SilentCallbacks {}
+#[cfg(not(target_arch = "wasm32"))]
 impl crate::IndexBuildCallbacks for SilentCallbacks {}
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convert an f32/f16 vindex at `src` into a Q4K vindex at `dst`.
 /// Atomic: writes into `<dst>.tmp/`, renames to `<dst>/` on success.
 pub fn vindex_to_q4k(
@@ -276,10 +285,12 @@ pub fn vindex_to_q4k(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn size_of(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.len())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn describe_out_backend(dst: &Path) -> Result<String, VindexError> {
     use crate::{SilentLoadCallbacks, VectorIndex};
     let mut cb = SilentLoadCallbacks;
@@ -287,6 +298,7 @@ fn describe_out_backend(dst: &Path) -> Result<String, VindexError> {
     Ok(index.describe_ffn_backend())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn link_or_copy(src: &Path, dst: &Path) -> Result<(), VindexError> {
     if dst.exists() {
         std::fs::remove_file(dst)
@@ -307,6 +319,7 @@ fn link_or_copy(src: &Path, dst: &Path) -> Result<(), VindexError> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Report from [`add_feature_major_down`].
 #[derive(Debug, Clone)]
 pub struct AddFeatureMajorDownReport {
@@ -319,6 +332,7 @@ pub struct AddFeatureMajorDownReport {
     pub wall_time: Duration,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Retrofit `down_features_q4k.bin` into an existing Q4K vindex
 /// without re-quantising the rest of the weights. Reads the down
 /// portion of `interleaved_q4k.bin` per layer, transposes to

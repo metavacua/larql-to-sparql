@@ -21,6 +21,7 @@ pub(super) struct TestEnvGuard {
 }
 
 impl TestEnvGuard {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn new(base: &str) -> Self {
         let prev_base = std::env::var(TEST_BASE_ENV).ok();
         let prev_token = std::env::var("HF_TOKEN").ok();
@@ -34,6 +35,7 @@ impl TestEnvGuard {
 }
 
 impl Drop for TestEnvGuard {
+    #[cfg(not(target_arch = "wasm32"))]
     fn drop(&mut self) {
         match self.prev_base.take() {
             Some(v) => std::env::set_var(TEST_BASE_ENV, v),
@@ -50,6 +52,7 @@ impl Drop for TestEnvGuard {
 mod tests {
     use super::*;
     use serial_test::serial;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn guard_restores_previous_base_on_drop() {
@@ -67,6 +70,7 @@ mod tests {
         std::env::remove_var("HF_TOKEN");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn guard_clears_when_no_previous_value() {

@@ -22,20 +22,6 @@
 //!   the policy-quantised projections are written fresh. On
 //!   cross-filesystem DST, hard-link falls back to copy with a
 //!   notice.
-
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
-use serde_json::{json, Value};
-
-use crate::config::types::{
-    ComplianceGate, Fp4Config, Precision, ProjectionFormat, Projections, VindexConfig,
-};
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::format::fp4_codec::{write_fp4_projection, write_fp8_projection};
-
-use super::scan::{scan_vindex, Dtype, ScanConfig, VindexComplianceReport};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -47,6 +33,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
+
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::{json, Value};
+
+use crate::config::types::{
+    ComplianceGate, Fp4Config, Precision, ProjectionFormat, Projections, VindexConfig,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::fp4_codec::{write_fp4_projection, write_fp8_projection};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::scan::{scan_vindex, Dtype, ScanConfig, VindexComplianceReport};
 
 /// Policy A / B / C from `fp4-precision-policy.md`. Gate stays at
 /// source dtype in every policy (see FP4 gate caveat in §2 of that
@@ -149,6 +155,7 @@ pub struct ProjectionAction {
     pub output_size_bytes: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct Fp4ConvertReport {
     pub src: PathBuf,
@@ -166,7 +173,9 @@ pub struct Fp4ConvertReport {
     pub walk_backend: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Fp4ConvertReport {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn compliance_sidecar_json(&self, scan_report: &VindexComplianceReport) -> Value {
         let per_projection: Vec<Value> = self
             .per_projection
@@ -205,6 +214,8 @@ fn precision_str(p: Precision) -> String {
     }
 }
 
+// Wall-clock timestamp — std::time::SystemTime is native-only.
+#[cfg(not(target_arch = "wasm32"))]
 fn now_iso_like() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -216,6 +227,7 @@ fn now_iso_like() -> String {
 
 // ── Main entry point ──────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convert an existing f32/f16 vindex to an FP4/FP8 vindex per the
 /// given policy. Atomic: writes into `<dst>.tmp/` and renames on
 /// success. Errors return early without touching `<dst>`.
@@ -531,6 +543,7 @@ pub fn vindex_to_fp4(
     Ok((report, scan_report))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn describe_out_backend(dst: &Path) -> Result<String, VindexError> {
     use crate::{SilentLoadCallbacks, VectorIndex};
     let mut cb = SilentLoadCallbacks;
@@ -538,6 +551,7 @@ fn describe_out_backend(dst: &Path) -> Result<String, VindexError> {
     Ok(index.describe_ffn_backend())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fs_prefix(name: &str) -> Result<&'static str, VindexError> {
     match name {
         "gate" => Ok("gate_vectors"),
@@ -547,6 +561,7 @@ fn fs_prefix(name: &str) -> Result<&'static str, VindexError> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_source_projection(
     path: &Path,
     dtype: Dtype,
@@ -585,6 +600,7 @@ fn read_source_projection(
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn link_or_copy(src: &Path, dst: &Path) -> Result<(), VindexError> {
     if dst.exists() {
         std::fs::remove_file(dst)

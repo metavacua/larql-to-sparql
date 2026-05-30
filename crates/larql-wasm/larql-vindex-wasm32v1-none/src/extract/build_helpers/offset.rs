@@ -1,9 +1,5 @@
 //! Offset direction — normalised `embed[output] - embed[input]`,
 //! the relation vector for clustering.
-
-use larql_models::ModelWeights;
-
-use crate::extract::constants::FIRST_CONTENT_TOKEN_ID;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +11,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+
+use crate::extract::constants::FIRST_CONTENT_TOKEN_ID;
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute the offset direction for a gate→down feature pair.
 /// Returns normalized(output_embed − input_embed) or None if invalid.
 pub(crate) fn compute_offset_direction(
@@ -73,6 +75,7 @@ pub(crate) fn compute_offset_direction(
 mod tests {
     use super::super::test_support::{vocab_tokenizer, weights_with_embed};
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_normalised_vector() {
         // Vocab: "Paris"=3, "France"=4 (≥ FIRST_CONTENT_TOKEN_ID=3).
@@ -107,6 +110,7 @@ mod tests {
         assert!(dir[3].abs() < 1e-6);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_none_for_empty_gate_token() {
         let toks = vocab_tokenizer(&["x"]);
@@ -115,6 +119,7 @@ mod tests {
         assert!(compute_offset_direction("", 3, &weights, &toks, 4, 5).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_none_for_special_token_output() {
         let toks = vocab_tokenizer(&["hello"]);
@@ -128,6 +133,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_none_for_oob_output_id() {
         let toks = vocab_tokenizer(&["hello"]);
@@ -136,6 +142,7 @@ mod tests {
         assert!(compute_offset_direction("hello", 99, &weights, &toks, 4, 5).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_none_when_gate_decodes_to_unk() {
         let toks = vocab_tokenizer(&["hello"]);
@@ -144,6 +151,7 @@ mod tests {
         assert!(compute_offset_direction("unknown_word", 3, &weights, &toks, 4, 5).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_offset_direction_returns_none_for_zero_offset() {
         let toks = vocab_tokenizer(&["[UNK]", "[PAD]", "[BOS]", "hello"]);

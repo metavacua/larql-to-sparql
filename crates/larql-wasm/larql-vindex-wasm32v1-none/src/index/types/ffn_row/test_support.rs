@@ -2,10 +2,6 @@
 //! traits. Each backend bool toggles which `has_*` flag returns true
 //! and which row methods route through, so tests can pin individual
 //! arms of the dispatch cascade.
-
-use ndarray::Array2;
-
-use super::super::{Fp4FfnAccess, NativeFfnAccess, QuantizedFfnAccess};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +13,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use super::super::{Fp4FfnAccess, NativeFfnAccess, QuantizedFfnAccess};
 /// Configurable stub. Each backend bool toggles which `has_*` flag
 /// returns true and which row methods route through.
 #[derive(Default)]
@@ -54,18 +55,23 @@ impl NativeFfnAccess for Stub {
     fn has_down_features(&self) -> bool {
         self.down_feature.is_some()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_gate(&self, _: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.gate.as_ref().map(|m| m.view())
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_up(&self, _: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.up.as_ref().map(|m| m.view())
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_down(&self, _: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.down.as_ref().map(|m| m.view())
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn up_layer_matrix(&self, _: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.up_layer.as_ref().map(|m| m.view())
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn down_layer_matrix(&self, _: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.down_layer.as_ref().map(|m| m.view())
     }
@@ -117,6 +123,7 @@ impl Fp4FfnAccess for Stub {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn one_row(values: &[f32]) -> Array2<f32> {
     Array2::from_shape_vec((1, values.len()), values.to_vec()).unwrap()
 }

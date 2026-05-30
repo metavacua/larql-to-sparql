@@ -10,13 +10,17 @@
 //! remains the primary FFN store. Per-layer format for dense is a
 //! future migration (`--ffn-layout` flag).
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 
 use super::super::write_f32::WeightSource;
+#[cfg(not(target_arch = "wasm32"))]
 use super::super::write_layers::{quantize_moe_entries, write_layer_weights, LayerWeightFormat};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn write_per_layer_moe_q4k(
     source: &dyn WeightSource,
     dir: &Path,

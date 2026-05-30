@@ -5,16 +5,6 @@
 //! Qwen, etc.); the source layer surfaces that via `source.lm_head()`.
 //! Manifest entry is appended to the running norms manifest so
 //! `weight_manifest.json` references everything in one list.
-
-use std::path::Path;
-
-use larql_compute::cpu::ops::q4_common::quantize_q4_k;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-
-use super::super::write_f32::{kind, WeightEntry, WeightSource};
-use super::pad_rows_to_block;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +16,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_compute::cpu::ops::q4_common::quantize_q4_k;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+
+use super::super::write_f32::{kind, WeightEntry, WeightSource};
+use super::pad_rows_to_block;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn write_lm_head_q4k(
     source: &dyn WeightSource,
     dir: &Path,

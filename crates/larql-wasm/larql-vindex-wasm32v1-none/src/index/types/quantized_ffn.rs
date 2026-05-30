@@ -15,12 +15,15 @@ pub trait QuantizedFfnAccess: Send + Sync {
     fn has_interleaved_q4(&self) -> bool {
         false
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_gate(&self, _layer: usize) -> Option<ndarray::Array2<f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_up(&self, _layer: usize) -> Option<ndarray::Array2<f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_q4_down(&self, _layer: usize) -> Option<ndarray::Array2<f32>> {
         None
     }
@@ -65,6 +68,7 @@ pub trait QuantizedFfnAccess: Send + Sync {
         false
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dequantised Q4K/Q6K FFN matrix for `(layer, component)` where
     /// `component` is 0=gate, 1=up, 2=down. Lazily decoded and cached.
     /// Returns `None` when the vindex has no Q4K interleaved data.
@@ -125,6 +129,7 @@ pub trait QuantizedFfnAccess: Send + Sync {
         false
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Direct Q4K/Q6K matmul — `Y = X @ W.T` against the layer's Q4K bytes.
     /// See `VectorIndex::q4k_matmul_transb`. `x` is `[x_rows, w_cols]`.
     /// `backend` (when provided) routes through Metal/CPU-SIMD kernels.

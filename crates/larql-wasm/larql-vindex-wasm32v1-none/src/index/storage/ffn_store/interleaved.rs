@@ -4,11 +4,6 @@
 //! Eliminates TLB thrash from three separate mmap files. Per-layer
 //! prefetch lets a forward pass tell the kernel which layer's bytes
 //! are about to be read.
-
-use crate::error::VindexError;
-use crate::format::filenames::INTERLEAVED_BIN;
-use crate::index::core::VectorIndex;
-use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +15,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::INTERLEAVED_BIN;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_demand_paged;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load interleaved FFN data: [gate|up|down] per layer in one contiguous file.
     /// Eliminates TLB thrash from 3 separate mmap files.
     pub fn load_interleaved(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -42,6 +47,7 @@ impl VectorIndex {
         self.storage.has_interleaved_f32()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get gate matrix for a layer from the interleaved file: [intermediate, hidden].
     pub fn interleaved_gate(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let bytes = self.storage.interleaved_f32_view()?;
@@ -64,6 +70,7 @@ impl VectorIndex {
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get up matrix for a layer from the interleaved file: [intermediate, hidden].
     pub fn interleaved_up(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let bytes = self.storage.interleaved_f32_view()?;
@@ -86,6 +93,7 @@ impl VectorIndex {
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get down matrix for a layer from the interleaved file: [intermediate, hidden].
     pub fn interleaved_down(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let bytes = self.storage.interleaved_f32_view()?;
@@ -108,6 +116,7 @@ impl VectorIndex {
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Prefetch next layer's interleaved data into page cache. Unix
     /// only; on Windows the function is a no-op because `madvise`
     /// isn't available and the OS handles readahead itself.
@@ -139,9 +148,11 @@ impl VectorIndex {
 mod tests {
     //! Round-trip coverage of the interleaved [gate|up|down] layer
     //! reader. Mirrors the test pattern in `down.rs`/`up.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn vindex_with_layer_features(
         num_layers: usize,
         intermediate: usize,
@@ -154,6 +165,7 @@ mod tests {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write `[gate | up | down]` for one layer as raw f32 bytes.
     fn write_interleaved(dir: &std::path::Path, gate: &[f32], up: &[f32], down: &[f32]) {
         let mut bytes: Vec<u8> = Vec::new();
@@ -254,6 +266,7 @@ mod tests {
         assert!(v.interleaved_down(0).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn interleaved_accessors_none_when_mmap_too_short() {
         // Vindex expects 4 features × 4 hidden = 16 floats × 3 matrices

@@ -16,18 +16,25 @@ use std::collections::{HashMap, HashSet};
 use larql_wasm_math::FloatExt as _;
 pub mod loaders;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array1;
 
 use crate::config::VindexConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::{FeatureMeta, VectorIndex};
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set metadata for a feature. Used by INSERT and UPDATE.
     pub fn set_feature_meta(&mut self, layer: usize, feature: usize, meta: FeatureMeta) {
         // Ensure layer slot exists
@@ -45,6 +52,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Set the gate vector for a specific feature at a layer.
     /// The vector length must match hidden_size.
     /// If the index is in mmap mode, promotes this layer to heap first.
@@ -122,6 +130,7 @@ impl VectorIndex {
             .map(|v| v.as_slice())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Copy a layer's gate vectors from mmap to heap (for mutation).
     fn promote_layer_to_heap(&mut self, layer: usize) {
         if let Some(view) = self.storage.gate_layer_view(layer) {
@@ -257,6 +266,7 @@ impl VectorIndex {
         results
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write down_meta to disk as binary format (down_meta.bin).
     /// JSONL is no longer written — use `larql dump-meta` for human-readable output.
     /// Loading still falls back to JSONL for v1 compat if binary is absent.
@@ -273,6 +283,7 @@ impl VectorIndex {
         crate::format::down_meta::write_binary(dir, &down_meta, max_top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn materialize_down_meta(&self) -> Vec<Option<Vec<Option<FeatureMeta>>>> {
         let mut out = Vec::with_capacity(self.num_layers);
         for layer in 0..self.num_layers {
@@ -305,6 +316,7 @@ impl VectorIndex {
         out
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write gate_vectors.bin back to disk and return updated layer info.
     /// Handles both heap and mmap modes.
     /// Writes to a temp file and renames to avoid invalidating active mmaps.
@@ -315,6 +327,7 @@ impl VectorIndex {
         self.save_gate_vectors_with_dtype(dir, crate::config::dtype::StorageDtype::F32)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write gate vectors using the dtype and per-layer metadata from config.
     pub fn save_gate_vectors_with_config(
         &self,
@@ -331,6 +344,7 @@ impl VectorIndex {
         Ok(layer_infos)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_gate_vectors_with_dtype(
         &self,
         dir: &Path,
@@ -398,6 +412,7 @@ impl VectorIndex {
         Ok(layer_infos)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save config (index.json) to disk.
     pub fn save_config(config: &VindexConfig, dir: &Path) -> Result<(), VindexError> {
         let path = dir.join(INDEX_JSON);
@@ -407,6 +422,7 @@ impl VectorIndex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save the full vindex (gate_vectors.bin + down_meta.jsonl + index.json).
     /// Updates the config's layer info to match current state.
     pub fn save_vindex(&self, dir: &Path, config: &mut VindexConfig) -> Result<(), VindexError> {

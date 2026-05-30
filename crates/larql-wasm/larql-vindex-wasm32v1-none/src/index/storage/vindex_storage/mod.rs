@@ -67,13 +67,6 @@
 //! FP4 vindex ever lands, the path is to either provide a parallel
 //! `Fp4Storage` impl or have `Fp4Storage` consume `VindexStorage`
 //! internally — but that's a separate decision from this trait.
-
-use bytes::Bytes;
-
-use crate::config::dtype::StorageDtype;
-use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
-use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
-use crate::index::types::GateLayerSlice;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -85,9 +78,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use bytes::Bytes;
+
+use crate::config::dtype::StorageDtype;
+use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
+use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
+use crate::index::types::GateLayerSlice;
 mod mmap_storage;
+#[cfg(not(target_arch = "wasm32"))]
 pub use mmap_storage::MmapStorage;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Borrowed view into a substore's whole-file `Bytes`. Carries the
 /// (offset, length) cut without paying the refcount bump that
 /// `Bytes::slice` would. Callers in the hot path use
@@ -109,7 +112,9 @@ pub struct BytesView<'a> {
     pub(crate) length: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> BytesView<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct a view. Used by storage impls; bounds checking is
     /// the impl's responsibility (the trait guarantees every returned
     /// view is in-range).
@@ -128,6 +133,7 @@ impl<'a> BytesView<'a> {
         &self.bytes[self.offset..self.offset + self.length]
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Refcounted, owned handle. One atomic increment. Use when the
     /// caller needs the bytes to outlive the borrow (cross-thread,
     /// stored in a struct, shipped to Redis).
@@ -148,6 +154,7 @@ impl<'a> BytesView<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Bundled view of one layer's gate vectors. Replaces three
 /// independent substore reaches (`gate.gate_mmap_bytes` +
 /// `gate_mmap_slices[layer]` + `gate_mmap_dtype`) that always travel
@@ -173,6 +180,7 @@ pub struct GateLayerView<'a> {
 pub trait VindexStorage: sealed::Sealed + Send + Sync {
     // ── FFN ─────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4_K / Q6_K interleaved FFN slices for one layer:
     /// `[(gate_view, gate_fmt), (up_view, up_fmt), (down_view, down_fmt)]`.
     ///
@@ -186,28 +194,33 @@ pub trait VindexStorage: sealed::Sealed + Send + Sync {
         layer: usize,
     ) -> Option<[(BytesView<'_>, &str); FFN_COMPONENTS_PER_LAYER]>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Whole-file Q4_K interleaved FFN buffer. Used by Metal
     /// `q4k_matmul_transb` for full-K decode without per-layer
     /// gathering. Returns `Bytes` (refcounted handle) because this is
     /// fetched once at load time, not per-layer-per-token.
     fn interleaved_q4k_whole_buffer(&self) -> Option<Bytes>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Whole-file Q4_0 interleaved FFN buffer. The Q4_0 path doesn't
     /// have a per-layer manifest; consumers compute layer offsets
     /// from `num_features`.
     fn interleaved_q4_whole_buffer(&self) -> Option<Bytes>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// W2 feature-major Q4_K down for one layer:
     /// `(view, fmt, padded_width)`. `padded_width` is the row stride
     /// after `pad_rows_to_block` — usually equal to `hidden_size`.
     fn down_features_q4k_layer_data(&self, layer: usize) -> Option<(BytesView<'_>, &str, usize)>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4_0 gate vectors for one layer (KNN side-channel — feature
     /// retrieval without dequantising the full layer).
     fn gate_q4_layer_data(&self, layer: usize) -> Option<BytesView<'_>>;
 
     // ── Attention ───────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4_K / Q6_K attention projections for one layer:
     /// `[(Q, fmt), (K, fmt), (V, fmt), (O, fmt)]`. `None` when no Q4_K
     /// attention manifest is loaded or the layer is out of range.
@@ -216,14 +229,17 @@ pub trait VindexStorage: sealed::Sealed + Send + Sync {
         layer: usize,
     ) -> Option<[(BytesView<'_>, &str); ATTN_TENSORS_PER_LAYER]>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Whole-file Q4_0 attention buffer.
     fn attn_q4_whole_buffer(&self) -> Option<Bytes>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4_0 attention projections for one layer: `[Q, K, V, O]` byte
     /// views.
     fn attn_q4_layer_slices(&self, layer: usize)
         -> Option<[BytesView<'_>; ATTN_TENSORS_PER_LAYER]>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q8 attention projections for one layer:
     /// `[(vals, scales), (vals, scales), (vals, scales), (vals, scales)]`
     /// for Q, K, V, O. Scales are returned as a `BytesView` — the
@@ -236,15 +252,19 @@ pub trait VindexStorage: sealed::Sealed + Send + Sync {
 
     // ── lm_head ─────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4_0 lm_head buffer (`lm_head_q4.bin`).
     fn lm_head_q4_bytes(&self) -> Option<Bytes>;
+    #[cfg(not(target_arch = "wasm32"))]
     /// f16 lm_head buffer (`lm_head.bin` when the source dtype is f16).
     fn lm_head_f16_bytes(&self) -> Option<Bytes>;
+    #[cfg(not(target_arch = "wasm32"))]
     /// f32 lm_head buffer (`lm_head.bin` when the source dtype is f32).
     fn lm_head_f32_bytes(&self) -> Option<Bytes>;
 
     // ── Gate vectors (KNN) ──────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Bundled view of one layer's gate vectors: bytes + dtype + slice.
     /// Replaces the three-field reach
     /// (`gate_mmap_bytes` + `gate_mmap_slices[layer]` + `gate_mmap_dtype`)

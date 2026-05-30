@@ -5,12 +5,6 @@
 //! footprint, even though the data targets gate-side KNN rather than
 //! FFN forward — the Q4 file is a compressed companion to
 //! `gate_vectors.bin`.
-
-use crate::error::VindexError;
-use crate::format::filenames::GATE_VECTORS_Q4_BIN;
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::mmap_util::mmap_optimized;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +16,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::GATE_VECTORS_Q4_BIN;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_optimized;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4_0 gate vectors from gate_vectors_q4.bin.
     ///
     /// File layout: layers packed contiguously, each layer is

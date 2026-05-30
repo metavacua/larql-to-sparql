@@ -1,14 +1,6 @@
 //! Per-file upload pipeline. Decides between LFS and inline-base64
 //! commits based on HuggingFace's preupload response, then dispatches
 //! into [`super::lfs`] or runs the regular commit inline.
-
-use std::path::Path;
-
-use crate::error::VindexError;
-
-use super::lfs::upload_lfs;
-use super::protocol::{hf_base, repo_type_plural, CONTENT_TYPE_NDJSON, HF_PREUPLOAD_SAMPLE_BYTES};
-use super::PublishCallbacks;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +12,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::lfs::upload_lfs;
+#[cfg(not(target_arch = "wasm32"))]
+use super::protocol::{hf_base, repo_type_plural, CONTENT_TYPE_NDJSON, HF_PREUPLOAD_SAMPLE_BYTES};
+use super::PublishCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 /// Upload a single file to a HuggingFace dataset repo via the real HF
 /// protocol:
 ///
@@ -90,6 +95,7 @@ struct PreuploadDecision {
     should_ignore: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Call `POST /api/datasets/{repo}/preupload/main` for a single file and
 /// return whether HF wants it uploaded via LFS or inlined in a regular
 /// commit. HF requires a base64 sample of the first ~512 bytes so it
@@ -143,6 +149,7 @@ fn preupload_decide(
     parse_preupload_response(&json)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse the JSON body of an HF preupload response into our routing
 /// decision. Pulled out as a pure helper so the JSON contract can be
 /// unit-tested without an HTTP server.
@@ -169,6 +176,7 @@ fn parse_preupload_response(json: &serde_json::Value) -> Result<PreuploadDecisio
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Small-file path: commit directly with the content inlined as base64
 /// in the NDJSON commit body. HF's preupload flags tiny text files for
 /// this path.
@@ -307,11 +315,13 @@ mod tests {
     use super::super::PublishCallbacks;
     use crate::format::huggingface::publish::protocol::TEST_BASE_ENV;
     use serial_test::serial;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write as _;
     struct EnvBaseGuard {
         prev: Option<String>,
     }
     impl EnvBaseGuard {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(value: &str) -> Self {
             let prev = std::env::var(TEST_BASE_ENV).ok();
             std::env::set_var(TEST_BASE_ENV, value);
@@ -319,6 +329,7 @@ mod tests {
         }
     }
     impl Drop for EnvBaseGuard {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             match self.prev.take() {
                 Some(v) => std::env::set_var(TEST_BASE_ENV, v),
@@ -338,6 +349,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_temp_bytes(bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("payload.bin");

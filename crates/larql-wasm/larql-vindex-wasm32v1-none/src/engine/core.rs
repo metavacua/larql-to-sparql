@@ -1,7 +1,3 @@
-use super::epoch::Epoch;
-use super::memit_store::MemitStore;
-use super::status::CompactStatus;
-use crate::patch::core::PatchedVindex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,8 +9,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use super::epoch::Epoch;
+#[cfg(not(target_arch = "wasm32"))]
+use super::memit_store::MemitStore;
+use super::status::CompactStatus;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::patch::core::PatchedVindex;
 const MEMIT_MIN_HIDDEN_DIM: usize = 1024;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct StorageEngine {
     patched: PatchedVindex,
     epoch: Epoch,
@@ -23,7 +27,9 @@ pub struct StorageEngine {
     memit_store: MemitStore,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl StorageEngine {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(patched: PatchedVindex) -> Self {
         Self {
             patched,
@@ -34,14 +40,17 @@ impl StorageEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn patched(&self) -> &PatchedVindex {
         &self.patched
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn patched_mut(&mut self) -> &mut PatchedVindex {
         &mut self.patched
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn into_patched(self) -> PatchedVindex {
         self.patched
     }
@@ -56,10 +65,12 @@ impl StorageEngine {
         self.mutations_since_major += 1;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn memit_store(&self) -> &MemitStore {
         &self.memit_store
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn memit_store_mut(&mut self) -> &mut MemitStore {
         &mut self.memit_store
     }

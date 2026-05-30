@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the architecture-detection JSON blob from the on-disk config.
 ///
 /// Includes core architecture fields, Gemma 4 per-layer geometry, and

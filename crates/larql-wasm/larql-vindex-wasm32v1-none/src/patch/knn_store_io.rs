@@ -14,11 +14,6 @@
 //!
 //! Keys are quantised to f16 — KNN cosine retrieval doesn't need f32
 //! precision. Reconstruction goes through `KnnStore::from_entries`.
-
-use std::io::{Cursor, Read};
-use std::path::Path;
-
-use super::knn_store::{KnnEntry, KnnStore};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -30,10 +25,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Cursor, Read};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::knn_store::{KnnEntry, KnnStore};
 const MAGIC: &[u8; 4] = b"LKNN";
 const VERSION: u32 = 1;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KnnStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save to binary format with f16 keys.
     pub fn save(&self, path: &Path) -> Result<(), String> {
         let mut buf = Vec::new();
@@ -91,6 +96,7 @@ impl KnnStore {
         std::fs::write(path, &buf).map_err(|e| format!("write knn_store: {e}"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load from binary format.
     pub fn load(path: &Path) -> Result<Self, String> {
         let data = std::fs::read(path).map_err(|e| format!("read knn_store: {e}"))?;
@@ -162,6 +168,7 @@ impl KnnStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, String> {
     let mut buf = [0u8; 4];
     cursor
@@ -170,6 +177,7 @@ fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, String> {
     Ok(u32::from_le_bytes(buf))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_u16(cursor: &mut Cursor<&[u8]>) -> Result<u16, String> {
     let mut buf = [0u8; 2];
     cursor

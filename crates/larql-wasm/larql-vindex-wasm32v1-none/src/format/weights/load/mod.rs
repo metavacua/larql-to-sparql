@@ -17,10 +17,13 @@ mod embeddings;
 mod f32;
 mod q4k;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_models::ModelWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::core::IndexLoadCallbacks;
@@ -113,6 +116,7 @@ impl LoadWeightsOptions {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a full `ModelWeights` from a vindex directory (no filtering).
 pub fn load_model_weights(
     dir: &Path,
@@ -121,6 +125,7 @@ pub fn load_model_weights(
     load_model_weights_with_opts(dir, callbacks, LoadWeightsOptions::default())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load `ModelWeights` from a vindex directory, skipping component
 /// tensors per [`LoadWeightsOptions`]. Body in [`f32::load_model_weights_with_opts`].
 pub fn load_model_weights_with_opts(
@@ -131,6 +136,7 @@ pub fn load_model_weights_with_opts(
     f32::load_model_weights_with_opts(dir, callbacks, opts)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load the minimum ModelWeights needed to drive a Q4_K vindex forward pass.
 ///
 /// Q4 vindexes store attn / FFN weights as packed blocks in
@@ -145,6 +151,7 @@ pub fn load_model_weights_q4k(
     load_model_weights_q4k_shard(dir, callbacks, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Expert-shard variant of [`load_model_weights_q4k`].
 ///
 /// Identical to the full loader except that when `expert_filter` is `Some((start,
@@ -159,6 +166,7 @@ pub fn load_model_weights_q4k_shard(
     q4k::load_model_weights_q4k_shard(dir, callbacks, expert_filter)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Find the tokenizer path near a model or vindex directory.
 pub fn find_tokenizer_path(dir: &Path) -> Option<std::path::PathBuf> {
     let p = dir.join(TOKENIZER_JSON);
@@ -329,6 +337,7 @@ mod tests {
 
     // ─── find_tokenizer_path ───────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_tokenizer_path_in_directory() {
         let dir = tempfile::tempdir().unwrap();
@@ -337,6 +346,7 @@ mod tests {
         assert_eq!(find_tokenizer_path(dir.path()), Some(path));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn find_tokenizer_path_falls_back_to_parent() {
         // Some vindex layouts nest a subdir but the tokenizer lives

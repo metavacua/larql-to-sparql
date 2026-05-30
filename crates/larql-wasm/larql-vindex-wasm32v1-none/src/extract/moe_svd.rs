@@ -14,10 +14,6 @@
 //!
 //! The implementation is intentionally LAPACK-free — uses `ndarray` +
 //! `rand` only. Speed comes from `rayon` parallelism across experts.
-
-use ndarray::{s, Array2, ArrayView2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +25,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2, ArrayView2};
+#[cfg(not(target_arch = "wasm32"))]
+use rand::rngs::StdRng;
+#[cfg(not(target_arch = "wasm32"))]
+use rand::{Rng, SeedableRng};
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute the top-K right singular vectors of `a` (shape `[m, n]`) via
 /// subspace iteration. Returns a `[K, n]` matrix whose rows are the
 /// approximate right singular vectors, sorted by descending singular value.
@@ -79,6 +83,7 @@ pub fn top_k_right_singular_vectors(
     v_final.slice(s![.., ..k]).t().to_owned()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Modified Gram-Schmidt orthonormalization of the columns of `m`.
 /// Output shape == input shape. Numerically stabler than classical GS
 /// for the moderate condition numbers we hit here.
@@ -106,7 +111,9 @@ fn modified_gram_schmidt(m: ArrayView2<f32>) -> Array2<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rank_one_matrix_recovers_top_singular_vector() {
         // A = u * v^T with v = (1,2,3,4)/sqrt(30), should recover v as top-1.
@@ -124,6 +131,7 @@ mod tests {
         assert!(cos.abs() > 0.99, "expected cos~1, got {cos}");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn returns_correct_shape() {
         let a = Array2::<f32>::eye(8);

@@ -4,11 +4,6 @@
 //! here because it's the one cross-cutting predicate (up + down both
 //! loaded) — kept on the up side since the up loader is the second
 //! to fire by convention.
-
-use crate::error::VindexError;
-use crate::format::filenames::UP_FEATURES_BIN;
-use crate::index::core::VectorIndex;
-use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +15,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::UP_FEATURES_BIN;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_demand_paged;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load feature-major up vectors from up_features.bin.
     pub fn load_up_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(UP_FEATURES_BIN);
@@ -36,6 +41,7 @@ impl VectorIndex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the full up matrix for a layer: [intermediate, hidden] zero-copy view.
     pub fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         let bytes = self.storage.up_features_view()?;
@@ -68,10 +74,12 @@ impl VectorIndex {
 mod tests {
     //! Round-trip coverage of the feature-major up loader. Mirrors the
     //! test pattern in `down.rs`.
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
     use super::*;
     use crate::format::filenames::DOWN_FEATURES_BIN;
+    #[cfg(not(target_arch = "wasm32"))]
     fn vindex_with_layer_features(
         num_layers: usize,
         intermediate: usize,
@@ -84,6 +92,7 @@ mod tests {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_features(dir: &std::path::Path, name: &str, floats: &[f32]) {
         let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
         std::fs::write(dir.join(name), &bytes).unwrap();

@@ -19,13 +19,17 @@ use std::collections::{HashMap, HashSet};
 use larql_wasm_math::FloatExt as _;
 mod helpers;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 use crate::format::filenames::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::publish::get_hf_token;
 use super::{vindex_core_files, VINDEX_METADATA_FILES, VINDEX_WEIGHT_FILES};
+#[cfg(not(target_arch = "wasm32"))]
 use helpers::{hf_cache_repo_dir, strip_etag_quoting, want_model_file};
 
 /// Which side of the HF API a repo lives on. Datasets are how vindexes
@@ -53,6 +57,7 @@ impl RepoKind {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn to_hub_type(self) -> hf_hub::RepoType {
         match self {
             RepoKind::Dataset => hf_hub::RepoType::Dataset,
@@ -68,6 +73,7 @@ impl RepoKind {
 /// that pin `--repo-type dataset`).
 const HF_PULL_REPO_KINDS: [RepoKind; 2] = [RepoKind::Model, RepoKind::Dataset];
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a typed `ApiRepo` handle for a given `(repo_id, revision, kind)`.
 /// Centralised so the three pull entry points share one constructor and
 /// the with/without-revision branching lives in one place.
@@ -89,6 +95,7 @@ fn hf_repo(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve an `hf://` path to a local directory, downloading if needed.
 ///
 /// Supports:
@@ -161,6 +168,7 @@ pub fn resolve_hf_vindex(hf_path: &str) -> Result<PathBuf, VindexError> {
     Ok(vindex_dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Download additional weight files for inference/compile.
 /// Called lazily when INFER or COMPILE is first used.
 pub fn download_hf_weights(hf_path: &str) -> Result<(), VindexError> {
@@ -201,8 +209,10 @@ pub fn download_hf_weights(hf_path: &str) -> Result<(), VindexError> {
 /// `hf_hub` directly. Implement this trait on an `indicatif::ProgressBar`
 /// wrapper (or similar) to get per-file progress + resume behaviour out
 /// of [`resolve_hf_vindex_with_progress`].
+#[cfg(not(target_arch = "wasm32"))]
 pub use hf_hub::api::Progress as DownloadProgress;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Check hf-hub's on-disk cache for `filename` and return `(path, size)`
 /// iff a ready-to-use copy exists whose content hash matches what HF
 /// reports on the remote.
@@ -271,6 +281,7 @@ fn cached_snapshot_file(
     Some((blob_path, size))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Issue a HEAD against HF's file-resolve endpoint for this repo+file
 /// and return `(etag, size)` from the response headers. HF redirects
 /// LFS files to S3 which also returns an etag, so we must follow
@@ -332,6 +343,7 @@ fn head_etag_and_size(
     Some((etag, size))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Like [`resolve_hf_vindex`], but drives a progress reporter per file.
 /// hf-hub handles `.incomplete` partial-file resume internally — if the
 /// download is interrupted, the next call picks up from where it left off.
@@ -421,6 +433,7 @@ where
     )))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve an `hf://` model repo path to a local snapshot directory,
 /// downloading the safetensors + tokenizer + config sidecar files needed
 /// for `larql convert safetensors-to-vindex`. Mirrors
@@ -591,6 +604,7 @@ mod tests {
         _tmp: tempfile::TempDir,
     }
     impl HfTestEnv {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(endpoint: &str) -> Self {
             let prev_endpoint = std::env::var("HF_ENDPOINT").ok();
             let prev_home = std::env::var("HF_HOME").ok();
@@ -615,6 +629,7 @@ mod tests {
         }
     }
     impl Drop for HfTestEnv {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             for (k, prev) in [
                 ("HF_ENDPOINT", self.prev_endpoint.take()),
@@ -845,6 +860,7 @@ mod tests {
 
     // ── cached_snapshot_file: cache directory traversal ──────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build an hf-hub-shaped cache layout under `hub_root`:
     ///   models--owner--name/
     ///     blobs/<etag>            ← `bytes`
@@ -877,6 +893,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn cached_snapshot_file_returns_snapshot_path_when_present() {
@@ -912,6 +929,7 @@ mod tests {
         assert!(path.ends_with("file.bin"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn cached_snapshot_file_returns_blob_when_no_snapshot_link() {
@@ -947,6 +965,7 @@ mod tests {
         assert!(path.ends_with("blobs/deadbeef"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn cached_snapshot_file_returns_none_on_size_mismatch() {
@@ -997,6 +1016,7 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn cached_snapshot_file_with_revision_falls_back_to_pinned_dir() {

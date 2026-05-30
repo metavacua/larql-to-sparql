@@ -1,8 +1,4 @@
 //! `GateLookup` — gate KNN and feature-metadata read surface.
-
-use ndarray::{Array1, Array2};
-
-use super::FeatureMeta;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,19 +10,27 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+
+use super::FeatureMeta;
 /// Gate KNN and feature metadata lookup.
 ///
 /// This is the minimal read-only surface needed by graph browsing and
 /// DESCRIBE-style operations. Consumers that do not need FFN storage or
 /// patch overlay access should depend on this trait rather than `GateIndex`.
 pub trait GateLookup: Send + Sync {
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)>;
     fn feature_meta(&self, layer: usize, feature: usize) -> Option<FeatureMeta>;
     fn num_features(&self, layer: usize) -> usize;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_scores_batch(&self, _layer: usize, _x: &Array2<f32>) -> Option<Array2<f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     /// Backend-aware variant of `gate_scores_batch`. When `backend` is a
     /// Metal `ComputeBackend` and `x` is a single row, implementations
     /// can dispatch `f32_gemv` instead of CPU BLAS — the gate matmul is
@@ -42,6 +46,7 @@ pub trait GateLookup: Send + Sync {
         self.gate_scores_batch(layer, x)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     /// Returns None if Q4 gate data isn't loaded or backend doesn't support Q4.
     fn gate_knn_q4(
@@ -54,6 +59,7 @@ pub trait GateLookup: Send + Sync {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Per-feature gate scoring: iterate all features, dot product each one.
     /// No matrix multiplication — each feature scored individually.
     /// Returns (feature_index, score) sorted by absolute score descending.
@@ -66,6 +72,7 @@ pub trait GateLookup: Send + Sync {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {
         let seq_len = x.shape()[0];
         let mut all = alloc::collections::BTreeSet::new();
@@ -91,6 +98,7 @@ mod tests {
     }
 
     impl GateLookup for StubGate {
+        #[cfg(not(target_arch = "wasm32"))]
         fn gate_knn(
             &self,
             _layer: usize,
@@ -129,6 +137,7 @@ mod tests {
     /// trait body. Lets the no-op default lines run.
     struct NoOpGate;
     impl GateLookup for NoOpGate {
+        #[cfg(not(target_arch = "wasm32"))]
         fn gate_knn(
             &self,
             _layer: usize,
@@ -145,6 +154,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_batch_unions_per_row_features_and_sorts() {
         // Three rows; rows 0 and 2 share feature 7. Expect a sorted
@@ -158,6 +168,7 @@ mod tests {
         assert_eq!(out, vec![1, 3, 5, 7, 9]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_batch_empty_seq_returns_empty() {
         let stub = StubGate { per_row: vec![] };
@@ -165,6 +176,7 @@ mod tests {
         assert!(stub.gate_knn_batch(0, &x, 4).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_batch_handles_empty_per_row() {
         // Row 1 returns no features; the union should still flow.
@@ -175,6 +187,7 @@ mod tests {
         assert_eq!(stub.gate_knn_batch(0, &x, 1), vec![2, 5]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn default_gate_scores_batch_is_none() {
         let n = NoOpGate;
@@ -182,6 +195,7 @@ mod tests {
         assert!(n.gate_scores_batch(0, &x).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn default_gate_scores_batch_backend_falls_through() {
         // The backend-aware variant defaults to `gate_scores_batch`
@@ -192,6 +206,7 @@ mod tests {
         assert!(n.gate_scores_batch_backend(0, &x, None).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Minimal in-test ComputeBackend that implements only what the
     /// `gate_knn_q4` / `gate_scores_batch_backend` defaults need (which
     /// is nothing — they just take it by reference and ignore it).
@@ -203,6 +218,7 @@ mod tests {
         assert!(n.gate_knn_q4(0, &r, 4, &backend).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn default_gate_walk_is_none() {
         let n = NoOpGate;
@@ -236,6 +252,7 @@ mod tests {
         assert_eq!(stub.num_features(99), 3);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn stub_gate_knn_returns_empty_for_out_of_range_row() {
         // Residual[0] selects the row; passing an index past per_row
@@ -247,6 +264,7 @@ mod tests {
         assert!(stub.gate_knn(0, &r, 4).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn noop_gate_methods_return_empty() {
         let n = NoOpGate;

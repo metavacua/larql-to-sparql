@@ -1,6 +1,4 @@
 //! Whole-word vocabulary reduction.
-
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,6 +10,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the whole-word vocabulary: tokens that decode as 3+ char
 /// alphabetic words. Returns (token_ids, reduced_embedding_matrix).
 pub(crate) fn build_whole_word_vocab(
@@ -51,6 +53,7 @@ pub(crate) fn build_whole_word_vocab(
 mod tests {
     use super::super::test_support::vocab_tokenizer;
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn build_whole_word_vocab_keeps_alphabetic_tokens_3plus_chars() {
         let toks = vocab_tokenizer(&["hello", "world", "hi", "no!", "foo123"]);
@@ -73,6 +76,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn build_whole_word_vocab_empty_vocab_returns_empty() {
         let toks = vocab_tokenizer(&[]);

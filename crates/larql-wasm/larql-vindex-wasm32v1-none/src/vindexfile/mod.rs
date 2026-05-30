@@ -25,18 +25,25 @@ use std::collections::{HashMap, HashSet};
 use larql_wasm_math::FloatExt as _;
 mod parser;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use parser::{
     parse_vindexfile, parse_vindexfile_str, Vindexfile, VindexfileDirective, VindexfileStage,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format::load::load_vindex_config;
 use crate::index::core::SilentLoadCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::patch::core::{PatchedVindex, VindexPatch};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build result from processing a Vindexfile.
 pub struct VindexfileBuild {
     /// The built vindex (base + all patches/edits baked down).
@@ -53,6 +60,7 @@ pub struct BuildLayer {
     pub features_modified: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Execute a Vindexfile: load base, apply patches, run edits, produce a clean VectorIndex.
 pub fn build_from_vindexfile(
     vf: &Vindexfile,
@@ -188,6 +196,7 @@ pub fn build_from_vindexfile(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve a path from a Vindexfile directive.
 /// Handles: local paths, `hf://` URLs (downloads + caches via the
 /// HuggingFace resolver), `https://` URLs (still TODO).
@@ -223,6 +232,7 @@ mod tests {
 
     // ── resolve_vindexfile_path ────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn resolve_local_path_relative_to_working_dir() {
         let tmp = tempfile::tempdir().unwrap();

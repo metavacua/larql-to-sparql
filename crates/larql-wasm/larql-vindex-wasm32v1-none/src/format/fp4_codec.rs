@@ -8,16 +8,6 @@
 //!
 //! See `docs/specs/vindex-format-spec.md` §5.10 and
 //! `docs/specs/fp4-format-spec.md`.
-
-use std::io::{Read, Write};
-use std::path::Path;
-
-use larql_models::quant::fp4_block::{
-    decode_fp4_feature, decode_fp8_feature, encode_fp4_feature, encode_fp8_feature,
-    fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
-};
-
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +19,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_models::quant::fp4_block::{
+    decode_fp4_feature, decode_fp8_feature, encode_fp4_feature, encode_fp8_feature,
+    fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
 
 /// Layout descriptor for one layer inside a per-projection file. Mirrors
 /// the information that `VindexConfig.layers[i]` already carries; exposed
@@ -82,6 +85,7 @@ pub fn fp8_layer_layouts(per_layer_features: &[usize], hidden: usize) -> Vec<Fp4
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write a full projection file (any of gate/up/down) in FP4 format.
 ///
 /// `per_layer_values[i]` is a flat row-major `[num_features × hidden]`
@@ -118,6 +122,7 @@ pub fn write_fp4_projection(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// FP8 counterpart of `write_fp4_projection`.
 pub fn write_fp8_projection(
     path: &Path,
@@ -150,6 +155,7 @@ pub fn write_fp8_projection(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read an FP4 projection file back into flat per-layer f32 vectors.
 /// `per_layer_features[i]` gives the expected feature count for layer `i`;
 /// the reader validates the file size matches exactly.
@@ -190,6 +196,7 @@ pub fn read_fp4_projection(
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// FP8 counterpart of `read_fp4_projection`.
 pub fn read_fp8_projection(
     path: &Path,
@@ -230,10 +237,12 @@ pub fn read_fp8_projection(
 mod tests {
     use super::*;
     use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write as IoWrite;
     /// A tempdir helper that cleans up at drop, using std::fs only.
     struct TempDir(std::path::PathBuf);
     impl TempDir {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(label: &str) -> Self {
             let base = std::env::temp_dir();
             let pid = std::process::id();
@@ -247,6 +256,7 @@ mod tests {
         }
     }
     impl Drop for TempDir {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
@@ -338,6 +348,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fp4_projection_non_uniform_widths() {
         // Mirror Gemma 4 E2B's mixed 6144/12288 layout pattern.
@@ -373,6 +384,7 @@ mod tests {
         assert_eq!(layouts[2].byte_offset, (16 + 32) * per_feat);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fp4_file_size_matches_spec() {
         // Pin the §5.10 "137 B per 256-element block" claim at the file level.
@@ -391,6 +403,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fp8_file_size_matches_spec() {
         let tmp = TempDir::new("fp8_size");
@@ -408,6 +421,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn fp4_reader_rejects_wrong_size() {
         let tmp = TempDir::new("fp4_bad");

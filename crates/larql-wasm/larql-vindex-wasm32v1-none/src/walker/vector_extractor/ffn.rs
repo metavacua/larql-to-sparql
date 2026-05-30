@@ -3,12 +3,6 @@
 use larql_models::{
     TopKEntry, VectorRecord, COMPONENT_FFN_DOWN, COMPONENT_FFN_GATE, COMPONENT_FFN_UP,
 };
-
-use super::loader::VectorExtractor;
-use super::types::{ExtractCallbacks, ExtractConfig};
-use super::writer::VectorWriter;
-use crate::error::VindexError;
-use crate::walker::utils::{decode_token, partial_top_k_column};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +15,19 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::loader::VectorExtractor;
+use super::types::{ExtractCallbacks, ExtractConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use super::writer::VectorWriter;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::walker::utils::{decode_token, partial_top_k_column};
+
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorExtractor {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extract FFN down vectors for a single layer.
     ///
     /// The stored vector is `w_down.column(feat)` — the raw weight direction
@@ -91,6 +97,7 @@ impl VectorExtractor {
         Ok(count)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extract FFN gate vectors for a single layer.
     pub fn extract_ffn_gate(
         &self,
@@ -156,6 +163,7 @@ impl VectorExtractor {
         Ok(count)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extract FFN up vectors for a single layer.
     pub fn extract_ffn_up(
         &self,
@@ -227,6 +235,7 @@ mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
     use larql_models::VectorFileHeader;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_ffn_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -234,10 +243,12 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_writer(path: &std::path::Path) -> VectorWriter {
         let mut w = VectorWriter::create(path).unwrap();
         w.write_header(&VectorFileHeader {

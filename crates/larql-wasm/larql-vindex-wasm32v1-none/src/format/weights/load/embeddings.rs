@@ -6,15 +6,6 @@
 //! a "skip embed" path for `LoadWeightsOptions::skip_embed` — used by
 //! FFN-service workers that never see token IDs and don't need the
 //! embedding table in heap.
-
-use std::path::Path;
-
-use ndarray::Array2;
-
-use crate::config::VindexConfig;
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::index::core::IndexLoadCallbacks;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +17,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use crate::config::VindexConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+use crate::index::core::IndexLoadCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap + decode `embeddings.bin` into a `[vocab_size, hidden_size]`
 /// array of f32. Auto-detects f32 vs f16 storage from the byte count.
 ///
@@ -54,6 +58,7 @@ pub(super) fn load_embeddings(
     Ok(arr)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Empty-shape placeholder used by f32 loader's `skip_embed` path.
 /// Pinned out as a function so the callsite is self-documenting and the
 /// callback ordering matches the non-skipped path.
@@ -114,6 +119,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_embeddings_bin(dir: &std::path::Path, floats: &[f32], dtype: StorageDtype) {
         let bytes = crate::config::dtype::encode_floats(floats, dtype);
         std::fs::write(dir.join(EMBEDDINGS_BIN), &bytes).unwrap();

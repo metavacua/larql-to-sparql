@@ -32,9 +32,14 @@ mod test_support;
 mod timestamp;
 mod vocab;
 
+#[cfg(not(target_arch = "wasm32"))]
 // Re-exports preserving the pre-split path (`super::build_helpers::*`).
 pub(crate) use clustering::{run_clustering_pipeline, ClusterData};
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use gate_tops::compute_gate_top_tokens;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use offset::compute_offset_direction;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use timestamp::chrono_now;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use vocab::build_whole_word_vocab;

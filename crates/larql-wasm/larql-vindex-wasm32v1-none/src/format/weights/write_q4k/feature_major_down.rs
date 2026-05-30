@@ -14,16 +14,6 @@
 //!
 //! Carved out of the monolithic `write_q4k.rs` in the 2026-04-25
 //! modularity pass.
-
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
-
-use crate::error::VindexError;
-use crate::format::weights::Q4kManifestEntry;
-
-use super::{pad_rows_to_block, QuantBlockFormat};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -35,6 +25,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::weights::Q4kManifestEntry;
+
+use super::{pad_rows_to_block, QuantBlockFormat};
+#[cfg(not(target_arch = "wasm32"))]
 /// In-flight state for the W2 feature-major down emission. Lives only
 /// while the FFN write loop is running; collapsed into the manifest
 /// JSON at end-of-loop. Each field has a name at the call sites
@@ -45,7 +49,9 @@ pub(crate) struct FeatureMajorDownState {
     manifest: Vec<Q4kManifestEntry>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FeatureMajorDownState {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn new(path: &Path, capacity_layers: usize) -> Result<Self, VindexError> {
         Ok(Self {
             file: BufWriter::new(std::fs::File::create(path)?),
@@ -96,6 +102,7 @@ impl FeatureMajorDownState {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Flush the bytes and write the manifest JSON sidecar.
     pub(crate) fn finalize(mut self, manifest_path: &Path) -> Result<(), VindexError> {
         self.file.flush()?;

@@ -12,19 +12,6 @@
 //! via the `WeightSource` trait.
 
 use crate::extract::stage_labels::*;
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use serde::{Deserialize, Serialize};
-
-use crate::config::{VindexConfig, VindexModelConfig};
-use crate::error::VindexError;
-use crate::extract::callbacks::IndexBuildCallbacks;
-use crate::format::filenames::*;
-use crate::format::load::load_vindex_config;
-
-use super::capabilities::{ensure_standard_attention_supported, SURFACE_F32_WEIGHT_WRITER};
-use larql_models::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -36,6 +23,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::{VindexConfig, VindexModelConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::extract::callbacks::IndexBuildCallbacks;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::load::load_vindex_config;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::capabilities::{ensure_standard_attention_supported, SURFACE_F32_WEIGHT_WRITER};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
 /// Manifest `kind` discriminators — wire-format strings written into
 /// `weights.json`. Constants exist so writers and the loader's match
 /// arm dispatch on the same source-of-truth. A typo on a constant
@@ -100,6 +106,7 @@ pub trait WeightSource {
 
 // ── ModelWeights implementation ──
 
+#[cfg(not(target_arch = "wasm32"))]
 impl WeightSource for ModelWeights {
     fn get_tensor(&self, key: &str) -> Option<(Vec<f32>, usize, usize)> {
         let t = self.tensors.get(key)?;
@@ -144,6 +151,7 @@ pub struct StreamingWeights<'a> {
 }
 
 impl<'a> StreamingWeights<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_tensor_raw(&self, key: &str) -> Option<(Vec<f32>, Vec<usize>)> {
         let (shard_idx, tensor_name) = self.tensor_index.get(key)?;
         let st = safetensors::SafeTensors::deserialize(self.shard_mmaps[*shard_idx]).ok()?;
@@ -164,6 +172,9 @@ impl<'a> StreamingWeights<'a> {
     }
 }
 
+// StreamingWeights streams tensors from mmap'd safetensors shards (native);
+// every method routes through the gated `read_tensor_raw`.
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WeightSource for StreamingWeights<'a> {
     fn get_tensor(&self, key: &str) -> Option<(Vec<f32>, usize, usize)> {
         let (data, shape) = self.read_tensor_raw(key)?;
@@ -211,6 +222,7 @@ impl<'a> WeightSource for StreamingWeights<'a> {
         names
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn get_packed_bf16(&self, key: &str) -> Option<Vec<u8>> {
         let (shard_idx, tensor_name) = self.tensor_index.get(key)?;
         let st = safetensors::SafeTensors::deserialize(self.shard_mmaps[*shard_idx]).ok()?;
@@ -265,6 +277,7 @@ impl Default for WriteWeightsOptions {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write model weights to split component files.
 ///
 /// Works with any `WeightSource`: ModelWeights (build path) or
@@ -277,6 +290,7 @@ pub fn write_model_weights(
     write_model_weights_with_opts(source, dir, callbacks, WriteWeightsOptions::default())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Explicit-options variant of [`write_model_weights`].
 pub fn write_model_weights_with_opts(
     source: &dyn WeightSource,
@@ -572,4 +586,5 @@ pub fn write_model_weights_with_opts(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::config::dtype::write_floats;

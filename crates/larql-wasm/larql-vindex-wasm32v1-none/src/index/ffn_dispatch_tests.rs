@@ -7,14 +7,6 @@
 //!
 //! The module is gated with `#[cfg(test)]` at its declaration in
 //! `index/mod.rs`; no file-level cfg needed.
-
-use ndarray::{Array1, Array2, ArrayView2};
-use std::sync::Mutex;
-
-use super::types::{
-    FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides,
-    QuantizedFfnAccess,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +18,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2, ArrayView2};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
+use super::types::{
+    FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides,
+    QuantizedFfnAccess,
+};
 
 /// Test-only GateIndex implementation. Each backend flag controls
 /// whether that layer fires; `last` tracks the dispatch trail.
@@ -63,6 +65,7 @@ impl Mock {
 }
 
 impl GateLookup for Mock {
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn(&self, _layer: usize, _residual: &Array1<f32>, _top_k: usize) -> Vec<(usize, f32)> {
         vec![]
     }
@@ -186,6 +189,7 @@ impl QuantizedFfnAccess for Mock {
 
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_native_row(rows: usize, cols: usize, fill: f32) -> Array2<f32> {
         Array2::from_elem((rows, cols), fill)
     }

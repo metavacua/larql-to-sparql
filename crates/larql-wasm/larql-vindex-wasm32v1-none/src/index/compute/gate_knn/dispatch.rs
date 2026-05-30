@@ -4,14 +4,6 @@
 //! HNSW (`hnsw_lifecycle.rs`), GPU full-batch (`scores_batch.rs`), and
 //! Q4 backend matvec, then funnel through `Self::top_k_from_scores`
 //! (`mod.rs`) for the K-with-largest-|val| extraction.
-
-use ndarray::{Array1, Array2, ArrayView2};
-
-use super::top_k_by_abs;
-use crate::index::core::VectorIndex;
-use crate::index::storage::gate_store::{gate_matmul, gemv};
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::index::types::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,7 +15,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2, ArrayView2};
+
+use super::top_k_by_abs;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::storage::gate_store::{gate_matmul, gemv};
+use crate::index::storage::vindex_storage::VindexStorage;
+use crate::index::types::*;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN: find the top-K features at a layer whose gate vectors have
     /// the highest dot product with the input residual. Uses BLAS matmul.
     ///
@@ -61,6 +66,7 @@ impl VectorIndex {
         Self::top_k_from_scores(&scores, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Batched gate walk: scores all features via a single BLAS `gemv`, then
     /// extracts the top-K. Despite the name, this is batched matrix-vector —
     /// see [`Self::gate_walk_pure`] for a true per-feature implementation.
@@ -119,6 +125,7 @@ impl VectorIndex {
         Some(Self::top_k_from_scores(&scores, top_k))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN within a specific feature range (for MoE expert-scoped queries).
     /// Only computes dot products for features [feat_start..feat_end].
     /// Returns (global_feature_index, score) pairs.
@@ -219,6 +226,7 @@ impl VectorIndex {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Full walk: gate KNN at each layer, annotated with down token metadata.
     pub fn walk(&self, residual: &Array1<f32>, layers: &[usize], top_k: usize) -> WalkTrace {
         let mut trace_layers = Vec::with_capacity(layers.len());
@@ -245,6 +253,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Batched gate KNN: compute scores for ALL sequence positions in one BLAS gemm.
     ///
     /// Input: x is [seq_len, hidden]. Computes gate_vectors @ x^T = [features, seq_len].
@@ -306,6 +315,7 @@ impl VectorIndex {
         feature_set.into_iter().collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Adaptive gate KNN — automatically picks the fastest path per layer.
     ///
     /// Dispatch order:
@@ -348,6 +358,7 @@ impl VectorIndex {
         self.gate_knn(layer, residual, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN via Q4 matvec — scored by a ComputeBackend.
     ///
     /// The vindex provides the raw Q4 data. The backend scores it.
@@ -396,7 +407,9 @@ mod tests {
 
     use super::*;
     use crate::index::FeatureMeta;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::array;
+    #[cfg(not(target_arch = "wasm32"))]
     /// Simple heap-mode index: 3 features at layer 0, hidden=4.
     /// Each row is a known direction so we can predict KNN hits.
     fn heap_idx() -> VectorIndex {
@@ -496,6 +509,7 @@ mod tests {
 
     // ── gate_knn_batch ───────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_batch_empty_seq_returns_empty() {
         let v = heap_idx();
@@ -512,6 +526,7 @@ mod tests {
         assert_eq!(hits[0], 2, "feature 2 has highest dot product");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `gate_knn_batch` switches to the rayon-parallel branch at
     /// `seq_len >= PARALLEL_TOPK_THRESHOLD` (16). Use seq_len = 20
     /// to exercise that path.

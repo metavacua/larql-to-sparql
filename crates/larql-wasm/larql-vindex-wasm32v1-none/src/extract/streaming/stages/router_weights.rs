@@ -1,12 +1,4 @@
 //! Stage 1b — router weights (MoE models only).
-
-use std::io::{BufWriter, Write};
-
-use crate::error::VindexError;
-use crate::extract::stage_labels::*;
-use crate::extract::streaming::context::StreamingContext;
-use crate::extract::streaming::tensor_io::{get_tensor_f32, normalize_key};
-use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,7 +10,21 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::extract::stage_labels::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::extract::streaming::context::StreamingContext;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::extract::streaming::tensor_io::{get_tensor_f32, normalize_key};
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> StreamingContext<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Stage 1b — router weights (MoE models only).
     pub(in crate::extract::streaming) fn write_router_weights(
         &mut self,

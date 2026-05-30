@@ -15,8 +15,6 @@
 //!
 //! No model dependency, no forward passes — pure linear algebra over
 //! `Array1<f32>` slices the caller already has in hand.
-
-use ndarray::Array1;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +26,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+#[cfg(not(target_arch = "wasm32"))]
 /// Input to the refine pass: a single fact's identifying coordinates
 /// plus the unrefined gate vector synthesised at INSERT time.
 #[derive(Debug, Clone)]
@@ -37,6 +39,7 @@ pub struct RefineInput {
     pub gate: Array1<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Output of the refine pass for a single fact: the refined (gate-only)
 /// vector and the fraction of the original norm retained after
 /// orthogonalisation. Norm retained < 1.0 means the refine pass
@@ -51,6 +54,7 @@ pub struct RefinedGate {
     pub retained_norm: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Aggregate result of running refine over a constellation. Carries the
 /// per-fact refined gates plus summary stats so the executor can report
 /// what happened to the user.
@@ -63,6 +67,7 @@ pub struct RefineResult {
     pub n_decoys: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Refine a constellation of patched gates.
 ///
 /// `inputs` is the full set of facts being baked. Within each layer, the
@@ -145,6 +150,7 @@ pub fn refine_gates(inputs: &[RefineInput], decoy_residuals: &[Array1<f32>]) -> 
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Project `target` onto the orthogonal complement of `span(suppress)`.
 ///
 /// Does proper modified Gram-Schmidt: first orthonormalises the
@@ -191,7 +197,9 @@ fn orthogonalise(target: &Array1<f32>, suppress: &[&Array1<f32>]) -> Array1<f32>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::array;
+    #[cfg(not(target_arch = "wasm32"))]
     fn vec(xs: &[f32]) -> Array1<f32> {
         Array1::from_vec(xs.to_vec())
     }
@@ -377,6 +385,7 @@ mod tests {
         assert_eq!(r.gates[0].gate, g);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cos(a: &Array1<f32>, b: &Array1<f32>) -> f32 {
         let na = a.dot(a).sqrt();
         let nb = b.dot(b).sqrt();

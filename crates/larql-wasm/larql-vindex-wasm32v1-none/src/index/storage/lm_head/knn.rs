@@ -6,8 +6,6 @@
 //! reduction-tree drift on close-call tokens. Both paths share
 //! `top_k_sorted` for the K-largest extraction so a future tweak (e.g.
 //! widening the argmax fast path) lands in one place.
-
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +17,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stride32Mode {
     Disabled,
@@ -26,6 +27,7 @@ enum Stride32Mode {
     First,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lm_head_stride32_mode() -> Stride32Mode {
     match std::env::var("LARQL_LM_HEAD_STRIDE32") {
         Ok(v) if matches!(v.as_str(), "1" | "true" | "on" | "yes") => Stride32Mode::First,
@@ -34,7 +36,9 @@ fn lm_head_stride32_mode() -> Stride32Mode {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// KNN against lm_head via a ComputeBackend. Tries paths in order:
     ///   1. Q4 matvec on `lm_head_q4.bin` (when present and backend has q4).
     ///   2. f16 gemv on the mmap'd embeddings (tied-embed models only).
@@ -85,6 +89,7 @@ impl VectorIndex {
         self.lm_head_knn(query, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Diagnostic alternative to `lm_head_knn_backend` — skips the
     /// production `q4k_matvec` path and tries stable-reduction
     /// alternatives in this order:
@@ -141,6 +146,7 @@ impl VectorIndex {
         self.lm_head_knn(query, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn lm_head_f16_backend_hits(
         &self,
         query: &ndarray::Array1<f32>,
@@ -180,6 +186,7 @@ impl VectorIndex {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn lm_head_stride32_backend_hits(
         &self,
         query: &ndarray::Array1<f32>,
@@ -285,6 +292,7 @@ impl VectorIndex {
         heap.into_iter().map(|(s, i)| (i, s)).collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// KNN against lm_head: find top-K tokens by dot product with query vector.
     /// Single BLAS gemv: query[1, hidden] @ lm_head[vocab, hidden]^T → [1, vocab].
     /// Then top-K selection. Returns (token_id, score) sorted by score descending.
@@ -344,10 +352,12 @@ mod tests {
     //! the f16 / Q4_K backend paths. The Q4_K matvec happy path needs
     //! a real ComputeBackend with `has_q4()`; that's covered by the
     //! Metal integration tests, not here.
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array1;
 
     use super::*;
     use crate::format::filenames::LM_HEAD_BIN;
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a `VectorIndex` with a synthetic `lm_head.bin` mmap'd in.
     /// `lm_head` is row-major `[vocab, hidden]` f32.
     fn vindex_with_lm_head(vocab: usize, hidden: usize, data: &[f32]) -> VectorIndex {
@@ -368,6 +378,7 @@ mod tests {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_returns_empty_when_no_mmap() {
         let v = VectorIndex::empty(1, 4);
@@ -375,6 +386,7 @@ mod tests {
         assert!(v.lm_head_knn(&q, 5).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_returns_empty_when_vocab_zero() {
         // Force lm_head_mmap to be Some but vocab_size = 0.
@@ -390,6 +402,7 @@ mod tests {
         assert!(v.lm_head_knn(&q, 5).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_returns_empty_when_mmap_too_small() {
         // Manually construct: tiny lm_head mmap with vocab=99 declared
@@ -407,6 +420,7 @@ mod tests {
         assert!(v.lm_head_knn(&q, 5).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_returns_top_k_in_descending_score_order() {
         // lm_head is [4, 2] — 4 vocab tokens × 2 hidden dims.
@@ -431,6 +445,7 @@ mod tests {
         assert!(hits.iter().all(|(id, _)| *id != 3));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_top_k_zero_returns_full_unsorted_pairs() {
         // The truncate guard requires k > 0; with k = 0 we return the
@@ -444,6 +459,7 @@ mod tests {
         assert_eq!(hits.len(), 2);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_knn_top_k_larger_than_vocab_returns_all() {
         let lm_head: Vec<f32> = vec![1.0, 0.0, 0.0, 1.0];
@@ -461,6 +477,7 @@ mod tests {
         prev: Option<String>,
     }
     impl EnvSet {
+        #[cfg(not(target_arch = "wasm32"))]
         fn set(value: Option<&str>) -> Self {
             let prev = std::env::var("LARQL_LM_HEAD_STRIDE32").ok();
             match value {
@@ -471,6 +488,7 @@ mod tests {
         }
     }
     impl Drop for EnvSet {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             match self.prev.take() {
                 Some(v) => std::env::set_var("LARQL_LM_HEAD_STRIDE32", v),
@@ -523,6 +541,7 @@ mod tests {
     // stride-32 / matvec branches fire when Q4 bytes are present.
     // f32 fallback fires when neither Q4 nor f16 is loaded.
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial_test::serial]
     fn lm_head_knn_backend_falls_back_to_f32_when_no_q4_or_f16() {
@@ -540,6 +559,7 @@ mod tests {
         assert_eq!(hits[0].0, 0, "token 0 [1, 0] best matches query [1, 0]");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial_test::serial]
     fn lm_head_knn_backend_skip_q4k_falls_back_to_f32() {
@@ -556,6 +576,7 @@ mod tests {
         assert_eq!(hits[0].0, 1);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `lm_head_stride32_backend_hits` short-circuits when no Q4 mmap
     /// is loaded on the storage façade. Exercised through the public
     /// `lm_head_knn_backend` with stride32 enabled.
@@ -574,6 +595,7 @@ mod tests {
         assert_eq!(hits[0].0, 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `lm_head_f16_backend_hits` returns None when vocab_size is 0.
     /// We force the path by populating the f16 mmap then setting
     /// vocab_size = 0 — the early-return on `vocab > 0` fires.

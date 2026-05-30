@@ -8,6 +8,7 @@ use crate::config::dtype::StorageDtype;
 use crate::index::core::VectorIndex;
 use crate::index::types::GateLayerSlice;
 use larql_models::TopKEntry;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 fn meta(token: &str) -> FeatureMeta {
     FeatureMeta {
@@ -22,6 +23,7 @@ fn meta(token: &str) -> FeatureMeta {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build an f16-backed mmap from a flat f32 buffer.
 fn f16_mmap_from(floats: &[f32]) -> memmap2::Mmap {
     let bytes = floats.len() * 2;
@@ -65,6 +67,7 @@ fn num_features_returns_zero_for_empty_index() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn num_features_reads_heap_gate_shape() {
     let mut v = VectorIndex::empty(2, 4);
@@ -102,6 +105,7 @@ fn num_features_oob_layer_returns_zero() {
 
 // ── total_gate_vectors / total_down_meta ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn total_gate_vectors_sums_heap_layers() {
     let mut v = VectorIndex::empty(3, 4);
@@ -144,6 +148,7 @@ fn total_down_meta_zero_when_empty() {
 
 // ── loaded_layers ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn loaded_layers_returns_indices_with_heap_gate() {
     let mut v = VectorIndex::empty(4, 4);
@@ -192,6 +197,7 @@ fn down_meta_at_returns_layer_slice() {
     assert_eq!(slice.len(), 1);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn gate_vectors_at_returns_matrix_only_in_heap_mode() {
     let mut v = VectorIndex::empty(2, 4);
@@ -203,6 +209,7 @@ fn gate_vectors_at_returns_matrix_only_in_heap_mode() {
 
 // ── gate_vector ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn gate_vector_heap_returns_row() {
     let mut v = VectorIndex::empty(1, 4);
@@ -215,6 +222,7 @@ fn gate_vector_heap_returns_row() {
     assert_eq!(row, vec![10.0, 11.0, 12.0, 13.0]);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn gate_vector_heap_returns_none_for_oob_feature() {
     let mut v = VectorIndex::empty(1, 4);
@@ -257,6 +265,7 @@ fn gate_vector_mmap_returns_none_for_oob_feature() {
 
 // ── gate_vectors_flat ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn gate_vectors_flat_heap_returns_data_rows_cols() {
     let mut v = VectorIndex::empty(1, 4);
@@ -308,6 +317,7 @@ fn gate_vectors_flat_mmap_returns_none_when_zero_features() {
 
 // ── num_features_at ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn num_features_at_heap_path_matches_num_features() {
     let mut v = VectorIndex::empty(2, 4);
@@ -362,6 +372,7 @@ fn describe_ffn_backend_reports_gate_mmap_dtype() {
 
 // ── warmup ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn warmup_is_noop_for_f32_mmap() {
     // f32 path returns immediately — warmed_gates stays empty.

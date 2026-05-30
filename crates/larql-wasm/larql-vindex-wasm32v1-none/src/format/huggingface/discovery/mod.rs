@@ -25,14 +25,20 @@ mod repo;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::publish::get_hf_token;
+#[cfg(not(target_arch = "wasm32"))]
 use super::publish::protocol::hf_base;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use collection::{add_collection_item, fetch_collection_items};
+#[cfg(not(target_arch = "wasm32"))]
 pub use repo::{dataset_repo_exists, repo_exists};
 
+#[cfg(not(target_arch = "wasm32"))]
 use collection::{create_collection, find_collection_slug};
 
 /// One repo in a collection.
@@ -46,6 +52,7 @@ pub struct CollectionItem {
     pub note: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Ensure a collection titled `title` exists in `namespace`, then add
 /// every item to it. Idempotent: re-runs reuse the slug (matched by
 /// case-insensitive title) and treat HTTP 409 on add-item as success.

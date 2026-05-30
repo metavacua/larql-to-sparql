@@ -18,10 +18,6 @@
 //! The `top_k_from_scores` impl method and the `top_k_by_abs` free
 //! function live here so every submodule can share them without
 //! cross-importing siblings.
-
-use ndarray::Array1;
-
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -33,12 +29,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
 mod dispatch;
 mod hnsw_lifecycle;
 mod scores_batch;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Shared `top_k_from_scores` — every submodule routes through this.
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Pick the K scores with the largest absolute value out of N. Single
     /// scan with a min-heap of capacity K; allocation is O(K), not O(N).
     /// On Gemma 4B (N=10240, K=10, 34-layer walk) this is ~5.4 MB less
@@ -119,6 +123,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::top_k_by_abs;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array1;
 
     // ── Per-(layer, expert) HNSW unit tests ──────────────────────────────
@@ -137,9 +142,11 @@ mod tests {
     // promising graph-search recall guarantees the tests can't enforce.
 
     use crate::index::VectorIndex;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     use core::sync::atomic::Ordering;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a 2-layer VectorIndex with 8 features × 4 hidden where
     /// `feature_i = e_(i mod 4)` (one-hot among the 4 hidden dims).  A
     /// query equal to `e_j` then dot-products to 1.0 exactly with
@@ -157,6 +164,7 @@ mod tests {
         VectorIndex::new(gate, down, num_layers, hidden)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_expert_brute_force_respects_range() {
         let v = synth_index();
@@ -173,6 +181,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_expert_hnsw_top_hit_matches_brute() {
         let v = synth_index();
@@ -192,6 +201,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_expert_hnsw_offsets_to_global_indices() {
         let v = synth_index();
@@ -224,6 +234,7 @@ mod tests {
         assert_eq!(n2, 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_expert_hnsw_falls_back_when_slice_empty() {
         let v = synth_index();
@@ -286,6 +297,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn top_k_from_scores_via_array1() {
         use crate::index::VectorIndex;

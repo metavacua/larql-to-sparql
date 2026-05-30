@@ -7,20 +7,6 @@
 //! `StreamingContext::new` to set up mmap + tensor index, then runs
 //! each stage method in order, then calls `finalize` to add checksums
 //! and clear the checkpoint.
-
-use std::path::{Path, PathBuf};
-
-use ndarray::Array2;
-
-use crate::config::dtype::StorageDtype;
-use crate::config::types::QuantFormat;
-use crate::config::{VindexConfig, VindexLayerInfo};
-use crate::error::VindexError;
-use crate::extract::callbacks::IndexBuildCallbacks;
-use crate::extract::stage_labels::*;
-use crate::format::filenames::*;
-
-use super::tensor_io::{normalize_key, MmapShard};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -32,6 +18,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use crate::config::dtype::StorageDtype;
+use crate::config::types::QuantFormat;
+use crate::config::{VindexConfig, VindexLayerInfo};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::extract::callbacks::IndexBuildCallbacks;
+use crate::extract::stage_labels::*;
+use crate::format::filenames::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::tensor_io::{normalize_key, MmapShard};
+#[cfg(not(target_arch = "wasm32"))]
 /// Holds the inputs + accumulators for the streaming-extract pipeline.
 pub(super) struct StreamingContext<'a> {
     // Inputs (borrowed from caller)
@@ -73,7 +78,9 @@ pub(super) struct StreamingContext<'a> {
     pub(super) embed: Option<Array2<f32>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> StreamingContext<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build the context: detect architecture, mmap the safetensors
     /// shards, build the tensor index, and load any compatible
     /// checkpoint. Caller must have already gated on
@@ -202,6 +209,7 @@ impl<'a> StreamingContext<'a> {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Add checksums to the index.json on disk and drop the checkpoint.
     /// Run after every stage has succeeded.
     pub(super) fn finalize(&self) -> Result<(), VindexError> {
@@ -220,6 +228,7 @@ impl<'a> StreamingContext<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Find every `*.safetensors` shard for a model. Looks in `model_dir`
 /// first, then falls back to `model_dir/weights/` — some HF clones
 /// land the binary shards under a `weights/` subdirectory.
@@ -252,6 +261,7 @@ fn discover_safetensors(model_dir: &Path) -> Result<Vec<PathBuf>, VindexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn touch(path: &Path) {
         std::fs::write(path, b"").unwrap();
     }
@@ -270,6 +280,7 @@ mod tests {
         assert!(got[1].ends_with("model-00002.safetensors"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn discover_safetensors_falls_back_to_weights_subdir() {
         let tmp = tempfile::tempdir().unwrap();
@@ -296,6 +307,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn discover_safetensors_errors_when_weights_subdir_is_empty() {
         let tmp = tempfile::tempdir().unwrap();

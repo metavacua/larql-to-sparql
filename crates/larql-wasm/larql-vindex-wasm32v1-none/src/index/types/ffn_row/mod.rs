@@ -39,6 +39,7 @@ pub trait FfnRowAccess: NativeFfnAccess + QuantizedFfnAccess + Fp4FfnAccess {
     // logic is the contract. Override the *specific* backend methods
     // (`fp4_ffn_row_dot`, `q4k_ffn_row_dot`, etc.) instead.
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Unified fused dequant + dot. `component`: 0=gate, 1=up, 2=down.
     /// Returns the dot product `row(layer, component, feat) · x` from
     /// whichever backend is loaded, or `None` if no backend covers this
@@ -100,6 +101,7 @@ pub trait FfnRowAccess: NativeFfnAccess + QuantizedFfnAccess + Fp4FfnAccess {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Unified fused dequant + scaled-add: `out[i] += alpha * row[i]`.
     /// Returns `true` on success, `false` if no backend covers the
     /// coordinate (or shapes don't match).
@@ -177,6 +179,7 @@ pub trait FfnRowAccess: NativeFfnAccess + QuantizedFfnAccess + Fp4FfnAccess {
         false
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Unified decode-into-buffer. `out.len()` must equal the row width.
     fn ffn_row_into(&self, layer: usize, component: usize, feat: usize, out: &mut [f32]) -> bool {
         if self.has_fp4_storage() && self.fp4_ffn_row_into(layer, component, feat, out) {

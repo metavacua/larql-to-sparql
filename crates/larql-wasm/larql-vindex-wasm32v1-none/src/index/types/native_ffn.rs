@@ -8,9 +8,11 @@ pub trait NativeFfnAccess: Send + Sync {
     fn has_down_features(&self) -> bool {
         false
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn down_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn up_layer_matrix(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         None
     }
@@ -20,12 +22,15 @@ pub trait NativeFfnAccess: Send + Sync {
     fn has_interleaved(&self) -> bool {
         false
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_gate(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_up(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         None
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_down(&self, _layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         None
     }

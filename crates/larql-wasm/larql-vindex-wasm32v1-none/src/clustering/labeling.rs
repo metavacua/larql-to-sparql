@@ -3,10 +3,6 @@
 //! Two approaches:
 //! 1. TF-IDF: distinctive tokens per cluster (fallback)
 //! 2. Member-based: average member embeddings → nearest category word
-
-use ndarray::Array1;
-
-use super::categories::{category_words, is_stop_word};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +14,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::categories::{category_words, is_stop_word};
+#[cfg(not(target_arch = "wasm32"))]
 /// TF-IDF labeling: find distinctive tokens per cluster.
 pub fn auto_label_clusters(
     assignments: &[usize],
@@ -100,6 +103,7 @@ pub fn auto_label_clusters(
     (labels, top_lists)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Member-based labeling: for each cluster, average the embeddings of its
 /// top member tokens, then find the nearest category word.
 ///
@@ -363,6 +367,7 @@ pub fn detect_entity_pattern(members: &[String]) -> Option<String> {
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Encode a token using the tokenizer and embedding matrix.
 pub fn encode_token_with_tokenizer(
     tok: &str,

@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode a single token ID to a trimmed string.
 pub fn decode_token(tokenizer: &tokenizers::Tokenizer, id: u32) -> Option<String> {
     tokenizer
@@ -110,6 +111,7 @@ pub fn date_from_epoch_secs(secs: u64) -> String {
     format!("{year}-{month:02}-{day:02}")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Current UTC date as a `YYYY-MM-DD` string, computed from a real
 /// Gregorian calendar (leap years included). Stored on every walker
 /// extraction's metadata header.
@@ -140,6 +142,7 @@ pub fn partial_top_k(data: &[f32], k: usize) -> Vec<(usize, f32)> {
     indexed
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-k from a matrix column.
 pub fn partial_top_k_column(
     matrix: &ndarray::Array2<f32>,
@@ -169,6 +172,7 @@ pub fn partial_top_k_column(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     // ── round4 ────────────────────────────────────────────────────────────────
 
@@ -347,6 +351,7 @@ mod tests {
 
     // ── partial_top_k_column ──────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn partial_top_k_column_extracts_correct_column() {
         // 4×3 matrix; column 1 values are [2, 5, 1, 8]
@@ -358,6 +363,7 @@ mod tests {
         assert_eq!(top[1].0, 1); // row 1 has value 5
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn partial_top_k_column_k_zero_returns_empty() {
         let m = Array2::from_elem((4, 2), 1.0f32);

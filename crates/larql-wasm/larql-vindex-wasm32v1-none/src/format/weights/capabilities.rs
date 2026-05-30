@@ -1,5 +1,4 @@
 use crate::config::ExtractLevel;
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -11,12 +10,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
 pub(super) const SURFACE_F32_WEIGHT_WRITER: &str = "f32 weight writer";
 pub(super) const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";
 pub(crate) const SURFACE_EXTRACT_PIPELINE: &str = "extract pipeline";
 
 const FEATURE_MLA: &str = "multi-head latent attention (MLA)";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Ensure the current vindex weight layout can represent this architecture's
 /// attention tensors.
 ///
@@ -39,6 +41,7 @@ pub(super) fn ensure_standard_attention_supported(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Entry-point gate for the extract pipeline: reject unsupported attention
 /// layouts before any partial vindex output is written.
 ///

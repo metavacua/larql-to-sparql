@@ -20,15 +20,6 @@
 //! See `docs/specs/fp4-format-spec.md` §5 for the byte layout these
 //! scales correspond to, and `~/chris-source/chris-experiments/routing/26_fp4_quantisation/SPEC.md`
 //! for the theoretical framing.
-
-use std::path::Path;
-
-use memmap2::Mmap;
-use rayon::prelude::*;
-use serde_json::Value;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -40,6 +31,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use memmap2::Mmap;
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
 /// Fixed block geometry for v1. `sub_block` matches MXFP4's 1×32.
 pub const SUB_BLOCK_SIZE: usize = 32;
 
@@ -248,13 +253,16 @@ impl VindexComplianceReport {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Canonical JSON dump — matches the shape the `fp4_q1_scan`
     /// example emits so sidecar consumers don't break across the
     /// example → library promotion.
     pub fn to_json(&self) -> Value {
+        #[cfg(not(target_arch = "wasm32"))]
         use serde_json::json;
         let thresholds = &self.config.compliance_thresholds;
 
+        #[cfg(not(target_arch = "wasm32"))]
         fn bucket_json(b: &Bucket, thresholds: &[f32]) -> Value {
             let q = b.quantiles();
             let compliance: Vec<Value> = thresholds
@@ -421,6 +429,7 @@ fn truncate_top<T: Clone>(v: &mut Vec<T>, k: usize, key: impl Fn(&T) -> f32) {
 
 // ── Public entry points ───────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn scan_projection(
     path: &Path,
     name: &str,
@@ -511,6 +520,7 @@ pub fn scan_projection(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn scan_vindex(
     vindex_dir: &Path,
     config: &ScanConfig,

@@ -1,11 +1,4 @@
 //! Streaming NDJSON writer + completed-layer scan for resume.
-
-use std::io::{BufRead, BufWriter, Write};
-use std::path::Path;
-
-use larql_models::{VectorFileHeader, VectorRecord};
-
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,13 +10,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufRead, BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_models::{VectorFileHeader, VectorRecord};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 /// Streaming NDJSON writer for vector records.
 pub struct VectorWriter {
     writer: BufWriter<std::fs::File>,
     count: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorWriter {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new writer, truncating any existing file.
     pub fn create(path: &Path) -> Result<Self, VindexError> {
         let file = std::fs::File::create(path)?;
@@ -33,6 +39,7 @@ impl VectorWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open an existing file for appending and count existing records.
     pub fn append(path: &Path) -> Result<(Self, usize), VindexError> {
         let existing = if path.exists() {
@@ -61,6 +68,7 @@ impl VectorWriter {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write the metadata header as the first line.
     pub fn write_header(&mut self, header: &VectorFileHeader) -> Result<(), VindexError> {
         serde_json::to_writer(&mut self.writer, header)
@@ -69,6 +77,7 @@ impl VectorWriter {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write a single vector record as one NDJSON line.
     pub fn write_record(&mut self, record: &VectorRecord) -> Result<(), VindexError> {
         serde_json::to_writer(&mut self.writer, record)
@@ -88,6 +97,7 @@ impl VectorWriter {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Scan an existing NDJSON file for completed layer numbers.
 pub fn scan_completed_layers(path: &Path) -> Result<HashSet<usize>, VindexError> {
     let mut layers = HashSet::new();
@@ -144,6 +154,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn vector_writer_create_writes_header_and_records() {
         let dir = std::env::temp_dir().join("larql_vex_writer_create");
@@ -168,6 +179,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn vector_writer_append_to_missing_file_starts_at_zero() {
         let dir = std::env::temp_dir().join("larql_vex_writer_append_missing");
@@ -182,6 +194,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn vector_writer_append_counts_existing_records() {
         let dir = std::env::temp_dir().join("larql_vex_writer_append_count");
@@ -208,6 +221,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn scan_completed_layers_missing_file_is_empty() {
         let path = std::env::temp_dir().join("larql_vex_scan_missing.jsonl");
@@ -216,6 +230,7 @@ mod tests {
         assert!(layers.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn scan_completed_layers_collects_unique_layer_numbers() {
         let dir = std::env::temp_dir().join("larql_vex_scan_collect");
@@ -239,6 +254,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn scan_completed_layers_ignores_malformed_lines() {
         let dir = std::env::temp_dir().join("larql_vex_scan_malformed");

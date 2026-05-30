@@ -23,15 +23,19 @@ mod context;
 mod stages;
 mod tensor_io;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::config::dtype::StorageDtype;
 use crate::config::types::QuantFormat;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 use crate::extract::callbacks::IndexBuildCallbacks;
 
+#[cfg(not(target_arch = "wasm32"))]
 use self::context::StreamingContext;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a vindex by streaming from safetensors files (no full model load).
 ///
 /// Peak memory: embeddings + 1 layer of gate/down weights at a time.

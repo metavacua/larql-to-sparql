@@ -4,8 +4,6 @@
 //! Falls back to a built-in core set if the file is not found.
 //!
 //! To regenerate: `python3 scripts/fetch_wikidata_properties.py`
-
-use std::path::Path;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +15,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 /// Load category words from the Wikidata categories file, or fall back to built-in.
 pub fn category_words() -> Vec<String> {
     // Try loading from file (relative to cwd or workspace root)
@@ -38,6 +40,7 @@ pub fn category_words() -> Vec<String> {
     builtin_categories()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load categories from a specific path.
 pub fn category_words_from(path: &Path) -> Vec<String> {
     if let Ok(text) = std::fs::read_to_string(path) {
@@ -393,6 +396,7 @@ mod tests {
         assert!(!is_stop_word("president"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn category_words_from_path_fallback() {
         // Non-existent path should fall back to builtin

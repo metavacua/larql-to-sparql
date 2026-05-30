@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a WordLevel tokenizer with a fixed vocab. Only the listed
 /// words exist; everything else falls back to `[UNK]` (id 0).
 pub(super) fn vocab_tokenizer(words: &[&str]) -> tokenizers::Tokenizer {
@@ -41,6 +42,7 @@ pub(super) fn vocab_tokenizer(words: &[&str]) -> tokenizers::Tokenizer {
     tokenizers::Tokenizer::from_bytes(json.as_bytes()).unwrap()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a `ModelWeights` with just enough fields for `embed`-only
 /// helpers — `tensors` starts empty; callers can add via
 /// `weights.tensors.insert(...)`.
@@ -80,6 +82,7 @@ pub(super) fn weights_with_embed(embed: ndarray::Array2<f32>, vocab_size: usize)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Insert a tensor `key → array` into `weights.tensors`.
 pub(super) fn insert_tensor(weights: &mut ModelWeights, key: &str, array: ndarray::Array2<f32>) {
     weights.tensors.insert(key.to_string(), array.into_shared());

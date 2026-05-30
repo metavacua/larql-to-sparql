@@ -14,12 +14,6 @@
 use larql_core::core::edge::Edge;
 use larql_core::core::enums::SourceType;
 use larql_core::core::graph::Graph;
-use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
-
-use super::utils::{count_threshold, decode_token, partial_top_k, top_entities};
-use super::weight_walker::{LayerResult, LayerStats, WalkCallbacks, WalkConfig};
-use crate::error::VindexError;
-use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +25,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::utils::{count_threshold, decode_token, partial_top_k, top_entities};
+use super::weight_walker::{LayerResult, LayerStats, WalkCallbacks, WalkConfig};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
 /// Result of walking attention heads at a single layer.
 #[derive(Debug, Clone)]
 pub struct AttentionLayerResult {
@@ -52,13 +55,16 @@ struct RawEdge {
     head: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A loaded model ready for attention walking.
 pub struct AttentionWalker {
     weights: ModelWeights,
     tokenizer: tokenizers::Tokenizer,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AttentionWalker {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(model: &str) -> Result<Self, VindexError> {
         let model_path = resolve_model_path(model)?;
         let weights = load_model_dir_validated(&model_path)?;
@@ -79,6 +85,7 @@ impl AttentionWalker {
         self.weights.num_layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Walk all attention heads at a single layer.
     pub fn walk_layer(
         &self,
@@ -306,6 +313,7 @@ mod tests {
     use super::super::test_fixture::create_mock_model;
     use super::super::weight_walker::{SilentWalkCallbacks, WalkConfig};
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_attn_inline_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -313,6 +321,7 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -331,6 +340,7 @@ mod tests {
         assert!(result.is_err(), "expected load error for missing dir");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_missing_tokenizer_errors() {
         let dir = fixture("missing_tok");

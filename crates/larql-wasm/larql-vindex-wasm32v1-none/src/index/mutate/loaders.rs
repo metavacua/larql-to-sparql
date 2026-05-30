@@ -3,17 +3,6 @@
 //!
 //! These are the heap-mode constructors. The mmap-mode entry point
 //! `VectorIndex::new_mmap` lives in `super::core` next to `new`.
-
-use std::io::{BufRead, BufReader};
-use std::path::Path;
-
-use larql_models::TopKEntry;
-use ndarray::Array2;
-
-use crate::error::VindexError;
-
-use crate::index::core::VectorIndex;
-use crate::index::types::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,7 +14,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufRead, BufReader};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_models::TopKEntry;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::types::*;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_gates(
         path: &Path,
         callbacks: &mut dyn IndexLoadCallbacks,
@@ -152,6 +159,7 @@ impl VectorIndex {
         Ok(v)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load down-projection token metadata from an NDJSON file (ffn_down.vectors.jsonl).
     ///
     /// Only loads the metadata (top_token, top_k, c_score), NOT the full vectors.
@@ -244,6 +252,7 @@ impl VectorIndex {
 mod tests {
     use super::*;
     use crate::index::types::SilentLoadCallbacks;
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_ndjson(
         dir: &std::path::Path,
         name: &str,
@@ -295,6 +304,7 @@ mod tests {
 
     // ── load_gates ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_gates_errors_when_file_missing() {
         let mut cb = SilentLoadCallbacks;
@@ -303,6 +313,7 @@ mod tests {
         assert!(result.is_err(), "missing file must error");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_gates_errors_on_invalid_json() {
         let tmp = tempfile::tempdir().unwrap();
@@ -313,6 +324,7 @@ mod tests {
         assert!(result.is_err(), "invalid json must error");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_gates_skips_blank_lines_and_reads_dimension_from_header() {
         let tmp = tempfile::tempdir().unwrap();
@@ -350,6 +362,7 @@ mod tests {
         assert_eq!(meta_filled.top_k.len(), 2);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_gates_infers_dimension_from_first_record_when_no_header() {
         let tmp = tempfile::tempdir().unwrap();
@@ -365,6 +378,7 @@ mod tests {
         assert_eq!(v.hidden_size, 3);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_gates_handles_missing_top_k_field() {
         let tmp = tempfile::tempdir().unwrap();
@@ -388,6 +402,7 @@ mod tests {
 
     // ── load_down_meta ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_down_meta_errors_when_file_missing() {
         let mut v = VectorIndex::empty(2, 4);
@@ -442,6 +457,7 @@ mod tests {
         assert!(v.metadata.down_meta[0].as_ref().unwrap()[0].is_some());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_down_meta_skips_blank_lines_and_header() {
         let tmp = tempfile::tempdir().unwrap();
@@ -460,6 +476,7 @@ mod tests {
         assert!(v.metadata.down_meta[0].as_ref().unwrap()[0].is_some());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_down_meta_errors_on_invalid_json() {
         let tmp = tempfile::tempdir().unwrap();

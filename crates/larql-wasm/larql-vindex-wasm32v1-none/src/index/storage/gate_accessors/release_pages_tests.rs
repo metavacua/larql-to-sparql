@@ -3,7 +3,6 @@
 use crate::config::dtype::StorageDtype;
 use crate::index::core::VectorIndex;
 use crate::index::types::GateLayerSlice;
-use ndarray::{Array1, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +14,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn release_mmap_pages_no_panic_on_heap_only_index() {
     // Heap-only index: no mmaps at all — release_mmap_pages must no-op.
@@ -26,6 +28,7 @@ fn release_mmap_pages_no_panic_on_heap_only_index() {
     idx.release_mmap_pages();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn release_mmap_pages_no_panic_with_f16_gate_mmap() {
     // f16 mmap-backed index — exercises the `gate_mmap_bytes` arm

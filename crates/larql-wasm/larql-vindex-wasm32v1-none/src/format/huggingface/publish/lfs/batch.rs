@@ -1,13 +1,5 @@
 //! LFS batch endpoint — request signed upload + verify URLs for one
 //! object, parse the response into actions our caller dispatches on.
-
-use crate::error::VindexError;
-
-use super::super::hf_repo_url;
-use super::super::protocol::{
-    CONTENT_TYPE_LFS_JSON, HASH_ALGO_SHA256, LFS_OP_UPLOAD, LFS_OP_VERIFY, LFS_TRANSFER_BASIC,
-};
-use super::{LfsAction, LfsBatchResponse};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +12,17 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::hf_repo_url;
+use super::super::protocol::{
+    CONTENT_TYPE_LFS_JSON, HASH_ALGO_SHA256, LFS_OP_UPLOAD, LFS_OP_VERIFY, LFS_TRANSFER_BASIC,
+};
+use super::{LfsAction, LfsBatchResponse};
+
+#[cfg(not(target_arch = "wasm32"))]
 /// POST to the LFS batch endpoint asking for an upload URL for one
 /// object. Returns the upload + verify actions (either or both may be
 /// absent — an absent `upload` means the object is already stored).
@@ -60,6 +63,7 @@ pub(super) fn lfs_batch_upload(
     parse_lfs_batch_response(&json)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse the JSON body of an LFS batch response into the upload/verify
 /// actions our caller dispatches on. Pulled out as a pure helper so the
 /// JSON contract can be unit-tested without an HTTP server.

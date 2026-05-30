@@ -1,12 +1,4 @@
 //! Checksum utilities for vindex file integrity verification.
-
-use std::io::Read;
-use std::path::Path;
-
-use sha2::{Digest, Sha256};
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +10,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use sha2::{Digest, Sha256};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute SHA256 checksum of a file. Returns hex string.
 pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
     let mut file = std::fs::File::open(path)?;
@@ -33,6 +38,7 @@ pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute checksums for all binary files in a vindex directory.
 /// Returns a map of filename → SHA256 hex string.
 pub fn compute_checksums(dir: &Path) -> Result<HashMap<String, String>, VindexError> {
@@ -60,6 +66,7 @@ pub fn compute_checksums(dir: &Path) -> Result<HashMap<String, String>, VindexEr
     Ok(checksums)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Verify checksums of a vindex directory against stored checksums.
 /// Returns a list of (filename, status) pairs.
 pub fn verify_checksums(
@@ -85,6 +92,7 @@ pub fn verify_checksums(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn sha256_file_deterministic() {
         let dir = TempDir::new().unwrap();
@@ -96,6 +104,7 @@ mod tests {
         assert_eq!(h1.len(), 64); // hex-encoded SHA-256
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn sha256_file_different_content_different_hash() {
         let dir = TempDir::new().unwrap();
@@ -106,6 +115,7 @@ mod tests {
         assert_ne!(sha256_file(&f1).unwrap(), sha256_file(&f2).unwrap());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn sha256_file_empty_file() {
         let dir = TempDir::new().unwrap();
@@ -119,12 +129,14 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn sha256_file_missing_returns_error() {
         let result = sha256_file(Path::new("/nonexistent/no_such_file.bin"));
         assert!(result.is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compute_checksums_skips_missing_files() {
         let dir = TempDir::new().unwrap();
@@ -143,6 +155,7 @@ mod tests {
         assert!(map.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn verify_checksums_pass_for_correct_content() {
         let dir = TempDir::new().unwrap();
@@ -155,6 +168,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn verify_checksums_fail_when_content_changed() {
         let dir = TempDir::new().unwrap();

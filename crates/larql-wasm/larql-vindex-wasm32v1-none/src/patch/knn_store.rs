@@ -6,11 +6,6 @@
 //! orthogonality constraint, no Hopfield bound — unlimited scale.
 //!
 //! Port of Python `RetrievalVindex` from ~/chris-source/chris-experiments/compilation/15_v11_model/vindex_build_wordnet_b.py.
-
-use std::sync::Mutex;
-
-use ndarray::{Array1, Array2};
-use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +17,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+use serde::{Deserialize, Serialize};
 /// A single entry in the retrieval-override KNN store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnnEntry {
@@ -39,6 +41,7 @@ pub struct KnnEntry {
     pub confidence: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer retrieval-override store. Entries are independent —
 /// no orthogonality constraint, no FFN-slot budget.
 #[derive(Debug)]
@@ -51,7 +54,9 @@ pub struct KnnStore {
     dirty: Mutex<HashSet<usize>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Clone for KnnStore {
+    #[cfg(not(target_arch = "wasm32"))]
     fn clone(&self) -> Self {
         Self {
             entries: self.entries.clone(),
@@ -61,7 +66,9 @@ impl Clone for KnnStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for KnnStore {
+    #[cfg(not(target_arch = "wasm32"))]
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
@@ -71,6 +78,7 @@ impl Default for KnnStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KnnStore {
     /// Add an entry. The key is L2-normalized before storage.
     #[allow(clippy::too_many_arguments)]
@@ -132,6 +140,7 @@ impl KnnStore {
         results.into_iter().next()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-K KNN query at a layer. Returns Vec<(&entry, cosine_score)> descending.
     ///
     /// Returns borrowed references to stored entries; callers clone only the
@@ -214,6 +223,7 @@ impl KnnStore {
         &self.entries
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Rebuild the normalized key matrix for a layer.
     fn rebuild_layer(&self, layer: usize) {
         if let Some(entries) = self.entries.get(&layer) {
@@ -234,6 +244,7 @@ impl KnnStore {
         self.dirty.lock().unwrap().remove(&layer);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct from a fully-populated entries map. Used by
     /// `super::knn_store_io::load`. Rebuilds `key_matrices` lazily on
     /// first query.
@@ -484,6 +495,7 @@ mod tests {
         assert!(n.iter().all(|&x| x == 0.0));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn test_save_load_roundtrip() {
         let mut store = KnnStore::default();

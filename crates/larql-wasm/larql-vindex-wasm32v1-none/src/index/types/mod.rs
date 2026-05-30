@@ -118,6 +118,7 @@ pub struct GateQ4Slice {
     pub num_features: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap'd down_meta.bin — reads individual feature records on demand.
 #[derive(Clone)]
 pub struct DownMetaMmap {
@@ -128,6 +129,7 @@ pub struct DownMetaMmap {
     pub(crate) tokenizer: std::sync::Arc<tokenizers::Tokenizer>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl DownMetaMmap {
     fn record_size(&self) -> usize {
         8 + self.top_k_count * 8
@@ -211,6 +213,7 @@ mod tests {
     /// One layer is a slice of records.
     type FixtureLayer<'a> = &'a [FixtureRecord<'a>];
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Hand-build a `DownMetaMmap` over a tempfile so the binary
     /// decode logic in `feature_meta` can be exercised end-to-end.
     /// Layout per feature: `[token_id u32][c_score f32][top_k × (id u32, logit f32)]`.
@@ -346,6 +349,7 @@ mod tests {
 
     // ── helpers used by the unit tests above ───────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn memmap_empty() -> memmap2::Mmap {
         // Tempfile that lives long enough for the test scope —
         // returns an empty mmap suitable for record_size / num_features
@@ -362,6 +366,7 @@ mod tests {
         mmap
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn empty_tokenizer() -> tokenizers::Tokenizer {
         use tokenizers::models::wordlevel::WordLevel;
         use tokenizers::TokenizerBuilder;

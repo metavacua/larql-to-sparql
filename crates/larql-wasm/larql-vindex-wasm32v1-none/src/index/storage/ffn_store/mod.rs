@@ -24,10 +24,6 @@
 //! `set_q4k_ffn_cache_max_layers`; only the CPU per-position fallback
 //! populates it (Metal full-K decode streams Q4_K bytes through
 //! `compute::q4k_dispatch::q4k_matmul_transb`).
-
-use std::sync::{Mutex};
-
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -39,6 +35,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Mutex};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
 /// Number of FFN component tensors per transformer layer: gate, up, down
 /// — in that order. Used everywhere the FFN manifest is indexed
 /// (`layer * FFN_COMPONENTS_PER_LAYER + component`) and as the inner
@@ -53,7 +55,9 @@ pub(crate) const FFN_COMPONENTS_PER_LAYER: usize = 3;
 /// (component `1`).
 pub(crate) const FFN_DOWN: usize = 2;
 
+#[cfg(not(target_arch = "wasm32"))]
 type Q4kFfnOnceSlot = std::sync::OnceLock<Option<Arc<Vec<f32>>>>;
+#[cfg(not(target_arch = "wasm32"))]
 type Q4kFfnOnceLayer = [Q4kFfnOnceSlot; FFN_COMPONENTS_PER_LAYER];
 
 mod down;
@@ -67,6 +71,7 @@ mod up;
 
 // ── FfnStore composed-substore ─────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer Q4_K/Q6_K FFN dequant cache: outer index = layer, inner array =
 /// `[gate, up, down]`. `Arc` shares the decoded matrix across `VectorIndex`
 /// clones; `Mutex` guards LRU eviction.
@@ -87,6 +92,7 @@ pub struct DownFeaturesQ4kEntry {
     pub padded_width: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct FfnStore {
     /// Per-layer lazy dequant cache for Q4_K/Q6_K FFN tensors.
     /// `q4k_ffn_cache[layer][c]` is the dequantised
@@ -115,7 +121,9 @@ pub struct FfnStore {
     pub fp4_storage: Option<Arc<crate::index::fp4_storage::Fp4Storage>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FfnStore {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn empty(num_layers: usize) -> Self {
         Self {
             q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
@@ -129,7 +137,9 @@ impl FfnStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Clone for FfnStore {
+    #[cfg(not(target_arch = "wasm32"))]
     fn clone(&self) -> Self {
         use core::sync::atomic::Ordering;
         let nl = self.q4k_ffn_cache.lock().map(|c| c.len()).unwrap_or(0);
@@ -147,6 +157,7 @@ impl Clone for FfnStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Byte offset where layer `layer` starts in a packed per-layer f32
     /// FFN file. `matrices_per_layer` = 1 for feature-major files
@@ -174,7 +185,9 @@ mod ffn_layer_byte_offset_tests {
     //! layer past the first whenever feature counts weren't constant.
 
     use crate::index::core::VectorIndex;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build an in-memory VectorIndex whose `num_features(layer)` reads
     /// from the heap gate-vectors fallback (no mmap needed). Each gate
     /// matrix has shape `[num_features[l], hidden]`.

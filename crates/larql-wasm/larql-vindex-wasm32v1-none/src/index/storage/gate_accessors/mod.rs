@@ -10,12 +10,6 @@
 //!   raw gate-matrix accessors (heap + mmap, single-row + bulk).
 //! - `warmup`: pre-decode f16 mmap to f32 once so per-query KNN avoids
 //!   re-decoding on every dispatch.
-
-use ndarray::Array2;
-
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::index::types::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +21,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
+use crate::index::types::*;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Look up metadata for a specific feature.
     /// Checks heap first (mutation overrides), then mmap (production read path).
@@ -191,6 +194,7 @@ impl VectorIndex {
             .map(|v| v.as_slice())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Access gate vectors matrix for a specific layer (heap mode only).
     /// Returns None in mmap mode — use gate_knn() directly instead.
     pub fn gate_vectors_at(&self, layer: usize) -> Option<&Array2<f32>> {

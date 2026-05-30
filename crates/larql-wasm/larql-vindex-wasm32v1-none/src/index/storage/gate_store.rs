@@ -15,14 +15,6 @@
 //!                            unified accessor.
 //! - `gate_knn_mmap_fast`   — zero-copy f32 mmap path used as the
 //!                            `gate_knn` happy path.
-
-use std::sync::{Mutex, RwLock};
-
-use larql_compute::{ComputeBackend, MatMul};
-use ndarray::{Array1, Array2, ArrayView2};
-
-use crate::index::core::VectorIndex;
-use crate::index::storage::vindex_storage::VindexStorage;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -34,8 +26,21 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Mutex, RwLock};
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{ComputeBackend, MatMul};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2, ArrayView2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+use crate::index::storage::vindex_storage::VindexStorage;
 // ── GateStore — composes all gate-matrix-and-cache state ────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Gate matrix storage + decode caches + HNSW index.
 ///
 /// Carved out of the monolithic `VectorIndex` god struct in the
@@ -69,7 +74,9 @@ pub struct GateStore {
     pub hnsw_ef_search: core::sync::atomic::AtomicUsize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GateStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Inert default — every Option is None, every cache is empty.
     pub fn empty(num_layers: usize) -> Self {
         Self {
@@ -86,6 +93,7 @@ impl GateStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Clone for GateStore {
     /// Heap data + atomics carry over; mutex-guarded caches reset to
     /// fresh state per the existing VectorIndex Clone contract
@@ -93,6 +101,7 @@ impl Clone for GateStore {
     /// moved to `MmapStorage::mmap_handles` in step 6 of the
     /// `VindexStorage` migration.
     fn clone(&self) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         use core::sync::atomic::Ordering;
         let nl = self.gate_vectors.len();
         Self {
@@ -117,6 +126,7 @@ impl Clone for GateStore {
 
 // ── BLAS / GPU helpers ──────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Matrix-vector multiply: view[N, hidden] × vec[hidden] → scores[N].
 /// All compute goes through larql-compute.
 pub(crate) fn gemv(view: &ArrayView2<f32>, vec: &Array1<f32>) -> Array1<f32> {
@@ -127,12 +137,14 @@ pub(crate) fn gemv(view: &ArrayView2<f32>, vec: &Array1<f32>) -> Array1<f32> {
     Array1::from_vec(result.into_raw_vec_and_offset().0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Gate scores batch: gate[N, hidden] × x[seq, hidden]^T → [N, seq].
 pub(crate) fn gate_matmul(gate: &ArrayView2<f32>, x: &ArrayView2<f32>) -> Array2<f32> {
     let cpu = larql_compute::CpuBackend;
     cpu.matmul_transb(*gate, *x)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// GPU-accelerated gate matmul for the single-position decode case.
 ///
 /// When `x` is a single row (seq_len == 1) and the caller passes a
@@ -171,6 +183,7 @@ pub(crate) struct GateData {
 }
 
 impl GateData {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn view(&self, hidden_size: usize) -> ArrayView2<'_, f32> {
         ArrayView2::from_shape((self.num_features, hidden_size), &self.data).unwrap()
     }
@@ -178,6 +191,7 @@ impl GateData {
 
 // ── Storage-side methods on VectorIndex ────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Cap the number of decoded f16 gate layers held in
     /// `f16_decode_cache`. Call with 0 for unlimited (default);
@@ -318,6 +332,7 @@ impl VectorIndex {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Zero-copy gate KNN scoring for the f32 mmap path — no
     /// allocation, no clone. Returns `None` if not on the f32 mmap
     /// path; caller falls back to `resolve_gate`.
@@ -385,7 +400,9 @@ mod gate_cache_lru_tests {
     use crate::config::dtype::StorageDtype;
     use crate::index::core::VectorIndex;
     use crate::index::types::GateLayerSlice;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array1;
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a minimal f16 mmap-backed VectorIndex suitable for
     /// exercising the f16 decode cache. `num_layers` layers, each
     /// with `num_features` features over `hidden` dims. The gate
@@ -418,6 +435,7 @@ mod gate_cache_lru_tests {
         VectorIndex::new_mmap(mmap, slices, StorageDtype::F16, None, num_layers, hidden)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Touch layer `l` to force a gate cache decode (or a hit if
     /// already cached).
     fn touch(idx: &VectorIndex, layer: usize) {

@@ -1,8 +1,6 @@
 //! Stage 6 — model weights (if extract level requires them).
 
 use crate::config::types::QuantFormat;
-use crate::error::VindexError;
-use crate::extract::streaming::context::StreamingContext;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,7 +12,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::extract::streaming::context::StreamingContext;
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> StreamingContext<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Stage 6 — model weights (if extract level requires them).
     ///
     /// With quant=q4k we always materialise weights regardless of the

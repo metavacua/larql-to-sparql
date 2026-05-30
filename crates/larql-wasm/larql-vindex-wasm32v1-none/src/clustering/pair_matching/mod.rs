@@ -11,5 +11,6 @@
 pub mod database;
 pub mod labeling;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use database::{load_reference_databases, ReferenceDatabases, RelationDatabase};
 pub use labeling::{label_clusters_from_outputs, label_clusters_from_pairs};

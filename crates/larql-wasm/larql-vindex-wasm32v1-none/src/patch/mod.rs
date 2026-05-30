@@ -15,8 +15,10 @@ pub mod overlay_gate_trait;
 pub mod refine;
 
 pub use format::*;
+#[cfg(not(target_arch = "wasm32"))]
 pub use knn_store::{KnnEntry, KnnStore};
 pub use overlay::*;
+#[cfg(not(target_arch = "wasm32"))]
 pub use refine::{refine_gates, RefineInput, RefineResult, RefinedGate};
 
 /// Compatibility alias — the patch surface used to live in `patch::core`.

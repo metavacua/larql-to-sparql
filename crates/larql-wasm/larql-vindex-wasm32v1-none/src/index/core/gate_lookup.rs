@@ -5,11 +5,6 @@
 //! `index::storage::gate_accessors`). Keeping the trait impl separate
 //! from the inherent impl makes the capability surface easy to read
 //! without scrolling through the storage implementation.
-
-use ndarray::{Array1, Array2};
-
-use super::VectorIndex;
-use crate::index::types::{FeatureMeta, GateLookup};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +16,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::VectorIndex;
+use crate::index::types::{FeatureMeta, GateLookup};
+#[cfg(not(target_arch = "wasm32"))]
 impl GateLookup for VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
     }
@@ -34,10 +38,12 @@ impl GateLookup for VectorIndex {
         self.num_features(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {
         self.gate_knn_batch(layer, x, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn_q4(
         &self,
         layer: usize,
@@ -49,10 +55,12 @@ impl GateLookup for VectorIndex {
         VectorIndex::gate_knn_q4(self, layer, residual, top_k, backend)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_scores_batch(&self, layer: usize, x: &Array2<f32>) -> Option<Array2<f32>> {
         self.gate_scores_batch(layer, x)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_scores_batch_backend(
         &self,
         layer: usize,
@@ -74,6 +82,7 @@ mod tests {
         VectorIndex::empty(2, 8)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_delegates_to_inherent_on_empty() {
         let v = fresh();
@@ -97,6 +106,7 @@ mod tests {
         assert_eq!(<VectorIndex as GateLookup>::num_features(&v, 1), 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_batch_delegates_to_inherent() {
         let v = fresh();
@@ -105,6 +115,7 @@ mod tests {
         assert!(out.is_empty(), "no features → empty union");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_knn_q4_returns_none_on_empty_vindex() {
         let v = fresh();
@@ -114,6 +125,7 @@ mod tests {
         assert!(<VectorIndex as GateLookup>::gate_knn_q4(&v, 0, &r, 4, &backend).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_scores_batch_returns_none_on_empty_vindex() {
         let v = fresh();
@@ -121,6 +133,7 @@ mod tests {
         assert!(<VectorIndex as GateLookup>::gate_scores_batch(&v, 0, &x).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_scores_batch_backend_returns_none_on_empty_vindex() {
         let v = fresh();
@@ -132,6 +145,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gate_scores_batch_backend_with_no_backend_falls_through() {
         let v = fresh();

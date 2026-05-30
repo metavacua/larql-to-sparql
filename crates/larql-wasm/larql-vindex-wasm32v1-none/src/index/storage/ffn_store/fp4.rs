@@ -5,9 +5,6 @@
 //! backing storage is FP4, Q4_K, or f32.
 //!
 //! Carved out of `ffn_store.rs` in the 2026-04-25 modularity pass.
-
-use crate::error::VindexError;
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,7 +16,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load FP4/FP8 FFN storage from `dir` per `config.fp4`. No-op when
     /// the manifest is absent (vindexes extracted before exp 26 don't
     /// have one). Returns an error only on filesystem issues or

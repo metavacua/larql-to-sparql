@@ -26,15 +26,21 @@ mod stream;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
 
 use super::PublishCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
 use batch::lfs_batch_upload;
+#[cfg(not(target_arch = "wasm32"))]
 use finalize::{commit_lfs_file, lfs_verify};
+#[cfg(not(target_arch = "wasm32"))]
 use stream::stream_put_with_progress;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Counting `Read` adapter — increments a shared atomic on every read so
 /// a poll thread can report upload progress without per-chunk syscalls.
 pub(super) struct CountingReader<R: std::io::Read> {
@@ -42,7 +48,9 @@ pub(super) struct CountingReader<R: std::io::Read> {
     pub(super) counter: std::sync::Arc<portable_atomic::AtomicU64>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R: std::io::Read> std::io::Read for CountingReader<R> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
         self.counter
@@ -63,6 +71,7 @@ pub(super) struct LfsBatchResponse {
     pub(super) verify: Option<LfsAction>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// LFS-mode upload: batch → PUT to signed URL → verify → commit pointer.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn upload_lfs(
@@ -103,6 +112,7 @@ mod tests {
     use super::test_support::{write_temp_bytes, CapturingCallbacks, EnvBaseGuard};
     use super::*;
     use serial_test::serial;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Read;
 
     // ─── CountingReader ────────────────────────────────────────────
@@ -127,6 +137,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::Relaxed), 11);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn counting_reader_counter_starts_at_zero() {
         use core::sync::atomic::Ordering;

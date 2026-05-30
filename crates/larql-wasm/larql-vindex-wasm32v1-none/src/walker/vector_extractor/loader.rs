@@ -3,11 +3,6 @@
 //! Per-component extraction methods are defined as `impl` blocks in
 //! sibling modules (`ffn.rs`, `attn.rs`, `embeddings.rs`); the
 //! orchestrator lives in `mod.rs`.
-
-use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
-
-use crate::error::VindexError;
-use crate::format::filenames::TOKENIZER_JSON;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +14,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::TOKENIZER_JSON;
+#[cfg(not(target_arch = "wasm32"))]
 /// A loaded model ready for vector extraction.
 pub struct VectorExtractor {
     pub(super) weights: ModelWeights,
@@ -26,7 +29,9 @@ pub struct VectorExtractor {
     pub(super) model_name: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorExtractor {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(model: &str) -> Result<Self, VindexError> {
         let model_path = resolve_model_path(model)?;
         let weights = load_model_dir_validated(&model_path)?;
@@ -64,6 +69,7 @@ impl VectorExtractor {
 mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_loader_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -71,6 +77,7 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -91,6 +98,7 @@ mod tests {
         assert!(r.is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extractor_load_missing_tokenizer_errors() {
         let dir = fixture("missing_tok");

@@ -6,10 +6,6 @@
 //! reads `interleaved_q4k_layer_data` slices and routes them through
 //! the registry (`crate::quant::registry`) — there are no inline
 //! 144 / 210 byte-stride literals here.
-
-use rayon::prelude::*;
-
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,7 +17,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Direct Q4K/Q6K matmul — Y = X @ W.T, where W is the FFN matrix
     /// stored as Q4K/Q6K bytes in the vindex. Decodes and FMAs fused,
     /// parallelised across W rows. Zero extra RAM (no f32 cache).

@@ -5,12 +5,6 @@
 //! gemv fast path for single-row decode. The two private helpers
 //! (`gate_scores_2d_gpu`, `gate_scores_2d_fast`) own the zero-copy
 //! mmap/warmed slicing logic and the f16 lazy-decode cache.
-
-use ndarray::{Array2, ArrayView2};
-
-use crate::index::core::VectorIndex;
-use crate::index::storage::gate_store::{gate_gemv_gpu, gate_matmul};
-use crate::index::storage::vindex_storage::VindexStorage;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +16,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array2, ArrayView2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::storage::gate_store::{gate_gemv_gpu, gate_matmul};
+use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Compute gate scores for all features × all positions in one BLAS gemm.
     /// Returns [seq_len, intermediate] matrix = x @ gate_vectors^T.
     /// These scores are the gate projections — the same as x @ W_gate.T.
@@ -30,6 +35,7 @@ impl VectorIndex {
         self.gate_scores_batch_backend(layer, x, None)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Backend-aware gate scores. When `backend` is present and `x` is
     /// a single row (seq_len == 1), route through `f32_gemv` — the
     /// same row-per-simdgroup path that closed lm_head. On Gemma 4 31B
@@ -66,6 +72,7 @@ impl VectorIndex {
         Some(scores_2d.t().to_owned())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Zero-copy GPU gate scores for f32 mmap/warmed, single-row `x`.
     /// Matches `gate_scores_2d_fast` shape contract: returns [N, 1].
     fn gate_scores_2d_gpu(
@@ -147,6 +154,7 @@ impl VectorIndex {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Zero-copy batch gate scores for f32 mmap/warmed — returns [features, seq].
     pub(super) fn gate_scores_2d_fast(&self, layer: usize, x: &Array2<f32>) -> Option<Array2<f32>> {
         // Warmed cache
@@ -232,7 +240,9 @@ mod tests {
 
     use crate::index::core::VectorIndex;
     use crate::index::types::GateLayerSlice;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::array;
+    #[cfg(not(target_arch = "wasm32"))]
     fn heap_idx() -> VectorIndex {
         let gate = ndarray::Array2::from_shape_vec(
             (3, 4),
@@ -242,6 +252,7 @@ mod tests {
         VectorIndex::new(vec![Some(gate)], vec![None], 1, 4)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `gate_scores_batch` rejects an empty seq.
     #[test]
     fn empty_seq_returns_none() {
@@ -273,6 +284,7 @@ mod tests {
         assert_eq!(scores[[0, 2]], 9.0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// f16 mmap fast path — populates storage with f16 bytes + slice
     /// meta, then exercises `gate_scores_2d_fast`'s f16 lazy-decode
     /// branch (which populates the f16 decode cache as a side effect).
@@ -319,6 +331,7 @@ mod tests {
         assert!(v.gate.f16_decode_cache.lock().unwrap()[0].is_some());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Empty layer slice (`num_features == 0`) on the f16 path
     /// short-circuits without panicking.
     #[test]
@@ -362,6 +375,7 @@ mod tests {
         assert_eq!(scores.shape(), &[1, 3]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// `gate_scores_batch_backend` short-circuits on empty seq.
     #[test]
     fn backend_path_empty_seq_returns_none() {
@@ -384,6 +398,7 @@ mod tests {
         assert_eq!(scores.shape(), &[3, 3]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Warmed-cache fast path: pre-populate `warmed_gates` and
     /// install matching gate slice metadata so `gate_scores_2d_fast`
     /// hits the warmed branch.

@@ -34,6 +34,7 @@ impl core::fmt::Display for StorageDtype {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write `data` to `w`, encoded according to `dtype`. Returns bytes written.
 ///
 /// Convenience wrapper around `encode_floats` for the binary writers in

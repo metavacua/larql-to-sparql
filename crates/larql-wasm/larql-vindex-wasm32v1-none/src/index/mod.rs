@@ -18,6 +18,7 @@ pub mod mutate;
 pub mod storage;
 pub mod types;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use compute::router::RouterIndex;
 pub use core::*;
 pub use storage::residency::{LayerState, ResidencyManager};

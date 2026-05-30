@@ -8,13 +8,6 @@
 //!
 //! The on-the-wire patch format (`VindexPatch`, `PatchOp`,
 //! `PatchDownMeta`, base64 helpers) lives in `super::format`.
-
-use ndarray::Array1;
-
-use crate::index::storage::vindex_storage::VindexStorage;
-use crate::index::{FeatureMeta, VectorIndex, WalkHit, WalkTrace};
-
-use super::format::VindexPatch;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,10 +19,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+
+use crate::index::storage::vindex_storage::VindexStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::{FeatureMeta, VectorIndex, WalkHit, WalkTrace};
+
+use super::format::VindexPatch;
 // ═══════════════════════════════════════════════════════════════
 // PatchedVindex — overlay on immutable base
 // ═══════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A vindex with patches applied as an overlay.
 /// The base **files on disk** are never modified.
 ///
@@ -91,6 +94,7 @@ pub struct PatchedVindex {
     pub knn_store: super::knn_store::KnnStore,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PatchedVindex {
     /// Create a patched vindex from a base index.
     pub fn new(base: VectorIndex) -> Self {
@@ -280,6 +284,7 @@ impl PatchedVindex {
         self.base.feature_meta(layer, feature)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN with patched vectors.
     /// For features with overridden gate vectors, uses the patch vector.
     /// For deleted features, excludes them from results.
@@ -320,6 +325,7 @@ impl PatchedVindex {
         hits
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Walk with patch overrides.
     pub fn walk(&self, residual: &Array1<f32>, layers: &[usize], top_k: usize) -> WalkTrace {
         let mut trace_layers = Vec::with_capacity(layers.len());
@@ -344,6 +350,7 @@ impl PatchedVindex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Flatten all patches into the base, producing a new clean VectorIndex (heap mode).
     pub fn bake_down(&self) -> VectorIndex {
         let mut new_gate = Vec::new();
@@ -471,6 +478,7 @@ impl PatchedVindex {
         self.base.down_meta_at(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Access gate vectors matrix for a layer (base only).
     pub fn gate_vectors_at(&self, layer: usize) -> Option<&ndarray::Array2<f32>> {
         self.base.gate_vectors_at(layer)
@@ -497,6 +505,7 @@ mod gate_override_tests {
     use super::*;
     use crate::index::core::VectorIndex;
     use larql_models::TopKEntry;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     fn make_meta(token: &str) -> FeatureMeta {
         FeatureMeta {
@@ -511,6 +520,7 @@ mod gate_override_tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// A 2-layer × 3-feature × 4-hidden empty base index for these
     /// tests. Gate vectors and metas are zero — overrides land on top.
     fn make_empty_base() -> PatchedVindex {

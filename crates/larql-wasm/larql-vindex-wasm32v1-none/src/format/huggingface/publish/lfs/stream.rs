@@ -1,12 +1,4 @@
 //! Streaming PUT to a signed LFS URL with progress callbacks.
-
-use std::path::Path;
-
-use crate::error::VindexError;
-
-use super::super::protocol::{LFS_PUT_TIMEOUT, UPLOAD_PROGRESS_POLL_INTERVAL};
-use super::super::PublishCallbacks;
-use super::CountingReader;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +10,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::protocol::{LFS_PUT_TIMEOUT, UPLOAD_PROGRESS_POLL_INTERVAL};
+use super::super::PublishCallbacks;
+#[cfg(not(target_arch = "wasm32"))]
+use super::CountingReader;
+#[cfg(not(target_arch = "wasm32"))]
 /// PUT the file contents to the signed LFS URL, streaming through a
 /// `CountingReader` so the worker thread can report progress.
 pub(super) fn stream_put_with_progress(

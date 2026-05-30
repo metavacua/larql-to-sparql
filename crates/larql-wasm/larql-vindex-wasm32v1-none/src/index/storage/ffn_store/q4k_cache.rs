@@ -15,7 +15,6 @@
 //! Carved out of `ffn_store.rs` in the 2026-04-25 modularity pass.
 
 use super::FFN_DOWN;
-use crate::index::core::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +26,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
     /// Diagnostic: count of populated `q4k_ffn_cache` slots and the
     /// total f32 bytes they hold. Used by perf probes that need to know
@@ -74,6 +76,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Record an access to a Q4_K-cached layer and evict if the LRU
     /// has grown beyond `q4k_ffn_cache_max_layers`. Must be called
     /// with `cache` already locked by the caller; `just_inserted` is
@@ -107,6 +110,7 @@ impl VectorIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dequantise one Q4K/Q6K FFN matrix on demand, caching the result.
     /// `component`: 0=gate, 1=up, 2=down. Returns `None` when no Q4K
     /// interleaved mmap is loaded. First access per (layer, component)
@@ -277,9 +281,11 @@ mod tests {
     //! don't require real Q4_K-encoded bytes.
     use core::sync::atomic::Ordering;
 
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn fresh(num_layers: usize, hidden: usize) -> VectorIndex {
         let mut v = VectorIndex::empty(num_layers, hidden);
         for layer in 0..num_layers {

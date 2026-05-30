@@ -8,13 +8,6 @@
 //!   Header (16 bytes): magic, version, num_layers, top_k
 //!   Per layer: num_features (u32), then fixed-size records
 //!   Per feature: top_token_id (u32), c_score (f32), top_k × (token_id u32, logit f32)
-
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::Path;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::index::FeatureMeta;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +19,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufReader, BufWriter, Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+use crate::index::FeatureMeta;
 const MAGIC: u32 = 0x444D4554; // "DMET"
 const LEGACY_LITERAL_MAGIC: u32 = 0x54454D44; // bytes written as b"DMET"
 const FORMAT_VERSION: u32 = 1;
@@ -36,6 +39,7 @@ const HEADER_BYTES: usize = HEADER_FIELDS * U32_BYTES;
 const RECORD_FIXED_BYTES: usize = U32_BYTES + F32_BYTES;
 const TOP_K_RECORD_BYTES: usize = U32_BYTES + F32_BYTES;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write down_meta in binary format.
 ///
 /// Writes to a sibling `.tmp` file and renames into place so an existing
@@ -122,6 +126,7 @@ pub fn write_binary(
     Ok(total)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read down_meta from binary format.
 /// Token strings are resolved via the tokenizer.
 #[allow(clippy::type_complexity)]
@@ -206,11 +211,13 @@ pub fn read_binary(
     Ok((down_meta, total))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Check if a binary down_meta.bin exists in the directory.
 pub fn has_binary(dir: &Path) -> bool {
     dir.join(DOWN_META_BIN).exists()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap down_meta.bin and build a lazy reader (zero heap for feature data).
 /// Only parses the header + per-layer feature counts to build the offset table.
 pub fn mmap_binary(
@@ -286,12 +293,14 @@ pub fn mmap_binary(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_u32<R: Read>(r: &mut R) -> Result<u32, VindexError> {
     let mut buf = [0u8; 4];
     r.read_exact(&mut buf)?;
     Ok(u32::from_le_bytes(buf))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_f32<R: Read>(r: &mut R) -> Result<f32, VindexError> {
     let mut buf = [0u8; 4];
     r.read_exact(&mut buf)?;

@@ -4,9 +4,11 @@
 //! interleaved layer matrices, and the `prefetch_interleaved_layer`
 //! madvise hint. Inherent methods live in `index::storage::ffn_store`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::VectorIndex;
 use crate::index::types::NativeFfnAccess;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl NativeFfnAccess for VectorIndex {
     fn down_feature_vector(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.down_feature_vector(layer, feature)
@@ -16,10 +18,12 @@ impl NativeFfnAccess for VectorIndex {
         self.has_down_features()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn down_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.down_layer_matrix(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn up_layer_matrix(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.up_layer_matrix(layer)
     }
@@ -32,14 +36,17 @@ impl NativeFfnAccess for VectorIndex {
         self.has_interleaved()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_gate(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.interleaved_gate(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_up(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.interleaved_up(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn interleaved_down(&self, layer: usize) -> Option<ndarray::ArrayView2<'_, f32>> {
         self.interleaved_down(layer)
     }

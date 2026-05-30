@@ -1,19 +1,4 @@
 //! Binary loading path for .vindex directories.
-
-use std::io::{BufRead, BufReader};
-use std::path::Path;
-
-use ndarray::Array2;
-
-use crate::config::VindexConfig;
-use crate::error::VindexError;
-use crate::format::filenames::{
-    DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN, GATE_VECTORS_BIN, INDEX_JSON,
-    INTERLEAVED_Q4K_BIN, INTERLEAVED_Q4K_MANIFEST_JSON, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
-    TOKENIZER_JSON,
-};
-use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
-use crate::index::{IndexLoadCallbacks, VectorIndex};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,7 +11,29 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufRead, BufReader};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use crate::config::VindexConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::{
+    DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN, GATE_VECTORS_BIN, INDEX_JSON,
+    INTERLEAVED_Q4K_BIN, INTERLEAVED_Q4K_MANIFEST_JSON, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
+    TOKENIZER_JSON,
+};
+use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::{IndexLoadCallbacks, VectorIndex};
+
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a VectorIndex from a .vindex directory.
     ///
     /// Reads gate_vectors.bin (mmap'd), down_meta.bin or legacy down_meta.jsonl,
@@ -39,6 +46,7 @@ impl VectorIndex {
         Self::load_vindex_with_range(dir, callbacks, None)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a VectorIndex restricted to a layer range `(start, end)` where
     /// `start` is inclusive and `end` is exclusive.
     ///
@@ -249,6 +257,7 @@ impl VectorIndex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Dequantize gate slices from `interleaved_q4k.bin` into an anonymous
 /// f16 mmap shaped like a real `gate_vectors.bin` file. Used when a
 /// Q4K vindex was extracted with `--drop-gate-vectors`.
@@ -373,6 +382,7 @@ fn synthesize_gate_from_q4k(
     Ok((mmap, gate_slices))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load embeddings from a .vindex directory.
 pub fn load_vindex_embeddings(dir: &Path) -> Result<(Array2<f32>, f32), VindexError> {
     let config_text = std::fs::read_to_string(dir.join(INDEX_JSON))?;
@@ -397,18 +407,21 @@ pub fn load_vindex_embeddings(dir: &Path) -> Result<(Array2<f32>, f32), VindexEr
     Ok((embed, config.embed_scale))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load tokenizer from a .vindex directory.
 pub fn load_vindex_tokenizer(dir: &Path) -> Result<tokenizers::Tokenizer, VindexError> {
     let path = dir.join(TOKENIZER_JSON);
     tokenizers::Tokenizer::from_file(&path).map_err(|e| VindexError::Parse(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load the vindex config.
 pub fn load_vindex_config(dir: &Path) -> Result<VindexConfig, VindexError> {
     let text = std::fs::read_to_string(dir.join(INDEX_JSON))?;
     serde_json::from_str(&text).map_err(|e| VindexError::Parse(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load feature labels from down_meta.jsonl — fast hash lookup, no vocab projection.
 ///
 /// Returns a map: (layer, feature) → top_token string.
@@ -462,6 +475,7 @@ mod tests {
     use tempfile::TempDir;
     // ── helpers ─────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write a minimal valid index.json into `dir`.
     fn write_minimal_index_json(dir: &std::path::Path, num_layers: usize, hidden: usize) {
         let json = serde_json::json!({
@@ -503,6 +517,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_vindex_config_malformed_json_errors() {
         let dir = TempDir::new().unwrap();
@@ -553,6 +568,7 @@ mod tests {
         assert_eq!(labels[&(0, 0)], "Rome");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_feature_labels_skips_blank_lines() {
         let dir = TempDir::new().unwrap();
@@ -563,12 +579,14 @@ mod tests {
         assert_eq!(labels.len(), 1);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_feature_labels_missing_file_errors() {
         let result = load_feature_labels(std::path::Path::new("/no/such/file.jsonl"));
         assert!(result.is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_feature_labels_empty_file_returns_empty_map() {
         let dir = TempDir::new().unwrap();
@@ -580,6 +598,7 @@ mod tests {
 
     // ── VectorIndex::load_vindex — minimal fixture ──────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write a zero-byte gate_vectors.bin and a matching index.json
     /// for a model with no features (all-zero slices). This lets us test
     /// `load_vindex` without running the full extract pipeline.
@@ -605,6 +624,7 @@ mod tests {
         std::fs::write(dir.join("index.json"), json.to_string()).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_vindex_missing_dir_errors() {
         let mut cb = crate::index::SilentLoadCallbacks;

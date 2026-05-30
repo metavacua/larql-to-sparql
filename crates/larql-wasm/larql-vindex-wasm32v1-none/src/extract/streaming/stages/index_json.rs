@@ -2,11 +2,15 @@
 //! added later in `finalize`).
 
 use crate::config::{VindexConfig, VindexModelConfig};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::extract::streaming::context::StreamingContext;
 use crate::format::filenames::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> StreamingContext<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Stage 5 — assemble + write `index.json` (preliminary; checksums
     /// added later in `finalize`).
     pub(in crate::extract::streaming) fn write_index_json(&mut self) -> Result<(), VindexError> {

@@ -1,8 +1,4 @@
 //! Vindexfile parser — reads the declarative build spec.
-
-use std::path::Path;
-
-use crate::error::VindexError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +10,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
 /// Parsed Vindexfile.
 #[derive(Debug, Clone)]
 pub struct Vindexfile {
@@ -55,12 +57,14 @@ pub enum VindexfileDirective {
     Expose(Vec<String>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse a Vindexfile from a file path.
 pub fn parse_vindexfile(path: &Path) -> Result<Vindexfile, VindexError> {
     let content = std::fs::read_to_string(path)?;
     parse_vindexfile_str(&content)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse a Vindexfile from a string.
 pub fn parse_vindexfile_str(input: &str) -> Result<Vindexfile, VindexError> {
     let mut directives = Vec::new();
@@ -115,6 +119,7 @@ pub fn parse_vindexfile_str(input: &str) -> Result<Vindexfile, VindexError> {
     Ok(Vindexfile { directives, stages })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_directive(line: &str, line_num: usize) -> Result<VindexfileDirective, VindexError> {
     let upper = line.to_uppercase();
 
@@ -145,6 +150,7 @@ fn parse_directive(line: &str, line_num: usize) -> Result<VindexfileDirective, V
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse INSERT ("entity", "relation", "target")
 fn parse_insert(rest: &str, line_num: usize) -> Result<VindexfileDirective, VindexError> {
     let parts = extract_triple(rest, line_num)?;
@@ -155,6 +161,7 @@ fn parse_insert(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse DELETE entity = "x" AND relation = "y" AND target = "z"
 fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, VindexError> {
     // Support both tuple form and condition form
@@ -193,6 +200,7 @@ fn parse_delete(rest: &str, line_num: usize) -> Result<VindexfileDirective, Vind
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Extract a parenthesised triple: ("a", "b", "c")
 fn extract_triple(s: &str, line_num: usize) -> Result<(String, String, String), VindexError> {
     let s = s.trim();

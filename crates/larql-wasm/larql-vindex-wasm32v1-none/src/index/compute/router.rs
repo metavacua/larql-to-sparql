@@ -5,12 +5,6 @@
 //! at full precision (bf16/f16), making them a reliable knowledge signal.
 //!
 //! Used by MoE DESCRIBE to show which experts activate for an entity.
-
-use std::path::Path;
-
-use ndarray::{Array1, Array2};
-
-use crate::format::filenames::ROUTER_WEIGHTS_BIN;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +16,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+
+use crate::format::filenames::ROUTER_WEIGHTS_BIN;
+#[cfg(not(target_arch = "wasm32"))]
 /// MoE router weights for all layers.
 pub struct RouterIndex {
     /// Per-layer router weight matrices: `[num_experts, hidden_size]`
@@ -45,7 +48,9 @@ pub struct RouteResult {
     pub scores: Vec<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RouterIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load router weights from a vindex directory.
     /// Returns None if router_weights.bin doesn't exist (dense model).
     pub fn load(dir: &Path, config: &crate::config::VindexConfig) -> Option<Self> {
@@ -94,6 +99,7 @@ impl RouterIndex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Route an entity embedding through the router at a specific layer.
     pub fn route(&self, layer: usize, embedding: &Array1<f32>) -> Option<RouteResult> {
         if layer >= self.weights.len() {
@@ -133,6 +139,7 @@ impl RouterIndex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Route an entity across all layers and find the most common experts.
     pub fn route_all_layers(
         &self,

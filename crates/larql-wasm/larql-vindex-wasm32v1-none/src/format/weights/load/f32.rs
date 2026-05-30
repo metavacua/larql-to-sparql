@@ -1,20 +1,6 @@
 //! f32 weight loader — reconstructs `ModelWeights` from the split
 //! `attn_weights.bin` / `up_weights.bin` / `down_weights.bin` /
 //! `norms.bin` / `lm_head.bin` files.
-
-use std::path::Path;
-
-use ndarray::Array2;
-
-use larql_models::ModelWeights;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::format::load::load_vindex_config;
-use crate::index::core::IndexLoadCallbacks;
-
-use super::super::write_f32::{kind, WeightEntry};
-use super::LoadWeightsOptions;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +12,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::load::load_vindex_config;
+use crate::index::core::IndexLoadCallbacks;
+
+use super::super::write_f32::{kind, WeightEntry};
+use super::LoadWeightsOptions;
+#[cfg(not(target_arch = "wasm32"))]
 /// Load `ModelWeights` from a vindex directory, skipping component
 /// tensors per [`LoadWeightsOptions`].
 pub fn load_model_weights_with_opts(

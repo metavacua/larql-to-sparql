@@ -36,9 +36,12 @@ mod loader;
 mod types;
 mod writer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::VindexError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::walker::utils::current_date;
 
 // ── Public re-exports preserving the pre-split path
@@ -49,13 +52,18 @@ pub use larql_models::{
     COMPONENT_ATTN_QK, COMPONENT_EMBEDDINGS, COMPONENT_FFN_DOWN, COMPONENT_FFN_GATE,
     COMPONENT_FFN_UP,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use loader::VectorExtractor;
+#[cfg(not(target_arch = "wasm32"))]
 pub use types::{
     ComponentSummary, ExtractCallbacks, ExtractConfig, ExtractSummary, SilentExtractCallbacks,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use writer::{scan_completed_layers, VectorWriter};
 
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorExtractor {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Orchestrate extraction of all requested components across requested layers.
     ///
     /// Returns `None` for unimplemented components so the caller can decide
@@ -206,6 +214,7 @@ mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_orch_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -213,10 +222,12 @@ mod tests {
         dir
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn cleanup(dir: &std::path::Path) {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_all_returns_summary_per_component() {
         let dir = fixture("extract_all");
@@ -239,6 +250,7 @@ mod tests {
         cleanup(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_all_resume_skips_completed_layers() {
         let dir = fixture("extract_resume");
@@ -260,6 +272,7 @@ mod tests {
         cleanup(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_all_resume_skips_existing_embeddings() {
         let dir = fixture("extract_resume_emb");
@@ -281,6 +294,7 @@ mod tests {
         cleanup(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn extract_all_unknown_component_records_zero_writes() {
         let dir = fixture("extract_unknown");

@@ -3,20 +3,6 @@
 //! `lm_head`, and packed-byte-range references for `attn_weights_q4k.bin`,
 //! `interleaved_q4k.bin`, and the per-layer `layers/layer_{L:02}.weights`
 //! files. The forward pass dequantises on demand.
-
-use std::path::Path;
-
-use ndarray::Array2;
-
-use larql_models::ModelWeights;
-
-use crate::error::VindexError;
-use crate::format::filenames::*;
-use crate::format::load::load_vindex_config;
-use crate::index::core::IndexLoadCallbacks;
-
-use super::super::write_f32::{kind, WeightEntry};
-use super::expert_in_shard;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +14,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::format::load::load_vindex_config;
+use crate::index::core::IndexLoadCallbacks;
+
+use super::super::write_f32::{kind, WeightEntry};
+use super::expert_in_shard;
+#[cfg(not(target_arch = "wasm32"))]
 /// Expert-shard variant of [`super::load_model_weights_q4k`].
 ///
 /// Identical to the full loader except that when `expert_filter` is `Some((start,

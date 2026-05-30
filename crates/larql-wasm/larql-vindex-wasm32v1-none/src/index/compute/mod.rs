@@ -7,4 +7,5 @@ pub mod hnsw;
 pub mod q4k_dispatch;
 pub mod router;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use router::RouterIndex;

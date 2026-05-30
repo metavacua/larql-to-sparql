@@ -2,8 +2,6 @@
 //! overrides (INSERT/DELETE-side mutations).
 //!
 //! Carved out of `VectorIndex` in the 2026-04-25 reorg.
-
-use crate::index::types::{DownMetaMmap, FeatureMeta};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +13,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::types::{DownMetaMmap, FeatureMeta};
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct MetadataStore {
     /// Per-layer, per-feature output token metadata (heap mode).
@@ -27,6 +29,7 @@ pub struct MetadataStore {
     pub up_overrides: HashMap<(usize, usize), Vec<f32>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl MetadataStore {
     pub fn empty(num_layers: usize) -> Self {
         Self {

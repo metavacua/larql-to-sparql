@@ -16,8 +16,6 @@
 //! Visibility: `pub mod` so integration tests in `tests/` can reach it
 //! via `larql_vindex::walker::test_fixture::*`. Not re-exported from the
 //! crate root — non-test consumers should ignore this module.
-
-use std::path::Path;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +27,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 /// Default sizing — small enough to extract in microseconds, large enough
 /// that every walker code path runs at least once (>= 1 head, >= 1
 /// FFN feature, >= 1 vocab row).
@@ -56,11 +57,13 @@ impl Default for ModelDims {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Default tiny mock model — calls [`create_with_dims`] with [`ModelDims::default`].
 pub fn create_mock_model(dir: &Path) {
     create_with_dims(dir, &ModelDims::default());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a mock model directory at `dir` with `config.json`,
 /// `tokenizer.json`, and `model.safetensors`.
 pub fn create_with_dims(dir: &Path, dims: &ModelDims) {
@@ -205,6 +208,7 @@ pub fn random_f32(n: usize, seed: usize) -> Vec<f32> {
     vals
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_safetensors(dir: &Path, tensors: &HashMap<String, (Vec<f32>, Vec<usize>)>) {
     let mut byte_bufs: HashMap<String, Vec<u8>> = HashMap::new();
     for (name, (values, _)) in tensors {
@@ -229,6 +233,7 @@ fn write_safetensors(dir: &Path, tensors: &HashMap<String, (Vec<f32>, Vec<usize>
     std::fs::write(dir.join("model.safetensors"), serialized).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_mock_tokenizer(dir: &Path, vocab_size: usize) {
     let tokens = [
         "the", "a", "is", "of", "France", "Paris", "Germany", "Berlin", "capital", "Europe",

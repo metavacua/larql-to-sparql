@@ -4,10 +4,6 @@
 //! cache-path resolution — kept here so the network-bound code in
 //! `download/mod.rs` is easier to read and so each helper can carry its
 //! own dense test coverage without racing against `hf_hub` API mocks.
-
-use std::path::PathBuf;
-
-use super::RepoKind;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +15,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use super::RepoKind;
 /// Normalise an HTTP ETag header to the raw content hash hf-hub uses
 /// as blob filenames. Handles:
 ///   * strong etag: `"abc123"` → `abc123`
@@ -55,6 +56,7 @@ pub(super) fn want_model_file(name: &str) -> bool {
     true
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve the hf-hub cache directory for a repo: the root of
 /// `~/.cache/huggingface/hub/{datasets,models}--{owner}--{name}/`. Honours
 /// `HF_HOME` and `HUGGINGFACE_HUB_CACHE` env overrides that hf-hub itself
@@ -180,6 +182,7 @@ mod tests {
     }
 
     impl EnvSet {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(pairs: &[(&str, Option<&str>)]) -> Self {
             let mut keys = Vec::new();
             for (k, v) in pairs {
@@ -195,6 +198,7 @@ mod tests {
     }
 
     impl Drop for EnvSet {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             for (k, prev) in self.keys.drain(..) {
                 match prev {
@@ -210,6 +214,7 @@ mod tests {
     // equality. Rebuilding the expected path the same way the
     // implementation does keeps the assertion platform-portable.
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn hf_cache_repo_dir_uses_huggingface_hub_cache_when_set() {
@@ -222,6 +227,7 @@ mod tests {
         assert_eq!(dir, expected);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn hf_cache_repo_dir_uses_hf_home_when_hub_unset() {
@@ -236,6 +242,7 @@ mod tests {
         assert_eq!(dir, expected);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[serial]
     fn hf_cache_repo_dir_falls_back_to_home_default() {

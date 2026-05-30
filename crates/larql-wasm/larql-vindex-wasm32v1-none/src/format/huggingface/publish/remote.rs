@@ -1,10 +1,6 @@
 //! HuggingFace API helpers for repo-level state — remote LFS index lookup
 //! and repo creation. Both are blocking HTTP calls used by the publish
 //! orchestrator before any per-file upload runs.
-
-use crate::error::VindexError;
-
-use super::protocol::{hf_base, repo_type_plural, HTTP_STATUS_CONFLICT};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +12,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::protocol::{hf_base, repo_type_plural, HTTP_STATUS_CONFLICT};
+#[cfg(not(target_arch = "wasm32"))]
 /// List remote files and return `filename → lfs.oid` for every LFS-tracked
 /// file at the repo root. Files without an `lfs.oid` (git-tracked small
 /// text) are omitted; callers skip only what's in the map.
@@ -45,6 +48,7 @@ pub(super) fn fetch_remote_lfs_oids(
     Ok(parse_lfs_oid_index(&body))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk the HF tree-listing JSON and return `filename → lfs.oid` for
 /// every LFS-tracked file. Files without an `lfs.oid` (small text /
 /// directories) are omitted. Pulled out as a pure helper so the JSON
@@ -75,6 +79,7 @@ fn parse_lfs_oid_index(body: &serde_json::Value) -> HashMap<String, String> {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn create_hf_repo(
     repo_id: &str,
     token: &str,
@@ -196,6 +201,7 @@ mod tests {
         prev: Option<String>,
     }
     impl EnvBaseGuard {
+        #[cfg(not(target_arch = "wasm32"))]
         fn new(value: &str) -> Self {
             let prev = std::env::var(TEST_BASE_ENV).ok();
             std::env::set_var(TEST_BASE_ENV, value);
@@ -203,6 +209,7 @@ mod tests {
         }
     }
     impl Drop for EnvBaseGuard {
+        #[cfg(not(target_arch = "wasm32"))]
         fn drop(&mut self) {
             match self.prev.take() {
                 Some(v) => std::env::set_var(TEST_BASE_ENV, v),

@@ -3,11 +3,6 @@
 //! Loaders + per-component dequant. Q4_K/Q6_K (the Ollama-compatible
 //! variant) lives in the sibling `interleaved_q4k.rs`; this file is
 //! the predecessor format used before the K-quant rollout.
-
-use crate::error::VindexError;
-use crate::format::filenames::INTERLEAVED_Q4_BIN;
-use crate::index::core::VectorIndex;
-use crate::mmap_util::mmap_demand_paged;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,7 +14,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::VindexError;
+use crate::format::filenames::INTERLEAVED_Q4_BIN;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::index::core::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::mmap_util::mmap_demand_paged;
+#[cfg(not(target_arch = "wasm32"))]
 impl VectorIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load Q4_0 interleaved FFN data.
     pub fn load_interleaved_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
         let path = dir.join(INTERLEAVED_Q4_BIN);
@@ -36,6 +41,7 @@ impl VectorIndex {
         self.storage.has_interleaved_q4()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dequantize one matrix from Q4 interleaved file → f32 Array2.
     /// component: 0=gate, 1=up, 2=down
     fn dequant_q4_matrix(&self, layer: usize, component: usize) -> Option<ndarray::Array2<f32>> {
@@ -62,21 +68,25 @@ impl VectorIndex {
         ndarray::Array2::from_shape_vec((intermediate, self.hidden_size), floats).ok()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get gate matrix from Q4 interleaved file, dequantized to f32.
     pub fn interleaved_q4_gate(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.dequant_q4_matrix(layer, 0)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get up matrix from Q4 interleaved file, dequantized to f32.
     pub fn interleaved_q4_up(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.dequant_q4_matrix(layer, 1)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get down matrix from Q4 interleaved file, dequantized to f32.
     pub fn interleaved_q4_down(&self, layer: usize) -> Option<ndarray::Array2<f32>> {
         self.dequant_q4_matrix(layer, 2)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Prefetch next layer's Q4 data. Unix only; no-op on Windows
     /// where `madvise` isn't available.
     #[cfg_attr(not(unix), allow(unused_variables))]
@@ -111,11 +121,13 @@ mod tests {
     //! reader. Uses real `quantize_q4_0` so the dequant chain runs
     //! end-to-end and we can pin the output is within Q4 noise of
     //! the source floats.
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
     use super::*;
     const Q4_0_BLOCK_ELEMS: usize = larql_models::quant::ggml::Q4_0_BLOCK_ELEMS;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn vindex_with_layer_features(
         num_layers: usize,
         intermediate: usize,
@@ -128,6 +140,7 @@ mod tests {
         v
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build per-layer Q4_0 interleaved bytes for `[gate | up | down]`.
     /// Each matrix is `intermediate × hidden` floats (must be a multiple
     /// of `Q4_0_BLOCK_ELEMS`).
@@ -245,6 +258,7 @@ mod tests {
         assert!(v.interleaved_q4_gate(0).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn interleaved_q4_accessors_none_when_mmap_too_short() {
         // Vindex thinks each layer is 1 × 32 floats × 3 matrices = 54 Q4

@@ -22,17 +22,21 @@ pub mod write_f32;
 pub mod write_layers;
 pub mod write_q4k;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use capabilities::ensure_extract_level_supported;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use load::{
     find_tokenizer_path, load_model_weights, load_model_weights_q4k, load_model_weights_q4k_shard,
     load_model_weights_with_opts, LoadWeightsOptions,
 };
 pub use manifest::Q4kManifestEntry;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write_f32::{
     write_model_weights, write_model_weights_with_opts, StreamingWeights, WeightSource,
     WriteWeightsOptions,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use write_q4k::{
     write_model_weights_q4k, write_model_weights_q4k_with_opts, Q4kWriteOptions, QuantBlockFormat,
 };
