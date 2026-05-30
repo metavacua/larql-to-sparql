@@ -38,11 +38,16 @@ pub use engines::markov_residual;
 pub use engines::turbo_quant;
 pub use engines::unlimited_context;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::markov_residual::MarkovResidualEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use engines::unlimited_context::UnlimitedContextEngine;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 use larql_inference::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
 // ─── EngineInfo ───────────────────────────────────────────────────────────────
@@ -82,10 +87,12 @@ pub trait KvEngine: Send {
     /// Runtime diagnostics: engine name, backend, config, description.
     fn info(&self) -> EngineInfo;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run the prefill forward pass over all prompt tokens.
     /// Returns the hidden state at the final token position (shape `[1, hidden_dim]`).
     fn prefill(&mut self, weights: &ModelWeights, token_ids: &[u32]) -> Option<Array2<f32>>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run one autoregressive decode step for a single new token.
     /// Returns the hidden state (shape `[1, hidden_dim]`).
     fn decode_step(&mut self, weights: &ModelWeights, token_id: u32) -> Option<Array2<f32>>;
@@ -108,6 +115,7 @@ pub trait KvEngine: Send {
         None
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Prefill using Q4K quantised weights from `index` and `backend`.
     ///
     /// When the backend supports the fused Q4 pipeline (Metal), this routes
@@ -128,6 +136,7 @@ pub trait KvEngine: Send {
         self.prefill(weights, token_ids) // default: f32 fallback
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// One autoregressive decode step using Q4K weights.
     ///
     /// Same routing semantics as [`prefill_q4k`]: Metal via `decode_token`
@@ -234,11 +243,13 @@ impl EngineKind {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a boxed engine, dispatching compute through `backend`.
     pub fn build(self, backend: Box<dyn ComputeBackend>) -> Box<dyn KvEngine> {
         self.build_with_profiling(backend, false)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a boxed engine with optional per-stage decode profiling.
     pub fn build_with_profiling(
         self,
@@ -511,10 +522,12 @@ mod compliance_tests {
                 config: String::new(),
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         fn prefill(&mut self, _weights: &ModelWeights, _token_ids: &[u32]) -> Option<Array2<f32>> {
             self.prefill_calls += 1;
             Some(Array2::zeros((1, 4)))
         }
+        #[cfg(not(target_arch = "wasm32"))]
         fn decode_step(&mut self, _weights: &ModelWeights, _token_id: u32) -> Option<Array2<f32>> {
             self.decode_calls += 1;
             Some(Array2::zeros((1, 4)))

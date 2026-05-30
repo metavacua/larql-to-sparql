@@ -1,15 +1,4 @@
 //! MarkovResidualEngine — KvEngine implementation.
-
-use larql_compute::{cpu_backend, ComputeBackend};
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-
-use super::compute::{rs_decode_step, rs_decode_step_profiled, rs_prefill};
-use super::q4k::{ensure_attn_tensors_dequantised, rs_decode_step_walk, rs_prefill_walk};
-use super::store::RsStore;
-use crate::profiler::{DecodeStageSummary, EngineProfiler};
-use crate::{EngineInfo, KvEngine};
-use larql_inference::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +10,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{cpu_backend, ComputeBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::compute::{rs_decode_step, rs_decode_step_profiled, rs_prefill};
+#[cfg(not(target_arch = "wasm32"))]
+use super::q4k::{ensure_attn_tensors_dequantised, rs_decode_step_walk, rs_prefill_walk};
+#[cfg(not(target_arch = "wasm32"))]
+use super::store::RsStore;
+use crate::profiler::{DecodeStageSummary, EngineProfiler};
+use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 pub struct MarkovResidualEngine {
     window_size: Option<usize>,
     store: Option<RsStore>,
@@ -30,11 +38,14 @@ pub struct MarkovResidualEngine {
     metal_prefill_done: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl MarkovResidualEngine {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(window_size: Option<usize>) -> Self {
         Self::with_backend(window_size, cpu_backend())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_backend(window_size: Option<usize>, backend: Box<dyn ComputeBackend>) -> Self {
         Self {
             window_size,
@@ -56,6 +67,7 @@ impl MarkovResidualEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for MarkovResidualEngine {
     fn name(&self) -> &str {
         "markov-rs"
@@ -78,6 +90,7 @@ impl KvEngine for MarkovResidualEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn prefill(&mut self, weights: &ModelWeights, token_ids: &[u32]) -> Option<Array2<f32>> {
         let result = rs_prefill(weights, token_ids, self.window_size, self.backend.as_ref());
         let hidden = result.hidden.clone();
@@ -85,6 +98,7 @@ impl KvEngine for MarkovResidualEngine {
         Some(hidden)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step(&mut self, weights: &ModelWeights, token_id: u32) -> Option<Array2<f32>> {
         let rs = self.store.take()?;
         let (hidden, new_rs) = if self.profiling {
@@ -121,6 +135,7 @@ impl KvEngine for MarkovResidualEngine {
         Some(self.profile.summary("markov-rs", self.backend.name()))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn prefill_q4k(
         &mut self,
         weights: &mut ModelWeights,
@@ -142,6 +157,7 @@ impl KvEngine for MarkovResidualEngine {
         Some(hidden)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step_q4k(
         &mut self,
         weights: &mut ModelWeights,

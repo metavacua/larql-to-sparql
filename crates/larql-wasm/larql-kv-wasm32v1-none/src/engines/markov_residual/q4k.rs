@@ -1,16 +1,4 @@
 //! Q4K helpers — attention dequantisation and WalkFfn-backed forward paths.
-
-use larql_compute::ComputeBackend;
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-
-use super::compute::{last_row, recompute_kv, RsPrefillResult};
-use super::store::RsStore;
-use larql_inference::attention::run_attention_with_kv_backend;
-use larql_inference::attention::SharedKV;
-use larql_inference::forward::{embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +10,29 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::compute::{last_row, recompute_kv, RsPrefillResult};
+#[cfg(not(target_arch = "wasm32"))]
+use super::store::RsStore;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::run_attention_with_kv_backend;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+#[cfg(not(target_arch = "wasm32"))]
 /// Dequantise attention Q4K weights (Q, K, V, O) for all layers into
 /// `weights.tensors`. Idempotent — skips layers already present.
 pub fn ensure_attn_tensors_dequantised(weights: &mut ModelWeights, index: &VectorIndex) {
@@ -55,6 +66,7 @@ pub fn ensure_attn_tensors_dequantised(weights: &mut ModelWeights, index: &Vecto
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dequantize_matrix(bytes: &[u8], format: &str, rows: usize, cols: usize) -> Array2<f32> {
     let n = rows * cols;
     let padded = n.div_ceil(256) * 256;
@@ -70,6 +82,7 @@ fn dequantize_matrix(bytes: &[u8], format: &str, rows: usize, cols: usize) -> Ar
     Array2::from_shape_vec((rows, cols), truncated).expect("shape mismatch")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Prefill using `WalkFfn` (Q4K FFN) instead of `BackendFfn` (f32 FFN).
 pub(super) fn rs_prefill_walk(
     weights: &ModelWeights,
@@ -127,6 +140,7 @@ pub(super) fn rs_prefill_walk(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode step using `WalkFfn` (Q4K FFN).
 pub(super) fn rs_decode_step_walk(
     weights: &ModelWeights,

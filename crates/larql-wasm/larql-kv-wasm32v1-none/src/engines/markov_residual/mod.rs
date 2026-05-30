@@ -9,9 +9,13 @@ pub mod engine;
 pub mod q4k;
 pub mod store;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use compute::{
     kv_memory_bytes_for_seq, recompute_kv, rs_decode_step, rs_prefill, RsPrefillResult,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use engine::MarkovResidualEngine;
+#[cfg(not(target_arch = "wasm32"))]
 pub use q4k::ensure_attn_tensors_dequantised;
+#[cfg(not(target_arch = "wasm32"))]
 pub use store::RsStore;

@@ -1,18 +1,4 @@
 //! Core residual-stream compute: prefill, decode step, K/V recomputation.
-
-use larql_compute::{dot_proj_gpu, ComputeBackend};
-use ndarray::{s, Array2};
-
-use super::store::RsStore;
-use crate::profiler::EngineProfiler;
-use larql_inference::attention::SharedKV;
-use larql_inference::attention::{
-    apply_rope_partial_at, run_attention_block_decode_step_backend, run_attention_with_kv_backend,
-};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{add_bias, apply_norm, embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +11,30 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{dot_proj_gpu, ComputeBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::store::RsStore;
+use crate::profiler::EngineProfiler;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::{
+    apply_rope_partial_at, run_attention_block_decode_step_backend, run_attention_with_kv_backend,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{add_bias, apply_norm, embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::residual::{rms_norm_heads, rms_norm_heads_no_weight};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct RsPrefillResult {
     pub hidden: Array2<f32>,
     pub store: RsStore,
@@ -32,6 +42,7 @@ pub struct RsPrefillResult {
     pub window_tokens: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn rs_prefill(
     weights: &ModelWeights,
     token_ids: &[u32],
@@ -88,6 +99,7 @@ pub fn rs_prefill(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn rs_decode_step(
     weights: &ModelWeights,
     new_token_id: u32,
@@ -97,6 +109,7 @@ pub fn rs_decode_step(
     rs_decode_step_inner(weights, new_token_id, rs, backend, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn rs_decode_step_profiled(
     weights: &ModelWeights,
     new_token_id: u32,
@@ -107,6 +120,7 @@ pub(crate) fn rs_decode_step_profiled(
     rs_decode_step_inner(weights, new_token_id, rs, backend, Some(profiler))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn rs_decode_step_inner(
     weights: &ModelWeights,
     new_token_id: u32,
@@ -273,6 +287,7 @@ fn rs_decode_step_inner(
     Some((last_row(&h_new), updated_rs))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Recompute K/V from stored pre-layer residuals using `backend` for projection matmuls.
 pub fn recompute_kv(
     weights: &ModelWeights,
@@ -342,6 +357,7 @@ pub fn recompute_kv(
     Some((k_rope, v))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Equivalent Standard KV memory in bytes for `seq_len` tokens (FP16).
 pub fn kv_memory_bytes_for_seq(weights: &ModelWeights, seq_len: usize) -> usize {
     let arch = &*weights.arch;
@@ -353,6 +369,7 @@ pub fn kv_memory_bytes_for_seq(weights: &ModelWeights, seq_len: usize) -> usize 
         .sum()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()
@@ -365,6 +382,7 @@ mod tests {
     use larql_inference::test_utils::make_test_weights;
     // ── recompute_kv ──────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn recompute_kv_returns_some_with_valid_weights() {
         let weights = make_test_weights();
@@ -376,6 +394,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn recompute_kv_output_shape_correct() {
         let weights = make_test_weights();
@@ -387,6 +406,7 @@ mod tests {
         assert_eq!(v.shape(), &[seq_len, kv_dim], "V shape mismatch");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn recompute_kv_output_is_finite() {
         let weights = make_test_weights();
@@ -402,6 +422,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn recompute_kv_abs_start_shifts_rope() {
         let weights = make_test_weights();

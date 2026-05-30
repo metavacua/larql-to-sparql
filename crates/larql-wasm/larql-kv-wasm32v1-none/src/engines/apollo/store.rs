@@ -17,15 +17,6 @@
 //! Loading uses a handwritten `.npy` parser (see `npy.rs`) + the `zip` crate
 //! for the `.npz` containers. No `ndarray-npy` dependency because its
 //! current release (0.10) pins ndarray 0.17 and our workspace is on 0.16.
-
-use std::io::Read;
-use std::path::Path;
-
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use super::entry::VecInjectEntry;
-use super::npy;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +28,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::Read;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use super::entry::VecInjectEntry;
+use super::npy;
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Error)]
 pub enum StoreLoadError {
     #[error("i/o error reading {path}: {source}")]
@@ -119,6 +122,7 @@ pub struct ApolloStore {
 }
 
 impl ApolloStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load an Apollo store from a directory.
     pub fn load(path: &Path) -> Result<Self, StoreLoadError> {
         let manifest = load_manifest(path)?;
@@ -170,6 +174,7 @@ impl ApolloStore {
 
 // ── internals ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     std::fs::read(path).map_err(|source| StoreLoadError::Io {
         path: path.display().to_string(),
@@ -177,11 +182,13 @@ fn read_file(path: &Path) -> Result<Vec<u8>, StoreLoadError> {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_manifest(path: &Path) -> Result<StoreManifest, StoreLoadError> {
     let bytes = read_file(&path.join("manifest.json"))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, StoreLoadError> {
     let dir = path.join("boundaries");
     let mut out = Vec::with_capacity(num_windows);
@@ -197,6 +204,7 @@ fn load_boundaries(path: &Path, num_windows: usize) -> Result<Vec<Vec<f32>>, Sto
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     let p = path.join("boundary_residual.npy");
     let bytes = read_file(&p)?;
@@ -207,6 +215,7 @@ fn load_boundary_residual(path: &Path) -> Result<Vec<f32>, StoreLoadError> {
     Ok(flat)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     let p = path.join("window_token_lists.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {
@@ -261,6 +270,7 @@ fn load_window_tokens(path: &Path) -> Result<Vec<Vec<u32>>, StoreLoadError> {
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_entries(path: &Path) -> Result<Vec<VecInjectEntry>, StoreLoadError> {
     let p = path.join("entries.npz");
     let file = std::fs::File::open(&p).map_err(|source| StoreLoadError::Io {
@@ -375,6 +385,7 @@ fn parse_structured_entries_npy(bytes: &[u8]) -> Result<Vec<VecInjectEntry>, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
     use tempfile::TempDir;
     use zip::write::SimpleFileOptions;
@@ -475,6 +486,7 @@ mod tests {
         out
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn synth_npz<I: IntoIterator<Item = (String, Vec<u8>)>>(members: I) -> Vec<u8> {
         let mut buf = Vec::new();
         {
@@ -491,6 +503,7 @@ mod tests {
         buf
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_minimal_store(
         dir: &Path,
         num_windows: usize,
@@ -561,6 +574,7 @@ mod tests {
 
     // ── Load — happy path & high-level errors ─────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_missing_directory_errors() {
         let r = ApolloStore::load(Path::new("/tmp/apollo-does-not-exist-xyz"));
@@ -599,6 +613,7 @@ mod tests {
         assert_eq!(store.manifest.num_windows, 2);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_with_optional_boundary_residual() {
         let dir = TempDir::new().unwrap();
@@ -610,6 +625,7 @@ mod tests {
         assert_eq!(store.boundary_residual, Some(vec![1.0, 2.0, 3.0, 4.0]));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_manifest_mismatch_on_boundary_count() {
         let dir = TempDir::new().unwrap();
@@ -625,6 +641,7 @@ mod tests {
         assert!(matches!(err, StoreLoadError::Io { .. }));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_manifest_mismatch_on_entry_count() {
         let dir = TempDir::new().unwrap();
@@ -648,6 +665,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_invalid_manifest_json_returns_json_error() {
         let dir = TempDir::new().unwrap();

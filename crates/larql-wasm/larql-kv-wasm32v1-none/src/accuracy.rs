@@ -2,8 +2,6 @@
 //!
 //! All functions are pure and require no model weights — safe to call in unit
 //! tests with synthetic data.
-
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +13,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Cosine similarity between two equal-length vectors. Returns 0.0 for zero vectors.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     debug_assert_eq!(a.len(), b.len());
@@ -46,6 +47,7 @@ pub fn mse(a: &[f32], b: &[f32]) -> f64 {
     sum / a.len() as f64
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Softmax of a logit vector. Numerically stable (subtract max).
 pub use larql_inference::forward::softmax;
 
@@ -104,6 +106,7 @@ impl HiddenAccuracy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compare the last row of two hidden-state matrices.
 pub fn compare_hidden(h1: &Array2<f32>, h2: &Array2<f32>) -> HiddenAccuracy {
     let last1: Vec<f32> = h1.row(h1.shape()[0] - 1).to_vec();
@@ -210,6 +213,7 @@ mod tests {
         assert!(js <= std::f64::consts::LN_2 + 1e-9, "JSD > ln2: {js}");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compare_hidden_identical() {
         let h = ndarray::array![[1.0f32, 2.0, 3.0]];
@@ -218,6 +222,7 @@ mod tests {
         assert!(acc.mse < 1e-12);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compare_hidden_assert_helpers() {
         let h = ndarray::array![[1.0f32, 0.0, 0.0]];

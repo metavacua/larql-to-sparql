@@ -9,4 +9,5 @@ pub mod lloyd_max;
 pub mod packing;
 pub mod rotation;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use engine::{TurboQuant, TurboQuantEngine};

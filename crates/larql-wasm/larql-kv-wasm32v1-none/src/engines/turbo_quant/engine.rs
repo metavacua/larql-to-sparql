@@ -11,22 +11,6 @@
 //! prefill captures K/V per layer and compresses them; each decode step
 //! decompresses the full prior K/V for attention, appends the new token's
 //! K/V, then re-compresses and stores the updated cache.
-
-use larql_compute::{cpu_backend, ComputeBackend};
-use larql_vindex::VectorIndex;
-use ndarray::{s, Array2};
-
-use super::{codebooks, lloyd_max, packing, rotation};
-use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
-use crate::{EngineInfo, KvEngine};
-use larql_inference::attention::SharedKV;
-use larql_inference::attention::{
-    run_attention_block_decode_step_backend, run_attention_with_kv_backend,
-};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +22,32 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{cpu_backend, ComputeBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2};
+
+use super::{codebooks, lloyd_max, packing, rotation};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
+use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::{
+    run_attention_block_decode_step_backend, run_attention_with_kv_backend,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 
 // ─── TurboQuant codec ────────────────────────────────────────────────────────
 
@@ -54,6 +64,7 @@ impl TurboQuant {
         Self { bits }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Encode a single vector: normalize → WHT → quantize → pack.
     pub fn encode_vector(&self, x: &[f32]) -> Vec<u8> {
         let d = x.len();
@@ -75,6 +86,7 @@ impl TurboQuant {
         buf
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Decode a single vector: unpack → centroids → inverse WHT → rescale.
     pub fn decode_vector(&self, encoded: &[u8], dim: usize) -> Vec<f32> {
         let norm = f32::from_le_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]);
@@ -105,6 +117,7 @@ pub(super) struct CompressedLayer {
 }
 
 impl CompressedLayer {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn compress(kv: &SharedKV, tq: &TurboQuant) -> Self {
         let (k, v) = kv;
         let num_vecs = k.shape()[0];
@@ -119,6 +132,7 @@ impl CompressedLayer {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn decompress(&self, tq: &TurboQuant) -> SharedKV {
         let k = decompress_matrix(
             &self.compressed_k,
@@ -151,6 +165,7 @@ pub(super) fn detect_head_dim(kv_dim: usize) -> usize {
     kv_dim // fallback: treat whole row as one head
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize) -> Vec<u8> {
     let mut buf = Vec::new();
     for row in m.rows() {
@@ -162,6 +177,7 @@ pub(super) fn compress_matrix(m: &Array2<f32>, tq: &TurboQuant, head_dim: usize)
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn decompress_matrix(
     bytes: &[u8],
     num_vecs: usize,
@@ -182,6 +198,7 @@ pub(super) fn decompress_matrix(
     Array2::from_shape_vec((num_vecs, kv_dim), data).expect("shape mismatch")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
     let last = h.shape()[0] - 1;
     h.slice(s![last..=last, ..]).to_owned()
@@ -189,6 +206,7 @@ pub(super) fn last_row(h: &Array2<f32>) -> Array2<f32> {
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct TurboQuantEngine {
     tq: TurboQuant,
     backend: Box<dyn ComputeBackend>,
@@ -196,11 +214,14 @@ pub struct TurboQuantEngine {
     abs_position: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(bits: u8) -> Self {
         Self::with_backend(bits, cpu_backend())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_backend(bits: u8, backend: Box<dyn ComputeBackend>) -> Self {
         Self {
             tq: TurboQuant::new(bits),
@@ -211,6 +232,7 @@ impl TurboQuantEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for TurboQuantEngine {
     fn name(&self) -> &str {
         "turbo-quant"
@@ -230,6 +252,7 @@ impl KvEngine for TurboQuantEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn prefill(&mut self, weights: &ModelWeights, token_ids: &[u32]) -> Option<Array2<f32>> {
         let num_layers = weights.num_layers;
         let be = Some(self.backend.as_ref());
@@ -253,6 +276,7 @@ impl KvEngine for TurboQuantEngine {
         Some(last_row(&h))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step(&mut self, weights: &ModelWeights, token_id: u32) -> Option<Array2<f32>> {
         let num_layers = weights.num_layers;
         let abs_position = self.abs_position;
@@ -299,6 +323,7 @@ impl KvEngine for TurboQuantEngine {
         self.layers.iter().map(|l| l.memory_bytes()).sum()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4K path: use Metal full pipeline for compute (same as MarkovRS/UnlimitedContext),
     /// giving ~97 tok/s. At window boundaries, compress K/V checkpoints with TurboQuant
     /// (36 KB/window vs 278 KB for UnlimitedContext — 7.7× smaller boundary checkpoints).
@@ -321,6 +346,7 @@ impl KvEngine for TurboQuantEngine {
         self.prefill_q4k_cpu(weights, index, token_ids, backend)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step_q4k(
         &mut self,
         weights: &mut ModelWeights,
@@ -340,7 +366,9 @@ impl KvEngine for TurboQuantEngine {
 
 // ── CPU Q4K helper methods (not part of the KvEngine trait) ──────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TurboQuantEngine {
+    #[cfg(not(target_arch = "wasm32"))]
     fn prefill_q4k_cpu(
         &mut self,
         weights: &mut ModelWeights,
@@ -369,6 +397,7 @@ impl TurboQuantEngine {
         Some(last_row(&h))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step_q4k_cpu(
         &mut self,
         weights: &mut ModelWeights,
@@ -583,6 +612,7 @@ mod tests {
 
     // ── CompressedLayer memory accounting ────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compressed_layer_memory_is_smaller_than_fp32() {
         use ndarray::Array2;
@@ -602,6 +632,7 @@ mod tests {
         assert!(ratio > 3.0, "ratio {ratio:.2} < 3.0");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn compressed_layer_roundtrip_cosine() {
         use ndarray::Array2;

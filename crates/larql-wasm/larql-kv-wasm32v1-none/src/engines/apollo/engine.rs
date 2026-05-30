@@ -17,16 +17,6 @@
 //!   `position_in_window`).
 //! - Routing uses tf-idf-lite on raw token IDs (no stemming/stopwords).
 //! - Boundary-residual replay not yet wired (`prefill_to_layer` is a TODO).
-
-use ndarray::{s, Array1, Array2};
-use thiserror::Error;
-
-use super::entry::{InjectionConfig, VecInjectEntry};
-use super::routing::{RoutingIndex, RoutingQuery};
-use super::store::ApolloStore;
-use crate::{EngineInfo, KvEngine};
-use larql_inference::forward::{embed_tokens_pub, forward_from_layer, forward_raw_logits};
-use larql_inference::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +28,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array1, Array2};
+use thiserror::Error;
+
+use super::entry::{InjectionConfig, VecInjectEntry};
+use super::routing::{RoutingIndex, RoutingQuery};
+use super::store::ApolloStore;
+use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{embed_tokens_pub, forward_from_layer, forward_raw_logits};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 /// (context_tokens, injection_delta, boundary_residual, crystal_layer)
 type InjectionPrep = (Vec<u32>, ndarray::Array1<f32>, Option<Vec<f32>>, usize);
 
@@ -71,6 +75,7 @@ pub struct QueryTrace {
 
 // ─── Engine struct ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ApolloEngine {
     pub store: Option<ApolloStore>,
     pub routing: RoutingIndex,
@@ -85,6 +90,7 @@ pub struct ApolloEngine {
     crystal_layer: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ApolloEngine {
     pub fn new(config: InjectionConfig) -> Self {
         Self {
@@ -219,6 +225,7 @@ impl ApolloEngine {
         Ok(scored.into_iter().map(|(e, _)| e).collect())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build the injection delta, context, and optional boundary residual
     /// for a set of query tokens.
     /// Returns `(context_tokens, injection_delta, boundary_residual, crystal_layer)`.
@@ -269,6 +276,7 @@ impl ApolloEngine {
         Some((context, Array1::from(delta), boundary, crystal))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// One-shot query: route → retrieve → inject → forward. Uses the compressed
     /// path (boundary + 4 layers) when the store has boundary residuals.
     pub fn query_greedy(&self, weights: &ModelWeights, query_ids: &[u32]) -> Option<QueryTrace> {
@@ -307,6 +315,7 @@ impl ApolloEngine {
 
 // ─── KvEngine impl ────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for ApolloEngine {
     fn name(&self) -> &str {
         "apollo"
@@ -339,6 +348,7 @@ impl KvEngine for ApolloEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Prefill routes token_ids, retrieves entries, builds the injection delta,
     /// and runs the forward pass.
     ///
@@ -376,6 +386,7 @@ impl KvEngine for ApolloEngine {
         Some(raw.h_pre_norm.slice(s![last..=last, ..]).to_owned())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Extend by one token. Uses the boundary compressed path when available
     /// (4 layers), otherwise full 34-layer re-forward.
     fn decode_step(&mut self, weights: &ModelWeights, token_id: u32) -> Option<Array2<f32>> {

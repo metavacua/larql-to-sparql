@@ -13,22 +13,6 @@
 //!   Checkpoints ≈ 278 KB/window × N_windows
 //!   Token archive = 4 bytes/token
 //!   Total ≈ 30 MB  vs  25.8 GB for Standard KV  (≈2,000×)
-
-use larql_compute::{cpu_backend, ComputeBackend};
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-use serde::Serialize;
-
-use super::checkpoint_store::CheckpointStore;
-use super::extend::{
-    empty_prior, rs_extend_from_checkpoint_backend, rs_extend_from_checkpoint_q4k,
-};
-use super::token_archive::TokenArchive;
-use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
-use crate::{EngineInfo, KvEngine};
-use larql_inference::attention::SharedKV;
-use larql_inference::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
-use larql_inference::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -40,6 +24,30 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{cpu_backend, ComputeBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+use serde::Serialize;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::checkpoint_store::CheckpointStore;
+#[cfg(not(target_arch = "wasm32"))]
+use super::extend::{
+    empty_prior, rs_extend_from_checkpoint_backend, rs_extend_from_checkpoint_q4k,
+};
+use super::token_archive::TokenArchive;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
+use crate::{EngineInfo, KvEngine};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+use larql_inference::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
 
 // ─── EngineStats ─────────────────────────────────────────────────────────────
 
@@ -67,6 +75,7 @@ impl EngineStats {
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct UnlimitedContextEngine {
     pub window_size: usize,
     pub checkpoints: CheckpointStore,
@@ -81,11 +90,14 @@ pub struct UnlimitedContextEngine {
     backend: Box<dyn ComputeBackend>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl UnlimitedContextEngine {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(window_size: usize) -> Self {
         Self::with_backend(window_size, cpu_backend())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_backend(window_size: usize, backend: Box<dyn ComputeBackend>) -> Self {
         Self {
             window_size,
@@ -100,6 +112,7 @@ impl UnlimitedContextEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Feed tokens into the engine. Windows auto-close when they fill.
     pub fn process(&mut self, weights: &ModelWeights, tokens: &[u32]) -> Option<()> {
         let mut remaining = tokens;
@@ -123,6 +136,7 @@ impl UnlimitedContextEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Reconstruct a window's full K,V by replaying its archived tokens from
     /// the prior window's boundary checkpoint.
     pub fn replay_window(
@@ -150,6 +164,7 @@ impl UnlimitedContextEngine {
         Some((out.kv_cache, abs_end))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Total storage and context statistics.
     pub fn stats(&self, weights: &ModelWeights) -> EngineStats {
         let arch = &*weights.arch;
@@ -185,6 +200,7 @@ impl UnlimitedContextEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// CPU Q4K equivalent of `process()` — uses `rs_extend_from_checkpoint_q4k`
     /// (WalkFfn for FFN) instead of the f32-backed `rs_extend_from_checkpoint_backend`.
     fn process_q4k(
@@ -208,6 +224,7 @@ impl UnlimitedContextEngine {
         Some(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn extend_current_q4k(
         &mut self,
         weights: &ModelWeights,
@@ -247,6 +264,7 @@ impl UnlimitedContextEngine {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn extend_current(&mut self, weights: &ModelWeights, chunk: &[u32]) -> Option<()> {
         if chunk.is_empty() {
             return Some(());
@@ -280,6 +298,7 @@ impl UnlimitedContextEngine {
         Some(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn close_window(&mut self) {
         let kv = match self.current_window_kv.take() {
             Some(kv) => kv,
@@ -311,6 +330,7 @@ impl UnlimitedContextEngine {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvEngine for UnlimitedContextEngine {
     fn name(&self) -> &str {
         "unlimited-context"
@@ -333,11 +353,13 @@ impl KvEngine for UnlimitedContextEngine {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn prefill(&mut self, weights: &ModelWeights, token_ids: &[u32]) -> Option<Array2<f32>> {
         self.process(weights, token_ids)?;
         self.last_hidden.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step(&mut self, weights: &ModelWeights, token_id: u32) -> Option<Array2<f32>> {
         self.process(weights, &[token_id])?;
         self.last_hidden.clone()
@@ -355,6 +377,7 @@ impl KvEngine for UnlimitedContextEngine {
         self.checkpoints.total_bytes() + self.archive.total_bytes()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q4K prefill — uses Metal `prefill_q4` when available (full GPU pipeline).
     ///
     /// Falls back to the CPU `process()` path when the backend does not support
@@ -380,6 +403,7 @@ impl KvEngine for UnlimitedContextEngine {
         self.last_hidden.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn decode_step_q4k(
         &mut self,
         weights: &mut ModelWeights,
@@ -402,6 +426,7 @@ impl KvEngine for UnlimitedContextEngine {
 
 // ─── Q4K / Metal helper fns ───────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run GPU prefill via `backend.prefill_q4` using Q4K pipeline layers built
 /// from `index`. Returns the last-token hidden state on success.
 pub(crate) fn q4k_prefill_metal(
@@ -474,6 +499,7 @@ pub(crate) fn q4k_prefill_metal(
     Some(h_2d.slice(ndarray::s![last..=last, ..]).to_owned())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run one Metal decode step via `backend.decode_token`.
 pub(crate) fn q4k_decode_token(
     weights: &ModelWeights,

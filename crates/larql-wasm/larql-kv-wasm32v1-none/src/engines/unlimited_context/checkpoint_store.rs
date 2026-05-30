@@ -2,8 +2,6 @@
 //!
 //! Each checkpoint is the K,V at the last position of a closed window — one
 //! (K, V) pair per layer. Bytes per checkpoint on Gemma 3 4B ≈ 278 KB (f32).
-
-use larql_inference::attention::SharedKV;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,17 +13,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 pub struct CheckpointStore {
     kv: HashMap<usize, Vec<SharedKV>>,
     abs_pos: HashMap<usize, usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl CheckpointStore {
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save the last-position K,V for a closed window.
     /// `kv_last[layer]` must have shape (1, kv_dim) for both K and V.
     pub fn save(&mut self, window_id: usize, kv_last: Vec<SharedKV>, abs_pos: usize) {
@@ -39,6 +43,7 @@ impl CheckpointStore {
         self.abs_pos.insert(window_id, abs_pos);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(&self, window_id: usize) -> Option<(Vec<SharedKV>, usize)> {
         let kv = self.kv.get(&window_id)?.clone();
         let pos = *self.abs_pos.get(&window_id)?;
@@ -74,7 +79,9 @@ impl CheckpointStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn mk_kv(layers: usize, kv_dim: usize) -> Vec<SharedKV> {
         (0..layers)
             .map(|l| {
@@ -135,6 +142,7 @@ mod tests {
         assert!(store.load(42).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[should_panic]
     fn save_rejects_multi_row_kv_in_debug() {

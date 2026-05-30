@@ -6,8 +6,6 @@
 //!
 //! Overhead when disabled: one branch per stage (zero-cost in release builds
 //! when the compiler inlines `if self.profiling { ... }`).
-
-use std::time::Instant;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +17,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 /// Accumulator for a single timing stage. Add new samples with `record`.
 #[derive(Debug, Clone, Default)]
 pub struct StageAccumulator {
@@ -27,6 +28,7 @@ pub struct StageAccumulator {
 }
 
 impl StageAccumulator {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn record(&mut self, t: Instant) {
         self.total_us += t.elapsed().as_secs_f64() * 1e6;
         self.count += 1;
@@ -61,6 +63,7 @@ impl DecodeStageSummary {
         self.avg_recompute_cold_us + self.avg_recompute_hot_us
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Print a human-readable breakdown table.
     pub fn print(&self) {
         let total = self.avg_total_decode_us;
@@ -144,6 +147,7 @@ impl EngineProfiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::thread::sleep;
     use std::time::Duration;
     #[test]

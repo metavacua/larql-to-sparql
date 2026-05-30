@@ -1,7 +1,4 @@
 //! RsStore — per-layer residual buffer for MarkovResidualEngine.
-
-use larql_inference::attention::SharedKV;
-use ndarray::{s, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,6 +10,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2};
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer pre-attention residuals for all stored positions.
 pub struct RsStore {
     pub stored: Vec<Array2<f32>>,
@@ -23,6 +26,7 @@ pub struct RsStore {
     pub max_window: Option<usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RsStore {
     pub fn memory_bytes(&self) -> usize {
         let hot: usize = self.stored.iter().map(|s| s.len() * 4).sum();
@@ -57,6 +61,7 @@ impl RsStore {
         self.stored.first().map_or(0, |s| s.shape()[0])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn clip_layer(&mut self, layer: usize, cold: &mut Vec<Array2<f32>>) {
         let window = match self.max_window {
             Some(w) => w,
@@ -77,6 +82,7 @@ impl RsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_store(num_layers: usize, seq_len: usize, hidden: usize) -> RsStore {
         let stored = (0..num_layers)
             .map(|_| Array2::from_elem((seq_len, hidden), 1.0f32))

@@ -2,16 +2,6 @@
 //!
 //! Runs a CPU/GPU forward pass over new tokens, seeding each layer's attention
 //! with an optional prior K,V cache (the window boundary checkpoint).
-
-use larql_compute::ComputeBackend;
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-
-use larql_inference::attention::{run_attention_block_decode_step_backend, SharedKV};
-use larql_inference::ffn::BackendFfn;
-use larql_inference::forward::{embed_tokens_pub, run_ffn};
-use larql_inference::model::ModelWeights;
-use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +13,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::ComputeBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::attention::{run_attention_block_decode_step_backend, SharedKV};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ffn::BackendFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{embed_tokens_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ExtendOutput {
     /// Hidden state at the last processed token, shape (1, hidden).
     pub last_hidden: Array2<f32>,
@@ -32,6 +41,7 @@ pub struct ExtendOutput {
     pub new_checkpoint: Vec<SharedKV>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the decoder forward over `token_ids` seeded with an optional prior K,V
 /// checkpoint at each layer. Matmuls route through `backend`.
 ///
@@ -51,6 +61,7 @@ pub fn rs_extend_from_checkpoint(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backend-dispatched variant of [`rs_extend_from_checkpoint`].
 pub fn rs_extend_from_checkpoint_backend(
     weights: &ModelWeights,
@@ -117,6 +128,7 @@ pub fn rs_extend_from_checkpoint_backend(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU Q4K variant of [`rs_extend_from_checkpoint_backend`].
 ///
 /// Uses `WalkFfn` (reads Q4K bytes directly from `index`) for FFN instead of
@@ -190,6 +202,7 @@ pub fn rs_extend_from_checkpoint_q4k(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build an empty (zero-row) K,V seed for use when no prior checkpoint exists.
 pub fn empty_prior(weights: &ModelWeights) -> Vec<SharedKV> {
     let arch = &*weights.arch;
