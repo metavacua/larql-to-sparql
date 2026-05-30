@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Render a filesystem path for safe inclusion inside an LQL quoted string
 /// literal. The LQL lexer interprets `\` as an escape introducer, so a raw
 /// Windows path like `C:\Users\runner\...` ends up decoded as
@@ -122,6 +123,7 @@ fn use_model_fails_on_nonexistent() {
     assert!(result.is_err());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn use_with_corrupt_index_json_errors() {
     // load_vindex_config maps malformed JSON into VindexError::Parse;
@@ -143,6 +145,7 @@ fn use_with_corrupt_index_json_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn use_with_corrupt_knn_store_warns_and_continues() {
     // Build a valid vindex, then drop a corrupt knn_store.bin into
@@ -164,6 +167,7 @@ fn use_with_corrupt_knn_store_warns_and_continues() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn use_with_corrupt_memit_store_warns_and_continues() {
     // Same shape as the knn_store case: a malformed memit_store.json
@@ -408,6 +412,7 @@ fn format_bytes_gb() {
 // Weight backend tests
 // ═══════════════════════════════════════════════════════════════
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create a minimal ModelWeights for testing the Weight backend.
 fn make_test_weights() -> larql_inference::ModelWeights {
     use larql_inference::ndarray;
@@ -512,6 +517,7 @@ fn make_test_weights() -> larql_inference::ModelWeights {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create a minimal tokenizer for testing.
 fn make_test_tokenizer() -> larql_inference::tokenizers::Tokenizer {
     let tok_json =
@@ -635,6 +641,7 @@ fn weight_backend_show_models_works() {
 
 use larql_inference::ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a minimal vindex directory on disk that the LQL executor can
 /// load via `USE`. Includes gate vectors, down_meta, embeddings, and a
 /// stub tokenizer. Returns the directory path; the caller is
@@ -730,6 +737,7 @@ fn make_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Spin up a session and `USE` the test vindex from `make_test_vindex_dir`.
 fn vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_test_vindex_dir(tag);
@@ -789,6 +797,7 @@ fn rich_fixture_tokenizer_json() -> String {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a test vindex with a real WordLevel tokenizer + non-zero
 /// embeddings so entity-anchored verbs produce real outputs.
 fn make_rich_test_vindex_dir(tag: &str) -> std::path::PathBuf {
@@ -905,6 +914,7 @@ fn make_rich_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Spin up a session and `USE` the rich test vindex.
 fn rich_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_rich_test_vindex_dir(tag);
@@ -930,6 +940,7 @@ fn rich_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
 // The same WordLevel tokenizer that `make_test_tokenizer(32)` produces
 // is written to the vindex so prompts tokenise to ids 0..31.
 
+#[cfg(not(target_arch = "wasm32"))]
 fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     use larql_vindex::{
         ExtractLevel, MoeConfig, QuantFormat, SilentBuildCallbacks, StorageDtype, VindexConfig,
@@ -1073,6 +1084,7 @@ fn make_full_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a synthetic vindex with hidden_size=1024.
 ///
 /// `make_test_weights()` is hardcoded to hidden=16, but `COMPACT MAJOR`
@@ -1290,6 +1302,7 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn large_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_large_test_vindex_dir(tag);
     let mut session = Session::new();
@@ -1300,6 +1313,7 @@ fn large_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     (session, dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a synthetic vindex with an MoE router so the `Backend::Vindex.router`
 /// field gets populated by `RouterIndex::load` during USE. Unlocks the
 /// `try_moe_describe` path in `describe/moe.rs`.
@@ -1478,6 +1492,7 @@ fn make_moe_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn moe_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_moe_test_vindex_dir(tag);
     let mut session = Session::new();
@@ -1488,6 +1503,7 @@ fn moe_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     (session, dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn full_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     let dir = make_full_test_vindex_dir(tag);
     let mut session = Session::new();
@@ -1498,6 +1514,7 @@ fn full_vindex_session(tag: &str) -> (Session, std::path::PathBuf) {
     (session, dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn use_synthetic_vindex_loads() {
     let (session, dir) = vindex_session("use_loads");
@@ -1505,6 +1522,7 @@ fn use_synthetic_vindex_loads() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn delete_by_layer_and_feature_succeeds() {
     let (mut session, dir) = vindex_session("delete_lf");
@@ -1526,6 +1544,7 @@ fn delete_by_layer_and_feature_succeeds() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn delete_no_matches_returns_message() {
     let (mut session, dir) = vindex_session("delete_nomatch");
@@ -1540,6 +1559,7 @@ fn delete_no_matches_returns_message() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn delete_relation_filter_without_labels_errors_before_mutating() {
     let (mut session, dir) = vindex_session("delete_relation_no_labels");
@@ -1566,6 +1586,7 @@ fn delete_relation_filter_without_labels_errors_before_mutating() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn update_feature_target_succeeds() {
     let (mut session, dir) = vindex_session("update_target");
@@ -1588,6 +1609,7 @@ fn update_feature_target_succeeds() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn update_relation_filter_without_labels_errors_before_mutating() {
     let (mut session, dir) = vindex_session("update_relation_no_labels");
@@ -1615,6 +1637,7 @@ fn update_relation_filter_without_labels_errors_before_mutating() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explicit_begin_patch_starts_session() {
     let (mut session, dir) = vindex_session("begin_patch");
@@ -1631,6 +1654,7 @@ fn explicit_begin_patch_starts_session() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_patch_writes_file_to_disk() {
     let (mut session, dir) = vindex_session("save_patch");
@@ -1660,6 +1684,7 @@ fn save_patch_writes_file_to_disk() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn auto_patch_session_starts_on_first_mutation() {
     let (mut session, dir) = vindex_session("auto_patch");
@@ -1681,6 +1706,7 @@ fn auto_patch_session_starts_on_first_mutation() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_nonexistent_source_errors_cleanly() {
     let (mut session, dir) = vindex_session("merge_bad_src");
@@ -1694,6 +1720,7 @@ fn merge_nonexistent_source_errors_cleanly() {
 
 // ── Session::patched_overlay_mut accessor ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn patched_overlay_mut_returns_some_for_vindex_backend() {
     let (mut session, dir) = vindex_session("overlay_mut_some");
@@ -1713,6 +1740,7 @@ fn patched_overlay_mut_returns_none_for_no_backend() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn patched_overlay_mut_round_trip_via_insert_feature() {
     use larql_models::TopKEntry;
@@ -1748,6 +1776,7 @@ fn patched_overlay_mut_round_trip_via_insert_feature() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_patches_with_no_patches_returns_message() {
     let (mut session, dir) = vindex_session("show_patches_empty");
@@ -1763,6 +1792,7 @@ fn show_patches_with_no_patches_returns_message() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn refresh_recorded_patch_ops_for_slots_persists_latest_overlay_vectors() {
     use larql_models::TopKEntry;
@@ -1843,6 +1873,7 @@ fn refresh_recorded_patch_ops_for_slots_persists_latest_overlay_vectors() {
 
 // ── COMPILE INTO VINDEX integration tests ──────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_vindex_no_patches_succeeds() {
     let (mut session, dir) = vindex_session("compile_nopatches_v");
@@ -1865,6 +1896,7 @@ fn compile_into_vindex_no_patches_succeeds() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_path_into_vindex_uses_supplied_source_without_active_backend() {
     let dir = make_test_vindex_dir("compile_path_source");
@@ -1890,6 +1922,7 @@ fn compile_path_into_vindex_uses_supplied_source_without_active_backend() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_path_into_model_reports_supplied_source_requirements() {
     let dir = make_test_vindex_dir("compile_path_model_source");
@@ -1913,6 +1946,7 @@ fn compile_path_into_model_reports_supplied_source_requirements() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_vindex_with_down_overrides_bakes_them() {
     use larql_models::TopKEntry;
@@ -1963,6 +1997,7 @@ fn compile_into_vindex_with_down_overrides_bakes_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_on_conflict_fail_detects_collision() {
     use larql_vindex::{PatchOp, VindexPatch};
@@ -2013,6 +2048,7 @@ fn compile_on_conflict_fail_detects_collision() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_on_conflict_last_wins_succeeds() {
     use larql_vindex::{PatchOp, VindexPatch};
@@ -2196,6 +2232,7 @@ fn memit_fact_struct() {
 
 // ── Compile into model requires weights ──────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_model_requires_model_weights() {
     let (mut session, dir) = vindex_session("compile_model_noweights");
@@ -2224,6 +2261,7 @@ fn compile_into_model_requires_model_weights() {
 // dormant. These tests assert obsolete behavior; they're #[ignore]d
 // pending a rewrite against the unified path (task #37).
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_insert_populates_store() {
@@ -2248,6 +2286,7 @@ fn knn_store_insert_populates_store() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_insert_multiple_facts() {
@@ -2277,6 +2316,7 @@ fn knn_store_insert_multiple_facts() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_describe_shows_inserted_edges() {
@@ -2297,6 +2337,7 @@ fn knn_store_describe_shows_inserted_edges() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_delete_removes_entries() {
@@ -2324,6 +2365,7 @@ fn knn_store_delete_removes_entries() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_compile_saves_and_loads() {
@@ -2428,6 +2470,7 @@ fn knn_store_delete_knn_patch_op() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 // restored: dual-mode INSERT defaults to KNN
 fn knn_store_insert_at_layer_hint() {
@@ -2455,6 +2498,7 @@ fn knn_store_insert_at_layer_hint() {
 // These tests verify that the format-agnostic abstraction routes correctly
 // without branching on `config.quant` in callers.
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn knn_insert_q4k_flagged_no_weights_uses_embedding_fallback() {
     // A vindex with quant=Q4K but has_model_weights=false must still use the
@@ -2553,6 +2597,7 @@ fn knn_insert_q4k_flagged_no_weights_uses_embedding_fallback() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_on_q4k_vindex_returns_clear_error() {
     // TRACE should return a helpful error on q4k vindexes rather than the
@@ -2649,6 +2694,7 @@ fn memit_store_mut_unavailable_without_backend() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn memit_store_mut_returns_empty_store_on_fresh_vindex() {
     let (mut session, dir) = vindex_session("memit_empty");
@@ -2660,6 +2706,7 @@ fn memit_store_mut_returns_empty_store_on_fresh_vindex() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_compact_status_reflects_live_memit_store() {
     // Regression: prior implementation hardcoded "0 facts across 0
@@ -2710,6 +2757,7 @@ fn show_compact_status_reflects_live_memit_store() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn memit_store_persists_added_cycles() {
     // Verifies the wiring change from item #5: facts pushed into the
@@ -2763,6 +2811,7 @@ fn no_backend_trace() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_on_browse_only_vindex_errors_with_weights_hint() {
     // The synthetic fixture is browse-only; TRACE needs model weights.
@@ -2803,6 +2852,7 @@ fn rebalance_without_backend_is_noop() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn rebalance_without_compose_installs_is_noop() {
     // With no `installed_edges` registered, REBALANCE returns a
@@ -2852,6 +2902,7 @@ fn no_backend_show_compact_status() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_minor_on_empty_l0_returns_message() {
     let (mut session, dir) = vindex_session("compact_minor_empty");
@@ -2866,6 +2917,7 @@ fn compact_minor_on_empty_l0_returns_message() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_compact_status_reports_empty_tiers() {
     let (mut session, dir) = vindex_session("compact_status");
@@ -2896,6 +2948,7 @@ fn no_backend_show_entities() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_entities_scans_synthetic_vindex() {
     // The synthetic fixture seeds content-shaped tokens — SHOW ENTITIES
@@ -2930,6 +2983,7 @@ fn no_backend_remove_patch() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn remove_patch_unknown_errors_cleanly() {
     let (mut session, dir) = vindex_session("remove_patch_missing");
@@ -2958,6 +3012,7 @@ fn pipe_propagates_no_backend_error() {
     ));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn pipe_concatenates_both_sides_output() {
     // Both sides execute and their output lines are concatenated.
@@ -2995,6 +3050,7 @@ fn parse_mutation_count(out: &[String]) -> usize {
     panic!("no integer count found in mutation output: {joined}");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn delete_with_feature_only_targets_only_that_feature() {
     // Regression: prior implementation passed (None, None, layer_filter) to
@@ -3014,6 +3070,7 @@ fn delete_with_feature_only_targets_only_that_feature() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn update_with_feature_only_targets_only_that_feature() {
     let (mut session, dir) = vindex_session("update_feature_only");
@@ -3028,6 +3085,7 @@ fn update_with_feature_only_targets_only_that_feature() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_skips_memit_fact_with_no_relation() {
     // Regression: prior implementation substituted the literal string
@@ -3072,6 +3130,7 @@ fn compile_skips_memit_fact_with_no_relation() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn delete_with_negative_layer_matches_nothing() {
     // Negative integers are kept as a usize::MAX sentinel rather than
@@ -3105,6 +3164,7 @@ fn delete_with_negative_layer_matches_nothing() {
 // runs end-to-end and emits the structural elements (header / dashes /
 // "no match" line) we know are unconditional.
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_default_runs_end_to_end() {
     let (mut session, dir) = vindex_session("select_edges_default");
@@ -3116,6 +3176,7 @@ fn select_edges_default_runs_end_to_end() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_with_layer_filter_runs() {
     let (mut session, dir) = vindex_session("select_edges_layer");
@@ -3124,6 +3185,7 @@ fn select_edges_with_layer_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_with_entity_filter_runs() {
     let (mut session, dir) = vindex_session("select_edges_entity");
@@ -3132,6 +3194,7 @@ fn select_edges_with_entity_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_with_score_predicate_runs() {
     let (mut session, dir) = vindex_session("select_edges_score");
@@ -3140,6 +3203,7 @@ fn select_edges_with_score_predicate_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_with_score_lt_predicate_runs() {
     let (mut session, dir) = vindex_session("select_edges_score_lt");
@@ -3148,6 +3212,7 @@ fn select_edges_with_score_lt_predicate_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_order_by_confidence_runs() {
     let (mut session, dir) = vindex_session("select_edges_order");
@@ -3156,6 +3221,7 @@ fn select_edges_order_by_confidence_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_order_by_layer_runs() {
     let (mut session, dir) = vindex_session("select_edges_order_layer");
@@ -3164,6 +3230,7 @@ fn select_edges_order_by_layer_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_no_matches_emits_friendly_line() {
     let (mut session, dir) = vindex_session("select_edges_empty");
@@ -3180,6 +3247,7 @@ fn select_edges_no_matches_emits_friendly_line() {
 
 // ── SELECT * FROM FEATURES ───────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_features_default_runs() {
     let (mut session, dir) = vindex_session("select_features_default");
@@ -3189,6 +3257,7 @@ fn select_features_default_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_features_with_layer_filter_runs() {
     let (mut session, dir) = vindex_session("select_features_layer");
@@ -3197,6 +3266,7 @@ fn select_features_with_layer_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_features_with_feature_filter_runs() {
     let (mut session, dir) = vindex_session("select_features_feat");
@@ -3207,6 +3277,7 @@ fn select_features_with_feature_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_features_token_filter_runs() {
     let (mut session, dir) = vindex_session("select_features_token");
@@ -3215,6 +3286,7 @@ fn select_features_token_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_features_explicit_limit_runs() {
     let (mut session, dir) = vindex_session("select_features_limit");
@@ -3225,6 +3297,7 @@ fn select_features_explicit_limit_runs() {
 
 // ── SELECT * FROM ENTITIES ───────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_entities_default_runs() {
     let (mut session, dir) = vindex_session("select_entities_default");
@@ -3234,6 +3307,7 @@ fn select_entities_default_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_entities_filter_runs() {
     let (mut session, dir) = vindex_session("select_entities_filter");
@@ -3242,6 +3316,7 @@ fn select_entities_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_entities_layer_filter_runs() {
     let (mut session, dir) = vindex_session("select_entities_layer");
@@ -3250,6 +3325,7 @@ fn select_entities_layer_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_entities_no_matches_runs() {
     let (mut session, dir) = vindex_session("select_entities_empty");
@@ -3260,6 +3336,7 @@ fn select_entities_no_matches_runs() {
 
 // ── SELECT … FROM EDGES NEAREST TO (rich fixture) ────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_nearest_to_known_entity_runs() {
     let (mut session, dir) = rich_vindex_session("select_nearest_known");
@@ -3268,6 +3345,7 @@ fn select_nearest_to_known_entity_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_nearest_to_unknown_entity_runs() {
     let (mut session, dir) = rich_vindex_session("select_nearest_unknown");
@@ -3279,6 +3357,7 @@ fn select_nearest_to_unknown_entity_runs() {
 
 // ── DESCRIBE (rich fixture) ──────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_known_entity_runs_through_walk_pipeline() {
     let (mut session, dir) = rich_vindex_session("describe_known");
@@ -3293,6 +3372,7 @@ fn describe_known_entity_runs_through_walk_pipeline() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_unknown_entity_emits_not_found() {
     let (mut session, dir) = rich_vindex_session("describe_unknown");
@@ -3308,6 +3388,7 @@ fn describe_unknown_entity_emits_not_found() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_brief_mode_compiles() {
     let (mut session, dir) = rich_vindex_session("describe_brief");
@@ -3316,6 +3397,7 @@ fn describe_brief_mode_compiles() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_at_explicit_layer_uses_layer_filter() {
     let (mut session, dir) = rich_vindex_session("describe_layer");
@@ -3325,6 +3407,7 @@ fn describe_at_explicit_layer_uses_layer_filter() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_with_band_clause_runs() {
     let (mut session, dir) = rich_vindex_session("describe_band");
@@ -3333,6 +3416,7 @@ fn describe_with_band_clause_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_relations_only_runs() {
     let (mut session, dir) = rich_vindex_session("describe_rel_only");
@@ -3341,6 +3425,7 @@ fn describe_relations_only_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_with_entity_and_relation_drives_walk_path() {
     let (mut session, dir) = rich_vindex_session("select_edges_walk");
@@ -3356,6 +3441,7 @@ fn select_edges_with_entity_and_relation_drives_walk_path() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn select_edges_walk_path_with_feature_filter() {
     let (mut session, dir) = rich_vindex_session("select_edges_walk_feat");
@@ -3367,6 +3453,7 @@ fn select_edges_walk_path_with_feature_filter() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_relations_runs_against_classifier() {
     let (mut session, dir) = rich_vindex_session("show_relations");
@@ -3377,6 +3464,7 @@ fn show_relations_runs_against_classifier() {
 
 // ── SHOW + STATS verbs ───────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_layers_lists_layers() {
     let (mut session, dir) = vindex_session("show_layers");
@@ -3388,6 +3476,7 @@ fn show_layers_lists_layers() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_layers_with_range_filter() {
     let (mut session, dir) = vindex_session("show_layers_range");
@@ -3396,6 +3485,7 @@ fn show_layers_with_range_filter() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_features_at_layer_runs() {
     let (mut session, dir) = vindex_session("show_features_layer");
@@ -3404,6 +3494,7 @@ fn show_features_at_layer_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_entities_with_classifier_runs() {
     let (mut session, dir) = rich_vindex_session("show_entities");
@@ -3419,6 +3510,7 @@ fn show_relations_no_backend_errors() {
     assert!(session.execute(&stmt).is_err());
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_compact_status_runs_against_synthetic_vindex() {
     let (mut session, dir) = vindex_session("show_compact_status");
@@ -3432,6 +3524,7 @@ fn show_compact_status_runs_against_synthetic_vindex() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn stats_runs_against_synthetic_vindex() {
     let (mut session, dir) = vindex_session("stats");
@@ -3441,6 +3534,7 @@ fn stats_runs_against_synthetic_vindex() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn stats_with_relation_classifier_renders_coverage_breakdown() {
     // Drop relation_clusters.json + feature_clusters.jsonl into the
@@ -3480,6 +3574,7 @@ fn stats_with_relation_classifier_renders_coverage_breakdown() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn stats_with_explicit_path_runs() {
     // STATS "<path>" form — explicit vindex path argument.
@@ -3489,6 +3584,7 @@ fn stats_with_explicit_path_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_relations_verbose_runs_against_classifier() {
     let (mut session, dir) = rich_vindex_session("show_rel_verbose");
@@ -3497,6 +3593,7 @@ fn show_relations_verbose_runs_against_classifier() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_relations_with_examples_runs() {
     let (mut session, dir) = rich_vindex_session("show_rel_examples");
@@ -3507,6 +3604,7 @@ fn show_relations_with_examples_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn show_relations_at_specific_layer_runs() {
     let (mut session, dir) = rich_vindex_session("show_rel_layer");
@@ -3517,6 +3615,7 @@ fn show_relations_at_specific_layer_runs() {
 
 // ── DIFF ─────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_two_synthetic_vindexes_runs() {
     let dir_a = make_test_vindex_dir("diff_a");
@@ -3536,6 +3635,7 @@ fn diff_two_synthetic_vindexes_runs() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_layer_filter_runs() {
     let dir_a = make_test_vindex_dir("diff_layer_a");
@@ -3552,6 +3652,7 @@ fn diff_with_layer_filter_runs() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_explicit_limit_runs() {
     let dir_a = make_test_vindex_dir("diff_limit_a");
@@ -3580,6 +3681,7 @@ fn diff_with_nonexistent_source_errors() {
 
 // ── MERGE ────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_synthetic_into_current_keeps_source_strategy() {
     let (mut session, dir) = vindex_session("merge_target");
@@ -3593,6 +3695,7 @@ fn merge_synthetic_into_current_keeps_source_strategy() {
     let _ = std::fs::remove_dir_all(&source_dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_with_keep_target_strategy() {
     let (mut session, dir) = vindex_session("merge_keep_target");
@@ -3607,6 +3710,7 @@ fn merge_with_keep_target_strategy() {
     let _ = std::fs::remove_dir_all(&source_dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_with_highest_confidence_strategy() {
     let (mut session, dir) = vindex_session("merge_highest");
@@ -3621,6 +3725,7 @@ fn merge_with_highest_confidence_strategy() {
     let _ = std::fs::remove_dir_all(&source_dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_with_missing_source_errors() {
     let (mut session, dir) = vindex_session("merge_no_source");
@@ -3630,6 +3735,7 @@ fn merge_with_missing_source_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn merge_no_backend_no_target_errors() {
     let mut session = Session::new();
@@ -3642,6 +3748,7 @@ fn merge_no_backend_no_target_errors() {
 
 // ── WALK + EXPLAIN WALK against rich fixture ─────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn walk_against_rich_fixture_runs() {
     let (mut session, dir) = rich_vindex_session("walk_basic");
@@ -3651,6 +3758,7 @@ fn walk_against_rich_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn walk_with_top_clause_runs() {
     let (mut session, dir) = rich_vindex_session("walk_top");
@@ -3659,6 +3767,7 @@ fn walk_with_top_clause_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn walk_with_layers_clause_runs() {
     let (mut session, dir) = rich_vindex_session("walk_layers");
@@ -3667,6 +3776,7 @@ fn walk_with_layers_clause_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn walk_unknown_token_uses_unk() {
     // Unknown tokens map to [UNK] (id 0), which has a valid embed row.
@@ -3676,6 +3786,7 @@ fn walk_unknown_token_uses_unk() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_walk_runs() {
     let (mut session, dir) = rich_vindex_session("explain_walk");
@@ -3687,6 +3798,7 @@ fn explain_walk_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_walk_verbose_runs() {
     let (mut session, dir) = rich_vindex_session("explain_walk_verbose");
@@ -3697,6 +3809,7 @@ fn explain_walk_verbose_runs() {
 
 // ── REBALANCE early-exit ─────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn rebalance_with_no_installs_short_circuits_v2() {
     let (mut session, dir) = vindex_session("rebalance_empty_v2");
@@ -3709,6 +3822,7 @@ fn rebalance_with_no_installs_short_circuits_v2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn rebalance_with_explicit_clauses_short_circuits() {
     let (mut session, dir) = vindex_session("rebalance_clauses_v2");
@@ -3719,6 +3833,7 @@ fn rebalance_with_explicit_clauses_short_circuits() {
 
 // ── COMPACT MINOR / COMPACT MAJOR short-circuits ─────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_minor_with_empty_l0_short_circuits_v2() {
     let (mut session, dir) = vindex_session("compact_minor_empty_v2");
@@ -3729,6 +3844,7 @@ fn compact_minor_with_empty_l0_short_circuits_v2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_on_small_hidden_dim_errors() {
     let (mut session, dir) = vindex_session("compact_major_small_v2");
@@ -3740,6 +3856,7 @@ fn compact_major_on_small_hidden_dim_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_with_lambda_clause_parses_and_errors_on_small_dim() {
     let (mut session, dir) = vindex_session("compact_major_lambda");
@@ -3751,6 +3868,7 @@ fn compact_major_with_lambda_clause_parses_and_errors_on_small_dim() {
 
 // ── Full-fixture tests (real ModelWeights on disk) ───────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn full_fixture_loads_via_use() {
     let (session, dir) = full_vindex_session("loads");
@@ -3758,6 +3876,7 @@ fn full_fixture_loads_via_use() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_against_full_fixture_runs() {
     let (mut session, dir) = full_vindex_session("infer_basic");
@@ -3768,6 +3887,7 @@ fn infer_against_full_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_with_compare_mode_runs() {
     let (mut session, dir) = full_vindex_session("infer_compare");
@@ -3776,6 +3896,7 @@ fn infer_with_compare_mode_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_against_full_fixture_runs() {
     let (mut session, dir) = full_vindex_session("explain_infer");
@@ -3784,6 +3905,7 @@ fn explain_infer_against_full_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_verbose_with_attention_runs() {
     let (mut session, dir) = full_vindex_session("explain_infer_attn");
@@ -3794,6 +3916,7 @@ fn explain_infer_verbose_with_attention_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_against_full_fixture_runs() {
     let (mut session, dir) = full_vindex_session("trace_basic");
@@ -3802,6 +3925,7 @@ fn trace_against_full_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_with_decompose_runs() {
     let (mut session, dir) = full_vindex_session("trace_decompose");
@@ -3810,6 +3934,7 @@ fn trace_with_decompose_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn insert_compose_against_full_fixture_runs() {
     // Compose-mode INSERT runs the full pipeline: plan → capture
@@ -3830,6 +3955,7 @@ fn insert_compose_against_full_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn three_compose_inserts_drive_cross_fact_regression_loop() {
     // After two prior compose installs, the third INSERT runs
@@ -3856,6 +3982,7 @@ fn three_compose_inserts_drive_cross_fact_regression_loop() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn insert_compose_with_explicit_alpha_and_confidence() {
     let (mut session, dir) = full_vindex_session("insert_compose_alpha");
@@ -3874,6 +4001,7 @@ fn insert_compose_with_explicit_alpha_and_confidence() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn rebalance_after_compose_insert_runs_real_loop() {
     // After a successful compose-mode INSERT, `installed_edges` has
@@ -3893,6 +4021,7 @@ fn rebalance_after_compose_insert_runs_real_loop() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn insert_knn_against_full_fixture_runs() {
     let (mut session, dir) = full_vindex_session("insert_knn");
@@ -3905,6 +4034,7 @@ fn insert_knn_against_full_fixture_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_minor_after_knn_insert_promotes_l0_to_l1() {
     // KNN INSERT writes to L0 (knn_store). COMPACT MINOR then
@@ -3926,6 +4056,7 @@ fn compact_minor_after_knn_insert_promotes_l0_to_l1() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_against_synthetic_vindex_errors_without_model_weights() {
     // Basic synthetic fixture has has_model_weights=false. INFER must
@@ -3937,6 +4068,7 @@ fn infer_against_synthetic_vindex_errors_without_model_weights() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_against_synthetic_vindex_errors_without_model_weights() {
     let (mut session, dir) = vindex_session("explain_infer_no_weights");
@@ -3946,6 +4078,7 @@ fn explain_infer_against_synthetic_vindex_errors_without_model_weights() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a `Session` with `Backend::Weight` populated from the
 /// synthetic test fixtures — no on-disk model required. This unlocks
 /// the dense INFER / EXPLAIN INFER paths that short-circuit before
@@ -4044,6 +4177,7 @@ fn trace_on_weight_backend_runs_dense_path() {
     let _ = session.execute(&stmt).expect("TRACE on Backend::Weight");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_on_synthetic_vindex_errors_without_model_weights() {
     // Basic synthetic fixture has has_model_weights=false; TRACE
@@ -4092,6 +4226,7 @@ fn diff_current_with_weight_backend_errors() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_with_canonical_knn_prompt_triggers_override_branch() {
     // INSERT KNN stores the residual at install_layer for the canonical
@@ -4129,6 +4264,7 @@ fn infer_with_canonical_knn_prompt_triggers_override_branch() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_canonical_knn_prompt_renders_override_summary() {
     // Same setup as infer_with_canonical_knn_prompt_triggers_override_branch
@@ -4156,6 +4292,7 @@ fn explain_infer_with_canonical_knn_prompt_renders_override_summary() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_after_knn_insert_drives_override_branch() {
     // INSERT KNN writes a residual key into the KnnStore. The next
@@ -4181,6 +4318,7 @@ fn infer_after_knn_insert_drives_override_branch() {
 
 // ── INFER / TRACE / EXPLAIN INFER mode variants ──────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_with_top_5_runs() {
     let (mut session, dir) = full_vindex_session("infer_top5");
@@ -4189,6 +4327,7 @@ fn infer_with_top_5_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn infer_default_top_runs() {
     let (mut session, dir) = full_vindex_session("infer_default");
@@ -4197,6 +4336,7 @@ fn infer_default_top_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_band_clause_runs() {
     let (mut session, dir) = full_vindex_session("explain_infer_band");
@@ -4205,6 +4345,7 @@ fn explain_infer_with_band_clause_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_relations_only_runs() {
     let (mut session, dir) = full_vindex_session("explain_infer_rel_only");
@@ -4215,6 +4356,7 @@ fn explain_infer_relations_only_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_attention_and_band_runs() {
     // WITH ATTENTION engages the f32 attention-capture path; combined
@@ -4228,6 +4370,7 @@ fn explain_infer_with_attention_and_band_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_attention_and_relations_only_runs() {
     // WITH ATTENTION + RELATIONS ONLY hits the compact-format render
@@ -4241,6 +4384,7 @@ fn explain_infer_with_attention_and_relations_only_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_layers_range_filters_trace() {
     // LAYERS m-n exercises the layer_range filter in the per-layer
@@ -4251,6 +4395,7 @@ fn explain_infer_with_layers_range_filters_trace() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_syntax_band_runs() {
     // SYNTAX band — different layer_range than KNOWLEDGE; exercises
@@ -4261,6 +4406,7 @@ fn explain_infer_syntax_band_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_output_band_runs() {
     // OUTPUT band — third arm of band_to_layer_range.
@@ -4270,6 +4416,7 @@ fn explain_infer_output_band_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn explain_infer_with_top_clause_runs() {
     let (mut session, dir) = full_vindex_session("explain_infer_top");
@@ -4278,6 +4425,7 @@ fn explain_infer_with_top_clause_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_for_specific_token_runs() {
     let (mut session, dir) = full_vindex_session("trace_for");
@@ -4286,6 +4434,7 @@ fn trace_for_specific_token_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_with_positions_all_runs() {
     let (mut session, dir) = full_vindex_session("trace_positions_all");
@@ -4294,6 +4443,7 @@ fn trace_with_positions_all_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_with_save_writes_file() {
     let (mut session, dir) = full_vindex_session("trace_save");
@@ -4307,6 +4457,7 @@ fn trace_with_save_writes_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn trace_with_layers_clause_runs() {
     let (mut session, dir) = full_vindex_session("trace_layers");
@@ -4317,6 +4468,7 @@ fn trace_with_layers_clause_runs() {
 
 // ── DIFF INTO PATCH ──────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_into_patch_writes_vlp_file() {
     let dir_a = make_test_vindex_dir("diff_into_patch_a");
@@ -4337,6 +4489,7 @@ fn diff_into_patch_writes_vlp_file() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a vindex matching `make_test_vindex_dir` but with three
 /// deliberate divergences vs. the base fixture so DIFF surfaces
 /// real edits:
@@ -4434,6 +4587,7 @@ fn make_modified_test_vindex_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_changes_reports_modified_added_removed() {
     // DIFF base vs modified should surface all three status categories
@@ -4465,6 +4619,7 @@ fn diff_with_changes_reports_modified_added_removed() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_no_changes_reports_no_differences() {
     // DIFF a fixture against itself: every (Some,Some) cell hits the
@@ -4490,6 +4645,7 @@ fn diff_with_no_changes_reports_no_differences() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_into_patch_with_real_changes_serialises_all_op_types() {
     // INTO PATCH on diverging fixtures should produce a .vlp file with
@@ -4535,6 +4691,7 @@ fn diff_into_patch_with_real_changes_serialises_all_op_types() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_current_resolves_to_active_vindex() {
     // VindexRef::Current resolves to the session's active backend path.
@@ -4553,6 +4710,7 @@ fn diff_current_resolves_to_active_vindex() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_layer_filter_excludes_other_layers() {
     // LAYER 1 should restrict the diff to layer 1 — modifications on
@@ -4577,6 +4735,7 @@ fn diff_with_layer_filter_excludes_other_layers() {
     let _ = std::fs::remove_dir_all(&dir_b);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn diff_with_explicit_limit_caps_displayed_diffs() {
     // LIMIT 1 should display at most 1 diff row even though the
@@ -4608,6 +4767,7 @@ fn diff_with_explicit_limit_caps_displayed_diffs() {
 
 // ── COMPILE INTO MODEL ───────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_model_default_path_runs() {
     let (mut session, dir) = full_vindex_session("compile_into_model");
@@ -4633,6 +4793,7 @@ fn compile_into_model_default_path_runs() {
     let _ = std::fs::remove_dir_all(&out_dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_vindex_with_memit_enabled_runs_solver_path() {
     // LARQL_MEMIT_ENABLE=1 + a compose-mode INSERT in the recording
@@ -4672,6 +4833,7 @@ fn compile_into_vindex_with_memit_enabled_runs_solver_path() {
     let _ = std::fs::remove_dir_all(&out_dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_vindex_on_conflict_highest_confidence_runs() {
     // ON CONFLICT HIGHEST_CONFIDENCE is accepted as a forward-compat
@@ -4722,6 +4884,7 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
     let _ = std::fs::remove_dir_all(&output);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compile_into_model_with_memit_enabled_runs() {
     // LARQL_MEMIT_ENABLE=1 + a compose-mode INSERT in the recording
@@ -4753,6 +4916,7 @@ fn compile_into_model_with_memit_enabled_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_against_full_fixture_runs() {
     // Full fixture has hidden_dim=16 < 1024 — COMPACT MAJOR still
@@ -4768,6 +4932,7 @@ fn compact_major_against_full_fixture_runs() {
 
 // ── COMPACT MAJOR full MEMIT path (large fixture, hidden_dim ≥ 1024) ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_against_large_fixture_with_no_patches_short_circuits() {
     // Large fixture clears the hidden_dim guard. With no patches and
@@ -4815,6 +4980,7 @@ fn mk_insert_patch(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_against_large_fixture_runs_full_memit_solve() {
     // Pre-seat one committed patch with a relation so COMPACT MAJOR
@@ -4855,6 +5021,7 @@ fn compact_major_against_large_fixture_runs_full_memit_solve() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_against_large_fixture_with_lambda_override() {
     // WITH LAMBDA = X threads through a non-default lambda; the value
@@ -4879,6 +5046,7 @@ fn compact_major_against_large_fixture_with_lambda_override() {
 
 // ── DESCRIBE on MoE-router fixture (try_moe_describe path) ─────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_on_moe_fixture_loads_router() {
     // USE on the MoE fixture should populate Backend::Vindex.router via
@@ -4917,6 +5085,7 @@ fn describe_on_moe_fixture_loads_router() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_verbose_on_moe_fixture_shows_routing() {
     // VERBOSE branch prints the per-layer routing table.
@@ -4934,6 +5103,7 @@ fn describe_verbose_on_moe_fixture_shows_routing() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn describe_on_moe_fixture_unknown_entity_reports_not_found() {
     // The "(not found)" branch fires when the entity doesn't tokenise
@@ -4953,6 +5123,7 @@ fn describe_on_moe_fixture_unknown_entity_reports_not_found() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn compact_major_skips_inserts_with_no_relation() {
     // A Compose patch with relation=None should be skipped and counted

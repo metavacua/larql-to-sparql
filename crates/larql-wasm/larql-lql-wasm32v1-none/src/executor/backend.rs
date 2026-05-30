@@ -1,13 +1,6 @@
 //! Backend enum, patch-recording state, and Session accessors that
 //! discriminate on the active backend. Split out of `mod.rs` so that
 //! module contains only `Session` + `execute()` dispatch.
-
-use std::path::{Path, PathBuf};
-
-use crate::error::LqlError;
-use crate::relations::RelationClassifier;
-
-use super::Session;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +12,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+use crate::error::LqlError;
+use crate::relations::RelationClassifier;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::Session;
+#[cfg(not(target_arch = "wasm32"))]
 /// The active backend for the session.
 /// The base vindex is always loaded readonly. A PatchedVindex overlay
 /// handles all mutations without modifying base files on disk.
@@ -79,15 +82,18 @@ pub(crate) struct InstalledEdge {
     pub target_id: u32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Active patch recording session (between BEGIN PATCH and SAVE PATCH).
 pub(crate) struct PatchRecording {
     pub path: String,
     pub operations: Vec<larql_vindex::PatchOp>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
     // ── Backend accessors ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get readonly access to the patched vindex (base + overlay).
     pub(crate) fn require_patched(&self) -> Result<&larql_vindex::PatchedVindex, LqlError> {
         match &self.backend {
@@ -102,6 +108,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get mutable access to the patched overlay.
     pub(crate) fn require_patched_mut(
         &mut self,
@@ -130,6 +137,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get readonly access to path + config + base index.
     pub(crate) fn require_vindex(
         &self,
@@ -158,6 +166,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn relation_classifier(&self) -> Option<&RelationClassifier> {
         match &self.backend {
             Backend::Vindex {
@@ -168,6 +177,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Mutable access to the Vindex backend's L2 MEMIT store.
     /// Used by `COMPACT MAJOR` to persist decomposed (k, d) pairs.
     pub(crate) fn memit_store_mut(&mut self) -> Result<&mut larql_vindex::MemitStore, LqlError> {
@@ -177,6 +187,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Readonly access to the active backend's MEMIT store. Returns
     /// `None` for non-Vindex backends (Weight, Remote, Empty) so
     /// `SHOW COMPACT STATUS` can render a single zero line without an
@@ -188,6 +199,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Mutable access to the patch overlay of the current vindex backend,
     /// for tests and benchmarks that need to inject patches without going
     /// through the full INSERT pipeline (which would require a real

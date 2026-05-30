@@ -16,14 +16,6 @@
 //! `walk_ffn_sparse`) is NOT touched here. Writing to the wrong file
 //! was the root cause of `refine_demo22`'s regression from 8/10 to
 //! 0/10 compiled retrieval.
-
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
-
-use crate::error::LqlError;
-use larql_vindex::format::filenames::WEIGHT_MANIFEST_JSON;
-
-use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -35,6 +27,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::OpenOptions;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Seek, SeekFrom, Write};
+
+use crate::error::LqlError;
+use larql_vindex::format::filenames::WEIGHT_MANIFEST_JSON;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
 /// Manifest key fragment that identifies an up_proj tensor entry.
 /// Used to filter `weight_manifest.json` while searching for the
 /// per-layer up tensors.
@@ -44,6 +47,7 @@ const UP_PROJ_KEY_FRAGMENT: &str = "up_proj";
 /// keys (`layers.{N}.…`).
 const LAYERS_KEY_FRAGMENT: &str = "layers.";
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(in crate::executor::lifecycle::compile) fn patch_up_weights(
     source_dir: &std::path::Path,
     dest_dir: &std::path::Path,
@@ -138,6 +142,7 @@ pub(in crate::executor::lifecycle::compile) fn patch_up_weights(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk the manifest JSON and collect `layer → (file, offset, length)`
 /// for every up_proj tensor. Entries without all four fields, or with
 /// a key that doesn't match the `layers.{N}.…up_proj` pattern, are
@@ -186,6 +191,7 @@ fn parse_layer_from_key(key: &str) -> Option<usize> {
     layer_str.parse::<usize>().ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn encode_row(up_vec: &[f32], bpf: usize, row_buf: &mut [u8]) {
     if bpf == BYTES_PER_F32 {
         for (i, v) in up_vec.iter().enumerate() {
@@ -252,6 +258,7 @@ mod tests {
 
     // ── End-to-end fixture tests ────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_bake_up_{label}_{}_{}",
@@ -292,6 +299,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Lay out a synthetic up_weights.bin with `num_layers` tensors of
     /// shape `[intermediate, hidden]` packed back-to-back. Returns the
     /// manifest entries so callers can write `weight_manifest.json`
@@ -334,6 +342,7 @@ mod tests {
         entries
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_manifest(dir: &std::path::Path, file: &str, entries: &[(String, u64, u64)]) {
         let json: Vec<serde_json::Value> = entries
             .iter()
@@ -353,6 +362,7 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_up_row_f32(
         dir: &std::path::Path,
         layer: usize,
@@ -372,6 +382,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_no_overrides_is_noop() {
         let dir = unique_dir("noop");
@@ -384,6 +395,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_skips_silently_when_manifest_absent() {
         let dir = unique_dir("no_manifest");
@@ -403,6 +415,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_f32_writes_correct_row() {
         let dir = unique_dir("f32");
@@ -442,6 +455,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_f16_round_trips_within_tolerance() {
         let dir = unique_dir("f16");
@@ -481,6 +495,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_rejects_wrong_shape() {
         let dir = unique_dir("wrong_shape");
@@ -502,6 +517,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_rejects_out_of_range_feature() {
         let dir = unique_dir("oor_feat");
@@ -523,6 +539,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_skips_layers_not_in_manifest() {
         let dir = unique_dir("skip_layer");
@@ -546,6 +563,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_up_weights_rejects_unrecognised_dtype() {
         let dir = unique_dir("dtype");
@@ -567,6 +585,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parse_manifest_for_up_filters_to_up_proj_entries() {
         let dir = unique_dir("parse");
@@ -588,6 +607,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parse_manifest_for_up_skips_malformed_entries() {
         let dir = unique_dir("malformed");

@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Tokenise `entity` and build a query vector by averaging its token
 /// embeddings. Returns `Ok(None)` when the entity tokenises to nothing
 /// — the caller emits the "(not found)" line.
@@ -74,6 +75,7 @@ pub(super) struct DescribeEdge {
     pub best_feature: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk the trace, deduplicate by lowercased target token, and apply
 /// content / coherence filters. Output is sorted descending by gate.
 pub(super) fn describe_collect_edges(

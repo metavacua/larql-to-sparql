@@ -14,11 +14,6 @@
 
 use crate::ast::{CompareOp, Condition, Field, NearestClause, OrderBy, Value};
 use crate::error::LqlError;
-use crate::executor::Session;
-
-use super::format::{
-    also_display, banner, format_also, EDGES_DEFAULT_LIMIT, EDGES_WALK_TOP_K, SCORE_EQ_TOLERANCE,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +25,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+use super::format::{
+    also_display, banner, format_also, EDGES_DEFAULT_LIMIT, EDGES_WALK_TOP_K, SCORE_EQ_TOLERANCE,
+};
 
 /// One row of `SELECT * FROM EDGES` output before formatting.
 struct EdgeRow {
@@ -129,7 +130,9 @@ fn relation_match(label: &str, wanted: &str) -> bool {
     label_norm.contains(&wanted_norm) || wanted_norm.contains(&label_norm)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_select(
         &self,
         _fields: &[Field],
@@ -200,6 +203,7 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk-anchored collection: embed the entity, walk every requested
 /// layer, filter hits by the relation label.
 #[allow(clippy::too_many_arguments)]
@@ -254,6 +258,7 @@ fn collect_via_walk(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Direct metadata scan: enumerate features at the requested layers
 /// and apply optional entity/relation/feature filters.
 fn collect_via_scan(

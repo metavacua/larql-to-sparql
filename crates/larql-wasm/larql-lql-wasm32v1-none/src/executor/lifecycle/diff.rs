@@ -1,11 +1,5 @@
 //! `DIFF a b [INTO PATCH p]` — two-way vindex diff with optional
 //! extraction as a `.vlp` patch file.
-
-use std::path::PathBuf;
-
-use crate::ast::VindexRef;
-use crate::error::LqlError;
-use crate::executor::{Backend, Session};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,7 +11,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use crate::ast::VindexRef;
+use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_diff(
         &self,
         a: &VindexRef,
@@ -217,6 +221,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Resolve a VindexRef to a concrete path.
     fn resolve_vindex_ref(&self, vref: &VindexRef) -> Result<PathBuf, LqlError> {
         match vref {

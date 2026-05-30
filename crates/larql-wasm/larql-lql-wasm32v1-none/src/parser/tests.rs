@@ -142,6 +142,7 @@ fn parse_compile_current_safetensors() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_compile_path_gguf() {
     let stmt = parse(r#"COMPILE "gemma3.vindex" INTO MODEL "out/" FORMAT gguf;"#).unwrap();
@@ -171,6 +172,7 @@ fn parse_compile_no_format() {
 
 // ── DIFF ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_diff_two_paths() {
     let stmt = parse(r#"DIFF "a.vindex" "b.vindex";"#).unwrap();
@@ -183,6 +185,7 @@ fn parse_diff_two_paths() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_diff_with_current() {
     let stmt = parse(r#"DIFF "gemma3-4b.vindex" CURRENT;"#).unwrap();
@@ -1679,6 +1682,7 @@ fn parse_patch_workflow() {
     parse(r#"REMOVE PATCH "medical-knowledge.vlp";"#).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_diff_into_patch() {
     let stmt = parse(

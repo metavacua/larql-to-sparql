@@ -1,10 +1,4 @@
 //! LQL REPL — interactive shell with history, arrow keys, and line editing.
-
-use crate::executor::Session;
-use crate::parser;
-
-use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +10,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+use crate::parser;
+
+#[cfg(not(target_arch = "wasm32"))]
+use rustyline::error::ReadlineError;
+#[cfg(not(target_arch = "wasm32"))]
+use rustyline::DefaultEditor;
 const BANNER: &str = r#"
    ╦   ╔═╗ ╦═╗ ╔═╗ ╦
    ║   ╠═╣ ╠╦╝ ║═╬╗║
@@ -26,15 +29,18 @@ const BANNER: &str = r#"
 const PROMPT: &str = "larql> ";
 const CONTINUATION: &str = "   ... ";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// History file location — stored in ~/.larql_history
 fn history_path() -> Option<std::path::PathBuf> {
     dirs_or_home().map(|d| d.join(".larql_history"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dirs_or_home() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the interactive REPL.
 pub fn run_repl() {
     println!("{BANNER}");
@@ -151,6 +157,7 @@ pub fn run_repl() {
     println!("Goodbye.");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Basic fallback REPL without line editing (used if rustyline fails).
 fn run_repl_basic() {
     use std::io::{self, BufRead, Write};
@@ -227,6 +234,7 @@ fn run_repl_basic() {
     println!("Goodbye.");
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single LQL statement (non-interactive).
 pub fn run_statement(input: &str) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     let stmt = parser::parse(input)?;
@@ -234,6 +242,7 @@ pub fn run_statement(input: &str) -> Result<Vec<String>, Box<dyn core::error::Er
     Ok(session.execute(&stmt)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a batch of LQL statements from a file or string.
 pub fn run_batch(input: &str) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     let mut session = Session::new();
@@ -299,6 +308,7 @@ fn split_statements(input: &str) -> Vec<String> {
     stmts
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn print_help() {
     println!(
         r#"

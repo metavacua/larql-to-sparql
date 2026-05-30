@@ -1,14 +1,4 @@
 //! `USE` — point the session at a vindex, model weights, or remote server.
-
-use std::path::PathBuf;
-
-use crate::ast::UseTarget;
-use crate::error::LqlError;
-use crate::executor::helpers::{dir_size, format_number};
-use crate::executor::memit_persist::load_memit_store;
-use crate::executor::{Backend, Session};
-use crate::relations::RelationClassifier;
-use larql_vindex::format::filenames::KNN_STORE_BIN;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +10,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use crate::ast::UseTarget;
+use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::helpers::{dir_size, format_number};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::memit_persist::load_memit_store;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
+use crate::relations::RelationClassifier;
+use larql_vindex::format::filenames::KNN_STORE_BIN;
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_use(&mut self, target: &UseTarget) -> Result<Vec<String>, LqlError> {
         match target {
             UseTarget::Vindex(path_str) => {

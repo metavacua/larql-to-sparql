@@ -1,10 +1,4 @@
 //! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS, SHOW COMPACT STATUS.
-
-use super::helpers::{dir_size, format_bytes, format_number, is_content_token};
-use super::Session;
-use crate::ast::*;
-use crate::error::LqlError;
-use larql_vindex::format::filenames::INDEX_JSON;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,7 +10,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::helpers::{dir_size, format_bytes, format_number, is_content_token};
+#[cfg(not(target_arch = "wasm32"))]
+use super::Session;
+use crate::ast::*;
+use crate::error::LqlError;
+use larql_vindex::format::filenames::INDEX_JSON;
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_compact_status(&self) -> Result<Vec<String>, LqlError> {
         let (_path, _config, patched) = self.require_vindex()?;
         let l0_entries = patched.knn_store.len();
@@ -70,7 +74,9 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_relations(
         &self,
         layer_filter: Option<u32>,
@@ -106,6 +112,7 @@ impl Session {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         // ── Raw token relations (skip for Brief mode unless no probes) ──
         struct TokenInfo {
             count: usize,
@@ -239,6 +246,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_layers(&self, range: Option<&Range>) -> Result<Vec<String>, LqlError> {
         let (_path, _config, patched) = self.require_vindex()?;
 
@@ -291,6 +299,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_features(
         &self,
         layer: u32,
@@ -371,6 +380,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_entities(
         &self,
         layer_filter: Option<u32>,
@@ -453,6 +463,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_show_models(&self) -> Result<Vec<String>, LqlError> {
         let mut out = Vec::new();
         out.push(format!(

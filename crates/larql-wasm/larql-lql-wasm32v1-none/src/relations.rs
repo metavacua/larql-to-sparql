@@ -2,13 +2,6 @@
 //!
 //! Uses discovered cluster centres from the vindex (computed during build).
 //! Falls back to embedding-direction heuristics if no clusters are available.
-
-use larql_inference::ndarray::{Array1, Array2};
-use larql_inference::tokenizers::Tokenizer;
-use larql_vindex::clustering::ClusterResult;
-use larql_vindex::format::filenames::{
-    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +13,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ndarray::{Array1, Array2};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::tokenizers::Tokenizer;
+use larql_vindex::clustering::ClusterResult;
+use larql_vindex::format::filenames::{
+    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
+};
 
 /// Classifies edges into relation types using discovered clusters
 /// or embedding-space direction matching.
@@ -35,6 +37,7 @@ pub struct RelationClassifier {
 }
 
 impl RelationClassifier {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a classifier from discovered clusters + probe labels in a vindex directory.
     /// Returns Some even if only probe labels exist (no clusters needed).
     pub fn from_vindex(vindex_path: &std::path::Path) -> Option<Self> {
@@ -152,6 +155,7 @@ impl RelationClassifier {
         self.clusters.is_some() && self.num_clusters() > 0
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Classify a direction vector against the stored cluster centres.
     /// Returns (cluster_id, label, cosine_similarity).
     pub fn classify_direction(&self, direction: &Array1<f32>) -> Option<(usize, &str, f32)> {
@@ -243,6 +247,7 @@ fn normalise_relation(s: &str) -> String {
         .join(" ")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Get the averaged embedding for a token string (public for executor use).
 pub fn token_embedding_pub(
     text: &str,
@@ -336,6 +341,7 @@ mod tests {
         assert!(rc.has_clusters());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_nonexistent_vindex() {
         let rc = RelationClassifier::from_vindex(std::path::Path::new("/nonexistent"));
@@ -440,6 +446,7 @@ mod tests {
 
     // ── classify_direction ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn classify_direction_picks_nearest_centre() {
         let rc = make_test_classifier();
@@ -450,6 +457,7 @@ mod tests {
         assert_eq!(label, "capital");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn classify_direction_returns_none_without_clusters() {
         let rc = RelationClassifier {
@@ -488,6 +496,7 @@ mod tests {
 
     // ── from_vindex with on-disk fixtures ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_fixture(dir: &std::path::Path, files: &[(&str, &str)]) {
         std::fs::create_dir_all(dir).unwrap();
         for (name, content) in files {
@@ -495,6 +504,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_loads_clusters_and_assignments() {
         let dir = std::env::temp_dir().join(format!(
@@ -527,6 +537,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_with_only_probe_labels() {
         // No clusters, no assignments — just probe labels keyed
@@ -556,6 +567,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_skips_malformed_jsonl_lines() {
         // The assignments JSONL parser silently drops malformed lines —
@@ -586,6 +598,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_skips_malformed_probe_keys() {
         // Keys that don't match "L{n}_F{m}" are silently dropped; the
@@ -612,6 +625,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_empty_dir_returns_none() {
         let dir = std::env::temp_dir().join(format!(
@@ -630,6 +644,7 @@ mod tests {
 
     // ── token_embedding_pub ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn token_embedding_returns_none_for_empty_tokens() {
         let embed = Array2::<f32>::zeros((10, 4));
@@ -640,6 +655,7 @@ mod tests {
         let _ = token_embedding_pub("", &embed, 1.0, &tok);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn token_embedding_with_embed_scale_multiplies() {
         // embed_scale should multiply each row before averaging — assert
@@ -666,6 +682,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn token_embedding_skips_out_of_range_ids() {
         // id beyond embed.shape()[0] is filtered — the function

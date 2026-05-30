@@ -3,9 +3,6 @@
 
 use crate::ast::{Assignment, Condition, Value};
 use crate::error::LqlError;
-use crate::executor::{Backend, Session};
-
-use super::{require_layer_feature, ENDPOINT_INSERT, ENDPOINT_PATCHES_APPLY};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,12 +14,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
+
+use super::{require_layer_feature, ENDPOINT_INSERT, ENDPOINT_PATCHES_APPLY};
 /// Default `confidence` for INSERT/UPDATE when the user doesn't
 /// pass one. 0.9 lands well above the retrieval floor without
 /// dominating template-matched siblings.
 const REMOTE_DEFAULT_CONFIDENCE: f32 = 0.9;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_insert(
         &self,
         entity: &str,
@@ -51,6 +54,7 @@ impl Session {
         ])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_delete(&self, conditions: &[Condition]) -> Result<Vec<String>, LqlError> {
         let (layer, feature) = require_layer_feature(conditions, "DELETE")?;
 
@@ -82,6 +86,7 @@ impl Session {
         )])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_update(
         &self,
         set: &[Assignment],
@@ -150,6 +155,7 @@ impl Session {
 
     // ── Local patch management (client-side overlay) ─────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_apply_local_patch(&mut self, path: &str) -> Result<Vec<String>, LqlError> {
         let patch_path = std::path::PathBuf::from(path);
         if !patch_path.exists() {
@@ -176,6 +182,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_show_patches(&self) -> Result<Vec<String>, LqlError> {
         let local_patches = match &self.backend {
             Backend::Remote { local_patches, .. } => local_patches,
@@ -208,6 +215,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_remove_local_patch(
         &mut self,
         name: &str,
@@ -482,6 +490,7 @@ mod tests {
 
     // ── Local-patch management (no HTTP needed) ─────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_temp_patch(name: &str, description: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "larql_remote_local_patch_{}_{}",
@@ -511,6 +520,7 @@ mod tests {
         path
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn remote_apply_local_patch_records_patch_in_session() {
         let mut server = mockito::Server::new();
@@ -552,6 +562,7 @@ mod tests {
         assert!(err.to_string().contains("patch not found"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn remote_apply_local_patch_errors_when_not_remote() {
         // Save a valid patch but use a non-Remote session.
@@ -578,6 +589,7 @@ mod tests {
         assert!(joined.contains("(no local patches)"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn remote_show_patches_lists_each_entry() {
         let mut server = mockito::Server::new();
@@ -611,6 +623,7 @@ mod tests {
         assert!(err.to_string().contains("not connected"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn remote_remove_local_patch_by_name() {
         let mut server = mockito::Server::new();

@@ -45,6 +45,7 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn parse(&mut self) -> Result<Statement, ParseError> {
         let stmt = self.parse_statement()?;
         let stmt = if self.check_pipe() {
@@ -68,6 +69,7 @@ impl Parser {
         Ok(stmt)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.peek() {
             Token::Keyword(Keyword::Extract) => self.parse_extract(),
@@ -100,6 +102,7 @@ impl Parser {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience: parse a string directly into a Statement.
 pub fn parse(input: &str) -> Result<Statement, Box<dyn core::error::Error>> {
     let mut lexer = crate::lexer::Lexer::new(input);

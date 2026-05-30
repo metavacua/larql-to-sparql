@@ -1,10 +1,6 @@
 //! Shared helpers: formatting, token filtering.
 
 #![allow(clippy::items_after_test_module)]
-
-use std::path::Path;
-
-use larql_inference::ndarray::Array1;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +12,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ndarray::Array1;
 /// Number of leading characters of a target token used for `starts_with`
 /// fuzzy matching against tokenizer outputs (e.g. "Pos" → matches " Pos",
 /// "Posei", "Poseidon"). Three characters is enough discrimination for
@@ -32,6 +34,7 @@ pub(crate) fn target_prefix(s: &str, n: usize) -> &str {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Average a sequence of embedding rows, applying `embed_scale`. The
 /// pure half of [`entity_query_vec`]: extracted so unit tests can
 /// exercise the math without a tokenizer fixture.
@@ -66,6 +69,7 @@ pub(crate) fn average_embed_rows(
     Some(avg)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the averaged-embedding query vector that SELECT / DESCRIBE /
 /// INSERT (compose + knn) walks the FFN against. Six call sites used
 /// to inline this loop; the helper fixes two issues at once:
@@ -88,6 +92,7 @@ pub(crate) fn entity_query_vec(
     Ok(average_embed_rows(embed, embed_scale, &token_ids))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Get total size of a directory in bytes.
 pub(crate) fn dir_size(path: &Path) -> u64 {
     let mut total = 0u64;
@@ -123,6 +128,7 @@ pub(crate) fn format_bytes(b: u64) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn format_knn_override_summary(
     ovr: &larql_inference::KnnOverride,
     model_top1: Option<&(String, f64)>,
@@ -226,6 +232,7 @@ mod tests {
     // executor integration tests. We unit-test `average_embed_rows`
     // directly so we don't have to bake a tokenizer fixture.
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn average_embed_rows_averages_token_embeddings() {
         // Two-token average.
@@ -239,6 +246,7 @@ mod tests {
         assert!(q[2].abs() < 1e-6);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn average_embed_rows_applies_embed_scale() {
         let mut embed = larql_inference::ndarray::Array2::<f32>::zeros((30, 2));
@@ -248,6 +256,7 @@ mod tests {
         assert!((q[0] - 4.0).abs() < 1e-6);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn average_embed_rows_skips_out_of_vocab_tokens() {
         // Vocab has 5 rows; token id 25 is past the embed's vocab.
@@ -259,12 +268,14 @@ mod tests {
         assert!((q[0] - 2.0).abs() < 1e-6);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn average_embed_rows_returns_none_when_all_out_of_vocab() {
         let embed = larql_inference::ndarray::Array2::<f32>::zeros((1, 2));
         assert!(average_embed_rows(&embed, 1.0, &[5u32, 10u32]).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn average_embed_rows_returns_none_for_empty_input() {
         let embed = larql_inference::ndarray::Array2::<f32>::zeros((1, 2));

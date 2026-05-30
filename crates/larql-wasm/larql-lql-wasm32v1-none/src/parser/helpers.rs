@@ -17,6 +17,7 @@ use larql_wasm_math::FloatExt as _;
 impl Parser {
     // ── Composite parsers ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn parse_vindex_ref(&mut self) -> Result<VindexRef, ParseError> {
         if self.check_keyword(Keyword::Current) {
             self.advance();

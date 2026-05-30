@@ -28,13 +28,16 @@ mod tuning;
 #[cfg(test)]
 mod tests;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use crate::ast::*;
 use crate::error::LqlError;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use backend::{Backend, InstalledEdge, PatchRecording};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Session state for the REPL / batch executor.
 pub struct Session {
     pub(crate) backend: Backend,
@@ -79,13 +82,16 @@ pub struct Session {
     pub(crate) mutations_since_major: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Session {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> Self {
         Self {
             backend: Backend::None,
@@ -114,6 +120,7 @@ impl Session {
         vec!["Auto-patch started (use SAVE PATCH \"file.vlp\" to persist, or edits are lost on exit)".into()]
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute(&mut self, stmt: &Statement) -> Result<Vec<String>, LqlError> {
         // Remote backend: forward supported queries via HTTP.
         if self.is_remote() {
@@ -297,6 +304,7 @@ impl Session {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Execute a statement against a remote backend.
     fn execute_remote(&mut self, stmt: &Statement) -> Result<Vec<String>, LqlError> {
         match stmt {
@@ -372,6 +380,7 @@ impl Session {
         Ok(vec![format!("Patch session started: {path}")])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn exec_save_patch(&mut self) -> Result<Vec<String>, LqlError> {
         let recording = self.patch_recording.take().ok_or_else(|| {
             LqlError::Execution("no active patch session. Run BEGIN PATCH first.".into())
@@ -417,6 +426,7 @@ impl Session {
         )])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn exec_apply_patch(&mut self, path: &str) -> Result<Vec<String>, LqlError> {
         let patch_path = PathBuf::from(path);
         if !patch_path.exists() {
@@ -442,6 +452,7 @@ impl Session {
         )])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn exec_show_patches(&self) -> Result<Vec<String>, LqlError> {
         let patched = self.require_patched()?;
         let mut out = Vec::new();
@@ -494,6 +505,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn exec_remove_patch(&mut self, path: &str) -> Result<Vec<String>, LqlError> {
         let patched = match &mut self.backend {
             Backend::Vindex { patched, .. } => patched,

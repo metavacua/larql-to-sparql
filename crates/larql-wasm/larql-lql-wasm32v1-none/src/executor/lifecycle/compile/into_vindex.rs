@@ -1,25 +1,6 @@
 //! `COMPILE INTO VINDEX`: bake the patch overlay onto a clean copy of
 //! the source vindex so the result is self-contained (no overlay
 //! needed at load time).
-
-use std::path::PathBuf;
-
-use crate::ast::CompileConflict;
-use crate::error::LqlError;
-use crate::executor::helpers::{dir_size, format_bytes};
-use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
-use crate::executor::Session;
-use larql_vindex::format::filenames::{
-    ATTN_WEIGHTS_BIN, DOWN_FEATURES_BIN, DOWN_META_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN,
-    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, KNN_STORE_BIN, NORMS_BIN, RELATION_CLUSTERS_JSON,
-    TOKENIZER_JSON, UP_FEATURES_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
-};
-
-use super::atomic::run_atomic_compile;
-use super::bake::{
-    apply_memit_deltas_to_down_weights, patch_down_weights, patch_gate_vectors, patch_up_weights,
-};
-use super::collect_memit_facts_with_recording;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -32,6 +13,32 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use crate::ast::CompileConflict;
+use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::helpers::{dir_size, format_bytes};
+use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+use larql_vindex::format::filenames::{
+    ATTN_WEIGHTS_BIN, DOWN_FEATURES_BIN, DOWN_META_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN,
+    FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, KNN_STORE_BIN, NORMS_BIN, RELATION_CLUSTERS_JSON,
+    TOKENIZER_JSON, UP_FEATURES_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::atomic::run_atomic_compile;
+#[cfg(not(target_arch = "wasm32"))]
+use super::bake::{
+    apply_memit_deltas_to_down_weights, patch_down_weights, patch_gate_vectors, patch_up_weights,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use super::collect_memit_facts_with_recording;
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk the ordered patch history and return the (layer, feature) slots
 /// touched by more than one patch, along with the write count. Used by
 /// `COMPILE INTO VINDEX ON CONFLICT` to detect ambiguous bakes.
@@ -56,7 +63,9 @@ pub(super) fn collect_compile_collisions(
     counts
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn exec_compile_into_vindex(
         &mut self,
         source_path: &std::path::Path,
@@ -77,6 +86,7 @@ impl Session {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn bake_compile_into_vindex(
         &mut self,
         output_dir: &std::path::Path,

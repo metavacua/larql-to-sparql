@@ -1,14 +1,6 @@
 //! Column-replace into `down_weights.bin`. Per-(layer, feature)
 //! overrides splice a `[hidden]` vector across all hidden rows of
 //! the target feature column.
-
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
-
-use crate::error::LqlError;
-use larql_vindex::format::filenames::DOWN_WEIGHTS_BIN;
-
-use super::{copy_for_patch, detect_down_dtype_bytes, BYTES_PER_F32};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +12,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::OpenOptions;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Read, Seek, SeekFrom, Write};
+
+use crate::error::LqlError;
+use larql_vindex::format::filenames::DOWN_WEIGHTS_BIN;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{copy_for_patch, detect_down_dtype_bytes, BYTES_PER_F32};
+#[cfg(not(target_arch = "wasm32"))]
 /// Bake down overrides into `down_weights.bin` (per-layer
 /// `[hidden, intermediate]` row-major, may be f16 or f32).
 pub(in crate::executor::lifecycle::compile) fn patch_down_weights(
@@ -137,6 +141,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_synthetic_f32(
         dir: &std::path::Path,
         num_layers: usize,
@@ -152,6 +157,7 @@ mod tests {
         std::fs::write(dir.join(DOWN_WEIGHTS_BIN), &bytes).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_synthetic_f16(
         dir: &std::path::Path,
         num_layers: usize,
@@ -168,6 +174,7 @@ mod tests {
         std::fs::write(dir.join(DOWN_WEIGHTS_BIN), &bytes).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_column_f32(
         dir: &std::path::Path,
         layer: usize,
@@ -187,6 +194,7 @@ mod tests {
         out
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_column_f16(
         dir: &std::path::Path,
         layer: usize,
@@ -210,6 +218,7 @@ mod tests {
         out
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_pdw_{label}_{}_{}",
@@ -221,6 +230,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_f32_writes_correct_columns() {
         let tmp = unique_dir("f32");
@@ -269,6 +279,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_f16_writes_correct_columns() {
         let tmp = unique_dir("f16");
@@ -300,6 +311,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_multiple_layers_and_features() {
         let tmp = unique_dir("multi");
@@ -345,6 +357,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_rejects_wrong_shape() {
         let tmp = unique_dir("bad");
@@ -367,6 +380,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_rejects_unrecognised_dtype_size() {
         let tmp = unique_dir("dtype");
@@ -387,6 +401,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_down_weights_missing_source_errors() {
         let tmp = unique_dir("missing");

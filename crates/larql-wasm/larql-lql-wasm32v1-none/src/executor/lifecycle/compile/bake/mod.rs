@@ -24,9 +24,13 @@ mod gate;
 mod memit_apply;
 mod up;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) use down::patch_down_weights;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) use gate::patch_gate_vectors;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) use memit_apply::apply_memit_deltas_to_down_weights;
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) use up::patch_up_weights;
 
 /// Bytes per `f32` element. Exposed as a named constant so the
@@ -36,6 +40,7 @@ pub(super) const BYTES_PER_F32: usize = 4;
 /// Bytes per `f16` element.
 pub(super) const BYTES_PER_F16: usize = 2;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Replace `dst` with a fresh writable copy of `src`. Compile bakers
 /// hard-link unchanging files in bulk; calling this before a seek-
 /// write breaks the link so the source vindex is never mutated.
@@ -91,6 +96,7 @@ mod tests {
         assert!(err.to_string().contains("matches neither"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn copy_for_patch_creates_destination() {
         let tmp = std::env::temp_dir().join(format!(
@@ -110,6 +116,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn copy_for_patch_replaces_existing_destination() {
         let tmp = std::env::temp_dir().join(format!(
@@ -130,6 +137,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn copy_for_patch_errors_on_missing_source() {
         let tmp = std::env::temp_dir().join(format!(

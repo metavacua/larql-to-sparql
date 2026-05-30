@@ -12,6 +12,9 @@ pub mod repl;
 
 pub use ast::Statement;
 pub use error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use executor::Session;
+#[cfg(not(target_arch = "wasm32"))]
 pub use parser::parse;
+#[cfg(not(target_arch = "wasm32"))]
 pub use repl::{run_batch, run_repl, run_statement};

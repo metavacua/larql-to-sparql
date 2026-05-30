@@ -54,6 +54,7 @@ impl Parser {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn parse_compile(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Compile)?;
         let vindex = self.parse_vindex_ref()?;
@@ -133,6 +134,7 @@ impl Parser {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn parse_diff(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Diff)?;
         let a = self.parse_vindex_ref()?;

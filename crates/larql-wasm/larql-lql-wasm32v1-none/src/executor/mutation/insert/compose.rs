@@ -11,9 +11,6 @@
 //! only consumed by this phase. Their unit tests travel with them.
 
 use crate::error::LqlError;
-use crate::executor::Session;
-
-use super::plan::InstallPlan;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +22,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+use super::plan::InstallPlan;
+#[cfg(not(target_arch = "wasm32"))]
 /// One successfully installed slot. Caller commits the raw residual to
 /// `session.raw_install_residuals` and the patch op to the session
 /// patch recording.
@@ -45,7 +47,9 @@ pub(super) struct InstalledSlot {
 // tuning module path directly.
 pub(super) use crate::executor::tuning::GATE_SCALE;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Walk the plan's layers, insert a slot per layer, and run the
     /// cliff-breaker refine pass against cached decoys + peer raw
     /// residuals. Returns every successfully installed slot; the
@@ -304,6 +308,7 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Rebuild every gate + up at `layer` from the per-feature raw
 /// residuals + decoys via Gram-Schmidt against the layer's
 /// constellation. Mutates `patched` in place via `set_gate_override` /
@@ -369,6 +374,7 @@ struct LayerMedianNorms {
     down: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sample up to `sample_size` features at `layer` and compute the median
 /// per-feature L2 norm for each of gate / up / down. Falls back to a
 /// reasonable default (1.0) for any matrix the index doesn't carry.

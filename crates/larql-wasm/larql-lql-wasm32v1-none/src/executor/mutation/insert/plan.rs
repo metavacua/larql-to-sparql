@@ -5,7 +5,6 @@
 //! pass for residual capture).
 
 use crate::error::LqlError;
-use crate::executor::Session;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
 /// Everything `exec_insert` needs to know about a planned compose-mode
 /// install after reading the vindex config and embeddings. Small enough
 /// to pass by reference to each subsequent phase.
@@ -40,6 +41,7 @@ pub(super) struct InstallPlan {
     pub use_constellation: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
     /// Read the vindex config + tokenizer + embeddings and build the
     /// `InstallPlan`. Pure config-side work: no forward passes, no
@@ -60,6 +62,7 @@ impl Session {
         // constellation, previous run). One layer keeps the
         // signal-to-noise ratio the Python reference validated.
         const SPAN_HALF_LO: usize = 0;
+        #[cfg(not(target_arch = "wasm32"))]
         const SPAN_HALF_HI: usize = 0;
 
         let (path, config, _patched) = self.require_vindex()?;

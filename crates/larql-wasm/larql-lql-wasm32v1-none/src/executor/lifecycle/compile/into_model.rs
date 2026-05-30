@@ -1,16 +1,5 @@
 //! `COMPILE INTO MODEL`: apply the patch overlay to model weights via
 //! MEMIT closed-form editing and emit a standalone safetensors dir.
-
-use std::path::PathBuf;
-
-use crate::error::LqlError;
-use crate::executor::helpers::{dir_size, format_bytes};
-use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
-use crate::executor::Session;
-use larql_vindex::format::filenames::TOKENIZER_JSON;
-
-use super::atomic::run_atomic_compile;
-use super::collect_memit_facts_with_recording;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +11,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
+use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::helpers::{dir_size, format_bytes};
+use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+use larql_vindex::format::filenames::TOKENIZER_JSON;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::atomic::run_atomic_compile;
+#[cfg(not(target_arch = "wasm32"))]
+use super::collect_memit_facts_with_recording;
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn exec_compile_into_model(
         &self,
         vindex_path: &std::path::Path,
@@ -49,6 +56,7 @@ impl Session {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn bake_compile_into_model(
         &self,
         vindex_path: &std::path::Path,

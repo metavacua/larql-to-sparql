@@ -7,13 +7,6 @@ use crate::executor::tuning::{
     DESCRIBE_MAX_OUTPUT_BRIEF, DESCRIBE_SIGNAL_CLEAN, DESCRIBE_SIGNAL_MODERATE,
     DESCRIBE_WALK_TOP_K,
 };
-use crate::executor::Session;
-
-use super::super::resolve_bands;
-use super::collect::{
-    describe_build_query, describe_collect_edges, describe_scan_layers, DescribeEdge,
-};
-use super::format::{describe_format_and_split, format_describe_edge};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +18,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+use super::super::resolve_bands;
+#[cfg(not(target_arch = "wasm32"))]
+use super::collect::{
+    describe_build_query, describe_collect_edges, describe_scan_layers, DescribeEdge,
+};
+use super::format::{describe_format_and_split, format_describe_edge};
 
 /// One row of DESCRIBE banner output: "signal: clean (4 edges, max gate 22.0)".
 fn signal_label(max_gate: f32) -> &'static str {
@@ -37,7 +39,9 @@ fn signal_label(max_gate: f32) -> &'static str {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_describe(
         &self,
         entity: &str,

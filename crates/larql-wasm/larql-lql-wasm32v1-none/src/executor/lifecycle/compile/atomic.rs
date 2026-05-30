@@ -18,10 +18,6 @@
 //!      → output. This is the only step that mutates the user's intended
 //!      destination.
 //!   5. On error: remove the staging directory.
-
-use std::path::{Path, PathBuf};
-
-use crate::error::LqlError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -33,6 +29,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
 /// Decide whether two paths refer to the same on-disk directory.
 ///
 /// Uses `canonicalize` when both paths exist (handles symlinks, `.`, `..`,
@@ -45,6 +47,7 @@ pub(super) fn paths_collide(a: &Path, b: &Path) -> Result<bool, LqlError> {
     Ok(canon_a == canon_b)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn canonical_or_absolute(p: &Path) -> Result<PathBuf, LqlError> {
     if p.exists() {
         return p
@@ -54,6 +57,7 @@ fn canonical_or_absolute(p: &Path) -> Result<PathBuf, LqlError> {
     std::path::absolute(p).map_err(|e| LqlError::exec(format!("absolute path {}", p.display()), e))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sibling staging directory for `final_dir`. Same parent → same
 /// filesystem → atomic `rename`.
 pub(super) fn staging_dir_for(final_dir: &Path) -> PathBuf {
@@ -66,6 +70,7 @@ pub(super) fn staging_dir_for(final_dir: &Path) -> PathBuf {
     parent.join(staging)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run `work(staging_dir)` and atomically promote the staging directory
 /// to `final_dir` on success. Cleans up the staging directory on error.
 ///
@@ -125,6 +130,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_tmp(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "larql_atomic_{label}_{}_{}",
@@ -136,6 +142,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn paths_collide_detects_existing_same_dir() {
         let a = unique_tmp("paths_collide");
@@ -146,6 +153,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&a);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn paths_collide_distinguishes_different_dirs() {
         let a = unique_tmp("collide_diff_a");
@@ -157,6 +165,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&b);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn paths_collide_works_when_output_does_not_exist() {
         let parent = unique_tmp("collide_nonexistent_parent");
@@ -182,6 +191,7 @@ mod tests {
         assert!(staging_name.contains(".tmp."));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_promotes_staging_on_success() {
         let source = unique_tmp("atomic_ok_src");
@@ -202,6 +212,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&final_dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_cleans_up_staging_on_error() {
         let source = unique_tmp("atomic_err_src");
@@ -223,6 +234,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&source);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_rejects_output_equal_to_source() {
         let source = unique_tmp("atomic_same_path");
@@ -242,6 +254,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&source);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn staging_dir_for_falls_back_when_basename_missing() {
         // Root path has no file_name — fallback to the literal "compile"
@@ -252,6 +265,7 @@ mod tests {
         assert!(name.contains(".tmp."));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn staging_dir_for_handles_relative_path_without_parent() {
         // `Path::new("foo").parent()` returns `Some("")`; we still
@@ -262,6 +276,7 @@ mod tests {
         assert!(name.contains(".tmp."));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_propagates_work_error() {
         // The error variant should bubble unchanged (we don't swap it out
@@ -282,6 +297,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&source);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn paths_collide_canonicalises_dot_segments() {
         // `/tmp/foo/./.` and `/tmp/foo` should collide once both
@@ -293,6 +309,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_errors_when_staging_create_fails() {
         // Force `create_dir_all(staging)` to fail by parking the staging
@@ -319,6 +336,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&source);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_atomic_compile_replaces_existing_final_dir() {
         let source = unique_tmp("atomic_replace_src");

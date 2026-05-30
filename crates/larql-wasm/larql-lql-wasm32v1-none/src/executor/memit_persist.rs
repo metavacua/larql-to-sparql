@@ -12,12 +12,6 @@
 //! hand and avoids pulling another dependency into `larql-vindex`
 //! purely to support this round-trip. The expected size for a
 //! month's worth of compaction is well under a megabyte.
-
-use std::path::Path;
-
-use larql_inference::ndarray::Array1;
-use larql_vindex::{MemitCycle, MemitFact, MemitStore};
-use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +23,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ndarray::Array1;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{MemitCycle, MemitFact, MemitStore};
+use serde::{Deserialize, Serialize};
 /// Filename for the JSON snapshot, kept as a constant so callers
 /// don't sprinkle the literal across the codebase.
 pub(crate) const MEMIT_STORE_JSON: &str = "memit_store.json";
@@ -58,7 +61,9 @@ struct MemitFactDto {
     reconstruction_cos: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&MemitFact> for MemitFactDto {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(fact: &MemitFact) -> Self {
         Self {
             entity: fact.entity.clone(),
@@ -71,7 +76,9 @@ impl From<&MemitFact> for MemitFactDto {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<MemitFactDto> for MemitFact {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(dto: MemitFactDto) -> Self {
         Self {
             entity: dto.entity,
@@ -84,7 +91,9 @@ impl From<MemitFactDto> for MemitFact {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&MemitCycle> for MemitCycleDto {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(cycle: &MemitCycle) -> Self {
         Self {
             cycle_id: cycle.cycle_id,
@@ -97,7 +106,9 @@ impl From<&MemitCycle> for MemitCycleDto {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<MemitCycleDto> for MemitCycle {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(dto: MemitCycleDto) -> Self {
         Self {
             cycle_id: dto.cycle_id,
@@ -110,6 +121,7 @@ impl From<MemitCycleDto> for MemitCycle {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a `MemitStore` snapshot from `<vindex_dir>/memit_store.json`.
 ///
 /// Returns `Ok(None)` when the file is absent, signalling "no prior
@@ -128,6 +140,7 @@ pub(crate) fn load_memit_store(vindex_dir: &Path) -> Result<Option<MemitStore>, 
     Ok(Some(MemitStore::from_cycles(cycles)))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Persist a `MemitStore` snapshot to `<vindex_dir>/memit_store.json`,
 /// using a tmp-file + rename so a crash mid-write can't corrupt an
 /// existing snapshot. Empty stores still write a file (one line of
@@ -157,6 +170,7 @@ pub(crate) fn save_memit_store(vindex_dir: &Path, store: &MemitStore) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_memit_persist_{label}_{}_{}",
@@ -168,6 +182,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn synthetic_store() -> MemitStore {
         let mut store = MemitStore::new();
         let fact = MemitFact {
@@ -182,6 +197,7 @@ mod tests {
         store
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_returns_none_when_file_absent() {
         let dir = unique_dir("absent");
@@ -190,6 +206,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn save_then_load_round_trips_cycle_state() {
         let dir = unique_dir("roundtrip");
@@ -215,6 +232,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn save_overwrites_atomically() {
         let dir = unique_dir("overwrite");
@@ -277,6 +295,7 @@ mod tests {
         assert_eq!(new_id, 8);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_propagates_corrupt_json_error() {
         let dir = unique_dir("corrupt");

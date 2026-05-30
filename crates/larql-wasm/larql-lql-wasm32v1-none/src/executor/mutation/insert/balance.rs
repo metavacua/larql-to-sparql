@@ -17,9 +17,6 @@ use crate::executor::tuning::{
     canonical_prompt, BALANCE_ITERS, BALANCE_PROBE_TOP_K, CROSS_ITERS, DOWN_SCALE,
     MAX_PRIORS_CHECKED, MAX_STALE, PRIOR_FLOOR, PROB_CEILING, PROB_FLOOR, UP_SCALE,
 };
-use crate::executor::Session;
-
-use super::compose::InstalledSlot;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,7 +28,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::compose::InstalledSlot;
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Greedy amplify/shrink on the freshly installed slots until the
     /// target token's canonical-prompt probability lands in
     /// [PROB_FLOOR, PROB_CEILING]. Snapshots and rolls back on amplify
@@ -157,6 +161,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Check that the newly-installed slots haven't hijacked any prior
     /// install's canonical prompt. If any prior fact's target prob
     /// drops below `PRIOR_FLOOR`, shrink THIS install × 0.7 and retry,

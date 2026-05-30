@@ -8,9 +8,6 @@
 
 use crate::ast::{Condition, Value};
 use crate::error::LqlError;
-use crate::executor::Session;
-
-use super::format::ENTITIES_DEFAULT_LIMIT;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +19,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+use super::format::ENTITIES_DEFAULT_LIMIT;
 /// Common English function/closed-class words that get capitalised
 /// at sentence starts but aren't named entities. Pulling this out as
 /// a `const` makes the heuristic auditable and keeps the verb body
@@ -64,7 +65,9 @@ fn looks_like_entity(tok: &str) -> bool {
     true
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_select_entities(
         &self,
         conditions: &[Condition],

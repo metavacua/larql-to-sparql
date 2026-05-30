@@ -2,14 +2,6 @@
 //! AFTER `patch_down_weights` — column-replace covers legacy arch-A
 //! inserts, MEMIT covers compose-mode inserts; both contribute to
 //! the final compiled slab.
-
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
-
-use crate::error::LqlError;
-use larql_vindex::format::filenames::DOWN_WEIGHTS_BIN;
-
-use super::{detect_down_dtype_bytes, BYTES_PER_F16, BYTES_PER_F32};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +13,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::OpenOptions;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Read, Seek, SeekFrom, Write};
+
+use crate::error::LqlError;
+use larql_vindex::format::filenames::DOWN_WEIGHTS_BIN;
+
+use super::{detect_down_dtype_bytes, BYTES_PER_F16, BYTES_PER_F32};
+#[cfg(not(target_arch = "wasm32"))]
 pub(in crate::executor::lifecycle::compile) fn apply_memit_deltas_to_down_weights(
     dest_dir: &std::path::Path,
     config: &larql_vindex::VindexConfig,
@@ -153,6 +156,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_memit_apply_{label}_{}_{}",
@@ -164,6 +168,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_synthetic_f32_down(
         dir: &std::path::Path,
         num_layers: usize,
@@ -180,6 +185,7 @@ mod tests {
         std::fs::write(dir.join(DOWN_WEIGHTS_BIN), &bytes).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_synthetic_f16_down(
         dir: &std::path::Path,
         num_layers: usize,
@@ -196,6 +202,7 @@ mod tests {
         std::fs::write(dir.join(DOWN_WEIGHTS_BIN), &bytes).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_cell_f32(
         dir: &std::path::Path,
         layer: usize,
@@ -210,6 +217,7 @@ mod tests {
         f32::from_le_bytes(bytes[cell..cell + BYTES_PER_F32].try_into().unwrap())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_cell_f16(
         dir: &std::path::Path,
         layer: usize,
@@ -246,6 +254,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_f32_adds_delta_to_existing_cell() {
         let dir = unique_dir("f32_add");
@@ -287,6 +296,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_f32_skips_zero_deltas() {
         // A delta_w that's all zeros should leave every cell untouched
@@ -322,6 +332,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_f16_round_trips_within_tolerance() {
         let dir = unique_dir("f16_round");
@@ -352,6 +363,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_errors_on_layer_out_of_range() {
         let dir = unique_dir("layer_oob");
@@ -374,6 +386,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_errors_on_shape_mismatch() {
         let dir = unique_dir("shape_mismatch");
@@ -401,6 +414,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_errors_when_down_weights_missing() {
         let dir = unique_dir("missing");
@@ -418,6 +432,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_errors_on_unrecognised_dtype() {
         let dir = unique_dir("dtype");
@@ -432,6 +447,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_memit_handles_multiple_layers_in_one_call() {
         let dir = unique_dir("multi_layer");

@@ -4,7 +4,6 @@
 use crate::ast::{CompileConflict, CompileTarget, OutputFormat, UseTarget, VindexRef};
 use crate::error::LqlError;
 use crate::executor::tuning::canonical_prompt;
-use crate::executor::{Backend, Session};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,12 +15,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
 mod atomic;
 mod bake;
 mod into_model;
 mod into_vindex;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn exec_compile(
         &mut self,
@@ -70,6 +73,7 @@ impl Session {
 
 // ── Shared MEMIT fact collection (used by INTO MODEL and INTO VINDEX) ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Result of a MEMIT-fact collection pass.
 ///
 /// `facts` is what the solver should consume; `warnings` is a list of
@@ -82,6 +86,7 @@ pub(crate) struct CollectedMemitFacts {
     pub warnings: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Collect MEMIT facts from BOTH applied patches on the PatchedVindex
 /// AND the in-memory `patch_recording` of the current session.
 /// Live INSERT ops go to `patch_recording` until SAVE PATCH; MEMIT

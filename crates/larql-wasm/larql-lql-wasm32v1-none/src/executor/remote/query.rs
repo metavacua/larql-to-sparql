@@ -3,12 +3,6 @@
 
 use crate::ast::{LayerBand, Range};
 use crate::error::LqlError;
-use crate::executor::{Backend, Session};
-
-use super::{
-    ENDPOINT_DESCRIBE, ENDPOINT_EXPLAIN_INFER, ENDPOINT_INFER, ENDPOINT_RELATIONS, ENDPOINT_SELECT,
-    ENDPOINT_STATS, ENDPOINT_WALK,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +14,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
+
+use super::{
+    ENDPOINT_DESCRIBE, ENDPOINT_EXPLAIN_INFER, ENDPOINT_INFER, ENDPOINT_RELATIONS, ENDPOINT_SELECT,
+    ENDPOINT_STATS, ENDPOINT_WALK,
+};
 
 /// Default `top` for `WALK` when the user doesn't specify one.
 const REMOTE_WALK_DEFAULT_TOP: u32 = 10;
@@ -49,7 +50,9 @@ fn band_label(band: Option<LayerBand>) -> &'static str {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_describe(
         &self,
         entity: &str,
@@ -172,6 +175,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_walk(
         &self,
         prompt: &str,
@@ -213,6 +217,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_infer(
         &self,
         prompt: &str,
@@ -269,6 +274,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_explain_infer(
         &self,
         prompt: &str,
@@ -418,6 +424,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_stats(&self) -> Result<Vec<String>, LqlError> {
         let body = self.remote_get_json(ENDPOINT_STATS, &[])?;
         let url = match &self.backend {
@@ -477,6 +484,7 @@ impl Session {
         mode: crate::ast::DescribeMode,
         with_examples: bool,
     ) -> Result<Vec<String>, LqlError> {
+        #[cfg(not(target_arch = "wasm32"))]
         use crate::ast::DescribeMode;
         let body = self.remote_get_json(ENDPOINT_RELATIONS, &[])?;
 
@@ -542,6 +550,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn remote_select(
         &self,
         conditions: &[crate::ast::Condition],
@@ -621,6 +630,7 @@ impl Session {
 
 // ── KNN-override formatters ──────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn remote_knn_override_line(
     override_obj: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
@@ -635,6 +645,7 @@ pub(super) fn remote_knn_override_line(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn remote_knn_override_summary(
     override_obj: &serde_json::Map<String, serde_json::Value>,
 ) -> String {

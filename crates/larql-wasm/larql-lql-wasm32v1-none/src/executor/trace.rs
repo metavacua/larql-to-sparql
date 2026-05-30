@@ -6,7 +6,6 @@
 
 use crate::ast::{Range, TracePositionMode};
 use crate::error::LqlError;
-use crate::executor::helpers::format_knn_override_summary;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,13 +17,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::helpers::format_knn_override_summary;
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct PendingRetrievalOverride {
     override_: larql_inference::KnnOverride,
     model_top1: Option<(String, f64)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl super::Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_trace(
         &self,
         prompt: &str,
@@ -93,6 +97,7 @@ impl super::Session {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[allow(clippy::too_many_arguments)]
     fn exec_trace_with_ffn(
         &self,
@@ -292,6 +297,7 @@ impl super::Session {
         self.maybe_save_and_return(out, &trace, weights, save)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn maybe_save_and_return(
         &self,
         mut out: Vec<String>,
@@ -325,6 +331,7 @@ fn vec_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn append_pending_retrieval_override(
     out: &mut Vec<String>,
     pending: Option<&PendingRetrievalOverride>,

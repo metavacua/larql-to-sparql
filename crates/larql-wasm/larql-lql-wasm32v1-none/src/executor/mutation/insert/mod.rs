@@ -36,6 +36,7 @@ mod plan;
 use crate::ast::InsertMode;
 use crate::error::LqlError;
 use crate::executor::tuning::DEFAULT_INSERT_ALPHA_MUL;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::executor::Session;
 
 /// Default `c_score` (confidence) for an INSERT without an explicit
@@ -43,7 +44,9 @@ use crate::executor::Session;
 /// KNN and compose-mode installs.
 const DEFAULT_INSERT_CONFIDENCE: f32 = 0.9;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     // Arg count mirrors the `Statement::Insert` AST variant 1:1 — each
     // parameter is a distinct AST field destructured by the dispatcher
     // in `executor::execute`. Bundling them into a struct would just
@@ -154,7 +157,9 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     fn refresh_installed_patch_ops_from_overlay(
         &self,
         installed: &mut [compose::InstalledSlot],
@@ -188,6 +193,7 @@ impl Session {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn format_insert_summary(
     installed: &[compose::InstalledSlot],

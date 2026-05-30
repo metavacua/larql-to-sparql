@@ -21,6 +21,7 @@ mod update;
 
 use crate::ast::{CompareOp, Condition, Value};
 use crate::error::LqlError;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::executor::Session;
 use crate::relations::RelationClassifier;
 
@@ -59,6 +60,7 @@ impl<'a> WhereFilters<'a> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Resolve the (layer, feature) candidate set against the base vindex.
     ///
     /// Honours all three filters (entity, layer, feature). When both layer
@@ -158,7 +160,9 @@ fn relation_like(label: &str, pattern: &str) -> bool {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn refresh_recorded_patch_ops_for_slots(
         &mut self,
         slots: &[(usize, usize)],

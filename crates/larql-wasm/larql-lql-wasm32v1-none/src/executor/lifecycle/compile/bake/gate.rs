@@ -12,14 +12,6 @@
 //!
 //! Within a layer, feature `f`'s gate is the row at
 //! `info.offset + f × hidden × bpf` — contiguous per-feature.
-
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
-
-use crate::error::LqlError;
-use larql_vindex::format::filenames::GATE_VECTORS_BIN;
-
-use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +23,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::OpenOptions;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{Seek, SeekFrom, Write};
+
+use crate::error::LqlError;
+use larql_vindex::format::filenames::GATE_VECTORS_BIN;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
+#[cfg(not(target_arch = "wasm32"))]
 pub(in crate::executor::lifecycle::compile) fn patch_gate_vectors(
     source_dir: &std::path::Path,
     dest_dir: &std::path::Path,
@@ -104,6 +108,7 @@ pub(in crate::executor::lifecycle::compile) fn patch_gate_vectors(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Encode a row of f32 values into the file's native dtype (f32 or f16).
 fn encode_row(gate_vec: &[f32], bpf: usize, row_buf: &mut [u8]) -> Result<(), LqlError> {
     if bpf == BYTES_PER_F32 {
@@ -162,6 +167,7 @@ mod tests {
 
     // ── End-to-end fixture tests ────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_bake_gate_{label}_{}_{}",
@@ -222,6 +228,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_synthetic_gate_bin(
         dir: &std::path::Path,
         num_layers: usize,
@@ -245,6 +252,7 @@ mod tests {
         std::fs::write(dir.join(GATE_VECTORS_BIN), &bytes).unwrap();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn read_gate_row_f32(
         dir: &std::path::Path,
         layer: usize,
@@ -264,6 +272,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_no_overrides_is_noop() {
         let dir = unique_dir("noop");
@@ -275,6 +284,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_f32_writes_correct_row() {
         let dir = unique_dir("f32");
@@ -311,6 +321,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_f16_round_trips() {
         let dir = unique_dir("f16");
@@ -347,6 +358,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_errors_on_missing_source() {
         let dir = unique_dir("missing");
@@ -365,6 +377,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_rejects_wrong_shape() {
         let dir = unique_dir("shape");
@@ -384,6 +397,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_rejects_unknown_layer() {
         let dir = unique_dir("layer");
@@ -404,6 +418,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn patch_gate_vectors_rejects_out_of_range_feature() {
         let dir = unique_dir("feat");

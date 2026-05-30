@@ -9,9 +9,6 @@
 //! cached, subsequent INSERTs at the same layer reuse it for free.
 
 use crate::error::LqlError;
-use crate::executor::Session;
-
-use super::plan::InstallPlan;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,9 +20,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::Session;
+
+use super::plan::InstallPlan;
 /// Output of `capture_install_residuals`. Caller commits the pending
 /// decoys to `session.decoy_residual_cache` after the immutable borrow
 /// of `self` ends.
+// Holds ndarray Array1 residuals (via larql_vindex's gated ndarray re-export)
+// — native; residual capture/install is a native inference path.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct CapturedResiduals {
     /// Per-layer captured residual at the install layers. Empty when
     /// `plan.use_constellation` is false (browse-only vindex).
@@ -36,7 +40,9 @@ pub(super) struct CapturedResiduals {
     pub pending_decoys: Vec<(usize, Vec<larql_vindex::ndarray::Array1<f32>>)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Capture the canonical-prompt residual at each install layer plus
     /// decoy residuals (canonical + template-matched) for any layer not
     /// already cached. Returns an empty `per_layer` when the vindex has

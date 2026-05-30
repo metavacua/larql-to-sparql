@@ -3,10 +3,6 @@
 
 use crate::ast::LayerBand;
 use crate::error::LqlError;
-use crate::executor::helpers::format_knn_override_summary;
-use crate::executor::{Backend, Session};
-
-use super::resolve_bands;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,7 +14,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::helpers::format_knn_override_summary;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::executor::{Backend, Session};
+
+use super::resolve_bands;
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn exec_infer_trace(
         &self,
         prompt: &str,
@@ -192,6 +196,7 @@ impl Session {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// EXPLAIN INFER on a `Backend::Weight` (no vindex): produces a dense
     /// inference summary with no feature trace, since there are no
     /// gate vectors / down meta to attribute.
@@ -244,6 +249,7 @@ impl Session {
 // The cross-surface trace reconstruction lives in
 // `larql_inference::walk_trace_from_residuals`.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a `layer → top-3 attended (token, weight)` map from the
 /// captured attention weights. Returns an empty map when
 /// `with_attention` is false. Averages across all heads, drops special
@@ -289,6 +295,7 @@ fn build_attention_map(
     map
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a `layer → (top_token, probability)` map by running the logit
 /// lens on each captured residual. Returns empty when `with_attention`
 /// is false (only the attention path captures intermediate residuals).
@@ -325,6 +332,7 @@ fn band_to_layer_range(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Render one layer's worth of trace hits, in either the compact
 /// `with_attention` single-line format (top hit + attention + lens) or
 /// the standard multi-line format (top-N hits with relation labels).

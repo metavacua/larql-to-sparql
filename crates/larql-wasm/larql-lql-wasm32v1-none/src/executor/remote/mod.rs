@@ -10,11 +10,6 @@
 //!     formatters.
 //!   - `mutation.rs`: write-side verbs (INSERT, DELETE, UPDATE) plus
 //!     local-patch management (APPLY/SHOW/REMOVE PATCH).
-
-use super::Backend;
-use super::Session;
-use crate::ast::{Condition, Value};
-use crate::error::LqlError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +21,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::Backend;
+#[cfg(not(target_arch = "wasm32"))]
+use super::Session;
+use crate::ast::{Condition, Value};
+use crate::error::LqlError;
 mod mutation;
 mod query;
 
@@ -90,7 +92,9 @@ pub(super) fn lookup_usize_condition(conditions: &[Condition], field: &str) -> O
         })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Session {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Connect to a remote larql-server.
     pub(crate) fn exec_use_remote(&mut self, url: &str) -> Result<Vec<String>, LqlError> {
         let url = url.trim_end_matches('/').to_string();
@@ -150,11 +154,13 @@ impl Session {
         )])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// True iff the active backend is the Remote variant.
     pub(crate) fn is_remote(&self) -> bool {
         matches!(&self.backend, Backend::Remote { .. })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the remote URL, client, and session ID, or error.
     pub(super) fn require_remote(
         &self,
@@ -174,6 +180,7 @@ impl Session {
 
     // ── Generic HTTP forwarding helpers ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// GET `{remote_url}{endpoint}` with optional query parameters,
     /// check the response status, and parse the body as JSON.
     pub(super) fn remote_get_json(
@@ -190,6 +197,7 @@ impl Session {
         Self::check_and_parse(endpoint, resp)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// POST `{remote_url}{endpoint}` with a JSON body. When
     /// `with_session` is true, attaches the `x-session-id` header so
     /// the server can route this request to the correct session-side
@@ -211,6 +219,7 @@ impl Session {
         Self::check_and_parse(endpoint, resp)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn check_and_parse(
         endpoint: &str,
         resp: reqwest::blocking::Response,
