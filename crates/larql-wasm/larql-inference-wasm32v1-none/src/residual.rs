@@ -1,7 +1,14 @@
 //! Layer normalization and residual stream operations.
 
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Default norm epsilon. Most models use 1e-5 or 1e-6.
 /// Callers should prefer passing `arch.norm_eps()` explicitly.
 pub const DEFAULT_EPS: f64 = 1e-6;
@@ -158,7 +165,6 @@ pub fn rms_norm_heads_eps(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── rms_norm ──────────────────────────────────────────────────────────────
 
     #[test]

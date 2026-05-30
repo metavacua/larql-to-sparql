@@ -18,7 +18,14 @@
 use ndarray::{s, Array2, ArrayView2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute the top-K right singular vectors of `a` (shape `[m, n]`) via
 /// subspace iteration. Returns a `[K, n]` matrix whose rows are the
 /// approximate right singular vectors, sorted by descending singular value.
@@ -97,7 +104,6 @@ fn modified_gram_schmidt(m: ArrayView2<f32>) -> Array2<f32> {
 mod tests {
     use super::*;
     use ndarray::Array2;
-
     #[test]
     fn rank_one_matrix_recovers_top_singular_vector() {
         // A = u * v^T with v = (1,2,3,4)/sqrt(30), should recover v as top-1.

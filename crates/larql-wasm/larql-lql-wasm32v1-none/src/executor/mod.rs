@@ -2,7 +2,14 @@
 //!
 //! The base vindex is always readonly. All mutations go through a patch overlay.
 //! INSERT/DELETE/UPDATE auto-start an anonymous patch session if none is active.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod backend;
 mod compact;
 mod helpers;
@@ -81,8 +88,8 @@ impl Session {
             backend: Backend::None,
             patch_recording: None,
             auto_patch: false,
-            decoy_residual_cache: std::collections::HashMap::new(),
-            raw_install_residuals: std::collections::HashMap::new(),
+            decoy_residual_cache: HashMap::new(),
+            raw_install_residuals: HashMap::new(),
             installed_edges: Vec::new(),
             epoch: 0,
             mutations_since_minor: 0,

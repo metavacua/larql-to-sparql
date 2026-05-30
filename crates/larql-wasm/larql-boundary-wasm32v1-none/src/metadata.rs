@@ -20,11 +20,15 @@
 //!   thresholds in log-prob units so they transfer across positions and
 //!   model checkpoints.
 
-#[cfg(target_arch = "wasm32")]
-use alloc::vec::Vec;
-
 use crate::frame::BoundaryAgreement;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// All per-boundary confidence fields produced by Phase 2.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BoundaryMetadata {
@@ -145,7 +149,6 @@ fn top2_by_logit(logits: &[f32]) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn peaked_logits(top: usize, v_top: f32, v_rest: f32, n: usize) -> Vec<f32> {
         let mut l = vec![v_rest; n];
         l[top] = v_top;

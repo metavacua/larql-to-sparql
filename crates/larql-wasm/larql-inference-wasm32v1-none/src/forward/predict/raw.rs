@@ -1,6 +1,6 @@
 //! Raw-logits forward passes used by target-delta optimisation and Apollo.
 
-use std::ops::Range;
+use core::ops::Range;
 
 use super::super::embed::embed_tokens;
 use super::super::layer::run_layer_with_ffn;
@@ -10,7 +10,14 @@ use crate::attention::SharedKV;
 use crate::ffn::WeightFfn;
 use crate::model::ModelWeights;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Return type for [`forward_raw_logits`]. `h_pre_norm` is the residual
 /// at the last transformer block's output (pre-final-norm), `h_final`
 /// is after final-norm, and `logits` are the raw logits at the final
@@ -187,7 +194,7 @@ fn forward_layer_range(
     let ple_inputs = precompute_per_layer_inputs(weights, &h, &ple_token_ids);
     let ffn = WeightFfn { weights };
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
 
     for layer in layer_range {
         let shared_kv = weights
@@ -246,7 +253,6 @@ fn forward_layer_range(
 mod forward_from_layer_tests {
     use super::*;
     use crate::test_utils::make_test_weights;
-
     #[test]
     fn forward_raw_logits_returns_vocab_logits() {
         let weights = make_test_weights();

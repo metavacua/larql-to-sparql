@@ -20,7 +20,14 @@
 
 use crate::model::ModelWeights;
 use ndarray::{ArrayView1, ArrayView2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Raw row of `W_E` for `token_id`. Returns `None` if the id is out of
 /// range. Does **not** apply the architecture's `embed_scale` — this is
 /// the matrix as stored. Use [`embedding_row_scaled`] if you want what
@@ -141,8 +148,8 @@ fn cosine_topk_against_matrix(
     scored.into_iter().map(|(i, s)| (i as u32, s)).collect()
 }
 
-fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -157,7 +164,6 @@ mod tests {
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
     use std::sync::OnceLock;
-
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)

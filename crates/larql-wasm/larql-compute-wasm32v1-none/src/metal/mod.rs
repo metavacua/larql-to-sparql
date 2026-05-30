@@ -49,7 +49,7 @@ pub mod stages; // modular: stages/mod.rs → one file per pipeline stage
 mod trait_impl;
 
 use metal::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use buffers::BufferCache;
 use f32_ops::F32Ops;

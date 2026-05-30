@@ -1,8 +1,15 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Benchmark runner: sweeps context lengths × strategies × models.
 /// Outputs JSON + formatted table.
 use crate::{model_config::ModelConfig, run_strategy_benchmark, KvStrategy, StrategyResult};
 use rand::prelude::*;
-
 /// Context lengths to sweep.
 pub const CONTEXT_LENGTHS: &[usize] = &[
     512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 370_000,

@@ -3,7 +3,14 @@ use ndarray::Array2;
 use super::{LayerGraph, LayerOutput};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Template detection ──
 
 /// Known template patterns for routing.
@@ -13,7 +20,7 @@ pub struct TemplatePattern {
     /// Token prefix that identifies this template (before the entity slot).
     pub prefix_tokens: Vec<u32>,
     /// Layer range for cached regime.
-    pub cached_layers: std::ops::RangeInclusive<usize>,
+    pub cached_layers: core::ops::RangeInclusive<usize>,
 }
 
 /// Detect which template a token sequence matches, if any.
@@ -74,7 +81,7 @@ impl TemplateUniverse {
     ) -> Self {
         let all_layers: Vec<usize> = (0..weights.num_layers).collect();
         let mut layer_features: std::collections::HashMap<usize, std::collections::HashSet<usize>> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         for entity in entities {
             let prompt = template.replace("{}", entity);
@@ -297,7 +304,6 @@ mod tests {
     use larql_models::ModelWeights;
     use ndarray::Array2;
     use std::sync::OnceLock;
-
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)
@@ -394,14 +400,14 @@ mod tests {
     fn universe_get_missing_layer_returns_none() {
         let universe = TemplateUniverse {
             name: "empty".into(),
-            features: std::collections::HashMap::new(),
+            features: HashMap::new(),
         };
         assert!(universe.get(0).is_none());
     }
 
     #[test]
     fn universe_get_populated_layer_returns_features() {
-        let mut features = std::collections::HashMap::new();
+        let mut features = HashMap::new();
         features.insert(3usize, vec![0usize, 5, 12]);
         let universe = TemplateUniverse {
             name: "t".into(),
@@ -413,7 +419,7 @@ mod tests {
 
     #[test]
     fn universe_total_features_sums_layers() {
-        let mut features = std::collections::HashMap::new();
+        let mut features = HashMap::new();
         features.insert(0, vec![1, 2, 3]);
         features.insert(1, vec![4, 5]);
         let universe = TemplateUniverse {
@@ -431,7 +437,7 @@ mod tests {
         let idx = make_test_vindex(w);
         let universe = TemplateUniverse {
             name: "empty".into(),
-            features: std::collections::HashMap::new(),
+            features: HashMap::new(),
         };
         let g = GuidedWalkLayerGraph {
             weights: w,
@@ -450,7 +456,7 @@ mod tests {
         let idx = make_test_vindex(w);
         let universe = TemplateUniverse {
             name: "t".into(),
-            features: std::collections::HashMap::new(),
+            features: HashMap::new(),
         };
         let g = GuidedWalkLayerGraph {
             weights: w,
@@ -466,7 +472,7 @@ mod tests {
         // `guided_walk_ffn` per-feature loop actually iterates.
         let w = weights();
         let idx = make_test_vindex(w);
-        let mut features = std::collections::HashMap::new();
+        let mut features = HashMap::new();
         // intermediate_size is 32 in the synthetic fixture.
         for layer in 0..w.num_layers {
             features.insert(layer, vec![0usize, 5, 10, 17, 31]);
@@ -496,7 +502,7 @@ mod tests {
         // summary() prints to stdout — we just verify it doesn't panic on
         // populated and empty universes. Captures both branches (n > 0 and
         // n == 0).
-        let mut features = std::collections::HashMap::new();
+        let mut features = HashMap::new();
         features.insert(0, vec![1, 2, 3]);
         features.insert(1, vec![]);
         let universe = TemplateUniverse {
@@ -507,7 +513,7 @@ mod tests {
 
         let empty = TemplateUniverse {
             name: "empty".into(),
-            features: std::collections::HashMap::new(),
+            features: HashMap::new(),
         };
         empty.summary();
     }
@@ -535,7 +541,7 @@ mod tests {
         let idx = make_test_vindex(w);
         let universe = TemplateUniverse {
             name: "t".into(),
-            features: std::collections::HashMap::new(),
+            features: HashMap::new(),
         };
         let g = GuidedWalkLayerGraph {
             weights: w,

@@ -12,12 +12,18 @@
 //! on every call — still only 1–2 µs, negligible vs network overhead.
 
 use larql_vindex::format::filenames::*;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use memmap2::Mmap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub struct EmbedStoreF16 {
     mmap: Arc<Mmap>,
     pub vocab_size: usize,
@@ -152,7 +158,6 @@ fn f16_to_f32(bits: u16) -> f32 {
 mod tests {
     use super::*;
     use std::io::Write;
-
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(

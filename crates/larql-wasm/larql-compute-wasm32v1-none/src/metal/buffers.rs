@@ -4,12 +4,18 @@
 //! Transient buffers (Q8 input, activation, output) are allocated fresh each call.
 //! Page-aligned mmap data uses newBufferWithBytesNoCopy (zero-copy GPU access).
 
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::Mutex;
 
 use metal::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Cache key: (pointer address, byte length) of the source data.
 type CacheKey = (usize, usize);
 
@@ -275,19 +281,18 @@ pub fn try_read_buffer_f32(buf: &metal::Buffer, len: usize) -> Option<Vec<f32>> 
     if ptr.is_null() {
         return None;
     }
-    if (buf.length() as usize) < len * std::mem::size_of::<f32>() {
+    if (buf.length() as usize) < len * core::mem::size_of::<f32>() {
         return None;
     }
     // SAFETY: ptr is non-null, buffer is large enough, and the command
     // buffer has completed (caller invariant). Data is immediately
     // copied into a new Vec, so no dangling reference is possible.
-    Some(unsafe { std::slice::from_raw_parts(ptr, len).to_vec() })
+    Some(unsafe { core::slice::from_raw_parts(ptr, len).to_vec() })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn dev() -> Option<Device> {
         Device::system_default()
     }

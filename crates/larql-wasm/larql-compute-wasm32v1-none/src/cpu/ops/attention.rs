@@ -5,7 +5,14 @@
 //!
 //! For the LARQL pipeline, this handles seq=1-6 where the
 //! attention matrix is tiny and flash attention is overkill.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Causal attention for one head.
 ///
 /// - `q`: [seq_len, head_dim] query vectors

@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // PromptResult fields (id, stratum, …) are accumulated for a future
 // diagnostic dump; suppress until the viewer is wired.
 #![allow(dead_code)]
@@ -12,7 +20,6 @@ use super::super::metrics::{
 use super::super::oracle_pq_forward::{final_logits, forward_q4k_predicted_address_mode_d_head};
 use super::super::program::{BehaviorMetrics, PositionContext, Program};
 use super::context::FitContext;
-
 /// Per-prompt result from a single proposal evaluation.
 pub struct PromptResult {
     pub id: String,
@@ -31,7 +38,7 @@ pub fn evaluate_program_fast(
     index: &VectorIndex,
     fit: &FitContext,
     program: &Program,
-) -> Result<(Vec<PromptResult>, BehaviorMetrics), Box<dyn std::error::Error>> {
+) -> Result<(Vec<PromptResult>, BehaviorMetrics), Box<dyn core::error::Error>> {
     let target_group = fit.group;
     let mut results = Vec::with_capacity(fit.captures.len());
 

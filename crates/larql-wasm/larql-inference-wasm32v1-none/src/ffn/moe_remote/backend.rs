@@ -11,7 +11,14 @@ use super::shard::{Shard, ShardTransport};
 use super::stream::{InflightMoe, ShardStream};
 use super::wire::{ExpertCallItem, ExpertResultItem};
 use larql_compute::cpu::ops::moe::quantize_x_to_q8k;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-shard call list element: (position, expert_id, residual).
 type ShardCallItem = (usize, usize, Vec<f32>);
 /// Output of `forward_layer_moe`: (output rows, optional per-expert (logit, weight)).
@@ -690,8 +697,8 @@ impl RemoteMoeBackend {
                         tasks.push(LayerTask {
                             layer: l,
                             shard_idx: si,
-                            expert_ids: std::mem::take(&mut shard_ids[si]),
-                            expert_weights: std::mem::take(&mut shard_wts[si]),
+                            expert_ids: core::mem::take(&mut shard_ids[si]),
+                            expert_weights: core::mem::take(&mut shard_wts[si]),
                         });
                     }
                 }

@@ -17,7 +17,14 @@
 //! (e.g. "use f32_gemv if the backend has it, otherwise fall back to
 //! matmul_transb") should use [`Capability`] + [`ComputeBackend::supports`]
 //! instead of probing for `None` returns.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod capability;
 pub mod decode;
 pub mod helpers;
@@ -29,7 +36,6 @@ pub use decode::DecodeBackend;
 pub use helpers::{dot_proj_gpu, matmul_gpu};
 pub use matmul::{MatMul, MatMulOp};
 pub use quant_matvec::QuantMatVec;
-
 /// Hardware compute backend — the umbrella trait every caller binds.
 ///
 /// Combines [`MatMul`] + [`QuantMatVec`] + [`DecodeBackend`] plus
@@ -56,5 +62,5 @@ pub trait ComputeBackend: MatMul + QuantMatVec + DecodeBackend + Send + Sync {
     }
 
     /// Expose the concrete type for safe downcasting.
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any(&self) -> &dyn core::any::Any;
 }

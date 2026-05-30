@@ -4,7 +4,14 @@
 //! Matches HuggingFace default and MLX traditional=False.
 
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Apply full RoPE to Q or K vectors.
 /// x: (seq_len, num_heads * head_dim)
 pub fn apply_rope(
@@ -74,7 +81,6 @@ pub fn apply_rope_partial_at(
 mod tests {
     use super::*;
     use ndarray::Array2;
-
     fn make_qk(seq: usize, heads: usize, head_dim: usize) -> Array2<f32> {
         let n = seq * heads * head_dim;
         Array2::from_shape_vec(

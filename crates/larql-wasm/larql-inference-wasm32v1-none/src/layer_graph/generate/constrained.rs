@@ -1,6 +1,14 @@
 //! Constrained generation over the GPU/vindex decode path.
 
 use super::cpu::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     backend_supports_fused_q4_pipeline, generate_constrained_via_cpu_q4k_streaming_sampled,
 };
 use super::eos::EosConfig;
@@ -13,7 +21,6 @@ use super::types::{GenerateError, GenerateResult, StageTimings};
 use crate::layer_graph::CachedLayerGraph;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
 /// Constrained variant of [`super::generate`] for grammar-controlled decoding.
 ///
 /// Differs from unconstrained generation in two places only:
@@ -32,7 +39,7 @@ pub fn generate_constrained<M>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mask_fn: M,
 ) -> GenerateResult
 where
@@ -62,7 +69,7 @@ pub fn try_generate_constrained<M>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mask_fn: M,
 ) -> Result<GenerateResult, GenerateError>
 where
@@ -92,7 +99,7 @@ pub fn generate_constrained_streaming<M, F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mask_fn: M,
     on_token: F,
 ) -> GenerateResult
@@ -126,7 +133,7 @@ pub fn try_generate_constrained_streaming<M, F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mask_fn: M,
     on_token: F,
 ) -> Result<GenerateResult, GenerateError>
@@ -159,7 +166,7 @@ pub fn generate_constrained_streaming_sampled<M, F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mut mask_fn: M,
     mut on_token: F,
     sampling: SamplingConfig,
@@ -339,7 +346,7 @@ pub fn try_generate_constrained_streaming_sampled<M, F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     mask_fn: M,
     on_token: F,
     sampling: SamplingConfig,

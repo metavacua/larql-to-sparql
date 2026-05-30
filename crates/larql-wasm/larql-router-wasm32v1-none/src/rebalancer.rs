@@ -9,8 +9,6 @@
 //! The server receives `UnassignMsg`, drains in-flight requests (up to 30s),
 //! sends `DroppingMsg(reason="reassigned")`, and re-enters the available pool.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::RwLock;
@@ -19,7 +17,14 @@ use tracing::{debug, info};
 use larql_router_protocol::{RouterMessage, RouterPayload, UnassignMsg};
 
 use crate::grid::GridState;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Config ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -134,7 +139,7 @@ async fn check_imbalance(
             continue;
         }
 
-        servers.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        servers.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
         let min_ms = servers.first().map(|(_, ms)| *ms).unwrap_or(0.0);
         let max_ms = servers.last().map(|(_, ms)| *ms).unwrap_or(0.0);
         let slowest_server_id = servers.last().map(|(id, _)| id.clone());
@@ -207,7 +212,6 @@ async fn send_unassign(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn imbalance_tracker_records_and_clears() {
         let mut t = ImbalanceTracker::default();

@@ -1,7 +1,14 @@
 use super::helpers::*;
 use super::*;
 use crate::parser;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Render a filesystem path for safe inclusion inside an LQL quoted string
 /// literal. The LQL lexer interprets `\` as an escape introducer, so a raw
 /// Windows path like `C:\Users\runner\...` ends up decoded as
@@ -401,7 +408,6 @@ fn format_bytes_gb() {
 /// Create a minimal ModelWeights for testing the Weight backend.
 fn make_test_weights() -> larql_inference::ModelWeights {
     use larql_inference::ndarray;
-    use std::collections::HashMap;
 
     let num_layers = 2;
     let hidden = 8;
@@ -484,10 +490,10 @@ fn make_test_weights() -> larql_inference::ModelWeights {
     larql_inference::ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
+        raw_bytes: HashMap::new(),
         skipped_tensors: Vec::new(),
-        packed_mmaps: std::collections::HashMap::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_mmaps: HashMap::new(),
+        packed_byte_ranges: HashMap::new(),
         embed,
         lm_head,
         position_embed: None,
@@ -1078,7 +1084,6 @@ fn make_large_test_vindex_dir(tag: &str) -> std::path::PathBuf {
         ExtractLevel, MoeConfig, QuantFormat, SilentBuildCallbacks, StorageDtype, VindexConfig,
         VindexLayerInfo, VindexModelConfig,
     };
-    use std::collections::HashMap;
 
     // Just over the COMPACT MAJOR threshold; intermediate kept tiny so
     // gate/up/down stay under 1 MB each.
@@ -2115,7 +2120,7 @@ fn memit_facts_deduplicate_across_patches() {
         }],
     };
     let patches = vec![mkp(0.9), mkp(0.95)];
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     for p in &patches {
         for op in &p.operations {
             if let PatchOp::Insert {
@@ -4671,7 +4676,6 @@ fn compile_into_vindex_on_conflict_highest_confidence_runs() {
     // accepted by the parser and exec_compile_into_vindex passes
     // through the strategy match arm without erroring.
     use larql_vindex::{PatchOp, VindexPatch};
-
     let (mut session, dir) = vindex_session("compile_conflict_highest");
     {
         let (_, _, patched) = session.require_patched_mut().unwrap();

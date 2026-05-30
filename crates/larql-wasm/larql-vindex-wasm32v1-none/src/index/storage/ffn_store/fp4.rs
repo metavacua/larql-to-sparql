@@ -8,7 +8,14 @@
 
 use crate::error::VindexError;
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load FP4/FP8 FFN storage from `dir` per `config.fp4`. No-op when
     /// the manifest is absent (vindexes extracted before exp 26 don't
@@ -30,7 +37,7 @@ impl VectorIndex {
             layer_features,
             config.hidden_size,
         )?;
-        self.ffn.fp4_storage = Some(std::sync::Arc::new(storage));
+        self.ffn.fp4_storage = Some(alloc::sync::Arc::new(storage));
         Ok(())
     }
 

@@ -9,14 +9,20 @@
 //!   - it's the only batch endpoint that supports cross-layer requests in
 //!     a single round-trip (e.g. interp tooling).
 
-use std::sync::Arc;
-
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::header;
 use axum::response::Response;
 
 use larql_inference::ffn::moe_remote::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_expert_request, encode_expert_response, ExpertCallItem, ExpertResultItem,
     EXPERT_BINARY_CONTENT_TYPE,
 };

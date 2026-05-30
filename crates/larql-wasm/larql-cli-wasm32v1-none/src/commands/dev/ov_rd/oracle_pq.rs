@@ -4,9 +4,16 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::encode_prompt;
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
-use std::collections::HashMap;
 
 use super::address::{
     attention_argmax, attention_relation_key, ffn_first_feature_key, prev_ffn_feature_key,
@@ -35,7 +42,6 @@ use super::oracle_pq_stability::measure_code_stability;
 use super::reports::*;
 use super::static_replace::fit_static_means;
 use super::types::*;
-
 #[derive(Args)]
 pub(super) struct OraclePqArgs {
     /// Self-contained Q4K vindex directory.
@@ -500,7 +506,7 @@ pub(super) struct OraclePqArgs {
     eval_offset: usize,
 }
 
-pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -2167,7 +2173,7 @@ pub(super) fn run_oracle_pq(args: OraclePqArgs) -> Result<(), Box<dyn std::error
                     let mut emit_position_variant =
                         |variant_name: String,
                          mut changed_positions: Vec<usize>|
-                         -> Result<(), Box<dyn std::error::Error>> {
+                         -> Result<(), Box<dyn core::error::Error>> {
                             changed_positions.sort_unstable();
                             changed_positions.dedup();
                             if changed_positions.is_empty() {
@@ -3888,7 +3894,7 @@ struct CodeClassCollapseMapping {
 
 fn parse_code_class_collapse_specs(
     spec: &str,
-) -> Result<Vec<CodeClassCollapseSpec>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CodeClassCollapseSpec>, Box<dyn core::error::Error>> {
     let mut out = Vec::new();
     for (idx, raw_spec) in spec
         .split(';')
@@ -3931,7 +3937,7 @@ fn parse_code_class_collapse_specs(
 
 fn parse_conditional_quotient_guards(
     spec: &str,
-) -> Result<Vec<ConditionalQuotientGuard>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ConditionalQuotientGuard>, Box<dyn core::error::Error>> {
     let mut out = Vec::new();
     for raw in spec
         .split(',')
@@ -3952,7 +3958,7 @@ fn parse_conditional_quotient_guards(
 
 fn parse_code_class_collapse_mappings(
     spec: &str,
-) -> Result<Vec<CodeClassCollapseMapping>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CodeClassCollapseMapping>, Box<dyn core::error::Error>> {
     let mut mappings = Vec::new();
     let mut seen_sources = Vec::new();
     for raw_mapping in spec
@@ -4022,7 +4028,7 @@ enum CodeSubstitutionToSpec {
 
 fn parse_code_substitution_to_specs(
     spec: &str,
-) -> Result<Vec<CodeSubstitutionToSpec>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CodeSubstitutionToSpec>, Box<dyn core::error::Error>> {
     let mut out = Vec::new();
     for part in spec
         .split(',')

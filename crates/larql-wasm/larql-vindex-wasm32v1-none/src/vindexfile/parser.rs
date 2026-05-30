@@ -3,7 +3,14 @@
 use std::path::Path;
 
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Parsed Vindexfile.
 #[derive(Debug, Clone)]
 pub struct Vindexfile {
@@ -207,7 +214,6 @@ fn extract_triple(s: &str, line_num: usize) -> Result<(String, String, String), 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn parse_minimal_vindexfile() {
         let input = r#"

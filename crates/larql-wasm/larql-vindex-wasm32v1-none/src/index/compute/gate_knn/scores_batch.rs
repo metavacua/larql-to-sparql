@@ -11,7 +11,14 @@ use ndarray::{Array2, ArrayView2};
 use crate::index::core::VectorIndex;
 use crate::index::storage::gate_store::{gate_gemv_gpu, gate_matmul};
 use crate::index::storage::vindex_storage::VindexStorage;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Compute gate scores for all features × all positions in one BLAS gemm.
     /// Returns [seq_len, intermediate] matrix = x @ gate_vectors^T.
@@ -96,7 +103,7 @@ impl VectorIndex {
                 }
                 let data = unsafe {
                     let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
-                    std::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
+                    core::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
                 };
                 let arr = ArrayView2::from_shape((view.slice.num_features, self.hidden_size), data)
                     .unwrap();
@@ -169,7 +176,7 @@ impl VectorIndex {
                 }
                 let data = unsafe {
                     let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
-                    std::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
+                    core::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
                 };
                 let arr = ArrayView2::from_shape((view.slice.num_features, self.hidden_size), data)
                     .unwrap();
@@ -223,7 +230,6 @@ mod tests {
     use crate::index::core::VectorIndex;
     use crate::index::types::GateLayerSlice;
     use ndarray::array;
-
     fn heap_idx() -> VectorIndex {
         let gate = ndarray::Array2::from_shape_vec(
             (3, 4),

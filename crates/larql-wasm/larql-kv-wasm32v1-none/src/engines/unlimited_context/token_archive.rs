@@ -2,8 +2,14 @@
 //!
 //! Append-only; never evicted. Provides the raw token stream for replay.
 //! Four bytes per token (u32), regardless of model size.
-
-use std::collections::HashMap;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub struct TokenArchive {
@@ -45,7 +51,6 @@ impl TokenArchive {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn archive_and_retrieve_roundtrip() {
         let mut archive = TokenArchive::new();

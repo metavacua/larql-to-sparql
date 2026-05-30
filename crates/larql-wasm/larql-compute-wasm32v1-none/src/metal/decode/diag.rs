@@ -11,7 +11,14 @@
 //!   is supplied; see [`dump_layer_buffers`].
 
 use crate::{options, FullPipelineLayer};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Print the one-line `DECODE_DEBUG` entry for the Nth decode call. No-op
 /// unless the env var is set and `call_n < 3` (caller's contract).
 pub(super) fn log_decode_entry(
@@ -107,7 +114,7 @@ pub(super) fn dump_l0_moe_intermediates(
         let path = format!("{dir}/{name}.bin");
         if let Ok(mut f) = std::fs::File::create(&path) {
             let bytes =
-                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+                unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
             let _ = f.write_all(bytes);
             eprintln!("[l0-dump] wrote {path} ({} f32)", data.len());
         }
@@ -172,7 +179,7 @@ pub(super) fn dump_layer_buffers(l: usize, bufs: &LayerDiagBufs<'_>) {
             eprintln!("[diag L{l}] {name}: null contents");
             return;
         }
-        let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+        let s = unsafe { core::slice::from_raw_parts(ptr, n) };
         let nan = s.iter().filter(|v| v.is_nan()).count();
         let inf = s.iter().filter(|v| v.is_infinite()).count();
         let maxabs = s
@@ -271,7 +278,7 @@ impl ResidualDump {
         ok &= file.write_all(&hidden.to_le_bytes()).is_ok();
         // f32 is always little-endian on the platforms we target.
         let as_bytes = |s: &[f32]| -> &[u8] {
-            unsafe { std::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * 4) }
+            unsafe { core::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * 4) }
         };
         ok &= file.write_all(as_bytes(layer_in)).is_ok();
         ok &= file.write_all(as_bytes(h_post_attn)).is_ok();

@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
 use clap::Args;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct BuildArgs {
     /// Directory containing the Vindexfile (defaults to current directory).
@@ -21,7 +28,7 @@ pub struct BuildArgs {
     compile: Option<String>,
 }
 
-pub fn run(args: BuildArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: BuildArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindexfile_path = args.dir.join("Vindexfile");
     if !vindexfile_path.exists() {
         return Err(format!("Vindexfile not found: {}", vindexfile_path.display()).into());

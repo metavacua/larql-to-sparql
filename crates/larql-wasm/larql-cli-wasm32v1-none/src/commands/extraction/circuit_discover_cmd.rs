@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -8,7 +7,14 @@ use larql_inference::ndarray;
 use larql_inference::tokenizers;
 use larql_inference::InferenceModel;
 use larql_vindex::load_feature_labels;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct CircuitDiscoverArgs {
     /// Model path or HuggingFace model ID.
@@ -58,7 +64,7 @@ struct Circuit {
     top_tokens: Vec<String>,
 }
 
-pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -337,7 +343,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
         while let Some(current) = queue.pop() {
             if let Some(neighbors) = adjacency.get(&current) {
                 for &(neighbor, _sim) in neighbors {
-                    if let std::collections::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor)
+                    if let hashbrown::hash_map::Entry::Vacant(e) = cluster_id.entry(neighbor)
                     {
                         e.insert(cid);
                         queue.push(neighbor);
@@ -362,7 +368,7 @@ pub fn run(args: CircuitDiscoverArgs) -> Result<(), Box<dyn std::error::Error>> 
     let mut circuits: Vec<Circuit> = Vec::new();
     let mut sorted_clusters: Vec<(usize, Vec<(usize, usize)>)> =
         cluster_heads.into_iter().collect();
-    sorted_clusters.sort_by_key(|(_, heads)| std::cmp::Reverse(heads.len()));
+    sorted_clusters.sort_by_key(|(_, heads)| core::cmp::Reverse(heads.len()));
 
     for (cid, mut heads) in sorted_clusters {
         heads.sort();
@@ -520,7 +526,7 @@ fn project_top_token(
         .to_string()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

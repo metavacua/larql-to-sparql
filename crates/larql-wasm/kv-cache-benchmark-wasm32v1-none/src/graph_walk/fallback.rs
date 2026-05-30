@@ -104,7 +104,6 @@ impl TierDistribution {
 mod tests {
     use super::super::walk_state::WalkMode;
     use super::*;
-
     #[test]
     fn test_tier_routing() {
         let factual = WalkState {

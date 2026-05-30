@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // Many helpers in this module are only invoked from the metal-gated
 // `#[cfg(all(feature = "metal", target_os = "macos"))]` branches. Without
 // the metal feature, those call sites disappear and the helpers become
@@ -31,7 +39,6 @@ use larql_compute::{Activation, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayo
 use larql_models::weights::{per_layer_ffn_key, PER_LAYER_FFN_DOWN, PER_LAYER_FFN_GATE_UP};
 #[cfg(all(feature = "metal", target_os = "macos"))]
 use larql_vindex::{load_model_weights_q4k, load_vindex_config, SilentLoadCallbacks};
-
 // ── Component / backend taxonomies ────────────────────────────────────────────
 
 /// Inference checkpoints that can be diffed independently.
@@ -100,7 +107,7 @@ pub struct ParityArgs {
 }
 
 #[cfg(not(all(feature = "metal", target_os = "macos")))]
-pub fn run(_args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(_args: ParityArgs) -> Result<(), Box<dyn core::error::Error>> {
     Err(
         "`larql parity` requires the `metal` feature on macOS — Metal is the reference \
          backend this command compares CPU output against."
@@ -109,7 +116,7 @@ pub fn run(_args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(all(feature = "metal", target_os = "macos"))]
-pub fn run(args: ParityArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ParityArgs) -> Result<(), Box<dyn core::error::Error>> {
     if !COMPONENTS.contains(&args.component.as_str()) {
         return Err(format!(
             "unknown --component '{}'. Available: {}",
@@ -195,7 +202,7 @@ fn run_lm_head(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_compute::CpuBackend;
     use larql_vindex::SilentLoadCallbacks;
 
@@ -281,7 +288,7 @@ fn run_lm_head(
 fn argmax(v: &[f32]) -> usize {
     v.iter()
         .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }
@@ -293,7 +300,7 @@ fn run_moe_expert(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let arch = &*weights.arch;
     let hidden = config.hidden_size;
     let inter = arch.moe_intermediate_size();
@@ -371,7 +378,7 @@ fn run_moe_block(
     weights: &larql_models::ModelWeights,
     args: &ParityArgs,
     backends: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let arch = &*weights.arch;
     let hidden = config.hidden_size;
     let inter = arch.moe_intermediate_size();
@@ -556,10 +563,9 @@ fn run_layer_diff(
     path: &std::path::Path,
     config: &larql_vindex::VindexConfig,
     args: &ParityArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_inference::layer_graph::{generate::generate, CachedLayerGraph};
     use larql_inference::vindex::predict_q4k_hidden;
-
     let num_layers = config.num_layers;
     let hidden = config.hidden_size;
 
@@ -670,7 +676,7 @@ fn run_layer_diff(
                 v[(n - 1) * hidden..].to_vec()
             }
         };
-        let mut out = std::collections::BTreeMap::new();
+        let mut out = alloc::collections::BTreeMap::new();
         for l in 0..num_layers {
             let h_out_path = metal_dense_dir.join(format!("metal_layer_{l:02}_h_out.f32"));
             let h_pa_path = metal_dense_dir.join(format!("metal_layer_{l:02}_h_post_attn.f32"));
@@ -804,7 +810,7 @@ struct ResidualRecord {
 /// Parse `LARQL_DUMP_RESIDUALS` binary (written by `moe_combine.rs / diag.rs`).
 /// Returns a map from layer_idx → record. Skips the 16-byte magic header.
 fn parse_residual_dump(bytes: &[u8]) -> std::collections::HashMap<usize, ResidualRecord> {
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
     if bytes.len() < 16 {
         return map;
     }
@@ -1146,7 +1152,7 @@ fn expert_bytes(
     weights: &larql_models::ModelWeights,
     layer: usize,
     expert: usize,
-) -> Result<(&[u8], &[u8]), Box<dyn std::error::Error>> {
+) -> Result<(&[u8], &[u8]), Box<dyn core::error::Error>> {
     let gu_key = per_layer_ffn_key(layer, expert, PER_LAYER_FFN_GATE_UP);
     let dn_key = per_layer_ffn_key(layer, expert, PER_LAYER_FFN_DOWN);
     let gu = weights
@@ -1180,7 +1186,7 @@ fn router_proj_for(
     weights: &larql_models::ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
     layer: usize,
-) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
     let key = arch
         .moe_router_key(layer)
         .ok_or("arch has no router_proj key for this layer")?;

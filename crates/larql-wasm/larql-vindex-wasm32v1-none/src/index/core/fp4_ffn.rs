@@ -48,7 +48,6 @@ mod tests {
     //! `index/storage/fp4_store.rs` and are exercised by the FP4
     //! integration tests; here we just pin the dispatch.
     use super::*;
-
     fn fresh() -> VectorIndex {
         VectorIndex::empty(2, 8)
     }

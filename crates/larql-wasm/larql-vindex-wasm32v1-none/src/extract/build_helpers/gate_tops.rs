@@ -5,7 +5,14 @@ use larql_models::{FfnType, ModelWeights};
 use ndarray::Array2;
 
 use crate::extract::constants::GATE_TOP_TOKEN_BATCH;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute gate top tokens for features at a layer using whole-word
 /// embeddings. Returns one decoded whole-word token per feature.
 pub(crate) fn compute_gate_top_tokens(
@@ -62,7 +69,6 @@ mod tests {
     use super::super::test_support::{insert_tensor, vocab_tokenizer, weights_with_embed};
     use super::super::vocab::build_whole_word_vocab;
     use super::*;
-
     #[test]
     fn compute_gate_top_tokens_returns_empty_strings_when_no_gate_tensor() {
         let toks = vocab_tokenizer(&["x"]);

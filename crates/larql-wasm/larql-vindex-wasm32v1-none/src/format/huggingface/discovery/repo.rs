@@ -46,7 +46,6 @@ mod tests {
     use super::super::test_support::TestEnvGuard;
     use super::*;
     use serial_test::serial;
-
     #[test]
     #[serial]
     fn repo_exists_returns_true_on_200() {

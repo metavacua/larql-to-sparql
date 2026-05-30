@@ -26,10 +26,14 @@
 //!
 //! `scale = clip / INT8_QMAX`, where `clip = CLIP_SIGMA × σ(r)`.
 //! The original value is recovered as `q as f32 × scale`.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
-use alloc::vec::Vec;
-
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Number of bytes in the scale header.
 pub const SCALE_BYTES: usize = 4;
 
@@ -126,7 +130,6 @@ fn std_dev(r: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn roundtrip_small_vector() {
         let r: Vec<f32> = (0..256).map(|i| i as f32 * 0.5 - 64.0).collect();

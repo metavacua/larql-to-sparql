@@ -3,8 +3,6 @@
 //! Session-aware: if `X-Session-Id` header is present, patches are scoped
 //! to that session. Otherwise, patches go to the global shared state.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
@@ -13,7 +11,14 @@ use serde::Deserialize;
 use crate::error::ServerError;
 use crate::session::{extract_session_id, PATCH_UNNAMED};
 use crate::state::AppState;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const PATCH_INLINE_NAME: &str = "inline-patch";
 
 #[derive(Deserialize)]

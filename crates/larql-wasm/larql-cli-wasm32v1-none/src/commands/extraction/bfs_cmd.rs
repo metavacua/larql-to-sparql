@@ -4,7 +4,14 @@ use std::time::Instant;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_core::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct BfsArgs {
     /// Comma-separated seed entities.
@@ -81,7 +88,7 @@ impl BfsCallbacks for ProgressCallbacks {
 #[allow(clippy::type_complexity)]
 fn load_mock_knowledge(
     path: &PathBuf,
-) -> Result<Vec<(String, String, f64)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, String, f64)>, Box<dyn core::error::Error>> {
     let contents = std::fs::read_to_string(path)?;
     let value: serde_json::Value = serde_json::from_str(&contents)?;
     let mut entries = Vec::new();
@@ -96,7 +103,7 @@ fn load_mock_knowledge(
     Ok(entries)
 }
 
-pub fn run(args: BfsArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: BfsArgs) -> Result<(), Box<dyn core::error::Error>> {
     // Load templates from file
     let tmpl_contents = std::fs::read_to_string(&args.templates).map_err(|e| {
         format!(

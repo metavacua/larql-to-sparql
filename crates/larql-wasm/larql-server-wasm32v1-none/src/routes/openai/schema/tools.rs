@@ -20,13 +20,18 @@
 //! the OpenAI `tool_calls` response shape (one `{id, type: "function",
 //! function: {name, arguments}}` entry per object in the output).
 
-use std::collections::BTreeMap;
-
 use serde_json::Value;
 
 use super::ast::{ObjectSchema, Schema};
 use super::parser::{parse_schema_with, ParseOptions};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Resolved tool-choice mode.
 ///
 /// - `None` — request has no `tools` (or `tool_choice == "none"`); skip
@@ -173,7 +178,6 @@ fn make_tool_branch(name: &str, args_schema: Schema) -> Schema {
 mod tests {
     use super::super::fsm::{Fsm, StepResult};
     use super::*;
-
     fn tool(name: &str, params: serde_json::Value) -> serde_json::Value {
         serde_json::json!({
             "type": "function",

@@ -3,6 +3,14 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_inference::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     forward_to_layer, predict, predict_from_hidden, trace_forward, InferenceModel,
 };
 
@@ -46,7 +54,7 @@ struct VectorMeta {
     layers: Vec<usize>,
 }
 
-pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ProjectionTestArgs) -> Result<(), Box<dyn core::error::Error>> {
     // ── Load model ──
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();

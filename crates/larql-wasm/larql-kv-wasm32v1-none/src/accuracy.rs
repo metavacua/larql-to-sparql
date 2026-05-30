@@ -4,7 +4,14 @@
 //! tests with synthetic data.
 
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Cosine similarity between two equal-length vectors. Returns 0.0 for zero vectors.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     debug_assert_eq!(a.len(), b.len());
@@ -107,7 +114,6 @@ pub fn compare_hidden(h1: &Array2<f32>, h2: &Array2<f32>) -> HiddenAccuracy {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn cosine_identical() {
         let v = vec![1.0f32, 2.0, 3.0];

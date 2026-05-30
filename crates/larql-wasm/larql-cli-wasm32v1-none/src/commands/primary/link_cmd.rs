@@ -23,7 +23,14 @@ use std::path::PathBuf;
 use clap::Args;
 
 use crate::commands::primary::cache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct LinkArgs {
     /// Path to a vindex directory (contains `index.json`).
@@ -40,7 +47,7 @@ pub struct LinkArgs {
     pub force: bool,
 }
 
-pub fn run(args: LinkArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: LinkArgs) -> Result<(), Box<dyn core::error::Error>> {
     // Resolve target to an absolute path — symlinks without absolute
     // targets break the moment you cd elsewhere.
     let target = std::fs::canonicalize(&args.path)
@@ -100,7 +107,7 @@ pub fn run(args: LinkArgs) -> Result<(), Box<dyn std::error::Error>> {
 
 /// Reject names that would collide with HF `owner/name` syntax or break
 /// filesystem assumptions.
-fn validate_name(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn validate_name(name: &str) -> Result<(), Box<dyn core::error::Error>> {
     if name.is_empty() {
         return Err("name cannot be empty".into());
     }

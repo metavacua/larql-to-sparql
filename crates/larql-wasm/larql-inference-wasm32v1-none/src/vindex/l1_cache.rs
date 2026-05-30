@@ -5,10 +5,16 @@
 //! Scope: single WalkFfn instance — one inference session or one HTTP request.
 //! Eviction: bounded by max_entries per layer (FIFO, no LRU).
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-
+use core::cell::{Cell, RefCell};
+use core::hash::{Hash, Hasher};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub const L1_DEFAULT_MAX_ENTRIES: usize = 4096;
 
 pub struct FfnL1Cache {
@@ -41,7 +47,7 @@ impl FfnL1Cache {
     pub fn key(feature_ids: &[usize]) -> u64 {
         let mut ids = feature_ids.to_vec();
         ids.sort_unstable();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
         ids.hash(&mut hasher);
         hasher.finish()
     }
@@ -56,7 +62,7 @@ impl FfnL1Cache {
     /// floating-point noise that would otherwise prevent cache hits across
     /// identical tokens at different context lengths.
     pub fn residual_key(residual: &[f32]) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
         for &v in residual {
             let q = (v * 256.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             q.hash(&mut hasher);
@@ -104,7 +110,6 @@ impl FfnL1Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn key_is_order_independent() {
         // Same features in different order → same key (gate-score order doesn't matter)

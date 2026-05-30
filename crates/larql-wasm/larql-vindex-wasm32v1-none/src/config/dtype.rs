@@ -4,7 +4,14 @@
 //! Half-precision conversion functions are in `larql_models::quant::half`.
 
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Storage precision for vindex binary files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -15,8 +22,8 @@ pub enum StorageDtype {
     F16,
 }
 
-impl std::fmt::Display for StorageDtype {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for StorageDtype {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::F32 => write!(f, "f32"),
             Self::F16 => write!(f, "f16"),
@@ -45,7 +52,7 @@ pub fn encode_floats(data: &[f32], dtype: StorageDtype) -> Vec<u8> {
     match dtype {
         StorageDtype::F32 => {
             let bytes: &[u8] =
-                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+                unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
             bytes.to_vec()
         }
         StorageDtype::F16 => larql_models::quant::half::encode_f16(data),
@@ -57,7 +64,7 @@ pub fn decode_floats(data: &[u8], dtype: StorageDtype) -> Vec<f32> {
     match dtype {
         StorageDtype::F32 => {
             let floats: &[f32] =
-                unsafe { std::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4) };
+                unsafe { core::slice::from_raw_parts(data.as_ptr() as *const f32, data.len() / 4) };
             floats.to_vec()
         }
         StorageDtype::F16 => larql_models::quant::half::decode_f16(data),
@@ -75,7 +82,6 @@ pub fn bytes_per_float(dtype: StorageDtype) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn encode_decode_f32() {
         let data = vec![1.0f32, 2.0, 3.0];

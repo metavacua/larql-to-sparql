@@ -29,7 +29,14 @@ use crate::format::filenames::*;
 
 use super::capabilities::{ensure_standard_attention_supported, SURFACE_Q4K_WEIGHT_WRITER};
 use super::write_f32::WeightSource;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod attn;
 mod ffn;
 mod lm_head;
@@ -94,7 +101,7 @@ pub(super) fn pad_rows_to_block(data: &[f32], rows: usize, cols: usize) -> (Vec<
     for r in 0..rows {
         let row = &data[r * cols..(r + 1) * cols];
         out.extend_from_slice(row);
-        out.extend(std::iter::repeat_n(0.0f32, pad));
+        out.extend(core::iter::repeat_n(0.0f32, pad));
     }
     (out, padded_cols)
 }
@@ -227,7 +234,6 @@ fn update_index_json(
 #[cfg(test)]
 mod helper_tests {
     use super::*;
-
     // ── resolve_v_tensor ──
 
     #[test]

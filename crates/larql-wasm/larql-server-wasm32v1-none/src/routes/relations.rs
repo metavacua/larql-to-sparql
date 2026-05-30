@@ -1,15 +1,19 @@
 //! GET /v1/relations — list all known relation types (top tokens).
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Content-word filter matching the local executor's `is_content_token`.
 fn is_content_token(tok: &str) -> bool {
     let tok = tok.trim();
@@ -213,7 +217,7 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
     }
 
     let mut sorted: Vec<&TokenInfo> = tokens.values().collect();
-    sorted.sort_by_key(|t| std::cmp::Reverse(t.count));
+    sorted.sort_by_key(|t| core::cmp::Reverse(t.count));
     sorted.truncate(50);
 
     let relations: Vec<serde_json::Value> = sorted

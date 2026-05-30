@@ -11,10 +11,17 @@
 
 use super::CachedLayerGraph;
 #[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[allow(unused_imports)]
 use super::LayerGraph;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
 /// Hybrid decode: GPU attention + vindex walk FFN per layer.
 ///
 /// Falls back to `predict_honest` if Metal is unavailable or walk data is missing.
@@ -27,7 +34,7 @@ pub fn predict_hybrid(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> crate::forward::PredictResult {
     // Try the Metal hybrid path
     #[cfg(all(feature = "metal", target_os = "macos"))]
@@ -70,7 +77,7 @@ fn predict_hybrid_metal(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: &std::ops::Range<usize>,
+    layer_range: &core::ops::Range<usize>,
 ) -> Option<crate::forward::PredictResult> {
     // Check: Metal backend?
     let metal = backend

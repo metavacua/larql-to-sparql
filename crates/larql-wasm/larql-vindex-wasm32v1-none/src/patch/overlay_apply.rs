@@ -11,7 +11,14 @@ use crate::index::FeatureMeta;
 
 use super::format::{decode_gate_vector, PatchOp, VindexPatch};
 use super::overlay::PatchedVindex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl PatchedVindex {
     /// Apply a patch. Operations are resolved into the override maps.
     pub fn apply_patch(&mut self, patch: VindexPatch) {
@@ -168,7 +175,6 @@ mod tests {
     use super::*;
     use crate::index::VectorIndex;
     use crate::patch::format::{encode_gate_vector, PatchDownMeta, PatchOp, VindexPatch};
-
     fn empty_pv() -> PatchedVindex {
         PatchedVindex::new(VectorIndex::new(vec![], vec![], 0, 0))
     }

@@ -11,7 +11,14 @@ use crate::layer_graph::generate::cpu::backend_supports_fused_q4_pipeline;
 use crate::layer_graph::generate::gpu_setup::{prefill_q4_prompt, reset_and_preallocate_kv_cache};
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Timings and forced tokens from [`stream_forced_full_logits`].
 #[derive(Debug, Clone, Default)]
 pub struct ForcedLogitsResult {
@@ -209,7 +216,6 @@ mod tests {
     //! tinymodel arch (no softcap, no scaling).
     use super::*;
     use crate::test_utils::{make_test_vindex, make_test_weights};
-
     #[test]
     fn forced_logits_result_default_is_empty() {
         let r = ForcedLogitsResult::default();

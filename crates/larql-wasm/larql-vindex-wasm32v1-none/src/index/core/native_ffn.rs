@@ -55,7 +55,6 @@ mod tests {
     //! `index/storage/ffn_store/*` integration tests; here we just pin
     //! that the trait dispatch lines run.
     use super::*;
-
     fn fresh() -> VectorIndex {
         VectorIndex::empty(2, 8)
     }

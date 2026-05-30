@@ -15,7 +15,14 @@ use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
 use super::utils::{count_threshold, decode_token, partial_top_k_column, top_entities};
 use crate::error::VindexError;
 use crate::format::filenames::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Result of walking a single layer.
 #[derive(Debug, Clone)]
 pub struct LayerResult {
@@ -242,9 +249,9 @@ impl WeightWalker {
         let mut sel_thresholds = ThresholdCounts::default();
 
         let mut subj_counts: std::collections::HashMap<String, (usize, f64)> =
-            std::collections::HashMap::new();
+            HashMap::new();
         let mut obj_counts: std::collections::HashMap<String, (usize, f64)> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         // Phase 3: add normalized edges to graph
         for raw in &raw_edges {
@@ -364,7 +371,6 @@ pub fn walk_model(
 mod tests {
     use super::super::test_fixture::create_mock_model;
     use super::*;
-
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_ww_inline_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);

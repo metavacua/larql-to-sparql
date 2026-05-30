@@ -52,7 +52,14 @@
 //! Any future direct-callback hook (avoiding the fs round-trip) can
 //! replace [`capture::run_with_dump_dir`] without touching the public
 //! surface.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod capture;
 mod compare;
 mod stages;

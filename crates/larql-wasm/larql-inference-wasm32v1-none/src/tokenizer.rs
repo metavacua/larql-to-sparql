@@ -6,7 +6,14 @@ use std::path::Path;
 use larql_models::ModelArchitecture;
 
 use crate::error::InferenceError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Load a tokenizer from a model directory.
 pub fn load_tokenizer(model_dir: &Path) -> Result<tokenizers::Tokenizer, InferenceError> {
     let path = model_dir.join(TOKENIZER_JSON);
@@ -78,7 +85,6 @@ pub fn decode_token_raw(tokenizer: &tokenizers::Tokenizer, id: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn maybe_prepend_bos_noop_when_arch_has_no_bos() {
         // Llama/Mistral/Qwen tokenizers already prepend BOS via their

@@ -37,7 +37,6 @@
 //! moment a backend grows or trims a stage; the explicit pair list
 //! makes the intent visible at the test site.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use larql_compute::prelude::*;
@@ -46,6 +45,14 @@ use larql_vindex::VectorIndex;
 
 use super::compare::{LayerStat, ParityThreshold};
 use crate::forward::dump_config::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     cpu_stage_prefix, decode_layer_prefix, metal_layer_prefix, ENV_CPU_STAGE_DUMP,
     ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS, ENV_STAGE_DUMP_LAYER,
 };
@@ -541,7 +548,6 @@ fn build_dummy_tokenizer() -> tokenizers::Tokenizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn cap(stages: &[(&str, Vec<f32>)], layer: usize, backend: &'static str) -> StageCapture {
         StageCapture {
             stages: stages

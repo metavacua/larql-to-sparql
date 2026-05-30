@@ -11,7 +11,14 @@ use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use crate::residual::rms_norm;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(
     weights: &ModelWeights,
@@ -282,7 +289,6 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn h(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),

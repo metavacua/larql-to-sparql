@@ -1,0 +1,11 @@
+[package]
+name = "larql-wasm-math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Portable float-method extension trait (libm-backed) for wasm32v1-none kernels"
+
+[dependencies]
+libm = { workspace = true }

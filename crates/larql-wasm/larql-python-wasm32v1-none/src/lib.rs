@@ -1,5 +1,13 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[macro_use]
 extern crate alloc;
 
 use pyo3::prelude::*;
@@ -7,7 +15,6 @@ use pyo3::types::PyDict;
 
 use larql_core as lq;
 use larql_vindex as lv;
-
 mod session;
 mod trace_py;
 mod vindex;
@@ -204,8 +211,8 @@ impl PyEdge {
     }
 
     fn __hash__(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use core::hash::{Hash, Hasher};
+        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
         self.inner.hash(&mut hasher);
         hasher.finish()
     }

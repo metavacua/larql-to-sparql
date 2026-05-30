@@ -35,7 +35,14 @@
 //! (slightly different shape — adds the assistant-open marker). Keep them
 //! aligned with the [`TurnRenderer`](crate::layer_graph::TurnRenderer) impls
 //! when adjusting either side.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Chat-template format for instruction-tuned models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatTemplate {

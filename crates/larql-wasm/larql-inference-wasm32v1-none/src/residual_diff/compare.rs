@@ -20,7 +20,14 @@
 //! 31B dense, Llama 2 7B, Mistral 7B v0.1.
 
 use super::capture::ResidualCapture;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-layer comparison output. `cos` close to 1.0 means matching
 /// direction; `max_abs` close to 0.0 means matching pointwise. Both
 /// matter — see module docs.
@@ -195,7 +202,6 @@ fn layer_stat(layer: usize, a: &[f32], b: &[f32]) -> LayerStat {
 mod tests {
     use super::super::capture::ResidualCapture;
     use super::*;
-
     fn cap(layers: Vec<Vec<f32>>, hidden: usize, seq_len: usize) -> ResidualCapture {
         ResidualCapture {
             layers,

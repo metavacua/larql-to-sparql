@@ -4,7 +4,14 @@ use ndarray::Array2;
 
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Shared logits computation: final norm + vindex KNN + softmax.
 pub fn finalize_logits(
     weights: &ModelWeights,
@@ -94,7 +101,6 @@ mod tests {
     use super::*;
     use crate::test_utils::{make_test_tokenizer, make_test_vindex, make_test_weights};
     use larql_compute::CpuBackend;
-
     #[test]
     fn finalize_logits_runs_without_panic() {
         let weights = make_test_weights();

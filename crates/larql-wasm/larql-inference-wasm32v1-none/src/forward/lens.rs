@@ -19,7 +19,14 @@ use super::predict::raw::hidden_to_raw_logits;
 use super::softmax;
 use crate::model::ModelWeights;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Top-k `(token_id, probability)` pairs at the given residual, projected
 /// through the model's final norm + lm_head. Probabilities sum to 1.0
 /// across the full vocab (top-k truncation happens after softmax, not
@@ -93,8 +100,8 @@ fn topk_from_probs(probs: &[f32], k: usize) -> Vec<(u32, f32)> {
         .collect()
 }
 
-fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
@@ -109,7 +116,6 @@ mod tests {
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
     use std::sync::OnceLock;
-
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)

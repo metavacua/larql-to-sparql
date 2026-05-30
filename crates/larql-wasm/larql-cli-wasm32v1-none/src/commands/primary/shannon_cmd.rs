@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::ops::Range;
+use core::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -16,7 +16,14 @@ use larql_inference::attention::SharedKV;
 use larql_inference::forward::{apply_norm, dot_proj};
 use larql_inference::{encode_prompt, InferenceModel, ModelWeights, WeightFfn};
 use ndarray::{s, Array2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const LN_2: f64 = std::f64::consts::LN_2;
 const DEFAULT_CONTEXT: usize = 512;
 const DEFAULT_STRIDE: usize = 256;
@@ -197,7 +204,7 @@ pub struct DecodeArgs {
     metal: bool,
 }
 
-pub fn run(cmd: ShannonCommand) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(cmd: ShannonCommand) -> Result<(), Box<dyn core::error::Error>> {
     match cmd {
         ShannonCommand::Score(args) => run_score(args),
         ShannonCommand::Slot(args) => run_slot(args),
@@ -208,7 +215,7 @@ pub fn run(cmd: ShannonCommand) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn run_score(args: ScoreArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_score(args: ScoreArgs) -> Result<(), Box<dyn core::error::Error>> {
     validate_window(args.context, args.stride)?;
     let text = read_text(&args.corpus, args.bytes)?;
     let model = load_model(&args.model)?;
@@ -235,7 +242,7 @@ fn run_score(args: ScoreArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_layers(args: LayersArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_layers(args: LayersArgs) -> Result<(), Box<dyn core::error::Error>> {
     validate_window(args.context, args.stride)?;
     let text = read_text(&args.corpus, args.bytes)?;
     let model = load_model(&args.model)?;
@@ -326,7 +333,7 @@ fn run_layers(args: LayersArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_slot(args: SlotArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_slot(args: SlotArgs) -> Result<(), Box<dyn core::error::Error>> {
     validate_window(args.context, 1)?;
     let model = load_model(&args.model)?;
     let full = format!("{}{}", args.prefix, args.answer);
@@ -373,7 +380,7 @@ fn run_slot(args: SlotArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_repeat(args: RepeatArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_repeat(args: RepeatArgs) -> Result<(), Box<dyn core::error::Error>> {
     validate_window(args.context, 1)?;
     if args.needle.is_empty() {
         return Err("--needle must not be empty".into());
@@ -417,7 +424,7 @@ fn run_repeat(args: RepeatArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_encode(args: EncodeArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_encode(args: EncodeArgs) -> Result<(), Box<dyn core::error::Error>> {
     if args.vindex.is_some() {
         return run_encode_vindex(args);
     }
@@ -476,7 +483,7 @@ fn run_encode(args: EncodeArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_decode(args: DecodeArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_decode(args: DecodeArgs) -> Result<(), Box<dyn core::error::Error>> {
     if args.vindex.is_some() {
         return run_decode_vindex(args);
     }
@@ -527,7 +534,7 @@ struct VindexShannonRuntime {
 fn load_vindex_runtime(
     vindex: &Path,
     metal: bool,
-) -> Result<VindexShannonRuntime, Box<dyn std::error::Error>> {
+) -> Result<VindexShannonRuntime, Box<dyn core::error::Error>> {
     if !metal {
         return Err("--vindex Shannon encode/decode currently requires --metal".into());
     }
@@ -570,7 +577,7 @@ fn load_vindex_runtime(
     })
 }
 
-fn run_encode_vindex(args: EncodeArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_encode_vindex(args: EncodeArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex = args.vindex.as_ref().ok_or("--vindex missing")?;
     let text = read_text(&args.input, args.bytes)?;
     let mut rt = load_vindex_runtime(vindex, args.metal)?;
@@ -658,7 +665,7 @@ fn run_encode_vindex(args: EncodeArgs) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn run_decode_vindex(args: DecodeArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_decode_vindex(args: DecodeArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex = args.vindex.as_ref().ok_or("--vindex missing")?;
     let mut raw = Vec::new();
     fs::File::open(&args.input)?.read_to_end(&mut raw)?;
@@ -725,7 +732,7 @@ fn run_decode_vindex(args: DecodeArgs) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn load_model(model: &str) -> Result<InferenceModel, Box<dyn std::error::Error>> {
+fn load_model(model: &str) -> Result<InferenceModel, Box<dyn core::error::Error>> {
     eprintln!("loading {model}...");
     let start = Instant::now();
     let loaded = InferenceModel::load(model)?;
@@ -741,7 +748,7 @@ fn load_model(model: &str) -> Result<InferenceModel, Box<dyn std::error::Error>>
 fn read_text(
     path: &PathBuf,
     limit_bytes: Option<usize>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     let mut text = fs::read_to_string(path)?;
     if let Some(limit) = limit_bytes {
         if text.len() > limit {
@@ -755,7 +762,7 @@ fn read_text(
     Ok(text)
 }
 
-fn validate_window(context: usize, stride: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn validate_window(context: usize, stride: usize) -> Result<(), Box<dyn core::error::Error>> {
     if context < 2 {
         return Err("--context must be at least 2 for scoring".into());
     }
@@ -768,7 +775,7 @@ fn validate_window(context: usize, stride: usize) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-fn ensure_token_prefix(prefix: &[u32], full: &[u32]) -> Result<(), Box<dyn std::error::Error>> {
+fn ensure_token_prefix(prefix: &[u32], full: &[u32]) -> Result<(), Box<dyn core::error::Error>> {
     if full.len() < prefix.len() || full[..prefix.len()] != *prefix {
         return Err(
             "answer did not tokenize as a suffix of prefix+answer; add explicit boundary whitespace"
@@ -797,7 +804,7 @@ fn score_token_range(
     context: usize,
     stride: usize,
     progress: Option<&str>,
-) -> Result<ScoreSummary, Box<dyn std::error::Error>> {
+) -> Result<ScoreSummary, Box<dyn core::error::Error>> {
     if range.start == 0 || range.end > ids.len() || range.start > range.end {
         return Err("invalid scoring token range".into());
     }
@@ -847,7 +854,7 @@ fn print_score_summary(summary: &ScoreSummary, bytes: usize, chars: usize) {
 fn forward_hidden(
     weights: &ModelWeights,
     token_ids: &[u32],
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     if token_ids.is_empty() {
         return Err("empty token window".into());
     }
@@ -855,7 +862,7 @@ fn forward_hidden(
     let mut h = larql_inference::forward::embed_tokens_pub(weights, token_ids);
     let ple_inputs =
         larql_inference::forward::ple::precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..weights.num_layers {
         let shared_kv = weights
             .arch
@@ -882,7 +889,7 @@ fn forward_hidden(
 fn forward_hidden_all_layers(
     weights: &ModelWeights,
     token_ids: &[u32],
-) -> Result<Vec<Array2<f32>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Array2<f32>>, Box<dyn core::error::Error>> {
     if token_ids.is_empty() {
         return Err("empty token window".into());
     }
@@ -893,7 +900,7 @@ fn forward_hidden_all_layers(
     let mut captures: Vec<Array2<f32>> = Vec::with_capacity(weights.num_layers + 1);
     captures.push(h0.clone());
     let mut h = h0;
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..weights.num_layers {
         let shared_kv = weights
             .arch
@@ -930,7 +937,7 @@ fn final_norm(weights: &ModelWeights, h: &Array2<f32>) -> Array2<f32> {
 fn logits_for_last_token(
     weights: &ModelWeights,
     token_ids: &[u32],
-) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
     let hidden = forward_hidden(weights, token_ids)?;
     let hidden = final_norm(weights, &hidden);
     logits_for_row(weights, &hidden, hidden.shape()[0] - 1)
@@ -940,7 +947,7 @@ fn logits_for_row(
     weights: &ModelWeights,
     final_hidden: &Array2<f32>,
     row_idx: usize,
-) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
     if row_idx >= final_hidden.shape()[0] {
         return Err("logit row out of range".into());
     }
@@ -961,7 +968,7 @@ fn logits_for_row(
         .collect())
 }
 
-fn bits_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn std::error::Error>> {
+fn bits_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn core::error::Error>> {
     let target = target as usize;
     if target >= logits.len() {
         return Err(format!("target token {target} out of vocab").into());
@@ -980,7 +987,7 @@ fn bits_for_raw_row(
     weights: &ModelWeights,
     row: ndarray::ArrayView1<'_, f32>,
     target: u32,
-) -> Result<f64, Box<dyn std::error::Error>> {
+) -> Result<f64, Box<dyn core::error::Error>> {
     let target = target as usize;
     if target >= row.len() {
         return Err(format!("target token {target} out of vocab").into());
@@ -1017,7 +1024,7 @@ fn bits_for_raw_row(
     Ok((logsumexp - target_logit as f64) / LN_2)
 }
 
-fn prob_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn std::error::Error>> {
+fn prob_for_target(logits: &[f32], target: u32) -> Result<f64, Box<dyn core::error::Error>> {
     Ok(2.0_f64.powf(-bits_for_target(logits, target)?))
 }
 
@@ -1145,7 +1152,7 @@ fn print_layers_summary(layer_summaries: &[LayerSummary], bytes: usize, chars: u
     );
 }
 
-fn finite_max(values: &[f32]) -> Result<f32, Box<dyn std::error::Error>> {
+fn finite_max(values: &[f32]) -> Result<f32, Box<dyn core::error::Error>> {
     values
         .iter()
         .copied()
@@ -1167,7 +1174,7 @@ fn print_top_k(tokenizer: &tokenizers::Tokenizer, logits: &[f32], top_k: usize) 
         .map(|&v| ((v - max_logit) as f64).exp())
         .sum();
     let mut indexed: Vec<(usize, f32)> = logits.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     println!("top predictions before slot:");
     for (rank, (id, logit)) in indexed.into_iter().take(top_k).enumerate() {
         let prob = (((logit - max_logit) as f64).exp() / exp_sum).max(0.0);
@@ -1191,7 +1198,7 @@ fn decode_one(tokenizer: &tokenizers::Tokenizer, id: u32) -> String {
         .unwrap_or_else(|| format!("[{id}]"))
 }
 
-fn quantized_counts(logits: &[f32]) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+fn quantized_counts(logits: &[f32]) -> Result<Vec<u32>, Box<dyn core::error::Error>> {
     if logits.len() >= FREQ_TOTAL as usize {
         return Err("vocab is too large for arithmetic coder frequency total".into());
     }
@@ -1234,7 +1241,7 @@ fn quantized_counts(logits: &[f32]) -> Result<Vec<u32>, Box<dyn std::error::Erro
 fn interval_for_symbol(
     counts: &[u32],
     symbol: u32,
-) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+) -> Result<(u32, u32), Box<dyn core::error::Error>> {
     let symbol = symbol as usize;
     if symbol >= counts.len() {
         return Err(format!("symbol {symbol} out of frequency table").into());
@@ -1247,7 +1254,7 @@ fn interval_for_symbol(
 fn symbol_for_value(
     counts: &[u32],
     value: u32,
-) -> Result<(u32, u32, u32), Box<dyn std::error::Error>> {
+) -> Result<(u32, u32, u32), Box<dyn core::error::Error>> {
     let mut low = 0u32;
     for (symbol, &count) in counts.iter().enumerate() {
         let high = low + count;
@@ -1463,7 +1470,7 @@ impl ShannonFile {
         out
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn core::error::Error>> {
         if bytes.len() < 36 || &bytes[..4] != b"LSC1" {
             return Err("not a LARQL Shannon compressed file".into());
         }
@@ -1500,7 +1507,7 @@ fn encode_vindex_blocks(blocks: &[VindexShannonBlock]) -> Vec<u8> {
 
 fn parse_vindex_blocks(
     bytes: &[u8],
-) -> Result<Option<Vec<VindexShannonBlock>>, Box<dyn std::error::Error>> {
+) -> Result<Option<Vec<VindexShannonBlock>>, Box<dyn core::error::Error>> {
     if !bytes.starts_with(b"LSB1") {
         return Ok(None);
     }
@@ -1550,7 +1557,6 @@ fn progress_bar(len: u64, label: &str) -> ProgressBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn arithmetic_round_trip_fixed_counts() {
         let counts = vec![3, 1, 4, 2];

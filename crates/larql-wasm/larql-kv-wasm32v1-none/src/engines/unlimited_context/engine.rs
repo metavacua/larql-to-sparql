@@ -21,6 +21,14 @@ use serde::Serialize;
 
 use super::checkpoint_store::CheckpointStore;
 use super::extend::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     empty_prior, rs_extend_from_checkpoint_backend, rs_extend_from_checkpoint_q4k,
 };
 use super::token_archive::TokenArchive;
@@ -292,7 +300,7 @@ impl UnlimitedContextEngine {
             .save(self.current_window_id, last_kv, abs_end);
         self.archive.archive(
             self.current_window_id,
-            std::mem::take(&mut self.current_window_tokens),
+            core::mem::take(&mut self.current_window_tokens),
             self.abs_offset,
         );
         self.abs_offset += window_len;

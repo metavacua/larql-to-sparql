@@ -14,7 +14,14 @@ use ndarray::Array2;
 use super::http::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
 use crate::ffn::FfnBackend;
 use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 struct LayerShard {
     start: usize,
     end: usize, // inclusive
@@ -171,7 +178,7 @@ impl LayerShardedBackend {
                 let shard_ptr = shard as *const RemoteWalkBackend;
                 if let Some(g) = shard_groups
                     .iter_mut()
-                    .find(|g| std::ptr::eq(g.shard, shard_ptr))
+                    .find(|g| core::ptr::eq(g.shard, shard_ptr))
                 {
                     g.layers.push((layer, layer));
                 } else {
@@ -198,7 +205,7 @@ impl LayerShardedBackend {
                             Ok(map) => map,
                             Err(_) => {
                                 // Fall back: call each layer via the f32 path.
-                                let mut fallback = std::collections::HashMap::new();
+                                let mut fallback = HashMap::new();
                                 for &l in &layer_indices {
                                     let x =
                                         Array2::from_shape_vec((1, hidden), vec![0.0f32; hidden])

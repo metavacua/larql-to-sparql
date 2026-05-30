@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -7,7 +6,14 @@ use indicatif::{ProgressBar, ProgressStyle};
 use larql_core::*;
 use larql_vindex::walker::attention_walker::{AttentionLayerResult, AttentionWalker};
 use larql_vindex::walker::weight_walker::{LayerResult, WalkCallbacks, WalkConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct AttentionWalkArgs {
     /// Model path or HuggingFace model ID (e.g. google/gemma-3-4b-it).
@@ -75,7 +81,7 @@ impl WalkCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: AttentionWalkArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: AttentionWalkArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let walker = AttentionWalker::load(&args.model)?;
     eprintln!("  {} layers", walker.num_layers());

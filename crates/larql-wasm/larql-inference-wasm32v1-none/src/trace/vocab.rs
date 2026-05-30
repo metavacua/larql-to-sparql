@@ -3,7 +3,14 @@
 use crate::model::ModelWeights;
 use larql_models::NormType;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Project a vector through final_norm → lm_head → logits.
 pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
     let hidden = weights.hidden_size;
@@ -91,7 +98,6 @@ fn apply_norm(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
-
     #[test]
     fn vec_norm_known_value() {
         assert!((vec_norm(&[3.0f32, 4.0]) - 5.0).abs() < 1e-5);

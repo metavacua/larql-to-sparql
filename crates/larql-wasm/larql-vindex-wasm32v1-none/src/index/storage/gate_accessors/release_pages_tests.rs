@@ -4,7 +4,14 @@ use crate::config::dtype::StorageDtype;
 use crate::index::core::VectorIndex;
 use crate::index::types::GateLayerSlice;
 use ndarray::{Array1, Array2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[test]
 fn release_mmap_pages_no_panic_on_heap_only_index() {
     // Heap-only index: no mmaps at all — release_mmap_pages must no-op.

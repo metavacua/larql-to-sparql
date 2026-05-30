@@ -22,7 +22,14 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ═══════════════════════════════════════════════════════════════
 // Patch data types
 // ═══════════════════════════════════════════════════════════════
@@ -186,7 +193,7 @@ impl VindexPatch {
 /// Encode a gate vector (f32 slice) as base64 string.
 pub fn encode_gate_vector(vec: &[f32]) -> String {
     let bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vec.as_ptr() as *const u8, vec.len() * 4) };
+        unsafe { core::slice::from_raw_parts(vec.as_ptr() as *const u8, vec.len() * 4) };
     base64_encode(bytes)
 }
 
@@ -199,7 +206,7 @@ pub fn decode_gate_vector(b64: &str) -> Result<Vec<f32>, VindexError> {
         ));
     }
     let floats: Vec<f32> =
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4) }
+        unsafe { core::slice::from_raw_parts(bytes.as_ptr() as *const f32, bytes.len() / 4) }
             .to_vec();
     Ok(floats)
 }
@@ -268,7 +275,6 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, VindexError> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
     // ── base64 encoding ─────────────────────────────────────────────────
 
     #[test]

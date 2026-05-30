@@ -2,7 +2,6 @@
 //! overrides splice a `[hidden]` vector across all hidden rows of
 //! the target feature column.
 
-use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -10,7 +9,14 @@ use crate::error::LqlError;
 use larql_vindex::format::filenames::DOWN_WEIGHTS_BIN;
 
 use super::{copy_for_patch, detect_down_dtype_bytes, BYTES_PER_F32};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Bake down overrides into `down_weights.bin` (per-layer
 /// `[hidden, intermediate]` row-major, may be f16 or f32).
 pub(in crate::executor::lifecycle::compile) fn patch_down_weights(
@@ -99,7 +105,6 @@ mod tests {
     //! were spliced into the correct cells (and *only* those cells)
     //! without disturbing any other bytes.
     use super::*;
-
     fn mini_config(
         num_layers: usize,
         hidden: usize,

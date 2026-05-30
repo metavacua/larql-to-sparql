@@ -15,7 +15,14 @@
 //! single-layer fallback to silently corrupt heterogeneous models
 //! like Gemma 4 31B (50 sliding-attention layers + 10 global-attention
 //! layers, with different head_dim and num_kv_heads on each class).
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// KV-cached generation primitives.
 ///
 /// "Backend supports decode" means the backend can run a full forward

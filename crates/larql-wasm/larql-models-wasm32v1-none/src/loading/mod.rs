@@ -8,6 +8,7 @@ pub mod gguf;
 pub mod safetensors;
 
 pub use gguf::{load_gguf, load_gguf_validated};
+#[cfg(not(target_arch = "wasm32"))]
 pub use safetensors::{
     is_ffn_tensor, load_model_dir, load_model_dir_filtered, load_model_dir_filtered_validated,
     load_model_dir_validated, load_model_dir_walk_only, load_model_dir_walk_only_validated,

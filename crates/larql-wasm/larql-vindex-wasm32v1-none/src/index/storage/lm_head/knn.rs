@@ -8,7 +8,14 @@
 //! widening the argmax fast path) lands in one place.
 
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stride32Mode {
     Disabled,
@@ -271,7 +278,7 @@ impl VectorIndex {
             }
         }
 
-        heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
         heap.into_iter().map(|(s, i)| (i, s)).collect()
     }
 
@@ -298,7 +305,7 @@ impl VectorIndex {
         // Zero-copy: reinterpret mmap as [vocab, hidden] f32 matrix
         let data = unsafe {
             let ptr = mmap.as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, vocab * hidden)
+            core::slice::from_raw_parts(ptr, vocab * hidden)
         };
         let lm_view = ndarray::ArrayView2::from_shape((vocab, hidden), data).unwrap();
 
@@ -338,7 +345,6 @@ mod tests {
 
     use super::*;
     use crate::format::filenames::LM_HEAD_BIN;
-
     /// Build a `VectorIndex` with a synthetic `lm_head.bin` mmap'd in.
     /// `lm_head` is row-major `[vocab, hidden]` f32.
     fn vindex_with_lm_head(vocab: usize, hidden: usize, data: &[f32]) -> VectorIndex {
@@ -354,7 +360,7 @@ mod tests {
         // Hold the tempdir for the test lifetime — the mmap's underlying
         // file stays open via memmap2 even if the dir is dropped on Linux,
         // but on macOS the file needs to outlive the mmap.
-        std::mem::forget(tmp);
+        core::mem::forget(tmp);
         assert_eq!(v.vocab_size, vocab);
         v
     }
@@ -376,7 +382,7 @@ mod tests {
         v.load_lm_head(tmp.path()).unwrap();
         // Override vocab_size to 0 to hit the `vocab == 0` guard.
         v.vocab_size = 0;
-        std::mem::forget(tmp);
+        core::mem::forget(tmp);
         let q = Array1::from_vec(vec![1.0_f32; 4]);
         assert!(v.lm_head_knn(&q, 5).is_empty());
     }
@@ -393,7 +399,7 @@ mod tests {
         v.load_lm_head(tmp.path()).unwrap();
         // Manually inflate vocab to force a too-small check.
         v.vocab_size = 99;
-        std::mem::forget(tmp);
+        core::mem::forget(tmp);
         let q = Array1::from_vec(vec![1.0_f32; 4]);
         assert!(v.lm_head_knn(&q, 5).is_empty());
     }
@@ -583,7 +589,7 @@ mod tests {
         let mmap = anon.make_read_only().unwrap();
 
         let mut v = VectorIndex::empty(1, 2);
-        v.set_lm_head_f16_mmap(std::sync::Arc::new(mmap));
+        v.set_lm_head_f16_mmap(alloc::sync::Arc::new(mmap));
         // Force vocab_size = 0 so the f16 path bails on the inner guard.
         v.vocab_size = 0;
         let cpu = larql_compute::CpuBackend;

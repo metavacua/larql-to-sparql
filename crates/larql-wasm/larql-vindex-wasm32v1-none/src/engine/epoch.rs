@@ -1,5 +1,5 @@
 use portable_atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use core::sync::atomic::Ordering;
 
 #[derive(Debug)]
 pub struct Epoch(AtomicU64);

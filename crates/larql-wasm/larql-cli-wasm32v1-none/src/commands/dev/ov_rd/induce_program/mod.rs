@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod args;
 mod capture;
 mod context;
@@ -24,7 +32,7 @@ use proposal::{identity_program, set_merge_program, single_merge_program};
 
 pub(super) fn run_induce_program(
     args: InduceProgramArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let heads = parse_head_spec(&args.head)?;
@@ -101,7 +109,7 @@ pub(super) fn run_induce_program(
     }
 
     // Step 4: dominant sink + merge candidates.
-    let mut sink_votes: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let mut sink_votes: std::collections::HashMap<usize, usize> = HashMap::new();
     for &(_, t, _) in &strict_pairs {
         *sink_votes.entry(t).or_default() += 1;
     }
@@ -316,7 +324,7 @@ fn save_and_report(
     program: &Program,
     metrics: &BehaviorMetrics,
     out: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let mut p = program.clone();
     p.metrics = Some(metrics.clone());
     p.normalize();

@@ -26,7 +26,14 @@ use crate::vindex::WalkFfn;
 
 use super::predict::predict_with_ffn;
 use super::PredictResult;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Cosine threshold for the L0 KnnStore override. A stored key whose top-1
 /// cosine against the captured residual exceeds this value replaces the
 /// walk FFN's top-1 prediction.

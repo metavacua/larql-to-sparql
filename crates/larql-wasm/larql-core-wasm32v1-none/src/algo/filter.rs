@@ -3,7 +3,14 @@
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::Graph;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Comparison operator for metadata predicates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataCompare {
@@ -204,7 +211,6 @@ pub fn filter_graph(graph: &Graph, config: &FilterConfig) -> Graph {
 mod tests {
     use super::*;
     use crate::core::enums::SourceType;
-
     fn test_edge(subj: &str, rel: &str, obj: &str, conf: f64) -> Edge {
         Edge::new(subj, rel, obj).with_confidence(conf)
     }

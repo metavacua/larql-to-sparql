@@ -17,7 +17,6 @@
 //! was the root cause of `refine_demo22`'s regression from 8/10 to
 //! 0/10 compiled retrieval.
 
-use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
@@ -25,7 +24,14 @@ use crate::error::LqlError;
 use larql_vindex::format::filenames::WEIGHT_MANIFEST_JSON;
 
 use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Manifest key fragment that identifies an up_proj tensor entry.
 /// Used to filter `weight_manifest.json` while searching for the
 /// per-layer up tensors.
@@ -194,7 +200,6 @@ fn encode_row(up_vec: &[f32], bpf: usize, row_buf: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn parse_layer_from_key_extracts_int() {
         assert_eq!(parse_layer_from_key("model.layers.7.mlp.up_proj"), Some(7));

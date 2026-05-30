@@ -5,7 +5,14 @@ use ndarray::Array2;
 use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};
 use super::FfnBackend;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Sparse FFN: compute all gate activations, select top-K, then
 /// compute gate/up/down for those K features only.
 ///
@@ -25,7 +32,7 @@ impl<'a> FfnBackend for SparseFfn<'a> {
         let seq_len = x.shape()[0];
 
         // Select features per position, union them, then compute once
-        let mut all_features = std::collections::BTreeSet::new();
+        let mut all_features = alloc::collections::BTreeSet::new();
         for s in 0..seq_len {
             let x_row = x.row(s);
             let feats = select_top_k_features(self.weights, layer, &x_row, self.top_k);
@@ -46,7 +53,6 @@ mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

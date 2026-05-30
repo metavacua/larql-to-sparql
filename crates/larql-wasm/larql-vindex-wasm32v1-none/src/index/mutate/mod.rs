@@ -3,7 +3,14 @@
 //! Adds INSERT/DELETE/UPDATE support and the ability to save a
 //! modified vindex back to disk. NDJSON heap loaders live in the
 //! sibling `loaders` module.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod loaders;
 
 use std::io::{BufWriter, Write};

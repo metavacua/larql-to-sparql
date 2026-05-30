@@ -8,7 +8,14 @@ use crate::error::LqlError;
 use crate::relations::RelationClassifier;
 
 use super::Session;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// The active backend for the session.
 /// The base vindex is always loaded readonly. A PatchedVindex overlay
 /// handles all mutations without modifying base files on disk.

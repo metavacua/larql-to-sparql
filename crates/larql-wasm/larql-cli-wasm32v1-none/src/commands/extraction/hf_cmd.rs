@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct HfArgs {
     #[command(subcommand)]
@@ -35,7 +42,7 @@ enum HfCommand {
     },
 }
 
-pub fn run(args: HfArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: HfArgs) -> Result<(), Box<dyn core::error::Error>> {
     match args.command {
         HfCommand::Download {
             repo,
@@ -50,7 +57,7 @@ fn run_download(
     repo: &str,
     output: Option<&std::path::Path>,
     revision: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let hf_path = if let Some(rev) = revision {
         format!("hf://{}@{}", repo, rev)
     } else {
@@ -86,7 +93,7 @@ fn run_download(
     Ok(())
 }
 
-fn run_publish(vindex: &std::path::Path, repo: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn run_publish(vindex: &std::path::Path, repo: &str) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Publishing vindex to HuggingFace: {}", repo);
 
     let mut callbacks = CliPublishCallbacks;
@@ -145,7 +152,7 @@ impl larql_vindex::PublishCallbacks for CliPublishCallbacks {
 fn copy_dir(
     src: &std::path::Path,
     dst: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;

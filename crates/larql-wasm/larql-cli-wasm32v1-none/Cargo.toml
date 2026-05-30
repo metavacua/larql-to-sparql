@@ -22,7 +22,6 @@ larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models
 larql-lql = { path = "../larql-lql-wasm32v1-none", package = "larql-lql-wasm32v1-none" }
 larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 serde = { workspace = true, features = ["derive"] }
-thiserror = { workspace = true }
 
 [features]
 default = []
@@ -34,6 +33,7 @@ metal = [
 ]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 clap = { version = "4", features = ["derive", "env"] }
 indicatif = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -45,3 +45,9 @@ ndarray = "0.16"
 minijinja = "2"
 libc = "0.2"
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

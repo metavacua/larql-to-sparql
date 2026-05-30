@@ -6,7 +6,14 @@
 use ndarray::Array2;
 
 use super::super::{Fp4FfnAccess, NativeFfnAccess, QuantizedFfnAccess};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Configurable stub. Each backend bool toggles which `has_*` flag
 /// returns true and which row methods route through.
 #[derive(Default)]

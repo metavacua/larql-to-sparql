@@ -2,7 +2,14 @@ use super::epoch::Epoch;
 use super::memit_store::MemitStore;
 use super::status::CompactStatus;
 use crate::patch::core::PatchedVindex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MEMIT_MIN_HIDDEN_DIM: usize = 1024;
 
 pub struct StorageEngine {
@@ -107,7 +114,6 @@ impl StorageEngine {
 mod tests {
     use super::*;
     use crate::index::core::VectorIndex;
-
     fn empty_engine() -> StorageEngine {
         let vi = VectorIndex::new(vec![], vec![], 0, 0);
         let pv = PatchedVindex::new(vi);

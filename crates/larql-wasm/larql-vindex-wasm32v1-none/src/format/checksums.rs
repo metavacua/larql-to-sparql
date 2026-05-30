@@ -1,6 +1,5 @@
 //! Checksum utilities for vindex file integrity verification.
 
-use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
@@ -8,7 +7,14 @@ use sha2::{Digest, Sha256};
 
 use crate::error::VindexError;
 use crate::format::filenames::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute SHA256 checksum of a file. Returns hex string.
 pub fn sha256_file(path: &Path) -> Result<String, VindexError> {
     let mut file = std::fs::File::open(path)?;
@@ -75,9 +81,7 @@ pub fn verify_checksums(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use tempfile::TempDir;
-
     #[test]
     fn sha256_file_deterministic() {
         let dir = TempDir::new().unwrap();

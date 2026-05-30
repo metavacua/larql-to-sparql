@@ -11,7 +11,14 @@ use metal::{Buffer, CommandBuffer, CommandQueue};
 
 use super::buffers::LayerBuffers;
 use crate::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Read `n` f32s out of a Metal `Buffer` and write them as raw
 /// little-endian bytes to `<dir>/<name>`.
 fn write_f32_buffer(dir: &str, name: &str, buf: &Buffer, n: usize) {
@@ -23,7 +30,7 @@ fn write_f32_buffer(dir: &str, name: &str, buf: &Buffer, n: usize) {
     // buffer is finished writing on the GPU side. `n` is sized to the
     // buffer's logical row count and the buffer was allocated for at
     // least `n * 4` bytes.
-    let s = unsafe { std::slice::from_raw_parts(ptr, n) };
+    let s = unsafe { core::slice::from_raw_parts(ptr, n) };
     let bytes: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
     let path = format!("{dir}/{name}");
     if let Err(e) = std::fs::write(&path, &bytes) {

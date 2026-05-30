@@ -13,7 +13,14 @@ use crate::format::filenames::*;
 use super::super::manifest::Q4kManifestEntry;
 use super::super::write_f32::WeightSource;
 use super::{pad_rows_to_block, resolve_v_tensor, QuantBlockFormat};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Write Q/K/V/O attention projections to `attn_weights_q4k.bin`,
 /// emitting a sidecar manifest with per-tensor offsets and formats.
 ///

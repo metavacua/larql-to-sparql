@@ -21,6 +21,14 @@ use crate::engines::markov_residual::ensure_attn_tensors_dequantised;
 use crate::{EngineInfo, KvEngine};
 use larql_inference::attention::SharedKV;
 use larql_inference::attention::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     run_attention_block_decode_step_backend, run_attention_with_kv_backend,
 };
 use larql_inference::ffn::BackendFfn;
@@ -629,7 +637,6 @@ mod integration_tests {
     use super::*;
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
-
     #[test]
     fn prefill_compresses_kv_for_all_layers() {
         let weights = make_test_weights();

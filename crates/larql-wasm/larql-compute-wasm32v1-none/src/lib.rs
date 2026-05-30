@@ -57,10 +57,16 @@
 //!   multi-layer pipeline, zero-copy mmap buffers.
 //! - `cuda`: (planned) CUDA GPU backend.
 #![cfg_attr(target_arch = "wasm32", no_std)]
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[macro_use]
 extern crate alloc;
-
-
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",
@@ -203,7 +209,6 @@ pub fn cpu_backend() -> Box<dyn ComputeBackend> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn cpu_backend_exposes_cpu_backend_capabilities() {
         let backend = cpu_backend();

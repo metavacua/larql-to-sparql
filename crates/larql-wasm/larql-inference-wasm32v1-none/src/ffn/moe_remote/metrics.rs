@@ -5,11 +5,17 @@
 //! go through [`RemoteMoeRuntime`] so [`record_call`] / [`record_skip`]
 //! pay no per-call env-var cost.
 
-use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 use super::runtime::RemoteMoeRuntime;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShardTransportTotals {
     pub calls: u64,

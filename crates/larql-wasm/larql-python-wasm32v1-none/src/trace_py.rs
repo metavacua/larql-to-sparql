@@ -9,7 +9,14 @@ use larql_inference::trace as trace_mod;
 use larql_inference::trace::TracePositions;
 use larql_inference::ModelWeights;
 use larql_vindex::tokenizers;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Complete inference trace — the residual stream DAG.
 #[pyclass(name = "ResidualTrace", unsendable)]
 pub struct PyResidualTrace {

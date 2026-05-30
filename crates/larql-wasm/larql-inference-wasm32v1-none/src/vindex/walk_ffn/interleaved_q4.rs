@@ -9,7 +9,14 @@
 use ndarray::Array2;
 
 use super::WalkFfn;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl<'a> WalkFfn<'a> {
     pub(super) fn walk_ffn_q4_interleaved(
         &self,
@@ -17,7 +24,6 @@ impl<'a> WalkFfn<'a> {
         x: &Array2<f32>,
     ) -> Option<(Array2<f32>, Array2<f32>)> {
         use larql_compute::cpu::ops::{q4_matvec, q4_vecmat};
-
         let q4_mmap = self.index.interleaved_q4_mmap_ref()?;
         let intermediate = self.index.num_features(layer);
         if intermediate == 0 {

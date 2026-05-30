@@ -5,7 +5,14 @@
 use std::path::Path;
 
 use larql_inference::ndarray::Array1;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Number of leading characters of a target token used for `starts_with`
 /// fuzzy matching against tokenizer outputs (e.g. "Pos" → matches " Pos",
 /// "Posei", "Poseidon"). Three characters is enough discrimination for
@@ -152,7 +159,6 @@ pub(crate) fn is_readable_token(tok: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn knn_override_summary_names_post_logits_source_and_model_top1() {
         let ovr = larql_inference::KnnOverride {

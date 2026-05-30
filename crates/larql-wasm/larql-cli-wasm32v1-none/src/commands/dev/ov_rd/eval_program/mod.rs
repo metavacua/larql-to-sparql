@@ -1,9 +1,15 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod args;
 mod report;
 
 pub(super) use args::EvalProgramArgs;
-
-use std::collections::HashMap;
 
 use larql_inference::encode_prompt;
 use larql_vindex::{load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks};
@@ -41,7 +47,7 @@ impl CodeHistogram {
     }
     fn sorted_desc(&self) -> Vec<(usize, usize)> {
         let mut v: Vec<_> = self.counts.iter().map(|(&k, &v)| (k, v)).collect();
-        v.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+        v.sort_by_key(|&(_, n)| core::cmp::Reverse(n));
         v
     }
     fn total(&self) -> usize {
@@ -77,7 +83,7 @@ impl Diagnostics {
 // Entry point
 // ────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn run_eval_program(args: EvalProgramArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn run_eval_program(args: EvalProgramArgs) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let program_text = std::fs::read_to_string(&args.program)?;

@@ -5,7 +5,14 @@ use tokenizers::Tokenizer;
 use crate::forward::PredictResult;
 
 use super::hidden::predict_q4k_hidden;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// End-to-end predict on a Q4_K/Q6_K vindex.
 pub fn predict_q4k(
     weights: &mut ModelWeights,
@@ -85,7 +92,7 @@ pub fn generate_q4k_cpu_remote(
             .copied()
             .enumerate()
             .filter(|(_, v)| v.is_finite())
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
             .map(|(i, _)| i as u32)
             .unwrap_or(0);
         let tok = tokenizer.decode(&[next_id], true).unwrap_or_default();
@@ -250,7 +257,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::is_end_of_turn;
-
     #[test]
     fn is_end_of_turn_recognises_known_terminators() {
         for t in [

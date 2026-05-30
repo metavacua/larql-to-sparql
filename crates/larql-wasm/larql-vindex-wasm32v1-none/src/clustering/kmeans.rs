@@ -1,7 +1,14 @@
 //! K-means clustering with BLAS-accelerated distance computation.
 
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run k-means clustering on normalized direction vectors.
 /// Returns (centres, assignments, distances).
 pub fn kmeans(
@@ -135,7 +142,6 @@ fn kmeans_pp_init(data: &Array2<f32>, k: usize) -> Array2<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn kmeans_basic() {
         let data = Array2::from_shape_vec(

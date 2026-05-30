@@ -10,6 +10,14 @@
 use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::wire::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_layer_batch_response, decode_layer_batch_response_f16, encode_layer_batch_request,
     encode_layer_batch_request_f16, ExpertCallItem, LAYER_BATCH_CONTENT_TYPE,
     LAYER_BATCH_F16_CONTENT_TYPE, LAYER_BATCH_F16_PATH, LAYER_BATCH_PATH,
@@ -17,7 +25,6 @@ use super::super::wire::{
 #[cfg(unix)]
 use super::uds_call;
 use super::{Shard, ShardTransport};
-
 impl Shard {
     /// Send a layer-batch request: ONE residual + K (expert_id, weight) pairs.
     /// Returns the router-weighted sum across the K experts owned by this

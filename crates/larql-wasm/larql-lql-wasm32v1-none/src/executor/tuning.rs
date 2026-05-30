@@ -27,7 +27,14 @@
 //! stream against thousands of natural competitors at the install
 //! layer. Pinned by `install_math_produces_competing_activation` test
 //! in `compose.rs`.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Multiplier on the unit gate direction at install time.
 pub(crate) const GATE_SCALE: f32 = 30.0;
 
@@ -200,7 +207,6 @@ pub(crate) fn canonical_prompt(relation: &str, entity: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn canonical_prompt_normalises_dashes_and_underscores() {
         assert_eq!(

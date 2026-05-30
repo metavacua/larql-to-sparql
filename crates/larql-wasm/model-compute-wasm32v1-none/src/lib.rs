@@ -42,9 +42,8 @@
 //! let output = session.solve(&input_bytes)?;
 //! ```
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#[cfg(target_arch = "wasm32")]
+#[macro_use]
 extern crate alloc;
-
 
 #[cfg(feature = "native")]
 pub mod native;

@@ -15,7 +15,6 @@
 //! boot when `larql-server --warmup-walk-ffn` is set, which is the
 //! recommended posture for production grid shards.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::State;
@@ -25,7 +24,14 @@ use tracing::info;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Default, Deserialize, utoipa::ToSchema)]
 pub struct WarmupRequest {
     /// Specific layers to prefetch (`madvise WILLNEED`). Defaults to

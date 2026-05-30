@@ -6,11 +6,22 @@
 //! the extract pipeline (issue #22 — `could not broadcast array from
 //! shape: [2560] to: [2048]`). Failing here keeps the error message
 //! attached to the actual cause.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use super::ModelError;
-
 /// HF-convention config file name read from a model directory.
 pub(super) const CONFIG_FILE_NAME: &str = "config.json";
 

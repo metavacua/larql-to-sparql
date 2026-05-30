@@ -4,7 +4,14 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::{trace_forward, InferenceModel};
 use serde::Serialize;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct TrajectoryTraceArgs {
     /// Model path or HuggingFace model ID.
@@ -307,7 +314,7 @@ fn make_pca_info(singular_values: Vec<f32>) -> PcaInfo {
 
 // ── Main ──
 
-pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -705,7 +712,7 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
             for traj in &trajectories {
                 for res in &traj.residuals {
                     let bytes: &[u8] = unsafe {
-                        std::slice::from_raw_parts(res.as_ptr() as *const u8, res.len() * 4)
+                        core::slice::from_raw_parts(res.as_ptr() as *const u8, res.len() * 4)
                     };
                     f.write_all(bytes)?;
                 }
@@ -735,7 +742,6 @@ pub fn run(args: TrajectoryTraceArgs) -> Result<(), Box<dyn std::error::Error>> 
     }
     let mut out = std::io::BufWriter::new(std::fs::File::create(&args.output)?);
     use std::io::Write;
-
     let header = TrajectoryHeader {
         _header: true,
         model: args.model.clone(),
@@ -826,7 +832,7 @@ fn current_date() -> String {
 fn parse_layer_spec(
     spec: &str,
     num_layers: usize,
-) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

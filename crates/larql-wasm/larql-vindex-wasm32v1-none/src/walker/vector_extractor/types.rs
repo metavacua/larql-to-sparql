@@ -3,7 +3,14 @@
 use std::path::PathBuf;
 
 pub use larql_models::ALL_COMPONENTS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Configuration for vector extraction.
 pub struct ExtractConfig {
     pub components: Vec<String>,
@@ -59,7 +66,6 @@ pub struct ComponentSummary {
 mod tests {
     use super::*;
     use larql_models::COMPONENT_FFN_DOWN;
-
     #[test]
     fn extract_config_default_targets_all_components() {
         let cfg = ExtractConfig::default();

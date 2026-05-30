@@ -26,7 +26,14 @@
 //! ```
 
 use super::{Kernel, KernelError};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAX_RANGE_LEN: i64 = 100_000_000;
 const MAX_FACTORIAL: i64 = 20;
 
@@ -210,7 +217,6 @@ fn parse_range(args: &str) -> Result<(i64, i64), KernelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn basic_ops() {
         let k = ArithmeticKernel;

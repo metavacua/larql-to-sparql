@@ -4,7 +4,14 @@
 //! Not optimised — scalar code intended as a correctness reference.
 
 use larql_models::quant::ggml::Q6_K_BLOCK_BYTES as Q6K_BLOCK_SIZE;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Decode f16 bits to f32.
 fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits >> 15) & 1) as u32;
@@ -101,7 +108,6 @@ pub fn dispatch(q6k_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> V
 mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q6_k;
-
     #[test]
     fn q6k_produces_nonzero() {
         let hidden = 256;

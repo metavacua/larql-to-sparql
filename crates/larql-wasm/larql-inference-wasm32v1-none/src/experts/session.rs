@@ -29,7 +29,14 @@ use crate::experts::caller::{ExpertResult, OpSpec};
 use crate::experts::parser::{parse_op_call, OpCall};
 use crate::experts::registry::ExpertRegistry;
 use crate::prompt::ChatTemplate;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Minimal contract a session needs from its op-dispatch backend.
 ///
 /// Implemented for [`ExpertRegistry`] so production code uses real WASM
@@ -411,7 +418,6 @@ mod tests {
 #[cfg(test)]
 mod mock_tests {
     use super::*;
-
     /// Hand-rolled [`Dispatcher`] that records calls and returns canned
     /// responses keyed by op name. Lives in tests to avoid leaking a mock
     /// trait implementation into the public API.
@@ -420,7 +426,7 @@ mod mock_tests {
         /// op → response. `None` means the dispatcher will refuse the call
         /// (modelling an expert that declined).
         responses: std::collections::HashMap<String, Option<ExpertResult>>,
-        calls: std::cell::RefCell<Vec<(String, Value)>>,
+        calls: core::cell::RefCell<Vec<(String, Value)>>,
     }
 
     impl MockDispatcher {
@@ -434,8 +440,8 @@ mod mock_tests {
                         args: args.iter().map(|a| (*a).to_string()).collect(),
                     })
                     .collect(),
-                responses: std::collections::HashMap::new(),
-                calls: std::cell::RefCell::new(Vec::new()),
+                responses: HashMap::new(),
+                calls: core::cell::RefCell::new(Vec::new()),
             }
         }
 

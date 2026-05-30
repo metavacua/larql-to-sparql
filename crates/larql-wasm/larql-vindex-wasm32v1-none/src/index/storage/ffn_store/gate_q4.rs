@@ -6,14 +6,19 @@
 //! FFN forward — the Q4 file is a compressed companion to
 //! `gate_vectors.bin`.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::GATE_VECTORS_Q4_BIN;
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
 use crate::mmap_util::mmap_optimized;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load Q4_0 gate vectors from gate_vectors_q4.bin.
     ///

@@ -1,13 +1,18 @@
 //! Introspection executor: SHOW RELATIONS, SHOW LAYERS, SHOW FEATURES, SHOW MODELS, SHOW COMPACT STATUS.
 
-use std::collections::HashMap;
-
 use super::helpers::{dir_size, format_bytes, format_number, is_content_token};
 use super::Session;
 use crate::ast::*;
 use crate::error::LqlError;
 use larql_vindex::format::filenames::INDEX_JSON;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Session {
     pub(crate) fn exec_show_compact_status(&self) -> Result<Vec<String>, LqlError> {
         let (_path, _config, patched) = self.require_vindex()?;
@@ -195,7 +200,7 @@ impl Session {
                 .values()
                 .map(|info| (info.original.as_str(), info))
                 .collect();
-            sorted.sort_by_key(|(_, info)| std::cmp::Reverse(info.count));
+            sorted.sort_by_key(|(_, info)| core::cmp::Reverse(info.count));
 
             let limit = if mode == DescribeMode::Verbose {
                 50
@@ -379,7 +384,7 @@ impl Session {
 
         // Collect distinct top_tokens across all scanned features.
         let mut entity_counts: std::collections::HashMap<String, (usize, f32)> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         for layer in &scan_layers {
             let nf = patched.num_features(*layer);
@@ -415,7 +420,7 @@ impl Session {
             .into_iter()
             .map(|(tok, (count, max_score))| (tok, count, max_score))
             .collect();
-        entities.sort_by_key(|(_, count, _)| std::cmp::Reverse(*count));
+        entities.sort_by_key(|(_, count, _)| core::cmp::Reverse(*count));
         entities.truncate(limit);
 
         let mut out = Vec::new();

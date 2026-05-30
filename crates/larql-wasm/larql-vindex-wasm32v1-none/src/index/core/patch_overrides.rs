@@ -7,7 +7,14 @@
 
 use super::VectorIndex;
 use crate::index::types::PatchOverrides;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl PatchOverrides for VectorIndex {
     fn down_override(&self, layer: usize, feature: usize) -> Option<&[f32]> {
         self.metadata
@@ -35,7 +42,6 @@ impl PatchOverrides for VectorIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn fresh() -> VectorIndex {
         VectorIndex::empty(3, 8)
     }

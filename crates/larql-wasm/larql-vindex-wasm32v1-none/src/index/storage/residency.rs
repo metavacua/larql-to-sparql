@@ -11,8 +11,14 @@
 //!
 //! The `ResidencyManager` tracks which layers are pinned and how much memory
 //! is used. `auto_pin()` fills the budget with the most-queried layers.
-
-use std::collections::HashMap;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 
 /// Per-layer residency state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -35,8 +35,6 @@
 //!   bytes (~33% smaller wire than the JSON array form). Many
 //!   production OpenAI clients default to base64 for embeddings.
 
-use std::sync::Arc;
-
 use axum::extract::State;
 use axum::Json;
 use base64::Engine;
@@ -47,7 +45,14 @@ use crate::routes::openai::OpenAIError;
 use crate::state::{AppState, LoadedModel};
 
 use crate::routes::embed::embed_tokens;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const EMBEDDING_OBJECT: &str = "embedding";
 const LIST_OBJECT: &str = "list";
 
@@ -243,7 +248,6 @@ fn mean_pool(h: &larql_vindex::ndarray::Array2<f32>) -> Vec<f32> {
 mod tests {
     use super::*;
     use larql_vindex::ndarray::array;
-
     #[test]
     fn mean_pool_single_row_returns_row() {
         let h = array![[1.0f32, 2.0, 3.0]];
@@ -293,7 +297,7 @@ mod tests {
             EmbeddingInput::SingleTokens(v) => assert_eq!(v, vec![1, 2, 3]),
             other => panic!(
                 "expected SingleTokens, got {:?}",
-                std::mem::discriminant(&other)
+                core::mem::discriminant(&other)
             ),
         }
     }

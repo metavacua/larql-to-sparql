@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Template detection and pattern walk cache.
 ///
 /// Templates are recurring query structures like "The capital of X is".
@@ -16,7 +24,7 @@ pub struct PatternWalk {
     /// Critical layers where entity-dependent features activate.
     pub critical_layers: Vec<usize>,
     /// Feature index ranges per critical layer.
-    pub feature_ranges: Vec<(usize, Vec<std::ops::Range<u32>>)>,
+    pub feature_ranges: Vec<(usize, Vec<core::ops::Range<u32>>)>,
     /// Number of entities validated against this template.
     pub validated_count: usize,
     /// Mean cosine similarity across validated entities.

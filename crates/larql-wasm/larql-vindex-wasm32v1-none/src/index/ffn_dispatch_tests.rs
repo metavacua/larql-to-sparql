@@ -12,6 +12,14 @@ use ndarray::{Array1, Array2, ArrayView2};
 use std::sync::Mutex;
 
 use super::types::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     FeatureMeta, FfnRowAccess, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides,
     QuantizedFfnAccess,
 };
@@ -175,7 +183,6 @@ impl QuantizedFfnAccess for Mock {
 
 mod tests {
     use super::*;
-
     fn make_native_row(rows: usize, cols: usize, fill: f32) -> Array2<f32> {
         Array2::from_elem((rows, cols), fill)
     }

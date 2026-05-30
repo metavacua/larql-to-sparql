@@ -1,7 +1,6 @@
 //! Build a .vindex from pre-extracted NDJSON vector files.
 
 use crate::extract::stage_labels::*;
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
@@ -10,6 +9,14 @@ use crate::format::filenames::*;
 
 use super::build::IndexBuildCallbacks;
 use crate::config::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DownMetaRecord, DownMetaTopK, LayerBands, VindexConfig, VindexLayerInfo, VindexModelConfig,
 };
 
@@ -167,7 +174,7 @@ pub fn build_vindex_from_vectors(
         }
 
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(layer_data.as_ptr() as *const u8, layer_data.len() * 4)
+            core::slice::from_raw_parts(layer_data.as_ptr() as *const u8, layer_data.len() * 4)
         };
         bin_file.write_all(bytes)?;
 
@@ -238,7 +245,7 @@ pub fn build_vindex_from_vectors(
     }
 
     let embed_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(embed_data.as_ptr() as *const u8, embed_data.len() * 4)
+        core::slice::from_raw_parts(embed_data.as_ptr() as *const u8, embed_data.len() * 4)
     };
     embed_out.write_all(embed_bytes)?;
     embed_out.flush()?;

@@ -12,7 +12,6 @@
 //! via the `WeightSource` trait.
 
 use crate::extract::stage_labels::*;
-use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -26,7 +25,14 @@ use crate::format::load::load_vindex_config;
 
 use super::capabilities::{ensure_standard_attention_supported, SURFACE_F32_WEIGHT_WRITER};
 use larql_models::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Manifest `kind` discriminators — wire-format strings written into
 /// `weights.json`. Constants exist so writers and the loader's match
 /// arm dispatch on the same source-of-truth. A typo on a constant

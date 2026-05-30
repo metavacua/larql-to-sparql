@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Local routing math ────────────────────────────────────────────────────────
 // Mirrored from larql-compute cpu/ops/moe.rs so the client can route without
 // having the expert weights locally.
@@ -49,7 +57,7 @@ fn softmax(v: &mut [f32]) {
 fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(v.len());
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     indexed.truncate(k);
     (
         indexed.iter().map(|(i, _)| *i).collect(),
@@ -155,7 +163,6 @@ impl MoeRouterWeights<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn rms_norm_empty_inputs_are_passthrough() {
         // Empty weight or empty input → return clone of input.

@@ -4,8 +4,6 @@
 //! use as gate vectors, write down vector overrides with target embedding.
 //! Supports session isolation via X-Session-Id header.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
@@ -15,7 +13,14 @@ use crate::band_utils::{get_layer_bands, INSERT_MODE_CONSTELLATION, INSERT_MODE_
 use crate::error::ServerError;
 use crate::session::extract_session_id;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct InsertRequest {
     pub entity: String,

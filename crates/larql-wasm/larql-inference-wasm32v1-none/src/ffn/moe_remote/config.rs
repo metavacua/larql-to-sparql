@@ -1,7 +1,14 @@
 use std::time::Duration;
 
 use super::error::RemoteMoeError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Shard configuration ───────────────────────────────────────────────────────
 
 /// One entry in the shard map: an expert-ID range + its URL.
@@ -69,7 +76,7 @@ impl ShardConfig {
             end,
             url,
             timeout: Duration::from_secs(30),
-            unit_set: Some(std::sync::Arc::new(units)),
+            unit_set: Some(alloc::sync::Arc::new(units)),
         }
     }
 
@@ -130,7 +137,7 @@ impl UnitShard {
     pub fn into_unit_set(
         self,
     ) -> Result<std::collections::HashSet<(usize, usize)>, RemoteMoeError> {
-        let mut units = std::collections::HashSet::new();
+        let mut units = HashSet::new();
         for (layer_str, ranges) in self.layer_experts {
             let layer: usize = layer_str.parse().map_err(|_| {
                 RemoteMoeError::Client(format!(

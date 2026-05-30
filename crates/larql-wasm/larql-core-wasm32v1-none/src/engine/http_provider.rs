@@ -1,8 +1,15 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "http")]
 use reqwest::blocking::Client;
 
 use super::provider::*;
-
 #[cfg(feature = "http")]
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 60;
 

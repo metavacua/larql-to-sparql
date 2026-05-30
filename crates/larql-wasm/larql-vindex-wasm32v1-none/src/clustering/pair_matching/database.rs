@@ -6,9 +6,15 @@
 //!
 //! Consumed by `super::labeling`.
 
-use std::collections::HashMap;
 use std::path::Path;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A reference database of (subject, object) pairs per relation type.
 #[derive(Default)]
 pub struct RelationDatabase {
@@ -196,7 +202,6 @@ pub fn load_reference_databases() -> ReferenceDatabases {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn write_triples(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, body).unwrap();

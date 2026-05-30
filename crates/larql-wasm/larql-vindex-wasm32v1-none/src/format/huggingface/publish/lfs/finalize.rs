@@ -1,11 +1,17 @@
 //! Post-PUT finalisation: verify the LFS object reached storage, then
 //! commit the pointer file via the HF NDJSON commit endpoint.
 
-use std::collections::HashMap;
-
 use crate::error::VindexError;
 
 use super::super::protocol::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     hf_base, repo_type_plural, CONTENT_TYPE_LFS_JSON, CONTENT_TYPE_NDJSON, HASH_ALGO_SHA256,
 };
 
@@ -100,7 +106,6 @@ mod tests {
     use super::super::test_support::EnvBaseGuard;
     use super::*;
     use serial_test::serial;
-
     // ── lfs_verify ──────────────────────────────────────────────────
 
     #[test]

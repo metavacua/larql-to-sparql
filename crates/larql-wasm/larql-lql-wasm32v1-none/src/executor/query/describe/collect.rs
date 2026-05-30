@@ -1,12 +1,18 @@
 //! Phases 1–3 of `DESCRIBE <entity>`: build the query embedding,
 //! pick scan layers, walk + collect edges into per-target buckets.
 
-use std::collections::HashMap;
-
 use crate::ast::LayerBand;
 use crate::error::LqlError;
 use crate::executor::helpers::{is_content_token, is_readable_token};
 use crate::executor::tuning::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DESCRIBE_ALSO_CONTENT_TAKE, DESCRIBE_ALSO_READABLE_TAKE, DESCRIBE_COHERENCE_FLOOR,
     DESCRIBE_GATE_THRESHOLD,
 };
@@ -145,7 +151,7 @@ pub(super) fn describe_collect_edges(
     ranked.sort_by(|a, b| {
         b.gate
             .partial_cmp(&a.gate)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     ranked
 }
@@ -153,7 +159,6 @@ pub(super) fn describe_collect_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn bands() -> larql_vindex::LayerBands {
         larql_vindex::LayerBands {
             syntax: (0, 4),

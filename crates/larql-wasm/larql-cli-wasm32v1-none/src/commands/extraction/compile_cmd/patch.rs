@@ -3,7 +3,6 @@
 //! Trigger comes from each patch's stored gate vector; write comes from the
 //! down_meta target token's embedding when present.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use ndarray::ArcArray2;
@@ -12,8 +11,15 @@ use super::detect::{decode_f32_b64, detect_ffn_pattern, ensure_cloned};
 use super::edge::install_edge;
 use super::save::{copy_model_config, merge_for_save, write_safetensors};
 use super::CompileArgs;
-
-pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+pub fn run(args: CompileArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex_path = args.vindex.as_ref().unwrap();
     eprintln!("LARQL AOT Compiler — patch mode");
     eprintln!("  base model: {}", args.base.display());

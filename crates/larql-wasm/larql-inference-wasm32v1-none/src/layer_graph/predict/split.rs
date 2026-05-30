@@ -18,7 +18,14 @@ use ndarray::Array2;
 use super::super::{AttentionCache, CachedLayerGraph, DenseLayerGraph, LayerGraph};
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Two-pass split pipeline: attention on CPU, FFN batched on Metal GPU.
 ///
 /// Pass 1: Run attention for all layers with attention-only residual stream (CPU).
@@ -40,7 +47,7 @@ pub fn predict_split_pass(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> crate::forward::PredictResult {
     let seq_len = token_ids.len();
     let hidden = weights.hidden_size;
@@ -226,7 +233,7 @@ pub fn predict_split_cached(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     attn_cache: &AttentionCache,
-    _layer_range: std::ops::Range<usize>,
+    _layer_range: core::ops::Range<usize>,
 ) -> crate::forward::PredictResult {
     let norm_offset = weights.arch.norm_weight_offset();
 

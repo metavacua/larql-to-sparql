@@ -5,7 +5,14 @@
 //! - `raw`: `RawForward`, `forward_raw_logits`, `forward_from_layer`, `hidden_to_raw_logits`
 //! - `dense`: Dense weight forward passes and logit projection
 //! - `ffn`: Custom FFN backend, router, and strategy forward passes
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod dense;
 pub mod ffn;
 pub mod raw;

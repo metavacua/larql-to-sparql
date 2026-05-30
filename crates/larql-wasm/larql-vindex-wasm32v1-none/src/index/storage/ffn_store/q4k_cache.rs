@@ -14,11 +14,16 @@
 //!
 //! Carved out of `ffn_store.rs` in the 2026-04-25 modularity pass.
 
-use std::sync::Arc;
-
 use super::FFN_DOWN;
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Diagnostic: count of populated `q4k_ffn_cache` slots and the
     /// total f32 bytes they hold. Used by perf probes that need to know
@@ -32,7 +37,7 @@ impl VectorIndex {
         for slot in cache.iter() {
             for arc in slot.iter().flatten() {
                 slots += 1;
-                bytes += arc.len() * std::mem::size_of::<f32>();
+                bytes += arc.len() * core::mem::size_of::<f32>();
             }
         }
         (slots, bytes)
@@ -52,7 +57,7 @@ impl VectorIndex {
     pub fn set_q4k_ffn_cache_max_layers(&self, max_layers: usize) {
         self.ffn
             .q4k_ffn_cache_max_layers
-            .store(max_layers, std::sync::atomic::Ordering::Relaxed);
+            .store(max_layers, core::sync::atomic::Ordering::Relaxed);
         if max_layers > 0 {
             let mut cache = self.ffn.q4k_ffn_cache.lock().unwrap();
             let mut lru = self.ffn.q4k_ffn_cache_lru.lock().unwrap();
@@ -79,7 +84,7 @@ impl VectorIndex {
         let max = self
             .ffn
             .q4k_ffn_cache_max_layers
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(core::sync::atomic::Ordering::Relaxed);
         if max == 0 {
             return;
         }
@@ -159,7 +164,7 @@ impl VectorIndex {
         } else {
             decoded.into_iter().take(n).collect()
         };
-        let arc = std::sync::Arc::new(final_data);
+        let arc = alloc::sync::Arc::new(final_data);
         {
             let mut cache = self.ffn.q4k_ffn_cache.lock().unwrap();
             if let Some(slot) = cache.get_mut(layer) {
@@ -254,7 +259,7 @@ impl VectorIndex {
             } else {
                 decoded.into_iter().take(n).collect()
             };
-            Some(std::sync::Arc::new(final_data))
+            Some(alloc::sync::Arc::new(final_data))
         });
 
         result.clone()
@@ -267,12 +272,11 @@ mod tests {
     //! `tests/test_vindex_to_q4k.rs` end-to-end fixtures; here we
     //! pin the cache-hit, LRU, stats, and early-return branches that
     //! don't require real Q4_K-encoded bytes.
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
 
     use ndarray::Array2;
 
     use super::*;
-
     fn fresh(num_layers: usize, hidden: usize) -> VectorIndex {
         let mut v = VectorIndex::empty(num_layers, hidden);
         for layer in 0..num_layers {

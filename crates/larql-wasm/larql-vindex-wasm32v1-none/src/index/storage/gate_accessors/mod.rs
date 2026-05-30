@@ -16,7 +16,14 @@ use ndarray::Array2;
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
 use crate::index::types::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Look up metadata for a specific feature.
     /// Checks heap first (mutation overrides), then mmap (production read path).

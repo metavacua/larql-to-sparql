@@ -1,11 +1,17 @@
 //! gRPC service implementation for VindexService.
 
-use std::sync::Arc;
-
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::band_utils::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     HEALTH_STATUS_OK, INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK, PROBE_RELATION_SOURCE,
 };
 use crate::state::AppState;
@@ -32,7 +38,7 @@ impl VindexService for VindexGrpcService {
         let served = self
             .state
             .requests_served
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(core::sync::atomic::Ordering::Relaxed);
         Ok(Response::new(HealthResponse {
             status: HEALTH_STATUS_OK.into(),
             uptime_seconds: uptime,
@@ -224,8 +230,8 @@ impl VindexService for VindexGrpcService {
 /// rather than panicking — corrupted vindex data or future patched scoring
 /// paths must not be able to take a gRPC worker down via `sort_by`.
 #[inline]
-fn cmp_score_desc(a: f32, b: f32) -> std::cmp::Ordering {
-    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+fn cmp_score_desc(a: f32, b: f32) -> core::cmp::Ordering {
+    b.partial_cmp(&a).unwrap_or(core::cmp::Ordering::Equal)
 }
 
 // ── Blocking handler implementations ──
@@ -553,7 +559,7 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
     let all_layers = patched.loaded_layers();
 
     let mut counts: std::collections::HashMap<String, (usize, String)> =
-        std::collections::HashMap::new();
+        HashMap::new();
     for &layer in &all_layers {
         if let Some(metas) = patched.down_meta_at(layer) {
             for meta in metas.iter().flatten() {
@@ -579,7 +585,7 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
             example,
         })
         .collect();
-    relations.sort_by_key(|r| std::cmp::Reverse(r.count));
+    relations.sort_by_key(|r| core::cmp::Reverse(r.count));
     let total = relations.len() as u32;
     relations.truncate(50);
 
@@ -812,8 +818,7 @@ fn grpc_stream_describe(
 #[cfg(test)]
 mod tests {
     use super::cmp_score_desc;
-    use std::cmp::Ordering;
-
+    use core::cmp::Ordering;
     #[test]
     fn cmp_score_desc_orders_descending() {
         assert_eq!(cmp_score_desc(1.0, 2.0), Ordering::Greater);

@@ -70,7 +70,6 @@ pub(super) fn detect_down_dtype_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn detect_dtype_recognises_f32() {
         let total = 1024;

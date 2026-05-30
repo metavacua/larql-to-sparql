@@ -25,7 +25,6 @@ larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-comp
 # threat-model rationale is visible at the crate boundary.
 
 serde = { workspace = true, features = ["derive"] }
-thiserror = { workspace = true }
 
 [features]
 default = []
@@ -44,6 +43,7 @@ tonic-build = "0.13"
 protobuf-src = "2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 axum = { version = "0.8", features = ["ws"] }
 half = "2"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
@@ -67,3 +67,9 @@ base64 = "0.22"
 utoipa = { version = "5", features = ["axum_extras", "preserve_order"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

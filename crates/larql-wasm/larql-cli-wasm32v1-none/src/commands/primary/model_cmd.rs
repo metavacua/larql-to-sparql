@@ -15,7 +15,14 @@
 
 use clap::{Args, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct ModelArgs {
     #[command(subcommand)]
@@ -38,13 +45,13 @@ pub struct ModelPullArgs {
     pub revision: Option<String>,
 }
 
-pub fn run(args: ModelArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ModelArgs) -> Result<(), Box<dyn core::error::Error>> {
     match args.command {
         ModelCommand::Pull(p) => run_pull(p),
     }
 }
 
-fn run_pull(args: ModelPullArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_pull(args: ModelPullArgs) -> Result<(), Box<dyn core::error::Error>> {
     let bare = args.repo.trim_start_matches("hf://");
     if !bare.contains('/') || bare.split('/').count() != 2 {
         return Err(format!(

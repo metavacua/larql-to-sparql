@@ -9,6 +9,14 @@
 use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::multi_layer_wire::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_multi_layer_response, encode_multi_layer_request, encode_multi_layer_request_q8k,
     MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K, MULTI_LAYER_BATCH_CONTENT_TYPE,
     MULTI_LAYER_BATCH_PATH, MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE, MULTI_LAYER_BATCH_Q8K_PATH,
@@ -16,7 +24,6 @@ use super::super::multi_layer_wire::{
 #[cfg(unix)]
 use super::uds_call;
 use super::{Shard, ShardTransport};
-
 impl Shard {
     /// Send all layers' routing decisions in one request, receive all h2 values.
     ///

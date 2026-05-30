@@ -11,10 +11,16 @@
 //! `q4k_ffn_layer` whole-layer dequant cache. The legacy interleaved
 //! path stays available as the fallback when the sidecar is absent.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DOWN_FEATURES_Q4K_BIN, DOWN_FEATURES_Q4K_MANIFEST_JSON, INTERLEAVED_Q4K_BIN,
     INTERLEAVED_Q4K_MANIFEST_JSON,
 };

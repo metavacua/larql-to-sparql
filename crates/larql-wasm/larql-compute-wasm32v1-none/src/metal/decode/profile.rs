@@ -25,7 +25,14 @@
 //! Cost: ~2 commit/waits per layer × 34 = ~68/token of cmd-buffer
 //! overhead (~2–3 ms on M3 Max). This is measurement-only mode; the
 //! production decode path is unchanged when the env var is unset.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-stage wall-clock decode timings in milliseconds.
 ///
 /// Filled by [`MetalBackend::decode_token_with_profile`]. Today
@@ -56,8 +63,8 @@ thread_local! {
     /// Most recent per-stage timing recorded by
     /// `decode_token_with_moe_split_fn` when `LARQL_PROFILE_SPLIT=1`.
     /// `decode_token_split_profile` reads back from this cell.
-    static LAST_SPLIT_TIMINGS: std::cell::Cell<Option<ProfileTimings>> =
-        const { std::cell::Cell::new(None) };
+    static LAST_SPLIT_TIMINGS: core::cell::Cell<Option<ProfileTimings>> =
+        const { core::cell::Cell::new(None) };
 }
 
 /// Store the latest per-stage timing for the current thread. Called by
@@ -109,7 +116,6 @@ impl ProfileTimings {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn total_ms_sums_buckets() {
         let p = ProfileTimings {

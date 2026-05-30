@@ -18,10 +18,16 @@
 //! work. Reference: `chuk-mlx/.../research/_stopwords.py`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use super::store::ApolloStore;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Inverted index: token_id → list of (window_id, term_frequency) pairs.
 /// term_frequency = number of occurrences of that token in that window.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -84,7 +90,7 @@ impl RoutingIndex {
             }
         }
         let mut ranked: Vec<(u16, f64)> = scores.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         ranked.into_iter().take(top_k).map(|(w, _)| w).collect()
     }
 
@@ -92,7 +98,7 @@ impl RoutingIndex {
     pub fn total_bytes(&self) -> usize {
         self.index
             .values()
-            .map(|v| 4 + v.len() * std::mem::size_of::<(u16, u32)>())
+            .map(|v| 4 + v.len() * core::mem::size_of::<(u16, u32)>())
             .sum()
     }
 
@@ -105,7 +111,6 @@ impl RoutingIndex {
 mod tests {
     use super::*;
     use crate::engines::apollo::store::{ArchConfig, StoreManifest};
-
     fn mk_store(per_window_tokens: Vec<Vec<u32>>) -> ApolloStore {
         ApolloStore {
             manifest: StoreManifest {

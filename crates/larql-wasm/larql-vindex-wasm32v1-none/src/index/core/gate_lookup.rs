@@ -10,7 +10,14 @@ use ndarray::{Array1, Array2};
 
 use super::VectorIndex;
 use crate::index::types::{FeatureMeta, GateLookup};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl GateLookup for VectorIndex {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
@@ -60,7 +67,6 @@ mod tests {
     //! lines run under coverage. The inherent methods themselves are
     //! covered by the storage-engine and walk integration tests.
     use super::*;
-
     fn fresh() -> VectorIndex {
         VectorIndex::empty(2, 8)
     }

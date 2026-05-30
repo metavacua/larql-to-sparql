@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod checkpoint;
 pub mod csv;
 pub mod format;
@@ -9,7 +17,6 @@ use std::path::Path;
 
 use crate::core::graph::{Graph, GraphError};
 pub use format::Format;
-
 /// Load a graph from disk, auto-detecting format from the file extension.
 pub fn load(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     let path = path.as_ref();

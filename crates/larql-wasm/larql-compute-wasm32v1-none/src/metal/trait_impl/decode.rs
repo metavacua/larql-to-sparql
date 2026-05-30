@@ -17,7 +17,14 @@
 
 use crate::backend::DecodeBackend;
 use crate::metal::{ops, MetalBackend};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// `(q_dim, kv_dim, num_q_heads, num_kv_heads, head_dim, rope_base)` for
 /// layer 0 — passed to the inner dispatchers as legacy scalars. Only
 /// `q_dim` is read on a non-empty-layers path (as the empty-layers
@@ -144,7 +151,7 @@ impl DecodeBackend for MetalBackend {
             head_dim: target_head_dim,
             num_q_heads: target_num_q_heads,
             replacement_delta,
-            pre_wo_capture: std::cell::RefCell::new(Vec::new()),
+            pre_wo_capture: core::cell::RefCell::new(Vec::new()),
             stop_after_capture: false,
         };
         Some(dispatch_full_pipeline(
@@ -390,7 +397,7 @@ impl DecodeBackend for MetalBackend {
             head_dim: target_head_dim,
             num_q_heads: target_num_q_heads,
             replacement_delta: &[], // unused — stop_after_capture returns before hook B
-            pre_wo_capture: std::cell::RefCell::new(Vec::new()),
+            pre_wo_capture: core::cell::RefCell::new(Vec::new()),
             stop_after_capture: true, // stop after capture, return pre_wo via RefCell
         };
         // dispatch returns empty vec (stop_after_capture=true); ignore it.
@@ -494,7 +501,7 @@ impl DecodeBackend for MetalBackend {
             head_dim: target_head_dim,
             num_q_heads: target_num_q_heads,
             replacement_delta,
-            pre_wo_capture: std::cell::RefCell::new(Vec::new()),
+            pre_wo_capture: core::cell::RefCell::new(Vec::new()),
             stop_after_capture: false,
         };
         Some(ops::full_pipeline::dispatch_full_pipeline(
@@ -585,8 +592,8 @@ impl DecodeBackend for MetalBackend {
         // sized for max_seq * kv_dim. k_data/v_data are borrow-checked
         // &[f32] params. Copy size is bounded by min(total, src.len()).
         unsafe {
-            std::ptr::copy_nonoverlapping(k_data.as_ptr(), k_ptr, total.min(k_data.len()));
-            std::ptr::copy_nonoverlapping(v_data.as_ptr(), v_ptr, total.min(v_data.len()));
+            core::ptr::copy_nonoverlapping(k_data.as_ptr(), k_ptr, total.min(k_data.len()));
+            core::ptr::copy_nonoverlapping(v_data.as_ptr(), v_ptr, total.min(v_data.len()));
         }
         lc.current_len = seq_len;
     }

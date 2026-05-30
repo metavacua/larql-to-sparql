@@ -4,7 +4,14 @@ use super::super::address::attention_argmax;
 use super::super::program::{fields, strata, Predicate};
 use super::context::{FitContext, PromptCapture};
 use super::localize::LocalizeResult;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A candidate guard predicate with coverage statistics.
 pub struct GuardCandidate {
     pub predicate: Predicate,
@@ -246,11 +253,11 @@ pub fn synthesize_guard(
     candidates.sort_by(|a, b| {
         b.fragile_coverage
             .partial_cmp(&a.fragile_coverage)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
             .then(
                 a.safe_false_positive
                     .partial_cmp(&b.safe_false_positive)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                    .unwrap_or(core::cmp::Ordering::Equal),
             )
             .then(a.complexity.cmp(&b.complexity))
     });

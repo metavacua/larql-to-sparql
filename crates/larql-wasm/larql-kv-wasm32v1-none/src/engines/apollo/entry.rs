@@ -62,7 +62,6 @@ impl Default for InjectionConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn default_injection_matches_apollo() {
         let cfg = InjectionConfig::default();
@@ -76,7 +75,7 @@ mod tests {
         // Must be layout-compatible with the Python structured dtype:
         // token_id u32 (4) + coef f32 (4) + window_id u16 (2) +
         // pos_in_window u16 (2) + fact_id u16 (2) = 14 bytes + padding
-        let size = std::mem::size_of::<VecInjectEntry>();
+        let size = core::mem::size_of::<VecInjectEntry>();
         assert!(size >= 14, "entry smaller than expected: {size}");
         assert!(size <= 20, "entry has too much padding: {size}");
     }

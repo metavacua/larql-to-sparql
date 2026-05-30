@@ -5,13 +5,19 @@
 //! present, matching HuggingFace's tied-embedding convention.
 
 use larql_vindex::format::filenames::*;
-use std::collections::HashMap;
 use std::path::Path;
 
 use ndarray::ArcArray2;
 
 use larql_models::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub const SKIP_PATTERNS: &[&str] = &[
     "vision_tower",
     "multi_modal_projector",
@@ -69,10 +75,9 @@ pub fn write_safetensors(
     tensors: &HashMap<String, ArcArray2<f32>>,
     vectors: &HashMap<String, Vec<f32>>,
     path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_models::quant::half::encode_bf16;
     use safetensors::tensor::{serialize, TensorView};
-
     let mut byte_bufs: HashMap<String, Vec<u8>> = HashMap::new();
     let mut shapes: HashMap<String, Vec<usize>> = HashMap::new();
 

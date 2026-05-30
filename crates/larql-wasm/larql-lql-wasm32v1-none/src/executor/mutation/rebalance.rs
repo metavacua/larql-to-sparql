@@ -22,11 +22,18 @@
 use crate::error::LqlError;
 use crate::executor::helpers::{target_prefix, TARGET_PREFIX_CHARS};
 use crate::executor::tuning::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     REBALANCE_CEILING_DEFAULT, REBALANCE_DOWN_SCALE, REBALANCE_FLOOR_DEFAULT,
     REBALANCE_MAX_ITERS_DEFAULT, REBALANCE_PROBE_TOP_K, REBALANCE_UP_SCALE,
 };
 use crate::executor::Session;
-
 impl Session {
     pub(crate) fn exec_rebalance(
         &mut self,

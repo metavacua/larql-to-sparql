@@ -1,5 +1,12 @@
 use crate::{model_config::ModelConfig, KvStrategy};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Strategy 1: Standard FP16 KV cache.
 ///
 /// Store raw f32 keys and values. Exact roundtrip — this is the baseline
@@ -130,7 +137,6 @@ fn decode_fp16_vectors(data: &[u8], num_vectors: usize, dim: usize) -> Vec<Vec<f
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_fp16_roundtrip() {
         let values = [0.0f32, 1.0, -1.0, 0.5, 0.333, 100.0, -0.001];

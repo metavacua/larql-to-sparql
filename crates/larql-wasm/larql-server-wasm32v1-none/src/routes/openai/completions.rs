@@ -43,8 +43,7 @@
 //! `logprobs: int` returns `null` in the response. Top-k log-probabilities
 //! over the lm_head distribution land in F18.
 
-use std::convert::Infallible;
-use std::sync::Arc;
+use core::convert::Infallible;
 
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -60,7 +59,14 @@ use crate::routes::openai::OpenAIError;
 use crate::state::{AppState, LoadedModel};
 
 use super::util::{contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const TEXT_COMPLETION_OBJECT: &str = "text_completion";
 const DEFAULT_MAX_TOKENS: usize = 16;
 
@@ -521,7 +527,6 @@ fn run_completions_loop(
 /// resolves to `0.0` for every token. `top_logprobs` is an empty map
 /// per token until top-K alternatives are surfaced (follow-up).
 fn build_completion_logprobs(tokens: &[(String, f64)]) -> CompletionLogprobs {
-    use std::collections::BTreeMap;
 
     let mut text_offset = Vec::with_capacity(tokens.len());
     let mut acc = 0usize;
@@ -550,7 +555,6 @@ fn build_completion_logprobs(tokens: &[(String, f64)]) -> CompletionLogprobs {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn deserialize_single_string_prompt() {
         let json = serde_json::json!({"prompt": "hello"});

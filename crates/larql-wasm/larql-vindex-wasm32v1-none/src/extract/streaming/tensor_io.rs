@@ -10,13 +10,19 @@
 //! - `get_tensor_f32` reads a 2D tensor by key and dequantises to f32.
 //! - `normalize_key` strips a fixed prefix list from a tensor key.
 
-use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
 use ndarray::Array2;
 
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Mmap'd safetensors file — kept alive for the duration of extraction.
 pub(super) struct MmapShard {
     pub(super) _file: std::fs::File,
@@ -135,9 +141,7 @@ pub(super) fn normalize_key(key: &str, prefixes: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use std::io::Write;
-
     // ── Synthetic safetensors fixture ─────────────────────────────────────
     //
     // Tests below want to drive `get_tensor_f32` against a real mmap'd

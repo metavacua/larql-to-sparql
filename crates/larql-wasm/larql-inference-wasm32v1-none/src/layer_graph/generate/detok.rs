@@ -16,7 +16,14 @@
 //! by snapping the slice point to the next char boundary before emitting.
 
 use tokenizers::Tokenizer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Stateful, single-stream incremental detokeniser.
 ///
 /// One instance per generation call. Not `Sync` — clone the underlying
@@ -107,7 +114,6 @@ impl<'a> Detokenizer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Build a tiny word-level tokenizer over a fixed vocab via the
     /// JSON-loader (avoids `TokenizerBuilder` generic-inference issues).
     /// Token N decodes back to its word; the WordLevel decoder joins with

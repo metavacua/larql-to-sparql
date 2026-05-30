@@ -1,7 +1,15 @@
 #![allow(clippy::doc_overindented_list_items)]
 #![allow(clippy::type_complexity)]
 #![cfg_attr(target_arch = "wasm32", no_std)]
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[macro_use]
 extern crate alloc;
 
 // Architectural lints suppressed crate-wide:
@@ -21,7 +29,6 @@ extern crate alloc;
 #![allow(clippy::large_enum_variant)]
 
 use clap::{Parser, Subcommand};
-
 mod commands;
 mod formatting;
 mod utils;
@@ -597,7 +604,7 @@ fn real_main() -> i32 {
     0
 }
 
-fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn core::error::Error>> {
     match cmd {
         DevCommand::WeightExtract(a) => weight_walk_cmd::run(a),
         DevCommand::AttentionExtract(a) => attention_walk_cmd::run(a),
@@ -627,7 +634,7 @@ fn run_dev(cmd: DevCommand) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_serve(args: ServeArgs) -> Result<(), Box<dyn core::error::Error>> {
     let mut cmd_args = Vec::new();
     if let Some(ref path) = args.vindex_path {
         // Resolve cache shorthands / owner-name / hf:// → actual path
@@ -768,7 +775,6 @@ fn run_serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod trampoline_tests {
     use super::*;
-
     fn args(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|s| s.to_string()).collect()
     }

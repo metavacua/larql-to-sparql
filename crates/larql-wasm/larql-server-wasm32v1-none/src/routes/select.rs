@@ -1,14 +1,19 @@
 //! POST /v1/select — SQL-style edge query.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SelectRequest {
     #[serde(default)]
@@ -102,7 +107,7 @@ fn select_edges(
                 let cmp = a
                     .c_score
                     .partial_cmp(&b.c_score)
-                    .unwrap_or(std::cmp::Ordering::Equal);
+                    .unwrap_or(core::cmp::Ordering::Equal);
                 if descending {
                     cmp.reverse()
                 } else {
@@ -125,7 +130,7 @@ fn select_edges(
                 let cmp = a
                     .c_score
                     .partial_cmp(&b.c_score)
-                    .unwrap_or(std::cmp::Ordering::Equal);
+                    .unwrap_or(core::cmp::Ordering::Equal);
                 cmp.reverse()
             });
         }

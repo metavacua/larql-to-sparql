@@ -24,7 +24,14 @@ use crate::error::VindexError;
 use crate::format::weights::Q4kManifestEntry;
 
 use super::{pad_rows_to_block, QuantBlockFormat};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// In-flight state for the W2 feature-major down emission. Lives only
 /// while the FFN write loop is running; collapsed into the manifest
 /// JSON at end-of-loop. Each field has a name at the call sites

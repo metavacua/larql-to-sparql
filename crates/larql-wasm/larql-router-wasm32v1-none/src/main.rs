@@ -20,9 +20,7 @@
 use larql_router::grid;
 use larql_router::rebalancer;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::State;
@@ -38,7 +36,14 @@ use tracing::{info, warn};
 
 use grid::{GridServiceImpl, GridState};
 use larql_router_protocol::GridServiceServer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Binary wire format constants ───────────────────────────────────────────────
 
 const BINARY_CT: &str = "application/x-larql-ffn";
@@ -484,11 +489,11 @@ async fn handle_stats(State(state): State<Arc<AppState>>) -> Response {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     // Accept both `larql-router <args>` and `larql-router route <args>`.
     let args: Vec<String> = std::env::args().collect();
     let filtered: Vec<String> = if args.len() > 1 && args[1] == "route" {
-        std::iter::once(args[0].clone())
+        core::iter::once(args[0].clone())
             .chain(args[2..].iter().cloned())
             .collect()
     } else {
@@ -610,7 +615,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── peek_binary ───────────────────────────────────────────────────────────
 
     fn make_binary_single(layer: u32, residual_floats: usize) -> Vec<u8> {
@@ -619,7 +623,7 @@ mod tests {
         buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
         buf.extend_from_slice(&1u32.to_le_bytes()); // flags (full_output)
         buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
+        buf.extend(core::iter::repeat_n(0u8, residual_floats * 4));
         buf
     }
 
@@ -633,7 +637,7 @@ mod tests {
         buf.extend_from_slice(&1u32.to_le_bytes()); // seq_len
         buf.extend_from_slice(&1u32.to_le_bytes()); // flags
         buf.extend_from_slice(&8092u32.to_le_bytes()); // top_k
-        buf.extend(std::iter::repeat_n(0u8, residual_floats * 4));
+        buf.extend(core::iter::repeat_n(0u8, residual_floats * 4));
         buf
     }
 

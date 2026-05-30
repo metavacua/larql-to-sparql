@@ -21,6 +21,14 @@ use larql_models::ModelWeights;
 use larql_vindex::{GateIndex, VectorIndex};
 
 use crate::forward::dump_config::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     cpu_layer_file, decode_layer_file, metal_layer_h_out_file, ENV_CPU_DUMP_LAYERS,
     ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS,
 };

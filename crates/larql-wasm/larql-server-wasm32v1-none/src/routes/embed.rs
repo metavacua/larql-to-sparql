@@ -7,8 +7,6 @@
 //!
 //! Activated when the server is started with `--embed-only`.
 
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::header;
@@ -22,6 +20,14 @@ use larql_vindex::ndarray::Array2;
 
 use crate::error::ServerError;
 use crate::http::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     BINARY_FFN_CONTENT_TYPE, JSON_CONTENT_TYPE, REQUEST_BODY_LIMIT_BYTES,
     REQUEST_BODY_LIMIT_LARGE_BYTES,
 };
@@ -715,7 +721,6 @@ fn handle_embed_single_inner(
 mod tests {
     use super::*;
     use larql_vindex::ndarray::Array2;
-
     // ── Binary wire format helpers ───────────────────────────────────────────
 
     fn make_binary_embed_request(token_ids: &[u32]) -> Vec<u8> {

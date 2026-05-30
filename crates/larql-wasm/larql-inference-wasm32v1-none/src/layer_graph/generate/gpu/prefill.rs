@@ -20,7 +20,14 @@ use crate::layer_graph::generate::types::GenerateError;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 use larql_compute::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run the prefill phase for streaming Q4 generation.
 ///
 /// `metal_ple_backend` is `Some(metal)` only when (a) the model uses
@@ -153,7 +160,6 @@ mod tests {
     //! `CpuBackend`, which doesn't advertise either Q4 or DecodeQ4KMoe.
     use super::*;
     use crate::test_utils::make_test_weights;
-
     #[test]
     fn prefill_q4k_moe_rejects_backend_without_decode_q4k_moe_capability() {
         // CpuBackend doesn't support `Capability::DecodeQ4KMoe` → the

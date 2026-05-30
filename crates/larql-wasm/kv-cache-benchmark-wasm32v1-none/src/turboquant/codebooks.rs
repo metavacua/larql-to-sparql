@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Pre-computed Lloyd-Max codebooks for Beta(d/2, d/2) distribution.
 ///
 /// After WHT of a unit-norm vector in d dimensions, each coordinate is
@@ -6,7 +14,6 @@
 /// These codebooks are the optimal scalar quantizers for this distribution.
 /// Values validated against llama.cpp Discussion #20969 reference implementation.
 use super::lloyd_max::Codebook;
-
 /// Get the pre-computed codebook for a given dimension and bit-width.
 pub fn get_codebook(dim: usize, bits: u8) -> &'static Codebook {
     match (dim, bits) {
@@ -77,7 +84,6 @@ fn make_gaussian_codebook(n_levels: usize, sigma: f32) -> Codebook {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_codebook_d256_4bit_has_16_centroids() {
         let cb = get_codebook(256, 4);

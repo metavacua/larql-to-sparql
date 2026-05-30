@@ -74,7 +74,14 @@ use crate::config::dtype::StorageDtype;
 use crate::index::storage::attn::ATTN_TENSORS_PER_LAYER;
 use crate::index::storage::ffn_store::FFN_COMPONENTS_PER_LAYER;
 use crate::index::types::GateLayerSlice;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod mmap_storage;
 pub use mmap_storage::MmapStorage;
 
@@ -253,7 +260,6 @@ mod sealed {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// `VindexStorage` must be object-safe — the migration plan holds
     /// it as `Arc<dyn VindexStorage>` on `VectorIndex`.
     #[test]

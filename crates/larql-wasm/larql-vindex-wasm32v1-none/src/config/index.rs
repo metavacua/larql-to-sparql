@@ -5,14 +5,19 @@
 //! round-2 cleanup. Aggregates types from sibling modules
 //! (`quantization`, `compliance`, `model`).
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 use super::compliance::LayerBands;
 use super::model::VindexModelConfig;
 use super::quantization::{Fp4Config, QuantFormat};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct VindexConfig {
     /// Format version.
@@ -153,8 +158,8 @@ impl ExtractLevel {
     }
 }
 
-impl std::fmt::Display for ExtractLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ExtractLevel {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Browse => write!(f, "browse"),
             Self::Attention => write!(f, "attention"),
@@ -215,7 +220,6 @@ mod fp4_schema_tests {
     // and the FP4 filename constants live in `format::filenames`.
     use super::super::quantization::{Fp4Config, Precision};
     use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN};
-
     #[test]
     fn option_b_default_shape() {
         let cfg = Fp4Config::option_b_default();

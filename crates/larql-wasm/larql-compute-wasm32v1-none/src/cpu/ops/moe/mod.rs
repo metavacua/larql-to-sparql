@@ -10,7 +10,14 @@
 //!
 //! Expert weights are stored as packed BF16: [num_experts, out_dim, in_dim].
 //! We dequantize only the selected top-k expert slices on demand.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod cache;
 mod expert;
 mod forward;
@@ -260,7 +267,7 @@ mod tests {
         let second = cache::try_cached_dequant(&data, crate::QuantFormat::BF16, 2).unwrap();
         // Both Arcs should point to the same allocation (same pointer).
         assert!(
-            std::sync::Arc::ptr_eq(&first, &second),
+            alloc::sync::Arc::ptr_eq(&first, &second),
             "cache hit should return the same Arc"
         );
     }

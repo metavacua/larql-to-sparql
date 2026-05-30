@@ -17,6 +17,14 @@ use crate::error::LqlError;
 use crate::executor::Session;
 
 use super::format::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     also_display, banner, format_also, EDGES_DEFAULT_LIMIT, EDGES_WALK_TOP_K, SCORE_EQ_TOLERANCE,
 };
 
@@ -298,7 +306,7 @@ fn sort_rows(rows: &mut [EdgeRow], ord: &OrderBy) {
                 let cmp = a
                     .c_score
                     .partial_cmp(&b.c_score)
-                    .unwrap_or(std::cmp::Ordering::Equal);
+                    .unwrap_or(core::cmp::Ordering::Equal);
                 if ord.descending {
                     cmp.reverse()
                 } else {
@@ -392,7 +400,6 @@ fn format_rows(rows: &[EdgeRow], explicit_relation_filter: bool) -> Vec<String> 
 mod tests {
     use super::*;
     use crate::ast::CompareOp;
-
     fn cond(field: &str, op: CompareOp, value: Value) -> Condition {
         Condition {
             field: field.into(),

@@ -15,14 +15,21 @@ use std::path::Path;
 use larql_vindex::format::filenames::TOKENIZER_CONFIG_JSON;
 use minijinja::{context, Environment, Value};
 use serde_json::Value as JsonValue;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Load the base model's chat template and render it over a single
 /// user message with `add_generation_prompt=true`. Returns the wrapped
 /// string ready to tokenize.
 pub fn render_user_prompt(
     base_dir: &Path,
     user_prompt: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     let cfg_path = base_dir.join(TOKENIZER_CONFIG_JSON);
     if !cfg_path.exists() {
         return Err(format!(

@@ -12,7 +12,14 @@ use crate::attention::SharedKV;
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
 use ndarray::{s, Array2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run a single transformer layer while zeroing selected pre-W_O attention heads.
 ///
 /// This is intended for OV ablation diagnostics: the selected query-head slices
@@ -266,7 +273,6 @@ mod tests {
     use crate::forward::run_layer_with_ffn;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn h(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),

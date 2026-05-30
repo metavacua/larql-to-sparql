@@ -9,14 +9,20 @@
 //! - `finalize`     — `lfs_verify` + `commit_lfs_file`
 //! - `mod` (here)   — `CountingReader`, action types, `upload_lfs` orchestrator
 //! - `test_support` — shared test fixtures (cfg(test))
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod batch;
 mod finalize;
 mod stream;
 #[cfg(test)]
 mod test_support;
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::VindexError;
@@ -100,9 +106,9 @@ mod tests {
 
     #[test]
     fn counting_reader_counts_bytes_read() {
-        use std::sync::atomic::Ordering;
+        use core::sync::atomic::Ordering;
         let bytes = b"hello world".to_vec();
-        let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
+        let counter = alloc::sync::Arc::new(portable_atomic::AtomicU64::new(0));
         let mut reader = CountingReader {
             inner: bytes.as_slice(),
             counter: counter.clone(),
@@ -120,8 +126,8 @@ mod tests {
 
     #[test]
     fn counting_reader_counter_starts_at_zero() {
-        use std::sync::atomic::Ordering;
-        let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
+        use core::sync::atomic::Ordering;
+        let counter = alloc::sync::Arc::new(portable_atomic::AtomicU64::new(0));
         let mut reader = CountingReader {
             inner: std::io::empty(),
             counter: counter.clone(),

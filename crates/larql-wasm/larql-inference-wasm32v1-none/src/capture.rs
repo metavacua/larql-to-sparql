@@ -3,13 +3,20 @@
 //! High-level API: load a model, tokenize entities, run forward passes,
 //! write NDJSON output files compatible with vector-load and vindex builds.
 
-use std::borrow::Cow;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::error::InferenceError;
 use crate::forward::trace_forward;
 use crate::model::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
 };
 use crate::tokenizer::load_tokenizer;
@@ -341,7 +348,6 @@ fn is_leap_year(y: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Convert epoch seconds to a YYYY-MM-DD string. Mirrors `current_date` but
     /// takes the timestamp as a parameter so it's deterministic.
     fn date_from_epoch_secs(secs: u64) -> String {

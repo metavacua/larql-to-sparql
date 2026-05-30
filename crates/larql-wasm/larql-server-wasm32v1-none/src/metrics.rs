@@ -9,11 +9,17 @@
 //! - `avg_ms`: EMA (α=0.1) — smooth, low overhead, updated every request.
 //! - `p99_ms`: ring-buffer p99 over the last 100 requests — tail latency.
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use larql_router_protocol::LayerLatency;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const RING_CAPACITY: usize = 100;
 const EMA_ALPHA: f32 = 0.1;
 
@@ -45,7 +51,7 @@ impl LayerStats {
             return 0.0;
         }
         let mut vals: Vec<f32> = self.ring.iter().copied().collect();
-        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
         let idx = ((vals.len() as f32 * 0.99) as usize).min(vals.len() - 1);
         vals[idx]
     }
@@ -106,7 +112,6 @@ impl LayerLatencyTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn record_and_snapshot_single_layer() {
         let t = LayerLatencyTracker::new();

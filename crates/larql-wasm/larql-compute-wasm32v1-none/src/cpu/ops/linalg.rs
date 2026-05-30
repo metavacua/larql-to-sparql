@@ -4,7 +4,14 @@
 //! inverse is ill-conditioned at f32 for ffn_dim > 2048).
 
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Cholesky decomposition of a symmetric positive-definite matrix.
 /// Returns the lower-triangular factor L such that A = L L^T.
 ///
@@ -132,7 +139,6 @@ pub fn ridge_decomposition_solve(
 mod tests {
     use super::*;
     use ndarray::array;
-
     #[test]
     fn test_cholesky_2x2() {
         // A = [[4, 2], [2, 3]] → L = [[2, 0], [1, √2]]

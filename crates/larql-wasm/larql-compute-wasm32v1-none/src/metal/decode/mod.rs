@@ -1,5 +1,12 @@
 use super::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod diag;
 mod encode_attn;
 mod encode_ffn;
@@ -13,7 +20,6 @@ pub mod profile;
 mod setup;
 
 pub use profile::ProfileTimings;
-
 pub(crate) const DEFAULT_KV_CACHE_MAX_SEQ: usize = 4096;
 
 impl MetalBackend {
@@ -184,8 +190,8 @@ impl MetalBackend {
         let mut residual_dump = diag::ResidualDump::from_env();
 
         // Input RMS debug (first 3 calls, env-gated).
-        static CALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let call_n = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        static CALL_COUNT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+        let call_n = CALL_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         diag::log_decode_entry(call_n, x, hidden, inter, layers);
 
         // Per-layer weight-buffer caches + per-stage scratch + ping-pong

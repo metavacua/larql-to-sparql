@@ -1,8 +1,5 @@
 //! GET /v1/describe — query all knowledge edges for an entity.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::extract::{Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
 use axum::http::HeaderMap;
@@ -11,11 +8,18 @@ use axum::Json;
 use serde::Deserialize;
 
 use crate::band_utils::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     filter_layers_by_band, get_layer_bands, BAND_KNOWLEDGE, PROBE_RELATION_SOURCE,
 };
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
 const DESCRIBE_CACHE_CONTROL: &str = "public, max-age=86400";
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -166,7 +170,7 @@ fn describe_entity(
     ranked.sort_by(|a, b| {
         b.gate
             .partial_cmp(&a.gate)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     ranked.truncate(params.limit);
 

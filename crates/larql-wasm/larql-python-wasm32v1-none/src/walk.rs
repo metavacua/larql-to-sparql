@@ -8,11 +8,18 @@ use ndarray::{Array1, Array2};
 use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
-use std::collections::HashMap;
 use std::path::Path;
 
 use larql_inference::ffn::FfnBackend;
 use larql_inference::forward::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     capture_donor_state_with_ffn, embedding_neighbors as li_embedding_neighbors,
     embedding_row as li_embedding_row, embedding_row_scaled as li_embedding_row_scaled,
     generate_cached_hooked, logit_lens_topk, patch_and_trace_with_ffn,
@@ -30,7 +37,6 @@ use larql_vindex::{
 };
 
 use crate::trace_py;
-
 /// Mmap'd weight file — kept alive so Array2 views remain valid.
 struct WeightMmap {
     _file: std::fs::File,
@@ -171,7 +177,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
                         .into_shared();
                     // Leak an extra Arc ref to prevent the Vec from being freed
                     // when the ArcArray2 drops — the mmap owns this memory
-                    std::mem::forget(arr.clone());
+                    core::mem::forget(arr.clone());
                     arr
                 } else {
                     let floats = larql_vindex::config::dtype::decode_floats(raw, config.dtype);
@@ -190,7 +196,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
                 // Vectors are small (norms) — copy is fine
                 let floats = if is_f32 {
                     unsafe {
-                        std::slice::from_raw_parts(raw.as_ptr() as *const f32, entry.shape[0])
+                        core::slice::from_raw_parts(raw.as_ptr() as *const f32, entry.shape[0])
                     }
                     .to_vec()
                 } else {
@@ -211,7 +217,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
         let arr = Array2::from_shape_vec((config.vocab_size, config.hidden_size), vec)
             .map_err(|e| e.to_string())?
             .into_shared();
-        std::mem::forget(arr.clone());
+        core::mem::forget(arr.clone());
         arr
     } else {
         let floats = larql_vindex::config::dtype::decode_floats(embed_data, config.dtype);
@@ -236,7 +242,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
             let arr = Array2::from_shape_vec((info.num_features, config.hidden_size), vec)
                 .map_err(|e| e.to_string())?
                 .into_shared();
-            std::mem::forget(arr.clone());
+            core::mem::forget(arr.clone());
             arr
         } else {
             let byte_offset = info.offset as usize;
@@ -260,10 +266,10 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
     let weights = ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
+        raw_bytes: HashMap::new(),
         skipped_tensors: Vec::new(),
-        packed_mmaps: std::collections::HashMap::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_mmaps: HashMap::new(),
+        packed_byte_ranges: HashMap::new(),
         embed,
         lm_head,
         position_embed: None,
@@ -389,7 +395,7 @@ impl PyWalkModel {
         }
 
         let floats: &[f32] =
-            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
+            unsafe { core::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
         let x_arr = ndarray::ArrayView2::from_shape((seq_len, hidden), floats)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
 
@@ -398,7 +404,7 @@ impl PyWalkModel {
 
         let out_slice = output.as_slice().unwrap();
         let out_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(out_slice.as_ptr() as *const u8, out_slice.len() * 4)
+            core::slice::from_raw_parts(out_slice.as_ptr() as *const u8, out_slice.len() * 4)
         };
         Ok(PyBytes::new(py, out_bytes))
     }
@@ -439,10 +445,10 @@ impl PyWalkModel {
 
         let k = top_k.unwrap_or(self.top_k);
         let floats: &[f32] =
-            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
+            unsafe { core::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
 
         // Collect features across all positions
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         for s in 0..seq_len {
             let row = &floats[s * hidden..(s + 1) * hidden];
             let arr = ndarray::Array1::from_vec(row.to_vec());
@@ -483,9 +489,9 @@ impl PyWalkModel {
 
         let k = top_k.unwrap_or(self.top_k);
         let floats: &[f32] =
-            unsafe { std::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
+            unsafe { core::slice::from_raw_parts(x_bytes.as_ptr() as *const f32, seq_len * hidden) };
 
-        let mut best: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        let mut best: std::collections::HashMap<usize, f32> = HashMap::new();
         for s in 0..seq_len {
             let row = &floats[s * hidden..(s + 1) * hidden];
             let arr = ndarray::Array1::from_vec(row.to_vec());

@@ -8,8 +8,6 @@
 //! Returns HTTP 404 when the server was not launched with `--experts` (i.e.,
 //! it owns all experts or is not operating as an expert shard).
 
-use std::sync::Arc;
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -17,7 +15,14 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Serialize, ToSchema)]
 pub struct TopologyResponse {
     /// Model identifier (e.g. `"google/gemma-4-26B-A4B-it"`).
@@ -71,7 +76,6 @@ pub async fn handle_topology(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// `owned_end` should be `(end_excl - 1)` to convert the half-open
     /// `expert_filter` tuple `(start, end_excl)` into the inclusive
     /// `[owned_start, owned_end]` range the wire format advertises.

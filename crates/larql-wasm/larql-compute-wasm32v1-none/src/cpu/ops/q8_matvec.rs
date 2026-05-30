@@ -6,7 +6,14 @@
 //! Used for V projection where Q4 accuracy is insufficient.
 
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Quantize a weight matrix to Q8 format: int8 values + per-block f32 scales.
 /// Returns (int8_data[N*K], scales[N * K/LEGACY_BLOCK_ELEMS]).
 pub fn quantize_weights_q8(weights: &[f32], num_rows: usize, hidden: usize) -> (Vec<i8>, Vec<f32>) {
@@ -66,7 +73,6 @@ pub fn dispatch(
 mod tests {
     use super::*;
     use crate::cpu::q4::quantize_to_q8;
-
     #[test]
     fn q8_matvec_produces_output() {
         let hidden = 256;

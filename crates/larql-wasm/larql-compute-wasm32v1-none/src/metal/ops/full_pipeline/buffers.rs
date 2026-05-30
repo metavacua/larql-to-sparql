@@ -10,7 +10,14 @@ use metal::Buffer;
 
 use crate::metal::buffers::BufferCache;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-position byte-stride for the shared Q8 staging buffers.
 ///
 /// `q8_bufs` and `q8s_bufs` are shared between two writers:
@@ -230,7 +237,6 @@ mod tests {
     use super::*;
     use crate::pipeline::*;
     use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
     const HIDDEN_SMALL: usize = 1024;
     const HIDDEN_GEMMA3_4B: usize = 2560;
     const Q_DIM_SMALLER_THAN_HIDDEN: usize = 2048;

@@ -1,12 +1,18 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::types::{HeadId, PqConfig, PromptRecord};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn load_prompts(
     path: &PathBuf,
     max_prompts: Option<usize>,
-) -> Result<Vec<PromptRecord>, Box<dyn std::error::Error>> {
+) -> Result<Vec<PromptRecord>, Box<dyn core::error::Error>> {
     let text = std::fs::read_to_string(path)?;
     let mut prompts = Vec::new();
     for line in text.lines() {
@@ -46,7 +52,7 @@ pub(super) fn split_prompt_records(
     prompts: &[PromptRecord],
     eval_mod: usize,
     eval_offset: usize,
-) -> Result<(Vec<PromptRecord>, Vec<PromptRecord>), Box<dyn std::error::Error>> {
+) -> Result<(Vec<PromptRecord>, Vec<PromptRecord>), Box<dyn core::error::Error>> {
     if eval_mod == 0 {
         return Err("--eval-mod must be greater than zero".into());
     }
@@ -75,7 +81,7 @@ pub(super) fn split_prompt_records(
     Ok((fit, eval))
 }
 
-pub(super) fn parse_head_spec(spec: &str) -> Result<Vec<HeadId>, Box<dyn std::error::Error>> {
+pub(super) fn parse_head_spec(spec: &str) -> Result<Vec<HeadId>, Box<dyn core::error::Error>> {
     let mut heads = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();
@@ -93,7 +99,7 @@ pub(super) fn parse_head_spec(spec: &str) -> Result<Vec<HeadId>, Box<dyn std::er
     Ok(heads)
 }
 
-pub(super) fn parse_usize_list(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+pub(super) fn parse_usize_list(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut values = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();
@@ -105,7 +111,7 @@ pub(super) fn parse_usize_list(spec: &str) -> Result<Vec<usize>, Box<dyn std::er
     Ok(values)
 }
 
-pub(super) fn parse_pq_configs(spec: &str) -> Result<Vec<PqConfig>, Box<dyn std::error::Error>> {
+pub(super) fn parse_pq_configs(spec: &str) -> Result<Vec<PqConfig>, Box<dyn core::error::Error>> {
     let mut configs = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();
@@ -137,7 +143,7 @@ pub(super) fn parse_pq_configs(spec: &str) -> Result<Vec<PqConfig>, Box<dyn std:
     Ok(configs)
 }
 
-pub(super) fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+pub(super) fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

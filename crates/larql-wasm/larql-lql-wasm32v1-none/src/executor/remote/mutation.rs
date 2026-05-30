@@ -6,7 +6,14 @@ use crate::error::LqlError;
 use crate::executor::{Backend, Session};
 
 use super::{require_layer_feature, ENDPOINT_INSERT, ENDPOINT_PATCHES_APPLY};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Default `confidence` for INSERT/UPDATE when the user doesn't
 /// pass one. 0.9 lands well above the retrieval floor without
 /// dominating template-matched siblings.
@@ -252,7 +259,6 @@ mod tests {
 
     use super::super::ENDPOINT_STATS;
     use crate::ast::{Assignment, CompareOp, Condition, Value};
-
     fn stats_body() -> String {
         serde_json::json!({
             "model": "test-model",

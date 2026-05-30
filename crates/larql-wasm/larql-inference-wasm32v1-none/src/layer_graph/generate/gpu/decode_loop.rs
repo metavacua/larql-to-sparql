@@ -15,7 +15,14 @@ use crate::layer_graph::generate::sampling::Sampler;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 use larql_compute::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Aggregated output of the decode-loop phase.
 pub(super) struct DecodeLoopOutcome {
     /// `(text, prob)` per generated token (excluding the first, which the

@@ -26,7 +26,14 @@ use serde_json::Value;
 
 use super::render::render_chat_template;
 use super::ChatWrap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Resolve and render the HF-published template from the vindex.
 ///
 /// Returns:
@@ -138,7 +145,6 @@ pub(super) fn extract_chat_template_field(cfg: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn extract_prefers_default_in_array_form() {
         let cfg: Value = serde_json::from_str(

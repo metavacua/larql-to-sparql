@@ -6,7 +6,14 @@
 //! Reference: [`WeightFfn`] + [`SparseFfn`] live here for correctness/bench
 //! comparison (see `examples/walk_correctness.rs`); they are not used in
 //! production dispatch.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod graph_backend;
 pub mod moe_remote;
 pub mod remote;

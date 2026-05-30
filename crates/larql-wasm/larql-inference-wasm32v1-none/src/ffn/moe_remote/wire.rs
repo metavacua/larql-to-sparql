@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Binary wire format ────────────────────────────────────────────────────────
 //
 // Content-Type: application/x-larql-expert
@@ -384,7 +391,6 @@ pub struct ExpertResultItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn layer_batch_request_roundtrips() {
         let residual = vec![1.0, -2.0, 3.5];

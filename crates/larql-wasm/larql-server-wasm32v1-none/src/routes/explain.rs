@@ -1,7 +1,5 @@
 //! POST /v1/explain-infer — walk inference with per-layer feature trace.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::Deserialize;
@@ -9,7 +7,14 @@ use serde::Deserialize;
 use crate::band_utils::{get_layer_bands, BAND_KNOWLEDGE, BAND_OUTPUT, BAND_SYNTAX};
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct ExplainRequest {
     pub prompt: String,
@@ -155,7 +160,7 @@ fn explain_infer(
 
     // Build attention lookup: layer → top attended tokens
     let attention_map: std::collections::HashMap<usize, Vec<(String, f32)>> = {
-        let mut map = std::collections::HashMap::new();
+        let mut map = HashMap::new();
         for cap in &attention_captures {
             let n_heads = cap.weights.heads.len();
             if n_heads == 0 || token_strs.is_empty() {
@@ -180,7 +185,7 @@ fn explain_infer(
                     Some((tok.trim().to_string(), w))
                 })
                 .collect();
-            pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
             pairs.truncate(3);
             map.insert(cap.layer, pairs);
         }
@@ -209,13 +214,13 @@ fn explain_infer(
                 let a_pos = a.gate_score > 0.0;
                 let b_pos = b.gate_score > 0.0;
                 match (a_pos, b_pos) {
-                    (true, false) => std::cmp::Ordering::Less,
-                    (false, true) => std::cmp::Ordering::Greater,
+                    (true, false) => core::cmp::Ordering::Less,
+                    (false, true) => core::cmp::Ordering::Greater,
                     _ => b
                         .gate_score
                         .abs()
                         .partial_cmp(&a.gate_score.abs())
-                        .unwrap_or(std::cmp::Ordering::Equal),
+                        .unwrap_or(core::cmp::Ordering::Equal),
                 }
             });
             lh
@@ -338,7 +343,6 @@ pub async fn handle_explain_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn explain_defaults_match_api_contract() {
         assert_eq!(default_top(), 5);

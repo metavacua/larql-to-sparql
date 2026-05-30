@@ -1,14 +1,19 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
-use std::collections::HashSet;
-
 use larql_compute::prelude::*;
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 
 use super::eos::EosConfig;
 use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const SUPPRESSED_TOKEN_CANDIDATE_TOPK: usize = 256;
 const DEBUG_SUPPRESS_PROBE_IDS: &[u32] = &[5, 31, 4, 168, 184];
 const ENV_DEBUG_TOKEN_IDS: &str = "LARQL_DEBUG_TOKEN_IDS";

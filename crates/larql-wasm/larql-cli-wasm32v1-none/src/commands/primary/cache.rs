@@ -30,7 +30,14 @@
 
 use larql_vindex::format::filenames::*;
 use std::path::{Path, PathBuf};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Which cache an entry came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheSource {
@@ -68,7 +75,7 @@ pub struct CachedVindex {
 
 /// Return the HF hub cache root (`~/.cache/huggingface/hub/` by default,
 /// honoring `HF_HOME`).
-pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
     if let Ok(h) = std::env::var("HF_HOME") {
         return Ok(PathBuf::from(h).join("hub"));
     }
@@ -81,7 +88,7 @@ pub fn hf_hub_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// Return the LARQL local cache root (`~/.cache/larql/local/` by default,
 /// honoring `LARQL_HOME` which should point at a dir that will hold the
 /// `local/` subdir).
-pub fn larql_local_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn larql_local_dir() -> Result<PathBuf, Box<dyn core::error::Error>> {
     if let Ok(h) = std::env::var("LARQL_HOME") {
         return Ok(PathBuf::from(h).join("local"));
     }
@@ -94,7 +101,7 @@ pub fn larql_local_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// Scan both caches for every cached vindex. Sorted by `(source, repo)`
 /// — local entries come first, then HF entries alphabetically within
 /// each group.
-pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
+pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
     let hub = hf_hub_dir()?;
     let local = larql_local_dir()?;
     scan_cached_vindexes_at_both(&hub, &local)
@@ -105,7 +112,7 @@ pub fn scan_cached_vindexes() -> Result<Vec<CachedVindex>, Box<dyn std::error::E
 pub fn scan_cached_vindexes_at_both(
     hub: &Path,
     local: &Path,
-) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
     let mut out = scan_hf_hub_at(hub)?;
     out.extend(scan_local_at(local)?);
     out.sort_by(|a, b| (a.source as u8, a.repo.as_str()).cmp(&(b.source as u8, b.repo.as_str())));
@@ -113,7 +120,7 @@ pub fn scan_cached_vindexes_at_both(
 }
 
 /// Scan the HuggingFace hub cache only.
-pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
+pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
     if !hub.exists() {
         return Ok(Vec::new());
     }
@@ -157,7 +164,7 @@ pub fn scan_hf_hub_at(hub: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::erro
 /// Scan the LARQL local cache only. Each entry is a directory (or
 /// symlink to one) under `local/` whose name ends in `.vindex` and which
 /// contains an `index.json`.
-pub fn scan_local_at(local: &Path) -> Result<Vec<CachedVindex>, Box<dyn std::error::Error>> {
+pub fn scan_local_at(local: &Path) -> Result<Vec<CachedVindex>, Box<dyn core::error::Error>> {
     if !local.exists() {
         return Ok(Vec::new());
     }
@@ -211,7 +218,7 @@ fn shorthand_key(repo: &str) -> &str {
 pub fn resolve_shorthand_from(
     name: &str,
     cache: &[CachedVindex],
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<PathBuf, Box<dyn core::error::Error>> {
     let matches: Vec<_> = cache
         .iter()
         .filter(|c| shorthand_key(&c.repo) == name)
@@ -245,7 +252,7 @@ pub fn resolve_shorthand_from(
 /// See the module docstring for the precedence order. Plain-name lookups
 /// that match multiple cached repos return an error listing the matches so
 /// the user can pick one.
-pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn core::error::Error>> {
     // 1. hf:// URI — defer to the vindex crate. Downloads if not cached.
     if model.starts_with("hf://") {
         return Ok(larql_vindex::resolve_hf_vindex(model)?);
@@ -277,7 +284,7 @@ pub fn resolve_model(model: &str) -> Result<PathBuf, Box<dyn std::error::Error>>
 /// Match a plain name against the cache. The match is on the `name` half
 /// of `owner/name`, e.g. `gemma-3-4b-it-vindex` matches
 /// `chrishayuk/gemma-3-4b-it-vindex`.
-pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn core::error::Error>> {
     let cache = scan_cached_vindexes()?;
     resolve_shorthand_from(name, &cache)
 }
@@ -285,7 +292,7 @@ pub fn resolve_shorthand(name: &str) -> Result<PathBuf, Box<dyn std::error::Erro
 /// Resolve a user-supplied string to a single `CachedVindex` entry —
 /// never touches the network. Used by `rm` where we explicitly don't want
 /// to download something in order to delete it.
-pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn std::error::Error>> {
+pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn core::error::Error>> {
     let cache = scan_cached_vindexes()?;
     resolve_cached_from(model, &cache)
 }
@@ -294,7 +301,7 @@ pub fn resolve_cached(model: &str) -> Result<CachedVindex, Box<dyn std::error::E
 pub fn resolve_cached_from(
     model: &str,
     cache: &[CachedVindex],
-) -> Result<CachedVindex, Box<dyn std::error::Error>> {
+) -> Result<CachedVindex, Box<dyn core::error::Error>> {
     let key = model.strip_prefix("hf://").unwrap_or(model);
 
     // Full owner/name match (HF entries only have this form).
@@ -345,7 +352,6 @@ pub fn dir_size_bytes(path: &Path) -> std::io::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Build a fake HF hub layout under `root` with the given
     /// `owner/name` entries. Each entry gets one snapshot containing
     /// `index.json` plus a small `stub.bin` so size calculations have

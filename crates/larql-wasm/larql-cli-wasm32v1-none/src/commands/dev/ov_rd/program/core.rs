@@ -7,7 +7,14 @@ use super::context::PositionContext;
 use super::metrics::{BehaviorMetrics, ProgramSize, TerminalClass};
 use super::rule::ProgramRule;
 use super::stage::{ProgramStage, MAX_FIXED_POINT_ITERS};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub head: HeadId,

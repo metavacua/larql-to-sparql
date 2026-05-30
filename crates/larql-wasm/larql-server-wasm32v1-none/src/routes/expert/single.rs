@@ -1,7 +1,5 @@
 //! `POST /v1/expert/{layer}/{expert_id}` — single expert dispatch.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::Json;
 
@@ -9,7 +7,14 @@ use crate::error::ServerError;
 use crate::state::AppState;
 
 use super::{SingleExpertRequest, SingleExpertResponse};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run one expert's gate/up/down compute on the given residual. Used by both
 /// the HTTP handler below and the gRPC expert path in `grpc_expert.rs`.
 ///

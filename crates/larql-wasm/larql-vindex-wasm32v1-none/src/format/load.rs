@@ -1,6 +1,5 @@
 //! Binary loading path for .vindex directories.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -9,6 +8,14 @@ use ndarray::Array2;
 use crate::config::VindexConfig;
 use crate::error::VindexError;
 use crate::format::filenames::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DOWN_META_BIN, DOWN_META_JSONL, EMBEDDINGS_BIN, GATE_VECTORS_BIN, INDEX_JSON,
     INTERLEAVED_Q4K_BIN, INTERLEAVED_Q4K_MANIFEST_JSON, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
     TOKENIZER_JSON,
@@ -141,7 +148,7 @@ impl VectorIndex {
         let down_meta_mmap = if has_binary_down_meta {
             let tokenizer = load_vindex_tokenizer(dir)?;
             callbacks.on_file_start("down_meta", &dir.join(DOWN_META_BIN).display().to_string());
-            let tok = std::sync::Arc::new(tokenizer);
+            let tok = alloc::sync::Arc::new(tokenizer);
             let dm = crate::format::down_meta::mmap_binary(dir, tok)?;
             let count = dm.total_features();
             callbacks.on_file_done("down_meta", count, start.elapsed().as_secs_f64() * 1000.0);
@@ -228,7 +235,7 @@ impl VectorIndex {
                         if index.vocab_size == 0 {
                             index.vocab_size = config.vocab_size;
                         }
-                        index.set_lm_head_f16_mmap(std::sync::Arc::new(mmap));
+                        index.set_lm_head_f16_mmap(alloc::sync::Arc::new(mmap));
                         index.synthesize_lm_head_q4();
                     }
                 }
@@ -450,7 +457,6 @@ pub fn load_feature_labels(path: &Path) -> Result<HashMap<(usize, usize), String
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
     // ── helpers ─────────────────────────────────────────────────────────
 
     /// Write a minimal valid index.json into `dir`.

@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn log_softmax(logits: &[f32]) -> Vec<f64> {
     let max_logit = logits
         .iter()
@@ -104,7 +112,7 @@ pub(super) fn argmax(values: &[f32]) -> u32 {
     values
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(idx, _)| idx as u32)
         .unwrap_or(0)
 }
@@ -113,10 +121,10 @@ pub(super) fn top_k_indices(values: &[f32], k: usize) -> Vec<u32> {
     let mut pairs: Vec<(usize, f32)> = values.iter().copied().enumerate().collect();
     let take = k.min(pairs.len());
     pairs.select_nth_unstable_by(take.saturating_sub(1), |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal)
     });
     pairs.truncate(take);
-    pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     pairs.into_iter().map(|(idx, _)| idx as u32).collect()
 }
 
@@ -148,7 +156,7 @@ pub(super) fn percentile(mut values: Vec<f64>, p: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let rank = ((values.len() - 1) as f64 * p).ceil() as usize;
     values[rank.min(values.len() - 1)]
 }

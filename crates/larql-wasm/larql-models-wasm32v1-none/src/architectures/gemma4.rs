@@ -16,7 +16,17 @@
 //! 3. Default pattern of 6 (every 6th layer is full)
 
 use crate::config::{Activation, ExpertFormat, ModelArchitecture, ModelConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Layer type string used in Gemma 4 `layer_types` config field.
 const LAYER_TYPE_FULL: &str = "full_attention";
 /// Default sliding-window period when not explicit in config.

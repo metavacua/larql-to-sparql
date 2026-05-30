@@ -18,7 +18,17 @@
 
 use super::fp4;
 use super::fp8;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Block geometry (v1 of the LARQL FP4 format).
 pub const BLOCK_ELEMENTS: usize = 256;
 pub const SUB_BLOCK_ELEMENTS: usize = 32;
@@ -445,6 +455,7 @@ mod tests {
     fn fp8_block_small_magnitude_like_ffn_down() {
         // Synthetic distribution in the range of actual Gemma 3 4B down
         // features: block_max ≈ 0.04, typical values ≈ 0.01–0.04.
+#[cfg(not(target_arch = "wasm32"))]
         use std::f32::consts::TAU;
         let values: Vec<f32> = (0..256)
             .map(|i| {
@@ -569,6 +580,7 @@ mod tests {
     /// well inside the walk kernel's BLAS-1 saxpy tolerance.
     #[test]
     fn fp4_block_typical_4b_distribution() {
+#[cfg(not(target_arch = "wasm32"))]
         use std::f32::consts::TAU;
         // Synthesize a block with per-sub-block max/min ratio ≈ 3.
         // Each sub-block is a 32-element vector with its own characteristic

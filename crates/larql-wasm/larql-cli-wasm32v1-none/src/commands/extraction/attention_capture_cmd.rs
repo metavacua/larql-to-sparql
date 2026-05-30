@@ -2,7 +2,14 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_inference::{trace_forward_full, InferenceModel, WeightFfn};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct AttentionCaptureArgs {
     /// Model path or HuggingFace model ID.
@@ -26,7 +33,7 @@ pub struct AttentionCaptureArgs {
     verbose: bool,
 }
 
-pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: AttentionCaptureArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -305,7 +312,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

@@ -2,7 +2,14 @@
 //!
 //! `pub(super)` keeps these module-private — `cpu_moe_forward` and the
 //! per-expert helpers share them, nothing outside `moe/` should.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Dequantize a BF16 byte slice to f32.
 #[inline]
 pub(super) fn bf16_to_f32(bytes: &[u8]) -> Vec<f32> {
@@ -134,7 +141,7 @@ pub(super) fn softmax(v: &mut [f32]) {
 pub(super) fn top_k(v: &[f32], k: usize) -> (Vec<usize>, Vec<f32>) {
     let k = k.min(v.len());
     let mut indexed: Vec<(usize, f32)> = v.iter().copied().enumerate().collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     indexed.truncate(k);
     let indices: Vec<usize> = indexed.iter().map(|(i, _)| *i).collect();
     let values: Vec<f32> = indexed.iter().map(|(_, v)| *v).collect();

@@ -9,7 +9,14 @@
 //! - `repo`        — `repo_exists` / `dataset_repo_exists` HEAD probes.
 //! - `mod` (here)  — `CollectionItem` type + `ensure_collection` orchestrator.
 //! - `test_support` (cfg(test)) — shared test fixtures.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod collection;
 mod repo;
 #[cfg(test)]
@@ -63,7 +70,6 @@ mod tests {
     use super::test_support::TestEnvGuard;
     use super::*;
     use serial_test::serial;
-
     #[test]
     fn test_is_hf_path() {
         assert!(is_hf_path("hf://chrishayuk/gemma-3-4b-it-vindex"));

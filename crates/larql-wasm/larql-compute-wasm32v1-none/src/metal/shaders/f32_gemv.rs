@@ -10,7 +10,14 @@
 //! simdgroup-per-row pattern gets ~4× over the 32×32 tiled sgemm at M=1
 //! (which wastes 31/32 of its threads and leaves accumulation precision
 //! different enough to shift argmax on noisy logits).
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub const SHADER: &str = r#"
 constant uint F32GEMV_SG_PER_TG = 8;   // simdgroups per threadgroup
 constant uint F32GEMV_ROWS_PER_TG = F32GEMV_SG_PER_TG; // one row per simdgroup

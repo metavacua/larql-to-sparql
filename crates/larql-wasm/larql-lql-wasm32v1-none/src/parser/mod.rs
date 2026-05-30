@@ -1,5 +1,12 @@
 //! LQL Parser — recursive descent from token stream to AST.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod helpers;
 mod introspection;
 mod lifecycle;
@@ -22,13 +29,13 @@ pub struct Parser {
 #[derive(Debug, Clone)]
 pub struct ParseError(pub String);
 
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "Parse error: {}", self.0)
     }
 }
 
-impl std::error::Error for ParseError {}
+impl core::error::Error for ParseError {}
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
@@ -91,7 +98,7 @@ impl Parser {
 }
 
 /// Convenience: parse a string directly into a Statement.
-pub fn parse(input: &str) -> Result<Statement, Box<dyn std::error::Error>> {
+pub fn parse(input: &str) -> Result<Statement, Box<dyn core::error::Error>> {
     let mut lexer = crate::lexer::Lexer::new(input);
     let tokens = lexer.tokenise()?;
     let mut parser = Parser::new(tokens);

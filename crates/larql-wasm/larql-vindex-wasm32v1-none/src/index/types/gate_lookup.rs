@@ -3,7 +3,14 @@
 use ndarray::{Array1, Array2};
 
 use super::FeatureMeta;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Gate KNN and feature metadata lookup.
 ///
 /// This is the minimal read-only surface needed by graph browsing and
@@ -58,7 +65,7 @@ pub trait GateLookup: Send + Sync {
 
     fn gate_knn_batch(&self, layer: usize, x: &Array2<f32>, top_k: usize) -> Vec<usize> {
         let seq_len = x.shape()[0];
-        let mut all = std::collections::BTreeSet::new();
+        let mut all = alloc::collections::BTreeSet::new();
         for s in 0..seq_len {
             let row = x.row(s).to_owned();
             for (feat, _) in self.gate_knn(layer, &row, top_k) {
@@ -73,7 +80,6 @@ pub trait GateLookup: Send + Sync {
 mod tests {
     use super::*;
     use larql_models::TopKEntry;
-
     /// Minimal stub returning fixed feature IDs per (layer, row).
     /// Lets us exercise the default-method bodies on `GateLookup`.
     struct StubGate {

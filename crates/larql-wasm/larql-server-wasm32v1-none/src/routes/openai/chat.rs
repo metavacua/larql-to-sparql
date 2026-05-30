@@ -50,8 +50,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use std::sync::Arc;
+use core::convert::Infallible;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
 
@@ -61,7 +60,14 @@ use crate::state::{AppState, LoadedModel};
 
 use super::schema::{ObjectSchema, Schema};
 use super::util::{contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const CHAT_COMPLETION_OBJECT: &str = "chat.completion";
 const CHAT_COMPLETION_CHUNK_OBJECT: &str = "chat.completion.chunk";
 const ASSISTANT_ROLE: &str = "assistant";
@@ -502,9 +508,9 @@ fn stream_chat_completion(
         let model_id_cb = model_id.clone();
         let tx_cb = tx.clone();
         let stop_strings_cb = stop_strings.clone();
-        let early_stop = std::rc::Rc::new(std::cell::Cell::new(false));
+        let early_stop = alloc::rc::Rc::new(core::cell::Cell::new(false));
         let early_stop_cb = early_stop.clone();
-        let buffered_text = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let buffered_text = alloc::rc::Rc::new(core::cell::RefCell::new(String::new()));
         let buffered_text_cb = buffered_text.clone();
         let on_token = move |_id: u32, text: &str, _prob: f64| {
             if early_stop_cb.get() {
@@ -1077,7 +1083,7 @@ fn schema_for_response_format(
 fn resolve_eos_token_ids(
     tokenizer: &larql_inference::tokenizers::Tokenizer,
 ) -> std::collections::HashSet<u32> {
-    let mut ids = std::collections::HashSet::new();
+    let mut ids = HashSet::new();
     for tok in [
         "<end_of_turn>",
         "<|end_of_turn|>",
@@ -1107,14 +1113,13 @@ fn build_constrained_mask(
 ) -> impl FnMut(&[u32], &mut Vec<f32>) {
     let eos_ids = resolve_eos_token_ids(tokenizer);
     let tk: std::sync::Arc<larql_inference::tokenizers::Tokenizer> =
-        std::sync::Arc::new(tokenizer.clone());
+        alloc::sync::Arc::new(tokenizer.clone());
     super::schema::build_mask(tk, super::schema::Fsm::new(schema), String::new(), eos_ids)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // Multi-turn template rendering is tested in
     // `larql_inference::prompt::render_messages_tests` (Gemma, ChatML,
     // Llama, Mistral, Plain). This handler only marshals JSON to the

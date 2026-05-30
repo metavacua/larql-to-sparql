@@ -8,6 +8,14 @@ use crate::forward::{apply_norm, embed_tokens_pub};
 use crate::layer_graph::generate::detok::Detokenizer;
 use crate::layer_graph::generate::eos::EosConfig;
 use crate::layer_graph::generate::policy::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
 };
 use larql_compute::prelude::*;
@@ -284,7 +292,7 @@ pub fn generate_with_remote_moe(
             // because both closures capture them and can't both have unique
             // mut borrows.  Closures are still called strictly sequentially
             // by the metal decode loop so RefCell never panics in practice.
-            use std::cell::RefCell;
+            use core::cell::RefCell;
             let inflight: RefCell<Option<(InflightMoe, std::time::Instant)>> = RefCell::new(None);
             let step_err_cell: RefCell<Option<RemoteMoeError>> = RefCell::new(None);
             let tok_timings_cell: RefCell<Vec<LayerTiming>> = RefCell::new(Vec::new());

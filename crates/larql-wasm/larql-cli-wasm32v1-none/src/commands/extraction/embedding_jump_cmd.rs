@@ -3,7 +3,14 @@ use std::time::Instant;
 
 use clap::Args;
 use larql_inference::{forward_to_layer, predict, predict_from_hidden, InferenceModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// End-to-end proof: raw token embeddings → L13 → L14-33 dense → prediction.
 /// Zero layers for L0-13. Just an embedding lookup + a learned projection.
 #[derive(Args)]
@@ -49,7 +56,7 @@ pub struct EmbeddingJumpArgs {
     source_layers: usize,
 }
 
-pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: EmbeddingJumpArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;

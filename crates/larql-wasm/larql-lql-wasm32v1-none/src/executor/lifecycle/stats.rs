@@ -3,7 +3,14 @@
 use crate::error::LqlError;
 use crate::executor::helpers::{dir_size, format_bytes, format_number};
 use crate::executor::{Backend, Session};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Session {
     pub(crate) fn exec_stats(&self, _vindex_path: Option<&str>) -> Result<Vec<String>, LqlError> {
         match &self.backend {
@@ -50,7 +57,7 @@ impl Session {
                     // Count probe-confirmed relation types
                     // (unique labels among probe labels)
                     let probe_type_count = if num_probes > 0 {
-                        let mut types = std::collections::HashSet::new();
+                        let mut types = HashSet::new();
                         // We can approximate by scanning loaded layers
                         let layers = index.loaded_layers();
                         for layer in &layers {

@@ -2,13 +2,20 @@
 
 use super::memit_persist::save_memit_store;
 use super::tuning::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     canonical_prompt, MEMIT_COMPACT_LAMBDA as DEFAULT_MEMIT_LAMBDA,
     MEMIT_MIN_RECONSTRUCTION_COS as MIN_RECONSTRUCTION_COS,
 };
 use super::Session;
 use crate::ast::InsertMode;
 use crate::error::LqlError;
-
 impl Session {
     /// `COMPACT MINOR` — promote L0 (KNN) entries to L1 (arch-A compose edges).
     pub(crate) fn exec_compact_minor(&mut self) -> Result<Vec<String>, LqlError> {
@@ -230,7 +237,7 @@ impl Session {
                 if let Some((_, residual)) = residuals.iter().find(|(l, _)| *l == *layer) {
                     keys_vec.extend_from_slice(residual);
                 } else {
-                    keys_vec.extend(std::iter::repeat_n(0.0f32, hidden_dim));
+                    keys_vec.extend(core::iter::repeat_n(0.0f32, hidden_dim));
                 }
 
                 // Target embedding

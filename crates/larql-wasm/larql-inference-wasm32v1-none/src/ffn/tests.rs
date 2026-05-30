@@ -5,7 +5,6 @@
 
 use crate::ffn::*;
 use ndarray::Array2;
-
 /// SiLU-gated FFN for testing (no architecture dispatch needed for unit tests).
 fn silu_ffn_forward(
     x: &Array2<f32>,

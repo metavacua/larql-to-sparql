@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_vindex::VectorIndex;
 use ndarray::s;
@@ -8,7 +7,14 @@ use super::pq::{ModeDTable, PqCodebook};
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn corruption_keep_values(groups: usize) -> Vec<usize> {
     [0usize, 4, 8, 12, 16, 24, 32, 40, groups]
         .into_iter()
@@ -25,7 +31,7 @@ pub(super) fn materialize_mode_d_tables(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     stratum_conditioned_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), ModeDTable>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), ModeDTable>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

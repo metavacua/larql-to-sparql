@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // FitContext / PromptCapture carry diagnostic fields (config,
 // codebook_fingerprint, num_codes helper) accumulated for a future
 // debug dump; suppress until the viewer is wired.
@@ -5,7 +13,6 @@
 
 use super::super::pq::ModeDTable;
 use super::super::types::{HeadId, PqConfig};
-
 /// Boxed Metal compute backend — `None` when Metal is not available or not requested.
 pub type MetalBackendOpt = Option<Box<dyn larql_compute::ComputeBackend + Send + Sync>>;
 

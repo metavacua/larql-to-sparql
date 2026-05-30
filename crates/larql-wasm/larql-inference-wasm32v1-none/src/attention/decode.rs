@@ -13,7 +13,14 @@ use ndarray::Array2;
 
 use super::rope::apply_rope_partial_at;
 use super::SharedKV;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-layer K/V cache. Can grow unbounded or be clamped to a fixed
 /// sliding window (Markov-residual-bounded strategy — keep the last W
 /// positions' K/V, evict older). When bounded, attention becomes
@@ -434,7 +441,6 @@ mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     // ── KvCache ───────────────────────────────────────────────────────────────
 
     #[test]

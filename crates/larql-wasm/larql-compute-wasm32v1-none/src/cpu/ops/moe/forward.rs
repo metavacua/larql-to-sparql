@@ -10,6 +10,14 @@ use super::cache::try_cached_dequant;
 use super::expert::{run_single_expert_q4k_q8k_into, ExpertScratch};
 use super::math::{gelu_tanh, matmul_vec, silu, softmax};
 use super::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     moe_expert_input, moe_post_expert_output, moe_route_from_router_input, moe_router_input,
 };
 use crate::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
@@ -65,9 +73,9 @@ pub fn cpu_moe_forward(
     };
 
     // Debug: print routing per layer if MOE_DEBUG=1
-    static DEBUG_LAYER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static DEBUG_LAYER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
     if let Some(logits) = debug_logits.as_ref() {
-        let layer_n = DEBUG_LAYER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 30;
+        let layer_n = DEBUG_LAYER.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 30;
         let h_rms = (h.iter().map(|v| v * v).sum::<f32>() / h.len() as f32).sqrt();
         let hn_rms =
             (expert_input.iter().map(|v| v * v).sum::<f32>() / expert_input.len() as f32).sqrt();
@@ -135,8 +143,8 @@ pub fn cpu_moe_forward(
     // call × K=8 × 30 layers = 1200 allocs/token, with occasional 150 µs
     // spikes from the allocator's slow path that drag par_iter wall up).
     thread_local! {
-        static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
-            const { std::cell::RefCell::new(None) };
+        static SCRATCH: core::cell::RefCell<Option<ExpertScratch>> =
+            const { core::cell::RefCell::new(None) };
     }
 
     use rayon::prelude::*;
@@ -273,7 +281,6 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
-
     fn bf16_fill(len: usize, val: f32) -> Vec<u8> {
         let b = ((val.to_bits() >> 16) as u16).to_le_bytes();
         let mut bytes = vec![0u8; len * 2];

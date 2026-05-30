@@ -13,7 +13,17 @@
 //! Byte packing convention: `byte[i] = (v[2i+1] << 4) | (v[2i] & 0x0F)`
 //! — lower nibble holds the even-indexed element. This matches the
 //! LARQL format spec §5.1.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// FP4 E2M1 value lookup. Index 0..15 maps the 4-bit encoding to f32.
 /// Must remain byte-identical to `mxfp4::MXFP4_TABLE`.
 pub const FP4_E2M1_TABLE: [f32; 16] = [

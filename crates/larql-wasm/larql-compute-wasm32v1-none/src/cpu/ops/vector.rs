@@ -33,7 +33,6 @@ pub fn cosine(a: &ArrayView1<f32>, b: &ArrayView1<f32>) -> f32 {
 mod tests {
     use super::*;
     use ndarray::Array1;
-
     #[test]
     fn dot_basic() {
         let a = Array1::from_vec(vec![1.0, 2.0, 3.0]);

@@ -7,6 +7,14 @@ use crate::forward::apply_norm;
 use crate::layer_graph::generate::detok::Detokenizer;
 use crate::layer_graph::generate::eos::EosConfig;
 use crate::layer_graph::generate::policy::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
 };
 use crate::residual::rms_norm;
@@ -14,7 +22,6 @@ use larql_compute::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
 use larql_compute::prelude::*;
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
-
 /// Autoregressive generation with Metal GPU attention and remote dense FFN.
 ///
 /// For dense models (not MoE) where the entire FFN should be offloaded to a
@@ -102,7 +109,7 @@ pub fn generate_with_remote_ffn(
         let tok_embed = crate::forward::embed_tokens_pub(weights, &[next_input_id]);
         let x_tok: Vec<f32> = tok_embed.as_slice().unwrap_or(&[]).to_vec();
 
-        let step_ffn_cell = std::cell::Cell::new(0.0f64);
+        let step_ffn_cell = core::cell::Cell::new(0.0f64);
         let mut moe_fn = |layer: usize, h_post_attn: &[f32]| -> Vec<f32> {
             let t_ffn = std::time::Instant::now();
             let result = if hidden % crate::ffn::Q4K_Q8K_SUPERBLOCK_ELEMS == 0 {

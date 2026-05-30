@@ -8,7 +8,19 @@
 //! - This file owns [`ModelError`] and the public entry points, including
 //!   the family-routing dispatch that maps `model_type` → concrete
 //!   [`ModelArchitecture`].
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::architectures::deepseek::DeepSeekArch;
@@ -27,50 +39,16 @@ use crate::architectures::qwen::QwenArch;
 use crate::architectures::starcoder2::StarCoder2Arch;
 use crate::architectures::tinymodel::TinyModelArch;
 use crate::config::ModelArchitecture;
-use crate::validation::ConfigValidationError;
-
 mod config_io;
 mod parser;
 
-use config_io::{
-    config_path, read_config_json, require_config_fields, CONFIG_FILE_NAME, CONFIG_KEY_TEXT_CONFIG,
-};
+use config_io::{config_path, read_config_json, require_config_fields};
 use parser::parse_model_config;
 
-/// Error from model detection/config parsing.
-#[derive(Debug, thiserror::Error)]
-pub enum ModelError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("JSON parse error: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("parse error: {0}")]
-    Parse(String),
-    #[error("unsupported dtype: {0}")]
-    UnsupportedDtype(String),
-    #[error("missing tensor: {0}")]
-    MissingTensor(String),
-    #[error("not a directory: {0}")]
-    NotADirectory(std::path::PathBuf),
-    #[error("no safetensors files in {0}")]
-    NoSafetensors(std::path::PathBuf),
-    #[error("config validation failed: {0:?}")]
-    ConfigValidation(Vec<ConfigValidationError>),
-    #[error(
-        "{CONFIG_FILE_NAME} not found at {0:?} — \
-         architecture cannot be inferred from safetensors alone; \
-         copy {CONFIG_FILE_NAME} from the source model into this directory"
-    )]
-    ConfigMissing(std::path::PathBuf),
-    #[error(
-        "{CONFIG_FILE_NAME} at {path:?} is missing required field(s): {missing:?} \
-         (checked under top level and `{CONFIG_KEY_TEXT_CONFIG}`)"
-    )]
-    ConfigFieldsMissing {
-        path: std::path::PathBuf,
-        missing: Vec<&'static str>,
-    },
-}
+// `ModelError` now lives in the portable `crate::error` module so quant/dequant
+// (which is target-agnostic) can return it. Re-exported here for callers that
+// reference `detect::ModelError`.
+pub use crate::error::ModelError;
 
 /// Read `config.json` from a model directory and return the architecture.
 ///

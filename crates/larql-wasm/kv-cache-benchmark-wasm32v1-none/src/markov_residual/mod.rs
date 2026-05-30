@@ -1,9 +1,16 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod checkpoint;
 pub mod cold_tier;
 pub mod window;
 
 use crate::{model_config::ModelConfig, KvStrategy};
-
 /// Strategy 3: Markov Residual Stream.
 ///
 /// Eliminates the KV cache entirely. Stores:

@@ -1,14 +1,19 @@
 //! GET /v1/walk — feature scan for a prompt.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Deserialize, utoipa::IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct WalkParams {

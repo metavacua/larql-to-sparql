@@ -1,10 +1,17 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Args, ValueEnum};
 use larql_inference::{encode_prompt, hidden_to_raw_logits};
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -15,7 +22,6 @@ use super::reports::{
     CaptureReport, ZeroAblationReport, ZeroHeadReport, ZeroPromptReport, ZeroStratumReport,
 };
 use super::types::HeadId;
-
 #[derive(Args)]
 pub(super) struct ZeroAblateArgs {
     /// Self-contained Q4K vindex directory.
@@ -96,7 +102,7 @@ impl ZeroHeadAccumulator {
         let top5_contains_baseline_top1 =
             bool_rate(self.prompts.iter().map(|p| p.baseline_top1_in_ablated_top5));
         let mut worst_examples = self.prompts.clone();
-        worst_examples.sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(std::cmp::Ordering::Equal));
+        worst_examples.sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(core::cmp::Ordering::Equal));
         worst_examples.truncate(10);
 
         let mut strata: Vec<_> = self
@@ -142,7 +148,7 @@ impl ZeroHeadAccumulator {
     }
 }
 
-pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -245,7 +251,7 @@ pub(super) fn run_zero_ablate(args: ZeroAblateArgs) -> Result<(), Box<dyn std::e
 
 fn select_zero_ablation_heads(
     args: &ZeroAblateArgs,
-) -> Result<Vec<HeadId>, Box<dyn std::error::Error>> {
+) -> Result<Vec<HeadId>, Box<dyn core::error::Error>> {
     let mut heads = if let Some(spec) = &args.heads {
         parse_head_spec(spec)?
     } else {
@@ -259,7 +265,7 @@ fn select_zero_ablation_heads(
         candidates.sort_by(|a, b| {
             stage0_rank_score(b, args.stage0_rank)
                 .partial_cmp(&stage0_rank_score(a, args.stage0_rank))
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
         });
         candidates
             .into_iter()
@@ -292,7 +298,7 @@ pub(super) fn forward_q4k_zero_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_zeroed_pre_o_heads(
         weights,
         token_ids,

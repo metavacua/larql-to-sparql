@@ -3,7 +3,14 @@
 use crate::config::types::QuantFormat;
 use crate::error::VindexError;
 use crate::extract::streaming::context::StreamingContext;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl<'a> StreamingContext<'a> {
     /// Stage 6 — model weights (if extract level requires them).
     ///

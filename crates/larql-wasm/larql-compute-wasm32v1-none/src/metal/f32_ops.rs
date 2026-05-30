@@ -8,7 +8,14 @@ use ndarray::{Array2, ArrayView2};
 use std::ffi::c_void;
 
 use super::buffers::BufferCache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Dispatch parameters for f32 matmul.
 pub struct F32Ops {
     pub sgemm_pipeline: ComputePipelineState,

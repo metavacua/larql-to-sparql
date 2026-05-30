@@ -9,7 +9,14 @@ use crate::executor::memit_persist::load_memit_store;
 use crate::executor::{Backend, Session};
 use crate::relations::RelationClassifier;
 use larql_vindex::format::filenames::KNN_STORE_BIN;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Session {
     pub(crate) fn exec_extract(
         &mut self,
@@ -143,7 +150,6 @@ impl larql_vindex::IndexBuildCallbacks for LqlBuildCallbacks {
 mod tests {
     use super::*;
     use larql_vindex::IndexBuildCallbacks;
-
     #[test]
     fn build_callbacks_new_starts_empty() {
         let cb = LqlBuildCallbacks::new();

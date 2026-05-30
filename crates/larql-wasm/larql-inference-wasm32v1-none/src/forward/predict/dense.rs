@@ -9,15 +9,22 @@ use crate::attention::SharedKV;
 use crate::ffn::WeightFfn;
 use crate::model::ModelWeights;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Descending order on the probability field of `(index, prob)` pairs,
 /// with NaN probabilities treated as the smallest value so they never
 /// displace a real top-k hit. Used by every top-k selector in this file
 /// — a forward pass that produces the occasional NaN (bad quant, runaway
 /// softmax) still surfaces the real maximum instead of whatever NaN
 /// happened to land in the pivot.
-pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
+pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
     match (a.1.is_nan(), b.1.is_nan()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater, // NaN sorts after real in descending order
@@ -126,7 +133,7 @@ pub fn predict_with_temperature(
     let num_layers = weights.num_layers;
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
     for layer in 0..num_layers {
         let shared_kv = weights
             .arch
@@ -245,7 +252,6 @@ mod tests {
     use super::*;
     use crate::test_utils::TestFixtures;
     use ndarray::Array2;
-
     #[test]
     fn cmp_desc_nan_last_orders_descending_with_nan_last() {
         let mut v = [(0, 1.0f32), (1, 3.0), (2, f32::NAN), (3, 2.0)];

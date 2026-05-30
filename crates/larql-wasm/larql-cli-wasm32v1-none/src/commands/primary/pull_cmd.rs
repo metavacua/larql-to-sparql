@@ -22,7 +22,14 @@ use std::path::PathBuf;
 
 use clap::Args;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Default sibling presets to probe / pull when the caller doesn't pass
 /// `--preset`. Matches the `publish` default set; the symmetry matters
 /// so `publish` and `pull` stay in lock-step.
@@ -70,7 +77,7 @@ pub struct PullArgs {
     pub output: Option<std::path::PathBuf>,
 }
 
-pub fn run(args: PullArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: PullArgs) -> Result<(), Box<dyn core::error::Error>> {
     if let Some(ref slug_or_url) = args.collection {
         return pull_collection(slug_or_url);
     }
@@ -113,7 +120,7 @@ fn render_sibling_repo(
     model: &str,
     preset: &str,
     template: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     let bare = model.trim_start_matches("hf://");
     if !looks_like_hf_repo(bare) {
         return Err(
@@ -166,7 +173,7 @@ fn download_with_indicatif(hf_path: &str) -> Result<PathBuf, larql_vindex::Vinde
 fn copy_dir_all(
     src: &std::path::Path,
     dst: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -186,7 +193,7 @@ fn pull_one(
     model: &str,
     print_siblings: bool,
     output: Option<&std::path::Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     // If --output is set and already populated, skip the download.
     if let Some(out) = output {
         if out.join("index.json").exists() {
@@ -235,7 +242,7 @@ fn pull_one(
 /// Pull every dataset item in an HF collection. A single-item failure
 /// logs a warning but doesn't abort — one unavailable sibling shouldn't
 /// fail the whole collection pull.
-fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Fetching collection: {slug_or_url}");
     let items = larql_vindex::fetch_collection_items(slug_or_url)?;
     let datasets: Vec<String> = items
@@ -279,7 +286,7 @@ fn pull_collection(slug_or_url: &str) -> Result<(), Box<dyn std::error::Error>> 
 
 /// Pull the full repo + every default sibling preset. Missing siblings
 /// log a warning; only the full repo is hard-required.
-fn pull_all_slices(model: &str, template: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn pull_all_slices(model: &str, template: &str) -> Result<(), Box<dyn core::error::Error>> {
     pull_one(model, /*print_siblings=*/ false, None)?;
     for preset in DEFAULT_SIBLING_PRESETS {
         let sibling = match render_sibling_repo(model, preset, template) {
@@ -347,7 +354,7 @@ fn split_sibling_suffix(bare: &str) -> (&str, Option<&'static str>) {
     (bare, None)
 }
 
-fn normalise_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn normalise_hf_path(model: &str) -> Result<String, Box<dyn core::error::Error>> {
     if model.starts_with("hf://") {
         return Ok(model.to_string());
     }
@@ -362,7 +369,6 @@ fn normalise_hf_path(model: &str) -> Result<String, Box<dyn std::error::Error>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn render_sibling_uses_default_template() {
         let got = render_sibling_repo(

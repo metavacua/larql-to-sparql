@@ -4,12 +4,17 @@
 //! knowledge layer, and record which features activate. This gives confirmed
 //! (entity, feature) mappings — ground truth for pair-based relation labeling.
 
-use std::collections::HashMap;
-
 use ndarray::Array1;
 
 use crate::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Result of probing: maps (layer, feature) → list of entity names that activate it.
 pub struct ProbeResult {
     /// (layer, feature) → entity names
@@ -105,7 +110,7 @@ pub fn probe_entities(
 
 /// Extract unique entity names from the reference triple files.
 pub fn extract_probe_entities(triples_path: &std::path::Path) -> Vec<String> {
-    let mut entities = std::collections::HashSet::new();
+    let mut entities = HashSet::new();
 
     if let Ok(text) = std::fs::read_to_string(triples_path) {
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {

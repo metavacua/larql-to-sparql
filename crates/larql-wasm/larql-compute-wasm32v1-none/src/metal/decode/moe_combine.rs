@@ -21,7 +21,14 @@
 
 use crate::cpu::ops::outer_combine::{apply_layer_scalar_in_place, outer_post_norm_residual};
 use crate::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Apply the outer post-FFN norm (when the arch declares one) followed by
 /// the whole-layer `layer_scalar` multiplication. Operates in place on
 /// `new_h`. Requires that `new_h` currently holds
@@ -50,9 +57,9 @@ pub(super) fn apply_outer_combine(
     // and the buffers are sized at allocation time, so the slice
     // length is correct by construction.
     let new_h_slice: &mut [f32] =
-        unsafe { std::slice::from_raw_parts_mut(new_h.contents() as *mut f32, hidden) };
+        unsafe { core::slice::from_raw_parts_mut(new_h.contents() as *mut f32, hidden) };
     let h_post_attn_slice: &[f32] =
-        unsafe { std::slice::from_raw_parts(h_post_attn.contents() as *const f32, hidden) };
+        unsafe { core::slice::from_raw_parts(h_post_attn.contents() as *const f32, hidden) };
 
     // Step A — outer post-FFN norm on `(h1 + h2)`, residual-added back.
     //

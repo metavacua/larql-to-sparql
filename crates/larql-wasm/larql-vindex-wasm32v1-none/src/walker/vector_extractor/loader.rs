@@ -8,7 +8,14 @@ use larql_models::{load_model_dir_validated, resolve_model_path, ModelWeights};
 
 use crate::error::VindexError;
 use crate::format::filenames::TOKENIZER_JSON;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A loaded model ready for vector extraction.
 pub struct VectorExtractor {
     pub(super) weights: ModelWeights,
@@ -54,7 +61,6 @@ impl VectorExtractor {
 mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
-
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_loader_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);

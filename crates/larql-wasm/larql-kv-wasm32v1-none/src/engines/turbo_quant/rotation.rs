@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Walsh-Hadamard Transform (WHT).
 ///
 /// The WHT is a fast orthogonal transform that converts coordinates to a
@@ -64,7 +72,6 @@ pub fn wht(x: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_wht_self_inverse() {
         let x: Vec<f32> = (0..128).map(|i| (i as f32 - 64.0) / 100.0).collect();

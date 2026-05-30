@@ -1,13 +1,19 @@
 //! AppState: loaded vindex + config, shared across all handlers.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::embed_store::EmbedStoreF16;
 
 use larql_models::ModelWeights;
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     format::filenames::FEATURE_LABELS_JSON, ndarray::Array2, tokenizers, PatchedVindex,
     VindexConfig,
 };
@@ -76,7 +82,7 @@ pub struct LoadedModel {
     /// Active walk-ffn request counter — incremented on request entry,
     /// decremented on return. Used by GT6 drain to know when it is safe
     /// to send DroppingMsg(reason="reassigned").
-    pub requests_in_flight: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    pub requests_in_flight: std::sync::Arc<core::sync::atomic::AtomicU32>,
     /// Expert ID range this server owns (from `--experts START-END`).
     /// `None` = serve all experts. Used by the expert endpoint to reject
     /// requests for experts this shard doesn't hold.
@@ -210,7 +216,7 @@ pub struct AppState {
     /// Server start time for uptime reporting.
     pub started_at: std::time::Instant,
     /// Request counter.
-    pub requests_served: std::sync::atomic::AtomicU64,
+    pub requests_served: core::sync::atomic::AtomicU64,
     /// Optional API key for authentication.
     pub api_key: Option<String>,
     /// Per-session PatchedVindex manager.
@@ -236,7 +242,7 @@ impl AppState {
 
     pub fn bump_requests(&self) {
         self.requests_served
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// Get a model by ID, or return a `NotFound` error.
@@ -387,8 +393,8 @@ mod loaded_model_tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: HashMap::new(),
             ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(1),
-            layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
-            requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            layer_latency_tracker: alloc::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+            requests_in_flight: alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0)),
             expert_filter: None,
             unit_filter: None,
             moe_remote: None,

@@ -4,6 +4,7 @@ members = [
     "larql-bridge",
     "larql-bridge-native",
     "larql-bridge-browser",
+    "larql-wasm-math",
     "larql-boundary-wasm32v1-none",
     "larql-boundary-interface",
     "larql-models-wasm32v1-none",
@@ -46,11 +47,12 @@ repository   = "https://github.com/metavacua/larql-to-sparql"
 
 [workspace.dependencies]
 larql-bridge = { path = "larql-bridge" }
+larql-wasm-math = { path = "larql-wasm-math" }
 serde        = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_core   = { version = "1", default-features = false, features = ["alloc"] }
 serde_json   = { version = "1", default-features = false, features = ["alloc"] }
 thiserror    = { version = "2", default-features = false }
-hashbrown    = { version = "0.14", default-features = false, features = ["alloc"] }
+hashbrown    = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
 libm         = { version = "0.2", default-features = false }
 
 [profile.release]

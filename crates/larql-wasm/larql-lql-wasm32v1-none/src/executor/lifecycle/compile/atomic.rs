@@ -22,7 +22,14 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::LqlError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Decide whether two paths refer to the same on-disk directory.
 ///
 /// Uses `canonicalize` when both paths exist (handles symlinks, `.`, `..`,
@@ -115,7 +122,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn unique_tmp(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "larql_atomic_{label}_{}_{}",

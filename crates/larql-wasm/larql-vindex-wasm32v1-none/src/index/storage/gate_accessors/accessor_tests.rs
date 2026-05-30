@@ -9,7 +9,6 @@ use crate::index::core::VectorIndex;
 use crate::index::types::GateLayerSlice;
 use larql_models::TopKEntry;
 use ndarray::Array2;
-
 fn meta(token: &str) -> FeatureMeta {
     FeatureMeta {
         top_token: token.into(),

@@ -30,8 +30,14 @@ use super::TraceResult;
 use crate::ffn::{FfnBackend, WeightFfn};
 use crate::model::ModelWeights;
 use ndarray::Array2;
-use std::collections::HashMap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Donor-side state: the residual row at each requested `(layer, position)`
 /// coord, captured during the donor forward pass.
 pub struct DonorState {
@@ -192,7 +198,6 @@ mod tests {
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
     use std::sync::OnceLock;
-
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)

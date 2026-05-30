@@ -5,14 +5,20 @@
 //! as [`WalkFfn`](crate::vindex::WalkFfn).
 
 use portable_atomic::AtomicU64;
-use std::collections::HashMap;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use core::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ndarray::Array2;
 
 use super::codec::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_binary_batch, decode_binary_batch_f16, decode_binary_batch_i8, decode_binary_single,
     decode_binary_single_f16, decode_binary_single_i8, encode_binary_request,
     extract_response_latency_ms, RemoteLatencyStats, WalkFfnSingleResponse, BINARY_CT, F16_CT,
@@ -605,7 +611,6 @@ pub enum RemoteFfnError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── RemoteFfnConfig ───────────────────────────────────────────────────────
 
     #[test]

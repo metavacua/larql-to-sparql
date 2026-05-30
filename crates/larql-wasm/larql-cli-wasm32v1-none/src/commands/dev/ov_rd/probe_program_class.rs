@@ -3,6 +3,14 @@ use std::path::PathBuf;
 
 use clap::Args;
 use larql_inference::attention::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     run_attention_block_with_pre_o_and_all_attention_weights, SharedKV,
 };
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -28,7 +36,6 @@ use super::oracle_pq_mode_d::materialize_mode_d_tables;
 use super::program::{PositionContext, Program};
 use super::static_replace::fit_static_means;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
 #[derive(Args)]
 pub struct ProbeProgramClassArgs {
     #[arg(long)]
@@ -81,7 +88,7 @@ enum ProbeSource {
 }
 
 impl ProbeSource {
-    fn parse_list(spec: &str) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
+    fn parse_list(spec: &str) -> Result<Vec<Self>, Box<dyn core::error::Error>> {
         let mut out = Vec::new();
         for part in spec.split(',') {
             let source = match part.trim() {
@@ -284,7 +291,7 @@ impl CentroidProbe {
 
 pub(super) fn run_probe_program_class(
     args: ProbeProgramClassArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     let sources = ProbeSource::parse_list(&args.sources)?;
@@ -535,7 +542,7 @@ fn capture_probe_prompts(
     head_means: &super::stats::StaticHeadMeans,
     codebook: &super::pq::PqCodebook,
     strata: &[String],
-) -> Result<Vec<ProbePrompt>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ProbePrompt>, Box<dyn core::error::Error>> {
     let mut captures = Vec::with_capacity(records.len());
     for (idx, record) in records.iter().enumerate() {
         let label = record
@@ -628,7 +635,7 @@ fn capture_target_features(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<TargetFeatures, Box<dyn std::error::Error>> {
+) -> Result<TargetFeatures, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
     let mut kv_cache: HashMap<usize, SharedKV> = HashMap::new();
@@ -767,7 +774,7 @@ fn position_bucket(pos: usize) -> usize {
 fn flatten_source(
     prompts: &[ProbePrompt],
     source: ProbeSource,
-) -> Result<FlatDataset, Box<dyn std::error::Error>> {
+) -> Result<FlatDataset, Box<dyn core::error::Error>> {
     let mut out = FlatDataset::default();
     for prompt in prompts {
         let rows = prompt
@@ -817,7 +824,7 @@ fn class_vocab(program: &Program, fit: &[ProbePrompt], eval: &[ProbePrompt]) -> 
 fn validate_quotient_classes(
     program: &Program,
     observed_classes: &[usize],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let declared = program
         .terminal_classes
         .iter()
@@ -895,7 +902,7 @@ fn evaluate_replacement<F>(
     mode_d_table: &super::pq::ModeDTable,
     prompts: &[ProbePrompt],
     mut predicted_classes: F,
-) -> Result<ReplacementMetrics, Box<dyn std::error::Error>>
+) -> Result<ReplacementMetrics, Box<dyn core::error::Error>>
 where
     F: FnMut(&ProbePrompt, &BTreeMap<ProbeSource, Vec<Vec<f32>>>) -> Vec<usize>,
 {

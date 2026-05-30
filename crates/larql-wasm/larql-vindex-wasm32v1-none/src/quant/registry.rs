@@ -29,7 +29,14 @@
 //! once at the seam, and the caller is forced to handle it.
 
 use larql_models::quant::ggml;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Function-pointer signatures that mirror `larql_models::quant::ggml`.
 type DequantizeFn = fn(&[u8], usize) -> Result<Vec<f32>, larql_models::ModelError>;
 type RowDotFn = fn(&[u8], &[f32]) -> Result<f32, larql_models::ModelError>;

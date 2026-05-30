@@ -1,9 +1,7 @@
 //! Grid state and gRPC service implementation for the self-assembling FFN grid.
 
-use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use core::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{mpsc, RwLock};
@@ -12,6 +10,14 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
 use larql_router_protocol::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     AckMsg, AnnounceMsg, Gap, GridService, LayerLatency, ModelCoverage, RouterMessage,
     RouterPayload, ServerInfo, ServerMessage, ServerPayload, ShardInfo, StatusRequest,
     StatusResponse,
@@ -145,11 +151,11 @@ impl GridState {
                     let lat_b = b.layer_latencies.get(&layer).map(|(avg, _)| *avg);
                     match (lat_a, lat_b) {
                         (Some(la), Some(lb)) => {
-                            la.partial_cmp(&lb).unwrap_or(std::cmp::Ordering::Equal)
+                            la.partial_cmp(&lb).unwrap_or(core::cmp::Ordering::Equal)
                         }
                         // Prefer server with latency data over unknown.
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (Some(_), None) => core::cmp::Ordering::Less,
+                        (None, Some(_)) => core::cmp::Ordering::Greater,
                         // No latency data for either: fall back to requests_in_flight.
                         (None, None) => a.requests_in_flight.cmp(&b.requests_in_flight),
                     }
@@ -345,7 +351,7 @@ impl GridState {
     /// All distinct `listen_url` values across all registered servers.
     /// Used by the `/v1/stats` proxy to find a shard to forward to.
     pub fn all_shard_urls(&self) -> Vec<String> {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         self.servers
             .values()
             .filter_map(|s| {
@@ -679,7 +685,6 @@ impl GridService for GridServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn entry(
         server_id: &str,
         listen_url: &str,

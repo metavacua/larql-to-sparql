@@ -1,10 +1,16 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 #![allow(clippy::single_range_in_vec_init)]
 #![cfg_attr(target_arch = "wasm32", no_std)]
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[macro_use]
 extern crate alloc;
-
-
 pub mod accuracy;
 pub mod accuracy_suite;
 pub mod benchmark;
@@ -30,7 +36,6 @@ pub mod vindex_compare;
 
 use metrics::Metrics;
 use model_config::ModelConfig;
-
 /// Result of running a strategy on a set of KV vectors.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyResult {

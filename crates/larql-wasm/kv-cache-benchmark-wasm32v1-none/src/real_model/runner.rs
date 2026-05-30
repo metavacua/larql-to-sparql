@@ -25,7 +25,14 @@ use super::graph_walk_layer;
 use super::kv_capture;
 use super::turboquant_layer;
 use crate::turboquant::TurboQuant;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Result from running one strategy on a real model.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RealModelResult {
@@ -304,7 +311,7 @@ pub fn run_all_engines_bench(
         let top1_idx = logits
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
             .map(|(i, _)| i as u32)
             .unwrap_or(0);
         let top1_token = tokenizer.decode(&[top1_idx], true).unwrap_or_default();
@@ -314,7 +321,7 @@ pub fn run_all_engines_bench(
                     &[logits
                         .iter()
                         .enumerate()
-                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
                         .map(|(i, _)| i as u32)
                         .unwrap_or(0)],
                     true,

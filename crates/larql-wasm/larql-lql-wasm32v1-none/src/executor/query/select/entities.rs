@@ -11,7 +11,14 @@ use crate::error::LqlError;
 use crate::executor::Session;
 
 use super::format::ENTITIES_DEFAULT_LIMIT;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Common English function/closed-class words that get capitalised
 /// at sentence starts but aren't named entities. Pulling this out as
 /// a `const` makes the heuristic auditable and keeps the verb body
@@ -86,7 +93,7 @@ impl Session {
 
         // Aggregate: token → (occurrence count, max c_score across layers).
         let mut entity_counts: std::collections::HashMap<String, (usize, f32)> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         for layer in &scan_layers {
             let nf = patched.num_features(*layer);
@@ -116,7 +123,7 @@ impl Session {
             .collect();
         // Sort by occurrence count descending — entities that appear at
         // many layers come first as the most "load-bearing".
-        entities.sort_by_key(|(_, count, _)| std::cmp::Reverse(*count));
+        entities.sort_by_key(|(_, count, _)| core::cmp::Reverse(*count));
         entities.truncate(limit);
 
         let mut out = Vec::new();
@@ -141,7 +148,6 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn looks_like_entity_accepts_capitalised_alphabetic() {
         assert!(looks_like_entity("Paris"));

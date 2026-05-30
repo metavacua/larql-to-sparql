@@ -24,6 +24,14 @@
 use ndarray::Array2;
 
 use crate::attention::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
 };
 use crate::ffn::FfnBackend;
@@ -458,7 +466,7 @@ fn masked_argmax(logits: &[f32], tokenizer: &tokenizers::Tokenizer) -> Option<(u
         .iter()
         .enumerate()
         .filter(|(_, &v)| !v.is_nan())
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))?;
     let id = idx as u32;
     let decoded = tokenizer.decode(&[id], true).ok()?;
     Some((id, decoded))
@@ -614,7 +622,7 @@ mod tests {
         let ffn = WeightFfn { weights: &weights };
         let max_new = 3usize;
         let mut hook = CountHook {
-            calls: std::collections::HashMap::new(),
+            calls: HashMap::new(),
         };
 
         let _ = generate_cached_hooked(
@@ -651,7 +659,6 @@ mod tests {
         // shift at least one generated token vs the unsteered baseline.
         use crate::forward::SteerHook;
         use ndarray::Array1;
-
         let weights = make_test_weights();
         let tokenizer = make_test_tokenizer(weights.vocab_size);
         let ffn = WeightFfn { weights: &weights };

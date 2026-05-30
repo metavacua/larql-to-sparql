@@ -1,6 +1,5 @@
 //! Per-IP rate limiting middleware using a token bucket.
 
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -11,7 +10,14 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::http::HEALTH_PATH;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Token bucket for a single IP.
 struct Bucket {
     tokens: f64,
@@ -131,7 +137,6 @@ pub async fn rate_limit_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn parse_per_minute() {
         let rl = RateLimiter::parse("100/min").unwrap();

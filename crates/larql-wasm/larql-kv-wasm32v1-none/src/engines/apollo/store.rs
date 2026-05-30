@@ -26,7 +26,14 @@ use thiserror::Error;
 
 use super::entry::VecInjectEntry;
 use super::npy;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Error)]
 pub enum StoreLoadError {
     #[error("i/o error reading {path}: {source}")]
@@ -149,7 +156,7 @@ impl ApolloStore {
             .map(|b| b.len() * 4)
             .unwrap_or(0);
         let token_bytes: usize = self.window_tokens.iter().map(|w| w.len() * 4).sum();
-        let entry_bytes = self.entries.len() * std::mem::size_of::<VecInjectEntry>();
+        let entry_bytes = self.entries.len() * core::mem::size_of::<VecInjectEntry>();
         boundary_bytes + boundary_residual_bytes + token_bytes + entry_bytes
     }
 
@@ -369,7 +376,6 @@ mod tests {
     use tempfile::TempDir;
     use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
-
     // ── Synthetic .npy / .npz builders ────────────────────────────────────
 
     /// Build a minimal v1.0 .npy header for the given dtype and shape.
@@ -667,7 +673,7 @@ mod tests {
                 5
             ],
         };
-        let entry_size = std::mem::size_of::<VecInjectEntry>();
+        let entry_size = core::mem::size_of::<VecInjectEntry>();
         let expected = 4 * 4 * 2 + 4 * 4 + 3 * 4 * 2 + 5 * entry_size;
         assert_eq!(store.total_bytes(), expected);
     }

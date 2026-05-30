@@ -1,6 +1,13 @@
 //! GEGLU activation: out[i] = silu(gate[i]) × up[i].
 //! Element-wise, pure Rust. 0.017ms for 10240 elements.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// SiLU (Swish) activation.
 #[inline(always)]
 pub fn silu(x: f32) -> f32 {

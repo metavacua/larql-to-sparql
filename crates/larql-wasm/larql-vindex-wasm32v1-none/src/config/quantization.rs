@@ -11,7 +11,14 @@ use serde::{Deserialize, Serialize};
 use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN, UP_FEATURES_FP4_BIN};
 
 use super::compliance::ComplianceGate;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum QuantFormat {
@@ -20,8 +27,8 @@ pub enum QuantFormat {
     Q4K,
 }
 
-impl std::fmt::Display for QuantFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for QuantFormat {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::None => write!(f, "none"),
             Self::Q4K => write!(f, "q4k"),
@@ -49,8 +56,8 @@ pub enum Precision {
     F32,
 }
 
-impl std::fmt::Display for Precision {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Precision {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Fp4 => write!(f, "fp4"),
             Self::Fp8 => write!(f, "fp8"),
@@ -149,7 +156,6 @@ impl Fp4Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn quant_format_default_is_none() {
         assert_eq!(QuantFormat::default(), QuantFormat::None);

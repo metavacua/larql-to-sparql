@@ -1,13 +1,18 @@
 //! GET /v1/stats
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::Json;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 fn build_stats(model: &LoadedModel) -> serde_json::Value {
     let config = &model.config;
     let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();

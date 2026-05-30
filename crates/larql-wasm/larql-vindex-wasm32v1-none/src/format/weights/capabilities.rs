@@ -1,6 +1,13 @@
 use crate::config::ExtractLevel;
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) const SURFACE_F32_WEIGHT_WRITER: &str = "f32 weight writer";
 pub(super) const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";
 pub(crate) const SURFACE_EXTRACT_PIPELINE: &str = "extract pipeline";
@@ -50,7 +57,6 @@ pub(crate) fn ensure_extract_level_supported(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     const TEST_SURFACE: &str = "test";
     const TEST_Q4K_SURFACE: &str = SURFACE_Q4K_WEIGHT_WRITER;
     const MODEL_TYPE_LLAMA: &str = "llama";

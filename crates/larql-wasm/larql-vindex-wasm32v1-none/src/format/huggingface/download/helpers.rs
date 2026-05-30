@@ -8,7 +8,14 @@
 use std::path::PathBuf;
 
 use super::RepoKind;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Normalise an HTTP ETag header to the raw content hash hf-hub uses
 /// as blob filenames. Handles:
 ///   * strong etag: `"abc123"` → `abc123`
@@ -69,7 +76,6 @@ pub(super) fn hf_cache_repo_dir(kind: RepoKind, repo_id: &str) -> Option<PathBuf
 mod tests {
     use super::*;
     use serial_test::serial;
-
     // ─── strip_etag_quoting ────────────────────────────────────────────
 
     #[test]

@@ -34,7 +34,14 @@
 //! [`generate_streaming`]: super::gpu::generate_streaming
 
 use tokenizers::Tokenizer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Context window default. Real models report this in their config; the
 /// caller can override with [`ChatSession::with_max_context`].
 pub const DEFAULT_MAX_CONTEXT: usize = 8192;
@@ -268,7 +275,6 @@ impl ChatSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn tiny_tokenizer() -> Tokenizer {
         // Whitespace-split word-level — every distinct word becomes one token.
         // Tokens used by the tests are: hi, bye, good, morning, the, capital,

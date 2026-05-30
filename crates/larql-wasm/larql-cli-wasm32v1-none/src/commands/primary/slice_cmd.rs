@@ -23,13 +23,19 @@
 //! dense-remote topology these presets were cut to serve.
 
 use larql_vindex::format::filenames::*;
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
 
 use crate::commands::primary::cache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ─── Parts catalogue ─────────────────────────────────────────────────────
 //
 // Each `Part` maps to one or more filename patterns. The `index.json` +
@@ -239,7 +245,7 @@ pub fn slice_vindex(
     parts: BTreeSet<Part>,
     force: bool,
     dry_run: bool,
-) -> Result<SliceOutcome, Box<dyn std::error::Error>> {
+) -> Result<SliceOutcome, Box<dyn core::error::Error>> {
     if !src.is_dir() {
         return Err(format!("source vindex not a directory: {}", src.display()).into());
     }
@@ -369,7 +375,7 @@ pub fn slice_vindex(
     Ok(outcome)
 }
 
-pub fn run(args: SliceArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: SliceArgs) -> Result<(), Box<dyn core::error::Error>> {
     // 1. Resolve source through the cache shorthand.
     let src = cache::resolve_model(&args.source)?;
 
@@ -510,7 +516,6 @@ fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn part_parse_aliases() {
         assert_eq!(Part::parse("attn"), Some(Part::Attn));

@@ -10,7 +10,14 @@
 use crate::format::filenames::*;
 
 use std::path::Path;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Files we opportunistically copy from the HF source directory. Names
 /// match the upstream HF layout so a round-trip back to a HF-shaped model
 /// dir is possible without renaming.
@@ -53,7 +60,6 @@ pub fn snapshot_hf_metadata(source_dir: &Path, output_dir: &Path) -> std::io::Re
 mod tests {
     use super::*;
     use std::fs;
-
     #[test]
     fn copies_present_files_only() {
         let tmp = tempfile::tempdir().unwrap();

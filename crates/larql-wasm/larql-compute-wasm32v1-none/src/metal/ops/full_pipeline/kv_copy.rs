@@ -14,7 +14,14 @@ use crate::metal::buffers::BufferCache;
 use crate::metal::decode::DEFAULT_KV_CACHE_MAX_SEQ;
 use crate::metal::ops::kv_cache::{KVCache, LayerKVCache};
 use crate::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Copy one layer's K/V scratch into the persistent KV cache.
 /// Called inside the per-layer MoE commit loop so the cache is current
 /// before the CPU MoE callback reads `h_post_attn` and writes to `new_h`.
@@ -40,8 +47,8 @@ pub(super) fn populate_kv_one_layer(
     // SAFETY: caller commit + wait before invocation. Destination
     // pre-allocated for max_seq * lnkv * lhd; copy bounded by max_seq.
     unsafe {
-        std::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
-        std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
+        core::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
+        core::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
     }
     kv.layers[layer_idx].current_len = seq_len;
 }
@@ -76,8 +83,8 @@ pub(super) fn populate_kv_after_commit(
         // are pre-allocated for `max_seq * lnkv * lhd` floats; we copy
         // up to `seq_len * lnkv * lhd` which is bounded by max_seq.
         unsafe {
-            std::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
-            std::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
+            core::ptr::copy_nonoverlapping(k_src, k_dst, total_kv);
+            core::ptr::copy_nonoverlapping(v_src, v_dst, total_kv);
         }
         kv.layers[l].current_len = seq_len;
     }
@@ -88,7 +95,6 @@ mod tests {
     use super::*;
     use crate::metal::MetalBackend;
     use crate::pipeline::*;
-
     /// Construct a minimal `FullPipelineLayer` with the per-layer
     /// dims this test cares about. All other fields hold the smallest
     /// valid value.
@@ -152,14 +158,14 @@ mod tests {
     /// Read a Metal Buffer's contents as f32s.
     fn read_metal_f32(buf: &metal::Buffer, n: usize) -> Vec<f32> {
         let ptr = buf.contents() as *const f32;
-        unsafe { std::slice::from_raw_parts(ptr, n).to_vec() }
+        unsafe { core::slice::from_raw_parts(ptr, n).to_vec() }
     }
 
     /// Write a known f32 pattern into a Metal Buffer's contents.
     fn write_metal_f32(buf: &metal::Buffer, src: &[f32]) {
         let ptr = buf.contents() as *mut f32;
         unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), ptr, src.len());
+            core::ptr::copy_nonoverlapping(src.as_ptr(), ptr, src.len());
         }
     }
 

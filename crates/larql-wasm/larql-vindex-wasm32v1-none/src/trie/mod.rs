@@ -15,7 +15,14 @@
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Serialised probe format ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -54,7 +61,7 @@ pub struct CascadeTrie {
 
 impl CascadeTrie {
     /// Load from a JSON file exported by `export_trie_probe.py`.
-    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(path: &Path) -> Result<Self, Box<dyn core::error::Error>> {
         let text = std::fs::read_to_string(path)?;
         let p: ProbeFile = serde_json::from_str(&text)?;
 
@@ -194,7 +201,6 @@ impl CascadeTrie {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn slug_replaces_slashes() {
         assert_eq!(
@@ -277,7 +283,7 @@ mod tests {
             mid,
             Some(PathBuf::from("/this/file/should/not/exist.json")),
             Some(dir.path().to_path_buf()),
-            std::iter::empty::<PathBuf>(),
+            core::iter::empty::<PathBuf>(),
         )
         .expect("found");
         assert_eq!(found, resolved);
@@ -329,7 +335,7 @@ mod tests {
             "no/where",
             Some(PathBuf::from("/nope/path")),
             Some(PathBuf::from("/nope/dir")),
-            std::iter::empty::<PathBuf>(),
+            core::iter::empty::<PathBuf>(),
         );
         assert!(none.is_none());
     }

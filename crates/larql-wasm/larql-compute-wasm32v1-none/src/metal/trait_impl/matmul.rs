@@ -2,11 +2,18 @@
 //! `f16_gemv` (threshold-gated and force variants).
 
 use ndarray::{Array2, ArrayView2};
-use std::sync::atomic::Ordering;
+use core::sync::atomic::Ordering;
 
 use crate::backend::{MatMul, MatMulOp};
 use crate::metal::MetalBackend;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl MatMul for MetalBackend {
     fn matmul(&self, a: ArrayView2<f32>, b: ArrayView2<f32>) -> Array2<f32> {
         self.f32_ops.matmul(
@@ -280,7 +287,7 @@ impl MetalBackend {
         let vals = crate::metal::buffers::read_buffer_f32(partial_vals, n_partials);
         let idxs_raw = unsafe {
             let ptr = partial_idxs.contents() as *const u32;
-            std::slice::from_raw_parts(ptr, n_partials)
+            core::slice::from_raw_parts(ptr, n_partials)
         };
         let (best_idx, best_val) = vals
             .iter()
@@ -344,7 +351,7 @@ impl MetalBackend {
         let vals = crate::metal::buffers::read_buffer_f32(partial_vals, total);
         let idxs = unsafe {
             let ptr = partial_idxs.contents() as *const u32;
-            std::slice::from_raw_parts(ptr, total)
+            core::slice::from_raw_parts(ptr, total)
         };
 
         let k = top_k.min(total);
@@ -400,7 +407,7 @@ impl MetalBackend {
                 sift_down(&mut heap, j);
             }
         }
-        heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
         heap.into_iter().map(|(s, i)| (i, s)).collect()
     }
 
@@ -536,7 +543,6 @@ impl MetalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// `f32_topk_partial` correctness against synthetic scores. Exercises:
     ///   - the partial last TG (vocab not divisible by 256), which is the
     ///     case that broke `q4_matvec_topk` parity in development.

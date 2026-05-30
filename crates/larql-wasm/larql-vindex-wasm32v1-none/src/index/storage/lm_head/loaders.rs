@@ -5,8 +5,6 @@
 //! models). All four populate `self.projections.lm_head_*` so the
 //! KNN dispatch in `knn.rs` picks them up uniformly.
 
-use std::sync::Arc;
-
 use larql_models::quant::ggml::K_QUANT_BLOCK_ELEMS;
 
 use crate::error::VindexError;
@@ -15,7 +13,14 @@ use crate::index::core::VectorIndex;
 use crate::mmap_util::mmap_optimized;
 
 use super::{read_lm_head_manifest_kind, Q4_BYTES_PER_ELEM_DEN, Q4_BYTES_PER_ELEM_NUM};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load Q4 lm_head for GPU logits (replaces CPU f32 lm_head KNN).
     ///

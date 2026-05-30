@@ -5,7 +5,14 @@
 
 use super::{AttentionAllWeights, AttentionWeights};
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// GQA with causal masking (no weight capture).
 /// q: (seq, num_q * head_dim), k: (seq, num_kv * head_dim), v: same as k
 #[allow(clippy::too_many_arguments)]
@@ -258,7 +265,6 @@ fn gqa_attention_capture(
 mod tests {
     use super::*;
     use ndarray::Array2;
-
     fn ones(rows: usize, cols: usize) -> Array2<f32> {
         Array2::ones((rows, cols))
     }

@@ -25,11 +25,16 @@
 //! own crate because it has a single call site inside one crate; when a
 //! second consumer (TinyModel, larql-lql executor) needs it, extract then.
 
-use std::collections::HashMap;
-
 use ndarray::ArcArray2;
 use thiserror::Error;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Error)]
 pub enum EdgeError {
     #[error("tensor not found: {0}")]
@@ -141,7 +146,6 @@ fn col_norm(tensor: &ArcArray2<f32>, col: usize) -> f32 {
 mod tests {
     use super::*;
     use ndarray::Array2;
-
     fn fresh_layer(ffn_dim: usize, hidden: usize) -> HashMap<String, ArcArray2<f32>> {
         let mut gate = Array2::<f32>::zeros((ffn_dim, hidden));
         let mut up = Array2::<f32>::zeros((ffn_dim, hidden));

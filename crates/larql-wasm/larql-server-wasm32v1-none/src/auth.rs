@@ -14,8 +14,6 @@
 //! leak; the constant-time compare removes the bytewise leak. SHA-256
 //! preimage resistance means a digest match implies the inputs match.
 
-use std::sync::Arc;
-
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
@@ -25,7 +23,14 @@ use subtle::ConstantTimeEq;
 
 use crate::http::{BEARER_PREFIX, HEALTH_PATH};
 use crate::state::AppState;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Constant-time equality on bearer tokens.
 ///
 /// Hashes both inputs with SHA-256 and compares the 32-byte digests with
@@ -74,7 +79,6 @@ pub async fn auth_middleware(
 #[cfg(test)]
 mod tests {
     use super::tokens_match;
-
     #[test]
     fn matching_tokens_compare_equal() {
         assert!(tokens_match("secret123", "secret123"));

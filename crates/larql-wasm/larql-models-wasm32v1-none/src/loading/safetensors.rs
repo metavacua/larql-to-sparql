@@ -2,15 +2,26 @@
 //!
 //! Handles dtype conversion (f16, bf16 → f32), HuggingFace cache resolution,
 //! and architecture detection.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
-use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
 use crate::detect::{detect_architecture_validated, ModelError};
 use crate::weights::{ModelWeights, PACKED_EXPERTS_DOWN_PROJ, PACKED_EXPERTS_GATE_UP_PROJ};
-
 const SAFETENSORS_EXT: &str = "safetensors";
 const GGUF_EXT: &str = "gguf";
 const CONFIG_JSON: &str = "config.json";
@@ -598,7 +609,6 @@ fn dequantize_per_expert_mxfp4(
     prefixes: &[&str],
     tensors: &mut HashMap<String, crate::WeightArray>,
 ) -> Result<std::collections::HashSet<String>, ModelError> {
-    use std::collections::HashSet;
     let mut consumed: HashSet<String> = HashSet::new();
 
     // Match V4-style per-expert weights: any tensor name containing
@@ -801,10 +811,11 @@ fn decode_f8_e8m0(bytes: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+#[cfg(not(target_arch = "wasm32"))]
     use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
     use std::sync::Mutex;
     use tempfile::TempDir;
-
     // Tests that mutate HOME must not run concurrently.
     static HOME_LOCK: Mutex<()> = Mutex::new(());
 

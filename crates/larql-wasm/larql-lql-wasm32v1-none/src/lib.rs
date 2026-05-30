@@ -1,5 +1,5 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#[cfg(target_arch = "wasm32")]
+#[macro_use]
 extern crate alloc;
 
 pub mod ast;

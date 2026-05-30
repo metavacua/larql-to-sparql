@@ -3,7 +3,14 @@ use std::path::PathBuf;
 use clap::Args;
 
 use super::program::Program;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub(super) struct NormalizeProgramArgs {
     /// Input program JSON.
@@ -17,7 +24,7 @@ pub(super) struct NormalizeProgramArgs {
 
 pub(super) fn run_normalize_program(
     args: NormalizeProgramArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let text = std::fs::read_to_string(&args.program)?;
     let mut program: Program = serde_json::from_str(&text)?;
     program.validate()?;

@@ -7,7 +7,14 @@ use std::time::Instant;
 use super::buffers::BufferCache;
 use super::f32_ops::F32Ops;
 use metal::CommandQueue;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Conservative default before calibration runs.
 pub const DEFAULT_FLOP_THRESHOLD: usize = 500_000_000;
 
@@ -78,7 +85,6 @@ fn bench_median<F: FnMut()>(n: usize, mut f: F) -> u64 {
 mod tests {
     use super::*;
     use crate::metal::MetalBackend;
-
     /// `calibrate()` returns a threshold inside the legal envelope:
     /// `[MIN_FLOP_FLOOR, DEFAULT_FLOP_THRESHOLD]` (inclusive on the
     /// upper bound — `best` starts at default and only goes down via

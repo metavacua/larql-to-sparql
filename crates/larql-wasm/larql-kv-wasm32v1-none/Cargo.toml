@@ -14,7 +14,6 @@ larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-comp
 larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
 
 serde = { workspace = true }
-thiserror = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ndarray = { version = "0.16", features = ["blas"] }
@@ -39,8 +38,15 @@ default = []
 metal = ["larql-compute/metal", "larql-inference/metal"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 ndarray = "0.16"
 zip = { version = "2", default-features = false }
 rand = "0.8"
 rand_distr = "0.4"
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

@@ -12,7 +12,14 @@
 //!
 //! Set `SKIP_MOE=1` to zero out the expert block on every decode step.
 //! This isolates whether errors come from remote dispatch vs. dense FFN.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod config;
 mod remote_ffn;
 mod remote_moe;

@@ -2,7 +2,14 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct MergeArgs {
     /// Input graph files to merge (at least 2).
@@ -18,7 +25,7 @@ pub struct MergeArgs {
     strategy: String,
 }
 
-pub fn run(args: MergeArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: MergeArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!(
         "Merging {} files (strategy={})",
         args.inputs.len(),

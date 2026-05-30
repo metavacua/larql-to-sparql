@@ -5,7 +5,14 @@ use crate::ast::{CompileConflict, CompileTarget, OutputFormat, UseTarget, Vindex
 use crate::error::LqlError;
 use crate::executor::tuning::canonical_prompt;
 use crate::executor::{Backend, Session};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod atomic;
 mod bake;
 mod into_model;
@@ -86,7 +93,7 @@ fn collect_memit_facts_with_recording(
 
     let mut facts = Vec::new();
     let mut warnings = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
 
     let push_fact = |op: &larql_vindex::PatchOp,
                      facts: &mut Vec<larql_inference::MemitFact>,

@@ -15,8 +15,6 @@
 
 #![cfg(feature = "real-model")]
 
-use std::collections::HashMap;
-
 use serde::Serialize;
 
 use larql_inference::attention::SharedKV;
@@ -24,7 +22,14 @@ use larql_inference::forward::{embed_tokens_pub, hidden_to_raw_logits, run_layer
 use larql_inference::model::ModelWeights;
 use larql_inference::vindex::WalkFfn;
 use larql_vindex::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-comparison knobs. Kept minimal; future options added as fields.
 #[derive(Debug, Clone)]
 pub struct ComparisonConfig {
@@ -304,7 +309,7 @@ fn aggregate(
     let cos_mean = prompts.iter().map(|p| p.logit_cos).sum::<f64>() / n as f64;
 
     let mut kls: Vec<f64> = prompts.iter().map(|p| p.kl_symmetric).collect();
-    kls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    kls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let kl_mean = kls.iter().sum::<f64>() / n as f64;
     let kl_p95 = percentile(&kls, 0.95);
     let kl_max = *kls.last().unwrap_or(&f64::NAN);
@@ -342,7 +347,7 @@ fn top_k_ids(xs: &[f32], k: usize) -> Vec<u32> {
     let k = k.min(xs.len());
     let mut indexed: Vec<(usize, f32)> = xs.iter().copied().enumerate().collect();
     indexed.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal)
     });
     let mut top: Vec<u32> = indexed[..k].iter().map(|(i, _)| *i as u32).collect();
     top.sort_unstable();
@@ -419,7 +424,6 @@ fn percentile(sorted: &[f64], q: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn argmax_finds_max() {
         assert_eq!(argmax(&[1.0, 3.0, 2.0, -5.0]), 1);

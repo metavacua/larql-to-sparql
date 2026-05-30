@@ -1,5 +1,12 @@
 //! ISO-8601 UTC timestamp without a `chrono` dependency.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Simple ISO 8601 timestamp without chrono dependency.
 pub(crate) fn chrono_now() -> String {
     let d = std::time::SystemTime::now()
@@ -29,7 +36,6 @@ pub(crate) fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn chrono_now_returns_iso8601_z_format() {
         let s = chrono_now();

@@ -11,7 +11,14 @@ use larql_inference::attention::SharedKV;
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::model::ModelWeights;
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Dequantise attention Q4K weights (Q, K, V, O) for all layers into
 /// `weights.tensors`. Idempotent — skips layers already present.
 pub fn ensure_attn_tensors_dequantised(weights: &mut ModelWeights, index: &VectorIndex) {
@@ -126,7 +133,6 @@ pub(super) fn rs_decode_step_walk(
     backend: &dyn ComputeBackend,
 ) -> Option<(Array2<f32>, RsStore)> {
     use ndarray::s;
-
     let num_layers = weights.num_layers;
     let abs_position = rs.next_position;
     let mut h_new = embed_tokens_pub(weights, &[new_token_id]);

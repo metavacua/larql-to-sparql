@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_inference::attention::run_attention_block_with_pre_o;
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -14,7 +13,14 @@ use super::reports::{CodeStabilityReport, CodeStabilityStratumReport};
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 struct CodeDistributionCounts {
     group_counts: HashMap<usize, Vec<usize>>,
@@ -56,7 +62,7 @@ pub(super) fn measure_code_stability(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), Vec<CodeStabilityReport>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<CodeStabilityReport>>, Box<dyn core::error::Error>> {
     let train = collect_code_distribution_counts(
         weights,
         index,
@@ -175,7 +181,7 @@ fn collect_code_distribution_counts(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
     label_prefix: &str,
-) -> Result<HashMap<(HeadId, PqConfig), CodeDistributionCounts>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), CodeDistributionCounts>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

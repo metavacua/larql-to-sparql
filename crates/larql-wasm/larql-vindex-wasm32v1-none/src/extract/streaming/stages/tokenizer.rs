@@ -4,7 +4,6 @@ use crate::error::VindexError;
 use crate::extract::stage_labels::*;
 use crate::extract::streaming::context::StreamingContext;
 use crate::format::filenames::*;
-
 impl<'a> StreamingContext<'a> {
     /// Stage 4 — tokenizer.
     pub(in crate::extract::streaming) fn write_tokenizer(&mut self) -> Result<(), VindexError> {

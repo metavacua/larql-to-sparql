@@ -11,7 +11,17 @@
 //! so norm_weight_offset is 0.0 (the saved weight IS the final multiplier).
 
 use crate::config::{Activation, ModelArchitecture, ModelConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Gemma 3 sliding window pattern: every 6th layer (0-indexed: 5, 11, 17, ...)
 /// uses full attention, the rest use sliding window.
 const GEMMA3_SLIDING_WINDOW_PATTERN: usize = 6;

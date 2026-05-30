@@ -6,7 +6,14 @@ use super::oracle_pq_forward::{final_logits, forward_q4k_predicted_address_mode_
 use super::pq::ModeDTable;
 use super::reports::AddressProbePromptReport;
 use super::types::HeadId;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn evaluate_predicted_address(
     weights: &mut larql_inference::ModelWeights,
     token_ids: &[u32],
@@ -19,7 +26,7 @@ pub(super) fn evaluate_predicted_address(
     baseline_logp: &[f64],
     baseline_top1: u32,
     oracle_codes_by_position: &[Vec<usize>],
-) -> Result<AddressProbePromptReport, Box<dyn std::error::Error>> {
+) -> Result<AddressProbePromptReport, Box<dyn core::error::Error>> {
     let address_match = address_match_report(oracle_codes_by_position, predicted_codes_by_position);
     let predicted_hidden = forward_q4k_predicted_address_mode_d_head(
         weights,

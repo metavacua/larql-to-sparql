@@ -13,7 +13,7 @@ pub fn prefill_with_kv(
     token_ids: &[u32],
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> Array2<f32> {
     let mut h = crate::forward::embed_tokens_pub(weights, token_ids);
     let seq_len = token_ids.len();
@@ -44,7 +44,7 @@ pub(super) fn prefill_kv_cache_cpu(
     token_ids: &[u32],
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
-    layer_range: &std::ops::Range<usize>,
+    layer_range: &core::ops::Range<usize>,
 ) {
     if !backend.has_kv_cache() {
         return;
@@ -60,7 +60,6 @@ mod tests {
     use larql_compute::CpuBackend;
     use larql_models::ModelWeights;
     use std::sync::OnceLock;
-
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)

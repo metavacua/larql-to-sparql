@@ -6,7 +6,6 @@
 //! with patch mode (vindex-driven, many edges).
 
 use larql_vindex::format::filenames::*;
-use std::collections::HashMap;
 
 use ndarray::ArcArray2;
 
@@ -14,8 +13,15 @@ use super::detect::detect_ffn_pattern;
 use super::edge::install_edge;
 use super::save::{copy_model_config, merge_for_save, write_safetensors};
 use super::CompileArgs;
-
-pub fn run(args: CompileArgs) -> Result<(), Box<dyn std::error::Error>> {
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+pub fn run(args: CompileArgs) -> Result<(), Box<dyn core::error::Error>> {
     let prompt = args.prompt.as_ref().unwrap();
     let answer = args.answer.as_ref().unwrap();
 

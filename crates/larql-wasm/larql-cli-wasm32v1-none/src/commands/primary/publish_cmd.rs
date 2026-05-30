@@ -19,7 +19,6 @@
 //! Requires `HF_TOKEN` (or `~/.huggingface/token`) just like `larql hf publish`.
 
 use larql_vindex::format::filenames::*;
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -27,7 +26,14 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::commands::primary::cache;
 use crate::commands::primary::slice_cmd::{preset_parts, slice_vindex, Part};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Default sibling slice presets when `--slices` is not given. Covers
 /// every deployment shape ADR-0007 and ADR-0008 support today:
 ///
@@ -123,7 +129,7 @@ pub struct PublishArgs {
     pub repo_type: String,
 }
 
-pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: PublishArgs) -> Result<(), Box<dyn core::error::Error>> {
     // 1. Resolve source.
     let src = cache::resolve_model(&args.source)?;
     if !src.is_dir() {
@@ -251,7 +257,7 @@ pub fn run(args: PublishArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     if raw.len() == 1 && raw[0].eq_ignore_ascii_case("none") {
         return Ok(Vec::new());
     }
@@ -273,7 +279,7 @@ fn resolve_collection_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::e
 
 /// Parse `OWNER/NAME` → `OWNER`. Returns an error for bare names so we
 /// don't accidentally treat a missing namespace as valid.
-fn namespace_of(repo: &str) -> Result<&str, Box<dyn std::error::Error>> {
+fn namespace_of(repo: &str) -> Result<&str, Box<dyn core::error::Error>> {
     repo.split_once('/')
         .map(|(ns, _)| ns)
         .ok_or_else(|| format!("--repo must be `OWNER/NAME`, got '{repo}'").into())
@@ -392,7 +398,7 @@ fn build_collections(
     args: &PublishArgs,
     uploaded: &[StepOutcome],
     levels: &[String],
-) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, String)>, Box<dyn core::error::Error>> {
     let namespace = namespace_of(&args.repo)?;
     let cfg = larql_vindex::load_vindex_config(src)?;
 
@@ -467,7 +473,7 @@ fn build_collections(
     Ok(urls)
 }
 
-fn resolve_slice_list(raw: &[String]) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn resolve_slice_list(raw: &[String]) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     // Default set when --slices is not passed.
     if raw.is_empty() {
         return Ok(DEFAULT_SLICES.iter().map(|s| s.to_string()).collect());
@@ -511,7 +517,7 @@ fn execute_step(
     step: &UploadStep,
     force_upload: bool,
     repo_type: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     match (&step.preset, &step.staging) {
         // Full vindex — upload the source directory directly, no slicing.
         (None, _) => {
@@ -547,7 +553,7 @@ fn upload_dir(
     repo: &str,
     force_upload: bool,
     repo_type: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     let mut callbacks = CliPublishCallbacks::new();
     let opts = larql_vindex::PublishOptions {
         skip_unchanged: !force_upload,
@@ -663,7 +669,6 @@ fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn default_slice_list_is_full_publish_set() {
         // Flipping this default changes what bare `larql publish` writes

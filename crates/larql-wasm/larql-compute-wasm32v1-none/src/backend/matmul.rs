@@ -6,7 +6,14 @@
 //! 32×32 tiled sgemm waste 31/32 threads).
 
 use ndarray::{Array2, ArrayView2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A single matmul operation for batch dispatch.
 pub struct MatMulOp {
     pub a: Array2<f32>,

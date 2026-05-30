@@ -1,6 +1,13 @@
-use std::collections::HashMap;
 
 use larql_inference::attention::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     run_attention_block_with_pre_o, run_attention_block_with_pre_o_and_all_attention_weights,
     run_attention_block_with_pre_o_and_reduced_qk_attention_weights,
 };
@@ -27,8 +34,7 @@ use super::reports::CodeOccurrenceRecord;
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
-type SampleVisitResult = Result<(), Box<dyn std::error::Error>>;
+type SampleVisitResult = Result<(), Box<dyn core::error::Error>>;
 
 #[derive(Debug, Clone)]
 struct AttentionClusterFitSample {
@@ -50,7 +56,7 @@ pub(super) fn fit_address_probe_models(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     include_mixed_key_probe: bool,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn core::error::Error>> {
     let names = address_probe_names();
     let mut key_counts: HashMap<(HeadId, PqConfig, String, usize, String), Vec<usize>> =
         HashMap::new();
@@ -147,7 +153,7 @@ pub(super) fn fit_address_probe_models(
                     .max_by(|(_, a), (_, b)| {
                         a.group_train_accuracy[group]
                             .partial_cmp(&b.group_train_accuracy[group])
-                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .unwrap_or(core::cmp::Ordering::Equal)
                     })
                     .map(|(idx, _)| idx)
                     .unwrap_or(0);
@@ -183,7 +189,7 @@ pub(super) fn fit_address_prev_ffn_feature_group_models(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
     feature_top_k: usize,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn core::error::Error>> {
     let names = prev_ffn_feature_probe_names();
     let mut key_counts: HashMap<(HeadId, PqConfig, String, usize, String), Vec<usize>> =
         HashMap::new();
@@ -302,7 +308,7 @@ pub(super) fn fit_address_ffn_first_feature_group_models(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
     feature_top_k: usize,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn core::error::Error>> {
     let names = ffn_first_feature_probe_names();
     let mut key_counts: HashMap<(HeadId, PqConfig, String, usize, String), Vec<usize>> =
         HashMap::new();
@@ -421,7 +427,7 @@ pub(super) fn fit_address_attention_relation_group_models(
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<AddressProbeModel>>, Box<dyn core::error::Error>> {
     let names = attention_relation_probe_names();
     let mut key_counts: HashMap<(HeadId, PqConfig, String, usize, String), Vec<usize>> =
         HashMap::new();
@@ -544,7 +550,7 @@ pub(super) fn fit_address_attention_cluster_group_models(
     cluster_counts: &[usize],
 ) -> Result<
     HashMap<(HeadId, PqConfig), Vec<AddressAttentionClusterGroupModel>>,
-    Box<dyn std::error::Error>,
+    Box<dyn core::error::Error>,
 > {
     let mut majority_counts: HashMap<(HeadId, PqConfig, usize), Vec<usize>> = HashMap::new();
     let mut samples: HashMap<(HeadId, PqConfig), Vec<AttentionClusterFitSample>> = HashMap::new();
@@ -691,7 +697,7 @@ pub(super) fn fit_address_reduced_qk_cluster_group_models(
     cluster_counts: &[usize],
 ) -> Result<
     HashMap<(HeadId, PqConfig), Vec<AddressAttentionClusterGroupModel>>,
-    Box<dyn std::error::Error>,
+    Box<dyn core::error::Error>,
 > {
     let mut models: HashMap<(HeadId, PqConfig), Vec<AddressAttentionClusterGroupModel>> =
         HashMap::new();
@@ -851,7 +857,7 @@ pub(super) fn fit_address_lsh_group_models(
     selected_groups: &[usize],
     bits: usize,
     seeds: usize,
-) -> Result<HashMap<(HeadId, PqConfig), AddressLshGroupModel>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), AddressLshGroupModel>, Box<dyn core::error::Error>> {
     let mut majority_counts: HashMap<(HeadId, PqConfig, usize), Vec<usize>> = HashMap::new();
     let mut bucket_counts: HashMap<(HeadId, PqConfig, usize, u64, usize), Vec<usize>> =
         HashMap::new();
@@ -979,7 +985,7 @@ pub(super) fn fit_address_supervised_group_models(
     epochs: usize,
     lr: f32,
     l2: f32,
-) -> Result<HashMap<(HeadId, PqConfig), AddressSupervisedGroupModel>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), AddressSupervisedGroupModel>, Box<dyn core::error::Error>> {
     let mut majority_counts: HashMap<(HeadId, PqConfig, usize), Vec<usize>> = HashMap::new();
     let mut samples: HashMap<(HeadId, PqConfig), Vec<(Vec<f32>, Vec<usize>)>> = HashMap::new();
 
@@ -1089,7 +1095,7 @@ pub(super) fn fit_majority_codes_for_codebooks(
     means: &HashMap<HeadId, StaticHeadMeans>,
     pca_bases: &HashMap<HeadId, ZPcaBasis>,
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<usize>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), Vec<usize>>, Box<dyn core::error::Error>> {
     let mut majority_counts: HashMap<(HeadId, PqConfig, usize), Vec<usize>> = HashMap::new();
 
     visit_code_samples(
@@ -1148,7 +1154,7 @@ pub(super) fn collect_code_occurrences(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     selected_groups: &[usize],
     selected_codes: &[usize],
-) -> Result<Vec<CodeOccurrenceRecord>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CodeOccurrenceRecord>, Box<dyn core::error::Error>> {
     let mut records = Vec::new();
     visit_code_samples(
         weights,
@@ -1238,7 +1244,7 @@ fn visit_code_samples<F>(
     with_attention_relation: bool,
     reduced_qk_rank: Option<usize>,
     mut visit: F,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), Box<dyn core::error::Error>>
 where
     F: FnMut(
         HeadId,

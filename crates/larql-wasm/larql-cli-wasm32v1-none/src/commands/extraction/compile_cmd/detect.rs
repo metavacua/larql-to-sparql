@@ -1,9 +1,14 @@
 //! FFN tensor naming conventions and helpers for cloning tensors on demand.
 
-use std::collections::HashMap;
-
 use ndarray::ArcArray2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub fn detect_ffn_pattern(tensors: &HashMap<String, ArcArray2<f32>>, component: &str) -> String {
     let patterns: &[&str] = match component {
         "gate" => &[
@@ -50,7 +55,7 @@ pub fn ensure_cloned(
     modified: &mut HashMap<String, ArcArray2<f32>>,
     originals: &HashMap<String, ArcArray2<f32>>,
     key: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     if !modified.contains_key(key) {
         let original = originals
             .get(key)
@@ -60,7 +65,7 @@ pub fn ensure_cloned(
     Ok(())
 }
 
-pub fn decode_f32_b64(b64: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+pub fn decode_f32_b64(b64: &str) -> Result<Vec<f32>, Box<dyn core::error::Error>> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64)?;
     Ok(bytes

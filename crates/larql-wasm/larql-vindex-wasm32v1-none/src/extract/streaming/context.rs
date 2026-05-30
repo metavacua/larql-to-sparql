@@ -8,7 +8,6 @@
 //! each stage method in order, then calls `finalize` to add checksums
 //! and clear the checkpoint.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ndarray::Array2;
@@ -22,7 +21,14 @@ use crate::extract::stage_labels::*;
 use crate::format::filenames::*;
 
 use super::tensor_io::{normalize_key, MmapShard};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Holds the inputs + accumulators for the streaming-extract pipeline.
 pub(super) struct StreamingContext<'a> {
     // Inputs (borrowed from caller)
@@ -243,7 +249,6 @@ fn discover_safetensors(model_dir: &Path) -> Result<Vec<PathBuf>, VindexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn touch(path: &Path) {
         std::fs::write(path, b"").unwrap();
     }

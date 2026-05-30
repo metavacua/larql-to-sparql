@@ -18,7 +18,14 @@ use std::ffi::c_void;
 use crate::metal::buffers::BufferCache;
 use crate::metal::ops::q4_common::Q4Pipelines;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Weights for one transformer layer — ALL Q4 + norm weights.
 /// Matches `crate::FullPipelineLayer` but with borrowed Metal-friendly data.
 pub struct LayerWeights<'a> {
@@ -125,7 +132,7 @@ pub struct PipelineIntervention<'a> {
     pub replacement_delta: &'a [f32],
     /// Capture the target head's pre-W_O output BEFORE hook A zeros it.
     /// Filled with `[seq_len × head_dim]` floats. Initialize to empty Vec.
-    pub pre_wo_capture: std::cell::RefCell<Vec<f32>>,
+    pub pre_wo_capture: core::cell::RefCell<Vec<f32>>,
     /// If true, stop dispatch immediately after capture (before O-proj).
     /// Used for oracle code computation — caller only needs pre_wo_capture.
     /// The returned Vec<f32> from dispatch will be empty when true.
@@ -466,7 +473,7 @@ pub fn dispatch_full_pipeline(
                     for pos in 0..seq_len {
                         let head_start = pos * q_dim + iv.target_head * iv.head_dim;
                         unsafe {
-                            cap.extend_from_slice(std::slice::from_raw_parts(
+                            cap.extend_from_slice(core::slice::from_raw_parts(
                                 attn_ro.add(head_start),
                                 iv.head_dim,
                             ));
@@ -479,7 +486,7 @@ pub fn dispatch_full_pipeline(
                 for pos in 0..seq_len {
                     let head_start = pos * q_dim + iv.target_head * iv.head_dim;
                     unsafe {
-                        std::ptr::write_bytes(attn_ptr.add(head_start), 0u8, iv.head_dim);
+                        core::ptr::write_bytes(attn_ptr.add(head_start), 0u8, iv.head_dim);
                     }
                 }
                 #[cfg(target_os = "macos")]
@@ -765,8 +772,8 @@ pub fn dispatch_full_pipeline(
                     let h_ptr = lb.h[l + 1].contents() as *mut f32;
                     // SAFETY: GPU finished (wait_until_completed). Both buffers
                     // are pre-allocated for `seq_len * hidden` f32s.
-                    let ha = unsafe { std::slice::from_raw_parts(ha_ptr, seq_len * hidden) };
-                    let h = unsafe { std::slice::from_raw_parts_mut(h_ptr, seq_len * hidden) };
+                    let ha = unsafe { core::slice::from_raw_parts(ha_ptr, seq_len * hidden) };
+                    let h = unsafe { core::slice::from_raw_parts_mut(h_ptr, seq_len * hidden) };
                     f(l, ha, h);
                 }
             }

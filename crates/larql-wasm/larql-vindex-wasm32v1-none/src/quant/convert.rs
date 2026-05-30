@@ -29,6 +29,14 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::config::types::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     ComplianceGate, Fp4Config, Precision, ProjectionFormat, Projections, VindexConfig,
 };
 use crate::error::VindexError;
@@ -562,7 +570,7 @@ fn read_source_projection(
         let floats: Vec<f32> = match dtype {
             Dtype::F32 => {
                 let view: &[f32] =
-                    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, n * hidden) };
+                    unsafe { core::slice::from_raw_parts(slice.as_ptr() as *const f32, n * hidden) };
                 view.to_vec()
             }
             Dtype::F16 => larql_models::quant::half::decode_f16(slice),
@@ -597,7 +605,6 @@ fn link_or_copy(src: &Path, dst: &Path) -> Result<(), VindexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn policy_precisions_keep_gate_source() {
         // All three policies keep gate=source (per spec).

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -6,7 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::program::{BehaviorMetrics, Program, ProgramRule};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ────────────────────────────────────────────────────────────────────────────
 // Cache types
 // ────────────────────────────────────────────────────────────────────────────
@@ -174,7 +180,7 @@ pub(super) struct BuildProgramCacheArgs {
 
 pub(super) fn run_build_program_cache(
     args: BuildProgramCacheArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let registry_dir = args.registry.parent().unwrap_or(Path::new("."));
     let registry: Value = serde_json::from_str(&std::fs::read_to_string(&args.registry)?)?;
 

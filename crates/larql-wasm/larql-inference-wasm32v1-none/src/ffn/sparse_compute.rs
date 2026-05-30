@@ -14,7 +14,14 @@ use super::weight::dense_ffn_forward;
 use super::{gelu_tanh, sigmoid};
 use crate::forward::add_bias;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute FFN output for a pre-selected set of features.
 ///
 /// Architecture-correct: reads ffn_type, activation, and bias from the model.
@@ -127,7 +134,7 @@ fn sparse_ffn_forward_impl(
 
     // Override lookup (only built when overrides are present)
     let override_map: std::collections::HashMap<usize, &[f32]> = if overrides.is_empty() {
-        std::collections::HashMap::new()
+        HashMap::new()
     } else {
         overrides.iter().copied().collect()
     };
@@ -513,7 +520,6 @@ mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

@@ -26,7 +26,14 @@ use clap::Args;
 
 use crate::commands::extraction::walk_cmd;
 use crate::commands::primary::cache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// KV cache strategy selector. Picks how the autoregressive decode
 /// stores past-token state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,7 +231,7 @@ pub struct RunArgs {
     pub moe_predispatch_iters: usize,
 }
 
-pub fn run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: RunArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex_path = cache::resolve_model(&args.model)?;
     if !vindex_path.is_dir() {
         return Err(format!(
@@ -289,7 +296,7 @@ fn run_once(
     vindex_path: &std::path::Path,
     prompt: &str,
     args: &RunArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let walk_args = build_walk_args(vindex_path, prompt, args);
     walk_cmd::run(walk_args)
 }
@@ -299,7 +306,7 @@ fn run_once(
 fn run_chat(
     vindex_path: &std::path::Path,
     args: &RunArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!(
         "larql chat — {} (Ctrl-D to exit)",
         vindex_path
@@ -378,7 +385,7 @@ fn run_with_moe_shards(
     max_tokens: usize,
     dispatch: &str,
     predispatch_iters: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_inference::ffn::moe_remote::{parse_unit_manifest, RemoteMoeBackend, ShardConfig};
     use larql_inference::{generate_with_remote_moe, generate_with_remote_moe_batch};
 
@@ -512,7 +519,7 @@ fn run_with_moe_shards(
         let top_k = weights.arch.num_experts_per_token();
         let experts_invoked = num_layers * top_k * n;
         // One f32 residual vector per layer per shard in each direction.
-        let bytes_per_token = num_layers * num_shards * hidden * std::mem::size_of::<f32>();
+        let bytes_per_token = num_layers * num_shards * hidden * core::mem::size_of::<f32>();
         let kb = |b: usize| b as f64 / 1024.0;
         eprintln!();
         eprintln!("  decode:          {tok_s:.1} tok/s");
@@ -551,7 +558,7 @@ fn run_with_remote_ffn(
     max_tokens: usize,
     dispatch: &str,
     predispatch_iters: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_inference::{
         generate_with_remote_ffn, generate_with_remote_ffn_batch, LayerShardedBackend,
     };
@@ -619,7 +626,7 @@ fn run_with_remote_ffn(
         let num_layers = weights.num_layers;
         let hidden = weights.hidden_size;
         // One f32 residual in each direction per layer.
-        let bytes_per_token = num_layers * hidden * std::mem::size_of::<f32>();
+        let bytes_per_token = num_layers * hidden * core::mem::size_of::<f32>();
         let kb = |b: usize| b as f64 / 1024.0;
         eprintln!();
         eprintln!("  decode:     {tok_s:.1} tok/s");
@@ -659,7 +666,7 @@ mod experts {
     use larql_inference::WeightFfn;
     use larql_vindex::{load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex};
 
-    type BoxErr = Box<dyn std::error::Error>;
+    type BoxErr = Box<dyn core::error::Error>;
 
     /// Which decode strategy to use for this `--experts` invocation.
     enum Strategy {
@@ -1095,7 +1102,6 @@ mod experts {
     mod tests {
         use super::*;
         use larql_vindex::QuantFormat;
-
         // ── pick_strategy ──────────────────────────────────────────────────
 
         #[test]

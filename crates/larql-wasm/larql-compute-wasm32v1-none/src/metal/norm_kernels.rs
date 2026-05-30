@@ -31,7 +31,6 @@ use metal::{ComputePipelineState, Device, Library};
 
 use crate::metal::kernel::get_shader_pipeline;
 use crate::metal::shaders;
-
 /// Pipeline registry for norm, residual, and scale-vector kernels.
 ///
 /// All fields are `pub` so existing dispatch sites can read them

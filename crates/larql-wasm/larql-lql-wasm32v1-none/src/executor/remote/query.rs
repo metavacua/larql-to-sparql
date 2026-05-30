@@ -6,6 +6,14 @@ use crate::error::LqlError;
 use crate::executor::{Backend, Session};
 
 use super::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     ENDPOINT_DESCRIBE, ENDPOINT_EXPLAIN_INFER, ENDPOINT_INFER, ENDPOINT_RELATIONS, ENDPOINT_SELECT,
     ENDPOINT_STATS, ENDPOINT_WALK,
 };
@@ -653,7 +661,6 @@ pub(super) fn remote_knn_override_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn mk_obj(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
         pairs
             .iter()

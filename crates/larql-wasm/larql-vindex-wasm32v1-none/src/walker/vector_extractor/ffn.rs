@@ -1,6 +1,14 @@
 //! FFN (gate / up / down) per-layer extraction methods.
 
 use larql_models::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     TopKEntry, VectorRecord, COMPONENT_FFN_DOWN, COMPONENT_FFN_GATE, COMPONENT_FFN_UP,
 };
 
@@ -216,7 +224,6 @@ mod tests {
     use super::*;
     use crate::walker::test_fixture::create_mock_model;
     use larql_models::VectorFileHeader;
-
     fn fixture(slug: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("larql_vex_ffn_{slug}"));
         let _ = std::fs::remove_dir_all(&dir);

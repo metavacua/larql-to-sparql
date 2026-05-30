@@ -4,7 +4,14 @@ use metal::ComputePipelineState;
 
 use crate::metal::kernel::KernelHandle;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Pipeline states for Q4 operations — compiled from modular shaders.
 ///
 /// `matvec` is a [`KernelHandle`] because its kernel uses simdgroup

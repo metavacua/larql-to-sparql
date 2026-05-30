@@ -4,13 +4,18 @@
 //! that connects to the router, sends an AnnounceMsg, and then sends
 //! Heartbeats every 10 seconds. On disconnect it reconnects with backoff.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use core::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use std::sync::Arc;
-
 use larql_router_protocol::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     AnnounceMsg, DroppingMsg, GridServiceClient, HeartbeatMsg, RouterPayload, ServerMessage,
     ServerPayload,
 };
@@ -50,7 +55,7 @@ pub struct AnnounceConfig {
     /// Per-layer latency tracker — populates HeartbeatMsg.layer_stats.
     pub latency_tracker: Arc<LayerLatencyTracker>,
     /// Active request counter — used for drain (GT6) and heartbeat.requests_in_flight.
-    pub requests_in_flight: Arc<std::sync::atomic::AtomicU32>,
+    pub requests_in_flight: Arc<core::sync::atomic::AtomicU32>,
 }
 
 // ── Mode B config ──────────────────────────────────────────────────────────────
@@ -139,7 +144,7 @@ pub fn vindex_identity_hash(model_id: &str, num_layers: usize) -> String {
 
 fn grid_bearer_value(
     grid_key: Option<&str>,
-) -> Result<Option<AsciiMetadataValue>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<AsciiMetadataValue>, Box<dyn core::error::Error + Send + Sync>> {
     grid_key
         .map(|k| format!("Bearer {k}").parse())
         .transpose()
@@ -161,9 +166,9 @@ fn announce_message(cfg: &AnnounceConfig) -> ServerMessage {
 
 fn heartbeat_message(
     tracker: &LayerLatencyTracker,
-    requests_in_flight: &std::sync::atomic::AtomicU32,
+    requests_in_flight: &core::sync::atomic::AtomicU32,
 ) -> ServerMessage {
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
     ServerMessage {
         payload: Some(ServerPayload::Heartbeat(HeartbeatMsg {
             cpu_pct: 0.0,
@@ -188,8 +193,8 @@ fn dropping_message(model_id: String, layer_start: u32, layer_end: u32) -> Serve
 /// Wait until `counter` reaches zero or `timeout` expires.
 /// Polls every 100 ms. Used by GT6 drain to ensure no requests are
 /// mid-flight before sending DroppingMsg.
-async fn drain_requests(counter: &std::sync::atomic::AtomicU32, timeout: Duration) {
-    use std::sync::atomic::Ordering;
+async fn drain_requests(counter: &core::sync::atomic::AtomicU32, timeout: Duration) {
+    use core::sync::atomic::Ordering;
     let deadline = tokio::time::Instant::now() + timeout;
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
     loop {
@@ -210,7 +215,7 @@ async fn drain_requests(counter: &std::sync::atomic::AtomicU32, timeout: Duratio
 
 // ── Single connection lifecycle ────────────────────────────────────────────────
 
-async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     let channel = tonic::transport::Channel::from_shared(cfg.join_url.clone())?
         .connect()
         .await?;
@@ -306,7 +311,7 @@ async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn std::error::Error 
 
 async fn try_once_available(
     cfg: &AvailableConfig,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     use larql_router_protocol::{AvailableMsg, ReadyMsg};
 
     let channel = tonic::transport::Channel::from_shared(cfg.join_url.clone())?
@@ -417,7 +422,6 @@ async fn try_once_available(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn config() -> AnnounceConfig {
         AnnounceConfig {
             join_url: "http://router:50052".into(),
@@ -429,7 +433,7 @@ mod tests {
             grid_key: Some("secret".into()),
             vindex_hash: "abc123".into(),
             latency_tracker: Arc::new(LayerLatencyTracker::new()),
-            requests_in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            requests_in_flight: Arc::new(core::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -469,7 +473,7 @@ mod tests {
     #[test]
     fn heartbeat_message_uses_zeroed_metrics() {
         let tracker = LayerLatencyTracker::new();
-        let rif = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let rif = alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0));
         let msg = heartbeat_message(&tracker, &rif);
         let Some(ServerPayload::Heartbeat(heartbeat)) = msg.payload else {
             panic!("expected heartbeat payload");
@@ -485,7 +489,7 @@ mod tests {
         let tracker = LayerLatencyTracker::new();
         tracker.record(5, 3.0);
         tracker.record(5, 5.0);
-        let rif = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let rif = alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0));
         let msg = heartbeat_message(&tracker, &rif);
         let Some(ServerPayload::Heartbeat(hb)) = msg.payload else {
             panic!("expected heartbeat");

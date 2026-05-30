@@ -6,7 +6,14 @@
 //! ARM vdotq_s32 intrinsics. 0.95ms on 14.7MB matrix (M3 Max).
 
 use super::q4_common::{q4_0_matvec_c, quantize_to_q8};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Q4 matvec: scores = Q4_matrix @ x.
 /// Pre-quantizes x to Q8 internally.
 pub fn dispatch(q4_data: &[u8], x: &[f32], num_rows: usize, hidden: usize) -> Vec<f32> {
@@ -72,7 +79,6 @@ mod tests {
     use super::*;
 
     use super::super::q4_common::quantize_q4_0;
-
     #[test]
     fn q4_matvec_produces_output() {
         let hidden = 256;

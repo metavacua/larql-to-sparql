@@ -7,7 +7,14 @@ use larql_inference::ndarray;
 use larql_inference::tokenizers;
 use larql_inference::InferenceModel;
 use larql_vindex::load_feature_labels;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct OvGateArgs {
     /// Model path or HuggingFace model ID.
@@ -43,7 +50,7 @@ pub struct OvGateArgs {
     labels: Option<PathBuf>,
 }
 
-pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: OvGateArgs) -> Result<(), Box<dyn core::error::Error>> {
     let ndjson = args.output == "ndjson";
 
     eprintln!("Loading model: {}", args.model);
@@ -196,7 +203,7 @@ pub fn run(args: OvGateArgs) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             eprintln!("  Labeling features (slow — use --labels for instant labels)...");
             let mut labels: std::collections::HashMap<(usize, usize), String> =
-                std::collections::HashMap::new();
+                HashMap::new();
             for hd in &all_heads {
                 for &(f, _) in &hd.couplings {
                     labels.entry((hd.layer, f)).or_default();
@@ -379,7 +386,7 @@ fn project_top_n(
         .collect()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

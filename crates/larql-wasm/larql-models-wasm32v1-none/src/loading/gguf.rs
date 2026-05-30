@@ -3,16 +3,28 @@
 //! GGUF is the GGML Universal Format used by llama.cpp.
 //! We support reading unquantized (F32, F16, BF16) and quantized (Q4_0, Q4_1, Q8_0) tensors.
 //! All tensors are dequantized to f32 for use with ModelWeights.
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
-use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufReader, Read, Seek};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
 use crate::detect::{detect_from_json_validated, ModelError};
 use crate::weights::ModelWeights;
-
 // ═══════════════════════════════════════════════════════════════
 // GGUF constants
 // ═══════════════════════════════════════════════════════════════
@@ -502,10 +514,10 @@ pub(crate) fn load_gguf_filtered_with_validation(
     Ok(ModelWeights {
         tensors: normalized_tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
+        raw_bytes: HashMap::new(),
         skipped_tensors: Vec::new(),
-        packed_mmaps: std::collections::HashMap::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_mmaps: HashMap::new(),
+        packed_byte_ranges: HashMap::new(),
         embed,
         lm_head,
         position_embed,
@@ -929,6 +941,7 @@ mod tests {
 
     #[test]
     fn test_orient_in_place_transposes_inverse_layout() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
@@ -955,6 +968,7 @@ mod tests {
 
     #[test]
     fn test_orient_in_place_leaves_canonical_layout_untouched() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
@@ -973,6 +987,7 @@ mod tests {
 
     #[test]
     fn test_orient_in_place_skips_ambiguous_square_dims() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         let mut tensors: HashMap<String, crate::WeightArray> = HashMap::new();
@@ -1038,6 +1053,7 @@ mod tests {
 
     #[test]
     fn test_orient_attention_tensors_fixes_inverse_fused_qkv_layout() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         // hidden=4, head_dim=2, n_heads=2 → q_dim=kv_dim=4, total=12.
@@ -1057,6 +1073,7 @@ mod tests {
 
     #[test]
     fn test_split_fused_qkv_materialises_per_projection_tensors_and_biases() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         // hidden=4, head_dim=2, n_heads=2 → q_dim=kv_dim=4, total=12.
@@ -1113,6 +1130,7 @@ mod tests {
 
     #[test]
     fn test_split_fused_qkv_no_op_when_arch_has_no_fused_key() {
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         // Llama-style arch — no fused QKV.
@@ -1133,6 +1151,7 @@ mod tests {
     #[test]
     fn test_orient_ffn_tensors_fixes_gpt2_style_inverse_layout() {
         use crate::config::ModelConfig;
+#[cfg(not(target_arch = "wasm32"))]
         use ndarray::Array2;
 
         let cfg = ModelConfig {
@@ -1209,6 +1228,7 @@ mod tests {
 
     #[test]
     fn test_load_tensors_swaps_gguf_2d_dims_to_rows_cols() {
+#[cfg(not(target_arch = "wasm32"))]
         use std::io::{Seek, Write};
 
         let dir = tempfile::tempdir().unwrap();
@@ -1354,8 +1374,8 @@ mod tests {
     /// reject this cleanly, not panic on a slice OOB.
     #[test]
     fn test_load_tensors_rejects_truncated_tensor_data() {
+#[cfg(not(target_arch = "wasm32"))]
         use std::io::{Seek, Write};
-
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("truncated.gguf");
         let mut file = std::fs::File::create(&path).unwrap();

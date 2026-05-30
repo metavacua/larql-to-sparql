@@ -5,17 +5,22 @@
 //! Returns `Ok(None)` for non-MoE backends so the dense walk-based
 //! `exec_describe` handles them.
 
-use std::collections::HashMap;
-
 use crate::ast::LayerBand;
 use crate::error::LqlError;
 use crate::executor::helpers::is_content_token;
 use crate::executor::tuning::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DESCRIBE_COROUTED_SAMPLE_SIZE, DESCRIBE_COROUTED_TOKENS_PER_EXPERT, DESCRIBE_MAX_EXPERTS_BRIEF,
     DESCRIBE_MAX_EXPERTS_VERBOSE, DESCRIBE_TOP_EXPERTS_FOR_COROUTED,
 };
 use crate::executor::{Backend, Session};
-
 impl Session {
     /// MoE-router DESCRIBE. Returns `Ok(None)` when this backend has
     /// no MoE router (i.e. dense model — fall through to the standard

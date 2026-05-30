@@ -33,6 +33,14 @@
 //! `LARQL_DEBUG_NAN_LAYERS`, `LARQL_GPU_TIMING`, `LARQL_DECODE_DUMP_LAYERS`.
 
 use crate::options::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     env_flag, env_not_zero_or_default, env_opt_in, env_opt_out, ENV_F16_ACC, ENV_FUSED_ATTN,
     ENV_FUSED_DOWN, ENV_FUSED_KV_APPEND_ATTEND, ENV_FUSED_POST_ATTN_NORM, ENV_FUSED_POST_FFN_NORM,
     ENV_FUSED_PRELAYER_NORM, ENV_FUSED_Q6K_DOWN, ENV_FUSED_QK_NORM_ROPE, ENV_GATE_UP_8SG,
@@ -182,7 +190,6 @@ impl Default for DecodeFlags {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Pin the defaults: every flag must resolve to a known value with
     /// no env vars set. Captures the contract that
     /// `MetalBackend::new()` on a clean process is deterministic.

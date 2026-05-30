@@ -92,9 +92,8 @@
 //!
 //! See `benches/codec.rs` for full benchmark suite.
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#[cfg(target_arch = "wasm32")]
+#[macro_use]
 extern crate alloc;
-
 
 pub mod codec;
 pub mod frame;

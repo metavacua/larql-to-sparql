@@ -46,7 +46,14 @@ use crate::vindex::walk_config::WalkFfnConfig;
 use larql_compute::prelude::*;
 
 use larql_vindex::{GateIndex, WalkHit, WalkTrace};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod exact;
 mod full_mmap;
 mod helpers;
@@ -65,13 +72,13 @@ pub struct WalkFfn<'a> {
     pub index: &'a dyn GateIndex,
     pub config: WalkFfnConfig,
     pub backend: Option<&'a dyn ComputeBackend>,
-    trace_residuals: std::cell::RefCell<Vec<(usize, Vec<f32>)>>,
+    trace_residuals: core::cell::RefCell<Vec<(usize, Vec<f32>)>>,
     record_trace: bool,
     l1_cache: Option<FfnL1Cache>,
     /// Dispatch-trace sink. `None` = disabled. When `Some`, every walk
     /// path appends a (layer, name) entry on exit. Used by the routing
     /// unit tests and by the env-var dispatch trace for Q2 debugging.
-    dispatch_trace: std::cell::RefCell<Option<Vec<DispatchEntry>>>,
+    dispatch_trace: core::cell::RefCell<Option<Vec<DispatchEntry>>>,
 }
 
 impl<'a> WalkFfn<'a> {
@@ -85,10 +92,10 @@ impl<'a> WalkFfn<'a> {
             index,
             config,
             backend: None,
-            trace_residuals: std::cell::RefCell::new(Vec::new()),
+            trace_residuals: core::cell::RefCell::new(Vec::new()),
             record_trace: false,
             l1_cache: None,
-            dispatch_trace: std::cell::RefCell::new(None),
+            dispatch_trace: core::cell::RefCell::new(None),
         }
     }
 
@@ -124,7 +131,7 @@ impl<'a> WalkFfn<'a> {
         self.dispatch_trace
             .borrow_mut()
             .as_mut()
-            .map(std::mem::take)
+            .map(core::mem::take)
             .unwrap_or_default()
     }
 
@@ -149,7 +156,7 @@ impl<'a> WalkFfn<'a> {
 // getenv on every layer. Set once per thread on first access; the
 // env var is typically static across a process lifetime.
 thread_local! {
-    static WALK_TRACE_ENABLED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static WALK_TRACE_ENABLED: core::cell::Cell<Option<bool>> = const { core::cell::Cell::new(None) };
 }
 
 fn walk_trace_env_enabled() -> bool {
@@ -427,7 +434,6 @@ mod dispatch_tests {
         W.get_or_init(make_test_weights)
     }
     use crate::ffn::FfnBackend;
-
     /// Minimal GateIndex with only the 3 required methods.
     /// All optional methods fall back to their trait defaults (all return None/false/[]).
     /// WalkFfn routes through path 9 (last-resort sparse matmul against weights.tensors).

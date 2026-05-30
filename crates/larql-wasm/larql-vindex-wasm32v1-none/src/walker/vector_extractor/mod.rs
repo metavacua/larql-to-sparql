@@ -18,7 +18,14 @@
 //!   - `attn`        — `extract_attn_ov` / `extract_attn_qk`.
 //!   - `embeddings`  — `extract_embeddings`.
 //!   - `mod` (here) — `extract_all` orchestrator + public re-exports.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod attn;
 mod embeddings;
 mod ffn;
@@ -26,7 +33,6 @@ mod loader;
 mod types;
 mod writer;
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::error::VindexError;

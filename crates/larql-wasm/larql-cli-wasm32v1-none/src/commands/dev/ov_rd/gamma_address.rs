@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_inference::attention::run_attention_block_with_pre_o;
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -8,6 +7,14 @@ use larql_vindex::VectorIndex;
 use ndarray::{s, Array2};
 
 use super::address::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     predict_code_from_hyperplanes, train_binary_hyperplane, AddressSupervisedGroupModel,
 };
 use super::basis::{WoRoundtripBasis, ZPcaBasis};
@@ -16,7 +23,6 @@ use super::pq::PqCodebook;
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
 #[derive(Debug, Clone)]
 pub(super) struct GammaProjectedAddressModel {
     pub(super) name: String,
@@ -36,7 +42,7 @@ impl GammaProjectedAddressModel {
     pub(super) fn project_layer_input(
         &self,
         layer_input: &Array2<f32>,
-    ) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+    ) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
         match &self.source {
             GammaProjectionSource::Raw => Ok(layer_input.clone()),
             GammaProjectionSource::DiagonalAffine(map) => {
@@ -212,7 +218,7 @@ pub(super) fn fit_gamma_projected_address_models(
     epochs: usize,
     lr: f32,
     l2: f32,
-) -> Result<HashMap<(HeadId, PqConfig), Vec<GammaProjectedAddressModel>>, Box<dyn std::error::Error>>
+) -> Result<HashMap<(HeadId, PqConfig), Vec<GammaProjectedAddressModel>>, Box<dyn core::error::Error>>
 {
     let samples = collect_gamma_code_samples(
         weights,
@@ -691,7 +697,7 @@ fn collect_gamma_code_samples(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     projection_layers: &[usize],
     label_prefix: &str,
-) -> Result<Vec<GammaCodeSample>, Box<dyn std::error::Error>> {
+) -> Result<Vec<GammaCodeSample>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);

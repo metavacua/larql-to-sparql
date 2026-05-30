@@ -6,7 +6,14 @@
 //! reference.
 
 use larql_models::quant::ggml::Q4_K_BLOCK_BYTES as Q4K_BLOCK_SIZE;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Offset to the start of the 128-byte nibble-packed quants region inside
 /// a Q4_K block: 2 bytes `d` + 2 bytes `dmin` + 12 packed `(scale, min)`
 /// bytes = 16. Pinning this so `[Q4K_HEADER_BYTES..Q4K_BLOCK_SIZE]`
@@ -117,7 +124,6 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use larql_models::quant::ggml::dequantize_q4_k;
-
     #[test]
     fn q4k_matches_dequantize_reference_single_superblock() {
         // One 256-value superblock packed → our dispatch() must match

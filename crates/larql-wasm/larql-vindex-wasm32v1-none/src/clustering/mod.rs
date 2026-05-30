@@ -7,7 +7,14 @@
 //! - `kmeans`: K-means clustering with BLAS acceleration
 //! - `labeling`: Auto-generate labels from cluster members + curated vocabulary
 //! - `categories`: Curated category vocabulary and stop words
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod categories;
 pub mod kmeans;
 pub mod labeling;

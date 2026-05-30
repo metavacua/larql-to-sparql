@@ -14,7 +14,14 @@
 use ndarray::{Array1, Array2};
 
 use larql_compute::cpu::ops::linalg::ridge_decomposition_solve;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A single MEMIT compaction cycle's result.
 #[derive(Debug, Clone)]
 pub struct MemitCycle {
@@ -242,7 +249,6 @@ fn max_off_diagonal_batched(d_matrix: &Array2<f32>, targets: &Array2<f32>) -> f3
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn make_fact(entity: &str, relation: &str, target: &str) -> MemitFact {
         MemitFact {
             entity: entity.into(),

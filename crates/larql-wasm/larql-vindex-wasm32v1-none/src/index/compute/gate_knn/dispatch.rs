@@ -12,7 +12,14 @@ use crate::index::core::VectorIndex;
 use crate::index::storage::gate_store::{gate_matmul, gemv};
 use crate::index::storage::vindex_storage::VindexStorage;
 use crate::index::types::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Gate KNN: find the top-K features at a layer whose gate vectors have
     /// the highest dot product with the input residual. Uses BLAS matmul.
@@ -29,7 +36,7 @@ impl VectorIndex {
         if self
             .gate
             .hnsw_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .load(core::sync::atomic::Ordering::Relaxed)
         {
             if let Some(results) = self.gate_knn_hnsw(layer, residual, top_k) {
                 return results;
@@ -82,7 +89,7 @@ impl VectorIndex {
                     return None;
                 }
                 Some(unsafe {
-                    std::slice::from_raw_parts(
+                    core::slice::from_raw_parts(
                         mmap[byte_offset..byte_end].as_ptr() as *const f32,
                         view.slice.num_features * self.hidden_size,
                     )
@@ -128,7 +135,7 @@ impl VectorIndex {
         if self
             .gate
             .hnsw_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .load(core::sync::atomic::Ordering::Relaxed)
         {
             if let Some(hits) =
                 self.gate_knn_expert_hnsw(layer, residual, feat_start, feat_end, top_k)
@@ -174,7 +181,7 @@ impl VectorIndex {
                 crate::config::dtype::StorageDtype::F32 => {
                     let data = unsafe {
                         let ptr = mmap[expert_byte_start..expert_byte_end].as_ptr() as *const f32;
-                        std::slice::from_raw_parts(ptr, n_features * self.hidden_size)
+                        core::slice::from_raw_parts(ptr, n_features * self.hidden_size)
                     };
                     let v = ndarray::ArrayView2::from_shape((n_features, self.hidden_size), data)
                         .unwrap();
@@ -289,7 +296,7 @@ impl VectorIndex {
                 .collect()
         };
 
-        let mut feature_set = std::collections::BTreeSet::new();
+        let mut feature_set = alloc::collections::BTreeSet::new();
         for hits in position_hits {
             feature_set.extend(hits);
         }
@@ -387,7 +394,6 @@ mod tests {
     use super::*;
     use crate::index::FeatureMeta;
     use ndarray::array;
-
     /// Simple heap-mode index: 3 features at layer 0, hidden=4.
     /// Each row is a known direction so we can predict KNN hits.
     fn heap_idx() -> VectorIndex {

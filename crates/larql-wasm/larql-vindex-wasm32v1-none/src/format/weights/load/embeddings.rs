@@ -15,7 +15,14 @@ use crate::config::VindexConfig;
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::core::IndexLoadCallbacks;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Mmap + decode `embeddings.bin` into a `[vocab_size, hidden_size]`
 /// array of f32. Auto-detects f32 vs f16 storage from the byte count.
 ///
@@ -59,8 +66,7 @@ mod tests {
     use super::*;
     use crate::config::dtype::StorageDtype;
     use crate::config::types::QuantFormat;
-    use std::cell::RefCell;
-
+    use core::cell::RefCell;
     /// Records callback order for assertions.
     #[derive(Default)]
     struct Recording {

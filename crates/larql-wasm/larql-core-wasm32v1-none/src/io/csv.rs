@@ -8,7 +8,14 @@ use std::path::Path;
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::{Graph, GraphError};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const CSV_HEADER: [&str; 5] = ["subject", "relation", "object", "confidence", "source"];
 
 /// Load a graph from CSV. Expected columns: subject,relation,object,confidence,source
@@ -128,18 +135,18 @@ fn parse_csv_records(input: &str) -> Result<Vec<Vec<String>>, GraphError> {
                 ));
             }
             ',' => {
-                record.push(std::mem::take(&mut field));
+                record.push(core::mem::take(&mut field));
             }
             '\n' => {
-                record.push(std::mem::take(&mut field));
-                records.push(std::mem::take(&mut record));
+                record.push(core::mem::take(&mut field));
+                records.push(core::mem::take(&mut record));
             }
             '\r' => {
                 if chars.peek() == Some(&'\n') {
                     chars.next();
                 }
-                record.push(std::mem::take(&mut field));
-                records.push(std::mem::take(&mut record));
+                record.push(core::mem::take(&mut field));
+                records.push(core::mem::take(&mut record));
             }
             _ => field.push(ch),
         }

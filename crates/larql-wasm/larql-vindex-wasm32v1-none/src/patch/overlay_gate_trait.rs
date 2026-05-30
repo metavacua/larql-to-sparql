@@ -12,11 +12,18 @@
 use ndarray::Array1;
 
 use crate::index::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
 };
 
 use super::overlay::PatchedVindex;
-
 impl GateLookup for PatchedVindex {
     fn gate_knn(&self, layer: usize, residual: &Array1<f32>, top_k: usize) -> Vec<(usize, f32)> {
         self.gate_knn(layer, residual, top_k)
@@ -59,7 +66,7 @@ impl GateLookup for PatchedVindex {
             // No overrides at this layer — base path is correct.
             return self.base.gate_knn_batch(layer, x, top_k);
         }
-        let mut selected = std::collections::BTreeSet::<usize>::new();
+        let mut selected = alloc::collections::BTreeSet::<usize>::new();
         for s in 0..x.shape()[0] {
             let row = x.row(s).to_owned();
             let hits = self.gate_knn(layer, &row, top_k);

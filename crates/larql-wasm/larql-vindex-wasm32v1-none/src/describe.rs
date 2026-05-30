@@ -3,7 +3,14 @@
 //! These represent the output of a DESCRIBE operation on an entity.
 //! The actual DESCRIBE logic lives in the executor (larql-lql), but these
 //! types are vindex-level so they can be shared across consumers.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Source of a relation label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelSource {
@@ -19,8 +26,8 @@ pub enum LabelSource {
     KnnStore,
 }
 
-impl std::fmt::Display for LabelSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for LabelSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Probe => write!(f, "probe"),
             Self::Cluster => write!(f, "cluster"),

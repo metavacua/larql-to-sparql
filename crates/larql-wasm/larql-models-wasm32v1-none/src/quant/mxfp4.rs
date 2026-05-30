@@ -7,8 +7,18 @@
 //!   blocks: [experts, out_features, groups, 16] as U8 (each byte = 2 × 4-bit values)
 //!   scales: [experts, out_features, groups] as U8 (e8m0 exponent)
 
-use crate::detect::ModelError;
-
+use crate::error::ModelError;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// MXFP4 lookup table: maps 4-bit value to float.
 /// Bit layout: [sign(1)][exponent(2)][mantissa(1)]
 /// Values: ±{0, 0.5, 1, 1.5, 2, 3, 4, 6}
@@ -186,7 +196,6 @@ pub fn split_gate_up_experts(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn e8m0_zero() {
         assert_eq!(e8m0_to_f32(0), 0.0);

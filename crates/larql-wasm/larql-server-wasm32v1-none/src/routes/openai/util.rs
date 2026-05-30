@@ -8,7 +8,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Stop strings — accepted as either a single string or a list.
 /// OpenAI's `stop` field allows both forms.
 #[derive(Deserialize, Debug, Clone)]
@@ -21,7 +28,7 @@ pub enum StopSpec {
 impl StopSpec {
     pub fn as_slice(&self) -> &[String] {
         match self {
-            StopSpec::Single(s) => std::slice::from_ref(s),
+            StopSpec::Single(s) => core::slice::from_ref(s),
             StopSpec::Multi(v) => v.as_slice(),
         }
     }
@@ -40,7 +47,7 @@ pub fn unix_now() -> u64 {
 /// Not cryptographically strong; uniqueness across one server lifetime
 /// is sufficient.
 pub fn new_id_suffix() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use core::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let now_ns = SystemTime::now()
@@ -147,7 +154,6 @@ pub fn build_sampling_eos(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn stop_spec_single_or_multi() {
         let single: StopSpec = serde_json::from_value(serde_json::json!("\\n")).unwrap();

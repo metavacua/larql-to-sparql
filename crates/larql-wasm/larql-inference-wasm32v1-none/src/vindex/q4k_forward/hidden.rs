@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
@@ -10,7 +9,14 @@ use crate::forward::ple::precompute_per_layer_inputs;
 use crate::forward::run_layer_with_ffn;
 
 use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
 /// `[seq_len, hidden]` array; caller owns the lm_head step.

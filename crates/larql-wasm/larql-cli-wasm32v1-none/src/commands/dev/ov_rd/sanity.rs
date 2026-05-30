@@ -4,6 +4,14 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::{encode_prompt, hidden_to_raw_logits};
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -13,7 +21,6 @@ use super::metrics::{kl_logp, log_softmax, max_abs_diff, mean};
 use super::reports::{SanityCheckReport, SanityHeadReport, SanityPromptReport};
 use super::types::HeadId;
 use super::zero_ablate::forward_q4k_zero_pre_o_head;
-
 #[derive(Args)]
 pub(super) struct SanityCheckArgs {
     /// Self-contained Q4K vindex directory.
@@ -91,7 +98,7 @@ impl SanityHeadAccumulator {
     }
 }
 
-pub(super) fn run_sanity_check(args: SanityCheckArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn run_sanity_check(args: SanityCheckArgs) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -213,7 +220,7 @@ fn forward_q4k_noop_replace_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(
         weights,
         token_ids,
@@ -230,7 +237,7 @@ fn forward_q4k_subtract_pre_o_head(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_subtracted_pre_o_heads(
         weights,
         token_ids,
@@ -246,7 +253,7 @@ fn forward_q4k_noop_replace_head_residual_delta(
     token_ids: &[u32],
     index: &VectorIndex,
     head: HeadId,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_original_head_residual_delta(
         weights, token_ids, index, head.layer, head.head,
     )

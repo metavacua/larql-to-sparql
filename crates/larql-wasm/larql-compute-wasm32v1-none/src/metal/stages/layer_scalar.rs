@@ -13,7 +13,14 @@
 
 use metal::{Buffer, ComputeCommandEncoderRef, ComputePipelineState, MTLSize};
 use std::ffi::c_void;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// If `scalar` is non-zero, scale the f32 residual at each position by `scalar`.
 ///
 /// * `h_buf` is the residual buffer holding `seq_len × hidden` f32s starting
@@ -57,7 +64,6 @@ mod tests {
     use super::*;
     use crate::metal::buffers::BufferCache;
     use crate::metal::shaders;
-
     /// Pin Gemma 4's per-layer residual stabiliser: out = h * scalar applied
     /// in-place to each position's hidden vector. Uses a non-trivial
     /// scalar (0.5) and 3 positions to verify the per-position offset
@@ -95,7 +101,7 @@ mod tests {
 
         let out_ptr = h_buf.contents() as *const f32;
         let metal_out: Vec<f32> =
-            unsafe { std::slice::from_raw_parts(out_ptr, seq_len * hidden).to_vec() };
+            unsafe { core::slice::from_raw_parts(out_ptr, seq_len * hidden).to_vec() };
 
         for (i, v) in metal_out.iter().enumerate() {
             let expected = h_init[i] * scalar;
@@ -139,7 +145,7 @@ mod tests {
         cmd.wait_until_completed();
 
         let out_ptr = h_buf.contents() as *const f32;
-        let out: Vec<f32> = unsafe { std::slice::from_raw_parts(out_ptr, hidden).to_vec() };
+        let out: Vec<f32> = unsafe { core::slice::from_raw_parts(out_ptr, hidden).to_vec() };
         for (i, v) in out.iter().enumerate() {
             assert!(
                 (v - h_init[i]).abs() < 1e-6,

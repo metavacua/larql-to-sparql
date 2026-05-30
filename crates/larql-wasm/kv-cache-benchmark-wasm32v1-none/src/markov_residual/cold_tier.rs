@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Cold tier storage: token IDs only.
 ///
 /// When tokens fall out of the active window, their residuals are discarded.
@@ -76,7 +84,6 @@ impl Default for ColdTier {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_cold_tier_memory() {
         let mut ct = ColdTier::new();

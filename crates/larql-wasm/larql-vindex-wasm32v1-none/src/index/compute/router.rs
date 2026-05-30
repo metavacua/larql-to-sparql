@@ -11,7 +11,14 @@ use std::path::Path;
 use ndarray::{Array1, Array2};
 
 use crate::format::filenames::ROUTER_WEIGHTS_BIN;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// MoE router weights for all layers.
 pub struct RouterIndex {
     /// Per-layer router weight matrices: `[num_experts, hidden_size]`
@@ -127,11 +134,11 @@ impl RouterIndex {
     pub fn route_all_layers(
         &self,
         embedding: &Array1<f32>,
-        layer_range: std::ops::RangeInclusive<usize>,
+        layer_range: core::ops::RangeInclusive<usize>,
     ) -> Vec<(usize, usize, f32)> {
         // Count how often each expert is selected across layers, with avg probability
         let mut expert_counts: std::collections::HashMap<usize, (usize, f32)> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         for layer in layer_range {
             if let Some(result) = self.route(layer, embedding) {

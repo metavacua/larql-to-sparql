@@ -5,7 +5,14 @@ use crate::parser;
 
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const BANNER: &str = r#"
    ╦   ╔═╗ ╦═╗ ╔═╗ ╦
    ║   ╠═╣ ╠╦╝ ║═╬╗║
@@ -218,14 +225,14 @@ fn run_repl_basic() {
 }
 
 /// Run a single LQL statement (non-interactive).
-pub fn run_statement(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn run_statement(input: &str) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     let stmt = parser::parse(input)?;
     let mut session = Session::new();
     Ok(session.execute(&stmt)?)
 }
 
 /// Run a batch of LQL statements from a file or string.
-pub fn run_batch(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn run_batch(input: &str) -> Result<Vec<String>, Box<dyn core::error::Error>> {
     let mut session = Session::new();
     let mut all_output = Vec::new();
 
@@ -275,7 +282,7 @@ fn split_statements(input: &str) -> Vec<String> {
             current.push(ch);
         } else if ch == ';' {
             current.push(ch);
-            stmts.push(std::mem::take(&mut current));
+            stmts.push(core::mem::take(&mut current));
         } else {
             current.push(ch);
         }
@@ -333,7 +340,6 @@ LQL Commands:
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── Statement splitting ──
 
     #[test]

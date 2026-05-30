@@ -7,8 +7,6 @@
 //! - Direct API: gate_vector(), embed(), gate_knn() — raw numpy arrays
 //! - High-level: describe(), entity_knn(), insert() — string in, results out
 
-use std::collections::HashMap;
-
 use ndarray::Array1;
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::prelude::*;
@@ -16,13 +14,20 @@ use pyo3::types::PyDict;
 
 use larql_vindex::patch::knn_store::KnnStore;
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     format::filenames::KNN_STORE_BIN, load_vindex_config, load_vindex_embeddings,
     load_vindex_tokenizer, tokenizers, FeatureMeta, SilentLoadCallbacks, VectorIndex, VindexConfig,
     WalkHit,
 };
 
 use larql_lql::relations::RelationClassifier;
-
 // ── Content token filter (matches LQL executor logic) ──
 
 fn is_readable_token(tok: &str) -> bool {
@@ -342,7 +347,7 @@ pub struct PyVindex {
     /// query path (`executor/query/infer.rs`).
     pub(crate) knn_store: Option<KnnStore>,
     /// Lazy-loaded mmap'd weights for infer(). Created on first call, reused after.
-    pub(crate) walk_model: std::cell::RefCell<Option<crate::walk::InferState>>,
+    pub(crate) walk_model: core::cell::RefCell<Option<crate::walk::InferState>>,
 }
 
 impl PyVindex {
@@ -389,7 +394,7 @@ impl PyVindex {
             path: path.to_string(),
             classifier,
             knn_store,
-            walk_model: std::cell::RefCell::new(None),
+            walk_model: core::cell::RefCell::new(None),
         })
     }
 
@@ -875,7 +880,7 @@ impl PyVindex {
             }
         }
 
-        rels.sort_by_key(|b| std::cmp::Reverse(b.count));
+        rels.sort_by_key(|b| core::cmp::Reverse(b.count));
         rels
     }
 
@@ -1429,7 +1434,7 @@ impl PyVindex {
                 }
             }
 
-            results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(core::cmp::Ordering::Equal));
             results.truncate(top_k);
             Ok(results)
         })

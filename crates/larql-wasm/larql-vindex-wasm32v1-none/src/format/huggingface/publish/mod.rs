@@ -11,7 +11,14 @@
 //!   - `upload.rs`  — `upload_file_to_hf` + preupload + `upload_regular`
 //!   - `lfs.rs`     — LFS protocol (batch / verify / commit) + streaming
 //!                    PUT + `CountingReader`
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod lfs;
 pub(super) mod protocol;
 mod remote;
@@ -119,7 +126,7 @@ pub fn publish_vindex_with_opts(
     let remote_lfs: std::collections::HashMap<String, String> = if opts.skip_unchanged {
         fetch_remote_lfs_oids(repo_id, &token, repo_type).unwrap_or_default()
     } else {
-        std::collections::HashMap::new()
+        HashMap::new()
     };
 
     // Collect files from the root and any immediate subdirectories (e.g. layers/).

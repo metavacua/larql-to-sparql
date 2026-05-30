@@ -17,7 +17,14 @@
 //! `Array1<f32>` slices the caller already has in hand.
 
 use ndarray::Array1;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Input to the refine pass: a single fact's identifying coordinates
 /// plus the unrefined gate vector synthesised at INSERT time.
 #[derive(Debug, Clone)]
@@ -84,7 +91,7 @@ pub fn refine_gates(inputs: &[RefineInput], decoy_residuals: &[Array1<f32>]) -> 
     // peers at the same layer. The decoys apply to every layer because
     // the caller is responsible for capturing them at the right depth.
     let mut by_layer: std::collections::BTreeMap<usize, Vec<usize>> =
-        std::collections::BTreeMap::new();
+        alloc::collections::BTreeMap::new();
     for (i, fact) in inputs.iter().enumerate() {
         by_layer.entry(fact.layer).or_default().push(i);
     }
@@ -182,7 +189,6 @@ fn orthogonalise(target: &Array1<f32>, suppress: &[&Array1<f32>]) -> Array1<f32>
 mod tests {
     use super::*;
     use ndarray::array;
-
     fn vec(xs: &[f32]) -> Array1<f32> {
         Array1::from_vec(xs.to_vec())
     }
@@ -294,7 +300,7 @@ mod tests {
         }];
         let decoy = vec(&[0.0, 1.0]);
         let cos_before = cos(&inputs[0].gate, &decoy);
-        let r = refine_gates(&inputs, std::slice::from_ref(&decoy));
+        let r = refine_gates(&inputs, core::slice::from_ref(&decoy));
         let cos_after = cos(&r.gates[0].gate, &decoy);
         assert!(
             cos_after.abs() < 1e-5,

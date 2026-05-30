@@ -2,7 +2,14 @@ use std::path::PathBuf;
 
 use clap::Args;
 use larql_core::{filter_graph, FilterConfig, MetadataPredicate, SourceType};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const METADATA_LAYER: &str = "layer";
 const METADATA_SELECTIVITY: &str = "selectivity";
 const METADATA_C_IN: &str = "c_in";
@@ -70,7 +77,7 @@ fn parse_source(s: &str) -> Option<SourceType> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
 }
 
-pub fn run(args: FilterArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: FilterArgs) -> Result<(), Box<dyn core::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
 
     let mut metadata = Vec::new();

@@ -3,11 +3,15 @@
 //!
 //! Carved out of `VectorIndex` in the 2026-04-25 reorg.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use crate::index::types::{DownMetaMmap, FeatureMeta};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 pub struct MetadataStore {
     /// Per-layer, per-feature output token metadata (heap mode).

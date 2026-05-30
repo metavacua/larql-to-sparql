@@ -18,7 +18,14 @@ use std::path::Path;
 use larql_inference::ndarray::Array1;
 use larql_vindex::{MemitCycle, MemitFact, MemitStore};
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Filename for the JSON snapshot, kept as a constant so callers
 /// don't sprinkle the literal across the codebase.
 pub(crate) const MEMIT_STORE_JSON: &str = "memit_store.json";
@@ -147,7 +154,6 @@ pub(crate) fn save_memit_store(vindex_dir: &Path, store: &MemitStore) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn unique_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_memit_persist_{label}_{}_{}",

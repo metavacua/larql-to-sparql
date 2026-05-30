@@ -21,6 +21,14 @@
 //! tests (which span loader + KNN seams) stay here.
 
 use larql_models::quant::ggml::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     Q4_0_BLOCK_BYTES, Q4_0_BLOCK_ELEMS, Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS,
 };
 
@@ -72,8 +80,6 @@ pub(super) fn read_lm_head_manifest_kind(dir: &std::path::Path) -> Option<String
 mod tests {
     use super::*;
     use crate::index::core::VectorIndex;
-    use std::sync::Arc;
-
     /// `top_k_sorted` is the shared reduce used by Q4 / f16 / f32 paths.
     /// Pin the contract: descending by score, capped at `top_k`.
     #[test]

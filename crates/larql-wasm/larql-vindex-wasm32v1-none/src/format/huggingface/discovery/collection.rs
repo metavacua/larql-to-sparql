@@ -7,7 +7,14 @@ use crate::error::VindexError;
 use super::super::publish::get_hf_token;
 use super::super::publish::protocol::hf_base;
 use super::CollectionItem;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn find_collection_slug(
     namespace: &str,
     title: &str,
@@ -193,7 +200,6 @@ mod tests {
     use super::super::test_support::TestEnvGuard;
     use super::*;
     use serial_test::serial;
-
     // ── fetch_collection_items ──
 
     #[test]

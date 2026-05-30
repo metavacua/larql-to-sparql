@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Lloyd-Max scalar quantization.
 ///
 /// After WHT rotation, each coordinate follows Beta(d/2, d/2) ≈ N(0, 1/d).
@@ -89,7 +97,6 @@ pub fn compute_codebook(samples: &[f32], n_levels: usize, max_iters: usize) -> C
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_quantize_dequantize_roundtrip() {
         let cb = Codebook {

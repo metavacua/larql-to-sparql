@@ -63,3 +63,8 @@ unexpected_cfgs = { level = "allow", check-cfg = [] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ndarray = "0.16"
 rayon = "1.10"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+hashbrown = { workspace = true }
+libm = { workspace = true }

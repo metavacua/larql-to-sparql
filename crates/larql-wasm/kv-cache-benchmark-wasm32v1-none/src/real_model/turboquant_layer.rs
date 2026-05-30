@@ -7,7 +7,14 @@ use super::kv_capture::KvCapture;
 use crate::metrics::Metrics;
 use crate::turboquant::TurboQuant;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Result of applying TurboQuant to captured K/V.
 pub struct TurboQuantResult {
     /// Compressed bytes for all K/V across all layers.

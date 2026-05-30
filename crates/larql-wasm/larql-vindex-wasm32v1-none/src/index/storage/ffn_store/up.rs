@@ -5,13 +5,18 @@
 //! loaded) — kept on the up side since the up loader is the second
 //! to fire by convention.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::UP_FEATURES_BIN;
 use crate::index::core::VectorIndex;
 use crate::mmap_util::mmap_demand_paged;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load feature-major up vectors from up_features.bin.
     pub fn load_up_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -45,7 +50,7 @@ impl VectorIndex {
         }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, floats_per_layer)
+            core::slice::from_raw_parts(ptr, floats_per_layer)
         };
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
@@ -64,7 +69,6 @@ mod tests {
 
     use super::*;
     use crate::format::filenames::DOWN_FEATURES_BIN;
-
     fn vindex_with_layer_features(
         num_layers: usize,
         intermediate: usize,

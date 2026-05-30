@@ -12,7 +12,14 @@ use ndarray::{Array1, ArrayView2};
 use crate::config::hnsw::HnswBuildConfig;
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Enable HNSW search. Indexes are built lazily on first query per layer.
     ///
@@ -20,24 +27,24 @@ impl VectorIndex {
     pub fn enable_hnsw(&self, ef_search: usize) {
         self.gate
             .hnsw_enabled
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+            .store(true, core::sync::atomic::Ordering::Relaxed);
         self.gate
             .hnsw_ef_search
-            .store(ef_search, std::sync::atomic::Ordering::Relaxed);
+            .store(ef_search, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// Disable HNSW, revert to brute-force matmul.
     pub fn disable_hnsw(&self) {
         self.gate
             .hnsw_enabled
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+            .store(false, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// Whether HNSW is currently enabled.
     pub fn is_hnsw_enabled(&self) -> bool {
         self.gate
             .hnsw_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .load(core::sync::atomic::Ordering::Relaxed)
     }
 
     /// Get the gate vector matrix for a layer as owned contiguous f32.
@@ -231,7 +238,7 @@ impl VectorIndex {
         let ef = self
             .gate
             .hnsw_ef_search
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(core::sync::atomic::Ordering::Relaxed);
         // Oversample so the abs-rank seam below has signed candidates
         // from both tails to choose from.
         let hnsw_k = top_k.saturating_mul(4).max(top_k);
@@ -254,7 +261,7 @@ impl VectorIndex {
             }
             let data = unsafe {
                 let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
-                std::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
+                core::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
             };
             let arr =
                 ArrayView2::from_shape((view.slice.num_features, self.hidden_size), data).unwrap();
@@ -270,7 +277,7 @@ impl VectorIndex {
         candidates.sort_unstable_by(|a, b| {
             b.1.abs()
                 .partial_cmp(&a.1.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
         });
         candidates.truncate(top_k);
         Some(candidates)
@@ -298,7 +305,7 @@ impl VectorIndex {
         let ef = self
             .gate
             .hnsw_ef_search
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(core::sync::atomic::Ordering::Relaxed);
         let hnsw_k = top_k.saturating_mul(4).max(top_k);
 
         // Need a view onto the expert's slice for re-ranking.  Cheapest path
@@ -321,7 +328,7 @@ impl VectorIndex {
         candidates.sort_unstable_by(|a, b| {
             b.1.abs()
                 .partial_cmp(&a.1.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
         });
         candidates.truncate(top_k);
         // HNSW returned indices in slice-local space (0..end-feat_start).

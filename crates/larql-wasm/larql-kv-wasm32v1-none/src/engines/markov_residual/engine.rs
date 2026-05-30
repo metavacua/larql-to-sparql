@@ -10,7 +10,14 @@ use super::store::RsStore;
 use crate::profiler::{DecodeStageSummary, EngineProfiler};
 use crate::{EngineInfo, KvEngine};
 use larql_inference::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub struct MarkovResidualEngine {
     window_size: Option<usize>,
     store: Option<RsStore>,
@@ -159,7 +166,6 @@ mod tests {
     use crate::KvEngine;
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
-
     // ── Construction ──────────────────────────────────────────────────────────
 
     #[test]

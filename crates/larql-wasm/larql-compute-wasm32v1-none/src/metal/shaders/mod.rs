@@ -2,7 +2,14 @@
 //!
 //! Each shader module exports a `SHADER` constant with the MSL source.
 //! `all_shaders()` concatenates them with the common header for compilation.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod common;
 pub mod sgemm;
 pub mod sgemm_transb;

@@ -18,7 +18,14 @@
 //! field. `args` defaults to an empty object when absent.
 
 use serde_json::{Map, Value};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A structured op-call extracted from model output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpCall {
@@ -113,7 +120,6 @@ fn normalise(text: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-
     #[test]
     fn extracts_simple_object() {
         let text = r#"{"op":"gcd","args":{"a":12,"b":8}}"#;

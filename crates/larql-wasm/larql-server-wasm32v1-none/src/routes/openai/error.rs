@@ -47,7 +47,14 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::error::ServerError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// OpenAI-shaped error returned by the three OpenAI-compat handlers.
 ///
 /// Renders as `{"error": {"message", "type", "param", "code"}}`.
@@ -152,7 +159,6 @@ impl IntoResponse for OpenAIError {
 mod tests {
     use super::*;
     use axum::body::to_bytes;
-
     async fn body_json(resp: Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()

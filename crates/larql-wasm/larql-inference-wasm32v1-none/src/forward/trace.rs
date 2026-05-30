@@ -3,6 +3,14 @@
 use super::embed::embed_tokens;
 use super::hooks::{LayerHook, NoopHook};
 use super::layer::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     apply_layer_scalar, run_attention, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
 };
 use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
@@ -429,7 +437,6 @@ mod tests {
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
     use std::sync::OnceLock;
-
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)

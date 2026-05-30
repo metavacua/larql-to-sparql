@@ -17,7 +17,14 @@
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Numeric guard: `temperature <= EPS` is treated as greedy (avoids
 /// dividing by zero in the temperature step).
 pub const TEMPERATURE_GREEDY_EPS: f32 = 1e-6;
@@ -215,7 +222,7 @@ impl Sampler {
                 .iter()
                 .enumerate()
                 .filter(|(_, v)| v.is_finite())
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))?;
             return Some(hits[idx].0);
         }
         let probs = apply_filters(&scored, self.cfg);
@@ -231,7 +238,7 @@ impl Sampler {
 /// Build a `token_id → count` map. Tiny helper used by both penalty
 /// paths; allocations dominate here only for very long histories.
 fn token_counts(generated: &[u32]) -> std::collections::HashMap<u32, usize> {
-    let mut counts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<u32, usize> = HashMap::new();
     for &id in generated {
         *counts.entry(id).or_insert(0) += 1;
     }
@@ -266,7 +273,7 @@ fn argmax(logits: &[f32]) -> Option<u32> {
         .iter()
         .enumerate()
         .filter(|(_, v)| v.is_finite())
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
 }
 
@@ -329,7 +336,7 @@ fn keep_top_k(scaled: &mut [f32], k: usize) {
     }
     // Descending nth-element: place the k-th largest at index k-1.
     copy.select_nth_unstable_by(k - 1, |a, b| {
-        b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+        b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal)
     });
     let thr = copy[k - 1];
     for v in scaled.iter_mut() {
@@ -349,7 +356,7 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
     order.sort_unstable_by(|&i, &j| {
         probs[j]
             .partial_cmp(&probs[i])
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     let mut cum = 0.0f32;
     let mut last_kept = 0usize;
@@ -398,7 +405,6 @@ fn multinomial(probs: &[f32], rng: &mut StdRng) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn logits_3() -> Vec<f32> {
         // argmax = 1 (score 5.0), then 0, then 2.
         vec![3.0, 5.0, 1.0]
@@ -499,7 +505,7 @@ mod tests {
                 .with_top_p(0.999)
                 .with_seed(7),
         );
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         for _ in 0..50 {
             seen.insert(s.sample(&logits_3()).unwrap());
         }
@@ -541,7 +547,7 @@ mod tests {
     fn sample_from_topk_uses_all_when_no_filters() {
         let hits = vec![(7u32, 3.5), (12, 3.4), (3, 3.3)];
         let mut s = Sampler::new(SamplingConfig::temperature(1.0).with_seed(11));
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         for _ in 0..50 {
             seen.insert(s.sample_from_topk(&hits).unwrap());
         }

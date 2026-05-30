@@ -13,8 +13,6 @@
 //! forward through `MmapStorage`. In step 5 the substore mmap fields
 //! drop entirely. Until then this is purely additive.
 
-use std::sync::Arc;
-
 use bytes::Bytes;
 
 use crate::config::dtype::StorageDtype;
@@ -24,7 +22,14 @@ use crate::index::types::{GateLayerSlice, GateQ4Slice};
 
 use super::sealed::Sealed;
 use super::{BytesView, GateLayerView, VindexStorage};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Parity wrapper over today's substore mmaps. Implements
 /// `VindexStorage` by cloning each substore's `Arc<Mmap>` (or
 /// `Arc<Vec<u8>>` for the synth lm_head) and converting once into a

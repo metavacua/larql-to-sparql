@@ -87,7 +87,6 @@ pub fn q4k_ffn_forward_layer_q8k(
 ) -> Array2<f32> {
     use crate::ffn::{gelu_tanh_gate_up, silu_gate_up};
     use crate::forward::dot_proj;
-
     let hidden = h_q8k.qs.len(); // = n_blocks * 256
     let intermediate = index.num_features(layer);
 

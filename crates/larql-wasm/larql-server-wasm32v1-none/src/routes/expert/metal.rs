@@ -11,7 +11,6 @@
 
 #![cfg(all(feature = "metal-experts", target_os = "macos"))]
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use larql_compute::{MetalBackend, MoeScratch};
@@ -21,7 +20,14 @@ use crate::error::ServerError;
 use crate::state::AppState;
 
 use super::cpu::run_experts_cpu_batch;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run a layer's pre-selected experts on the Metal GPU and return the weighted
 /// sum of their outputs.  Returns `Ok(None)` when Metal is unavailable, the
 /// model is not hybrid-MoE, or per-layer Q4_K weights are missing — caller

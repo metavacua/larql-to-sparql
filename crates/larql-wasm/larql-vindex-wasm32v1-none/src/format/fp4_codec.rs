@@ -13,6 +13,14 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use larql_models::quant::fp4_block::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_fp4_feature, decode_fp8_feature, encode_fp4_feature, encode_fp8_feature,
     fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
 };
@@ -220,7 +228,6 @@ mod tests {
     use super::*;
     use crate::format::filenames::{DOWN_FEATURES_FP8_BIN, GATE_VECTORS_FP4_BIN};
     use std::io::Write as IoWrite;
-
     /// A tempdir helper that cleans up at drop, using std::fs only.
     struct TempDir(std::path::PathBuf);
     impl TempDir {

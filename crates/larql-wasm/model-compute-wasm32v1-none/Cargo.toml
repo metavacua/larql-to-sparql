@@ -18,7 +18,6 @@ wasm = ["dep:wasmi"]
 wasm-jit = ["dep:wasmtime"]
 
 [dependencies]
-thiserror = { workspace = true }
 
 # Feature: native kernels
 evalexpr = { version = "11", optional = true }
@@ -30,5 +29,12 @@ chrono = { version = "0.4", optional = true, default-features = false, features 
 # Cranelift requires a 64-bit host; arm32/Android uses wasmi above instead.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 wasmi = { version = "1", optional = true }
 wasmtime = { version = ">=36.0.7", optional = true, default-features = false, features = ["cranelift", "runtime", "std"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

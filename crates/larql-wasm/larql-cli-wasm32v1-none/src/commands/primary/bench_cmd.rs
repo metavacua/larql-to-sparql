@@ -26,7 +26,14 @@ use clap::Args;
 use larql_kv::EngineKind;
 
 use crate::commands::primary::cache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct BenchArgs {
     /// Vindex directory, `hf://owner/name`, or cache shorthand.
@@ -193,14 +200,14 @@ fn compute_percentiles(values: &[f64]) -> (f64, f64, f64) {
         return (0.0, 0.0, 0.0);
     }
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     let mean = sorted.iter().sum::<f64>() / sorted.len() as f64;
     let p50 = percentile(&sorted, 50.0);
     let p99 = percentile(&sorted, 99.0);
     (mean, p50, p99)
 }
 
-pub fn run(args: BenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: BenchArgs) -> Result<(), Box<dyn core::error::Error>> {
     let vindex_path = cache::resolve_model(&args.model)?;
     if !vindex_path.is_dir() {
         return Err(format!(
@@ -474,7 +481,7 @@ fn run_larql(
     vindex_path: &std::path::Path,
     args: &BenchArgs,
     metal: bool,
-) -> Result<BenchRow, Box<dyn std::error::Error>> {
+) -> Result<BenchRow, Box<dyn core::error::Error>> {
     use larql_inference::layer_graph::generate::generate;
     use larql_inference::layer_graph::CachedLayerGraph;
 
@@ -649,7 +656,7 @@ fn run_engine(
     kind: EngineKind,
     backend: Box<dyn larql_inference::ComputeBackend>,
     args: &BenchArgs,
-) -> Result<BenchRow, Box<dyn std::error::Error>> {
+) -> Result<BenchRow, Box<dyn core::error::Error>> {
     use larql_inference::forward::hidden_to_raw_logits;
 
     let mut engine = kind.build_with_profiling(backend, args.profile);
@@ -747,7 +754,7 @@ fn argmax_token(logits: &[f32]) -> u32 {
     logits
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(i, _)| i as u32)
         .unwrap_or(0)
 }
@@ -763,7 +770,7 @@ fn run_engine_q4k(
     kind: EngineKind,
     backend: Box<dyn larql_inference::ComputeBackend>,
     args: &BenchArgs,
-) -> Result<BenchRow, Box<dyn std::error::Error>> {
+) -> Result<BenchRow, Box<dyn core::error::Error>> {
     // We need two backend instances: one owned by the engine, one for Q4K calls.
     let want_metal_q4k = args.backends.contains("metal");
     let backend_for_q4k: Box<dyn larql_inference::ComputeBackend> = if want_metal_q4k {
@@ -879,7 +886,7 @@ fn run_remote_ffn_bench(
     args: &BenchArgs,
     ffn_url: &str,
     wire_pref: larql_inference::WirePreference,
-) -> Result<BenchRow, Box<dyn std::error::Error>> {
+) -> Result<BenchRow, Box<dyn core::error::Error>> {
     use larql_inference::{
         generate_with_remote_ffn, generate_with_remote_ffn_batch, LayerShardedBackend,
     };
@@ -1058,10 +1065,9 @@ fn run_remote_moe_bench(
     vindex_path: &std::path::Path,
     args: &BenchArgs,
     shards_str: &str,
-) -> Result<BenchRow, Box<dyn std::error::Error>> {
+) -> Result<BenchRow, Box<dyn core::error::Error>> {
     use larql_inference::ffn::moe_remote::{RemoteMoeBackend, ShardConfig};
     use larql_inference::{generate_with_remote_moe, generate_with_remote_moe_batch};
-
     // Parse "START-END=URL,..." shard map.
     let mut configs: Vec<ShardConfig> = Vec::new();
     for segment in shards_str.split(',') {

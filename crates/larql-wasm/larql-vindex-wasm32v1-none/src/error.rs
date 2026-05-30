@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
 use crate::config::ExtractLevel;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, thiserror::Error)]
 pub enum VindexError {
     #[error("not a directory: {0}")]
@@ -34,7 +41,6 @@ pub enum VindexError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     const FAMILY_DEEPSEEK: &str = "deepseek";
     const FEATURE_MLA: &str = "multi-head latent attention (MLA)";
     const SURFACE_Q4K_WEIGHT_WRITER: &str = "q4k weight writer";

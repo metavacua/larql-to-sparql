@@ -10,7 +10,14 @@
 use rayon::prelude::*;
 
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Direct Q4K/Q6K matmul — Y = X @ W.T, where W is the FFN matrix
     /// stored as Q4K/Q6K bytes in the vindex. Decodes and FMAs fused,
@@ -283,7 +290,6 @@ impl VectorIndex {
 #[cfg(test)]
 mod tests {
     use crate::index::core::VectorIndex;
-
     /// Locks in the W2 footgun fix: `q4k_ffn_row_scaled_add` rejects
     /// `component == 2` (down) up-front. Down on disk is
     /// `[hidden, intermediate]` so `feat`-th row is hidden-dim wide,

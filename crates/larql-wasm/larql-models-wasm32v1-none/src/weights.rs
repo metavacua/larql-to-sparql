@@ -1,10 +1,21 @@
 //! Model weight tensors — the loaded representation of a model's parameters.
 
 use crate::ModelArchitecture;
-use memmap2::Mmap;
-use ndarray::ArcArray2;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use memmap2::Mmap;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::ArcArray2;
 /// Type alias for weight tensors — ArcArray2 supports both owned and shared storage.
 /// Owned: from safetensors loading (heap). Shared: from mmap (zero-copy).
 pub type WeightArray = ArcArray2<f32>;
@@ -136,7 +147,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         // Also drop FFN bias vectors
@@ -148,7 +159,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         // Drop packed expert byte tensors (Gemma 4 A4B experts.gate_up_proj / experts.down_proj)
@@ -217,7 +228,7 @@ impl ModelWeights {
             .collect();
         for key in &keys_to_remove {
             if let Some(arr) = self.tensors.remove(key) {
-                freed += arr.len() * std::mem::size_of::<f32>();
+                freed += arr.len() * core::mem::size_of::<f32>();
             }
         }
         let vec_keys: Vec<String> = self
@@ -228,7 +239,7 @@ impl ModelWeights {
             .collect();
         for key in &vec_keys {
             if let Some(v) = self.vectors.remove(key) {
-                freed += v.len() * std::mem::size_of::<f32>();
+                freed += v.len() * core::mem::size_of::<f32>();
             }
         }
         freed
@@ -243,7 +254,7 @@ impl ModelWeights {
     /// Replaces `lm_head` with an empty array so the ModelWeights struct
     /// remains valid.
     pub fn drop_lm_head(&mut self) -> usize {
-        let freed = self.lm_head.len() * std::mem::size_of::<f32>();
+        let freed = self.lm_head.len() * core::mem::size_of::<f32>();
         self.lm_head = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed
@@ -256,7 +267,7 @@ impl ModelWeights {
     ///
     /// Typical savings: ~2.7 GB for 4B / ~5.6 GB for 31B.
     pub fn drop_embed(&mut self) -> usize {
-        let freed = self.embed.len() * std::mem::size_of::<f32>();
+        let freed = self.embed.len() * core::mem::size_of::<f32>();
         self.embed = ndarray::ArcArray2::from_shape_vec((0, 0), Vec::new())
             .expect("empty 0x0 array is always valid");
         freed

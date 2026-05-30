@@ -1,7 +1,5 @@
 //! POST /v1/infer — full forward pass with attention.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
@@ -11,7 +9,14 @@ use crate::band_utils::{INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK};
 use crate::error::ServerError;
 use crate::session::extract_session_id;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct InferRequest {
     /// Prompt to run inference on.
@@ -251,7 +256,6 @@ pub async fn handle_infer_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn infer_defaults_match_api_contract() {
         assert_eq!(default_top(), 5);

@@ -4,7 +4,14 @@
 use larql_models::ModelWeights;
 
 use crate::extract::constants::FIRST_CONTENT_TOKEN_ID;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute the offset direction for a gate→down feature pair.
 /// Returns normalized(output_embed − input_embed) or None if invalid.
 pub(crate) fn compute_offset_direction(
@@ -63,7 +70,6 @@ pub(crate) fn compute_offset_direction(
 mod tests {
     use super::super::test_support::{vocab_tokenizer, weights_with_embed};
     use super::*;
-
     #[test]
     fn compute_offset_direction_returns_normalised_vector() {
         // Vocab: "Paris"=3, "France"=4 (≥ FIRST_CONTENT_TOKEN_ID=3).

@@ -6,7 +6,17 @@ use crate::ModelError;
 
 use super::check_block_input;
 use crate::quant::half::f16_to_f32;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 pub fn q6k_row_dot(data: &[u8], x: &[f32]) -> Result<f32, ModelError> {
     const BLOCK: usize = 210;
     const SUPER: usize = 256;
@@ -69,6 +79,7 @@ pub(super) fn q6k_row_dot_scalar(data: &[u8], x: &[f32], n_blocks: usize) -> f32
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn q6k_row_dot_neon(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
+#[cfg(not(target_arch = "wasm32"))]
     use std::arch::aarch64::*;
     const BLOCK: usize = 210;
     let mut acc0 = vdupq_n_f32(0.0);

@@ -4,13 +4,18 @@
 //! variant) lives in the sibling `interleaved_q4k.rs`; this file is
 //! the predecessor format used before the K-quant rollout.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::INTERLEAVED_Q4_BIN;
 use crate::index::core::VectorIndex;
 use crate::mmap_util::mmap_demand_paged;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load Q4_0 interleaved FFN data.
     pub fn load_interleaved_q4(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -106,7 +111,6 @@ mod tests {
     use ndarray::Array2;
 
     use super::*;
-
     const Q4_0_BLOCK_ELEMS: usize = larql_models::quant::ggml::Q4_0_BLOCK_ELEMS;
 
     fn vindex_with_layer_features(

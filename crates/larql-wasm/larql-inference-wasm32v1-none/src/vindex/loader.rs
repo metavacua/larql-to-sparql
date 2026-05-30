@@ -99,7 +99,6 @@ pub fn open_inference_vindex(path: &Path) -> Result<VectorIndex, InferenceError>
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn missing_directory_errors() {
         let tmp = tempfile::tempdir().unwrap();

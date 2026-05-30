@@ -20,7 +20,14 @@ use std::path::Path;
 use crate::format::filenames::{layer_weights_filename, LAYERS_DIR};
 use crate::VindexError;
 use larql_compute::cpu::ops::q4_common::{quantize_q4_k, quantize_q6_k};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Format tag written into the file header. Extend as new formats land.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,13 +51,13 @@ impl LayerWeightFormat {
 
 const MAGIC: u32 = u32::from_le_bytes(*b"LYRW");
 const FORMAT_VERSION: u32 = 1;
-const U32_FIELD_BYTES: usize = std::mem::size_of::<u32>();
-const U64_FIELD_BYTES: usize = std::mem::size_of::<u64>();
+const U32_FIELD_BYTES: usize = core::mem::size_of::<u32>();
+const U64_FIELD_BYTES: usize = core::mem::size_of::<u64>();
 const HEADER_FIELDS: usize = 6;
 const OFFSET_FIELDS_PER_ENTRY: usize = 4;
 const HEADER_BYTES: usize = HEADER_FIELDS * U32_FIELD_BYTES;
 const OFFSET_ENTRY_BYTES: usize = OFFSET_FIELDS_PER_ENTRY * U64_FIELD_BYTES;
-const BF16_BYTES: usize = std::mem::size_of::<u16>();
+const BF16_BYTES: usize = core::mem::size_of::<u16>();
 
 /// One quantized entry: gate+up bytes and down bytes, both in the same format.
 pub struct LayerEntry {

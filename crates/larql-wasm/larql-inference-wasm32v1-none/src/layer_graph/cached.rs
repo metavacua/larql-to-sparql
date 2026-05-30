@@ -3,7 +3,14 @@ use ndarray::Array2;
 use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
 use crate::ffn::FfnBackend;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 
 /// Cached layer graph: returns a precomputed residual instead of computing.
@@ -26,7 +33,7 @@ impl CachedLayerGraph {
         ffn: &dyn FfnBackend,
     ) -> Self {
         let mut h = crate::forward::embed_tokens_pub(weights, token_ids);
-        let mut cache = std::collections::HashMap::new();
+        let mut cache = HashMap::new();
         let max_layer = *layers.iter().max().unwrap_or(&0);
 
         for layer in 0..=max_layer.min(weights.num_layers - 1) {
@@ -92,7 +99,7 @@ pub fn build_adaptive_graph<'a>(
     cache: &'a CachedLayerGraph,
     fallback: &'a dyn LayerGraph,
     num_layers: usize,
-    cached_range: &std::ops::RangeInclusive<usize>,
+    cached_range: &core::ops::RangeInclusive<usize>,
 ) -> PerLayerGraph<'a> {
     let mut layers: Vec<&dyn LayerGraph> = Vec::with_capacity(num_layers);
     for layer in 0..num_layers {
@@ -124,7 +131,7 @@ impl AttentionCache {
         token_ids: &[u32],
         cached_layers: &CachedLayerGraph,
         ffn: &dyn FfnBackend,
-        layer_range: std::ops::Range<usize>,
+        layer_range: core::ops::Range<usize>,
     ) -> Self {
         let seq_len = token_ids.len();
         let arch = &*weights.arch;
@@ -175,7 +182,6 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     #[test]
     fn from_residuals_empty() {
         let g = CachedLayerGraph::from_residuals(vec![]);

@@ -1,7 +1,14 @@
 //! Shared utilities for walker modules.
 
 use super::weight_walker::ThresholdCounts;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Decode a single token ID to a trimmed string.
 pub fn decode_token(tokenizer: &tokenizers::Tokenizer, id: u32) -> Option<String> {
     tokenizer
@@ -25,7 +32,7 @@ pub fn top_entities(
         .iter()
         .map(|(name, (count, sum_conf))| (name.clone(), *count, sum_conf / *count as f64))
         .collect();
-    sorted.sort_by_key(|(_, count, _)| std::cmp::Reverse(*count));
+    sorted.sort_by_key(|(_, count, _)| core::cmp::Reverse(*count));
     sorted.truncate(n);
     sorted
 }
@@ -160,8 +167,6 @@ pub fn partial_top_k_column(
 mod tests {
     use super::*;
     use ndarray::Array2;
-    use std::collections::HashMap;
-
     // ── round4 ────────────────────────────────────────────────────────────────
 
     #[test]

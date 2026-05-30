@@ -21,7 +21,14 @@ use std::path::Path;
 use memmap2::Mmap;
 
 use super::types::TraceNode;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAGIC: [u8; 4] = *b"TRAC";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 64;
@@ -46,11 +53,11 @@ impl TraceHeader {
     }
 
     fn to_bytes(self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
+        unsafe { core::mem::transmute(*bytes) }
     }
 
     fn expected_file_len(&self) -> usize {
@@ -152,7 +159,7 @@ impl TraceStore {
         }
 
         let slice = &self.mmap[start..end];
-        let floats = unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) };
+        let floats = unsafe { core::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) };
         Some(floats)
     }
 
@@ -279,13 +286,13 @@ impl TraceWriter {
         // Write vectors in order: for each waypoint, [residual, attn_delta, ffn_delta]
         for node in nodes {
             let r_bytes = unsafe {
-                std::slice::from_raw_parts(node.residual.as_ptr() as *const u8, hidden * 4)
+                core::slice::from_raw_parts(node.residual.as_ptr() as *const u8, hidden * 4)
             };
             let a_bytes = unsafe {
-                std::slice::from_raw_parts(node.attn_delta.as_ptr() as *const u8, hidden * 4)
+                core::slice::from_raw_parts(node.attn_delta.as_ptr() as *const u8, hidden * 4)
             };
             let f_bytes = unsafe {
-                std::slice::from_raw_parts(node.ffn_delta.as_ptr() as *const u8, hidden * 4)
+                core::slice::from_raw_parts(node.ffn_delta.as_ptr() as *const u8, hidden * 4)
             };
             self.file.write_all(r_bytes)?;
             self.file.write_all(a_bytes)?;

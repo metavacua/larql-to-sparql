@@ -5,7 +5,14 @@
 
 use crate::env_flags;
 use crate::state::LoadedModel;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Eager warmup of the per-(layer, expert) HNSW unit cache for **walk** /
 /// interpretability KNN queries.  Iterates every `(layer, expert)` this
 /// shard owns and pre-builds an HNSW index over that expert's gate slice
@@ -92,7 +99,6 @@ pub fn warmup_hnsw_unit_cache(model: &LoadedModel) -> Result<(usize, usize, usiz
 #[cfg(all(feature = "metal-experts", target_os = "macos"))]
 pub fn warmup_metal_expert_cache(model: &LoadedModel) -> Result<usize, String> {
     use larql_compute::MetalBackend;
-
     if env_flags::no_warmup() {
         return Ok(0);
     }

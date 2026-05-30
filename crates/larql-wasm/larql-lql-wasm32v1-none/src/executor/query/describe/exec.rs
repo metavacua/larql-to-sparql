@@ -3,6 +3,14 @@
 use crate::ast::{DescribeMode, LayerBand};
 use crate::error::LqlError;
 use crate::executor::tuning::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     DESCRIBE_KNN_GATE_SCALE, DESCRIBE_MAX_EDGES_BRIEF, DESCRIBE_MAX_EDGES_VERBOSE,
     DESCRIBE_MAX_OUTPUT_BRIEF, DESCRIBE_SIGNAL_CLEAN, DESCRIBE_SIGNAL_MODERATE,
     DESCRIBE_WALK_TOP_K,
@@ -135,7 +143,6 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn signal_label_clean_at_threshold() {
         assert_eq!(signal_label(DESCRIBE_SIGNAL_CLEAN), "clean");

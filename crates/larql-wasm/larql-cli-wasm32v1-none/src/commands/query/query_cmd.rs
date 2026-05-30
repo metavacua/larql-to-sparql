@@ -1,7 +1,14 @@
 use std::path::PathBuf;
 
 use clap::Args;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct QueryArgs {
     /// Path to graph file (.larql.json or .larql.bin).
@@ -15,7 +22,7 @@ pub struct QueryArgs {
     relation: Option<String>,
 }
 
-pub fn run(args: QueryArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: QueryArgs) -> Result<(), Box<dyn core::error::Error>> {
     let graph = larql_core::load(&args.graph)?;
     let edges = graph.select(&args.subject, args.relation.as_deref());
 

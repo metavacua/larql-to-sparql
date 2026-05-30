@@ -15,12 +15,19 @@ use std::path::Path;
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::index::FeatureMeta;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAGIC: u32 = 0x444D4554; // "DMET"
 const LEGACY_LITERAL_MAGIC: u32 = 0x54454D44; // bytes written as b"DMET"
 const FORMAT_VERSION: u32 = 1;
-const U32_BYTES: usize = std::mem::size_of::<u32>();
-const F32_BYTES: usize = std::mem::size_of::<f32>();
+const U32_BYTES: usize = core::mem::size_of::<u32>();
+const F32_BYTES: usize = core::mem::size_of::<f32>();
 const HEADER_FIELDS: usize = 4;
 const HEADER_BYTES: usize = HEADER_FIELDS * U32_BYTES;
 const RECORD_FIXED_BYTES: usize = U32_BYTES + F32_BYTES;
@@ -43,7 +50,7 @@ pub fn write_binary(
     top_k_count: usize,
 ) -> Result<usize, VindexError> {
     use portable_atomic::AtomicU64;
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(DOWN_META_BIN);
@@ -268,7 +275,7 @@ pub fn mmap_binary(
     }
 
     Ok(crate::index::core::DownMetaMmap {
-        mmap: std::sync::Arc::new(mmap),
+        mmap: alloc::sync::Arc::new(mmap),
         layer_offsets,
         layer_num_features,
         top_k_count,

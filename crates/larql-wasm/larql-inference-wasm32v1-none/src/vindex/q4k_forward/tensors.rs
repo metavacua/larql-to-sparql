@@ -2,7 +2,14 @@ use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
 
 use super::dequant::dequantize_matrix;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Insert one Q4_K/Q6_K vindex layer's attention and dense FFN tensors into
 /// `weights.tensors` as dense f32 matrices.
 ///

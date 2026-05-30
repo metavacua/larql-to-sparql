@@ -18,7 +18,14 @@
 //! continues to bring the full surface into scope unchanged.
 
 use larql_models::TopKEntry;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod ffn_row;
 mod fp4_ffn;
 mod gate_lookup;
@@ -248,11 +255,11 @@ mod tests {
 
         (
             DownMetaMmap {
-                mmap: std::sync::Arc::new(mmap),
+                mmap: alloc::sync::Arc::new(mmap),
                 layer_offsets,
                 layer_num_features,
                 top_k_count,
-                tokenizer: std::sync::Arc::new(tokenizer),
+                tokenizer: alloc::sync::Arc::new(tokenizer),
             },
             dir,
         )
@@ -261,11 +268,11 @@ mod tests {
     #[test]
     fn record_size_includes_header_plus_top_k() {
         let dmm = DownMetaMmap {
-            mmap: std::sync::Arc::new(memmap_empty()),
+            mmap: alloc::sync::Arc::new(memmap_empty()),
             layer_offsets: Vec::new(),
             layer_num_features: Vec::new(),
             top_k_count: 5,
-            tokenizer: std::sync::Arc::new(empty_tokenizer()),
+            tokenizer: alloc::sync::Arc::new(empty_tokenizer()),
         };
         assert_eq!(dmm.record_size(), 8 + 5 * 8);
     }
@@ -273,11 +280,11 @@ mod tests {
     #[test]
     fn num_features_returns_zero_for_unknown_layer() {
         let dmm = DownMetaMmap {
-            mmap: std::sync::Arc::new(memmap_empty()),
+            mmap: alloc::sync::Arc::new(memmap_empty()),
             layer_offsets: vec![0, 16],
             layer_num_features: vec![1, 2],
             top_k_count: 1,
-            tokenizer: std::sync::Arc::new(empty_tokenizer()),
+            tokenizer: alloc::sync::Arc::new(empty_tokenizer()),
         };
         assert_eq!(dmm.num_features(0), 1);
         assert_eq!(dmm.num_features(1), 2);
@@ -287,11 +294,11 @@ mod tests {
     #[test]
     fn total_features_sums_across_layers() {
         let dmm = DownMetaMmap {
-            mmap: std::sync::Arc::new(memmap_empty()),
+            mmap: alloc::sync::Arc::new(memmap_empty()),
             layer_offsets: vec![0, 16, 32],
             layer_num_features: vec![3, 7, 5],
             top_k_count: 1,
-            tokenizer: std::sync::Arc::new(empty_tokenizer()),
+            tokenizer: alloc::sync::Arc::new(empty_tokenizer()),
         };
         assert_eq!(dmm.total_features(), 15);
     }
@@ -348,7 +355,7 @@ mod tests {
         // Leak the tempdir for the duration of the test — the mmap
         // outlives this scope but the OS reclaims pages on process
         // exit; a few bytes per test is fine.
-        std::mem::forget(dir);
+        core::mem::forget(dir);
         mmap
     }
 

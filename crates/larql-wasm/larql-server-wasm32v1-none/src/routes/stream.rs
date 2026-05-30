@@ -8,13 +8,19 @@
 //!   ← {"type": "layer", "layer": 15, "edges": [...]}
 //!   ← {"type": "done", "total_edges": 6, "latency_ms": 12.3}
 
-use std::sync::Arc;
-
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 
 use crate::band_utils::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     filter_layers_by_band, get_layer_bands, INFER_MODE_DENSE, PROBE_RELATION_SOURCE,
 };
 use crate::state::{elapsed_ms, AppState};
@@ -535,8 +541,7 @@ async fn handle_stream_generate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::sync::atomic::AtomicU64;
+    use core::sync::atomic::AtomicU64;
 
     use larql_vindex::ndarray::Array2;
     use larql_vindex::{
@@ -549,7 +554,6 @@ mod tests {
     use crate::ffn_l2_cache::FfnL2Cache;
     use crate::session::SessionManager;
     use crate::state::LoadedModel;
-
     #[test]
     fn websocket_error_shape_is_stable() {
         let msg = ws_error("bad input");
@@ -698,15 +702,15 @@ mod tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: labels,
             ffn_l2_cache: FfnL2Cache::new(1),
-            layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
-            requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            layer_latency_tracker: alloc::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+            requests_in_flight: alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0)),
             expert_filter: None,
             unit_filter: None,
             moe_remote: None,
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
             metal_backend: std::sync::OnceLock::new(),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
-            moe_scratches: std::sync::Mutex::new(std::collections::HashMap::new()),
+            moe_scratches: std::sync::Mutex::new(HashMap::new()),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
             metal_ffn_layer_bufs: std::sync::OnceLock::new(),
         })

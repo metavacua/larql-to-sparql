@@ -29,10 +29,17 @@ use std::ffi::c_void;
 use super::buffers::{read_buffer_f32, BufferCache};
 use super::MetalBackend;
 use crate::cpu::ops::moe::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     moe_expert_input, moe_post_expert_output, moe_route_from_router_input, moe_router_input,
 };
 use crate::MoeLayerWeights;
-
 /// Pre-allocated scratch for the whole MoE decode loop.
 ///
 /// All sizes are determined by `(top_k, hidden, intermediate_size)` of the
@@ -105,7 +112,7 @@ impl MoeScratch {
         // remaining `inter_padded - inter` floats stay zero forever.
         unsafe {
             let ptr = act_buf.contents() as *mut f32;
-            std::ptr::write_bytes(ptr, 0, top_k * inter_padded);
+            core::ptr::write_bytes(ptr, 0, top_k * inter_padded);
         }
 
         Self {
@@ -287,7 +294,7 @@ impl MetalBackend {
         // Stage h_norm only (small — `hidden * 4` bytes).
         unsafe {
             let x_ptr = scratch.x_buf.contents() as *mut f32;
-            std::ptr::copy_nonoverlapping(h_norm.as_ptr(), x_ptr, hidden);
+            core::ptr::copy_nonoverlapping(h_norm.as_ptr(), x_ptr, hidden);
         }
         let t_stage = t_start.elapsed();
 
@@ -475,12 +482,12 @@ impl MetalBackend {
             // SAFETY: gate_ptr / up_ptr are StorageModeShared Metal buffer
             // contents; offsets are bounded by `top_k * gate_half_bytes`.
             unsafe {
-                std::ptr::copy_nonoverlapping(
+                core::ptr::copy_nonoverlapping(
                     gu_bytes.as_ptr(),
                     gate_ptr.add(valid_count * gate_half_bytes),
                     gate_half_bytes,
                 );
-                std::ptr::copy_nonoverlapping(
+                core::ptr::copy_nonoverlapping(
                     gu_bytes.as_ptr().add(gate_half_bytes),
                     up_ptr.add(valid_count * up_half_bytes),
                     up_half_bytes,
@@ -490,9 +497,9 @@ impl MetalBackend {
             let dn_dst = scratch.down_bufs[valid_count].contents() as *mut u8;
             let copy_len = dn_bytes.len().min(down_expert_bytes);
             unsafe {
-                std::ptr::copy_nonoverlapping(dn_bytes.as_ptr(), dn_dst, copy_len);
+                core::ptr::copy_nonoverlapping(dn_bytes.as_ptr(), dn_dst, copy_len);
                 if copy_len < down_expert_bytes {
-                    std::ptr::write_bytes(dn_dst.add(copy_len), 0, down_expert_bytes - copy_len);
+                    core::ptr::write_bytes(dn_dst.add(copy_len), 0, down_expert_bytes - copy_len);
                 }
             }
 
@@ -507,7 +514,7 @@ impl MetalBackend {
         // ── Stage h_norm into pre-allocated x_buf ─────────────────────────
         unsafe {
             let x_ptr = scratch.x_buf.contents() as *mut f32;
-            std::ptr::copy_nonoverlapping(h_norm.as_ptr(), x_ptr, hidden);
+            core::ptr::copy_nonoverlapping(h_norm.as_ptr(), x_ptr, hidden);
         }
         let t_stage = t_start.elapsed();
 
@@ -776,12 +783,12 @@ impl MetalBackend {
             // allocated up front (see `MoeScratch::new`). Writes complete
             // before the encoder dispatches the matvec that reads them.
             unsafe {
-                std::ptr::copy_nonoverlapping(
+                core::ptr::copy_nonoverlapping(
                     gu_bytes.as_ptr(),
                     gate_ptr.add(valid_count * gate_half_bytes),
                     gate_half_bytes,
                 );
-                std::ptr::copy_nonoverlapping(
+                core::ptr::copy_nonoverlapping(
                     gu_bytes.as_ptr().add(gate_half_bytes),
                     up_ptr.add(valid_count * up_half_bytes),
                     up_half_bytes,
@@ -791,9 +798,9 @@ impl MetalBackend {
             let dn_dst = scratch.down_bufs[valid_count].contents() as *mut u8;
             let copy_len = dn_bytes.len().min(down_expert_bytes);
             unsafe {
-                std::ptr::copy_nonoverlapping(dn_bytes.as_ptr(), dn_dst, copy_len);
+                core::ptr::copy_nonoverlapping(dn_bytes.as_ptr(), dn_dst, copy_len);
                 if copy_len < down_expert_bytes {
-                    std::ptr::write_bytes(dn_dst.add(copy_len), 0, down_expert_bytes - copy_len);
+                    core::ptr::write_bytes(dn_dst.add(copy_len), 0, down_expert_bytes - copy_len);
                 }
             }
 
@@ -808,7 +815,7 @@ impl MetalBackend {
         // ── 3. Stage router-normed input into pre-allocated x_buf ─────────
         unsafe {
             let x_ptr = scratch.x_buf.contents() as *mut f32;
-            std::ptr::copy_nonoverlapping(expert_input.as_ptr(), x_ptr, hidden);
+            core::ptr::copy_nonoverlapping(expert_input.as_ptr(), x_ptr, hidden);
         }
 
         let cmd = self.queue.new_command_buffer();

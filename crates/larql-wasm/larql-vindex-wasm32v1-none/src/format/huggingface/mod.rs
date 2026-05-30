@@ -19,7 +19,14 @@
 //! VINDEX_WEIGHT_FILES}`.
 
 use crate::format::filenames::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Small metadata files needed to describe a vindex (`larql show`,
 /// browse-tier UIs, schema introspection). All of these together stay
 /// well under a few MB on a typical vindex, so they're safe to fetch
@@ -91,7 +98,6 @@ pub fn is_hf_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── is_hf_path ────────────────────────────────────────────────────────
 
     #[test]

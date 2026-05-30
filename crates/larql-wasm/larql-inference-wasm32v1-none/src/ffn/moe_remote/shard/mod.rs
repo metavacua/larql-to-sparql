@@ -20,7 +20,14 @@
 //!   with HTTP/UDS/gRPC transport branches).
 //! - [`multi_layer`] — `call_multi_layer_batch` + the Q8K-prenormed
 //!   variant (HTTP/UDS only).
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod expert_batch;
 mod layer_batch;
 mod multi_layer;
@@ -120,7 +127,7 @@ impl Shard {
             } else {
                 config.url.replacen("grpc://", "http://", 1)
             };
-            let rt = std::sync::Arc::new(
+            let rt = alloc::sync::Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
                     .enable_all()
@@ -148,7 +155,7 @@ impl Shard {
                     cause: e.to_string(),
                 })?
             };
-            ShardTransport::Grpc(std::sync::Arc::new(GrpcState {
+            ShardTransport::Grpc(alloc::sync::Arc::new(GrpcState {
                 runtime: rt,
                 client,
             }))
@@ -323,7 +330,7 @@ pub(super) fn uds_call(
                 "UDS response missing HTTP/1.1 status line".into(),
             ));
         }
-        let status = std::str::from_utf8(&buf[9..12])
+        let status = core::str::from_utf8(&buf[9..12])
             .ok()
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(0);
@@ -384,7 +391,7 @@ fn parse_content_length(headers: &[u8]) -> Result<usize, RemoteMoeError> {
     while end < headers.len() && headers[end].is_ascii_digit() {
         end += 1;
     }
-    let s = std::str::from_utf8(&headers[start..end])
+    let s = core::str::from_utf8(&headers[start..end])
         .map_err(|_| RemoteMoeError::BadResponse("UDS Content-Length value not UTF-8".into()))?;
     s.parse::<usize>()
         .map_err(|_| RemoteMoeError::BadResponse(format!("UDS Content-Length not a number: {s:?}")))

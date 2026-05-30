@@ -8,9 +8,15 @@
 //! by the caller. This makes the build practical at dim=2560.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-
+use core::cmp::Ordering;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Max-heap element (best score first).
 #[derive(Clone, Copy)]
 struct MaxScored {
@@ -241,7 +247,7 @@ impl HnswLayer {
                 (s.id as usize, exact_score)
             })
             .collect();
-        results.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         results.truncate(top_k);
         results
     }

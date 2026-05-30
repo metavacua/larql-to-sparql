@@ -6,7 +6,14 @@
 //! round-2 cleanup.
 
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VindexModelConfig {
     pub model_type: String,
@@ -137,7 +144,6 @@ impl VindexModelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn minimal_model_config() -> VindexModelConfig {
         VindexModelConfig {
             model_type: "gemma3".into(),

@@ -12,7 +12,14 @@ use larql_inference::ffn::BackendFfn;
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::model::ModelWeights;
 use larql_inference::vindex::{WalkFfn, WalkFfnConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub struct ExtendOutput {
     /// Hidden state at the last processed token, shape (1, hidden).
     pub last_hidden: Array2<f32>,
@@ -199,7 +206,6 @@ mod tests {
     use super::*;
     use larql_inference::forward::hidden_to_raw_logits;
     use larql_inference::test_utils::make_test_weights;
-
     // ── empty_prior ───────────────────────────────────────────────────────────
 
     #[test]

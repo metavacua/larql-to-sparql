@@ -2,7 +2,14 @@
 
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const ENV_LM_HEAD_SKIP_Q4K: &str = "LARQL_LM_HEAD_SKIP_Q4K";
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -234,7 +241,7 @@ pub(super) fn backend_lm_head_topk(
         }
     }
 
-    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    heap.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
     heap.into_iter().map(|(s, i)| (i, s)).collect()
 }
 
@@ -315,7 +322,6 @@ mod tests {
     use super::*;
     use crate::test_utils::TestFixtures;
     use ndarray::Array1;
-
     fn fx() -> TestFixtures {
         TestFixtures::build()
     }

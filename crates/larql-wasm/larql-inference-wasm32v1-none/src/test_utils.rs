@@ -10,8 +10,14 @@
 
 use larql_models::{detect_from_json, ModelWeights, WeightArray};
 use ndarray::Array2;
-use std::collections::HashMap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Build a synthetic `ModelWeights` with all tensors populated.
 /// Uses `TinyModelArch` key conventions (e.g. `"0.attn.q_proj.weight"`).
 pub fn make_test_weights() -> ModelWeights {

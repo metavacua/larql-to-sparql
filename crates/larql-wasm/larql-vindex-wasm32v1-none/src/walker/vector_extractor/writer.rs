@@ -1,13 +1,19 @@
 //! Streaming NDJSON writer + completed-layer scan for resume.
 
-use std::collections::HashSet;
 use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
 use larql_models::{VectorFileHeader, VectorRecord};
 
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Streaming NDJSON writer for vector records.
 pub struct VectorWriter {
     writer: BufWriter<std::fs::File>,
@@ -107,7 +113,6 @@ pub fn scan_completed_layers(path: &Path) -> Result<HashSet<usize>, VindexError>
 mod tests {
     use super::*;
     use larql_models::TopKEntry;
-
     fn sample_header() -> VectorFileHeader {
         VectorFileHeader {
             _header: true,

@@ -28,7 +28,14 @@ use crate::FullPipelineLayer;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
 use larql_models::quant::ggml::Q4_K_BLOCK_ELEMS;
 use metal::Buffer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) struct DecodeScratch {
     // ── Per-layer weight buffer caches (length = num_layers) ──
     pub wq_bufs: Vec<Buffer>,
@@ -176,7 +183,7 @@ impl DecodeScratch {
             // entire f32 capacity before any layer writes the live
             // `inter` columns; the trailing `inter_padded - inter`
             // columns stay zero for the remainder of the decode.
-            unsafe { std::ptr::write_bytes(ptr, 0, inter_padded) };
+            unsafe { core::ptr::write_bytes(ptr, 0, inter_padded) };
         }
         let down_out = bufs.output((hidden * 4) as u64);
         let gate_out_scratch = bufs.output((inter * 4) as u64);

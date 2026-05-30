@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_inference::attention::run_attention_block_with_pre_o;
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -12,7 +11,14 @@ use super::pq::{kmeans_centroids, PqCodebook};
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) fn fit_pq_codebooks(
     weights: &mut larql_inference::ModelWeights,
     index: &VectorIndex,
@@ -25,7 +31,7 @@ pub(super) fn fit_pq_codebooks(
     configs: &[PqConfig],
     iterations: usize,
     stratum_conditioned_groups: &[usize],
-) -> Result<HashMap<(HeadId, PqConfig), PqCodebook>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, PqConfig), PqCodebook>, Box<dyn core::error::Error>> {
     let max_k = configs.iter().map(|c| c.k).max().unwrap_or(0);
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {

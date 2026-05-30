@@ -2,12 +2,17 @@
 //! and repo creation. Both are blocking HTTP calls used by the publish
 //! orchestrator before any per-file upload runs.
 
-use std::collections::HashMap;
-
 use crate::error::VindexError;
 
 use super::protocol::{hf_base, repo_type_plural, HTTP_STATUS_CONFLICT};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// List remote files and return `filename → lfs.oid` for every LFS-tracked
 /// file at the repo root. Files without an `lfs.oid` (git-tracked small
 /// text) are omitted; callers skip only what's in the map.
@@ -183,7 +188,6 @@ mod tests {
 
     use crate::format::huggingface::publish::protocol::TEST_BASE_ENV;
     use serial_test::serial;
-
     /// RAII-style env-var override: sets the var, restores on drop.
     struct EnvBaseGuard {
         prev: Option<String>,

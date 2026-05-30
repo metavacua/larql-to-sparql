@@ -15,7 +15,14 @@
 
 use minijinja::{context, Environment};
 use serde_json::Value;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Render `template_str` (Jinja2) against a single-turn conversation.
 /// Returns the rendered string or a `minijinja::Error` with full diagnostic
 /// info (line/column, template frame).
@@ -136,7 +143,6 @@ fn cfg_string_field(cfg: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn empty_cfg() -> Value {
         Value::Object(Default::default())
     }

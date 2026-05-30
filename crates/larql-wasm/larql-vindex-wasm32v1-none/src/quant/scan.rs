@@ -29,7 +29,14 @@ use serde_json::Value;
 
 use crate::error::VindexError;
 use crate::format::filenames::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Fixed block geometry for v1. `sub_block` matches MXFP4's 1×32.
 pub const SUB_BLOCK_SIZE: usize = 32;
 
@@ -134,7 +141,7 @@ impl Bucket {
 
     pub fn quantiles(&self) -> BucketQuantiles {
         let mut sorted = self.ratios.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
         BucketQuantiles {
             total_blocks: self.count(),
             nonzero_ratio_blocks: sorted.len() as u64,
@@ -304,9 +311,9 @@ impl VindexComplianceReport {
                 }
             }
         }
-        pf.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+        pf.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(core::cmp::Ordering::Equal));
         pf.truncate(self.config.top_k_offenders);
-        sf.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(std::cmp::Ordering::Equal));
+        sf.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(core::cmp::Ordering::Equal));
         sf.truncate(self.config.top_k_offenders);
 
         json!({
@@ -404,7 +411,7 @@ fn truncate_top<T: Clone>(v: &mut Vec<T>, k: usize, key: impl Fn(&T) -> f32) {
     v.sort_by(|a, b| {
         key(b)
             .partial_cmp(&key(a))
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     v.truncate(k);
 }
@@ -461,7 +468,7 @@ pub fn scan_projection(
                 Dtype::F32 => {
                     // SAFETY: mmap'd region, f32 alignment matches u8.
                     let view: &[f32] = unsafe {
-                        std::slice::from_raw_parts(layer_bytes.as_ptr() as *const f32, nf * hidden)
+                        core::slice::from_raw_parts(layer_bytes.as_ptr() as *const f32, nf * hidden)
                     };
                     view.to_vec()
                 }
@@ -568,7 +575,6 @@ pub fn scan_vindex(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn bucket_compliance_fraction() {
         let b = Bucket {

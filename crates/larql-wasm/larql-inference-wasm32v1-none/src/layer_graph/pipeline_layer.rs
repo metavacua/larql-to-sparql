@@ -6,6 +6,14 @@
 
 use crate::model::ModelWeights;
 use larql_compute::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     FullPipelineLayer, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat, QuantWeight,
 };
 
@@ -410,7 +418,7 @@ pub fn resolve_ffn_weights<'a>(
 pub fn build_pipeline_layers<'a>(
     weights: &'a ModelWeights,
     index: &'a larql_vindex::VectorIndex,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     q4_ffn_mmap: &'a [u8],
     q4_ffn_per_matrix: usize,
     ffn_format: QuantFormat,
@@ -525,7 +533,6 @@ mod tests {
     use super::*;
     use crate::test_utils::{make_test_vindex, make_test_weights};
     use larql_models::ModelWeights;
-    use std::collections::HashMap;
     use std::sync::OnceLock;
 
     fn weights() -> &'static ModelWeights {
@@ -699,7 +706,6 @@ mod tests {
     fn synthetic_e2b_like_weights() -> ModelWeights {
         use larql_models::{detect_from_json, WeightArray};
         use ndarray::Array2;
-
         let arch = detect_from_json(&synthetic_e2b_like_arch_json());
         let num_layers = 4;
         let hidden = 8;

@@ -14,7 +14,14 @@ use crate::error::LqlError;
 use crate::executor::Session;
 
 use super::plan::InstallPlan;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// One successfully installed slot. Caller commits the raw residual to
 /// `session.raw_install_residuals` and the patch op to the session
 /// patch recording.
@@ -433,7 +440,7 @@ fn median_or(xs: &mut [f32], default: f32) -> f32 {
     if xs.is_empty() {
         return default;
     }
-    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     xs[xs.len() / 2]
 }
 
@@ -456,7 +463,6 @@ mod install_helpers_tests {
     //! post-fix should be 10/10). Test them in isolation so a future
     //! refactor can't drift the math without a red light.
     use super::*;
-
     #[test]
     fn unit_vector_normalises_to_length_one() {
         let v = vec![3.0_f32, 4.0]; // norm = 5

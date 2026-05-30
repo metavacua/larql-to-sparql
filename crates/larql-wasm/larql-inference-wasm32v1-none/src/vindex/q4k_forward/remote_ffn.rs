@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_models::ModelWeights;
 use larql_vindex::VectorIndex;
@@ -10,7 +9,14 @@ use crate::forward::ple::precompute_per_layer_inputs;
 use crate::forward::{run_layer_with_ffn, PredictResult};
 
 use super::dequant::dequantize_matrix;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
 /// [`crate::ffn::FfnBackend`].
 pub fn predict_q4k_with_ffn(

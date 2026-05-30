@@ -6,7 +6,17 @@ use crate::ModelError;
 
 use super::check_block_input;
 use crate::quant::half::f16_to_f32;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Q4_K block layout (144 bytes per super-block of 256 elements), as
 /// written by llama.cpp / GGUF files:
 ///   bytes 0-1:   d    (f16 global scale)
@@ -110,6 +120,7 @@ fn unpack_q4k_scales(scales_bytes: &[u8]) -> ([u8; 8], [u8; 8]) {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn q4k_row_dot_neon(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
+#[cfg(not(target_arch = "wasm32"))]
     use std::arch::aarch64::*;
     let mut acc0 = vdupq_n_f32(0.0);
     let mut acc1 = vdupq_n_f32(0.0);
@@ -118,7 +129,7 @@ unsafe fn q4k_row_dot_neon(data: &[u8], x: &[f32], n_blocks: usize) -> f32 {
         let block = data.as_ptr().add(sb * 144);
         let d = f16_to_f32(u16::from_le_bytes([*block, *block.add(1)]));
         let dmin = f16_to_f32(u16::from_le_bytes([*block.add(2), *block.add(3)]));
-        let scales_slice = std::slice::from_raw_parts(block.add(4), 12);
+        let scales_slice = core::slice::from_raw_parts(block.add(4), 12);
         let (scales, mins) = unpack_q4k_scales(scales_slice);
         let quants = block.add(16);
         let sb_base = sb * 256;
@@ -231,13 +242,14 @@ fn q4k_row_scaled_add_scalar(data: &[u8], alpha: f32, out: &mut [f32], n_blocks:
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn q4k_row_scaled_add_neon(data: &[u8], alpha: f32, out: &mut [f32], n_blocks: usize) {
+#[cfg(not(target_arch = "wasm32"))]
     use std::arch::aarch64::*;
     let out_ptr = out.as_mut_ptr();
     for sb in 0..n_blocks {
         let block = data.as_ptr().add(sb * 144);
         let d = f16_to_f32(u16::from_le_bytes([*block, *block.add(1)]));
         let dmin = f16_to_f32(u16::from_le_bytes([*block.add(2), *block.add(3)]));
-        let scales_slice = std::slice::from_raw_parts(block.add(4), 12);
+        let scales_slice = core::slice::from_raw_parts(block.add(4), 12);
         let (scales, mins) = unpack_q4k_scales(scales_slice);
         let quants = block.add(16);
         let sb_base = sb * 256;

@@ -28,7 +28,14 @@
 use std::sync::{Arc, Mutex};
 
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Number of FFN component tensors per transformer layer: gate, up, down
 /// — in that order. Used everywhere the FFN manifest is indexed
 /// (`layer * FFN_COMPONENTS_PER_LAYER + component`) and as the inner
@@ -87,7 +94,7 @@ pub struct FfnStore {
     /// LRU of layers held in `q4k_ffn_cache`. Front = newest.
     pub q4k_ffn_cache_lru: Mutex<std::collections::VecDeque<usize>>,
     /// Cap on `q4k_ffn_cache`. 0 = unlimited (default).
-    pub q4k_ffn_cache_max_layers: std::sync::atomic::AtomicUsize,
+    pub q4k_ffn_cache_max_layers: core::sync::atomic::AtomicUsize,
     /// Lock-free per-slot dequant cache for the parallel-batch server path.
     ///
     /// `q4k_ffn_once[layer][c]` is populated at most once per process
@@ -109,8 +116,8 @@ impl FfnStore {
     pub fn empty(num_layers: usize) -> Self {
         Self {
             q4k_ffn_cache: Mutex::new((0..num_layers).map(|_| [None, None, None]).collect()),
-            q4k_ffn_cache_lru: Mutex::new(std::collections::VecDeque::new()),
-            q4k_ffn_cache_max_layers: std::sync::atomic::AtomicUsize::new(0),
+            q4k_ffn_cache_lru: Mutex::new(alloc::collections::VecDeque::new()),
+            q4k_ffn_cache_max_layers: core::sync::atomic::AtomicUsize::new(0),
             q4k_ffn_once: (0..num_layers)
                 .map(|_| std::array::from_fn(|_| std::sync::OnceLock::new()))
                 .collect(),
@@ -121,12 +128,12 @@ impl FfnStore {
 
 impl Clone for FfnStore {
     fn clone(&self) -> Self {
-        use std::sync::atomic::Ordering;
+        use core::sync::atomic::Ordering;
         let nl = self.q4k_ffn_cache.lock().map(|c| c.len()).unwrap_or(0);
         Self {
             q4k_ffn_cache: Mutex::new((0..nl).map(|_| [None, None, None]).collect()),
-            q4k_ffn_cache_lru: Mutex::new(std::collections::VecDeque::new()),
-            q4k_ffn_cache_max_layers: std::sync::atomic::AtomicUsize::new(
+            q4k_ffn_cache_lru: Mutex::new(alloc::collections::VecDeque::new()),
+            q4k_ffn_cache_max_layers: core::sync::atomic::AtomicUsize::new(
                 self.q4k_ffn_cache_max_layers.load(Ordering::Relaxed),
             ),
             q4k_ffn_once: (0..nl)
@@ -165,7 +172,6 @@ mod ffn_layer_byte_offset_tests {
 
     use crate::index::core::VectorIndex;
     use ndarray::Array2;
-
     /// Build an in-memory VectorIndex whose `num_features(layer)` reads
     /// from the heap gate-vectors fallback (no mmap needed). Each gate
     /// matrix has shape `[num_features[l], hidden]`.

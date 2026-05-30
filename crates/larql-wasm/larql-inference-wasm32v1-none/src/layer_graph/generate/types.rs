@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Sum of per-stage decode times across every successful step.
 ///
 /// Dividing each field by `GenerateResult::decode_ms.len()` gives the
@@ -62,8 +70,8 @@ impl GenerateError {
     }
 }
 
-impl std::fmt::Display for GenerateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for GenerateError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             GenerateError::UnsupportedBackend { reason } => write!(f, "{reason}"),
             GenerateError::MissingWeights { reason } => write!(f, "{reason}"),
@@ -87,7 +95,7 @@ impl std::fmt::Display for GenerateError {
     }
 }
 
-impl std::error::Error for GenerateError {}
+impl core::error::Error for GenerateError {}
 
 impl From<String> for GenerateError {
     fn from(reason: String) -> Self {
@@ -198,7 +206,6 @@ impl GenerateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn generate_result_into_result_returns_typed_error() {
         let result = GenerateResult::empty_error(GenerateError::unsupported_backend("no Q4"));

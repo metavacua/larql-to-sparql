@@ -1,6 +1,5 @@
 //! Streaming PUT to a signed LFS URL with progress callbacks.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use crate::error::VindexError;
@@ -8,7 +7,14 @@ use crate::error::VindexError;
 use super::super::protocol::{LFS_PUT_TIMEOUT, UPLOAD_PROGRESS_POLL_INTERVAL};
 use super::super::PublishCallbacks;
 use super::CountingReader;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// PUT the file contents to the signed LFS URL, streaming through a
 /// `CountingReader` so the worker thread can report progress.
 pub(super) fn stream_put_with_progress(
@@ -19,11 +25,11 @@ pub(super) fn stream_put_with_progress(
     remote_filename: &str,
     callbacks: &mut dyn PublishCallbacks,
 ) -> Result<(), VindexError> {
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
     use std::sync::mpsc::TryRecvError;
 
     let file = std::fs::File::open(local_path)?;
-    let counter = std::sync::Arc::new(portable_atomic::AtomicU64::new(0));
+    let counter = alloc::sync::Arc::new(portable_atomic::AtomicU64::new(0));
     let reader = CountingReader {
         inner: file,
         counter: counter.clone(),
@@ -89,7 +95,6 @@ mod tests {
     use super::super::test_support::{write_temp_bytes, CapturingCallbacks, EnvBaseGuard};
     use super::*;
     use serial_test::serial;
-
     #[test]
     #[serial]
     fn stream_put_uploads_body_and_ticks_progress_to_100() {

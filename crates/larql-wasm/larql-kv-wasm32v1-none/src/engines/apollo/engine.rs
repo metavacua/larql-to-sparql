@@ -27,7 +27,14 @@ use super::store::ApolloStore;
 use crate::{EngineInfo, KvEngine};
 use larql_inference::forward::{embed_tokens_pub, forward_from_layer, forward_raw_logits};
 use larql_inference::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// (context_tokens, injection_delta, boundary_residual, crystal_layer)
 type InjectionPrep = (Vec<u32>, ndarray::Array1<f32>, Option<Vec<f32>>, usize);
 
@@ -144,7 +151,7 @@ impl ApolloEngine {
                 .filter(|e| in_candidate(e))
                 .map(|e| (*e, e.coefficient))
                 .collect();
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
             scored.truncate(self.config.top_k);
             return Ok(scored.into_iter().map(|(e, _)| e).collect());
         }
@@ -157,7 +164,7 @@ impl ApolloEngine {
 
         let mut scored: Vec<(VecInjectEntry, f32)> = Vec::new();
         let mut seen: std::collections::HashSet<(u16, u16, u32, u16)> =
-            std::collections::HashSet::new();
+            HashSet::new();
 
         for e in &seeds {
             scored.push((**e, e.coefficient));
@@ -197,14 +204,14 @@ impl ApolloEngine {
             pool.sort_by(|a, b| {
                 b.coefficient
                     .partial_cmp(&a.coefficient)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .unwrap_or(core::cmp::Ordering::Equal)
             });
             for e in pool.into_iter().take(self.config.top_k - scored.len()) {
                 scored.push((*e, e.coefficient * 0.8));
             }
         }
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         scored.truncate(self.config.top_k);
         Ok(scored.into_iter().map(|(e, _)| e).collect())
     }
@@ -274,7 +281,7 @@ impl ApolloEngine {
             .logits
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
             .map(|(i, &v)| (i as u32, v))?;
         let q = RoutingQuery {
             token_ids: query_ids.to_vec(),
@@ -398,7 +405,6 @@ impl KvEngine for ApolloEngine {
 mod tests {
     use super::*;
     use crate::engines::apollo::store::{ArchConfig, StoreManifest};
-
     /// Build a minimal in-memory ApolloStore with synthetic data.
     fn mk_store(windows: usize, window_size: usize, hidden: usize) -> ApolloStore {
         let window_tokens: Vec<Vec<u32>> = (0..windows)

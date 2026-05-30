@@ -9,7 +9,14 @@ use crate::extract::stage_labels::*;
 use crate::extract::streaming::context::StreamingContext;
 use crate::extract::streaming::tensor_io::{get_tensor_f32, normalize_key, GateSink};
 use crate::format::filenames::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl<'a> StreamingContext<'a> {
     /// Stage 1 — gate vectors (streaming, one layer at a time).
     ///

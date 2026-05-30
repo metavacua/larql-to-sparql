@@ -24,7 +24,14 @@
 use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
 use crate::model::ModelWeights;
 use ndarray::{Array1, Array2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A single fact to be compiled via MEMIT.
 #[derive(Debug, Clone)]
 pub struct MemitFact {
@@ -239,7 +246,7 @@ fn run_memit_inner(
 
     // Group facts by layer.
     let mut by_layer: std::collections::HashMap<usize, Vec<&MemitFact>> =
-        std::collections::HashMap::new();
+        HashMap::new();
     for fact in facts {
         by_layer.entry(fact.layer).or_default().push(fact);
     }

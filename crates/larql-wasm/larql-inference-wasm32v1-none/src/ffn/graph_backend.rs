@@ -9,7 +9,6 @@
 //! Eliminates the gate matmul entirely. One embedding projection + hash lookup
 //! replaces 500ms of BLAS.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
@@ -18,7 +17,14 @@ use ndarray::Array2;
 use crate::error::InferenceError;
 use crate::ffn::sigmoid;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Precomputed gate index: for each (layer, token_id), which features activate.
 /// Built offline from the gate weight matrix and embedding matrix.
 /// Serializable to disk for reuse across predict calls.
@@ -433,7 +439,6 @@ impl GateIndex {
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
-
     const TOP_TOKENS: usize = 3;
     const FEATURES_PER_TOK: usize = 4;
 

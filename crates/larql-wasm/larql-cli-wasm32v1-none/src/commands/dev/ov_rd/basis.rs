@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use larql_inference::attention::run_attention_block_with_pre_o;
 use larql_inference::forward::ple::precompute_per_layer_inputs;
@@ -10,7 +9,14 @@ use ndarray::s;
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PromptRecord};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug)]
 pub(super) struct WoRoundtripBasis {
     pub(super) head_dim: usize,
@@ -133,7 +139,7 @@ pub(super) fn build_roundtrip_bases(
     index: &VectorIndex,
     heads: &[HeadId],
     sigma_rel_cutoff: f64,
-) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<HeadId, WoRoundtripBasis>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -209,7 +215,7 @@ impl ZPcaAccumulator {
         }
         let (eigenvalues, eigenvectors) = jacobi_symmetric_eigen(&covariance, 100, 1e-8);
         let mut pairs: Vec<(f64, Vec<f64>)> = eigenvalues.into_iter().zip(eigenvectors).collect();
-        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
         ZPcaBasis {
             vectors: pairs
                 .into_iter()
@@ -228,7 +234,7 @@ pub(super) fn fit_z_pca_bases(
     heads: &[HeadId],
     bases: &HashMap<HeadId, WoRoundtripBasis>,
     means: &HashMap<HeadId, StaticHeadMeans>,
-) -> Result<HashMap<HeadId, ZPcaBasis>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<HeadId, ZPcaBasis>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -306,7 +312,7 @@ pub(super) fn fit_z_pca_bases(
 fn build_wo_roundtrip_basis(
     w_o_head: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
     sigma_rel_cutoff: f64,
-) -> Result<WoRoundtripBasis, Box<dyn std::error::Error>> {
+) -> Result<WoRoundtripBasis, Box<dyn core::error::Error>> {
     let hidden = w_o_head.nrows();
     let head_dim = w_o_head.ncols();
     let mut gram = vec![vec![0.0f64; head_dim]; head_dim];
@@ -326,7 +332,7 @@ fn build_wo_roundtrip_basis(
 
     let (eigenvalues, eigenvectors) = jacobi_symmetric_eigen(&gram, 100, 1e-10);
     let mut pairs: Vec<(f64, Vec<f64>)> = eigenvalues.into_iter().zip(eigenvectors).collect();
-    pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
 
     let sigma_max = pairs
         .first()

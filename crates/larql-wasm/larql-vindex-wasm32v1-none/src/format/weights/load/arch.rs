@@ -10,7 +10,14 @@
 //! get added here once and flow through both loaders automatically.
 
 use crate::config::{VindexConfig, VindexModelConfig};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Build the architecture-detection JSON blob from the on-disk config.
 ///
 /// Includes core architecture fields, Gemma 4 per-layer geometry, and
@@ -92,7 +99,6 @@ pub(super) fn build_arch_json(
 mod tests {
     use super::*;
     use crate::config::types::QuantFormat;
-
     fn minimal_model_cfg() -> VindexModelConfig {
         VindexModelConfig {
             model_type: "test_arch".into(),

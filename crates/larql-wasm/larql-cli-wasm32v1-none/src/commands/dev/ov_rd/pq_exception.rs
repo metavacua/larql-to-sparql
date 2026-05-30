@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -8,6 +7,14 @@ use larql_inference::forward::ple::precompute_per_layer_inputs;
 use larql_inference::forward::{embed_tokens_pub, run_layer_with_ffn};
 use larql_inference::{encode_prompt, WeightFfn};
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -32,7 +39,6 @@ use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::static_replace::fit_static_means;
 use super::stats::StaticHeadMeans;
 use super::types::{HeadId, PqConfig, PromptRecord};
-
 #[derive(Args)]
 pub(super) struct OraclePqExceptionArgs {
     /// Self-contained Q4K vindex directory.
@@ -137,7 +143,7 @@ enum TailSelector {
 }
 
 impl TailSelector {
-    fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn parse(value: &str) -> Result<Self, Box<dyn core::error::Error>> {
         match value {
             "residual-error" => Ok(Self::ResidualError),
             "prompt-kl" => Ok(Self::PromptKl),
@@ -171,7 +177,7 @@ enum ExceptionFit {
 }
 
 impl ExceptionFit {
-    fn parse(value: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn parse(value: &str) -> Result<Self, Box<dyn core::error::Error>> {
         match value {
             "kmeans" => Ok(Self::Kmeans),
             "exemplar" => Ok(Self::Exemplar),
@@ -191,7 +197,7 @@ impl ExceptionFit {
 
 pub(super) fn run_oracle_pq_exception(
     args: OraclePqExceptionArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -230,7 +236,7 @@ pub(super) fn run_oracle_pq_exception(
         return Err("--exception-edits values must be greater than zero".into());
     }
     let mut tail_fracs = parse_f64_list(&args.tail_fracs)?;
-    tail_fracs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    tail_fracs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
     tail_fracs.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
     if tail_fracs.is_empty()
         || tail_fracs
@@ -588,7 +594,7 @@ fn fit_exception_catalogs(
     prompt_scores: &HashMap<(HeadId, usize), f64>,
     position_scores: &HashMap<(HeadId, usize, usize), f64>,
     iterations: usize,
-) -> Result<HashMap<ExceptionKey, ExceptionCatalog>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<ExceptionKey, ExceptionCatalog>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -694,11 +700,11 @@ fn fit_exception_catalogs(
         head_samples.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
                 .then_with(|| {
                     b.sq_norm
                         .partial_cmp(&a.sq_norm)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .unwrap_or(core::cmp::Ordering::Equal)
                 })
         });
         let total = head_samples.len();
@@ -760,7 +766,7 @@ fn measure_fit_prompt_base_pq_kl(
     codebooks: &HashMap<(HeadId, PqConfig), PqCodebook>,
     tables: &HashMap<(HeadId, PqConfig), ModeDTable>,
     base_config: PqConfig,
-) -> Result<HashMap<(HeadId, usize), f64>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, usize), f64>, Box<dyn core::error::Error>> {
     let mut scores = HashMap::new();
     for (prompt_idx, record) in prompts.iter().enumerate() {
         let label = prompt_label(record);
@@ -822,7 +828,7 @@ fn measure_fit_position_restore_gains(
     base_config: PqConfig,
     tail_selector: TailSelector,
     candidates_per_prompt: usize,
-) -> Result<HashMap<(HeadId, usize, usize), f64>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<(HeadId, usize, usize), f64>, Box<dyn core::error::Error>> {
     let mut scores = HashMap::new();
     if candidates_per_prompt == 0 {
         return Ok(scores);
@@ -880,7 +886,7 @@ fn measure_fit_position_restore_gains(
                 weights, index, &token_ids, *head, basis, pca_basis, head_means, codebook, table,
                 w_o_head, stratum,
             )?;
-            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
             candidates.truncate(candidates_per_prompt.min(candidates.len()));
 
             for (position, _sq_norm) in candidates {
@@ -922,14 +928,14 @@ fn capture_head_position_sq_errors(
     table: &ModeDTable,
     w_o_head: &[Vec<f32>],
     stratum: &str,
-) -> Result<Vec<(usize, f64)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(usize, f64)>, Box<dyn core::error::Error>> {
     let mut h = embed_tokens_pub(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
     for layer in 0..weights.num_layers {
         let inserted = insert_q4k_layer_tensors(weights, index, layer)?;
         if layer == head.layer {
-            let result = (|| -> Result<Vec<(usize, f64)>, Box<dyn std::error::Error>> {
+            let result = (|| -> Result<Vec<(usize, f64)>, Box<dyn core::error::Error>> {
                 let (_, pre_o) = run_attention_block_with_pre_o(weights, &h, layer)
                     .ok_or_else(|| format!("pre-W_O capture failed at layer {layer}"))?;
                 let head_dim = weights.arch.head_dim_for_layer(layer);
@@ -987,7 +993,7 @@ fn forward_q4k_oracle_pq_exception_head(
     w_o_head: &[Vec<f32>],
     catalog: &ExceptionCatalog,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -1037,7 +1043,7 @@ fn forward_q4k_oracle_pq_position_restore_head(
     w_o_head: &[Vec<f32>],
     restore_position: usize,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let hidden_size = weights.hidden_size;
     larql_inference::vindex::predict_q4k_hidden_with_mapped_head_residual_delta(
         weights,
@@ -1095,7 +1101,7 @@ fn copy_w_o_heads(
     weights: &mut larql_inference::ModelWeights,
     index: &VectorIndex,
     heads: &[HeadId],
-) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<HeadId, Vec<Vec<f32>>>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -1220,7 +1226,7 @@ impl PqExceptionAccumulator {
     }
 }
 
-fn parse_f64_list(spec: &str) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+fn parse_f64_list(spec: &str) -> Result<Vec<f64>, Box<dyn core::error::Error>> {
     let mut values = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

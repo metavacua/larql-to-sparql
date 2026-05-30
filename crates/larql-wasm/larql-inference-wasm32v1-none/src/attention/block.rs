@@ -4,6 +4,14 @@
 //! Supports KV sharing (reuse K/V from a source layer).
 
 use super::gqa::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
 };
 use super::rope::apply_rope_partial;
@@ -566,7 +574,6 @@ mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn hidden(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),

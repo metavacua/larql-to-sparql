@@ -2,7 +2,14 @@
 
 use larql_inference::attention::SharedKV;
 use ndarray::{s, Array2};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Per-layer pre-attention residuals for all stored positions.
 pub struct RsStore {
     pub stored: Vec<Array2<f32>>,
@@ -67,7 +74,6 @@ impl RsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn make_store(num_layers: usize, seq_len: usize, hidden: usize) -> RsStore {
         let stored = (0..num_layers)
             .map(|_| Array2::from_elem((seq_len, hidden), 1.0f32))

@@ -7,7 +7,14 @@
 use larql_vindex::LayerBands;
 
 use crate::state::LoadedModel;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub const BAND_SYNTAX: &str = "syntax";
 pub const BAND_KNOWLEDGE: &str = "knowledge";
 pub const BAND_OUTPUT: &str = "output";

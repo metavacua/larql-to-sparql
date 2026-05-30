@@ -1,12 +1,18 @@
 //! LFS batch endpoint — request signed upload + verify URLs for one
 //! object, parse the response into actions our caller dispatches on.
 
-use std::collections::HashMap;
-
 use crate::error::VindexError;
 
 use super::super::hf_repo_url;
 use super::super::protocol::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     CONTENT_TYPE_LFS_JSON, HASH_ALGO_SHA256, LFS_OP_UPLOAD, LFS_OP_VERIFY, LFS_TRANSFER_BASIC,
 };
 use super::{LfsAction, LfsBatchResponse};
@@ -95,7 +101,6 @@ mod tests {
     use super::super::test_support::EnvBaseGuard;
     use super::*;
     use serial_test::serial;
-
     // ─── parse_lfs_batch_response ──────────────────────────────────
 
     #[test]

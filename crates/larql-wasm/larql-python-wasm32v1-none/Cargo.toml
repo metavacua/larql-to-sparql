@@ -24,3 +24,8 @@ numpy = "0.24"
 ndarray = "0.16"
 memmap2 = "0.9"
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+hashbrown = { workspace = true }
+libm = { workspace = true }

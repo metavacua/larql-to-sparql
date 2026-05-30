@@ -33,10 +33,15 @@
 //!
 //! Content-Type: `application/x-larql-ffn-q8k-batch`
 
-use std::collections::HashMap;
-
 use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Content-type for the Q8K dense-FFN batch protocol.
 pub const Q8K_BATCH_CT: &str = "application/x-larql-ffn-q8k-batch";
 
@@ -208,7 +213,6 @@ pub fn encode_q8k_batch_response(entries: &[(usize, &[f32])]) -> Vec<u8> {
 mod tests {
     use super::*;
     use larql_compute::cpu::ops::q4k_q8k_dot::quantize_x_to_q8k;
-
     #[test]
     fn request_roundtrip_single_block() {
         let x: Vec<f32> = (0..256).map(|i| (i as f32 * 0.01).sin()).collect();

@@ -6,6 +6,14 @@ use super::super::input::{limit_prompts_per_stratum, load_prompts, split_prompt_
 use super::super::metrics::{argmax, log_softmax};
 use super::super::oracle_pq_fit::fit_pq_codebooks;
 use super::super::oracle_pq_forward::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     capture_attention_relation_rows, final_logits, forward_q4k_oracle_pq_head,
 };
 use super::super::oracle_pq_mode_d::materialize_mode_d_tables;
@@ -14,7 +22,6 @@ use super::super::static_replace::fit_static_means;
 use super::super::types::{HeadId, PqConfig};
 use super::args::InduceProgramArgs;
 use super::context::{FitContext, MetalBackendOpt, PromptCapture};
-
 pub fn build_fit_context(
     args: &InduceProgramArgs,
     weights: &mut larql_inference::ModelWeights,
@@ -22,7 +29,7 @@ pub fn build_fit_context(
     tokenizer: &tokenizers::Tokenizer,
     head: HeadId,
     config: PqConfig,
-) -> Result<FitContext, Box<dyn std::error::Error>> {
+) -> Result<FitContext, Box<dyn core::error::Error>> {
     let mut all_records = load_prompts(&args.prompts, None)?;
     if args.max_per_stratum > 0 {
         all_records = limit_prompts_per_stratum(all_records, args.max_per_stratum);

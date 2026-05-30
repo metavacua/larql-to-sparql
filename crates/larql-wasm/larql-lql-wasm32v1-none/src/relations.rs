@@ -7,6 +7,14 @@ use larql_inference::ndarray::{Array1, Array2};
 use larql_inference::tokenizers::Tokenizer;
 use larql_vindex::clustering::ClusterResult;
 use larql_vindex::format::filenames::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, RELATION_CLUSTERS_JSON,
 };
 
@@ -36,7 +44,7 @@ impl RelationClassifier {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok());
 
-        let mut feature_assignments = std::collections::HashMap::new();
+        let mut feature_assignments = HashMap::new();
         if let Ok(text) = std::fs::read_to_string(&assignments_path) {
             for line in text.lines() {
                 if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {
@@ -49,7 +57,7 @@ impl RelationClassifier {
         }
 
         // Load probe-confirmed per-feature labels (highest priority)
-        let mut probe_labels = std::collections::HashMap::new();
+        let mut probe_labels = HashMap::new();
         if let Ok(text) = std::fs::read_to_string(&probe_labels_path) {
             if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(map) = obj.as_object() {
@@ -195,7 +203,7 @@ impl RelationClassifier {
     pub fn typical_layer_for_relation(&self, relation: &str) -> Option<usize> {
         let norm = normalise_relation(relation);
         let mut layer_counts: std::collections::HashMap<usize, usize> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         // Check probe labels
         for (&(layer, _), label) in &self.probe_labels {
@@ -260,7 +268,6 @@ pub fn token_embedding_pub(
 mod tests {
     use super::*;
     use larql_vindex::clustering::ClusterResult;
-
     fn make_test_classifier() -> RelationClassifier {
         let clusters = ClusterResult {
             k: 3,
@@ -274,7 +281,7 @@ mod tests {
             ],
         };
 
-        let mut assignments = std::collections::HashMap::new();
+        let mut assignments = HashMap::new();
         assignments.insert((26, 9515), 0); // capital cluster
         assignments.insert((24, 4532), 1); // language cluster
         assignments.insert((25, 3603), 2); // continent cluster
@@ -282,7 +289,7 @@ mod tests {
         RelationClassifier {
             clusters: Some(clusters),
             feature_assignments: assignments,
-            probe_labels: std::collections::HashMap::new(),
+            probe_labels: HashMap::new(),
             probe_count: 0,
         }
     }
@@ -380,8 +387,8 @@ mod tests {
         // returns None for any relation lookup.
         let rc = RelationClassifier {
             clusters: None,
-            feature_assignments: std::collections::HashMap::new(),
-            probe_labels: std::collections::HashMap::new(),
+            feature_assignments: HashMap::new(),
+            probe_labels: HashMap::new(),
             probe_count: 0,
         };
         assert_eq!(rc.cluster_for_relation("anything"), None);
@@ -444,8 +451,8 @@ mod tests {
     fn classify_direction_returns_none_without_clusters() {
         let rc = RelationClassifier {
             clusters: None,
-            feature_assignments: std::collections::HashMap::new(),
-            probe_labels: std::collections::HashMap::new(),
+            feature_assignments: HashMap::new(),
+            probe_labels: HashMap::new(),
             probe_count: 0,
         };
         let dir = Array1::from(vec![1.0, 0.0]);

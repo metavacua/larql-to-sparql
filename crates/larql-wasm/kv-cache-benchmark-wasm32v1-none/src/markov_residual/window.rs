@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Sliding window over residual vectors.
 ///
 /// Maintains the most recent `capacity` residuals. Older residuals
@@ -34,7 +42,7 @@ impl ResidualWindow {
             self.buffer.push(residual);
             None
         } else {
-            let evicted = std::mem::replace(&mut self.buffer[self.write_pos], residual);
+            let evicted = core::mem::replace(&mut self.buffer[self.write_pos], residual);
             self.write_pos = (self.write_pos + 1) % self.capacity;
             Some(evicted)
         }
@@ -77,7 +85,6 @@ impl ResidualWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_window_fill_and_evict() {
         let mut w = ResidualWindow::new(3, 4);

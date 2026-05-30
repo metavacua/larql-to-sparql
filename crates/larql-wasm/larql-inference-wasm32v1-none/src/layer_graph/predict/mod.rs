@@ -13,7 +13,14 @@
 //!   and `predict_split_cached` (logits-only fast path on cached residuals).
 //! - [`honest`] — `predict_honest`, the production GPU+CPU hybrid that
 //!   `larql bench` and the streaming-demo runner use.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod honest;
 mod split;
 

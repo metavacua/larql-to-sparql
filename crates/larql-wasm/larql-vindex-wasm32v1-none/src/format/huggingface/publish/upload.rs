@@ -9,7 +9,14 @@ use crate::error::VindexError;
 use super::lfs::upload_lfs;
 use super::protocol::{hf_base, repo_type_plural, CONTENT_TYPE_NDJSON, HF_PREUPLOAD_SAMPLE_BYTES};
 use super::PublishCallbacks;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Upload a single file to a HuggingFace dataset repo via the real HF
 /// protocol:
 ///
@@ -298,7 +305,6 @@ mod tests {
     use crate::format::huggingface::publish::protocol::TEST_BASE_ENV;
     use serial_test::serial;
     use std::io::Write as _;
-
     struct EnvBaseGuard {
         prev: Option<String>,
     }

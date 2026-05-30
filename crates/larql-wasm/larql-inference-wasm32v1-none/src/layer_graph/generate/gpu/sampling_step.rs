@@ -5,7 +5,14 @@ use crate::layer_graph::generate::detok::Detokenizer;
 use crate::layer_graph::generate::eos::EosConfig;
 use crate::layer_graph::generate::sampling::Sampler;
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Outcome of a single sampling step: the picked token id, its surface
 /// form, the softmax probability, and whether EOS was hit.
 pub(super) struct PickedToken {
@@ -61,7 +68,6 @@ mod tests {
     use super::*;
     use crate::layer_graph::generate::sampling::SamplingConfig;
     use crate::test_utils::TestFixtures;
-
     #[test]
     fn returns_none_on_empty_hits() {
         let fx = TestFixtures::build();

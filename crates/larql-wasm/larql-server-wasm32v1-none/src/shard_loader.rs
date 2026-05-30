@@ -14,7 +14,14 @@
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use tracing::{info, warn};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const SHARD_ENDPOINT: &str = "/v1/shard";
 
 /// Download a shard from `origin_url`, verify the hash, store at
@@ -30,7 +37,7 @@ pub async fn download_and_load_shard(
     model_id: &str,
     layer_start: u32,
     layer_end: u32,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     let url = format!(
         "{}{SHARD_ENDPOINT}/{model_id}/{layer_start}-{layer_end}",
         origin_url.trim_end_matches('/')
@@ -98,7 +105,6 @@ pub async fn download_and_load_shard(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn shard_dir_path_is_deterministic() {
         let dir = PathBuf::from("/mnt/shards")

@@ -3,7 +3,6 @@
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Keyword;
-
 impl Parser {
     pub(crate) fn parse_extract(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Extract)?;

@@ -1,11 +1,17 @@
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
+use core::cell::RefCell;
 
 use super::edge::{CompactEdge, Edge, Triple};
 use super::enums::{MergeStrategy, SourceType};
 use super::node::Node;
 use super::schema::Schema;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const LARQL_JSON_VERSION: &str = "0.1.0";
 const JSON_KEY_VERSION: &str = "larql_version";
 const JSON_KEY_METADATA: &str = "metadata";
@@ -640,8 +646,8 @@ impl Default for Graph {
     }
 }
 
-impl std::fmt::Debug for Graph {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Graph {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "Graph(edges={}, nodes={})",

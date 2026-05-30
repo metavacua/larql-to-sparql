@@ -9,13 +9,20 @@ use prost::Message;
 use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::wire::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_expert_response, encode_expert_request, ExpertCallItem, ExpertResultItem,
     EXPERT_BATCH_PATH, EXPERT_BINARY_CONTENT_TYPE,
 };
 #[cfg(unix)]
 use super::uds_call;
 use super::{Shard, ShardTransport};
-
 impl Shard {
     /// Send a batch of expert calls to this shard.
     ///

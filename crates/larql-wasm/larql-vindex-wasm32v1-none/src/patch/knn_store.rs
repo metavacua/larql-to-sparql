@@ -7,12 +7,18 @@
 //!
 //! Port of Python `RetrievalVindex` from ~/chris-source/chris-experiments/compilation/15_v11_model/vindex_build_wordnet_b.py.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A single entry in the retrieval-override KNN store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnnEntry {
@@ -159,7 +165,7 @@ impl KnnStore {
         // Top-K
         let k_eff = k.min(scores.len());
         let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
-        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         indexed.truncate(k_eff);
 
         indexed
@@ -252,7 +258,6 @@ fn l2_normalize(v: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn make_key(dim: usize, seed: f32) -> Vec<f32> {
         (0..dim).map(|i| (i as f32 + seed).sin()).collect()
     }

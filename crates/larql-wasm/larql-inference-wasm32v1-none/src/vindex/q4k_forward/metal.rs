@@ -4,7 +4,14 @@ use ndarray::Array2;
 use tokenizers::Tokenizer;
 
 use crate::forward::PredictResult;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MIN_KV_CACHE_SEQ: usize = 64;
 
 /// End-to-end predict on a Q4_K vindex driven by a Metal (or any Q4-capable)
@@ -294,7 +301,6 @@ pub fn predict_q4k_metal_capture_pre_wo(
 ) -> Option<Vec<f32>> {
     use crate::layer_graph::pipeline_layer::{build_arch_params, resolve_attn_weights};
     use larql_compute::QuantFormat;
-
     let arch = &*weights.arch;
     let num_layers = weights.num_layers;
     let hidden = weights.hidden_size;

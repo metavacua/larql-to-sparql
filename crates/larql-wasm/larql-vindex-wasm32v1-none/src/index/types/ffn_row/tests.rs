@@ -7,7 +7,6 @@ use super::super::StorageBucket;
 use super::super::{Fp4FfnAccess, NativeFfnAccess, QuantizedFfnAccess};
 use super::test_support::{one_row, Stub};
 use super::FfnRowAccess;
-
 // ── ffn_row_dot ─────────────────────────────────────────────
 
 #[test]

@@ -23,7 +23,14 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use memmap2::Mmap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAGIC: [u8; 4] = *b"BNDX";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 64;
@@ -63,11 +70,11 @@ impl BoundaryHeader {
     }
 
     fn to_bytes(self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
+        unsafe { core::mem::transmute(*bytes) }
     }
 }
 
@@ -86,11 +93,11 @@ struct BoundaryEntry {
 
 impl BoundaryEntry {
     fn to_bytes(self) -> [u8; ENTRY_SIZE] {
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; ENTRY_SIZE]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
+        unsafe { core::mem::transmute(*bytes) }
     }
 }
 
@@ -167,7 +174,7 @@ impl BoundaryStore {
             return None;
         }
         let slice = &self.mmap[start..end];
-        Some(unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) })
+        Some(unsafe { core::slice::from_raw_parts(slice.as_ptr() as *const f32, hidden) })
     }
 
     /// Find the boundary that contains a given token offset.
@@ -286,7 +293,7 @@ impl BoundaryWriter {
         self.file.seek(SeekFrom::End(0))?;
         let data_pos = self.file.stream_position()? as u32;
         let r_bytes =
-            unsafe { std::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4) };
+            unsafe { core::slice::from_raw_parts(residual.as_ptr() as *const u8, hidden * 4) };
         self.file.write_all(r_bytes)?;
 
         // Write index entry
@@ -326,7 +333,6 @@ impl BoundaryWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── BoundaryWriter + BoundaryStore ────────────────────────────────────────
 
     #[test]

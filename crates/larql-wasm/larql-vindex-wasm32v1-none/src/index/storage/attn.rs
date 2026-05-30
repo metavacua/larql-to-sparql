@@ -5,15 +5,20 @@
 //! manifests. Mirrors the FFN walk plumbing in `super::walk`; lives in
 //! its own file so attention storage isn't tangled with FFN storage.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::mmap_util::mmap_optimized;
 
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Number of attention projection tensors recorded per layer in every
 /// `attn_weights_*.bin` manifest: Q, K, V, O — in that order.
 pub(crate) const ATTN_TENSORS_PER_LAYER: usize = 4;
@@ -71,7 +76,7 @@ impl VectorIndex {
             // accessor used; preserves the alignment-and-padding
             // contract enforced by the writer.
             let scales = unsafe {
-                std::slice::from_raw_parts(
+                core::slice::from_raw_parts(
                     scales_bytes.as_ptr() as *const f32,
                     scales_bytes.len() / 4,
                 )
@@ -439,7 +444,7 @@ mod tests {
         // into `None` rather than a panic. Direct mutation of the
         // storage's pub(crate) manifest field is a test-only pattern
         // (production goes through `set_attn_q4k`).
-        let storage = std::sync::Arc::make_mut(&mut idx.storage);
+        let storage = alloc::sync::Arc::make_mut(&mut idx.storage);
         let m = storage.attn_q4k_manifest.as_mut().expect("manifest");
         m[2] = (len, 1, "Q4_K".to_string()); // offset = len → end = len + 1 > mmap.len()
         assert!(idx.attn_q4k_layer_data(0).is_none());

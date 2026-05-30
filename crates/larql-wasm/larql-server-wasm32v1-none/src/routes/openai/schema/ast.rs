@@ -19,8 +19,14 @@
 //! `not`, `if/then/else`, `dependencies`, `allOf`. These can be added
 //! incrementally; the FSM design accommodates them as new `Schema`
 //! variants without rewriting the existing branches.
-
-use std::collections::BTreeMap;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 
 /// A single schema node. Sized via `Box`-ed children so the recursive
 /// variants (Object, Array, OneOf) don't blow up the enum's stack size.

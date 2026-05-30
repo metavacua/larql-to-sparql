@@ -3,14 +3,20 @@
 //! One file per sub-trait — mirrors the `backend/` split. The umbrella
 //! `ComputeBackend` impl (`name`, `device_info`, `supports`) lives
 //! here; sub-trait impls are in their own files.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod decode;
 mod matmul;
 mod quant_matvec;
 
 use super::*;
 use crate::backend::{Capability, ComputeBackend};
-
 impl ComputeBackend for MetalBackend {
     fn name(&self) -> &str {
         "metal (GPU)"
@@ -20,7 +26,7 @@ impl ComputeBackend for MetalBackend {
         format!("Metal GPU, FLOP threshold: {}", self.flop_threshold())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 

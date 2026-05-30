@@ -5,7 +5,14 @@ use wasmi::{Engine, Instance, Memory, Module, Store, StoreLimits, StoreLimitsBui
 
 use super::error::SolverError;
 use super::runtime::SolverLimits;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // Guest ABI export names.
 const WASM_MEMORY: &str = "memory";
 const WASM_ALLOC: &str = "alloc";

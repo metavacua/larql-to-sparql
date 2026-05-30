@@ -4,7 +4,14 @@
 //! on its own scan logic and forces the magic numbers used across
 //! tables (column widths, banner lengths, default limits) through a
 //! single audited place.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Default LIMIT values ──────────────────────────────────────────
 //
 // These are picked to fit a comfortable terminal page (~25 rows of

@@ -2008,11 +2008,14 @@ dependencies = [
 name = "kv-cache-benchmark-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
  "larql-compute-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-kv-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
+ "libm",
  "ndarray",
  "rand 0.8.6",
  "rand_distr",
@@ -2037,6 +2040,8 @@ dependencies = [
 name = "larql-boundary-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
+ "larql-wasm-math",
  "libm",
  "serde",
  "serde_json",
@@ -2094,6 +2099,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "hashbrown 0.15.5",
  "indicatif 0.17.11",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
@@ -2102,7 +2108,9 @@ dependencies = [
  "larql-lql-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
  "libc",
+ "libm",
  "memmap2",
  "minijinja",
  "ndarray",
@@ -2138,8 +2146,11 @@ version = "0.1.0"
 dependencies = [
  "blas-src",
  "cc",
+ "hashbrown 0.15.5",
  "larql-models-wasm32v1-none",
+ "larql-wasm-math",
  "libc",
+ "libm",
  "metal",
  "ndarray",
  "objc",
@@ -2164,6 +2175,9 @@ dependencies = [
 name = "larql-core-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
+ "larql-wasm-math",
+ "libm",
  "reqwest",
  "rmp-serde",
  "serde",
@@ -2223,12 +2237,15 @@ dependencies = [
  "blas-src",
  "futures",
  "half",
+ "hashbrown 0.15.5",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-router-protocol-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
  "libc",
+ "libm",
  "memmap2",
  "minijinja",
  "minijinja-contrib",
@@ -2278,9 +2295,12 @@ name = "larql-kv-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
  "blas-src",
+ "hashbrown 0.15.5",
  "larql-compute-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
+ "libm",
  "ndarray",
  "openblas-src",
  "rand 0.8.6",
@@ -2314,11 +2334,14 @@ dependencies = [
 name = "larql-lql-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
+ "libm",
  "ndarray",
  "reqwest",
  "rustyline",
@@ -2345,6 +2368,9 @@ dependencies = [
 name = "larql-models-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
+ "larql-wasm-math",
+ "libm",
  "memmap2",
  "ndarray",
  "safetensors",
@@ -2374,11 +2400,14 @@ dependencies = [
 name = "larql-python-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.15.5",
  "larql-core-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-lql-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
+ "libm",
  "memmap2",
  "ndarray",
  "numpy",
@@ -2424,6 +2453,8 @@ dependencies = [
 name = "larql-router-protocol-wasm32v1-none"
 version = "0.1.0"
 dependencies = [
+ "larql-wasm-math",
+ "libm",
  "prost",
  "protobuf-src",
  "tokio",
@@ -2440,7 +2471,10 @@ dependencies = [
  "clap",
  "futures",
  "futures-core",
+ "hashbrown 0.15.5",
  "larql-router-protocol-wasm32v1-none",
+ "larql-wasm-math",
+ "libm",
  "reqwest",
  "serde",
  "serde_json",
@@ -2501,12 +2535,15 @@ dependencies = [
  "clap",
  "futures",
  "half",
+ "hashbrown 0.15.5",
  "larql-compute-wasm32v1-none",
  "larql-inference-wasm32v1-none",
  "larql-models-wasm32v1-none",
  "larql-router-protocol-wasm32v1-none",
  "larql-vindex-wasm32v1-none",
+ "larql-wasm-math",
  "libc",
+ "libm",
  "memmap2",
  "prost",
  "protobuf-src",
@@ -2563,11 +2600,14 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "hashbrown 0.15.5",
  "hf-hub",
  "larql-compute-wasm32v1-none",
  "larql-core-wasm32v1-none",
  "larql-models-wasm32v1-none",
+ "larql-wasm-math",
  "libc",
+ "libm",
  "memmap2",
  "ndarray",
  "portable-atomic",
@@ -2580,6 +2620,13 @@ dependencies = [
  "sha2",
  "thiserror 2.0.18",
  "tokenizers",
+]
+
+[[package]]
+name = "larql-wasm-math"
+version = "0.1.0"
+dependencies = [
+ "libm",
 ]
 
 [[package]]
@@ -2886,6 +2933,9 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "evalexpr",
+ "hashbrown 0.15.5",
+ "larql-wasm-math",
+ "libm",
  "thiserror 2.0.18",
  "wasmi",
  "wasmtime",

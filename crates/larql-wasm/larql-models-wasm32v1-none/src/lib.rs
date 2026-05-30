@@ -1,22 +1,31 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", macro_use)]
 extern crate alloc;
 
 pub mod architectures;
 pub mod config;
+pub mod error;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod detect;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod loading;
 pub mod quant;
 pub mod validation;
 pub mod vectors;
+// `weights` holds ndarray `ArcArray2` tensors and `memmap2::Mmap` handles —
+// both genuinely native. On wasm32v1-none, tensor data arrives via the bridge.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod weights;
 
 pub use config::{
     Activation, ExpertFormat, FfnType, ModelArchitecture, ModelConfig, NormType, RopeScaling,
 };
+// ModelError is portable (std-coupled variants gated inside `error`).
+pub use error::ModelError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use detect::{
     detect_architecture, detect_architecture_validated, detect_from_json,
-    detect_from_json_validated, ModelError,
+    detect_from_json_validated,
 };
 pub use validation::{ConfigValidationError, ConfigValidationResult};
 
@@ -40,8 +49,10 @@ pub use vectors::{
     COMPONENT_ATTN_QK, COMPONENT_EMBEDDINGS, COMPONENT_FFN_DOWN, COMPONENT_FFN_GATE,
     COMPONENT_FFN_UP,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use weights::{ModelWeights, WeightArray};
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use loading::{
     is_ffn_tensor, load_gguf, load_gguf_validated, load_model_dir, load_model_dir_filtered,
     load_model_dir_filtered_validated, load_model_dir_validated, load_model_dir_walk_only,

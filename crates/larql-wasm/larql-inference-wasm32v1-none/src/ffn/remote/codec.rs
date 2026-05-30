@@ -3,8 +3,14 @@
 //! See the `super` module doc for the full binary frame layout.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) const BINARY_CT: &str = "application/x-larql-ffn";
 pub(super) const BATCH_MARKER: u32 = 0xFFFF_FFFF;
 
@@ -80,8 +86,8 @@ pub struct RemoteLatencyStats {
     pub samples: usize,
 }
 
-impl std::fmt::Display for RemoteLatencyStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for RemoteLatencyStats {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "layers={} hidden={} samples={}\n  total    {:7.2} ms\n  server   {:7.2} ms  (FFN compute)\n  overhead {:7.2} ms  (HTTP + TCP + framing)",

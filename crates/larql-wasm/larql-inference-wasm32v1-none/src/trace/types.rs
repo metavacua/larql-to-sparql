@@ -3,7 +3,14 @@
 use crate::attention::AttentionWeights;
 use crate::model::ModelWeights;
 use serde::{Deserialize, Serialize};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A single waypoint in the residual stream.
 #[derive(Clone)]
 pub struct TraceNode {
@@ -177,7 +184,6 @@ impl ResidualTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn node(layer: i32, position: usize) -> TraceNode {
         TraceNode {
             layer,

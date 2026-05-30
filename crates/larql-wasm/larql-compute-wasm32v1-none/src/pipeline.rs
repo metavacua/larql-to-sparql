@@ -4,7 +4,14 @@
 //! norm type, activation, attention geometry, RoPE, FFN type, etc.
 //! The compute backends read these fields per-layer — no hardcoded
 //! model assumptions in the execution path.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Bytes per Q4_KF pre-baked super-block. Q4_KF keeps the 256-element
 /// Q4_K block shape but expands packed scale/min metadata for faster decode.
 pub const Q4_KF_BLOCK_BYTES: usize = 160;

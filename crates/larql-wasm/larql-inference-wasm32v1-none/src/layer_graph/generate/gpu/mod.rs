@@ -6,7 +6,14 @@
 //! - [`sampling_step`] — sample + detok + EOS-check helper shared by
 //!   first-token and decode-loop branches
 //! - [`forced_logits`] — Shannon-codec primitive (independent of sampling)
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod decode_loop;
 mod forced_logits;
 mod prefill;
@@ -57,7 +64,7 @@ pub fn generate(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> GenerateResult {
     generate_with_sampling(
         weights,
@@ -83,7 +90,7 @@ pub fn try_generate(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> Result<GenerateResult, GenerateError> {
     generate(
         weights,
@@ -109,7 +116,7 @@ pub fn generate_with_sampling(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     sampling: SamplingConfig,
     eos: &EosConfig,
 ) -> GenerateResult {
@@ -138,7 +145,7 @@ pub fn try_generate_with_sampling(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     sampling: SamplingConfig,
     eos: &EosConfig,
 ) -> Result<GenerateResult, GenerateError> {
@@ -185,7 +192,7 @@ pub fn generate_streaming<F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     sampling: SamplingConfig,
     eos: &EosConfig,
     mut on_token: F,
@@ -470,7 +477,7 @@ pub fn try_generate_streaming<F>(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
     sampling: SamplingConfig,
     eos: &EosConfig,
     on_token: F,

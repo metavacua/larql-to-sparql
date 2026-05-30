@@ -59,7 +59,14 @@
 use ndarray::{Array1, ArrayView1, ArrayView2};
 
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Hyperparameters for target-delta optimisation. Defaults match the
 /// Python reference (`vindex_compile_rome_v11.py::optimise_target_delta`).
 #[derive(Debug, Clone, Copy)]
@@ -577,7 +584,6 @@ mod tests {
     use ndarray::arr1;
     use ndarray::arr2;
     use ndarray::Array2;
-
     fn assert_opt_err_contains(tokens: &[u32], target_id: u32, needle: &str) {
         let weights = make_test_weights();
         let err = optimise_target_delta(

@@ -1,5 +1,12 @@
 //! Router setup — maps URL paths to handlers.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod describe;
 pub mod embed;
 pub mod expert;
@@ -18,8 +25,6 @@ pub mod topology;
 pub mod walk;
 pub mod walk_ffn;
 pub mod warmup;
-
-use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};

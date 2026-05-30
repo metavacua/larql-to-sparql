@@ -7,14 +7,21 @@
 use clap::Args;
 
 use crate::commands::primary::cache;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct ShowArgs {
     /// Vindex directory, `hf://owner/name`, `owner/name`, or cache shorthand.
     pub model: String,
 }
 
-pub fn run(args: ShowArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ShowArgs) -> Result<(), Box<dyn core::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
     let cfg = larql_vindex::load_vindex_config(&path)?;
 

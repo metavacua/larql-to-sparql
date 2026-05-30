@@ -3,7 +3,14 @@
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Parser {
     // ── Composite parsers ──
 
@@ -436,7 +443,7 @@ impl Parser {
 
     pub(crate) fn expect_token(&mut self, expected: &Token) -> Result<(), ParseError> {
         let tok = self.peek();
-        if std::mem::discriminant(&tok) == std::mem::discriminant(expected) {
+        if core::mem::discriminant(&tok) == core::mem::discriminant(expected) {
             self.advance();
             Ok(())
         } else {

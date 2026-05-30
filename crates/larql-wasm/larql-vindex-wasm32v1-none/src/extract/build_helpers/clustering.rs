@@ -11,7 +11,14 @@ use crate::extract::callbacks::IndexBuildCallbacks;
 use crate::extract::constants::{MAX_RELATION_CLUSTERS, RELATION_KMEANS_ITERS};
 use crate::extract::stage_labels::STAGE_RELATION_CLUSTERS;
 use crate::format::filenames::{FEATURE_CLUSTERS_JSONL, RELATION_CLUSTERS_JSON};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Collected data for relation clustering.
 pub(crate) struct ClusterData {
     pub directions: Vec<f32>,
@@ -135,7 +142,6 @@ pub(crate) fn run_clustering_pipeline(
 mod tests {
     use super::super::test_support::{vocab_tokenizer, weights_with_embed};
     use super::*;
-
     #[test]
     fn run_clustering_pipeline_skips_empty_directions() {
         let toks = vocab_tokenizer(&[]);

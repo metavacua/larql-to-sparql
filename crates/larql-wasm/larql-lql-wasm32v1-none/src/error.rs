@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// LQL error types.
 
 #[derive(Debug, thiserror::Error)]
@@ -18,7 +26,7 @@ impl LqlError {
     /// Accepts `&str` or owned `String` for `ctx` so callers can pass a
     /// formatted message (`format!("connect to {url}")`) without an
     /// intermediate `.as_str()` dance.
-    pub fn exec(ctx: impl Into<String>, cause: impl std::fmt::Display) -> Self {
+    pub fn exec(ctx: impl Into<String>, cause: impl core::fmt::Display) -> Self {
         LqlError::Execution(format!("{}: {cause}", ctx.into()))
     }
 }
@@ -26,7 +34,6 @@ impl LqlError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn exec_concatenates_context_and_cause() {
         let err = LqlError::exec("loading vindex", "file missing");

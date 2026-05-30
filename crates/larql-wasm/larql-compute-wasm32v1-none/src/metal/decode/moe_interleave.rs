@@ -11,7 +11,14 @@ use metal::{Buffer, CommandBuffer, ComputeCommandEncoder};
 use super::{diag, encode_ffn, encode_post_ffn, gpu_timing, moe_combine};
 use crate::metal::MetalBackend;
 use crate::FullPipelineLayer;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(super) struct MoeInterleaveCtx<'a> {
     pub layer_idx: usize,
     pub num_layers: usize,
@@ -91,7 +98,7 @@ impl MetalBackend {
         // MoE and dense FFN run on the SAME input (`h_post_attn`, the
         // post-attention residual). Dense FFN output is already in `new_h`.
         let attn_ptr = bufs.h_post_attn.contents() as *const f32;
-        let attn_slice = unsafe { std::slice::from_raw_parts(attn_ptr, ctx.hidden) };
+        let attn_slice = unsafe { core::slice::from_raw_parts(attn_ptr, ctx.hidden) };
         let moe_out = if ctx.defer_ffn_for_split {
             // Split path: fire MoE NOW, then encode dense FFN + post-FFN
             // residual on a fresh cb so GPU runs while the remote trip is in

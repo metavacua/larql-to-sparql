@@ -17,6 +17,14 @@
 
 use clap::Args;
 use larql_vindex::format::filenames::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     ATTN_WEIGHTS_Q4K_BIN, ATTN_WEIGHTS_Q4K_MANIFEST_JSON, ATTN_WEIGHTS_Q4_BIN, ATTN_WEIGHTS_Q8_BIN,
     EMBEDDINGS_BIN, GENERATION_CONFIG_JSON, INDEX_JSON, INTERLEAVED_Q4K_BIN,
     INTERLEAVED_Q4K_MANIFEST_JSON, INTERLEAVED_Q4_BIN, LM_HEAD_BIN, LM_HEAD_Q4_BIN, NORMS_BIN,
@@ -46,7 +54,7 @@ struct PathDecision {
     note: String,
 }
 
-pub fn run(args: DiagArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: DiagArgs) -> Result<(), Box<dyn core::error::Error>> {
     let path = cache::resolve_model(&args.model)?;
     println!("Engine diagnostic — {}", path.display());
     println!("{}", "=".repeat(70));
@@ -156,7 +164,7 @@ pub fn run(args: DiagArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// Walk every Q4_K manifest in the vindex, compare each entry's recorded
 /// `length` to `format.expected_bytes(&shape)`. Returns a single line
 /// summary; on mismatch, the kernel reads off-stride and produces NaN.
-fn validate_strides(dir: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
+fn validate_strides(dir: &std::path::Path) -> Result<String, Box<dyn core::error::Error>> {
     let manifests = [
         ATTN_WEIGHTS_Q4K_MANIFEST_JSON,
         INTERLEAVED_Q4K_MANIFEST_JSON,
@@ -241,7 +249,7 @@ fn resolve_lm_head_path(
     let q4_ready = backend.has_q4() && has_q4_data && index.vocab_size > 0;
     let f16_ready = index.has_lm_head_f16() && index.vocab_size > 0;
     let is_non_cpu_backend =
-        backend.as_any().type_id() != std::any::TypeId::of::<larql_compute::CpuBackend>();
+        backend.as_any().type_id() != core::any::TypeId::of::<larql_compute::CpuBackend>();
     let skip_q4k_env = std::env::var("LARQL_LM_HEAD_SKIP_Q4K").unwrap_or_default();
     let skip_q4k =
         is_non_cpu_backend && matches!(skip_q4k_env.as_str(), "1" | "true" | "on" | "yes");
@@ -316,7 +324,7 @@ fn probe_run(
     vindex_path: &std::path::Path,
     _index: &larql_vindex::VectorIndex,
     tokens: usize,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn core::error::Error>> {
     use larql_inference::{default_backend, generate, CachedLayerGraph};
 
     let mut cb = larql_vindex::SilentLoadCallbacks;
@@ -395,7 +403,6 @@ fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Static stride validation must pass on a clean canonical-stride
     /// manifest and fail on a 148-byte legacy stride.
     #[test]

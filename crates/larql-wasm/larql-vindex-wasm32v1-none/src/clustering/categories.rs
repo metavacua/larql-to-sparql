@@ -6,7 +6,14 @@
 //! To regenerate: `python3 scripts/fetch_wikidata_properties.py`
 
 use std::path::Path;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Load category words from the Wikidata categories file, or fall back to built-in.
 pub fn category_words() -> Vec<String> {
     // Try loading from file (relative to cwd or workspace root)
@@ -347,7 +354,6 @@ pub fn is_stop_word(tok: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn category_words_not_empty() {
         let words = category_words();

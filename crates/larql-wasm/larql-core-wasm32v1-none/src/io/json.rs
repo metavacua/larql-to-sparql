@@ -1,7 +1,14 @@
 use std::path::Path;
 
 use crate::core::graph::{Graph, GraphError};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Load a .larql.json graph from disk.
 pub fn load_json(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     let contents = std::fs::read_to_string(path)?;

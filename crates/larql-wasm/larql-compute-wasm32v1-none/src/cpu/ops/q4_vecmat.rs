@@ -3,7 +3,14 @@
 //! out[K] = activation[N] @ Q4[N, K]
 
 use super::q4_common::q4_0_vecmat_c;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Q4 vecmat: out = activation @ Q4_matrix.
 pub fn dispatch(
     activation: &[f32],
@@ -29,7 +36,6 @@ mod tests {
     use super::*;
 
     use super::super::q4_common::quantize_q4_0;
-
     #[test]
     fn q4_vecmat_produces_output() {
         let hidden = 256;

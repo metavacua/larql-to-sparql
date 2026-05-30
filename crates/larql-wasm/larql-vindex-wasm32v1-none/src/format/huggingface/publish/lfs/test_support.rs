@@ -3,7 +3,14 @@
 use std::io::Write as _;
 
 use crate::format::huggingface::publish::PublishCallbacks;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Set `LARQL_HF_BASE_URL` for the lifetime of the guard, restoring the
 /// previous value on drop. Wraps the env var that
 /// `super::super::protocol::hf_base()` reads, letting tests point all

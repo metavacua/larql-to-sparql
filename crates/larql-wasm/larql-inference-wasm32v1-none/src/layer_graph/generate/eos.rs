@@ -10,11 +10,17 @@
 //! `vindex::is_end_of_turn` had a longer list; `forward::kv_generate` had
 //! a third superset including Llama-3 markers.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 pub use larql_vindex::format::filenames::GENERATION_CONFIG_JSON as GENERATION_CONFIG_FILENAME;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Token strings that always terminate generation across model families.
 ///
 /// Built-in fallback when `generation_config.json` is missing or doesn't
@@ -169,7 +175,6 @@ impl EosConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn builtin_recognises_gemma_end_of_turn() {
         let cfg = EosConfig::builtin();

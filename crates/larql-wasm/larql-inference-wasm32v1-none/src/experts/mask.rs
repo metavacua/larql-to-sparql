@@ -33,11 +33,17 @@
 //! Per-step (outside op-name field): one decode call on `generated_ids`,
 //! then early return.
 
-use std::collections::HashSet;
 use tokenizers::Tokenizer;
 
 use crate::experts::OpSpec;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Where the decoder is in the `{"op":"<NAME>","args":{...}}` skeleton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GrammarState {
@@ -203,7 +209,6 @@ impl<'tok> OpNameMask<'tok> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── Pure state-machine tests (no tokenizer needed) ────────────────────
 
     #[test]

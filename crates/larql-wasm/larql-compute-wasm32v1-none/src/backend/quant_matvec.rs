@@ -17,7 +17,14 @@
 
 use crate::QuantFormat;
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Reverse the `quantize_to_q8` block layout: each 32-element block
 /// has one f32 scale, multiplied through to recover f32 values.
 fn dequantise_q8(q8_x: &[i8], q8_scales: &[f32]) -> Vec<f32> {
@@ -283,7 +290,6 @@ pub trait QuantMatVec {
 mod tests {
     use super::*;
     use crate::CpuBackend;
-
     /// Pin the Q4_0/Q8_0 dispatch split: Q4_0 must continue to route
     /// through `q4_matvec`, and Q8_0 must route through the new
     /// `q8_matvec` (defaulting to `None`). Pre-2026-05-09 both formats

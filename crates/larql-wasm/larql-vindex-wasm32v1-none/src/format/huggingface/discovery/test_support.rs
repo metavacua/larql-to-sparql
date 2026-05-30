@@ -1,7 +1,14 @@
 //! Shared test fixtures for the discovery sibling test suites.
 
 use crate::format::huggingface::publish::protocol::TEST_BASE_ENV;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// RAII env-var override for `LARQL_HF_TEST_BASE`, plus a fake
 /// HF_TOKEN so the discovery functions don't try to read
 /// `~/.huggingface/token` during the test. Restored on drop.
@@ -40,7 +47,6 @@ impl Drop for TestEnvGuard {
 mod tests {
     use super::*;
     use serial_test::serial;
-
     #[test]
     #[serial]
     fn guard_restores_previous_base_on_drop() {

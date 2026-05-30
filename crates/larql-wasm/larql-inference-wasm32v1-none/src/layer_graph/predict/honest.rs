@@ -12,7 +12,14 @@ use crate::layer_graph::logits::finalize_logits;
 use crate::layer_graph::prefill::prefill_kv_cache_cpu;
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Honest production pipeline: real computation, no over-caching.
 ///
 /// - L0-12: cached (template-fixed, proven at 0.999 cosine — legitimate)
@@ -29,7 +36,7 @@ pub fn predict_honest(
     index: &larql_vindex::VectorIndex,
     backend: &dyn ComputeBackend,
     cached_layers: &CachedLayerGraph,
-    layer_range: std::ops::Range<usize>,
+    layer_range: core::ops::Range<usize>,
 ) -> crate::forward::PredictResult {
     let norm_offset = weights.arch.norm_weight_offset();
 

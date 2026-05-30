@@ -24,15 +24,20 @@
 //! in a sibling module. Adding a new capability is one new sibling
 //! plus one `mod` line here.
 
-use std::sync::Arc;
-
 use ndarray::Array2;
 
 use super::storage::{FfnStore, GateStore, MetadataStore, MmapStorage};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // Re-export all shared types from types.rs so external callers can
 // keep using `crate::index::core::{VectorIndex, FeatureMeta, …}` paths.
 pub use super::types::*;
-
 mod fp4_ffn;
 mod gate_lookup;
 mod native_ffn;
@@ -157,7 +162,7 @@ impl VectorIndex {
             .gate_vectors
             .iter()
             .filter_map(|v| v.as_ref())
-            .map(|m| m.len() * std::mem::size_of::<f32>())
+            .map(|m| m.len() * core::mem::size_of::<f32>())
             .sum()
     }
 
@@ -188,8 +193,7 @@ mod refactor_tests {
     //! atomics carry).
     use super::*;
     use crate::index::storage::vindex_storage::VindexStorage;
-    use std::sync::atomic::Ordering;
-    use std::sync::Arc;
+    use core::sync::atomic::Ordering;
 
     #[test]
     fn empty_defaults_for_new_fields() {
@@ -508,7 +512,6 @@ mod refactor_tests {
     fn num_features_legacy_wins_when_gate_present() {
         use super::super::fp4_storage::Fp4Storage;
         use crate::config::types::Fp4Config;
-
         let mut v = VectorIndex::empty(2, 256);
         v.gate.gate_vectors[0] = Some(Array2::<f32>::zeros((8, 256)));
         let storage = Fp4Storage {

@@ -8,10 +8,16 @@
 //! hidden state (shape `[1, hidden_dim]`). The caller applies `final_norm +
 //! lm_head` to get logits — see `larql_inference::forward::hidden_to_raw_logits`.
 #![cfg_attr(target_arch = "wasm32", no_std)]
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[macro_use]
 extern crate alloc;
-
-
 #[cfg(any(
     target_os = "linux",
     target_os = "freebsd",
@@ -356,7 +362,6 @@ mod tests {
 mod compliance_tests {
     use super::*;
     use larql_compute::cpu_backend;
-
     fn all_kinds() -> Vec<EngineKind> {
         vec![
             EngineKind::MarkovResidual { window_size: None },

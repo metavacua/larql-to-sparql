@@ -3,7 +3,6 @@
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::{Keyword, Token};
-
 impl Parser {
     pub(crate) fn parse_insert(&mut self) -> Result<Statement, ParseError> {
         self.expect_keyword(Keyword::Insert)?;

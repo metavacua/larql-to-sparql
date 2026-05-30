@@ -39,11 +39,17 @@
 //! lengths, so the key includes pointer, length, format, and expected float
 //! count.
 
-use std::collections::VecDeque;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::options;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// LRU cache entry: dequantised expert weights.
 pub(super) type ExpertF32 = Arc<Vec<f32>>;
 
@@ -52,8 +58,8 @@ pub(super) enum DequantError {
     UnsupportedFormat(crate::QuantFormat),
 }
 
-impl std::fmt::Display for DequantError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for DequantError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::UnsupportedFormat(format) => {
                 write!(f, "CPU MoE dequant does not support {format:?}")
@@ -62,7 +68,7 @@ impl std::fmt::Display for DequantError {
     }
 }
 
-impl std::error::Error for DequantError {}
+impl core::error::Error for DequantError {}
 
 /// Cache key — in production the byte slice's start pointer is stable across
 /// the lifetime of the mmap, so different experts in the same packed tensor get
@@ -88,9 +94,9 @@ fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -
 
 #[cfg(test)]
 fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -> Key {
-    use std::hash::{Hash, Hasher};
+    use core::hash::{Hash, Hasher};
 
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut h = hashbrown::hash_map::DefaultHasher::new();
     bytes.hash(&mut h);
     (
         bytes.as_ptr() as usize,
@@ -116,7 +122,7 @@ struct Inner {
 impl Inner {
     fn new(cap: usize) -> Self {
         Self {
-            map: std::collections::HashMap::with_capacity(cap.saturating_add(1)),
+            map: HashMap::with_capacity(cap.saturating_add(1)),
             order: VecDeque::with_capacity(cap.saturating_add(1)),
             cap,
         }
@@ -210,7 +216,6 @@ pub(super) fn try_cached_dequant(
 mod cache_format_tests {
     use super::*;
     use crate::QuantFormat;
-
     /// BF16 path: 2 bytes per float, no padding. Round-trip a fixed value.
     #[test]
     fn bf16_dispatch_round_trip() {

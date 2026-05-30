@@ -22,7 +22,6 @@ use crate::model::ModelWeights;
 use super::infer_patched::{infer_patched, infer_patched_q4k, InferPatchedResult};
 use super::predict::predict;
 use super::PredictResult;
-
 /// An inference-ready weight handle that is agnostic to quantisation format.
 ///
 /// Constructed via [`InferenceWeights::load`]. Callers use

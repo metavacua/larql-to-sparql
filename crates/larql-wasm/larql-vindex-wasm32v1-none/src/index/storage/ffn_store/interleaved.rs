@@ -5,13 +5,18 @@
 //! prefetch lets a forward pass tell the kernel which layer's bytes
 //! are about to be read.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::INTERLEAVED_BIN;
 use crate::index::core::VectorIndex;
 use crate::mmap_util::mmap_demand_paged;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load interleaved FFN data: [gate|up|down] per layer in one contiguous file.
     /// Eliminates TLB thrash from 3 separate mmap files.
@@ -51,7 +56,7 @@ impl VectorIndex {
         }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, matrix_floats)
+            core::slice::from_raw_parts(ptr, matrix_floats)
         };
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
@@ -73,7 +78,7 @@ impl VectorIndex {
         }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, matrix_floats)
+            core::slice::from_raw_parts(ptr, matrix_floats)
         };
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
@@ -95,7 +100,7 @@ impl VectorIndex {
         }
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, matrix_floats)
+            core::slice::from_raw_parts(ptr, matrix_floats)
         };
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
@@ -134,7 +139,6 @@ mod tests {
     use ndarray::Array2;
 
     use super::*;
-
     fn vindex_with_layer_features(
         num_layers: usize,
         intermediate: usize,

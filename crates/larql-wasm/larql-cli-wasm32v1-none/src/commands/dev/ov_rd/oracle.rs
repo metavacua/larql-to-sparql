@@ -1,10 +1,17 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Args;
 use larql_inference::{encode_prompt, hidden_to_raw_logits};
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -25,7 +32,6 @@ use super::reports::{
 use super::static_replace::fit_static_means;
 use super::stats::StaticHeadMeans;
 use super::types::HeadId;
-
 #[derive(Args)]
 pub(super) struct OracleRoundtripArgs {
     /// Self-contained Q4K vindex directory.
@@ -202,7 +208,7 @@ impl OracleRoundtripAccumulator {
 
 pub(super) fn run_oracle_roundtrip(
     args: OracleRoundtripArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -323,7 +329,7 @@ pub(super) fn run_oracle_roundtrip(
 
 pub(super) fn run_oracle_lowrank(
     args: OracleLowrankArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -545,7 +551,7 @@ fn forward_q4k_oracle_roundtrip_head(
     index: &VectorIndex,
     head: HeadId,
     basis: &WoRoundtripBasis,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn std::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn core::error::Error>> {
     let mut metrics = None;
 
     let h = larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(
@@ -602,7 +608,7 @@ fn forward_q4k_oracle_lowrank_head(
     pca_basis: &ZPcaBasis,
     means: &StaticHeadMeans,
     k: usize,
-) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn std::error::Error>> {
+) -> Result<(Array2<f32>, RoundtripPatchMetrics), Box<dyn core::error::Error>> {
     let mut metrics = None;
 
     let h = larql_inference::vindex::predict_q4k_hidden_with_mapped_pre_o_head(

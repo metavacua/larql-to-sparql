@@ -5,6 +5,14 @@ use super::config::{parse_unit_manifest, ShardConfig, UnitManifest};
 use super::router::MoeRouterWeights;
 use super::shard::{Shard, ShardTransport};
 use super::wire::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_layer_batch_request_f16, decode_layer_batch_response_f16,
     encode_layer_batch_request_f16, encode_layer_batch_response_f16, f16_bits_to_f32,
     f32_to_f16_bits,
@@ -293,7 +301,7 @@ fn shard_config_with_timeout_overrides_default() {
 #[test]
 fn shard_config_with_units_empty_set_yields_zero_range() {
     // Diagnostic min/max default to (0, 0) when the unit set is empty.
-    let empty: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let empty: std::collections::HashSet<(usize, usize)> = HashSet::new();
     let s = ShardConfig::with_units("http://h:9000", empty);
     assert_eq!(s.start, 0);
     assert_eq!(s.end, 0);

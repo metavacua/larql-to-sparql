@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // Diagnostic-capture structs accumulate per-prompt fields (clears_failure,
 // metrics, worst_prompt_kl, …) for a future dump/serializer; suppress until
 // the viewer is wired.
@@ -9,7 +17,6 @@ use super::super::metrics::{argmax, kl_logp, log_softmax, mean, percentile};
 use super::super::oracle_pq_forward::{final_logits, forward_q4k_predicted_address_mode_d_head};
 use super::super::program::BehaviorMetrics;
 use super::context::{FitContext, PromptCapture};
-
 // ────────────────────────────────────────────────────────────────────────────
 // Result types
 // ────────────────────────────────────────────────────────────────────────────
@@ -56,7 +63,7 @@ pub fn eval_leave_code_oracle(
     merged_codes: &[usize],
     target: usize,
     leave_oracle_code: Option<usize>,
-) -> Result<BehaviorMetrics, Box<dyn std::error::Error>> {
+) -> Result<BehaviorMetrics, Box<dyn core::error::Error>> {
     let target_group = fit.group;
     let mut kls = Vec::with_capacity(fit.captures.len());
     let mut top1_hits = 0usize;
@@ -123,7 +130,7 @@ pub fn eval_leave_position_oracle(
     target: usize,
     fragile_code: usize,
     leave_oracle_position: Option<usize>,
-) -> Result<f64, Box<dyn std::error::Error>> {
+) -> Result<f64, Box<dyn core::error::Error>> {
     let target_group = fit.group;
 
     let remapped: Vec<Vec<usize>> = capture
@@ -169,7 +176,7 @@ pub fn localize_failure(
     merged_codes: &[usize],
     target: usize,
     _failing_max_kl: f64,
-) -> Result<LocalizeResult, Box<dyn std::error::Error>> {
+) -> Result<LocalizeResult, Box<dyn core::error::Error>> {
     // Step 1: find worst prompt from the full-merge evaluation.
     let _full_metrics = eval_leave_code_oracle(weights, index, fit, merged_codes, target, None)?;
     let (worst_idx, worst_kl) = fit
@@ -202,7 +209,7 @@ pub fn localize_failure(
             .unwrap_or(0.0);
             (i, kl)
         })
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal))
         .unwrap_or((0, 0.0));
 
     let worst_prompt = &fit.captures[worst_idx];

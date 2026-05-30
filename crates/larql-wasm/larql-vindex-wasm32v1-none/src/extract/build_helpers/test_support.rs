@@ -1,9 +1,14 @@
 //! Shared test fixtures used by sibling helper-module test suites.
 
-use std::collections::HashMap;
-
 use larql_models::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Build a WordLevel tokenizer with a fixed vocab. Only the listed
 /// words exist; everything else falls back to `[UNK]` (id 0).
 pub(super) fn vocab_tokenizer(words: &[&str]) -> tokenizers::Tokenizer {

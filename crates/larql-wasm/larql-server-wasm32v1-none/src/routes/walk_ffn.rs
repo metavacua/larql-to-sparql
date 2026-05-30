@@ -87,8 +87,6 @@
 //!   12    M×4   output (f32[] LE)
 //! ```
 
-use std::sync::Arc;
-
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::Response;
@@ -97,12 +95,19 @@ use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// RAII guard that decrements the requests_in_flight counter on drop (GT6 drain).
-struct RifGuard(std::sync::Arc<std::sync::atomic::AtomicU32>);
+struct RifGuard(std::sync::Arc<core::sync::atomic::AtomicU32>);
 impl Drop for RifGuard {
     fn drop(&mut self) {
-        use std::sync::atomic::Ordering;
+        use core::sync::atomic::Ordering;
         // Saturating sub to avoid wrapping if something incremented 0 and dropped twice.
         let prev = self
             .0
@@ -815,7 +820,7 @@ pub async fn handle_walk_ffn(
 
     // Track active requests for GT6 drain.
     let _rif_guard = state.models.first().map(|m| {
-        use std::sync::atomic::Ordering;
+        use core::sync::atomic::Ordering;
         m.requests_in_flight.fetch_add(1, Ordering::Relaxed);
         RifGuard(m.requests_in_flight.clone())
     });
@@ -1113,7 +1118,6 @@ pub async fn handle_walk_ffn_q8k(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── decode_binary_request ─────────────────────────────────────────────────
 
     fn make_single_binary(

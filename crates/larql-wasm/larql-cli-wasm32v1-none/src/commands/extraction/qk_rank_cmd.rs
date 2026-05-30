@@ -3,7 +3,14 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::ndarray;
 use larql_inference::InferenceModel;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct QkRankArgs {
     /// Model path or HuggingFace model ID.
@@ -22,7 +29,7 @@ pub struct QkRankArgs {
     all: bool,
 }
 
-pub fn run(args: QkRankArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: QkRankArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -261,11 +268,11 @@ fn compute_singular_values(ata: &ndarray::Array2<f32>, dim: usize) -> Vec<f32> {
         matrix = matrix - outer;
     }
 
-    eigenvalues.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    eigenvalues.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
     eigenvalues
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

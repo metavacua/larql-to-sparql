@@ -3,10 +3,14 @@
 //! BF16 = upper 16 bits of IEEE 754 float32 with round-to-nearest-even.
 //! Same exponent range as float32 (max ≈ 3.4e38), so Gemma-class residuals
 //! (observed absmax ≈ 94 K–151 K) never overflow — unlike float16 (max 65 504).
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
-use alloc::vec::Vec;
-
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Number of bytes per encoded element.
 pub const BYTES_PER_ELEM: usize = 2;
 
@@ -46,7 +50,6 @@ pub fn decode(payload: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn roundtrip_normal_values() {
         let r = vec![0.0f32, 1.0, -1.0, 2.71, -100.0, 0.001]; // not a clippy approx_constant

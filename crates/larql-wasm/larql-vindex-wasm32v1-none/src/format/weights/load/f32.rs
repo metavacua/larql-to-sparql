@@ -2,7 +2,6 @@
 //! `attn_weights.bin` / `up_weights.bin` / `down_weights.bin` /
 //! `norms.bin` / `lm_head.bin` files.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use ndarray::Array2;
@@ -16,7 +15,14 @@ use crate::index::core::IndexLoadCallbacks;
 
 use super::super::write_f32::{kind, WeightEntry};
 use super::LoadWeightsOptions;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Load `ModelWeights` from a vindex directory, skipping component
 /// tensors per [`LoadWeightsOptions`].
 pub fn load_model_weights_with_opts(
@@ -239,10 +245,10 @@ pub fn load_model_weights_with_opts(
     Ok(ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
+        raw_bytes: HashMap::new(),
         skipped_tensors: Vec::new(),
-        packed_mmaps: std::collections::HashMap::new(),
-        packed_byte_ranges: std::collections::HashMap::new(),
+        packed_mmaps: HashMap::new(),
+        packed_byte_ranges: HashMap::new(),
         embed,
         lm_head,
         position_embed: None,

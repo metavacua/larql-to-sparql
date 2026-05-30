@@ -1,7 +1,13 @@
-use std::collections::HashMap;
 
 use ndarray::{Array2, ArrayView1};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub(super) struct AddressProbeModel {
     pub(super) name: String,
@@ -426,7 +432,7 @@ pub(super) fn attention_argmax(weights: &[f32], position: usize) -> usize {
         .take(causal_len)
         .copied()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .map(|(idx, _)| idx)
         .unwrap_or(0)
 }
@@ -439,7 +445,7 @@ fn attention_topk_key(weights: &[f32], position: usize, k: usize) -> String {
         .copied()
         .enumerate()
         .collect::<Vec<_>>();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     let key = indexed
         .into_iter()
         .take(k)
@@ -546,7 +552,7 @@ pub(super) fn top_feature_ids_from_activation_row(
     indexed.sort_unstable_by(|a, b| {
         b.1.abs()
             .partial_cmp(&a.1.abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .unwrap_or(core::cmp::Ordering::Equal)
     });
     indexed
         .into_iter()
@@ -633,7 +639,7 @@ pub(super) fn attention_pattern_features(weights: &[f32], position: usize) -> Ve
         .copied()
         .enumerate()
         .collect::<Vec<_>>();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
     for rank in 0..8 {
         if let Some((source, mass)) = indexed.get(rank).copied() {
             let source_norm = source as f64 / denom;

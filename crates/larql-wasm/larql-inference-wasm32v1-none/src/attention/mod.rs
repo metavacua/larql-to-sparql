@@ -5,7 +5,14 @@
 //! - `gqa`: Grouped-Query Attention with BLAS-fused dot products
 //! - `block`: CPU attention block (norm → proj → RoPE → GQA → O → residual)
 //! - `gpu`: GPU-accelerated attention, KV-capture, Q4 projection
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod block;
 pub mod decode;
 pub mod gpu;

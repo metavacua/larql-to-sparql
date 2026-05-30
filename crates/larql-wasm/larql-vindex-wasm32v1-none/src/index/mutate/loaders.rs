@@ -4,7 +4,6 @@
 //! These are the heap-mode constructors. The mmap-mode entry point
 //! `VectorIndex::new_mmap` lives in `super::core` next to `new`.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
@@ -15,7 +14,14 @@ use crate::error::VindexError;
 
 use crate::index::core::VectorIndex;
 use crate::index::types::*;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     pub fn load_gates(
         path: &Path,
@@ -235,7 +241,6 @@ impl VectorIndex {
 mod tests {
     use super::*;
     use crate::index::types::SilentLoadCallbacks;
-
     fn write_ndjson(
         dir: &std::path::Path,
         name: &str,

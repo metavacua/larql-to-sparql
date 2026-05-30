@@ -3,7 +3,14 @@ use std::time::Instant;
 
 use clap::{Args, Subcommand};
 use larql_inference::{CaptureCallbacks, CaptureConfig, InferenceModel, DEFAULT_ACTIVATION_TOP_K};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct ResidualsArgs {
     #[command(subcommand)]
@@ -63,13 +70,13 @@ impl CaptureCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: ResidualsArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ResidualsArgs) -> Result<(), Box<dyn core::error::Error>> {
     match args.command {
         ResidualsCommand::Capture(capture) => run_capture(capture),
     }
 }
 
-fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn run_capture(args: CaptureArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let capturer = InferenceModel::load(&args.model)?;
     eprintln!(

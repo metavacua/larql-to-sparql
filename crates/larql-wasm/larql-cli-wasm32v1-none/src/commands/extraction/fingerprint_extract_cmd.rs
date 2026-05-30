@@ -6,7 +6,14 @@ use clap::Args;
 use larql_inference::ndarray;
 use larql_inference::InferenceModel;
 use serde::Serialize;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Extract OV fingerprint basis vectors from attention weights.
 /// For each head at each layer, compute what the head writes to the residual
 /// when it attends to each vocab token. This is the OV circuit:
@@ -93,7 +100,7 @@ struct HeadContribution {
     top_token: String,
 }
 
-pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: FingerprintExtractArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -437,7 +444,7 @@ fn top_token(
         .to_string()
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

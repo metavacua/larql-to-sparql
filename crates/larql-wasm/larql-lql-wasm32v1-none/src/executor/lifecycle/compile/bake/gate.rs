@@ -13,7 +13,6 @@
 //! Within a layer, feature `f`'s gate is the row at
 //! `info.offset + f × hidden × bpf` — contiguous per-feature.
 
-use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
@@ -21,7 +20,14 @@ use crate::error::LqlError;
 use larql_vindex::format::filenames::GATE_VECTORS_BIN;
 
 use super::{copy_for_patch, BYTES_PER_F16, BYTES_PER_F32};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub(in crate::executor::lifecycle::compile) fn patch_gate_vectors(
     source_dir: &std::path::Path,
     dest_dir: &std::path::Path,

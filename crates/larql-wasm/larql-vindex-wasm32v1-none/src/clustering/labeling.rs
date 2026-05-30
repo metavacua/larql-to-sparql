@@ -5,10 +5,16 @@
 //! 2. Member-based: average member embeddings → nearest category word
 
 use ndarray::Array1;
-use std::collections::HashMap;
 
 use super::categories::{category_words, is_stop_word};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// TF-IDF labeling: find distinctive tokens per cluster.
 pub fn auto_label_clusters(
     assignments: &[usize],
@@ -56,7 +62,7 @@ pub fn auto_label_clusters(
             })
             .collect();
 
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
 
         let top: Vec<String> = scored
             .iter()
@@ -68,7 +74,7 @@ pub fn auto_label_clusters(
         let label = if top.is_empty() {
             let mut freq: Vec<(String, usize)> =
                 cluster_tok.iter().map(|(t, &c)| (t.clone(), c)).collect();
-            freq.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+            freq.sort_by_key(|(_, count)| core::cmp::Reverse(*count));
             let fallback: Vec<String> = freq
                 .iter()
                 .filter(|(t, _)| t.len() >= 3)
@@ -394,7 +400,6 @@ pub fn encode_token_with_tokenizer(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn tfidf_labels_basic() {
         let assignments = vec![0, 0, 0, 1, 1, 1];

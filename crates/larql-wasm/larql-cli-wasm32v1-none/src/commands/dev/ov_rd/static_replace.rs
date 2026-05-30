@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -8,6 +7,14 @@ use larql_inference::forward::ple::precompute_per_layer_inputs;
 use larql_inference::forward::{embed_tokens_pub, run_layer_with_ffn};
 use larql_inference::{encode_prompt, hidden_to_raw_logits, WeightFfn};
 use larql_vindex::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights_q4k, load_vindex_tokenizer, SilentLoadCallbacks, VectorIndex,
 };
 use ndarray::{s, Array2};
@@ -21,7 +28,6 @@ use super::reports::{
 use super::runtime::{insert_q4k_layer_tensors, remove_layer_tensors};
 use super::stats::{StaticHeadAccumulator, StaticHeadMeans};
 use super::types::{HeadId, PromptRecord};
-
 #[derive(Args)]
 pub(super) struct StaticReplaceArgs {
     /// Self-contained Q4K vindex directory.
@@ -117,7 +123,7 @@ impl StaticModeAccumulator {
                 .collect::<Vec<_>>(),
         );
         let mut worst_examples = self.prompts.clone();
-        worst_examples.sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(std::cmp::Ordering::Equal));
+        worst_examples.sort_by(|a, b| b.kl.partial_cmp(&a.kl).unwrap_or(core::cmp::Ordering::Equal));
         worst_examples.truncate(10);
         let mut strata: Vec<_> = self
             .by_stratum
@@ -163,7 +169,7 @@ impl StaticModeAccumulator {
 
 pub(super) fn run_static_replace(
     args: StaticReplaceArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     std::fs::create_dir_all(&args.out)?;
 
     eprintln!("Loading vindex: {}", args.index.display());
@@ -315,7 +321,7 @@ pub(super) fn fit_static_means(
     tokenizer: &tokenizers::Tokenizer,
     prompts: &[PromptRecord],
     heads: &[HeadId],
-) -> Result<HashMap<HeadId, StaticHeadMeans>, Box<dyn std::error::Error>> {
+) -> Result<HashMap<HeadId, StaticHeadMeans>, Box<dyn core::error::Error>> {
     let mut heads_by_layer: HashMap<usize, Vec<HeadId>> = HashMap::new();
     for head in heads {
         heads_by_layer.entry(head.layer).or_default().push(*head);
@@ -386,7 +392,7 @@ fn build_static_replacement(
     seq_len: usize,
     means: &StaticHeadMeans,
     stratum: &str,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     let mut values = Vec::with_capacity(seq_len * means.head_dim);
     for pos in 0..seq_len {
         let owned_row;
@@ -416,7 +422,7 @@ fn build_static_replacement(
         if let Some(row) = row {
             values.extend_from_slice(row);
         } else {
-            values.extend(std::iter::repeat(0.0).take(means.head_dim));
+            values.extend(core::iter::repeat(0.0).take(means.head_dim));
         }
     }
     Ok(Array2::from_shape_vec((seq_len, means.head_dim), values)?)
@@ -428,7 +434,7 @@ fn forward_q4k_replace_pre_o_head(
     index: &VectorIndex,
     head: HeadId,
     replacement: &Array2<f32>,
-) -> Result<Array2<f32>, Box<dyn std::error::Error>> {
+) -> Result<Array2<f32>, Box<dyn core::error::Error>> {
     larql_inference::vindex::predict_q4k_hidden_with_replaced_pre_o_head(
         weights,
         token_ids,

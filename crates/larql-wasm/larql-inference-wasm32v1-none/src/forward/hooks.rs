@@ -27,8 +27,14 @@
 
 use crate::attention::AttentionWeights;
 use ndarray::{Array1, Array2};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
-
 /// Mid-forward callbacks. All defaults are no-ops; impls override only the
 /// callbacks they need.
 ///
@@ -258,7 +264,6 @@ impl LayerHook for CompositeHook<'_> {
 mod tests {
     use super::*;
     use ndarray::array;
-
     #[test]
     fn noop_hook_compiles_and_does_nothing() {
         let mut h: Array2<f32> = array![[1.0, 2.0], [3.0, 4.0]];

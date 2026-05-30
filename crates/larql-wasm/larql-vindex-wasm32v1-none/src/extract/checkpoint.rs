@@ -25,7 +25,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::VindexLayerInfo;
 use crate::error::VindexError;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Checkpoint filename inside the output directory. Hidden so it
 /// doesn't clutter `ls` and so HF / vindex-loader code doesn't try to
 /// upload it.
@@ -228,7 +235,6 @@ fn days_to_ymd(z: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn tempdir(label: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "larql_checkpoint_{}_{}_{}",

@@ -7,7 +7,14 @@ use super::gqa::gqa_attention_with_weights;
 use super::rope::apply_rope_partial;
 use super::AttentionWeights;
 use ndarray::Array2;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// GPU-accelerated attention block. Same as `run_attention_block` but routes
 /// Q/K/V/O projections through the ComputeBackend (Metal, CUDA, or CPU).
 pub fn run_attention_block_gpu(
@@ -307,7 +314,6 @@ mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
     use ndarray::Array2;
-
     fn h(rows: usize, cols: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, cols),

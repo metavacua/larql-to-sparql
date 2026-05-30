@@ -2,10 +2,15 @@
 //! token pairs against reference databases (`super::database`) and
 //! pick the winning relation per cluster.
 
-use std::collections::HashMap;
-
 use super::database::RelationDatabase;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Label clusters by matching (input, output) token pairs against reference databases.
 ///
 /// For each cluster:
@@ -149,7 +154,6 @@ pub fn label_clusters_from_outputs(
 mod tests {
     use super::super::database::RelationDatabase;
     use super::*;
-
     #[test]
     fn test_lookup() {
         let mut db = RelationDatabase::default();

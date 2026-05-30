@@ -4,8 +4,14 @@
 //! (K, V) pair per layer. Bytes per checkpoint on Gemma 3 4B ≈ 278 KB (f32).
 
 use larql_inference::attention::SharedKV;
-use std::collections::HashMap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub struct CheckpointStore {
     kv: HashMap<usize, Vec<SharedKV>>,
@@ -66,7 +72,6 @@ impl CheckpointStore {
 mod tests {
     use super::*;
     use ndarray::Array2;
-
     fn mk_kv(layers: usize, kv_dim: usize) -> Vec<SharedKV> {
         (0..layers)
             .map(|l| {

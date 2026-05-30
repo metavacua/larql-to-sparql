@@ -9,15 +9,20 @@
 //! The on-the-wire patch format (`VindexPatch`, `PatchOp`,
 //! `PatchDownMeta`, base64 helpers) lives in `super::format`.
 
-use std::collections::HashMap;
-
 use ndarray::Array1;
 
 use crate::index::storage::vindex_storage::VindexStorage;
 use crate::index::{FeatureMeta, VectorIndex, WalkHit, WalkTrace};
 
 use super::format::VindexPatch;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ═══════════════════════════════════════════════════════════════
 // PatchedVindex — overlay on immutable base
 // ═══════════════════════════════════════════════════════════════
@@ -91,7 +96,7 @@ impl PatchedVindex {
             patches: Vec::new(),
             overrides_meta: HashMap::new(),
             overrides_gate: HashMap::new(),
-            deleted: std::collections::HashSet::new(),
+            deleted: HashSet::new(),
             knn_store: super::knn_store::KnnStore::default(),
         }
     }
@@ -490,7 +495,6 @@ mod gate_override_tests {
     use crate::index::core::VectorIndex;
     use larql_models::TopKEntry;
     use ndarray::Array2;
-
     fn make_meta(token: &str) -> FeatureMeta {
         FeatureMeta {
             top_token: token.into(),

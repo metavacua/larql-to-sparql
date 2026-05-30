@@ -4,7 +4,6 @@
 //! `interleaved_q4k.bin`, and the per-layer `layers/layer_{L:02}.weights`
 //! files. The forward pass dequantises on demand.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use ndarray::Array2;
@@ -18,7 +17,14 @@ use crate::index::core::IndexLoadCallbacks;
 
 use super::super::write_f32::{kind, WeightEntry};
 use super::expert_in_shard;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Expert-shard variant of [`super::load_model_weights_q4k`].
 ///
 /// Identical to the full loader except that when `expert_filter` is `Some((start,
@@ -244,7 +250,7 @@ pub fn load_model_weights_q4k_shard(
     Ok(ModelWeights {
         tensors,
         vectors,
-        raw_bytes: std::collections::HashMap::new(),
+        raw_bytes: HashMap::new(),
         skipped_tensors: Vec::new(),
         packed_mmaps,
         packed_byte_ranges,

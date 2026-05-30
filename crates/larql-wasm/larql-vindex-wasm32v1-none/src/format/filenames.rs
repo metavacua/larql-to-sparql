@@ -10,7 +10,14 @@
 //!
 //! Convention: `SCREAMING_SNAKE`, named for what they hold, not how
 //! they're encoded.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Top-level config / sidecars ─────────────────────────────────────────
 pub const INDEX_JSON: &str = "index.json";
 pub const TOKENIZER_JSON: &str = "tokenizer.json";
@@ -132,7 +139,6 @@ pub const HF_UPLOAD_FILES: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Constants must never collide — a duplicate name would silently
     /// route two writers at the same file.
     #[test]

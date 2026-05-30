@@ -4,7 +4,17 @@
 //! (per ADR-008 — they're hot enough to keep next to the SIMD kernels
 //! that consume them). This module covers Q4_0 and Q8_0, which the
 //! vindex write path uses for the lm_head and gate vector slices.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 // ── Quantizers (f32 → packed bytes) ──
 
 /// Quantize f32 values to Q4_0 format.

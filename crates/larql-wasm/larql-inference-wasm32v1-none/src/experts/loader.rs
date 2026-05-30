@@ -3,7 +3,6 @@ use std::path::Path;
 use wasmi::{Engine, Instance, Linker, Module, Store};
 
 use super::wasi_shim;
-
 /// Per-instance store data. Empty for now; WASI state is handled statelessly
 /// by the shim closures (they write directly to host stdout/stderr).
 pub struct ExpertStore {}

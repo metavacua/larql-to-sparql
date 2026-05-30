@@ -8,7 +8,14 @@
 //! when the compiler inlines `if self.profiling { ... }`).
 
 use std::time::Instant;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Accumulator for a single timing stage. Add new samples with `record`.
 #[derive(Debug, Clone, Default)]
 pub struct StageAccumulator {
@@ -136,7 +143,6 @@ mod tests {
     use super::*;
     use std::thread::sleep;
     use std::time::Duration;
-
     #[test]
     fn stage_accumulator_avg_us_zero_when_empty() {
         let acc = StageAccumulator::default();

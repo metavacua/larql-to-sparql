@@ -22,7 +22,14 @@
 //! reducing the per-element compute overhead (vectorized accumulation).
 
 use std::time::Instant;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const GEMMA3_4B_KV_DIM: usize = 4096;
 
 /// Result for a single kernel profiling run.
@@ -160,7 +167,6 @@ pub fn profile_all(n_layers: usize, warmup: usize, iters: usize) -> Vec<KernelRe
         MatMul, QuantMatVec,
     };
     use metal::MTLSize;
-
     let metal = MetalBackend::new().expect("Metal backend required for profiling");
 
     // Gemma 3 4B production shapes

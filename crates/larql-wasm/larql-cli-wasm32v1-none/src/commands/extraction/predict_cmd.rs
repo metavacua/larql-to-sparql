@@ -11,6 +11,14 @@ use std::time::Instant;
 use clap::Args;
 
 use larql_inference::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     calibrate_scalar_gains, predict,
     predict::LayerMode,
     predict_with_ffn, predict_with_strategy,
@@ -18,7 +26,6 @@ use larql_inference::{
     FfnBackend, InferenceModel, WeightFfn,
 };
 use larql_vindex::{SilentLoadCallbacks, VectorIndex};
-
 #[derive(Args)]
 pub struct PredictArgs {
     /// Model path or HuggingFace model ID.
@@ -57,7 +64,7 @@ pub struct PredictArgs {
     mode: Option<String>,
 }
 
-pub fn run(args: PredictArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: PredictArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model: {}", args.model);
     let start = Instant::now();
     let model = InferenceModel::load(&args.model)?;
@@ -93,7 +100,7 @@ fn run_single(
     token_ids: &[u32],
     top_k: usize,
     args: &PredictArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let weights = model.weights();
 
     match args.ffn.as_str() {
@@ -149,7 +156,7 @@ fn run_ffn(
     print_predictions(label, &result.predictions);
 }
 
-fn parse_k(k: &str, num_layers: usize) -> Result<WalkFfnConfig, Box<dyn std::error::Error>> {
+fn parse_k(k: &str, num_layers: usize) -> Result<WalkFfnConfig, Box<dyn core::error::Error>> {
     if k == "full" || k == "unlimited" {
         Ok(WalkFfnConfig::dense(num_layers))
     } else {
@@ -168,7 +175,7 @@ fn run_with_mode(
     top_k: usize,
     spec: &str,
     args: &PredictArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let weights = model.weights();
     let num_layers = weights.num_layers;
 
@@ -290,7 +297,7 @@ fn run_comparison(
     token_ids: &[u32],
     top_k: usize,
     args: &PredictArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let weights = model.weights();
 
     println!();

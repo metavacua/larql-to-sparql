@@ -15,12 +15,18 @@
 //! Keys are quantised to f16 — KNN cosine retrieval doesn't need f32
 //! precision. Reconstruction goes through `KnnStore::from_entries`.
 
-use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
 use super::knn_store::{KnnEntry, KnnStore};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAGIC: &[u8; 4] = b"LKNN";
 const VERSION: u32 = 1;
 

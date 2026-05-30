@@ -46,7 +46,14 @@
 //! future fix should change both sides together.
 
 use std::sync::OnceLock;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Env var names ──────────────────────────────────────────────────────────
 
 /// `LARQL_CPU_DUMP_LAYERS=<dir>` — read by [`DumpConfig`].
@@ -176,7 +183,6 @@ impl DumpConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn from_env_reads_all_three_vars() {
         // Hand-build via from_env-style construction (we can't poke the

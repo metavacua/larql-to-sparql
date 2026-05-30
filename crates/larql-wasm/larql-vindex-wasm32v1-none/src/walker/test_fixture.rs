@@ -17,9 +17,15 @@
 //! via `larql_vindex::walker::test_fixture::*`. Not re-exported from the
 //! crate root — non-test consumers should ignore this module.
 
-use std::collections::HashMap;
 use std::path::Path;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Default sizing — small enough to extract in microseconds, large enough
 /// that every walker code path runs at least once (>= 1 head, >= 1
 /// FFN feature, >= 1 vocab row).

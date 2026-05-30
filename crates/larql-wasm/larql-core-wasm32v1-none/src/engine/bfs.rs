@@ -7,7 +7,14 @@ use crate::core::graph::Graph;
 use super::chain::chain_tokens;
 use super::provider::ModelProvider;
 use super::templates::TemplateRegistry;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub const DEFAULT_MAX_DEPTH: u32 = 3;
 pub const DEFAULT_MAX_ENTITIES: usize = 1000;
 pub const DEFAULT_MIN_CONFIDENCE: f64 = 0.3;
@@ -193,7 +200,6 @@ pub fn default_should_follow_entity(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_valid_entity() {
         assert!(default_should_follow_entity("France"));

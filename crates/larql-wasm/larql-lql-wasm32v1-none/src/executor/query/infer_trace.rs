@@ -7,7 +7,14 @@ use crate::executor::helpers::format_knn_override_summary;
 use crate::executor::{Backend, Session};
 
 use super::resolve_bands;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Session {
     pub(crate) fn exec_infer_trace(
         &self,
@@ -245,9 +252,9 @@ fn build_attention_map(
     with_attention: bool,
 ) -> std::collections::HashMap<usize, Vec<(String, f32)>> {
     if !with_attention {
-        return std::collections::HashMap::new();
+        return HashMap::new();
     }
-    let mut map = std::collections::HashMap::new();
+    let mut map = HashMap::new();
     for cap in captures {
         let n_heads = cap.weights.heads.len();
         if n_heads == 0 || token_strs.is_empty() {
@@ -272,7 +279,7 @@ fn build_attention_map(
                 Some((tok.trim().to_string(), w))
             })
             .collect();
-        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
         pairs.truncate(3);
         map.insert(cap.layer, pairs);
     }
@@ -289,7 +296,7 @@ fn build_lens_map(
     with_attention: bool,
 ) -> std::collections::HashMap<usize, (String, f64)> {
     if !with_attention {
-        return std::collections::HashMap::new();
+        return HashMap::new();
     }
     lens_residuals
         .iter()
@@ -347,13 +354,13 @@ fn render_trace_layer(
             let a_pos = a.gate_score > 0.0;
             let b_pos = b.gate_score > 0.0;
             match (a_pos, b_pos) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
+                (true, false) => core::cmp::Ordering::Less,
+                (false, true) => core::cmp::Ordering::Greater,
                 _ => b
                     .gate_score
                     .abs()
                     .partial_cmp(&a.gate_score.abs())
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                    .unwrap_or(core::cmp::Ordering::Equal),
             }
         });
         lh

@@ -33,7 +33,14 @@
 
 use crate::cpu::ops::q4_common::f16_to_f32;
 use larql_models::quant::ggml::{Q4_K_BLOCK_BYTES, Q4_K_BLOCK_ELEMS};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Q4_K super-block layout: 144 bytes per 256 values.
 const BLOCK_BYTES: usize = Q4_K_BLOCK_BYTES;
 /// Number of f32 / i8 elements per Q4_K (and Q8_K) super-block.

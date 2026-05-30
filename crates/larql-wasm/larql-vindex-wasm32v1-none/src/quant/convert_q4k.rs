@@ -26,6 +26,14 @@ use crate::config::types::VindexConfig;
 use crate::error::VindexError;
 use crate::format::filenames::*;
 use crate::format::weights::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     load_model_weights, write_model_weights_q4k_with_opts, Q4kWriteOptions,
 };
 use crate::index::storage::ffn_store::{FFN_COMPONENTS_PER_LAYER, FFN_DOWN};
@@ -417,7 +425,6 @@ pub fn add_feature_major_down(vindex_dir: &Path) -> Result<AddFeatureMajorDownRe
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn default_config_is_q4k_m_mix() {
         let c = Q4kConvertConfig::default();

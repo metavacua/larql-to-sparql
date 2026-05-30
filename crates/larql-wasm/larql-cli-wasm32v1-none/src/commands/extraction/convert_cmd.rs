@@ -2,7 +2,14 @@ use larql_vindex::format::filenames::*;
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct ConvertArgs {
     #[command(subcommand)]
@@ -174,7 +181,7 @@ enum QuantizeCommand {
     },
 }
 
-pub fn run(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: ConvertArgs) -> Result<(), Box<dyn core::error::Error>> {
     match args.command {
         ConvertCommand::GgufToVindex {
             input,
@@ -199,7 +206,7 @@ pub fn run(args: ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
 fn run_add_feature_major_down(
     input: &std::path::Path,
     quiet: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use larql_vindex::quant::add_feature_major_down;
 
     if !quiet {
@@ -229,7 +236,7 @@ fn run_add_feature_major_down(
     Ok(())
 }
 
-fn run_quantize(cmd: QuantizeCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn run_quantize(cmd: QuantizeCommand) -> Result<(), Box<dyn core::error::Error>> {
     match cmd {
         QuantizeCommand::Fp4 {
             input,
@@ -279,7 +286,7 @@ struct QuantizeQ4kOpts {
     quiet: bool,
 }
 
-fn run_quantize_q4k(opts: QuantizeQ4kOpts) -> Result<(), Box<dyn std::error::Error>> {
+fn run_quantize_q4k(opts: QuantizeQ4kOpts) -> Result<(), Box<dyn core::error::Error>> {
     use larql_vindex::quant::{vindex_to_q4k, Q4kConvertConfig};
 
     let config = Q4kConvertConfig {
@@ -340,9 +347,8 @@ struct QuantizeFp4Opts {
     quiet: bool,
 }
 
-fn run_quantize_fp4(opts: QuantizeFp4Opts) -> Result<(), Box<dyn std::error::Error>> {
+fn run_quantize_fp4(opts: QuantizeFp4Opts) -> Result<(), Box<dyn core::error::Error>> {
     use larql_vindex::quant::{vindex_to_fp4, Fp4ConvertConfig, Policy, ProjectionOutcome};
-
     let policy = Policy::parse(&opts.policy)?;
     let config = Fp4ConvertConfig {
         policy,
@@ -426,7 +432,7 @@ fn run_gguf_to_vindex(
     output: &std::path::Path,
     level: &str,
     use_f16: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading GGUF: {}", input.display());
 
     let gguf = larql_models::loading::gguf::GgufFile::open(input)?;
@@ -511,7 +517,7 @@ fn run_safetensors_to_vindex(
     output: &std::path::Path,
     level: &str,
     use_f16: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     // This is essentially extract-index
     eprintln!("Loading safetensors: {}", input.display());
     let weights = larql_models::load_model_dir(input)?;
@@ -563,7 +569,7 @@ fn run_safetensors_to_vindex(
     Ok(())
 }
 
-fn run_gguf_info(input: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn run_gguf_info(input: &std::path::Path) -> Result<(), Box<dyn core::error::Error>> {
     let gguf = larql_models::loading::gguf::GgufFile::open(input)?;
 
     println!("GGUF: {}", input.display());

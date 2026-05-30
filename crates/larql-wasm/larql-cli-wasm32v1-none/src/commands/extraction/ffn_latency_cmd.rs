@@ -11,7 +11,14 @@
 
 use clap::Args;
 use larql_inference::ffn::{RemoteFfnConfig, RemoteWalkBackend};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct FfnLatencyArgs {
     /// URL of a running `larql-server` (e.g. `http://127.0.0.1:9183`).
@@ -32,7 +39,7 @@ pub struct FfnLatencyArgs {
     pub timeout: u64,
 }
 
-pub fn run(args: FfnLatencyArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: FfnLatencyArgs) -> Result<(), Box<dyn core::error::Error>> {
     let layers: Vec<usize> = args
         .layers
         .split(',')

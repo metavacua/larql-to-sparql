@@ -22,7 +22,14 @@
 use ndarray::Array1;
 
 use crate::index::core::VectorIndex;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 mod dispatch;
 mod hnsw_lifecycle;
 mod scores_batch;
@@ -51,8 +58,7 @@ pub(super) fn top_k_by_abs<I>(scores: I, top_k: usize) -> Vec<(usize, f32)>
 where
     I: IntoIterator<Item = f32>,
 {
-    use std::cmp::Ordering;
-    use std::collections::BinaryHeap;
+    use core::cmp::Ordering;
 
     if top_k == 0 {
         return Vec::new();
@@ -129,7 +135,7 @@ mod tests {
 
     use crate::index::VectorIndex;
     use ndarray::Array2;
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
 
     /// Build a 2-layer VectorIndex with 8 features × 4 hidden where
     /// `feature_i = e_(i mod 4)` (one-hot among the 4 hidden dims).  A
@@ -263,7 +269,7 @@ mod tests {
 
     #[test]
     fn top_k_by_abs_empty_input_returns_empty() {
-        let result = top_k_by_abs(std::iter::empty::<f32>(), 5);
+        let result = top_k_by_abs(core::iter::empty::<f32>(), 5);
         assert!(result.is_empty());
     }
 

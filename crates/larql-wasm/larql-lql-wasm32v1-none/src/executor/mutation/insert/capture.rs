@@ -12,7 +12,14 @@ use crate::error::LqlError;
 use crate::executor::Session;
 
 use super::plan::InstallPlan;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Output of `capture_install_residuals`. Caller commits the pending
 /// decoys to `session.decoy_residual_cache` after the immutable borrow
 /// of `self` ends.
@@ -227,7 +234,6 @@ pub(super) const CANONICAL_DECOY_PROMPTS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn canonical_decoys_have_unique_3word_prefixes() {
         let prefixes: std::collections::HashSet<String> = CANONICAL_DECOY_PROMPTS

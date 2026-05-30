@@ -4,7 +4,14 @@
 //! and Q8 quantization helper.
 
 use larql_models::quant::ggml::LEGACY_BLOCK_ELEMS;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 extern "C" {
     /// C kernel: Q4_0 × Q8_0 matrix-vector multiply with ARM vdotq_s32.
     pub fn q4_0_matvec_c(
@@ -630,7 +637,6 @@ pub fn q4k_matvec_into(out: &mut [f32], x: &[f32], w: &[u8], rows: usize, cols: 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Reference implementation kept here as the correctness oracle for
     /// the bit-manipulation `f16_to_f32`.  Mirrors the previous (slow)
     /// version that used `2.0f32.powi(...)`.  The new fast path must

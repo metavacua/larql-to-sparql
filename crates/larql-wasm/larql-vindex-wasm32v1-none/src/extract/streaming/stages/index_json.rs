@@ -12,7 +12,7 @@ impl<'a> StreamingContext<'a> {
     pub(in crate::extract::streaming) fn write_index_json(&mut self) -> Result<(), VindexError> {
         let cfg = self.arch.config();
         let family = self.arch.family().to_string();
-        let layer_infos = std::mem::take(&mut self.layer_infos);
+        let layer_infos = core::mem::take(&mut self.layer_infos);
         let config = VindexConfig {
             version: 2,
             model: self.model_name.to_string(),

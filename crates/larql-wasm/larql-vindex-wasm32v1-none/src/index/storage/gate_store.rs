@@ -23,7 +23,14 @@ use ndarray::{Array1, Array2, ArrayView2};
 
 use crate::index::core::VectorIndex;
 use crate::index::storage::vindex_storage::VindexStorage;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── GateStore — composes all gate-matrix-and-cache state ────────────────
 
 /// Gate matrix storage + decode caches + HNSW index.
@@ -40,7 +47,7 @@ pub struct GateStore {
     /// LRU queue for `f16_decode_cache`. Back is oldest, front is newest.
     pub gate_cache_lru: Mutex<std::collections::VecDeque<usize>>,
     /// Cap on live entries in `f16_decode_cache`. 0 = unlimited.
-    pub gate_cache_max_layers: std::sync::atomic::AtomicUsize,
+    pub gate_cache_max_layers: core::sync::atomic::AtomicUsize,
     /// Warm-up cache (RwLock — lock-free reads).
     pub warmed_gates: RwLock<Vec<Option<Vec<f32>>>>,
     /// HNSW per-layer index, lazily built on first query when enabled.
@@ -54,9 +61,9 @@ pub struct GateStore {
     pub hnsw_unit_cache:
         Mutex<std::collections::HashMap<(usize, usize), super::super::hnsw::HnswLayer>>,
     /// HNSW master toggle.
-    pub hnsw_enabled: std::sync::atomic::AtomicBool,
+    pub hnsw_enabled: core::sync::atomic::AtomicBool,
     /// HNSW beam width.
-    pub hnsw_ef_search: std::sync::atomic::AtomicUsize,
+    pub hnsw_ef_search: core::sync::atomic::AtomicUsize,
 }
 
 impl GateStore {
@@ -65,13 +72,13 @@ impl GateStore {
         Self {
             gate_vectors: vec![None; num_layers],
             f16_decode_cache: Mutex::new(vec![None; num_layers]),
-            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
-            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(0),
+            gate_cache_lru: Mutex::new(alloc::collections::VecDeque::new()),
+            gate_cache_max_layers: core::sync::atomic::AtomicUsize::new(0),
             warmed_gates: RwLock::new(vec![None; num_layers]),
             hnsw_cache: Mutex::new((0..num_layers).map(|_| None).collect()),
-            hnsw_unit_cache: Mutex::new(std::collections::HashMap::new()),
-            hnsw_enabled: std::sync::atomic::AtomicBool::new(false),
-            hnsw_ef_search: std::sync::atomic::AtomicUsize::new(200),
+            hnsw_unit_cache: Mutex::new(HashMap::new()),
+            hnsw_enabled: core::sync::atomic::AtomicBool::new(false),
+            hnsw_ef_search: core::sync::atomic::AtomicUsize::new(200),
         }
     }
 }
@@ -83,22 +90,22 @@ impl Clone for GateStore {
     /// moved to `MmapStorage::mmap_handles` in step 6 of the
     /// `VindexStorage` migration.
     fn clone(&self) -> Self {
-        use std::sync::atomic::Ordering;
+        use core::sync::atomic::Ordering;
         let nl = self.gate_vectors.len();
         Self {
             gate_vectors: self.gate_vectors.clone(),
             f16_decode_cache: Mutex::new(vec![None; nl]),
-            gate_cache_lru: Mutex::new(std::collections::VecDeque::new()),
-            gate_cache_max_layers: std::sync::atomic::AtomicUsize::new(
+            gate_cache_lru: Mutex::new(alloc::collections::VecDeque::new()),
+            gate_cache_max_layers: core::sync::atomic::AtomicUsize::new(
                 self.gate_cache_max_layers.load(Ordering::Relaxed),
             ),
             warmed_gates: RwLock::new(vec![None; nl]),
             hnsw_cache: Mutex::new((0..nl).map(|_| None).collect()),
-            hnsw_unit_cache: Mutex::new(std::collections::HashMap::new()),
-            hnsw_enabled: std::sync::atomic::AtomicBool::new(
+            hnsw_unit_cache: Mutex::new(HashMap::new()),
+            hnsw_enabled: core::sync::atomic::AtomicBool::new(
                 self.hnsw_enabled.load(Ordering::Relaxed),
             ),
-            hnsw_ef_search: std::sync::atomic::AtomicUsize::new(
+            hnsw_ef_search: core::sync::atomic::AtomicUsize::new(
                 self.hnsw_ef_search.load(Ordering::Relaxed),
             ),
         }
@@ -182,7 +189,7 @@ impl VectorIndex {
     pub fn set_gate_cache_max_layers(&self, max_layers: usize) {
         self.gate
             .gate_cache_max_layers
-            .store(max_layers, std::sync::atomic::Ordering::Relaxed);
+            .store(max_layers, core::sync::atomic::Ordering::Relaxed);
         // Shrink eagerly if the new cap is below the current cache size.
         if max_layers > 0 {
             let mut cache = self.gate.f16_decode_cache.lock().unwrap();
@@ -210,7 +217,7 @@ impl VectorIndex {
         let max = self
             .gate
             .gate_cache_max_layers
-            .load(std::sync::atomic::Ordering::Relaxed);
+            .load(core::sync::atomic::Ordering::Relaxed);
         if max == 0 {
             return;
         }
@@ -282,7 +289,7 @@ impl VectorIndex {
                     let float_count = view.slice.num_features * self.hidden_size;
                     unsafe {
                         let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
-                        std::slice::from_raw_parts(ptr, float_count).to_vec()
+                        core::slice::from_raw_parts(ptr, float_count).to_vec()
                     }
                 }
                 crate::config::dtype::StorageDtype::F16 => {
@@ -348,7 +355,7 @@ impl VectorIndex {
                 }
                 let data = unsafe {
                     let ptr = mmap[byte_offset..byte_end].as_ptr() as *const f32;
-                    std::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
+                    core::slice::from_raw_parts(ptr, view.slice.num_features * self.hidden_size)
                 };
                 let arr = ArrayView2::from_shape((view.slice.num_features, self.hidden_size), data)
                     .unwrap();
@@ -376,7 +383,6 @@ mod gate_cache_lru_tests {
     use crate::index::core::VectorIndex;
     use crate::index::types::GateLayerSlice;
     use ndarray::Array1;
-
     /// Build a minimal f16 mmap-backed VectorIndex suitable for
     /// exercising the f16 decode cache. `num_layers` layers, each
     /// with `num_features` features over `hidden` dims. The gate

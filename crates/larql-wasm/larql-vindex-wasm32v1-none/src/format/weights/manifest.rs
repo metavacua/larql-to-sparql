@@ -19,7 +19,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::write_q4k::QuantBlockFormat;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// One manifest entry describing one Q4_K/Q6_K-encoded tensor slice.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Q4kManifestEntry {
@@ -51,7 +58,6 @@ impl Q4kManifestEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// JSON wire shape stays compatible with the previous string-keyed
     /// loader — `offset`/`length`/`format`/`shape`/`key` field names
     /// are load-bearing for already-extracted vindexes on disk.

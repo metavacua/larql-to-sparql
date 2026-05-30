@@ -13,7 +13,14 @@
 use clap::Args;
 
 use crate::commands::primary::cache::{self, CacheSource};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct RmArgs {
     /// `owner/name` (HF), or cache shorthand.
@@ -24,7 +31,7 @@ pub struct RmArgs {
     pub yes: bool,
 }
 
-pub fn run(args: RmArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: RmArgs) -> Result<(), Box<dyn core::error::Error>> {
     let entry = cache::resolve_cached(&args.model)?;
 
     let (target_desc, target_path, is_symlink) = match entry.source {

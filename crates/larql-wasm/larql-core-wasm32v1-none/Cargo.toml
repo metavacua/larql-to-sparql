@@ -10,7 +10,6 @@ categories = ["data-structures", "science"]
 
 [dependencies]
 serde = { workspace = true }
-thiserror = { workspace = true }
 
 # HTTP provider — optional so pure graph usage has zero network deps
 
@@ -23,5 +22,12 @@ http = ["dep:reqwest"]
 msgpack = ["dep:rmp-serde"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+libm = { workspace = true }
+hashbrown = { workspace = true }

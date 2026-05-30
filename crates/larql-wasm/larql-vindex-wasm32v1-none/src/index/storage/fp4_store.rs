@@ -14,9 +14,16 @@
 //! filename sniffing.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use larql_models::quant::fp4_block::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     decode_fp4_feature, decode_fp8_feature, fp4_feature_bytes, fp8_feature_bytes, BLOCK_ELEMENTS,
 };
 
@@ -258,8 +265,8 @@ impl Fp4Storage {
     }
 }
 
-impl std::fmt::Debug for Fp4Storage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Fp4Storage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Fp4Storage")
             .field("manifest", &self.manifest)
             .field("gate_mmap", &self.gate_mmap.as_ref().map(|m| m.len()))
@@ -282,7 +289,6 @@ mod tests {
     use crate::config::types::{ComplianceGate, Fp4Config as Cfg, Projections};
     use crate::format::filenames::*;
     use crate::format::fp4_storage::{write_fp4_projection, write_fp8_projection};
-
     /// Tempdir that cleans up on drop; stdlib-only so tests don't need a crate.
     /// Disambiguates with a process-wide atomic counter so parallel tests
     /// using the same label can't collide (SystemTime::now().as_nanos()
@@ -297,7 +303,7 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let seq = TEMPDIR_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let seq = TEMPDIR_SEQ.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             let p = base.join(format!(
                 "fp4storage_{label}_{}_{}_{}",
                 std::process::id(),

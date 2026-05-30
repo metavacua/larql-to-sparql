@@ -5,13 +5,18 @@
 //! through `ffn_layer_byte_offset` so variable per-layer feature counts
 //! (MoE shards) address correctly.
 
-use std::sync::Arc;
-
 use crate::error::VindexError;
 use crate::format::filenames::DOWN_FEATURES_BIN;
 use crate::index::core::VectorIndex;
 use crate::mmap_util::mmap_demand_paged;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl VectorIndex {
     /// Load feature-major down vectors from down_features.bin.
     pub fn load_down_features(&mut self, dir: &std::path::Path) -> Result<(), VindexError> {
@@ -54,7 +59,7 @@ impl VectorIndex {
 
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, self.hidden_size)
+            core::slice::from_raw_parts(ptr, self.hidden_size)
         };
         Some(data)
     }
@@ -78,7 +83,7 @@ impl VectorIndex {
 
         let data = unsafe {
             let ptr = mmap[start..end].as_ptr() as *const f32;
-            std::slice::from_raw_parts(ptr, floats_per_layer)
+            core::slice::from_raw_parts(ptr, floats_per_layer)
         };
         ndarray::ArrayView2::from_shape((intermediate, self.hidden_size), data).ok()
     }
@@ -93,7 +98,6 @@ mod tests {
     use ndarray::Array2;
 
     use super::*;
-
     /// Build a `VectorIndex` with `num_features(layer) = intermediate` so
     /// the feature-major decode arithmetic has a non-zero intermediate
     /// to slice against.

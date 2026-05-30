@@ -4,7 +4,14 @@
 //! (interleaved / q4 / full_mmap — chosen internally based on what
 //! the vindex exposes). `Some(k)` selects the sparse walk path
 //! (gate KNN → top-K up dot products → GEGLU → K down accumulations).
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct WalkFfnConfig {
     /// Per-layer K. None = dense walk (all features). Some(k) = top-K sparse.

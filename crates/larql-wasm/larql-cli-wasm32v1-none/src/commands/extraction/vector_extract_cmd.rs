@@ -4,6 +4,14 @@ use std::time::Instant;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use larql_vindex::walker::vector_extractor::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     ExtractCallbacks, ExtractConfig, VectorExtractor, ALL_COMPONENTS,
 };
 
@@ -81,7 +89,7 @@ impl ExtractCallbacks for ProgressCallbacks {
     }
 }
 
-pub fn run(args: VectorExtractArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: VectorExtractArgs) -> Result<(), Box<dyn core::error::Error>> {
     // Validate components
     let components: Vec<String> = match args.components {
         Some(ref cs) => {

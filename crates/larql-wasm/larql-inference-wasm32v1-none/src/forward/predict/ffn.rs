@@ -8,7 +8,14 @@ use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResul
 use crate::attention::SharedKV;
 use crate::ffn::{FfnBackend, LayerFfnRouter};
 use crate::model::ModelWeights;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Run a full forward pass with a custom FFN backend for all layers.
 pub fn predict_with_ffn(
     weights: &ModelWeights,
@@ -21,7 +28,7 @@ pub fn predict_with_ffn(
     let mut h = embed_tokens(weights, token_ids);
     let ple_inputs = precompute_per_layer_inputs(weights, &h, token_ids);
 
-    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = std::collections::HashMap::new();
+    let mut kv_cache: std::collections::HashMap<usize, SharedKV> = HashMap::new();
 
     for layer in 0..num_layers {
         let shared_kv = weights
@@ -167,7 +174,6 @@ mod tests {
     use super::*;
     use crate::ffn::{LayerFfnRouter, WeightFfn};
     use crate::test_utils::TestFixtures;
-
     #[test]
     fn predict_with_ffn_attention_returns_attention_and_residuals() {
         let fx = TestFixtures::build();

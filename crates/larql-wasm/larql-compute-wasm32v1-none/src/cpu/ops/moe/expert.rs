@@ -9,6 +9,14 @@ use super::cache::{try_cached_dequant, ExpertF32};
 use super::math::{gelu_tanh, matmul_vec, matmul_vec_into, rms_norm, silu};
 use crate::cpu::ops::q4_common::q4k_matvec_into;
 use crate::cpu::ops::q4k_q8k_dot::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     q4k_q8k_matvec_into, quantize_x_to_q8k, quantize_x_to_q8k_into, Q8KActivation,
 };
 use crate::options;
@@ -120,16 +128,16 @@ pub fn run_single_expert(
         && !super::q4k_direct_disabled()
     {
         thread_local! {
-            static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
-                const { std::cell::RefCell::new(None) };
+            static SCRATCH: core::cell::RefCell<Option<ExpertScratch>> =
+                const { core::cell::RefCell::new(None) };
         }
         // Quantise h_norm into a per-thread scratch buffer too, reusing
         // capacity across calls.  Same pattern as ExpertScratch — the
         // h_norm is the same length on every call from the HTTP path, so
         // resize is a no-op after the first hit.
         thread_local! {
-            static H_Q8K: std::cell::RefCell<Q8KActivation> =
-                std::cell::RefCell::new(Q8KActivation::with_capacity(0));
+            static H_Q8K: core::cell::RefCell<Q8KActivation> =
+                core::cell::RefCell::new(Q8KActivation::with_capacity(0));
         }
         return SCRATCH.with(|cell| {
             let mut borrow = cell.borrow_mut();
@@ -562,7 +570,6 @@ mod tests {
     use super::*;
     use crate::cpu::ops::q4_common::quantize_q4_k;
     use crate::{Activation, QuantFormat};
-
     // BF16 encoding for common values (little-endian: low byte first).
     fn bf16_bytes(v: f32) -> [u8; 2] {
         let bits = v.to_bits();

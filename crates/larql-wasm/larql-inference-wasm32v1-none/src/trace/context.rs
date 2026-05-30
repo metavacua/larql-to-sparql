@@ -31,7 +31,14 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use memmap2::Mmap;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 const MAGIC: [u8; 4] = *b"CTXT";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 128;
@@ -95,11 +102,11 @@ impl ContextHeader {
     }
 
     fn to_bytes(self) -> [u8; HEADER_SIZE] {
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
 
     fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
+        unsafe { core::mem::transmute(*bytes) }
     }
 
     fn critical_layer_list(&self) -> Vec<usize> {
@@ -121,10 +128,10 @@ struct ContextEntry {
 
 impl ContextEntry {
     fn to_bytes(self) -> [u8; ENTRY_SIZE] {
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
     fn from_bytes(bytes: &[u8; ENTRY_SIZE]) -> Self {
-        unsafe { std::mem::transmute(*bytes) }
+        unsafe { core::mem::transmute(*bytes) }
     }
 }
 
@@ -205,7 +212,7 @@ impl ContextStore {
             return None;
         }
         Some(unsafe {
-            std::slice::from_raw_parts(self.mmap[byte_offset..].as_ptr() as *const f32, hidden)
+            core::slice::from_raw_parts(self.mmap[byte_offset..].as_ptr() as *const f32, hidden)
         })
     }
 
@@ -444,14 +451,13 @@ impl ContextWriter {
 }
 
 fn write_f32_slice(file: &mut File, data: &[f32]) -> io::Result<()> {
-    let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
+    let bytes = unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
     file.write_all(bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // ── ContextTier ───────────────────────────────────────────────────────────
 
     #[test]

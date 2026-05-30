@@ -17,7 +17,14 @@
 //! - `ops/attention`:  Causal attention (fused QK softmax V)
 //! - `ops/vector`:     `dot`, `norm`, `cosine` over slices/views
 //! - `ops/linalg`:     Cholesky factor/solve, `ridge_decomposition_solve`
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 pub mod ops;
 
 // Re-export for backward compatibility (used by benchmarks/examples)
@@ -118,7 +125,7 @@ impl ComputeBackend for CpuBackend {
         }
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 

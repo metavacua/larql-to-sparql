@@ -4,7 +4,14 @@ use std::time::Instant;
 use clap::Args;
 use larql_inference::{GateIndex, InferenceModel};
 use larql_vindex::load_feature_labels;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Args)]
 pub struct KgBenchArgs {
     /// Model path or HuggingFace model ID (for tokenizer).
@@ -51,7 +58,7 @@ fn parse_range(spec: &str) -> Vec<usize> {
     out
 }
 
-pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn core::error::Error>> {
     eprintln!("Loading model (tokenizer only)...");
     let model = InferenceModel::load(&args.model)?;
 
@@ -82,7 +89,7 @@ pub fn run(args: KgBenchArgs) -> Result<(), Box<dyn std::error::Error>> {
 
         // Aggregate answer tokens across layers
         let mut token_votes: std::collections::HashMap<String, f32> =
-            std::collections::HashMap::new();
+            HashMap::new();
 
         for &layer in &layers {
             let features = gi.lookup_from_tokens(&entity_tokens, layer, args.top_k);

@@ -1,8 +1,14 @@
 //! ETag generation for CDN edge caching.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
+use core::hash::{Hash, Hasher};
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Compute a short ETag from a JSON response body.
 pub fn compute_etag(body: &serde_json::Value) -> String {
     let mut hasher = DefaultHasher::new();
@@ -21,7 +27,6 @@ pub fn matches_etag(if_none_match: Option<&str>, etag: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn etag_is_quoted() {
         let etag = compute_etag(&serde_json::json!({"hello": "world"}));

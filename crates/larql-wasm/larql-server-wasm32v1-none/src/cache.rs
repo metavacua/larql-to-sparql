@@ -1,9 +1,15 @@
 //! TTL cache for DESCRIBE results.
 
-use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 struct CacheEntry {
     value: serde_json::Value,
     inserted_at: Instant,
@@ -68,7 +74,6 @@ impl DescribeCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn disabled_when_ttl_zero() {
         let cache = DescribeCache::new(0);

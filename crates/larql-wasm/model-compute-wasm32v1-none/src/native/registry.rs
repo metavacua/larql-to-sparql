@@ -1,9 +1,14 @@
 //! Kernel registry: name → kernel dispatch.
 
-use std::collections::HashMap;
-
 use super::{Kernel, KernelError};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub struct KernelRegistry {
     kernels: HashMap<String, Box<dyn Kernel>>,
@@ -44,7 +49,6 @@ impl KernelRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn defaults_have_arithmetic_and_datetime() {
         let r = KernelRegistry::with_defaults();

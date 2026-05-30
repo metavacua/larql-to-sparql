@@ -4,7 +4,14 @@
 use crate::ast::DescribeMode;
 
 use super::collect::DescribeEdge;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// A formatted edge ready to be rendered into the output buffer.
 /// Built from a `DescribeEdge` by `describe_format_and_split` after
 /// label resolution and the RELATIONS ONLY filter.
@@ -162,7 +169,6 @@ fn format_also(also: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn edge(primary: usize, label: &str, target: &str, gate: f32) -> FormattedEdge {
         FormattedEdge {
             label: label.into(),

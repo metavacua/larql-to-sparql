@@ -1,14 +1,21 @@
 use std::path::PathBuf;
 use std::time::Instant;
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 
 #[cfg(unix)]
 extern crate libc;
-
 /// Current process RSS in megabytes (best-effort).
 fn rss_mb() -> f64 {
     #[cfg(unix)]
     unsafe {
-        let mut usage: libc::rusage = std::mem::zeroed();
+        let mut usage: libc::rusage = core::mem::zeroed();
         libc::getrusage(libc::RUSAGE_SELF, &mut usage);
         // macOS: ru_maxrss is bytes. Linux: kilobytes.
         #[cfg(target_os = "macos")]
@@ -160,7 +167,7 @@ macro_rules! vlog {
     };
 }
 
-pub fn run(args: WalkArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(args: WalkArgs) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
     let load_start = Instant::now();
 
@@ -250,7 +257,7 @@ fn run_vindex_walk(
     args: &WalkArgs,
     index: &VectorIndex,
     layers: &[usize],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
 
     vlog!(verbose, "Loading embeddings from vindex...");
@@ -305,7 +312,7 @@ fn run_model_embedding_walk(
     args: &WalkArgs,
     index: &VectorIndex,
     layers: &[usize],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
 
     vlog!(verbose, "Loading model: {}", model_name);
@@ -364,7 +371,7 @@ fn run_with_model(
     args: &WalkArgs,
     index: &VectorIndex,
     _layers: &[usize],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     vlog!(args.verbose, "Loading model: {}", model_name);
     let model_start = Instant::now();
     let model = InferenceModel::load(model_name)?;
@@ -386,7 +393,7 @@ fn run_with_vindex_weights(
     index: &VectorIndex,
     _layers: &[usize],
     verbose: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     vlog!(verbose, "Loading model weights from vindex...");
     let load_start = Instant::now();
 
@@ -456,7 +463,7 @@ fn run_predict_q4k(
     tokenizer: &tokenizers::Tokenizer,
     args: &WalkArgs,
     _index: &VectorIndex,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
     // Apply the same chat-template wrapping the gRPC path uses, so dense
     // Gemma 4 (and any other instruct family) doesn't see the raw user
@@ -612,7 +619,7 @@ fn run_predict_q4k_remote(
     tokenizer: &tokenizers::Tokenizer,
     args: &WalkArgs,
     vindex_path: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
     let url = args.ffn_remote.as_ref().expect("ffn_remote is set");
     let timeout = std::time::Duration::from_secs(args.ffn_remote_timeout_secs);
@@ -682,7 +689,7 @@ fn run_q4k_generate_cpu(
     initial_ids: &[u32],
     args: &WalkArgs,
     q4_index: &VectorIndex,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     use std::io::Write;
     let verbose = args.verbose;
     let mut ids = initial_ids.to_vec();
@@ -724,7 +731,7 @@ fn run_predict_inner(
     tokenizer: &tokenizers::Tokenizer,
     args: &WalkArgs,
     index: &VectorIndex,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
 
     let encoding = tokenizer
@@ -894,7 +901,7 @@ fn run_predict_remote(
     token_ids: &[u32],
     args: &WalkArgs,
     url: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     let verbose = args.verbose;
     let timeout = std::time::Duration::from_secs(args.ffn_remote_timeout_secs);
 
@@ -1182,7 +1189,7 @@ fn print_walk_trace(trace: &larql_vindex::WalkTrace, down_top_k: usize) {
     }
 }
 
-fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn std::error::Error>> {
+fn parse_layer_spec(spec: &str) -> Result<Vec<usize>, Box<dyn core::error::Error>> {
     let mut layers = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();

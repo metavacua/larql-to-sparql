@@ -2,7 +2,6 @@
 //! the source vindex so the result is self-contained (no overlay
 //! needed at load time).
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::ast::CompileConflict;
@@ -11,6 +10,14 @@ use crate::executor::helpers::{dir_size, format_bytes};
 use crate::executor::tuning::{MEMIT_DEFAULT_RIDGE, MEMIT_TARGET_ALPHA};
 use crate::executor::Session;
 use larql_vindex::format::filenames::{
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
     ATTN_WEIGHTS_BIN, DOWN_FEATURES_BIN, DOWN_META_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN,
     FEATURE_CLUSTERS_JSONL, FEATURE_LABELS_JSON, KNN_STORE_BIN, NORMS_BIN, RELATION_CLUSTERS_JSON,
     TOKENIZER_JSON, UP_FEATURES_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
@@ -31,7 +38,7 @@ pub(super) fn collect_compile_collisions(
     let mut counts: HashMap<(usize, usize), usize> = HashMap::new();
     for patch in patches {
         let mut seen_in_this_patch: std::collections::HashSet<(usize, usize)> =
-            std::collections::HashSet::new();
+            HashSet::new();
         for op in &patch.operations {
             let key = match op.key() {
                 Some(k) => k,
@@ -435,7 +442,6 @@ mod tests {
     //! `collect_compile_collisions` unit tests.
     use super::*;
     use larql_vindex::{PatchOp, VindexPatch};
-
     fn make_patch(ops: Vec<PatchOp>) -> VindexPatch {
         VindexPatch {
             version: 1,

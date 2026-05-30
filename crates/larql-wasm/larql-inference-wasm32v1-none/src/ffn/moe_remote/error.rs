@@ -1,3 +1,11 @@
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 // ── Public error type ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -14,8 +22,8 @@ pub enum RemoteMoeError {
     Client(String),
 }
 
-impl std::fmt::Display for RemoteMoeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for RemoteMoeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Unreachable { url, cause } => {
                 write!(f, "expert shard unreachable: {url} ({cause})")
@@ -30,4 +38,4 @@ impl std::fmt::Display for RemoteMoeError {
     }
 }
 
-impl std::error::Error for RemoteMoeError {}
+impl core::error::Error for RemoteMoeError {}

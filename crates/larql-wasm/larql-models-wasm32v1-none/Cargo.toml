@@ -10,12 +10,18 @@ categories = ["data-structures"]
 
 [dependencies]
 serde = { workspace = true }
-thiserror = { workspace = true }
 
 # Model weight loading
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+thiserror = "2"
 ndarray = "0.16"
 safetensors = "0.7"
 memmap2 = "0.9"
 serde_json = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+larql-wasm-math = { workspace = true }
+thiserror = { version = "2", default-features = false }
+hashbrown = { workspace = true }
+libm = { workspace = true }

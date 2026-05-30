@@ -11,7 +11,14 @@ use super::super::error::RemoteMoeError;
 use super::super::metrics;
 use super::super::stream::ShardStream;
 use super::{Shard, ShardTransport};
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl Shard {
     /// Open a bidirectional gRPC stream for one decode step.
     ///
@@ -26,7 +33,7 @@ impl Shard {
     pub(in super::super) fn open_stream(&self) -> Result<ShardStream, RemoteMoeError> {
         match &self.transport {
             ShardTransport::Grpc(grpc) => {
-                let rt = std::sync::Arc::clone(&grpc.runtime);
+                let rt = alloc::sync::Arc::clone(&grpc.runtime);
                 let mut client = grpc.client.clone();
 
                 // Work channel: Metal thread → async task (non-blocking send)

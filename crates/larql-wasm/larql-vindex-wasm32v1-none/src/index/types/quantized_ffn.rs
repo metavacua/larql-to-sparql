@@ -1,5 +1,12 @@
 //! `QuantizedFfnAccess` — Q4_0 / Q4_K / Q6_K FFN row access.
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 /// Q4_0/Q4_K/Q6_K FFN storage access.
 pub trait QuantizedFfnAccess: Send + Sync {
     fn has_interleaved_q4(&self) -> bool {

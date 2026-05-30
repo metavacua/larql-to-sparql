@@ -8,7 +8,14 @@
 
 use super::VectorIndex;
 use crate::index::types::QuantizedFfnAccess;
-
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
 impl QuantizedFfnAccess for VectorIndex {
     fn has_interleaved_q4(&self) -> bool {
         self.has_interleaved_q4()
@@ -133,7 +140,6 @@ mod tests {
     //! confirm each trait line runs and falls through to the inherent
     //! method's "no Q4_K data" guard.
     use super::*;
-
     fn fresh() -> VectorIndex {
         VectorIndex::empty(2, 8)
     }
