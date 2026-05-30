@@ -37,6 +37,7 @@
 //! - [`ENV_SKIP_MOE`] = `SKIP_MOE=1` — bypass MoE entirely on the grid
 //!   (CPU dense fallback). Consumed by `grid/config.rs`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 // ── Env var names (single source of truth — grid/config.rs and
@@ -85,6 +86,7 @@ pub struct RemoteMoeRuntime {
 }
 
 impl RemoteMoeRuntime {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Read the env vars and assemble the runtime config.
     pub fn from_env() -> Self {
         let moe_bytes_raw = std::env::var(ENV_MOE_BYTES).is_ok();
@@ -103,6 +105,7 @@ impl RemoteMoeRuntime {
 
     /// Process-wide singleton. First caller pays the env-read cost; every
     /// subsequent caller returns a cheap `&'static`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get() -> &'static Self {
         static CFG: OnceLock<RemoteMoeRuntime> = OnceLock::new();
         CFG.get_or_init(Self::from_env)

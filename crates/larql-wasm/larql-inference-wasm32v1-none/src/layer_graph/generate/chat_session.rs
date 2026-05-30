@@ -32,8 +32,6 @@
 //!
 //! [`generate_with_sampling`]: super::gpu::generate_with_sampling
 //! [`generate_streaming`]: super::gpu::generate_streaming
-
-use tokenizers::Tokenizer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -45,6 +43,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
 /// Context window default. Real models report this in their config; the
 /// caller can override with [`ChatSession::with_max_context`].
 pub const DEFAULT_MAX_CONTEXT: usize = 8192;
@@ -118,6 +119,7 @@ impl TurnRenderer for Llama3Renderer {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Multi-turn chat session — owns the running token buffer and per-turn
 /// lengths so eviction can drop *whole oldest turns* when the buffer
 /// exceeds `max_context`.
@@ -132,7 +134,9 @@ pub struct ChatSession {
     pending_assistant_turn: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ChatSession {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(tokenizer: Tokenizer, renderer: Box<dyn TurnRenderer>) -> Self {
         Self {
             tokenizer,
@@ -144,16 +148,19 @@ impl ChatSession {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: Gemma-templated session.
     pub fn gemma(tokenizer: Tokenizer) -> Self {
         Self::new(tokenizer, Box::new(GemmaRenderer))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: ChatML-templated session.
     pub fn chatml(tokenizer: Tokenizer) -> Self {
         Self::new(tokenizer, Box::new(ChatMLRenderer))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: Llama-3-templated session.
     pub fn llama3(tokenizer: Tokenizer) -> Self {
         Self::new(tokenizer, Box::new(Llama3Renderer))

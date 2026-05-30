@@ -7,9 +7,6 @@
 //!
 //! Dimensions: vocab=32, hidden=16, intermediate=32, 2 q-heads, 1 kv-head,
 //! head_dim=8, 2 layers. Forward pass ≈ 10 ms on CPU.
-
-use larql_models::{detect_from_json, ModelWeights, WeightArray};
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +18,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::{detect_from_json, ModelWeights, WeightArray};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a synthetic `ModelWeights` with all tensors populated.
 /// Uses `TinyModelArch` key conventions (e.g. `"0.attn.q_proj.weight"`).
 pub fn make_test_weights() -> ModelWeights {
@@ -111,6 +114,7 @@ pub fn make_test_weights() -> ModelWeights {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build an in-memory `VectorIndex` with random gate vectors per layer.
 /// The VectorIndex has no Q4K or interleaved data — `predict_honest` falls
 /// through to the CPU path, and `WalkFfn` routes through the sparse fallback
@@ -139,6 +143,7 @@ pub fn make_test_vindex(weights: &ModelWeights) -> larql_vindex::VectorIndex {
     larql_vindex::VectorIndex::new(gate_vectors, down_meta, weights.num_layers, hidden)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a `tokenizers::Tokenizer` with a vocabulary of `vocab_size` tokens.
 /// Token N decodes to `"[N]"`, so token IDs from `make_test_weights()` all
 /// decode to valid (if meaningless) strings.
@@ -172,6 +177,7 @@ pub fn make_test_tokenizer(vocab_size: usize) -> tokenizers::Tokenizer {
     tokenizers::Tokenizer::from_bytes(&bytes).expect("synthetic tokenizer construction failed")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// All three synthetic fixtures bundled together. Build once per test module
 /// via `OnceLock`; each field is cheaply borrowed.
 pub struct TestFixtures {
@@ -180,7 +186,9 @@ pub struct TestFixtures {
     pub index: larql_vindex::VectorIndex,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TestFixtures {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn build() -> Self {
         let weights = make_test_weights();
         let tokenizer = make_test_tokenizer(weights.vocab_size);
@@ -202,6 +210,7 @@ impl TestFixtures {
 // tensors + vectors the matching forward path needs to reach finite
 // output without panicking.
 
+#[cfg(not(target_arch = "wasm32"))]
 fn rand_mat_seeded(rows: usize, cols: usize, scale: f32, seed: u64) -> WeightArray {
     let mut state = seed;
     let data: Vec<f32> = (0..rows * cols)
@@ -217,6 +226,7 @@ fn rand_mat_seeded(rows: usize, cols: usize, scale: f32, seed: u64) -> WeightArr
         .into_shared()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a synthetic `ModelWeights` configured as a Gemma 3-style arch.
 ///
 /// Enables the dormant branches in `attention/{block, gpu}.rs` and
@@ -236,6 +246,7 @@ pub fn make_gemma3_test_weights() -> ModelWeights {
     const NUM_Q: usize = 2;
     const NUM_KV: usize = 1;
     const HEAD_DIM: usize = 8;
+    #[cfg(not(target_arch = "wasm32"))]
     const NUM_LAYERS: usize = 2;
 
     let arch_json = serde_json::json!({
@@ -352,6 +363,7 @@ pub fn make_gemma3_test_weights() -> ModelWeights {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a synthetic `ModelWeights` configured as a Starcoder2-style arch.
 ///
 /// Enables the dormant branches:
@@ -369,6 +381,7 @@ pub fn make_starcoder2_test_weights() -> ModelWeights {
     const NUM_Q: usize = 2;
     const NUM_KV: usize = 1;
     const HEAD_DIM: usize = 8;
+    #[cfg(not(target_arch = "wasm32"))]
     const NUM_LAYERS: usize = 2;
 
     let arch_json = serde_json::json!({

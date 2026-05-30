@@ -7,13 +7,6 @@
 //!
 //! Supports gated (Gemma/Llama/Mistral) and non-gated (StarCoder2) models,
 //! SiLU and GELU activations, optional up/down bias, and down vector overrides.
-
-use ndarray::Array2;
-
-use super::weight::dense_ffn_forward;
-use super::{gelu_tanh, sigmoid};
-use crate::forward::add_bias;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +18,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::weight::dense_ffn_forward;
+use super::{gelu_tanh, sigmoid};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::add_bias;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute FFN output for a pre-selected set of features.
 ///
 /// Architecture-correct: reads ffn_type, activation, and bias from the model.
@@ -42,6 +47,7 @@ pub fn sparse_ffn_forward(
     sparse_ffn_forward_impl(weights, layer, x, features, &[])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sparse FFN with down vector overrides (for patched features).
 pub fn sparse_ffn_forward_with_overrides(
     weights: &ModelWeights,
@@ -67,6 +73,7 @@ pub struct FeatureSlotOverride<'a> {
     pub down: Option<&'a [f32]>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sparse FFN with full slot overrides — gate, up, and down can each
 /// be replaced per feature. This is the path the LQL `INSERT` constellation
 /// takes when the vindex hasn't loaded `up_features.bin` (the LQL `USE`
@@ -84,6 +91,7 @@ pub fn sparse_ffn_forward_with_full_overrides(
     sparse_ffn_forward_full_impl(weights, layer, x, features, overrides)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sparse_ffn_forward_impl(
     weights: &ModelWeights,
     layer: usize,
@@ -223,6 +231,7 @@ fn sparse_ffn_forward_impl(
     (out, full_activation)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sparse_ffn_forward_full_impl(
     weights: &ModelWeights,
     layer: usize,
@@ -425,6 +434,7 @@ fn sparse_ffn_forward_full_impl(
     (out, full_activation)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Gather rows from a weight matrix for selected features.
 /// Input: w is [num_features, hidden], output: [K, hidden] contiguous.
 fn gather_rows(
@@ -442,6 +452,7 @@ fn gather_rows(
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Gather columns from a weight matrix for selected features.
 /// Input: w is [hidden, intermediate] (row-major), output: [hidden, K] contiguous.
 fn gather_columns(
@@ -462,6 +473,7 @@ fn gather_columns(
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Select top-K features by gate activation magnitude (architecture-correct).
 pub fn select_top_k_features(
     weights: &ModelWeights,
@@ -522,7 +534,9 @@ pub fn select_top_k_features(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

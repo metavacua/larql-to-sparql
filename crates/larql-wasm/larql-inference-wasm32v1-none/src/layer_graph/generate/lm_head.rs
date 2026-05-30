@@ -1,7 +1,4 @@
 //! LM-head top-K helpers and constrained-decode token sampling.
-
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,6 +10,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
 const ENV_LM_HEAD_SKIP_Q4K: &str = "LARQL_LM_HEAD_SKIP_Q4K";
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -21,6 +22,7 @@ pub(crate) struct LmHeadPolicy {
 }
 
 impl LmHeadPolicy {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn from_env() -> Self {
         Self {
             skip_q4k: env_bool(ENV_LM_HEAD_SKIP_Q4K),
@@ -28,6 +30,7 @@ impl LmHeadPolicy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn env_bool(name: &str) -> bool {
     matches!(
         std::env::var(name).as_deref(),
@@ -35,6 +38,7 @@ fn env_bool(name: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-K logits lookup that transparently handles models with tied
 /// input/output embeddings (Gemma 2/3/4) whose vindex has no dedicated
 /// `lm_head.bin` / `lm_head_q4.bin`.
@@ -67,6 +71,7 @@ pub fn lm_head_topk(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn lm_head_topk_with_policy(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -111,6 +116,7 @@ pub(crate) fn lm_head_topk_with_policy(
     backend_lm_head_topk(weights, query, top_k, backend)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// LM-head top-K via the active ComputeBackend.
 ///
 /// Performs a single gemv `scores[vocab] = lm_head[vocab, hidden] · query[hidden]`
@@ -248,6 +254,7 @@ pub(super) fn backend_lm_head_topk(
     heap.into_iter().map(|(s, i)| (i, s)).collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Kept for the `LARQL_METAL_COMPARE_CPU=1` diagnostic mode which wants a
 /// known-good CPU reference. Not used in the hot path.
 #[allow(dead_code)]
@@ -259,6 +266,7 @@ pub(super) fn cpu_lm_head_topk(
     backend_lm_head_topk(weights, query, top_k, &larql_compute::CpuBackend)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Dense LM-head: full `Vec<f32>` of vocabulary scores. Required for
 /// constrained decoding — the sparse vindex KNN can't apply an arbitrary
 /// vocabulary mask because masked-out tokens might fall outside the top-K.
@@ -291,6 +299,7 @@ pub(super) fn backend_lm_head_scores(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sampling-under-mask variant. Runs the dense LM head, applies the
 /// mask, then defers token selection to the caller-supplied
 /// [`Sampler`]. Repetition penalties on the sampler are applied as
@@ -324,11 +333,13 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::TestFixtures;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array1;
     fn fx() -> TestFixtures {
         TestFixtures::build()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn env_bool_recognises_truthy_values() {
         std::env::remove_var("LARQL_TEST_LMHEAD_ENV_BOOL");
@@ -352,6 +363,7 @@ mod tests {
         assert!(!p.skip_q4k);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_returns_at_most_top_k() {
         let f = fx();
@@ -361,6 +373,7 @@ mod tests {
         assert!(hits.iter().all(|(_, s)| s.is_finite()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_handles_empty_lm_head() {
         // Force an empty lm_head.
@@ -371,6 +384,7 @@ mod tests {
         assert!(hits.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_handles_empty_query() {
         let f = fx();
@@ -379,6 +393,7 @@ mod tests {
         assert!(hits.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_handles_dim_mismatch() {
         let f = fx();
@@ -387,6 +402,7 @@ mod tests {
         assert!(hits.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cpu_lm_head_topk_matches_backend_with_cpu() {
         let f = fx();
@@ -400,6 +416,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_scores_returns_full_vocab_vector() {
         let f = fx();
@@ -409,6 +426,7 @@ mod tests {
         assert!(scores.iter().all(|v| v.is_finite()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_scores_handles_dim_mismatch() {
         let f = fx();
@@ -417,6 +435,7 @@ mod tests {
         assert!(scores.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_scores_handles_empty_lm_head() {
         let mut f = fx();
@@ -425,6 +444,7 @@ mod tests {
         assert!(backend_lm_head_scores(&f.weights, &q, &larql_compute::CpuBackend).is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn pick_next_token_masked_sampled_returns_id_and_score() {
         let f = fx();
@@ -447,6 +467,7 @@ mod tests {
         assert!(score.is_finite());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn pick_next_token_masked_sampled_returns_none_when_lm_head_empty() {
         let mut f = fx();
@@ -466,6 +487,7 @@ mod tests {
         .is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_topk_uses_policy_from_env_default() {
         // Public `lm_head_topk` consults LmHeadPolicy::from_env() — when
@@ -483,6 +505,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lm_head_topk_with_policy_skip_q4k_routes_through_diagnostic_path() {
         // skip_q4k=true + a backend that supports F32Gemv (CpuBackend
@@ -502,6 +525,7 @@ mod tests {
         assert!(hits.len() <= 4);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_top_k_1_fast_path_returns_argmax() {
         // top_k=1 routes through the f32_gemv_topk1 fast path on backends
@@ -517,6 +541,7 @@ mod tests {
         assert!(score.is_finite());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_topk_top_k_zero_returns_empty() {
         // Regression: top_k=0 used to panic with `index out of bounds: 0`
@@ -528,6 +553,7 @@ mod tests {
         assert!(hits.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn pick_next_token_masked_sampled_invokes_mask_fn() {
         let f = fx();

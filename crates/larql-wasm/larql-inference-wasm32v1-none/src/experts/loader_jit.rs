@@ -14,10 +14,14 @@
     )
 ))]
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::SystemTime;
 
+#[cfg(not(target_arch = "wasm32"))]
 use wasmtime::{Engine, Instance, Linker, Module, Store};
+#[cfg(not(target_arch = "wasm32"))]
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 
 /// Per-instance store data — just the WASI preview1 context.
@@ -25,6 +29,7 @@ pub struct ExpertStore {
     pub wasi: WasiP1Ctx,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compile (or load from cache) a WASM expert's `Module` without
 /// instantiating it. Instantiation is deferred until the first `call()` so the
 /// registry does not pay ~1 MiB of linear memory per expert at startup.
@@ -71,6 +76,7 @@ pub fn instantiate(
     Ok((store, instance))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compile and instantiate a WASM expert in one step — kept for callers that
 /// want the historical semantics (e.g. tests that need immediate metadata
 /// without touching the registry layer).
@@ -79,6 +85,7 @@ pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<Expert
     instantiate(engine, &module)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cache_is_fresh(cache: &Path, source: &Path) -> bool {
     let cache_mtime = match std::fs::metadata(cache).and_then(|m| m.modified()) {
         Ok(t) => t,
@@ -104,8 +111,10 @@ fn cache_is_fresh(cache: &Path, source: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fresh_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_loader_jit_{name}_{}_{}",
@@ -117,6 +126,7 @@ mod tests {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cache_is_fresh_returns_false_when_cache_missing() {
         let cache = fresh_path("missing_cache");
@@ -126,6 +136,7 @@ mod tests {
         let _ = std::fs::remove_file(&source);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cache_is_fresh_returns_false_when_source_missing() {
         let cache = fresh_path("cache_no_source");
@@ -135,6 +146,7 @@ mod tests {
         let _ = std::fs::remove_file(&cache);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cache_is_fresh_returns_true_when_cache_newer_than_source() {
         let source = fresh_path("source_old");
@@ -147,6 +159,7 @@ mod tests {
         let _ = std::fs::remove_file(&cache);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cache_is_fresh_returns_false_when_source_newer_than_cache() {
         let cache = fresh_path("cache_old");

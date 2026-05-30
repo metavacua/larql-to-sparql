@@ -1,11 +1,6 @@
 //! Tokenizer loading and helpers.
 
 use larql_vindex::format::filenames::*;
-use std::path::Path;
-
-use larql_models::ModelArchitecture;
-
-use crate::error::InferenceError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +12,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_models::ModelArchitecture;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::InferenceError;
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a tokenizer from a model directory.
 pub fn load_tokenizer(model_dir: &Path) -> Result<tokenizers::Tokenizer, InferenceError> {
     let path = model_dir.join(TOKENIZER_JSON);
@@ -28,6 +31,7 @@ pub fn load_tokenizer(model_dir: &Path) -> Result<tokenizers::Tokenizer, Inferen
     tokenizers::Tokenizer::from_file(&path).map_err(|e| InferenceError::Parse(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Tokenize `prompt` with BOS prepended when the architecture requires
 /// it but the tokenizer's post-processor doesn't add it (Gemma 4).
 ///
@@ -62,6 +66,7 @@ pub(crate) fn maybe_prepend_bos(mut ids: Vec<u32>, bos: Option<u32>) -> Vec<u32>
     ids
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode a single token ID to a trimmed string.
 pub fn decode_token(tokenizer: &tokenizers::Tokenizer, id: u32) -> Option<String> {
     tokenizer
@@ -71,6 +76,7 @@ pub fn decode_token(tokenizer: &tokenizers::Tokenizer, id: u32) -> Option<String
         .filter(|s| !s.is_empty())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode a single token ID, including special tokens (BOS, EOS, etc.).
 /// Falls back to the raw vocabulary entry if normal decode produces nothing.
 pub fn decode_token_raw(tokenizer: &tokenizers::Tokenizer, id: u32) -> String {
@@ -122,6 +128,7 @@ mod tests {
         assert_eq!(maybe_prepend_bos(vec![], None), Vec::<u32>::new());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_tokenizer_missing_file_errors() {
         let dir = std::env::temp_dir().join(format!(
@@ -138,6 +145,7 @@ mod tests {
         let _ = std::fs::remove_dir(&dir);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_tokenizer_invalid_json_returns_parse_error() {
         let dir = std::env::temp_dir().join(format!(

@@ -4,14 +4,6 @@
 //! or removing one attention component. They are used by mechanistic
 //! interpretability and OV/RD experiments without making the canonical layer
 //! dispatcher carry every intervention variant.
-
-use super::dot_proj;
-use super::layer::{apply_layer_scalar, run_ffn};
-use super::ple::apply_per_layer_embedding;
-use crate::attention::SharedKV;
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
-use ndarray::{s, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +15,21 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::dot_proj;
+#[cfg(not(target_arch = "wasm32"))]
+use super::layer::{apply_layer_scalar, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use super::ple::apply_per_layer_embedding;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2};
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer while zeroing selected pre-W_O attention heads.
 ///
 /// This is intended for OV ablation diagnostics: the selected query-head slices
@@ -53,6 +60,7 @@ pub fn run_layer_with_zeroed_pre_o_heads(
     Some((h_out, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer while replacing one pre-W_O attention head.
 ///
 /// This supports static-injection gates: a head can be replaced by global,
@@ -83,6 +91,7 @@ pub fn run_layer_with_replaced_pre_o_head(
     Some((h_out, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a layer while first exposing one original pre-W_O head to a mapper, then
 /// replacing that head with the mapper's returned value.
 ///
@@ -130,6 +139,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a layer while exposing one original pre-W_O head to a mapper that
 /// returns a replacement residual-space delta for that head.
 ///
@@ -177,6 +187,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a layer while replacing one head's residual-space contribution with the
 /// original `pre_W_O @ W_O_head` contribution.
 ///
@@ -215,6 +226,7 @@ pub fn run_layer_with_original_head_residual_delta(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer while subtracting selected pre-W_O head
 /// contributions after W_O projection and before the attention residual path.
 ///
@@ -238,6 +250,7 @@ pub fn run_layer_with_subtracted_pre_o_heads(
     Some((h_out, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer while replacing one attention head's
 /// residual-space contribution after W_O projection.
 ///
@@ -275,7 +288,9 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::forward::run_layer_with_ffn;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn h(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),

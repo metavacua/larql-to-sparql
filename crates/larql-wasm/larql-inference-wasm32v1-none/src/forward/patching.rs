@@ -23,13 +23,6 @@
 //! let donor = capture_donor_state(weights, &donor_tokens, &[(5, 3), (7, 3)]);
 //! let trace = patch_and_trace(weights, &recipient_tokens, &donor, &[10]);
 //! ```
-
-use super::hooks::{LayerHook, RecordHook};
-use super::trace::trace_forward_full_hooked;
-use super::TraceResult;
-use crate::ffn::{FfnBackend, WeightFfn};
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -41,6 +34,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::hooks::{LayerHook, RecordHook};
+#[cfg(not(target_arch = "wasm32"))]
+use super::trace::trace_forward_full_hooked;
+use super::TraceResult;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::{FfnBackend, WeightFfn};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Donor-side state: the residual row at each requested `(layer, position)`
 /// coord, captured during the donor forward pass.
 pub struct DonorState {
@@ -59,6 +64,7 @@ impl DonorState {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass on `tokens` and capture the post-layer residual row
 /// at each requested `(layer, position)` coord. The returned [`DonorState`]
 /// feeds [`PatchHook::from_donor`] for the second pass.
@@ -75,6 +81,7 @@ pub fn capture_donor_state(
     capture_donor_state_with_ffn(weights, tokens, coords, &ffn)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backend-parametric donor capture. Use this when a trace must match a
 /// specific inference path, e.g. vindex `WalkFfn` rather than dense weights.
 pub fn capture_donor_state_with_ffn(
@@ -140,7 +147,9 @@ impl<'a> PatchHook<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerHook for PatchHook<'_> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_layer(&mut self, layer: usize, h: &mut Array2<f32>) {
         let n_rows = h.nrows();
         let hidden = h.ncols();
@@ -156,6 +165,7 @@ impl LayerHook for PatchHook<'_> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience: pass 2. Run `recipient_tokens` with the donor's state
 /// patched in, capturing residuals at `capture_layers` for inspection.
 ///
@@ -171,6 +181,7 @@ pub fn patch_and_trace(
     patch_and_trace_with_ffn(weights, recipient_tokens, donor, capture_layers, &ffn)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backend-parametric activation patching. Donor and recipient passes should
 /// use the same FFN backend so the causal intervention is interpreted in the
 /// same mechanism the caller is studying.
@@ -200,6 +211,7 @@ mod tests {
     use crate::forward::trace::trace_forward_full;
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();

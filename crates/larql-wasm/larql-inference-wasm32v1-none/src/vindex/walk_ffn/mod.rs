@@ -35,17 +35,6 @@
 //! Adding a new storage format should almost never touch `mod.rs` — add
 //! a new module with a single walk function, one branch in the routing
 //! ladder, and a unit test in `routing_tests.rs`.
-
-use ndarray::Array2;
-
-use crate::ffn::sparse_compute::sparse_ffn_forward;
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
-use crate::vindex::l1_cache::FfnL1Cache;
-use crate::vindex::walk_config::WalkFfnConfig;
-use larql_compute::prelude::*;
-
-use larql_vindex::{GateIndex, WalkHit, WalkTrace};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -57,6 +46,21 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::sparse_compute::sparse_ffn_forward;
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use crate::vindex::l1_cache::FfnL1Cache;
+use crate::vindex::walk_config::WalkFfnConfig;
+use larql_compute::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{GateIndex, WalkHit, WalkTrace};
 mod exact;
 mod full_mmap;
 mod helpers;
@@ -70,6 +74,7 @@ mod routing_tests;
 
 pub use helpers::DispatchEntry;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct WalkFfn<'a> {
     pub weights: &'a ModelWeights,
     pub index: &'a dyn GateIndex,
@@ -84,7 +89,9 @@ pub struct WalkFfn<'a> {
     dispatch_trace: core::cell::RefCell<Option<Vec<DispatchEntry>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_config(
         weights: &'a ModelWeights,
         index: &'a dyn GateIndex,
@@ -102,6 +109,7 @@ impl<'a> WalkFfn<'a> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_backend(mut self, backend: &'a dyn ComputeBackend) -> Self {
         self.backend = Some(backend);
         self
@@ -138,6 +146,7 @@ impl<'a> WalkFfn<'a> {
             .unwrap_or_default()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Record a dispatch entry; no-op when the trace is disabled.
     /// Called by each walk path on successful exit.
     ///
@@ -156,12 +165,13 @@ impl<'a> WalkFfn<'a> {
 }
 
 // Thread-local cache of the LARQL_WALK_TRACE env var so we don't
-// getenv on every layer. Set once per thread on first access; the
-// env var is typically static across a process lifetime.
+// getenv on every layer. std-only — no TLS / no env on wasm32v1-none.
+#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static WALK_TRACE_ENABLED: core::cell::Cell<Option<bool>> = const { core::cell::Cell::new(None) };
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_trace_env_enabled() -> bool {
     WALK_TRACE_ENABLED.with(|c| {
         if let Some(v) = c.get() {
@@ -173,6 +183,7 @@ fn walk_trace_env_enabled() -> bool {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
     fn top_k_for(&self, layer: usize) -> usize {
         self.config.k_for(layer).unwrap_or(usize::MAX)
@@ -180,6 +191,7 @@ impl<'a> WalkFfn<'a> {
 
     // ── Legacy constructors (stable public API) ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(weights: &'a ModelWeights, index: &'a dyn GateIndex, top_k: usize) -> Self {
         let config = if top_k == usize::MAX {
             WalkFfnConfig::dense(weights.num_layers)
@@ -189,10 +201,12 @@ impl<'a> WalkFfn<'a> {
         Self::from_config(weights, index, config)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_unlimited(weights: &'a ModelWeights, index: &'a dyn GateIndex) -> Self {
         Self::from_config(weights, index, WalkFfnConfig::dense(weights.num_layers))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_with_backend(
         weights: &'a ModelWeights,
         index: &'a dyn GateIndex,
@@ -202,6 +216,7 @@ impl<'a> WalkFfn<'a> {
         Self::new(weights, index, top_k).with_backend(backend)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_unlimited_with_backend(
         weights: &'a ModelWeights,
         index: &'a dyn GateIndex,
@@ -210,6 +225,7 @@ impl<'a> WalkFfn<'a> {
         Self::new_unlimited(weights, index).with_backend(backend)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_with_trace(
         weights: &'a ModelWeights,
         index: &'a dyn GateIndex,
@@ -218,6 +234,7 @@ impl<'a> WalkFfn<'a> {
         Self::new(weights, index, top_k).with_trace()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new_unlimited_with_trace(weights: &'a ModelWeights, index: &'a dyn GateIndex) -> Self {
         Self::new_unlimited(weights, index).with_trace()
     }
@@ -226,6 +243,7 @@ impl<'a> WalkFfn<'a> {
         self.trace_residuals.borrow_mut().drain(..).collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn take_trace(&self) -> WalkTrace {
         let residuals = self
             .trace_residuals
@@ -254,11 +272,14 @@ impl<'a> WalkFfn<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> FfnBackend for WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         self.forward_with_activation(layer, x).0
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let num_features = self.index.num_features(layer);
         if num_features == 0 {
@@ -429,7 +450,9 @@ mod dispatch_tests {
     use larql_vindex::{
         FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
     };
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::{Array1, Array2};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
 
     fn shared_weights() -> &'static ModelWeights {
@@ -445,6 +468,7 @@ mod dispatch_tests {
     }
 
     impl GateLookup for MockGateIndex {
+        #[cfg(not(target_arch = "wasm32"))]
         fn gate_knn(
             &self,
             _layer: usize,
@@ -474,6 +498,7 @@ mod dispatch_tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (seq, hidden),

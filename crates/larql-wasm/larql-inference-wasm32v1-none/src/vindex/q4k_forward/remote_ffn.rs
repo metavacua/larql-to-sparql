@@ -1,14 +1,3 @@
-
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-use tokenizers::Tokenizer;
-
-use crate::attention::SharedKV;
-use crate::forward::embed_tokens_pub;
-use crate::forward::ple::precompute_per_layer_inputs;
-use crate::forward::{run_layer_with_ffn, PredictResult};
-
-use super::dequant::dequantize_matrix;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +9,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::embed_tokens_pub;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::{run_layer_with_ffn, PredictResult};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::dequant::dequantize_matrix;
+#[cfg(not(target_arch = "wasm32"))]
 /// End-to-end predict on a Q4_K vindex with the FFN served by an external
 /// [`crate::ffn::FfnBackend`].
 pub fn predict_q4k_with_ffn(
@@ -34,6 +43,7 @@ pub fn predict_q4k_with_ffn(
     crate::forward::predict::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// End-to-end hidden-state forward on a Q4_K vindex with the FFN served by an
 /// external [`crate::ffn::FfnBackend`].
 pub fn predict_q4k_hidden_with_ffn(

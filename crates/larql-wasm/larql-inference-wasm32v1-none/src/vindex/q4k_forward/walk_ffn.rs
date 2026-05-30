@@ -1,11 +1,15 @@
 use larql_compute::cpu::ops::q4k_q8k_dot::{
     q4k_q8k_gate_up_into, q4k_q8k_matvec_into, quantize_x_to_q8k, Q8KActivation,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::dequant::dequantize_matrix;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run one layer's FFN forward on a Q4_K vindex, dequantising gate/up/down
 /// for just this layer and applying the architecture's activation gate.
 pub fn q4k_ffn_forward_layer(
@@ -70,6 +74,7 @@ pub fn q4k_ffn_forward_layer(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Q4_K × Q8_K variant: accepts a pre-quantised Q8_K activation vector
 /// (already RMS-normed by the client) and skips the dequant of gate/up by
 /// using the NEON/AVX2 `q4k_q8k_gate_up_into` kernel.  Down projection

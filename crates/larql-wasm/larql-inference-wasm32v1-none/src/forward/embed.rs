@@ -1,13 +1,17 @@
 //! Token embedding — lookup + architecture-specific scaling.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Embed token IDs with architecture-specific scaling (internal).
 pub(super) fn embed_tokens(weights: &ModelWeights, token_ids: &[u32]) -> Array2<f32> {
     embed_tokens_pub(weights, token_ids)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Embed token IDs with architecture-specific scaling.
 pub fn embed_tokens_pub(weights: &ModelWeights, token_ids: &[u32]) -> Array2<f32> {
     let seq_len = token_ids.len();

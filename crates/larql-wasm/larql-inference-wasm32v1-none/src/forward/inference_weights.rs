@@ -9,19 +9,26 @@
 //! **Scope:** the INFER / INSERT KNN / EXPLAIN INFER pipeline. Specialised
 //! callers (bench, generation, Metal) keep their own explicit paths.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use tokenizers::Tokenizer;
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::{
     GateIndex, IndexLoadCallbacks, KnnStore, QuantFormat, VectorIndex, VindexConfig, VindexError,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::infer_patched::{infer_patched, infer_patched_q4k, InferPatchedResult};
+#[cfg(not(target_arch = "wasm32"))]
 use super::predict::predict;
 use super::PredictResult;
+#[cfg(not(target_arch = "wasm32"))]
 /// An inference-ready weight handle that is agnostic to quantisation format.
 ///
 /// Constructed via [`InferenceWeights::load`]. Callers use
@@ -36,7 +43,9 @@ pub enum InferenceWeights {
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InferenceWeights {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load weights for the vindex at `path`, choosing the right artefacts
     /// based on `config.quant`. Returns `VindexError` on any I/O or parse
     /// failure so callers can map it to their own error type.
@@ -65,6 +74,7 @@ impl InferenceWeights {
         matches!(self, Self::Quantised { .. })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Borrow the underlying `ModelWeights` (arch + embeddings + norms).
     ///
     /// Always valid — both variants carry a `ModelWeights`. For the
@@ -77,6 +87,7 @@ impl InferenceWeights {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Mutably borrow the underlying `ModelWeights`.
     pub fn as_weights_mut(&mut self) -> &mut ModelWeights {
         match self {
@@ -85,6 +96,7 @@ impl InferenceWeights {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run the shared INFER pipeline, dispatching to the correct forward path.
     ///
     /// Identical contract to [`infer_patched`] / [`infer_patched_q4k`]:
@@ -108,6 +120,7 @@ impl InferenceWeights {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dense forward pass (no walk FFN, no KNN). Used for the
     /// `INFER COMPARE` dense side-by-side column.
     pub fn predict_dense(

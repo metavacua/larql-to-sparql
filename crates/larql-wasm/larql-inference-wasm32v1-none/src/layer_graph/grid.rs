@@ -29,7 +29,9 @@ mod remote_moe;
 mod setup;
 mod timing;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_ffn::{generate_with_remote_ffn, generate_with_remote_ffn_batch};
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_moe::{generate_with_remote_moe, generate_with_remote_moe_batch};
 
 // ── Bottleneck diagnostic ────────────────────────────────────────────────────

@@ -1,7 +1,3 @@
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-
-use super::dequant::dequantize_matrix;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -13,6 +9,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::dequant::dequantize_matrix;
+#[cfg(not(target_arch = "wasm32"))]
 /// Insert one Q4_K/Q6_K vindex layer's attention and dense FFN tensors into
 /// `weights.tensors` as dense f32 matrices.
 ///
@@ -88,6 +92,7 @@ pub fn insert_q4k_layer_tensors(
     Ok(vec![q_key, k_key, v_key, o_key, gate_key, up_key, down_key])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Remove tensor keys previously returned by [`insert_q4k_layer_tensors`].
 pub fn remove_layer_tensors(weights: &mut ModelWeights, keys: Vec<String>) {
     for key in keys {

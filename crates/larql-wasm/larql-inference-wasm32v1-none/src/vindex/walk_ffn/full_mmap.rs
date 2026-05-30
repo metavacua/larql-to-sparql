@@ -6,11 +6,15 @@
 //! win is that all weight reads come from the vindex so the safetensors
 //! can be unloaded after extraction.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::WalkFfn;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn walk_ffn_full_mmap(
         &self,
         layer: usize,

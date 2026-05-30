@@ -2,8 +2,6 @@
 //!
 //! Split-half pairing: rotates (x[i], x[i + half_dim]) pairs.
 //! Matches HuggingFace default and MLX traditional=False.
-
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +13,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply full RoPE to Q or K vectors.
 /// x: (seq_len, num_heads * head_dim)
 pub fn apply_rope(
@@ -26,6 +28,7 @@ pub fn apply_rope(
     apply_rope_partial(x, num_heads, head_dim, rope_base, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply RoPE with partial rotation: only the first `fraction` of each head's
 /// dimensions get rotary encoding. The rest pass through unchanged.
 /// fraction = 1.0 means full rotation (standard RoPE).
@@ -39,6 +42,7 @@ pub fn apply_rope_partial(
     apply_rope_partial_at(x, num_heads, head_dim, rope_base, fraction, 0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply RoPE with a positional offset — row `i` in `x` is treated as
 /// token position `position_offset + i`. Use this during KV-cached
 /// decode: cached K already carries RoPE for positions 0..N-1, and
@@ -83,7 +87,9 @@ pub fn apply_rope_partial_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn make_qk(seq: usize, heads: usize, head_dim: usize) -> Array2<f32> {
         let n = seq * heads * head_dim;
         Array2::from_shape_vec(
@@ -136,6 +142,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_rope_different_positions_differ() {
         // Row 0 (position 0) and row 1 (position 1) should differ after RoPE
@@ -155,6 +162,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_rope_partial_at_offset() {
         // Position 5 with offset 0 should equal position 0 with offset 5.
@@ -208,6 +216,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rope_position_offset_matches_sequential_positions() {
         // apply_rope_partial_at(x, ..., offset=5) on a 1-token sequence should

@@ -1,5 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Dequantise a row-major Q4_K or Q6_K matrix into a dense f32 `Array2`.
 ///
 /// The on-disk layout (`rows x cols` elements) must be stored contiguously

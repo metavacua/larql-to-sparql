@@ -1,9 +1,3 @@
-use ndarray::Array2;
-
-use super::{LayerGraph, LayerOutput};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,8 +9,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{LayerGraph, LayerOutput};
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
 // ── Walk: dense attention + vindex walk FFN ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk layer graph: dense attention + vindex walk FFN.
 /// This is the working walk path, wrapped in the LayerGraph trait.
 pub struct WalkLayerGraph<'a> {
@@ -24,7 +28,9 @@ pub struct WalkLayerGraph<'a> {
     pub backend: Option<&'a dyn ComputeBackend>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for WalkLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         weights: &ModelWeights,
@@ -48,6 +54,7 @@ impl<'a> LayerGraph for WalkLayerGraph<'a> {
 
 // ── Pipelined: CPU attention + batched GPU Q4 FFN ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Pipelined layer graph: runs attention on CPU, batches all FFN layers
 /// in one Metal Q4 command buffer via `multi_layer_q4_ffn`.
 ///
@@ -65,7 +72,9 @@ pub struct PipelinedLayerGraph<'a> {
     pub layer_range: core::ops::Range<usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for PipelinedLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         weights: &ModelWeights,
@@ -105,13 +114,16 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

@@ -17,12 +17,6 @@
 //!
 //! The store is append-only. New boundaries extend the file.
 //! Mmap'd for zero-copy reads. RSS ≈ one boundary at a time.
-
-use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-use std::path::Path;
-
-use memmap2::Mmap;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -34,6 +28,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::{File, OpenOptions};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, Seek, SeekFrom, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use memmap2::Mmap;
 const MAGIC: [u8; 4] = *b"BNDX";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 64;
@@ -104,13 +108,16 @@ impl BoundaryEntry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read-only mmap'd boundary store.
 pub struct BoundaryStore {
     mmap: Mmap,
     header: BoundaryHeader,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl BoundaryStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open an existing boundary file.
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
@@ -213,6 +220,7 @@ impl BoundaryStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Writable boundary store — append-only.
 pub struct BoundaryWriter {
     file: File,
@@ -221,7 +229,9 @@ pub struct BoundaryWriter {
     max_boundaries: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl BoundaryWriter {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new boundary store.
     ///
     /// `max_boundaries` pre-allocates index space. Can be extended later
@@ -266,6 +276,7 @@ impl BoundaryWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Append a boundary residual.
     ///
     /// `token_offset`: the token position where this window starts
@@ -327,6 +338,7 @@ impl BoundaryWriter {
         self.header.total_tokens as usize
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;
         Ok(self.path)
@@ -338,6 +350,7 @@ mod tests {
     use super::*;
     // ── BoundaryWriter + BoundaryStore ────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn create_append_open_roundtrip() {
         let path = std::env::temp_dir().join("larql_boundary_test_roundtrip.bndx");
@@ -365,6 +378,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn multiple_boundaries_indexed_correctly() {
         let path = std::env::temp_dir().join("larql_boundary_test_multi.bndx");
@@ -392,6 +406,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn out_of_range_residual_returns_none() {
         let path = std::env::temp_dir().join("larql_boundary_test_oob.bndx");
@@ -405,6 +420,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn boundary_for_token_finds_correct_window() {
         let path = std::env::temp_dir().join("larql_boundary_test_tok.bndx");
@@ -432,6 +448,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn token_range_returns_correct_bounds() {
         let path = std::env::temp_dir().join("larql_boundary_test_range.bndx");
@@ -447,6 +464,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn wrong_residual_size_returns_error() {
         let path = std::env::temp_dir().join("larql_boundary_test_bad_size.bndx");

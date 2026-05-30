@@ -3,10 +3,6 @@
 //! Gemma 4 E2B adds a per-layer embedding lookup to each layer's hidden state.
 //! Two streams are combined: a model-level projection of the main embeddings,
 //! and a per-layer token embedding lookup, scaled and gated.
-
-use super::{apply_norm, dot_proj};
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +14,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{apply_norm, dot_proj};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Precompute per-layer input signals from token embeddings.
 ///
 /// Combines two streams:
@@ -115,6 +119,7 @@ pub fn precompute_per_layer_inputs(
     per_layer_inputs
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply Per-Layer Embeddings (PLE) to the hidden state after attention+FFN.
 ///
 /// Runs at the end of each decoder layer:
@@ -183,7 +188,9 @@ pub(crate) fn apply_per_layer_embedding(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()
@@ -205,6 +212,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn precompute_returns_empty_when_projection_weight_missing() {
         // Even if arch claims PLE support, missing weight → empty return.
@@ -226,6 +234,7 @@ mod tests {
         assert_eq!(result, h, "None per_layer_input should return h unchanged");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_ple_missing_gate_weight_returns_h_unchanged() {
         let weights = make_test_weights();

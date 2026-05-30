@@ -16,16 +16,6 @@
 //! Callers pass a `&dyn GateIndex` + `Option<&KnnStore>`. `PatchedVindex`
 //! bundles both; `PyVindex` keeps them as separate fields. Both pass through
 //! here.
-
-use larql_vindex::{GateIndex, KnnStore, PatchedVindex, VectorIndex, WalkHit};
-use tokenizers::Tokenizer;
-
-use crate::model::ModelWeights;
-use crate::vindex::predict_q4k_with_ffn;
-use crate::vindex::WalkFfn;
-
-use super::predict::predict_with_ffn;
-use super::PredictResult;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +27,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{GateIndex, KnnStore, PatchedVindex, VectorIndex, WalkHit};
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::vindex::predict_q4k_with_ffn;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::vindex::WalkFfn;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::predict::predict_with_ffn;
+use super::PredictResult;
 /// Cosine threshold for the L0 KnnStore override. A stored key whose top-1
 /// cosine against the captured residual exceeds this value replaces the
 /// walk FFN's top-1 prediction.
@@ -71,6 +77,7 @@ pub struct InferPatchedResult {
     pub walk_ms: f64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass with the walk FFN, consult the KnnStore for a
 /// possible top-1 override, and return the top-k predictions.
 ///
@@ -107,6 +114,7 @@ pub fn infer_patched(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Q4K variant of `infer_patched`. Identical contract but routes the forward
 /// pass through `predict_q4k_with_ffn`, which dequantises one layer at a time
 /// from the vindex instead of reading pre-loaded f32 tensors.
@@ -145,6 +153,7 @@ pub fn infer_patched_q4k(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Pure function: given raw walk predictions, per-layer residuals, and an
 /// optional KnnStore, return `(predictions, knn_override)`.
 ///
@@ -197,6 +206,7 @@ pub fn apply_knn_override(
     (predictions, knn_override)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Rebuild a per-layer walk trace from captured residuals — shared between
 /// the LQL `INFER` / `EXPLAIN INFER` display paths and the HTTP `/explain`
 /// route. Each layer's residual is re-queried against the patched vindex's

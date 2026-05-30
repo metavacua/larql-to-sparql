@@ -1,5 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use wasmi::{Engine, Instance, Linker, Module, Store};
 
 use super::wasi_shim;
@@ -7,12 +9,14 @@ use super::wasi_shim;
 /// by the shim closures (they write directly to host stdout/stderr).
 pub struct ExpertStore {}
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compile a WASM expert's `Module` from the given `.wasm` file.
 pub fn load_module(engine: &Engine, path: &Path) -> anyhow::Result<Module> {
     let bytes = std::fs::read(path)?;
     Module::new(engine, &bytes).map_err(Into::into)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Instantiate a previously compiled `Module` with a fresh WASI context.
 pub fn instantiate(
     engine: &Engine,
@@ -25,6 +29,7 @@ pub fn instantiate(
     Ok((store, instance))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compile and instantiate a WASM expert in one step.
 pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<ExpertStore>, Instance)> {
     let module = load_module(engine, path)?;
@@ -34,6 +39,7 @@ pub fn load_expert(engine: &Engine, path: &Path) -> anyhow::Result<(Store<Expert
 #[cfg(test)]
 mod tests {
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fresh_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "larql_loader_{name}_{}_{}",

@@ -20,17 +20,6 @@
 //!
 //! Works with any [`FfnBackend`] — local `WalkFfn`, `RemoteWalkBackend`
 //! (FFN over HTTP), etc.
-
-use ndarray::Array2;
-
-use crate::attention::{
-    run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
-};
-use crate::ffn::FfnBackend;
-use crate::forward::hooks::{LayerHook, NoopHook};
-use crate::forward::predict::hidden_to_raw_logits;
-use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -43,6 +32,23 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::{
+    run_attention_block_decode_step_backend, run_attention_with_kv_backend, KvCache,
+};
+use crate::ffn::FfnBackend;
+use crate::forward::hooks::{LayerHook, NoopHook};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::predict::hidden_to_raw_logits;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Stream autoregressive generation with a KV cache.
 ///
 /// `on_token` receives `(token_id, decoded_string)` for each generated
@@ -74,6 +80,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Variant of [`generate_cached`] that runs Q/K/V/O projections on a
 /// GPU `ComputeBackend` when provided. GQA softmax stays on CPU.
 #[allow(clippy::too_many_arguments)]
@@ -102,6 +109,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sliding-window (Markov-residual-bounded) variant of
 /// [`generate_cached`]. Keeps only the last `window` positions of K/V
 /// per layer — older tokens drop off the back of the cache and are no
@@ -132,6 +140,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_bounded(
     weights: &ModelWeights,
@@ -156,6 +165,7 @@ fn generate_cached_bounded(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Hook-aware autoregressive generation on the CPU KV-cache path.
 ///
 /// Same prefill + decode loop as [`generate_cached`], but fires
@@ -209,6 +219,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn generate_cached_hooked_inner(
     weights: &ModelWeights,
@@ -330,6 +341,7 @@ fn generate_cached_hooked_inner(
     generated
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn last_row_as_2d(h: &Array2<f32>) -> Array2<f32> {
     let seq_len = h.shape()[0];
     let hidden = h.shape()[1];
@@ -338,6 +350,7 @@ fn last_row_as_2d(h: &Array2<f32>) -> Array2<f32> {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn argmax_next_token(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -362,6 +375,7 @@ fn is_stop_token_str(s: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Autoregressive generation where a caller-supplied closure can mask the raw
 /// logits before each argmax step.
 ///
@@ -463,6 +477,7 @@ where
     generated
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Argmax over a (possibly masked) logit vector — returns `(token_id, decoded)`.
 fn masked_argmax(logits: &[f32], tokenizer: &tokenizers::Tokenizer) -> Option<(u32, String)> {
     let (idx, _) = logits
@@ -607,6 +622,7 @@ mod tests {
         assert_eq!(baseline, hooked, "noop hook must not change generated ids");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn generate_cached_hooked_record_fires_during_prefill_and_decode() {
         // RecordHook should fire on every layer of every step (prefill +
@@ -656,6 +672,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn generate_cached_hooked_steer_changes_output() {
         // A non-trivial steering vector applied at every layer should

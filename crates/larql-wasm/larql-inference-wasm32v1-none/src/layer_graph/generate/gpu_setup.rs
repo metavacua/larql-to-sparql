@@ -1,11 +1,6 @@
 //! Shared setup for GPU/vindex-backed generation paths.
 
 use super::types::GenerateError;
-use crate::layer_graph::pipeline_layer::{kv_cache_shapes_for_arch, DEFAULT_GPU_KV_CACHE_MAX_SEQ};
-use crate::model::ModelWeights;
-use larql_compute::backend::Capability;
-use larql_compute::{prelude::*, FullPipelineLayer};
-use core::ops::Range;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +12,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::pipeline_layer::{kv_cache_shapes_for_arch, DEFAULT_GPU_KV_CACHE_MAX_SEQ};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::backend::Capability;
+use larql_compute::{prelude::*, FullPipelineLayer};
+use core::ops::Range;
+#[cfg(not(target_arch = "wasm32"))]
 /// True when the model has at least two layers and any per-layer
 /// attention parameter differs from layer 0. Catches Gemma 4 31B's
 /// sliding/global geometry alternation, the canonical heterogeneous
@@ -44,6 +47,7 @@ pub(crate) fn has_heterogeneous_attention(weights: &ModelWeights) -> bool {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Reject heterogeneous models on backends that haven't opted in via
 /// `Capability::HeterogeneousAttention`. The error fires *before* the
 /// first decode dispatch so the caller sees a precise unsupported-backend
@@ -69,6 +73,7 @@ pub(super) struct GpuDecodeSetup<'a> {
     pub intermediate: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn build_gpu_decode_setup<'a>(
     weights: &'a ModelWeights,
     index: &'a larql_vindex::VectorIndex,
@@ -130,6 +135,7 @@ pub(super) fn build_gpu_decode_setup<'a>(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn ensure_prompt_fits(seq_len: usize) -> Result<(), GenerateError> {
     if seq_len > DEFAULT_GPU_KV_CACHE_MAX_SEQ {
         return Err(GenerateError::prompt_too_long(
@@ -140,12 +146,14 @@ pub(super) fn ensure_prompt_fits(seq_len: usize) -> Result<(), GenerateError> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn reset_and_preallocate_kv_cache(weights: &ModelWeights, backend: &dyn ComputeBackend) {
     backend.reset_kv_cache();
     let kv_shapes = kv_cache_shapes_for_arch(weights);
     backend.preallocate_kv_cache_per_layer(&kv_shapes, DEFAULT_GPU_KV_CACHE_MAX_SEQ);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prefill_q4_prompt(
     backend: &dyn ComputeBackend,

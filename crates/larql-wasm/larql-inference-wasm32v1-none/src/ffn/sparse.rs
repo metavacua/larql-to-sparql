@@ -1,10 +1,4 @@
 //! Sparse FFN backend — gate matmul selects top-K features, architecture-correct.
-
-use ndarray::Array2;
-
-use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};
-use super::FfnBackend;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +10,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::sparse_compute::{select_top_k_features, sparse_ffn_forward};
+use super::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 /// Sparse FFN: compute all gate activations, select top-K, then
 /// compute gate/up/down for those K features only.
 ///
@@ -26,11 +30,14 @@ pub struct SparseFfn<'a> {
     pub top_k: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> FfnBackend for SparseFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         self.forward_with_activation(layer, x).0
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let seq_len = x.shape()[0];
 
@@ -55,7 +62,9 @@ impl<'a> FfnBackend for SparseFfn<'a> {
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

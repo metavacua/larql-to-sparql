@@ -1,9 +1,4 @@
 //! Logits computation — final norm + vindex KNN + softmax.
-
-use ndarray::Array2;
-
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +10,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Shared logits computation: final norm + vindex KNN + softmax.
 pub fn finalize_logits(
     weights: &ModelWeights,
@@ -104,6 +107,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{make_test_tokenizer, make_test_vindex, make_test_weights};
     use larql_compute::CpuBackend;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn finalize_logits_runs_without_panic() {
         let weights = make_test_weights();
@@ -162,6 +166,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn finalize_logits_with_softcap_arch_path() {
         // Exercise the `if let Some(cap) = final_softcap` branch in the
@@ -187,6 +192,7 @@ mod tests {
         assert!(result.predictions.is_empty() || result.predictions.len() <= 3);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a `VectorIndex` whose `lm_head_knn_backend` returns real hits
     /// by materialising `lm_head.bin` on disk in a tempdir and calling
     /// `load_lm_head`. The bytes come from the synthetic `weights.lm_head`
@@ -210,6 +216,7 @@ mod tests {
         index
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn finalize_logits_returns_predictions_with_lm_head_hits() {
         // Drives the inner closures (scaled / predictions / max-logit fold)
@@ -245,6 +252,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn finalize_logits_picks_highest_logit_first() {
         let weights = make_test_weights();

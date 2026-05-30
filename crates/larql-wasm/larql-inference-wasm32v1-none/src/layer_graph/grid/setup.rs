@@ -1,11 +1,4 @@
 use crate::ffn::moe_remote::RemoteMoeError;
-use crate::layer_graph::pipeline_layer::{
-    build_pipeline_layers, kv_cache_shapes_for_arch, patch_pipeline_layers_for_remote_ffn,
-    patch_pipeline_layers_for_remote_moe, DEFAULT_GPU_KV_CACHE_MAX_SEQ,
-};
-use larql_compute::{prelude::ComputeBackend, FullPipelineLayer};
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,12 +10,24 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::pipeline_layer::{
+    build_pipeline_layers, kv_cache_shapes_for_arch, patch_pipeline_layers_for_remote_ffn,
+    patch_pipeline_layers_for_remote_moe, DEFAULT_GPU_KV_CACHE_MAX_SEQ,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_compute::{prelude::ComputeBackend, FullPipelineLayer};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum RemotePatch {
     Moe,
     Ffn,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct GridPipelineSetup<'a> {
     pub layers: Vec<FullPipelineLayer<'a>>,
     pub hidden: usize,
@@ -30,6 +35,7 @@ pub(super) struct GridPipelineSetup<'a> {
     pub num_layers: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn build_grid_pipeline_setup<'a>(
     weights: &'a ModelWeights,
     index: &'a VectorIndex,
@@ -75,6 +81,7 @@ pub(super) fn build_grid_pipeline_setup<'a>(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn reset_and_preallocate_grid_kv(weights: &ModelWeights, backend: &dyn ComputeBackend) {
     backend.reset_kv_cache();
     let kv_shapes = kv_cache_shapes_for_arch(weights);

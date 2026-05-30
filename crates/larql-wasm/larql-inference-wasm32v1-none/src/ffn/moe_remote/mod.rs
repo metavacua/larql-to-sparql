@@ -61,7 +61,9 @@ mod tests;
 
 // ── Public re-exports (preserve the pre-split crate-public API) ──────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use backend::RemoteMoeBackend;
+#[cfg(not(target_arch = "wasm32"))]
 pub use config::{parse_unit_manifest, ShardConfig, UnitManifest, UnitShard};
 pub use error::RemoteMoeError;
 pub use multi_layer_wire::{
@@ -71,7 +73,9 @@ pub use multi_layer_wire::{
     MULTI_LAYER_BATCH_Q8K_CONTENT_TYPE,
 };
 pub use router::MoeRouterWeights;
+#[cfg(not(target_arch = "wasm32"))]
 pub use stream::{InflightMoe, ShardStream};
+#[cfg(not(target_arch = "wasm32"))]
 pub use wire::{
     decode_expert_request, decode_expert_response, decode_layer_batch_request,
     decode_layer_batch_request_f16, decode_layer_batch_response, decode_layer_batch_response_f16,

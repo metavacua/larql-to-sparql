@@ -204,6 +204,8 @@ pub fn decode_binary_batch(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, Stri
 pub(crate) const F16_CT: &str = "application/x-larql-ffn-f16";
 
 /// Decode a binary single-layer f16 response into f32 output.
+// Half-precision wire codec — uses the native `half` crate.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_binary_single_f16(body: &[u8]) -> Result<(usize, Vec<f32>), String> {
     use half::f16;
     if body.len() < 12 {
@@ -228,7 +230,10 @@ pub fn decode_binary_single_f16(body: &[u8]) -> Result<(usize, Vec<f32>), String
 }
 
 /// Decode a binary batch f16 response into f32 outputs.
+// Half-precision wire codec — uses the native `half` crate.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decode_binary_batch_f16(body: &[u8]) -> Result<HashMap<usize, Vec<f32>>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
     use half::f16;
     if body.len() < 12 {
         return Err(format!(

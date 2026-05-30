@@ -138,6 +138,7 @@ impl ChatTemplate {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Render a multi-turn message list (OpenAI chat-completions shape)
     /// into a single prompt ready for the tokenizer. Always appends the
     /// assistant-open marker so the model continues the conversation.
@@ -165,6 +166,7 @@ impl ChatTemplate {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Generic multi-turn rendering for any `TurnRenderer`.
 fn render_via_renderer<R: crate::layer_graph::TurnRenderer>(
     renderer: &R,

@@ -12,12 +12,6 @@
 //! - [`predict_split_cached`] — one-pass logits-only fast path that
 //!   borrows pre-computed `AttentionCache` residuals; exact output, no
 //!   attention compute. The "70 tok/s" GPU-fast variant.
-
-use ndarray::Array2;
-
-use super::super::{AttentionCache, CachedLayerGraph, DenseLayerGraph, LayerGraph};
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +23,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::{AttentionCache, CachedLayerGraph, DenseLayerGraph, LayerGraph};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Two-pass split pipeline: attention on CPU, FFN batched on Metal GPU.
 ///
 /// Pass 1: Run attention for all layers with attention-only residual stream (CPU).
@@ -223,6 +227,7 @@ pub fn predict_split_pass(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Split pass using cached attention residuals — exact output at GPU speed.
 ///
 /// Uses `AttentionCache` (built from one exact run) to skip all attention

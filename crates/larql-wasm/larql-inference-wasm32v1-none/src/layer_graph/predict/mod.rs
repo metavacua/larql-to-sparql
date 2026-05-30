@@ -27,17 +27,24 @@ use larql_wasm_math::FloatExt as _;
 mod honest;
 mod split;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use honest::predict_honest;
+#[cfg(not(target_arch = "wasm32"))]
 pub use split::{predict_split_cached, predict_split_pass};
 
 use super::LayerGraph;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
 // Re-export moved functions for backward compatibility.
 pub use super::generate::{generate, GenerateResult};
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::logits::finalize_logits;
+#[cfg(not(target_arch = "wasm32"))]
 pub use super::prefill::prefill_with_kv;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass using vindex logits (KNN against lm_head mmap).
 /// Replaces the 231ms dense logits matmul with a ~1ms KNN lookup.
 pub fn predict_with_graph_vindex_logits(
@@ -111,6 +118,7 @@ pub fn predict_with_graph_vindex_logits(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass using a LayerGraph for per-layer routing.
 /// This is the generic layer loop — embedding → layers → logits.
 pub fn predict_with_graph(
@@ -132,6 +140,7 @@ pub fn predict_with_graph(
     crate::forward::logits_to_predictions_pub(weights, &h, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Optimized predict: uses vindex logits when lm_head is loaded, falls back to full matmul.
 ///
 /// This is the production entry point. It:
@@ -158,6 +167,7 @@ pub fn predict_pipeline(
     predict_with_graph(weights, tokenizer, token_ids, top_k, graph)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass with tracing (residuals + activations + attention).
 pub fn trace_with_graph(
     weights: &ModelWeights,
@@ -214,6 +224,7 @@ pub fn trace_with_graph(
 mod tests {
     use super::*;
     use crate::test_utils::TestFixtures;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
 
     fn fx() -> &'static TestFixtures {
@@ -314,6 +325,7 @@ mod tests {
 
     // ── DenseLayerGraph ───────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dense_layer_graph_forward_runs() {
         use crate::layer_graph::{DenseLayerGraph, LayerGraph};
@@ -331,6 +343,7 @@ mod tests {
         assert_eq!(out.unwrap().residual.shape(), &[2, weights.hidden_size]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dense_layer_graph_all_layers() {
         use crate::layer_graph::{DenseLayerGraph, LayerGraph};
@@ -351,6 +364,7 @@ mod tests {
 
     // ── WalkLayerGraph ────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn walk_layer_graph_forward_runs() {
         use crate::layer_graph::{LayerGraph, WalkLayerGraph};

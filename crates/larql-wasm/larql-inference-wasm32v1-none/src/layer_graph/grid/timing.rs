@@ -1,5 +1,3 @@
-use crate::ffn::moe_remote::{MoeRouterWeights, RemoteMoeError, ShardStream};
-use crate::ffn::RemoteMoeBackend;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -11,6 +9,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::moe_remote::{MoeRouterWeights, RemoteMoeError, ShardStream};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::RemoteMoeBackend;
 #[derive(Clone, Debug)]
 pub(super) struct LayerTiming {
     pub total_ms: f32,
@@ -24,6 +26,7 @@ fn shard_compute_max(t: &LayerTiming) -> f32 {
     t.per_shard.iter().map(|(_, c)| *c).fold(0.0, f32::max)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn print_token_breakdown(label: &str, tok_idx: usize, timings: &[LayerTiming]) {
     if timings.is_empty() {
         return;
@@ -41,6 +44,7 @@ pub(super) fn print_token_breakdown(label: &str, tok_idx: usize, timings: &[Laye
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn print_run_summary(label: &str, per_token: &[Vec<LayerTiming>]) {
     if per_token.is_empty() {
         return;
@@ -96,6 +100,7 @@ pub(super) fn print_run_summary(label: &str, per_token: &[Vec<LayerTiming>]) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Inner MoE call with optional timing capture.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn moe_call_timed(

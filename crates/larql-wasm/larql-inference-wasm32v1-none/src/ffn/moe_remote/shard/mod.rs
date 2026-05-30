@@ -36,16 +36,19 @@ mod layer_batch;
 mod multi_layer;
 mod stream;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::config::ShardConfig;
 use super::error::RemoteMoeError;
 
 // ── Internal shard state ──────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct GrpcState {
     runtime: std::sync::Arc<tokio::runtime::Runtime>,
     client: larql_router_protocol::ExpertServiceClient<tonic::transport::Channel>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) enum ShardTransport {
     Http(reqwest::blocking::Client),
     Grpc(std::sync::Arc<GrpcState>),
@@ -76,12 +79,15 @@ pub(super) struct UdsState {
     stream: std::sync::Mutex<Option<std::os::unix::net::UnixStream>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) struct Shard {
     pub(super) config: ShardConfig,
     pub(super) transport: ShardTransport,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Shard {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn connect(config: ShardConfig) -> Result<Self, RemoteMoeError> {
         // URL scheme dispatch:
         //   `grpc://host:port` → tonic gRPC over HTTP/2 persistent channel.
@@ -200,6 +206,7 @@ impl Shard {
         expert_id >= self.config.start && expert_id <= self.config.end
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// True if this shard uses gRPC transport (not HTTP or UDS).
     /// Used by `backend.rs` to decide whether to use the multi-layer fast path.
     pub(super) fn is_grpc(&self) -> bool {
@@ -232,6 +239,7 @@ impl Shard {
 // Connections are persistent and reused across calls (the server's axum
 // hyper accept loop honours keep-alive by default).
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Send a single POST + read the response body via the persistent UDS
 /// stream.  Reconnects on broken-pipe / read errors.
 #[cfg(unix)]

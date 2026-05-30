@@ -17,9 +17,6 @@
 //!   over logits. **No final norm, no softcap, no scaling.** This is
 //!   pure DLA; for the full lens (with norm/softcap/scale) use
 //!   [`super::lens::logit_lens_topk`].
-
-use crate::model::ModelWeights;
-use ndarray::{ArrayView1, ArrayView2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +28,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{ArrayView1, ArrayView2};
+#[cfg(not(target_arch = "wasm32"))]
 /// Raw row of `W_E` for `token_id`. Returns `None` if the id is out of
 /// range. Does **not** apply the architecture's `embed_scale` — this is
 /// the matrix as stored. Use [`embedding_row_scaled`] if you want what
@@ -43,6 +46,7 @@ pub fn embedding_row(weights: &ModelWeights, token_id: u32) -> Option<Vec<f32>> 
     Some(weights.embed.row(idx).to_vec())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Same as [`embedding_row`] but multiplied by `arch.embed_scale()` —
 /// matches the residual the forward pass writes for this token.
 pub fn embedding_row_scaled(weights: &ModelWeights, token_id: u32) -> Option<Vec<f32>> {
@@ -56,6 +60,7 @@ pub fn embedding_row_scaled(weights: &ModelWeights, token_id: u32) -> Option<Vec
     Some(row)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Raw row of `W_U` (the unembedding / `lm_head` matrix) for `token_id`.
 /// This is the direction whose dot product with the final residual gives
 /// the raw logit for that token (before any norm/softcap/scaling).
@@ -67,6 +72,7 @@ pub fn unembedding_row(weights: &ModelWeights, token_id: u32) -> Option<Vec<f32>
     Some(weights.lm_head.row(idx).to_vec())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-k tokens by **cosine similarity** to `query` against the embedding
 /// matrix `W_E`. Returns `(token_id, cosine)` pairs in descending order.
 ///
@@ -87,6 +93,7 @@ pub fn embedding_neighbors(weights: &ModelWeights, query: &[f32], k: usize) -> V
     cosine_topk_against_matrix(weights.embed.view(), q_view, q_norm, k)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Raw unembedding projection: returns top-k `(token_id, logit)` pairs
 /// from `lm_head @ vec`. **No final norm, no softcap, no logits-scale,
 /// no softmax.** This is the direct-logit-attribution primitive — apply
@@ -119,10 +126,12 @@ pub fn project_through_unembed(weights: &ModelWeights, vec: &[f32], k: usize) ->
 
 // ── internals ───────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn vec_norm(v: ArrayView1<f32>) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cosine_topk_against_matrix(
     matrix: ArrayView2<f32>,
     query: ArrayView1<f32>,
@@ -166,6 +175,7 @@ mod tests {
     use super::*;
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();

@@ -2,11 +2,6 @@
 //!
 //! Falls back to CPU BLAS when backend is None.
 //! Also includes Q4 quantized attention projection and KV-capture attention.
-
-use super::gqa::gqa_attention_with_weights;
-use super::rope::apply_rope_partial;
-use super::AttentionWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +13,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::gqa::gqa_attention_with_weights;
+#[cfg(not(target_arch = "wasm32"))]
+use super::rope::apply_rope_partial;
+use super::AttentionWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// GPU-accelerated attention block. Same as `run_attention_block` but routes
 /// Q/K/V/O projections through the ComputeBackend (Metal, CUDA, or CPU).
 pub fn run_attention_block_gpu(
@@ -154,6 +158,7 @@ pub fn run_attention_block_gpu(
     Some((h_post_attn, attn_projected, attn_weights))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention and return K (post-RoPE) and V for KV cache population.
 /// Accepts optional ComputeBackend for GPU-accelerated projections.
 pub fn run_attention_with_kv(
@@ -164,6 +169,7 @@ pub fn run_attention_with_kv(
     run_attention_with_kv_backend(weights, h, layer, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional compute backend for accelerated projections.
 pub fn run_attention_with_kv_backend(
     weights: &crate::model::ModelWeights,
@@ -284,6 +290,7 @@ pub fn run_attention_with_kv_backend(
     Some((h_out, k_r, v))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Q4 attention projection: single projection via Q4 matvec through ComputeBackend.
 /// Returns [seq_len, out_dim] f32 result, or None if backend doesn't support Q4.
 pub fn q4_attention_proj(
@@ -316,7 +323,9 @@ pub fn q4_attention_proj(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn h(rows: usize, cols: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, cols),

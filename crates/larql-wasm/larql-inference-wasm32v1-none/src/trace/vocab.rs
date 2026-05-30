@@ -1,8 +1,4 @@
 //! Vocabulary projection helpers — project residual vectors through lm_head.
-
-use crate::model::ModelWeights;
-use larql_models::NormType;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +10,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_models::NormType;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Project a vector through final_norm → lm_head → logits.
 pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
     let hidden = weights.hidden_size;
@@ -42,8 +45,10 @@ pub fn project_to_logits(weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
     logits
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use crate::forward::softmax;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn top_k_from_logits(
     logits: &[f32],
     tokenizer: &tokenizers::Tokenizer,
@@ -78,6 +83,7 @@ pub fn vec_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_norm(
     weights: &ModelWeights,
     x: &Array2<f32>,

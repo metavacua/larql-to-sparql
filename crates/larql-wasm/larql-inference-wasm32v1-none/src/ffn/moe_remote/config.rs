@@ -1,6 +1,3 @@
-use std::time::Duration;
-
-use super::error::RemoteMoeError;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,8 +9,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+
+use super::error::RemoteMoeError;
 // ── Shard configuration ───────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// One entry in the shard map: an expert-ID range + its URL.
 ///
 /// Two ownership modes (mutually exclusive — `unit_set` takes precedence):
@@ -47,7 +49,9 @@ pub struct ShardConfig {
     pub unit_set: Option<std::sync::Arc<HashSet<(usize, usize)>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ShardConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(start: usize, end: usize, url: impl Into<String>) -> Self {
         let url = url.into().trim_end_matches('/').to_string();
         Self {
@@ -59,6 +63,7 @@ impl ShardConfig {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a shard config that owns an explicit set of `(layer, expert_id)`
     /// pairs.  `start`/`end` are derived from the set's min/max for
     /// diagnostic compatibility; ownership checks use the set itself.
@@ -83,6 +88,7 @@ impl ShardConfig {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -118,6 +124,7 @@ impl ShardConfig {
 // `(layer, expert_id)` ownership set; the client routes per-(layer, expert)
 // rather than per-expert.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-level JSON shape: a list of shards, each with its URL + per-layer
 /// expert-range ownership.  Matches the server-side `--units` format
 /// extended with `url` so a single manifest can describe the whole grid.
@@ -126,6 +133,7 @@ pub struct UnitManifest {
     pub shards: Vec<UnitShard>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// One shard's slice of the grid.
 #[derive(serde::Deserialize)]
 pub struct UnitShard {
@@ -135,6 +143,7 @@ pub struct UnitShard {
     pub layer_experts: std::collections::BTreeMap<String, Vec<[usize; 2]>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl UnitShard {
     /// Expand the per-layer ranges into a flat `(layer, expert_id)` set.
     pub fn into_unit_set(
@@ -162,7 +171,9 @@ impl UnitShard {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl UnitManifest {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convert the parsed manifest into one `ShardConfig` per shard, each
     /// carrying its explicit `(layer, expert_id)` ownership set.
     pub fn into_shard_configs(self) -> Result<Vec<ShardConfig>, RemoteMoeError> {
@@ -176,6 +187,7 @@ impl UnitManifest {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse a unit-manifest JSON file from `path` into ready-to-connect
 /// `ShardConfig`s.  Returns `RemoteMoeError::Client` on read or parse
 /// failure with the path included so the operator can fix it without

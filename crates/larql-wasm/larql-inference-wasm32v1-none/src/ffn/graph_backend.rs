@@ -8,15 +8,6 @@
 //!
 //! Eliminates the gate matmul entirely. One embedding projection + hash lookup
 //! replaces 500ms of BLAS.
-
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::Path;
-
-use ndarray::Array2;
-
-use crate::error::InferenceError;
-use crate::ffn::sigmoid;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +19,20 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufRead, BufReader, BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::InferenceError;
+use crate::ffn::sigmoid;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 /// Precomputed gate index: for each (layer, token_id), which features activate.
 /// Built offline from the gate weight matrix and embedding matrix.
 /// Serializable to disk for reuse across predict calls.
@@ -50,6 +55,7 @@ pub struct SilentIndexCallbacks;
 impl IndexBuildCallbacks for SilentIndexCallbacks {}
 
 impl GateIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build the gate index from model weights.
     ///
     /// For each layer, for each token in the vocabulary:
@@ -129,6 +135,7 @@ impl GateIndex {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build the gate index and stream directly to disk — never holds more than
     /// one layer's worth of index data in memory at a time.
     pub fn build_streaming(
@@ -223,6 +230,7 @@ impl GateIndex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save the gate index to an NDJSON file.
     /// Format: header line, then one line per (layer, token) entry.
     pub fn save(&self, path: &Path) -> Result<(), InferenceError> {
@@ -267,6 +275,7 @@ impl GateIndex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a gate index from an NDJSON file.
     pub fn load(path: &Path, top_tokens: usize) -> Result<Self, InferenceError> {
         let file = std::fs::File::open(path)?;
@@ -379,6 +388,7 @@ impl GateIndex {
         result
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Look up which features should activate for a given residual at a layer.
     ///
     /// Projects residual against the embedding matrix, finds the top-N nearest tokens,
@@ -546,6 +556,7 @@ mod tests {
 
     // ── save / load roundtrip ─────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn save_load_roundtrip_preserves_structure() {
         let weights = make_test_weights();
@@ -558,6 +569,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fresh_path(name: &str) -> std::path::PathBuf {
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -567,6 +579,7 @@ mod tests {
         std::env::temp_dir().join(format!("larql_gate_idx_{name}_{pid}_{nanos}.ndjson"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn build_streaming_writes_header_and_per_layer_entries() {
         let weights = make_test_weights();
@@ -588,6 +601,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn build_streaming_invokes_callbacks_per_layer() {
         // Custom callback recorder: ensure on_layer_start and on_layer_done
@@ -631,6 +645,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn load_returns_err_for_missing_file() {
         let path = std::env::temp_dir().join(format!(
@@ -645,6 +660,7 @@ mod tests {
         assert!(GateIndex::load(&path, TOP_TOKENS).is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lookup_returns_features_for_known_layer() {
         let weights = make_test_weights();
@@ -657,6 +673,7 @@ mod tests {
         assert!(features.len() <= 5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lookup_unknown_layer_returns_empty() {
         let weights = make_test_weights();
@@ -668,6 +685,7 @@ mod tests {
         assert!(features.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lookup_top_k_zero_returns_features_unchanged() {
         // total_k=0 → the truncate path's `k > 0 && k < features.len()`

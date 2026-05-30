@@ -1,8 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use wasmi::{Instance, Memory, Store, TypedFunc};
-
-use super::loader::ExpertStore;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +10,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
+use wasmi::{Instance, Memory, Store, TypedFunc};
+
+use super::loader::ExpertStore;
 // Guest ABI export names.
 const WASM_MEMORY: &str = "memory";
 const LARQL_ALLOC: &str = "larql_alloc";
@@ -21,6 +23,7 @@ const LARQL_DEALLOC: &str = "larql_dealloc";
 const LARQL_CALL: &str = "larql_call";
 const LARQL_METADATA: &str = "larql_metadata";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpertResult {
     pub value: Value,
@@ -46,6 +49,7 @@ pub struct ExpertMetadata {
     pub ops: Vec<OpSpec>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write a UTF-8 string into WASM linear memory via `larql_alloc`.
 /// Returns (ptr, len) of the allocated buffer.
 pub(crate) fn write_str(
@@ -68,6 +72,7 @@ pub(crate) fn write_str(
     Ok((ptr, len))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read a null-terminated string from WASM linear memory at `ptr`.
 /// Returns the decoded string and the byte count before the null terminator.
 pub(crate) fn read_cstring(
@@ -88,6 +93,7 @@ pub(crate) fn read_cstring(
     Ok((s, end as u32))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Call `larql_dealloc(ptr, len)`. Errors are silenced — a failed free must
 /// not mask a successful result.
 fn dealloc(store: &mut Store<ExpertStore>, instance: &Instance, ptr: u32, len: u32) {
@@ -96,6 +102,7 @@ fn dealloc(store: &mut Store<ExpertStore>, instance: &Instance, ptr: u32, len: u
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Call `larql_call(op, args)` and return the parsed `ExpertResult`, or
 /// `None` if the expert declined the op.
 pub fn call(
@@ -127,6 +134,7 @@ pub fn call(
     Ok(Some(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Call `larql_metadata` and return the parsed `ExpertMetadata`.
 pub fn metadata(
     store: &mut Store<ExpertStore>,

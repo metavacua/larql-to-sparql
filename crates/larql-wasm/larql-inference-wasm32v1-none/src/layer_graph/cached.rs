@@ -1,8 +1,3 @@
-use ndarray::Array2;
-
-use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,8 +9,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{DenseLayerGraph, LayerGraph, LayerOutput, PerLayerGraph};
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 // ── Cached: precomputed layer output for fixed-routing regimes ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Cached layer graph: returns a precomputed residual instead of computing.
 /// For layers where the output is template-determined (L0-12 regime).
 ///
@@ -26,7 +30,9 @@ pub struct CachedLayerGraph {
     cache: HashMap<usize, Array2<f32>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl CachedLayerGraph {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a cache by running a dense forward pass and capturing residuals.
     /// `layers`: which layers to cache (e.g., 0..=12).
     pub fn build(
@@ -56,6 +62,7 @@ impl CachedLayerGraph {
         Self { cache }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from an existing residual (e.g., from a previous forward pass).
     pub fn from_residuals(residuals: Vec<(usize, Array2<f32>)>) -> Self {
         Self {
@@ -72,7 +79,9 @@ impl CachedLayerGraph {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerGraph for CachedLayerGraph {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         _weights: &ModelWeights,
@@ -92,6 +101,7 @@ impl LayerGraph for CachedLayerGraph {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a PerLayerGraph with cached layers for a detected template.
 /// Returns the graph and the number of cached layers.
 ///
@@ -115,6 +125,7 @@ pub fn build_adaptive_graph<'a>(
     PerLayerGraph::new(layers)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Cached post-attention residuals and FFN-normed inputs for the split pass.
 ///
 /// Built from one exact (interleaved) forward pass. Reused for all entities
@@ -126,7 +137,9 @@ pub struct AttentionCache {
     pub final_residual: Array2<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AttentionCache {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build by running one exact forward pass (interleaved attention + FFN)
     /// and capturing the FFN inputs at each walk layer.
     pub fn build(
@@ -184,6 +197,7 @@ mod tests {
     use super::*;
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     #[test]
     fn from_residuals_empty() {
@@ -192,6 +206,7 @@ mod tests {
         assert!(!g.has_layer(0));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_residuals_single() {
         let arr = Array2::zeros((3, 4));
@@ -201,6 +216,7 @@ mod tests {
         assert!(!g.has_layer(1));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_residuals_multiple() {
         let arr = Array2::ones((2, 8));
@@ -213,6 +229,7 @@ mod tests {
         assert!(!g.has_layer(1));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn forward_layer_returns_cached() {
         let weights = make_test_weights();
@@ -224,6 +241,7 @@ mod tests {
         assert_eq!(out.residual.shape(), &[2, weights.hidden_size]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn forward_layer_none_for_uncached() {
         let weights = make_test_weights();
@@ -268,6 +286,7 @@ mod tests {
         assert_eq!(g.num_cached(), 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn build_adaptive_graph_routes_layers_through_cache_or_fallback() {
         let weights = make_test_weights();

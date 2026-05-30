@@ -18,6 +18,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
 pub const L1_DEFAULT_MAX_ENTRIES: usize = 4096;
 
 pub struct FfnL1Cache {
@@ -50,7 +54,7 @@ impl FfnL1Cache {
     pub fn key(feature_ids: &[usize]) -> u64 {
         let mut ids = feature_ids.to_vec();
         ids.sort_unstable();
-        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         ids.hash(&mut hasher);
         hasher.finish()
     }
@@ -65,7 +69,7 @@ impl FfnL1Cache {
     /// floating-point noise that would otherwise prevent cache hits across
     /// identical tokens at different context lengths.
     pub fn residual_key(residual: &[f32]) -> u64 {
-        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         for &v in residual {
             let q = (v * 256.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             q.hash(&mut hasher);

@@ -14,9 +14,6 @@
 //!
 //! Reproducibility: when [`SamplingConfig::seed`] is set, the same logit
 //! vector produces the same token id every call. Useful for evals.
-
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -28,6 +25,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use rand::rngs::StdRng;
+#[cfg(not(target_arch = "wasm32"))]
+use rand::{Rng, SeedableRng};
 /// Numeric guard: `temperature <= EPS` is treated as greedy (avoids
 /// dividing by zero in the temperature step).
 pub const TEMPERATURE_GREEDY_EPS: f32 = 1e-6;
@@ -127,6 +129,7 @@ impl SamplingConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Stateful sampler. Owns RNG state when sampling is non-greedy; for
 /// greedy configs `Sampler::new` skips RNG construction entirely so a
 /// single sampler instance can be cloned across no-cost greedy decoders.
@@ -135,7 +138,9 @@ pub struct Sampler {
     rng: Option<StdRng>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Sampler {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(cfg: SamplingConfig) -> Self {
         let rng = if cfg.is_greedy() {
             None
@@ -158,6 +163,7 @@ impl Sampler {
         self.sample_with_history(logits, &[])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Sample with awareness of previously-generated token ids so
     /// repetition penalties (`frequency_penalty`, `presence_penalty`)
     /// can be applied before softmax. Pass `generated: &[]` when no
@@ -192,6 +198,7 @@ impl Sampler {
         self.sample_from_topk_with_history(hits, &[])
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-k sample with repetition-penalty support. The penalty
     /// adjusts the per-hit score in-place before normal filtering, so
     /// hits whose token id has already been emitted slide down the
@@ -385,6 +392,7 @@ fn keep_top_p(probs: &mut [f32], p_thr: f32) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Multinomial draw via inverse-CDF on a normalised probability vector.
 fn multinomial(probs: &[f32], rng: &mut StdRng) -> usize {
     let r: f32 = rng.gen_range(0.0..1.0);

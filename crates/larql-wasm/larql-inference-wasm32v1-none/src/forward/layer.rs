@@ -2,15 +2,6 @@
 //!
 //! Orchestrates the per-layer computation: attention (with optional KV sharing),
 //! FFN, per-layer embeddings, and layer scalar multiplication.
-
-use super::apply_norm;
-use super::hooks::LayerHook;
-use super::ple::apply_per_layer_embedding;
-use crate::attention::{AttentionWeights, SharedKV};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
-use crate::residual::rms_norm;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +13,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::apply_norm;
+use super::hooks::LayerHook;
+#[cfg(not(target_arch = "wasm32"))]
+use super::ple::apply_per_layer_embedding;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::{AttentionWeights, SharedKV};
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::residual::rms_norm;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Public wrapper for run_attention — used by diagnostic/capture tooling.
 pub fn run_attention_public(
     weights: &ModelWeights,
@@ -31,6 +38,7 @@ pub fn run_attention_public(
     run_attention(weights, h, layer)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention for a single layer. Returns the post-attention residual.
 pub(super) fn run_attention(
     weights: &ModelWeights,
@@ -41,6 +49,7 @@ pub(super) fn run_attention(
     Some(h_post_attn)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional per-head weight capture and shared K/V.
 pub(super) fn run_attention_inner(
     weights: &ModelWeights,
@@ -60,6 +69,7 @@ pub(super) fn run_attention_inner(
     Some((h_post_attn, attn_weights))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention returning post-processed K/V for caching (KV sharing source layers).
 pub(super) fn run_attention_with_kv_cache(
     weights: &ModelWeights,
@@ -71,6 +81,7 @@ pub(super) fn run_attention_with_kv_cache(
     Some((h_post_attn, (k_rope, v_final)))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run FFN for a single layer using the given backend. Returns the post-FFN residual.
 pub fn run_ffn(
     weights: &ModelWeights,
@@ -134,6 +145,7 @@ pub fn run_ffn(
     (h_out, activation)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply per-layer scalar multiplier if present (e.g., Gemma 4 layer_scalar).
 ///
 /// Skip when the scalar is 0.0 (absent / unloaded — multiplying would zero the
@@ -152,6 +164,7 @@ pub(crate) fn apply_layer_scalar(weights: &ModelWeights, h: &mut Array2<f32>, la
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer with the given FFN backend.
 ///
 /// Handles: attention → FFN → per-layer embedding → layer_scalar.
@@ -194,6 +207,7 @@ pub fn run_layer_with_ffn(
     Some((h_out, activation, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a single transformer layer, optionally capturing attention weights.
 ///
 /// Backwards-compatible wrapper: behaves identically to the pre-hook version
@@ -228,6 +242,7 @@ pub(super) fn run_layer_with_capture(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Hook-aware sibling of [`run_layer_with_capture`]. Fires the [`LayerHook`]
 /// callbacks at four points inside the layer: pre-layer, post-attention
 /// (mut), attention-weights / FFN-activation if captured, post-layer (mut).
@@ -291,7 +306,9 @@ mod tests {
     use super::*;
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn h(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),

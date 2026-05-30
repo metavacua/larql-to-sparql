@@ -3,22 +3,6 @@
 //! `RemoteWalkBackend` holds a blocking HTTP client and dispatches FFN calls
 //! to a `larql-server` over HTTP, implementing the same [`FfnBackend`] trait
 //! as [`WalkFfn`](crate::vindex::WalkFfn).
-
-use portable_atomic::AtomicU64;
-use core::sync::atomic::Ordering;
-use std::time::Duration;
-
-use ndarray::Array2;
-
-use super::codec::{
-    decode_binary_batch, decode_binary_batch_f16, decode_binary_batch_i8, decode_binary_single,
-    decode_binary_single_f16, decode_binary_single_i8, encode_binary_request,
-    extract_response_latency_ms, RemoteLatencyStats, WalkFfnSingleResponse, BINARY_CT, F16_CT,
-    I8_CT,
-};
-use super::q8k_wire::{decode_q8k_batch_response, encode_q8k_batch_request, Q8K_BATCH_CT};
-use crate::ffn::FfnBackend;
-use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +14,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use portable_atomic::AtomicU64;
+use core::sync::atomic::Ordering;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::codec::{
+    decode_binary_batch, decode_binary_batch_f16, decode_binary_batch_i8, decode_binary_single,
+    decode_binary_single_f16, decode_binary_single_i8, encode_binary_request,
+    extract_response_latency_ms, RemoteLatencyStats, WalkFfnSingleResponse, BINARY_CT, F16_CT,
+    I8_CT,
+};
+use super::q8k_wire::{decode_q8k_batch_response, encode_q8k_batch_request, Q8K_BATCH_CT};
+use crate::ffn::FfnBackend;
+use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
 
 const STATS_PATH: &str = "/v1/stats";
 const WALK_FFN_PATH: &str = "/v1/walk-ffn";
@@ -57,6 +61,7 @@ pub enum WirePreference {
 }
 
 impl WirePreference {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct an `Accept` header value for this preference.
     pub fn accept_header(self) -> String {
         match self {
@@ -89,6 +94,7 @@ impl WirePreference {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Client config for talking to a remote FFN server.
 #[derive(Clone, Debug)]
 pub struct RemoteFfnConfig {
@@ -101,7 +107,9 @@ pub struct RemoteFfnConfig {
     pub wire: WirePreference,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RemoteFfnConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
@@ -110,6 +118,7 @@ impl RemoteFfnConfig {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -123,6 +132,7 @@ impl RemoteFfnConfig {
 
 // ── Client ───────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Remote FFN backend. Holds a blocking HTTP client plus the server URL.
 ///
 /// Cloning is cheap — the underlying `reqwest::blocking::Client` is
@@ -137,7 +147,9 @@ pub struct RemoteWalkBackend {
     wire_bytes_recv: Arc<AtomicU64>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RemoteWalkBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build a backend. Performs a one-shot health check against
     /// `/v1/stats` so we fail fast if the server is unreachable at
     /// construction time rather than mid-forward-pass.
@@ -202,6 +214,7 @@ impl RemoteWalkBackend {
         &self.config.base_url
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Single-layer FFN call using the binary wire format.
     /// Returns a `Vec<f32>` of length `seq_len * hidden_size`, row-major.
     fn call_single(
@@ -276,6 +289,7 @@ impl RemoteWalkBackend {
         Ok(output)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Batch FFN call — sends all `layers` in one round trip using the binary
     /// wire format. Returns a map from layer index to output floats.
     ///
@@ -360,6 +374,7 @@ impl RemoteWalkBackend {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q8K batch FFN call — sends pre-normed Q8K activations for one or more
     /// layers in a single HTTP round trip to `/v1/walk-ffn-q8k`.
     ///
@@ -407,6 +422,7 @@ impl RemoteWalkBackend {
         decode_q8k_batch_response(&resp_bytes).map_err(RemoteFfnError::BadResponse)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Measure round-trip latency breakdown over `n` calls.
     ///
     /// Sends a zero residual batch covering `layers` each time and reports:
@@ -478,6 +494,7 @@ impl RemoteWalkBackend {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run the full FFN forward pass for every layer in `layers`, returning
     /// a map from layer → `Array2<f32>` shaped `[seq_len, hidden]`.
     ///
@@ -513,7 +530,9 @@ impl RemoteWalkBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FfnBackend for RemoteWalkBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         let seq_len = x.shape()[0];
         let hidden = x.shape()[1];
@@ -532,6 +551,7 @@ impl FfnBackend for RemoteWalkBackend {
             .expect("RemoteWalkBackend: server output shape mismatch (validated above)")
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         let out = self.forward(layer, x);
         let seq_len = x.shape()[0];
@@ -539,6 +559,7 @@ impl FfnBackend for RemoteWalkBackend {
         (out, zeros)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_moe_full_layer(
         &self,
         layer: usize,
@@ -578,6 +599,7 @@ impl FfnBackend for RemoteWalkBackend {
 
 // ── JSON fallback helper ──────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn json_output_floats(v: &serde_json::Value) -> Result<Vec<f32>, RemoteFfnError> {
     v.get("output")
         .and_then(|o| o.as_array())

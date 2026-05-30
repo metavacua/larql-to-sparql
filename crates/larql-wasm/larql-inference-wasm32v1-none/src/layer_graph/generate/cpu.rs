@@ -5,8 +5,6 @@ use super::{
     eos::EosConfig,
     types::{GenerateError, GenerateResult, StageTimings},
 };
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +16,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
 // ── Backend capability probe + CPU Q4K delegation ────────────────────────────
 //
 // `generate` / `generate_constrained` assume the backend implements the fused
@@ -26,6 +27,7 @@ use larql_wasm_math::FloatExt as _;
 // (`predict_q4k_hidden`), which mutates `weights.tensors` per layer — that's
 // the single reason these functions take `&mut ModelWeights`.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// True when the backend can handle the fused Q4 prefill + decode pipeline
 /// directly. Metal: yes. Pure CPU: no — that path produces correct forward
 /// results via the vindex Q4K dequant loop in `crate::vindex::q4k_forward`.
@@ -33,6 +35,7 @@ pub(super) fn backend_supports_fused_q4_pipeline(backend: &dyn ComputeBackend) -
     backend.supports(Capability::PrefillQ4) && backend.supports(Capability::DecodeToken)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU Q4K generate path: loops `predict_q4k` one step at a time. O(N²) in
 /// context length (no KV cache), but correct across all supported
 /// architectures including hybrid MoE (if wired — see
@@ -127,6 +130,7 @@ pub(super) fn generate_via_cpu_q4k(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sampling-aware bridge to the CPU Q4_K constrained decoder. Threads
 /// the caller's `SamplingConfig` (temperature/top_p/seed/penalties)
 /// through to token selection over the masked logits.

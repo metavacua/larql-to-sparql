@@ -28,16 +28,19 @@ pub use types::{
     PredictResultWithResiduals, TraceResult,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use raw::{
     forward_from_layer, forward_raw_logits, forward_raw_logits_with_prefix, hidden_to_raw_logits,
     RawForward,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use dense::{
     logit_lens_top1, logits_to_predictions_pub, predict, predict_from_hidden,
     predict_from_hidden_with_ffn, predict_with_ffn_trace, predict_with_temperature,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::{
     predict_with_ffn, predict_with_ffn_attention, predict_with_router, predict_with_strategy,
 };

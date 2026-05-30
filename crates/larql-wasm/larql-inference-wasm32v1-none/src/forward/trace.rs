@@ -1,15 +1,4 @@
 //! Tracing and calibration — capture residuals, activations, and attention weights.
-
-use super::embed::embed_tokens;
-use super::hooks::{LayerHook, NoopHook};
-use super::layer::{
-    apply_layer_scalar, run_attention, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
-};
-use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
-use super::{LayerAttentionCapture, TraceResult};
-use crate::ffn::{FfnBackend, WeightFfn};
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +11,24 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::embed::embed_tokens;
+use super::hooks::{LayerHook, NoopHook};
+#[cfg(not(target_arch = "wasm32"))]
+use super::layer::{
+    apply_layer_scalar, run_attention, run_ffn, run_layer_with_capture_hooked, run_layer_with_ffn,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use super::ple::{apply_per_layer_embedding, precompute_per_layer_inputs};
+use super::{LayerAttentionCapture, TraceResult};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::{FfnBackend, WeightFfn};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer residuals captured for speculation error analysis.
 pub struct SpecCapture {
     /// Initial embedding (seq, hidden) before any transformer layers.
@@ -34,6 +41,7 @@ pub struct SpecCapture {
     pub h_final: Array2<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Single-pass capture for speculation error analysis.
 ///
 /// Returns per-layer post-attention residuals (for true FFN delta) and
@@ -72,6 +80,7 @@ pub fn capture_spec_residuals(weights: &ModelWeights, token_ids: &[u32]) -> Spec
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass through layers 0..=stop_layer and return the full
 /// hidden state matrix (seq_len, hidden_size) at that layer.
 pub fn forward_to_layer(
@@ -92,6 +101,7 @@ pub fn forward_to_layer(
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass and return last-token residuals at requested layers.
 pub fn capture_residuals(
     weights: &ModelWeights,
@@ -102,6 +112,7 @@ pub fn capture_residuals(
     trace.residuals
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture decoy residuals at a single layer for a list of pre-tokenised
 /// prompts. Returns one `Array1<f32>` per prompt (the last-token residual
 /// at `layer`), in the same order as the input.
@@ -130,6 +141,7 @@ pub fn capture_decoy_residuals(
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture the **full** FFN activation matrix `(seq_len, ffn_dim)` at
 /// a specific layer for one pre-tokenised prompt. Unlike
 /// `capture_residuals` (which returns only the last token's residual
@@ -179,6 +191,7 @@ pub fn capture_ffn_activation_matrix(
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Accumulate the uncentered FFN activation covariance at a layer,
 /// across many pre-tokenised prompts, in one pass. Returns a
 /// `(ffn_dim, ffn_dim)` symmetric matrix approximately equal to
@@ -263,6 +276,7 @@ pub fn estimate_ffn_covariance(
     Some((ktk, total_samples))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass and capture both residuals and sparse activations.
 pub fn trace_forward(
     weights: &ModelWeights,
@@ -282,6 +296,7 @@ pub fn trace_forward(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass with a custom FFN backend.
 pub fn trace_forward_with_ffn(
     weights: &ModelWeights,
@@ -302,6 +317,7 @@ pub fn trace_forward_with_ffn(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass capturing residuals, activations, and optionally attention weights.
 ///
 /// Backwards-compatible wrapper around [`trace_forward_full_hooked`] using a
@@ -327,6 +343,7 @@ pub fn trace_forward_full(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Hook-aware sibling of [`trace_forward_full`]. Fires the hook's callbacks
 /// at every layer (not just `capture_layers`) — hooks decide for themselves
 /// which layers they care about.
@@ -402,6 +419,7 @@ pub fn trace_forward_full_hooked(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Calibrate scalar gains from a forward pass: norm[L+1] / norm[L] at each layer.
 pub fn calibrate_scalar_gains(weights: &ModelWeights, token_ids: &[u32]) -> Vec<f32> {
     let all_layers: Vec<usize> = (0..weights.num_layers).collect();
@@ -439,6 +457,7 @@ mod tests {
     use super::*;
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();

@@ -8,11 +8,15 @@
 //! down read is mmap-backed, so a hot layer's down matrix can stay
 //! resident across calls without reloading safetensors shards.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::WalkFfn;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn walk_ffn_exact(
         &self,
         layer: usize,

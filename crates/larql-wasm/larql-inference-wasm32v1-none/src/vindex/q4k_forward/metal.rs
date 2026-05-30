@@ -1,9 +1,3 @@
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-use tokenizers::Tokenizer;
-
-use crate::forward::PredictResult;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,8 +9,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+
+use crate::forward::PredictResult;
 const MIN_KV_CACHE_SEQ: usize = 64;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// End-to-end predict on a Q4_K vindex driven by a Metal (or any Q4-capable)
 /// `ComputeBackend`.
 pub fn predict_q4k_metal(
@@ -95,6 +100,7 @@ pub fn predict_q4k_metal(
     crate::forward::predict::logits_to_predictions_pub(weights, &h_last, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Metal-accelerated head-replacement forward pass via `full_pipeline_q4_with_head_replacement`.
 ///
 /// Uses the same KV-cache + per-position RoPE path as `prefill_q4`, so all
@@ -193,6 +199,7 @@ pub fn predict_q4k_metal_with_replaced_head_residual_delta(
     Array2::from_shape_vec((seq_len, hidden), result).ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Metal-accelerated baseline forward pass — full seq_len, no intervention.
 ///
 /// Returns the hidden state for ALL positions `[seq_len × hidden]`. Uses
@@ -289,6 +296,7 @@ pub fn predict_q4k_metal_hidden(
     Array2::from_shape_vec((seq_len, hidden), result).ok()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture the target head's pre-W_O output at `target_layer` using only GPU
 /// layers 0..=target_layer. Returns `[seq_len × head_dim]` f32.
 ///

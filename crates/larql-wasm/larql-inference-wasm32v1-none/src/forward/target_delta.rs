@@ -55,10 +55,6 @@
 //! Once complete, `optimise_target_delta` runs 60-80 Adam iters per
 //! fact in pure Rust; `run_memit` calls it and feeds the optimised
 //! deltas into `rome_batch_update` as V*.
-
-use ndarray::{Array1, ArrayView1, ArrayView2};
-
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -70,6 +66,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, ArrayView1, ArrayView2};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 /// Hyperparameters for target-delta optimisation. Defaults match the
 /// Python reference (`vindex_compile_rome_v11.py::optimise_target_delta`).
 #[derive(Debug, Clone, Copy)]
@@ -93,6 +95,7 @@ impl Default for TargetDeltaOpts {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Result of a single target-delta optimisation.
 #[derive(Debug, Clone)]
 pub struct TargetDelta {
@@ -121,6 +124,7 @@ pub struct TargetDelta {
 // closures for each layer's backward are filled in piece-by-piece as
 // the backward functions below are implemented.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Softmax cross-entropy loss for a 1-D logits vector and a single
 /// target id. Returns `(loss, dlogits)` where `dlogits[j] = softmax[j] - onehot[target][j]`.
 /// Used at the output end — no tape needed since this is the loss itself.
@@ -141,6 +145,7 @@ pub(crate) fn cross_entropy_and_grad(
     (loss, dlogits)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backward through the tied-embedding lm_head: `logits = embed @ h`
 /// so `∂loss/∂h = embed.T @ dlogits`. For tied embeddings
 /// `lm_head.weight == embed.weight`, so we use the same matrix.
@@ -164,6 +169,7 @@ pub(crate) fn lm_head_backward(
     dh
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backward through the final RMSNorm at the last position:
 ///
 ///   y = (x / rms(x)) * weight           where rms(x) = sqrt(mean(x^2) + eps)
@@ -200,6 +206,7 @@ pub(crate) fn rmsnorm_backward_pos(
     dx
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backward through a gated FFN block at one position.
 ///
 /// Forward:
@@ -307,6 +314,7 @@ pub(crate) fn attention_backward_last_pos() {
     unimplemented!("attention_backward_last_pos: pending implementation")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-fact target delta optimisation.
 ///
 /// CURRENT SUPPORT: `install_layer = n_layers - 1` (last layer). The
@@ -477,6 +485,7 @@ pub fn optimise_target_delta(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_target_delta_inputs(
     weights: &ModelWeights,
     tokens: &[u32],
@@ -572,6 +581,7 @@ fn validate_target_delta_inputs(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Softmax over a 1-D vector (numerically stable).
 fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
     let max = logits.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
@@ -584,8 +594,11 @@ fn softmax_1d(logits: &Array1<f32>) -> Array1<f32> {
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::arr1;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::arr2;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     fn assert_opt_err_contains(tokens: &[u32], target_id: u32, needle: &str) {
         let weights = make_test_weights();
@@ -623,6 +636,7 @@ mod tests {
         assert_opt_err_contains(&[weights.vocab_size as u32], 0, "token id");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn optimise_target_delta_rejects_bad_lm_head_shape() {
         let mut weights = make_test_weights();
@@ -694,6 +708,7 @@ mod tests {
         assert!((dh[3] - 0.2).abs() < 1e-5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gated_ffn_backward_finite_difference() {
         // Small hand-sized case: hidden=3, ffn_dim=4
@@ -863,6 +878,7 @@ mod tests {
         assert!(probs[1] > probs[2]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rmsnorm_backward_finite_difference() {
         // Analytical gradient should match numerical at a random point.

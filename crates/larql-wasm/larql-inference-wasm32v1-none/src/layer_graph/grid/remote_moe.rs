@@ -1,18 +1,3 @@
-use super::config::GridRuntimeConfig;
-use super::setup::{build_grid_pipeline_setup, reset_and_preallocate_grid_kv, RemotePatch};
-use super::timing::{moe_call_timed, print_run_summary, print_token_breakdown, LayerTiming};
-use super::GridGenerateResult;
-use crate::ffn::moe_remote::{InflightMoe, MoeRouterWeights, RemoteMoeError};
-use crate::ffn::RemoteMoeBackend;
-use crate::forward::{apply_norm, embed_tokens_pub};
-use crate::layer_graph::generate::detok::Detokenizer;
-use crate::layer_graph::generate::eos::EosConfig;
-use crate::layer_graph::generate::policy::{
-    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
-};
-use larql_compute::prelude::*;
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -24,7 +9,33 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use super::config::GridRuntimeConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use super::setup::{build_grid_pipeline_setup, reset_and_preallocate_grid_kv, RemotePatch};
+#[cfg(not(target_arch = "wasm32"))]
+use super::timing::{moe_call_timed, print_run_summary, print_token_breakdown, LayerTiming};
+use super::GridGenerateResult;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::moe_remote::{InflightMoe, MoeRouterWeights, RemoteMoeError};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::RemoteMoeBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::{apply_norm, embed_tokens_pub};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::detok::Detokenizer;
+use crate::layer_graph::generate::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::policy::{
+    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
+};
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build `MoeRouterWeights` for one layer from the model's vector store.
 /// Returns None if the required router projection is absent.
 ///
@@ -61,6 +72,7 @@ fn build_router<'a>(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Greedy autoregressive generation through a remote-expert grid.
 ///
 /// Requires a Metal (or Q4-capable) backend — attention and dense FFN run on
@@ -452,6 +464,7 @@ pub fn generate_with_remote_moe(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Batch pre-dispatch variant of [`generate_with_remote_moe`].
 ///
 /// Each decode step runs two Metal passes:

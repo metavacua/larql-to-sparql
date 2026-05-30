@@ -14,19 +14,6 @@
 //! the churn for the test ergonomics win this module gives. If a future
 //! refactor moves to direct callbacks, `run_with_dump_dir` can become a
 //! callback adapter without changing the public surface.
-
-use std::path::Path;
-
-use larql_models::ModelWeights;
-use larql_vindex::{GateIndex, VectorIndex};
-
-use crate::forward::dump_config::{
-    cpu_layer_file, decode_layer_file, metal_layer_h_out_file, ENV_CPU_DUMP_LAYERS,
-    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS,
-};
-use crate::layer_graph::generate::generate;
-use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
-use crate::layer_graph::CachedLayerGraph;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +25,24 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{GateIndex, VectorIndex};
+
+use crate::forward::dump_config::{
+    cpu_layer_file, decode_layer_file, metal_layer_h_out_file, ENV_CPU_DUMP_LAYERS,
+    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::generate;
+use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::CachedLayerGraph;
 
 /// Per-layer end-of-layer hidden state. `layers[l]` is the residual
 /// after layer l completes (post post_ffn norm + post-FFN residual +
@@ -90,6 +95,7 @@ impl ResidualCapture {
 }
 
 impl ResidualCapture {
+    #[cfg(not(target_arch = "wasm32"))]
     /// CPU full prefill via `predict_q4k_hidden`. Drives the per-layer
     /// dump hook (`LARQL_CPU_DUMP_LAYERS=<dir>`) at file `cpu_layer_NN.f32`
     /// per layer, then reads them back into a `Vec<Vec<f32>>`.
@@ -121,6 +127,7 @@ impl ResidualCapture {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Metal prefill on `prefix_ids` followed by a single
     /// KV-cached `decode_token(new_id)`. The capture reflects the
     /// per-layer output of the *decode step* — one position per layer
@@ -220,6 +227,7 @@ impl ResidualCapture {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Metal `prefill(prefix_ids)` followed by a sequential chain of
     /// `decode_token(id)` calls for each id in `new_ids`. Captures the
     /// per-layer hidden state of the **last** decode step. Pair with
@@ -322,6 +330,7 @@ impl ResidualCapture {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Metal full prefill via `prefill_q4`. Drives the per-layer dump
     /// hook (`LARQL_METAL_DUMP_LAYERS=<dir>`) at `metal_layer_NN_h_out.f32`
     /// per layer.
@@ -382,6 +391,7 @@ impl ResidualCapture {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Set the named env var to a fresh tempdir, run `f`, return the
 /// tempdir guard so the caller can read files before drop. Restores
 /// the previous env var value on drop (best-effort — Rust env vars
@@ -399,6 +409,7 @@ fn run_with_dump_dir(env_var: &str, f: impl FnOnce()) -> Result<tempfile::TempDi
     Ok(dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read a flat `f32` little-endian file. Returns `None` on any I/O
 /// error or non-multiple-of-4 file size — caller surfaces a friendly
 /// error.
@@ -415,6 +426,7 @@ fn read_f32_vec(path: &Path) -> Option<Vec<f32>> {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a minimal `tokenizers::Tokenizer` for the captures that need
 /// to call `generate()` but don't actually use the tokenizer for
 /// anything other than its decode-sample step (the dump hooks fire
@@ -439,6 +451,7 @@ fn build_dummy_tokenizer() -> tokenizers::Tokenizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::path::PathBuf;
 
     #[test]
@@ -467,6 +480,7 @@ mod tests {
         assert_eq!(dec.hidden_size, 2);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_with_dump_dir_restores_prior_env() {
         std::env::set_var("LARQL_TEST_RESID_DUMP_DIR_RESTORE", "previous");
@@ -482,6 +496,7 @@ mod tests {
         std::env::remove_var("LARQL_TEST_RESID_DUMP_DIR_RESTORE");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_with_dump_dir_clears_when_no_prior_value() {
         std::env::remove_var("LARQL_TEST_RESID_DUMP_DIR_NONE");
@@ -489,6 +504,7 @@ mod tests {
         assert!(std::env::var("LARQL_TEST_RESID_DUMP_DIR_NONE").is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn read_f32_vec_decodes_le_floats() {
         use std::io::Write;
@@ -502,6 +518,7 @@ mod tests {
         assert_eq!(v, vec![1.0, 2.5, -3.25]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn read_f32_vec_rejects_non_multiple_of_four() {
         use std::io::Write;
@@ -510,6 +527,7 @@ mod tests {
         assert!(read_f32_vec(tmp.path()).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn read_f32_vec_returns_none_on_missing_file() {
         let p = PathBuf::from("/nonexistent/path/that/cant/exist/xyz.f32");

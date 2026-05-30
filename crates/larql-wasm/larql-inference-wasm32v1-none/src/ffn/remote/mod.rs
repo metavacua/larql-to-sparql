@@ -61,9 +61,11 @@ pub mod q8k_wire;
 pub mod sharded;
 
 pub use codec::RemoteLatencyStats;
+#[cfg(not(target_arch = "wasm32"))]
 pub use http::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
 pub use q8k_wire::{
     decode_q8k_batch_request, decode_q8k_batch_response, encode_q8k_batch_request,
     encode_q8k_batch_response, Q8KRequestEntry, Q8K_BATCH_CT,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use sharded::LayerShardedBackend;

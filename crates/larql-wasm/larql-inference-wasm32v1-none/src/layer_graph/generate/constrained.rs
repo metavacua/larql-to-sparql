@@ -1,18 +1,4 @@
 //! Constrained generation over the GPU/vindex decode path.
-
-use super::cpu::{
-    backend_supports_fused_q4_pipeline, generate_constrained_via_cpu_q4k_streaming_sampled,
-};
-use super::eos::EosConfig;
-use super::gpu_setup::{
-    build_gpu_decode_setup, ensure_prompt_fits, prefill_q4_prompt, reset_and_preallocate_kv_cache,
-};
-use super::lm_head::pick_next_token_masked_sampled;
-use super::sampling::{Sampler, SamplingConfig};
-use super::types::{GenerateError, GenerateResult, StageTimings};
-use crate::layer_graph::CachedLayerGraph;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -24,6 +10,27 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::cpu::{
+    backend_supports_fused_q4_pipeline, generate_constrained_via_cpu_q4k_streaming_sampled,
+};
+use super::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use super::gpu_setup::{
+    build_gpu_decode_setup, ensure_prompt_fits, prefill_q4_prompt, reset_and_preallocate_kv_cache,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use super::lm_head::pick_next_token_masked_sampled;
+#[cfg(not(target_arch = "wasm32"))]
+use super::sampling::{Sampler, SamplingConfig};
+use super::types::{GenerateError, GenerateResult, StageTimings};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::CachedLayerGraph;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Constrained variant of [`super::generate`] for grammar-controlled decoding.
 ///
 /// Differs from unconstrained generation in two places only:
@@ -62,6 +69,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate_constrained`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate_constrained<M>(
@@ -92,6 +100,7 @@ where
     .into_result()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Streaming variant of [`generate_constrained`].
 #[allow(clippy::too_many_arguments)]
 pub fn generate_constrained_streaming<M, F>(
@@ -126,6 +135,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate_constrained_streaming`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate_constrained_streaming<M, F>(
@@ -159,6 +169,7 @@ where
     .into_result()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Streaming + sampling-aware constrained decode.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_constrained_streaming_sampled<M, F>(
@@ -339,6 +350,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate_constrained_streaming_sampled`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate_constrained_streaming_sampled<M, F>(

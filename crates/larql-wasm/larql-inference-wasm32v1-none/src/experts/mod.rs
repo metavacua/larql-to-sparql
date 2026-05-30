@@ -28,9 +28,15 @@ pub mod caller_jit;
 ))]
 pub mod loader_jit;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use caller::{ExpertMetadata, ExpertResult, OpSpec};
+#[cfg(not(target_arch = "wasm32"))]
 pub use loader::load_expert;
+#[cfg(not(target_arch = "wasm32"))]
 pub use mask::OpNameMask;
+#[cfg(not(target_arch = "wasm32"))]
 pub use parser::{parse_op_call, OpCall};
+#[cfg(not(target_arch = "wasm32"))]
 pub use registry::{ExpertHandle, ExpertRegistry, WasmInfo};
+#[cfg(not(target_arch = "wasm32"))]
 pub use session::{DispatchOutcome, DispatchSkip, Dispatcher, ExpertSession, FilteredDispatcher};

@@ -14,11 +14,6 @@
 //!
 //! All three are tokenizer-free — they return raw token IDs and probs.
 //! Decode IDs to strings on the caller side if needed.
-
-use super::predict::raw::hidden_to_raw_logits;
-use super::softmax;
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +25,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::predict::raw::hidden_to_raw_logits;
+#[cfg(not(target_arch = "wasm32"))]
+use super::softmax;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-k `(token_id, probability)` pairs at the given residual, projected
 /// through the model's final norm + lm_head. Probabilities sum to 1.0
 /// across the full vocab (top-k truncation happens after softmax, not
@@ -45,6 +50,7 @@ pub fn logit_lens_topk(weights: &ModelWeights, residual: &[f32], k: usize) -> Ve
     topk_from_probs(&probs, k)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Probability of `target_id` at the given residual. Returns 0.0 on
 /// dimension mismatch or out-of-range token id.
 pub fn track_token(weights: &ModelWeights, residual: &[f32], target_id: u32) -> f32 {
@@ -60,6 +66,7 @@ pub fn track_token(weights: &ModelWeights, residual: &[f32], target_id: u32) -> 
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Top-k per layer for a list of `(layer, residual)` pairs. Equivalent to
 /// calling [`logit_lens_topk`] in a loop, but returned in one allocation
 /// for caller convenience. Layer ordering preserved.
@@ -76,6 +83,7 @@ pub fn track_race(
 
 // ── internals ───────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn residual_to_probs(weights: &ModelWeights, residual: &[f32]) -> Option<Vec<f32>> {
     let hidden = weights.hidden_size;
     if residual.len() != hidden {
@@ -118,6 +126,7 @@ mod tests {
     use super::*;
     use crate::model::ModelWeights;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn shared_weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();

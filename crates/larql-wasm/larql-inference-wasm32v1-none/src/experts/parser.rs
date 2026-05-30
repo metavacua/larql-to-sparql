@@ -16,8 +16,6 @@
 //! `{...}` blocks, normalises punctuation, applies the Mistral patch, and
 //! returns the first block that parses as JSON and contains a string `op`
 //! field. `args` defaults to an empty object when absent.
-
-use serde_json::{Map, Value};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +27,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::{Map, Value};
+#[cfg(not(target_arch = "wasm32"))]
 /// A structured op-call extracted from model output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpCall {
@@ -36,6 +38,7 @@ pub struct OpCall {
     pub args: Value,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Extract the first valid op-call JSON object from `text`.
 ///
 /// Returns `None` if no balanced `{...}` block parses to an object with a
@@ -59,6 +62,7 @@ pub fn parse_op_call(text: &str) -> Option<OpCall> {
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn into_op_call(v: Value) -> Option<OpCall> {
     let mut obj = match v {
         Value::Object(m) => m,

@@ -1,16 +1,3 @@
-use std::sync::{RwLock};
-
-use rayon::prelude::*;
-
-use super::config::ShardConfig;
-use super::error::RemoteMoeError;
-use super::metrics;
-use super::multi_layer_wire::{MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K};
-use super::router::{rms_norm, MoeRouterWeights};
-use super::shard::{Shard, ShardTransport};
-use super::stream::{InflightMoe, ShardStream};
-use super::wire::{ExpertCallItem, ExpertResultItem};
-use larql_compute::cpu::ops::moe::quantize_x_to_q8k;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +9,24 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{RwLock};
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::config::ShardConfig;
+use super::error::RemoteMoeError;
+use super::metrics;
+use super::multi_layer_wire::{MultiLayerResult, MultiLayerTask, MultiLayerTaskQ8K};
+use super::router::{rms_norm, MoeRouterWeights};
+#[cfg(not(target_arch = "wasm32"))]
+use super::shard::{Shard, ShardTransport};
+#[cfg(not(target_arch = "wasm32"))]
+use super::stream::{InflightMoe, ShardStream};
+use super::wire::{ExpertCallItem, ExpertResultItem};
+use larql_compute::cpu::ops::moe::quantize_x_to_q8k;
 /// Per-shard call list element: (position, expert_id, residual).
 type ShardCallItem = (usize, usize, Vec<f32>);
 /// Output of `forward_layer_moe`: (output rows, optional per-expert (logit, weight)).
@@ -29,6 +34,7 @@ type LayerMoeResult = (Vec<f32>, Vec<(f32, f32)>);
 
 // ── RemoteMoeBackend ───────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Remote MoE expert backend. Thread-safe — all methods take `&self`.
 ///
 /// The shard map is stored behind an `RwLock` so `reshard()` can replace it
@@ -37,6 +43,7 @@ pub struct RemoteMoeBackend {
     pub(super) shards: Arc<RwLock<Vec<Shard>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RemoteMoeBackend {
     /// Build with no shards and no health check. Tests only — the backend
     /// will return errors on any actual dispatch attempt.
@@ -47,6 +54,7 @@ impl RemoteMoeBackend {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from a shard list. Performs a health check on each shard.
     pub fn connect(configs: Vec<ShardConfig>) -> Result<Self, RemoteMoeError> {
         let shards: Result<Vec<Shard>, _> = configs.into_iter().map(Shard::connect).collect();
@@ -55,6 +63,7 @@ impl RemoteMoeBackend {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Replace the shard map live (no model reload, no inference interruption).
     ///
     /// Reconnects to new shards, then atomically swaps the map.
@@ -65,6 +74,7 @@ impl RemoteMoeBackend {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Returns true if all shards use gRPC transport (`grpc://` URLs).
     /// When true, `open_streams` is available and `forward_moe_stream` can be used.
     pub fn has_grpc_shards(&self) -> bool {
@@ -75,6 +85,7 @@ impl RemoteMoeBackend {
                 .all(|s| matches!(s.transport, ShardTransport::Grpc(_)))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Latency-stats probe: test-call each shard with a zero-length batch and
     /// return `(url, rtt_ms)` per shard. Non-fatal — returns partial results.
     pub fn probe_latency(&self) -> Vec<(String, f64)> {
@@ -90,6 +101,7 @@ impl RemoteMoeBackend {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run one MoE layer forward pass with experts dispatched remotely.
     ///
     /// Steps:
@@ -196,6 +208,7 @@ impl RemoteMoeBackend {
         Ok(rms_norm(&out, router.post_experts_norm, eps, norm_offset))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Batch MoE forward for a full sequence of positions in one shot.
     ///
     /// Runs the router on every row of `h`, then issues **one** HTTP batch
@@ -322,6 +335,7 @@ impl RemoteMoeBackend {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open one gRPC streaming channel per shard for a decode step.
     ///
     /// Returns a `Vec<ShardStream>`, one per shard in the internal shard map.
@@ -340,6 +354,7 @@ impl RemoteMoeBackend {
         shards.iter().map(|shard| shard.open_stream()).collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run one MoE layer via the already-open per-shard streams.
     ///
     /// Eliminates the per-call connection overhead of `forward_moe` — the
@@ -359,6 +374,7 @@ impl RemoteMoeBackend {
         self.forward_moe_stream_collect(streams, inflight)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fire half of `forward_moe_stream`: route locally, push one input per
     /// shard onto its async dispatch task, and return immediately.
     ///
@@ -513,6 +529,7 @@ impl RemoteMoeBackend {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Collect half of `forward_moe_stream`: condvar-wait one partial weighted
     /// sum per shard, accumulate, and apply the post-experts RMS norm.
     ///
@@ -528,6 +545,7 @@ impl RemoteMoeBackend {
             .map(|(h2, _)| h2)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Same as [`Self::forward_moe_stream_collect`] but also returns
     /// per-shard `(wall_collect_ms, server_compute_ms)` for diagnostics.
     /// The `wall_collect_ms` is the wall-clock time the caller waited
@@ -620,6 +638,7 @@ impl RemoteMoeBackend {
         Ok((normed, per_shard))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Pre-dispatch: route ALL layers at once, fire ONE batch call per shard
     /// (parallel), return h2 per layer.
     ///

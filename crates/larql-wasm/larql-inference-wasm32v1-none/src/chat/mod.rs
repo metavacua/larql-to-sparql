@@ -44,17 +44,21 @@ pub(crate) mod fallback;
 pub(crate) mod render;
 pub(crate) mod source;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Re-export of the multi-message renderer for diagnostic CLI flags
 /// (`--system`, `--thinking`) and external callers that need richer
 /// chat shapes than the single-turn `wrap_prompt_raw` exposes.
 pub use render::render_chat_template_multi;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use larql_vindex::format::filenames::TOKENIZER_CONFIG_JSON;
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::Value;
 
 use fallback::fallback_template_for;
+#[cfg(not(target_arch = "wasm32"))]
 use source::try_hf_template;
 
 const ENV_RAW_PROMPT: &str = "LARQL_RAW_PROMPT";
@@ -82,6 +86,7 @@ pub struct ChatWrap {
     pub note: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Simple form: resolves and renders the template stored in
 /// `<vindex_dir>/…` against a single user turn. No hardcoded fallbacks.
 /// Returns raw prompt with `applied=false` on any failure.
@@ -89,6 +94,7 @@ pub fn wrap_with_vindex_template(vindex_dir: &Path, user_prompt: &str) -> ChatWr
     wrap_chat_prompt(vindex_dir, None, user_prompt)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Full form: primary path is the HF template in the vindex; secondary is
 /// a small hardcoded-template fallback keyed on a `model_hint` string
 /// (e.g. the `cfg.model` field from the vindex —
@@ -122,6 +128,7 @@ pub fn wrap_chat_prompt(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Try the hardcoded instruct-family fallback (Llama-2-chat,
 /// Mistral-Instruct). Returns `None` when the hint doesn't match or
 /// `model_hint` was `None`.
@@ -142,6 +149,7 @@ fn try_fallback(model_hint: Option<&str>, user_prompt: &str) -> Option<ChatWrap>
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Render `template_str` (Jinja2) against a single user turn. Exposed so
 /// callers that already have the template text in memory (remote API, test
 /// fixture, in-memory generation) can reuse the render machinery without
@@ -160,6 +168,7 @@ pub fn passthrough(user_prompt: &str) -> String {
     user_prompt.to_string()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// One-stop prompt rendering for `larql run`-style callers: respects
 /// `LARQL_RAW_PROMPT`, `LARQL_THINKING`, `LARQL_SYSTEM`, and injects a
 /// model-family-specific default system message when none is set.
@@ -233,6 +242,7 @@ fn default_system_prompt_for_family(family: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read the model's chat template, looking in `chat_template.jinja` first
 /// (newer convention — Gemma 4) then `tokenizer_config.json::chat_template`
 /// (older — Gemma 2/3, Llama 3). Returns None when neither is present.
@@ -292,6 +302,7 @@ mod integration_tests {
 
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn hf_template_wins_over_fallback_when_both_exist() {
         let tmp = tempfile::tempdir().unwrap();
@@ -313,6 +324,7 @@ mod integration_tests {
         assert_eq!(w.prompt, "hi");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn standalone_jinja_file_beats_tokenizer_config() {
         // When both sources are present, `chat_template.jinja` wins

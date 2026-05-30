@@ -13,14 +13,6 @@
 //!
 //! Append-only: new tokens extend the file. Old chains are frozen.
 //! Mmap'd: OS pages in/out on demand. RSS ≈ active chain only.
-
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::path::Path;
-
-use memmap2::Mmap;
-
-use super::types::TraceNode;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -32,6 +24,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::{File, OpenOptions};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use memmap2::Mmap;
+
+use super::types::TraceNode;
 const MAGIC: [u8; 4] = *b"TRAC";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 64;
@@ -68,13 +72,16 @@ impl TraceHeader {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read-only mmap'd trace store.
 pub struct TraceStore {
     mmap: Mmap,
     header: TraceHeader,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TraceStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open an existing trace file for reading.
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
@@ -196,6 +203,7 @@ impl TraceStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Writable trace store — append-only.
 pub struct TraceWriter {
     file: File,
@@ -203,7 +211,9 @@ pub struct TraceWriter {
     path: std::path::PathBuf,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TraceWriter {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new trace file.
     pub fn create(path: &Path, hidden_size: usize, n_layers: usize) -> io::Result<Self> {
         let header = TraceHeader {
@@ -231,6 +241,7 @@ impl TraceWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open an existing trace file for appending.
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
@@ -270,6 +281,7 @@ impl TraceWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Append a complete token chain (all layers) to the store.
     ///
     /// `nodes` must contain (n_layers + 1) nodes for this token, ordered by layer
@@ -312,6 +324,7 @@ impl TraceWriter {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Write a full ResidualTrace (all positions) to the store.
     pub fn write_trace(&mut self, trace: &super::types::ResidualTrace) -> io::Result<usize> {
         let n_positions = trace.tokens.len();
@@ -348,6 +361,7 @@ impl TraceWriter {
         Ok(chains.len())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Finish writing — flush and return the path.
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;
@@ -359,6 +373,7 @@ impl TraceWriter {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_chain(nodes: &[TraceNode], hidden: usize) -> io::Result<()> {
     let Some(first) = nodes.first() else {
         return Ok(());
@@ -400,6 +415,7 @@ fn validate_chain(nodes: &[TraceNode], hidden: usize) -> io::Result<()> {
 }
 
 // Need Seek for TraceWriter
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Seek;
 
 #[cfg(test)]
@@ -428,6 +444,7 @@ mod tests {
 
     // ── TraceWriter + TraceStore roundtrip ────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn create_write_read_roundtrip() {
         let path = std::env::temp_dir().join("larql_trace_test_roundtrip.trac");
@@ -462,6 +479,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn out_of_bounds_returns_none() {
         let path = std::env::temp_dir().join("larql_trace_test_bounds.trac");
@@ -480,6 +498,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn multiple_tokens_roundtrip() {
         let path = std::env::temp_dir().join("larql_trace_test_multi.trac");
@@ -506,6 +525,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn wrong_chain_length_returns_error() {
         let path = std::env::temp_dir().join("larql_trace_test_bad_len.trac");
@@ -517,6 +537,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn out_of_order_chain_returns_error() {
         let path = std::env::temp_dir().join("larql_trace_test_bad_order.trac");
@@ -532,6 +553,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn write_trace_rejects_incomplete_position_without_partial_write() {
         let path = std::env::temp_dir().join("larql_trace_test_incomplete_trace.trac");
@@ -554,6 +576,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn node_accessor_reconstructs_trace_node() {
         let path = std::env::temp_dir().join("larql_trace_test_node.trac");
@@ -575,6 +598,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_bad_magic_returns_error() {
         let path = std::env::temp_dir().join("larql_trace_test_bad_magic.trac");
@@ -586,6 +610,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_truncated_trace_returns_error() {
         let path = std::env::temp_dir().join("larql_trace_test_truncated.trac");
@@ -606,6 +631,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_file_smaller_than_header_returns_error() {
         // mmap.len() < HEADER_SIZE — early return before parsing magic.
@@ -616,6 +642,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_unsupported_version_returns_error() {
         let path = std::env::temp_dir().join("larql_trace_test_bad_version.trac");
@@ -644,6 +671,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn attn_delta_accessor_reads_correct_component() {
         // attn_delta is exercised by component-2 tests above only via
@@ -669,6 +697,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn write_trace_appends_all_positions_in_order() {
         // Drives `write_trace` happy path: collects per-position chains,
@@ -711,6 +740,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn writer_open_appends_to_existing_file() {
         // TraceWriter::open exercises the "open existing for append" path,
@@ -733,6 +763,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn writer_open_rejects_bad_magic() {
         let path = std::env::temp_dir().join("larql_trace_test_writer_open_bad_magic.trac");
@@ -742,6 +773,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn writer_open_rejects_unsupported_version() {
         let path = std::env::temp_dir().join("larql_trace_test_writer_open_bad_version.trac");
@@ -759,6 +791,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn writer_open_rejects_length_mismatch() {
         let path = std::env::temp_dir().join("larql_trace_test_writer_open_bad_len.trac");
@@ -778,6 +811,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn validate_chain_rejects_position_mismatch() {
         let path = std::env::temp_dir().join("larql_trace_test_pos_mismatch.trac");
@@ -789,6 +823,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn validate_chain_rejects_vector_size_mismatch() {
         let path = std::env::temp_dir().join("larql_trace_test_vec_size.trac");

@@ -4,13 +4,6 @@
 //! forwards work between two channels — sync mpsc on the Metal-thread
 //! side, async tokio mpsc on the gRPC side. The sync caller never calls
 //! `block_on` per-layer; it just `send`s and `recv`s.
-
-use prost::Message;
-
-use super::super::error::RemoteMoeError;
-use super::super::metrics;
-use super::super::stream::ShardStream;
-use super::{Shard, ShardTransport};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,7 +15,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use prost::Message;
+
+use super::super::error::RemoteMoeError;
+use super::super::metrics;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::stream::ShardStream;
+#[cfg(not(target_arch = "wasm32"))]
+use super::{Shard, ShardTransport};
+#[cfg(not(target_arch = "wasm32"))]
 impl Shard {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open a bidirectional gRPC stream for one decode step.
     ///
     /// Spawns a dedicated async tokio task that:

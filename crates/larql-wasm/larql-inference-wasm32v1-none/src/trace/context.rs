@@ -25,12 +25,6 @@
 //!   Vector data:           contiguous, variable per tier
 //!
 //! Mmap'd, append-only, zero-copy reads.
-
-use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-use std::path::Path;
-
-use memmap2::Mmap;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -42,6 +36,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::{File, OpenOptions};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, Seek, SeekFrom, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use memmap2::Mmap;
 const MAGIC: [u8; 4] = *b"CTXT";
 const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 128;
@@ -138,13 +142,16 @@ impl ContextEntry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read-only mmap'd context store.
 pub struct ContextStore {
     mmap: Mmap,
     header: ContextHeader,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ContextStore {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
         let mmap = unsafe { Mmap::map(&file)? };
@@ -287,6 +294,7 @@ impl ContextStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Writable context store.
 pub struct ContextWriter {
     file: File,
@@ -295,7 +303,9 @@ pub struct ContextWriter {
     max_boundaries: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ContextWriter {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new context store.
     pub fn create(
         path: &Path,
@@ -346,6 +356,7 @@ impl ContextWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Append a boundary with its vectors.
     ///
     /// `residual`: the boundary residual (always required)
@@ -447,12 +458,14 @@ impl ContextWriter {
         self.header.total_tokens as usize
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn finish(mut self) -> io::Result<std::path::PathBuf> {
         self.file.flush()?;
         Ok(self.path)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_f32_slice(file: &mut File, data: &[f32]) -> io::Result<()> {
     let bytes = unsafe { core::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };
     file.write_all(bytes)
@@ -497,6 +510,7 @@ mod tests {
 
     // ── ContextWriter + ContextStore create/open roundtrip ────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn create_open_basic_roundtrip() {
         let path = std::env::temp_dir().join("larql_context_test_basic.ctxt");
@@ -533,6 +547,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fresh_path(name: &str) -> std::path::PathBuf {
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -542,6 +557,7 @@ mod tests {
         std::env::temp_dir().join(format!("larql_ctx_{name}_{pid}_{nanos}.ctxt"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn ffn_deltas_tier_round_trips_per_critical_layer() {
         let path = fresh_path("ffn_deltas");
@@ -574,6 +590,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn full_tier_round_trips_attn_and_ffn_deltas() {
         let path = fresh_path("full");
@@ -602,6 +619,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn token_range_and_boundary_for_token() {
         let path = fresh_path("ranges");
@@ -626,6 +644,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn n_boundaries_and_metadata_accessors() {
         let path = fresh_path("meta");
@@ -659,6 +678,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn out_of_range_boundary_returns_none() {
         let path = fresh_path("oob");
@@ -673,6 +693,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_rejects_truncated_file() {
         let path = fresh_path("truncated");
@@ -684,6 +705,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_rejects_bad_magic() {
         let path = fresh_path("bad_magic");

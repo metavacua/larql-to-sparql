@@ -1,8 +1,3 @@
-use ndarray::Array2;
-
-use super::{LayerGraph, LayerOutput};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +9,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{LayerGraph, LayerOutput};
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 // ── Template detection ──
 
 /// Known template patterns for routing.
@@ -69,6 +72,7 @@ pub struct TemplateUniverse {
 }
 
 impl TemplateUniverse {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build by running dense forward passes for a template with multiple entities.
     /// `template`: format string with `{}` for entity slot.
     /// `entities`: list of entities to test.
@@ -139,6 +143,7 @@ impl TemplateUniverse {
         self.features.values().map(|v| v.len()).sum()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Print a summary.
     pub fn summary(&self) {
         let mut layers: Vec<usize> = self.features.keys().copied().collect();
@@ -153,6 +158,7 @@ impl TemplateUniverse {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Guided walk layer graph: dense attention + walk FFN restricted to
 /// the template's per-layer feature universe.
 ///
@@ -164,7 +170,9 @@ pub struct GuidedWalkLayerGraph<'a> {
     pub index: &'a dyn larql_vindex::GateIndex,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for GuidedWalkLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         weights: &ModelWeights,
@@ -190,6 +198,7 @@ impl<'a> LayerGraph for GuidedWalkLayerGraph<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Guided walk FFN: pre-FFN norm → gate scores for universe → GEGLU → accumulate.
 ///
 /// Gate: scores all features (one gate_scores_batch call), but only processes
@@ -305,13 +314,16 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::{make_test_tokenizer, make_test_vindex, make_test_weights};
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

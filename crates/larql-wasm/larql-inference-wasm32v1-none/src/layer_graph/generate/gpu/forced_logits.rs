@@ -6,11 +6,6 @@
 //! corpus token; decode returns the arithmetic-decoded token. Reuses the
 //! same fused prefill and `decode_token` machinery as generation, so each
 //! step extends the KV cache instead of recomputing the full prefix.
-
-use crate::layer_graph::generate::cpu::backend_supports_fused_q4_pipeline;
-use crate::layer_graph::generate::gpu_setup::{prefill_q4_prompt, reset_and_preallocate_kv_cache};
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +17,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::cpu::backend_supports_fused_q4_pipeline;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::gpu_setup::{prefill_q4_prompt, reset_and_preallocate_kv_cache};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
 /// Timings and forced tokens from [`stream_forced_full_logits`].
 #[derive(Debug, Clone, Default)]
 pub struct ForcedLogitsResult {
@@ -34,6 +37,7 @@ pub struct ForcedLogitsResult {
     pub decode_ms: Vec<f64>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Stream full-vocabulary next-token logits while forcing known tokens
 /// through the Q4K/Metal KV-cache path.
 #[allow(clippy::too_many_arguments)]
@@ -147,6 +151,7 @@ where
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn final_norm_row(
     weights: &ModelWeights,
     h_vec: &[f32],
@@ -168,6 +173,7 @@ fn final_norm_row(
     Ok(h_final.row(0).to_owned())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn full_logits_from_vindex(
     index: &larql_vindex::VectorIndex,
     weights: &ModelWeights,
@@ -308,6 +314,7 @@ mod tests {
         assert_eq!(r.len(), 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn full_logits_returns_err_when_lm_head_knn_yields_nothing() {
         // The synthetic vindex has no lm_head data loaded, so

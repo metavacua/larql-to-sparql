@@ -22,13 +22,6 @@
 //! so unit tests can substitute a mock without instantiating the WASM runtime.
 //! The trait surface is intentionally minimal — `ops()` + `call()` — to keep
 //! the contract narrow and easy to satisfy.
-
-use serde_json::Value;
-
-use crate::experts::caller::{ExpertResult, OpSpec};
-use crate::experts::parser::{parse_op_call, OpCall};
-use crate::experts::registry::ExpertRegistry;
-use crate::prompt::ChatTemplate;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -40,22 +33,37 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::experts::caller::{ExpertResult, OpSpec};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::experts::parser::{parse_op_call, OpCall};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::experts::registry::ExpertRegistry;
+use crate::prompt::ChatTemplate;
 /// Minimal contract a session needs from its op-dispatch backend.
 ///
 /// Implemented for [`ExpertRegistry`] so production code uses real WASM
 /// experts; tests can implement it on a struct with hard-coded responses
 /// to avoid loading WASM.
 pub trait Dispatcher {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Every (op, args-schema) pair this dispatcher can handle. Used to
     /// render prompts that tell the model the exact argument keys per op.
     fn op_specs(&self) -> Vec<OpSpec>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Invoke `op` with `args`. Returns `None` if the op is unknown to the
     /// dispatcher OR the underlying expert declined the call.
     fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Dispatcher for ExpertRegistry {
+    #[cfg(not(target_arch = "wasm32"))]
     fn op_specs(&self) -> Vec<OpSpec> {
         ExpertRegistry::op_specs(self)
             .into_iter()
@@ -63,6 +71,7 @@ impl Dispatcher for ExpertRegistry {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
         ExpertRegistry::call(self, op, args)
     }
@@ -72,10 +81,12 @@ impl Dispatcher for ExpertRegistry {
 /// concrete dispatchers (raw vs. filtered) at runtime without duplicating
 /// the surrounding generation code.
 impl Dispatcher for Box<dyn Dispatcher> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn op_specs(&self) -> Vec<OpSpec> {
         (**self).op_specs()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
         (**self).call(op, args)
     }
@@ -112,6 +123,7 @@ impl<D: Dispatcher> FilteredDispatcher<D> {
 }
 
 impl<D: Dispatcher> Dispatcher for FilteredDispatcher<D> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn op_specs(&self) -> Vec<OpSpec> {
         self.inner
             .op_specs()
@@ -120,6 +132,7 @@ impl<D: Dispatcher> Dispatcher for FilteredDispatcher<D> {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
         if !self.allowed.contains(op) {
             return None;
@@ -128,6 +141,7 @@ impl<D: Dispatcher> Dispatcher for FilteredDispatcher<D> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Result of a successful expert dispatch.
 #[derive(Debug, Clone)]
 pub struct DispatchOutcome {
@@ -137,6 +151,7 @@ pub struct DispatchOutcome {
     pub result: ExpertResult,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Reasons a dispatch attempt produced no [`DispatchOutcome`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchSkip {
@@ -148,6 +163,7 @@ pub enum DispatchSkip {
     ExpertDeclined { op: String, args: Value },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// High-level session orchestrating prompt construction + dispatch over a
 /// [`Dispatcher`] (defaults to [`ExpertRegistry`]).
 pub struct ExpertSession<D = ExpertRegistry>
@@ -157,6 +173,7 @@ where
     registry: D,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<D: Dispatcher> ExpertSession<D> {
     /// Wrap a dispatcher. The session takes ownership; use
     /// [`Self::registry_mut`] for low-level access.
@@ -223,6 +240,7 @@ impl<D: Dispatcher> ExpertSession<D> {
         template.wrap(&combined)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Parse + dispatch a single op-call from `model_output`.
     ///
     /// Returns `Ok(outcome)` when an op-call was extracted and the registry
@@ -249,8 +267,10 @@ impl<D: Dispatcher> ExpertSession<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::path::PathBuf;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn wasm_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../larql-experts/target/wasm32-wasip1/release")

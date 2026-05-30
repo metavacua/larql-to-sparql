@@ -4,10 +4,6 @@
 //! compiled with the Rust `wasm32-wasip1` target can be loaded and called.
 //! Provides real fd_write (stdout/stderr pass-through) and correct environ/args
 //! initialization stubs; everything else returns ERRNO_NOSYS or ERRNO_BADF.
-
-use wasmi::{Caller, Linker};
-
-use super::loader::ExpertStore;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +15,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use wasmi::{Caller, Linker};
+
+use super::loader::ExpertStore;
 const WASI_MODULE: &str = "wasi_snapshot_preview1";
 const WASM_MEMORY: &str = "memory";
 
@@ -28,6 +29,7 @@ const ERRNO_BADF: i32 = 8;
 const ERRNO_FAULT: i32 = 21;
 const ERRNO_NOSYS: i32 = 52;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Register all WASI preview1 host functions into `linker`.
 pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
     // ── fd_write ──────────────────────────────────────────────────────────────
@@ -286,6 +288,7 @@ pub fn add_to_linker(linker: &mut Linker<ExpertStore>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write two u32 values to the guest memory at `ptr_a` and `ptr_b`.
 fn write_u32_pair(
     caller: &mut Caller<ExpertStore>,

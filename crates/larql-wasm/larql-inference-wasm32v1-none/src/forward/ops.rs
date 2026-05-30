@@ -1,9 +1,4 @@
 //! Small math utilities shared by `forward/` and `attention/`.
-
-use crate::model::ModelWeights;
-use crate::residual::rms_norm;
-use larql_models::NormType;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +10,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::residual::rms_norm;
+use larql_models::NormType;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply the appropriate norm (RMSNorm or LayerNorm) based on architecture.
 pub fn apply_norm(
     weights: &ModelWeights,
@@ -35,6 +39,7 @@ pub fn apply_norm(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute x @ w.T via BLAS.
 pub fn dot_proj(
     x: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
@@ -54,6 +59,7 @@ pub fn softmax(logits: &[f32]) -> Vec<f32> {
     exps.iter().map(|&x| x / sum).collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Add a 1D bias vector to each row of a 2D matrix.
 pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
     let cols = x.shape()[1];
@@ -69,9 +75,11 @@ pub fn add_bias(x: &mut Array2<f32>, bias: &[f32]) {
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     // ── dot_proj ──────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dot_proj_shape() {
         let x = Array2::<f32>::from_elem((3, 4), 1.0);
@@ -80,6 +88,7 @@ mod tests {
         assert_eq!(out.shape(), &[3, 5]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dot_proj_identity_weight() {
         // x @ I^T = x when w is identity
@@ -93,6 +102,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dot_proj_values_correct() {
         // [1,2] @ [[3],[4]]^T = [1*3+2*4] = [11]
@@ -105,6 +115,7 @@ mod tests {
 
     // ── add_bias ──────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn add_bias_all_rows_updated() {
         let mut x = Array2::from_elem((3, 4), 1.0f32);
@@ -120,6 +131,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn add_bias_shorter_bias_does_not_overflow() {
         let mut x = Array2::from_elem((2, 4), 0.0f32);
@@ -133,6 +145,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn add_bias_zero_bias_is_noop() {
         let orig = Array2::from_elem((2, 3), 5.0f32);
@@ -143,6 +156,7 @@ mod tests {
 
     // ── apply_norm ────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_norm_output_shape_matches_input() {
         let weights = make_test_weights();
@@ -152,6 +166,7 @@ mod tests {
         assert_eq!(out.shape(), x.shape());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_norm_output_is_finite() {
         let weights = make_test_weights();
@@ -164,6 +179,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn apply_norm_with_offset_differs_from_without() {
         let weights = make_test_weights();

@@ -18,14 +18,6 @@
 //! `bos_token` / `eos_token` context values that templates reference, so
 //! we always load it when present — even when the template itself comes
 //! from the standalone `.jinja` file.
-
-use std::path::Path;
-
-use larql_vindex::format::filenames::TOKENIZER_CONFIG_JSON;
-use serde_json::Value;
-
-use super::render::render_chat_template;
-use super::ChatWrap;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -37,6 +29,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_vindex::format::filenames::TOKENIZER_CONFIG_JSON;
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::render::render_chat_template;
+use super::ChatWrap;
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve and render the HF-published template from the vindex.
 ///
 /// Returns:
@@ -76,6 +80,7 @@ pub(super) fn try_hf_template(vindex_dir: &Path, user_prompt: &str) -> Result<Ch
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Shared tail of both template-source branches: render the Jinja, tag the
 /// `ChatWrap` with which source was used, upgrade render errors to `Err` so
 /// the caller can still try hardcoded fallbacks.
@@ -102,6 +107,7 @@ fn finish_render(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read `tokenizer_config.json` into a `serde_json::Value`. Returns an
 /// empty object on any failure (missing file, parse error) so downstream
 /// rendering can continue without special-token context. Errors here are
@@ -118,6 +124,7 @@ pub(super) fn load_tokenizer_config(vindex_dir: &Path) -> Value {
         .unwrap_or_else(|| Value::Object(Default::default()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Pull a `chat_template` value out of a parsed `tokenizer_config.json`.
 /// HF ships it either as a single string, or (for models with multiple
 /// templates like Llama-3) an array of `{name, template}` entries. We
@@ -191,6 +198,7 @@ mod tests {
         assert!(w.note.contains("no chat_template.jinja"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn try_hf_template_reads_standalone_jinja_file() {
         let tmp = tempfile::tempdir().unwrap();
@@ -205,6 +213,7 @@ mod tests {
         assert!(w.note.contains("chat_template.jinja"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn try_hf_template_reads_tokenizer_config_fallback() {
         // No standalone .jinja → should read from tokenizer_config.json.
@@ -220,6 +229,7 @@ mod tests {
         assert!(w.note.contains("tokenizer_config.json"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn render_error_produces_err_wrap() {
         let tmp = tempfile::tempdir().unwrap();

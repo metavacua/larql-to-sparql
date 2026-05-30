@@ -5,11 +5,15 @@
 //! Peak memory is one layer's worth of dequantised f32 matrices;
 //! cheap on 4B (120 MB), tight on 31B (1.8 GB).
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::WalkFfn;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn walk_ffn_q4k_dequant(
         &self,
         layer: usize,

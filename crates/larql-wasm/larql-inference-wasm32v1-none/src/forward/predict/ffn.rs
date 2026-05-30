@@ -1,13 +1,4 @@
 //! FFN-backend forward passes (custom backend, router, strategy).
-
-use super::super::embed::embed_tokens;
-use super::super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
-use super::super::ple::precompute_per_layer_inputs;
-use super::dense::logits_to_predictions;
-use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention};
-use crate::attention::SharedKV;
-use crate::ffn::{FfnBackend, LayerFfnRouter};
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +10,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::embed::embed_tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::layer::{run_attention, run_layer_with_capture, run_layer_with_ffn};
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use super::dense::logits_to_predictions;
+use super::types::{LayerAttentionCapture, LayerMode, PredictResult, PredictResultWithAttention};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+use crate::ffn::{FfnBackend, LayerFfnRouter};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass with a custom FFN backend for all layers.
 pub fn predict_with_ffn(
     weights: &ModelWeights,
@@ -61,6 +68,7 @@ pub fn predict_with_ffn(
     logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass with a custom FFN backend, capturing attention weights
 /// and per-layer residuals for logit lens.
 pub fn predict_with_ffn_attention(
@@ -107,6 +115,7 @@ pub fn predict_with_ffn_attention(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass with per-layer FFN backend selection.
 pub fn predict_with_router(
     weights: &ModelWeights,
@@ -130,6 +139,7 @@ pub fn predict_with_router(
     logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a forward pass with per-layer strategy: full compute or scalar gain bypass.
 pub fn predict_with_strategy(
     weights: &ModelWeights,

@@ -4,7 +4,9 @@
 //! without loading a real model.
 
 use crate::ffn::*;
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// SiLU-gated FFN for testing (no architecture dispatch needed for unit tests).
 fn silu_ffn_forward(
     x: &Array2<f32>,
@@ -17,6 +19,7 @@ fn silu_ffn_forward(
     silu_gate_up(&gate, &up).dot(&w_down.t())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn silu_ffn_forward_with_activation(
     x: &Array2<f32>,
     w_gate: &Array2<f32>,
@@ -30,6 +33,7 @@ fn silu_ffn_forward_with_activation(
     (out, activation)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create small synthetic weights for testing.
 /// hidden=4, intermediate=8
 fn make_weights() -> (Array2<f32>, Array2<f32>, Array2<f32>) {
@@ -57,6 +61,7 @@ fn make_weights() -> (Array2<f32>, Array2<f32>, Array2<f32>) {
     (gate, up, down)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn make_input() -> Array2<f32> {
     Array2::from_shape_vec((1, 4), vec![1.0, 0.5, -0.3, 0.8]).unwrap()
 }
@@ -68,6 +73,7 @@ fn test_sigmoid() {
     assert!(sigmoid(-10.0) < 0.01);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn test_silu_gate_up() {
     let gate = Array2::from_shape_vec((1, 3), vec![1.0, -1.0, 0.0]).unwrap();
@@ -139,6 +145,7 @@ fn test_silu_forward_and_with_activation_match() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn test_ffn_multi_position() {
     let (gate, up, down) = make_weights();

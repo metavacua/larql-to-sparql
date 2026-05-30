@@ -1,6 +1,4 @@
 //! Layer normalization and residual stream operations.
-
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -12,10 +10,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Default norm epsilon. Most models use 1e-5 or 1e-6.
 /// Callers should prefer passing `arch.norm_eps()` explicitly.
 pub const DEFAULT_EPS: f64 = 1e-6;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// RMS norm with configurable weight offset and epsilon.
 /// offset=1.0 for Gemma 2/3 (weight = 1 + learned), offset=0.0 for most layers.
 /// Uses f64 accumulation for the sum-of-squares to avoid order-dependent rounding.
@@ -23,6 +25,7 @@ pub fn rms_norm(x: &Array2<f32>, weight: Option<&Vec<f32>>, offset: f32) -> Arra
     rms_norm_eps(x, weight, offset, DEFAULT_EPS)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// RMS norm with explicit epsilon.
 pub fn rms_norm_eps(
     x: &Array2<f32>,
@@ -48,6 +51,7 @@ pub fn rms_norm_eps(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// LayerNorm: (x - mean) / std * weight + bias.
 /// Uses f64 accumulation for mean/variance.
 pub fn layer_norm(
@@ -58,6 +62,7 @@ pub fn layer_norm(
     layer_norm_eps(x, weight, bias, DEFAULT_EPS)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// LayerNorm with explicit epsilon.
 pub fn layer_norm_eps(
     x: &Array2<f32>,
@@ -91,12 +96,14 @@ pub fn layer_norm_eps(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-head RMS norm without learned weights (parameter-free normalization).
 /// Used for V-norm in Gemma 4: just normalizes, no scaling.
 pub fn rms_norm_heads_no_weight(x: &Array2<f32>, num_heads: usize, head_dim: usize) -> Array2<f32> {
     rms_norm_heads_no_weight_eps(x, num_heads, head_dim, DEFAULT_EPS)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-head parameter-free RMS norm with explicit epsilon.
 pub fn rms_norm_heads_no_weight_eps(
     x: &Array2<f32>,
@@ -124,6 +131,7 @@ pub fn rms_norm_heads_no_weight_eps(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-head RMS norm for Q/K projections with configurable weight offset.
 /// Uses f64 accumulation for the sum-of-squares.
 pub fn rms_norm_heads(
@@ -136,6 +144,7 @@ pub fn rms_norm_heads(
     rms_norm_heads_eps(x, weight, num_heads, head_dim, offset, DEFAULT_EPS)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-head RMS norm with explicit epsilon.
 pub fn rms_norm_heads_eps(
     x: &Array2<f32>,
@@ -170,6 +179,7 @@ mod tests {
     use super::*;
     // ── rms_norm ──────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_shape_preserved() {
         let x = Array2::from_shape_vec((3, 4), vec![1.0f32; 12]).unwrap();
@@ -177,6 +187,7 @@ mod tests {
         assert_eq!(out.shape(), x.shape());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_output_is_finite() {
         let x = Array2::from_shape_vec((2, 8), (0..16).map(|i| i as f32 * 0.1).collect()).unwrap();
@@ -187,6 +198,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_with_ones_weight_and_offset_one() {
         // weight=ones, offset=1.0 → Gemma-style: weight = 1.0 + learned (learned=0 here)
@@ -203,6 +215,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_zero_row_is_finite() {
         // Zero input → norm = 0 → eps prevents div-by-zero
@@ -213,6 +226,7 @@ mod tests {
 
     // ── layer_norm ────────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn layer_norm_shape_and_finite() {
         let x = Array2::from_shape_vec((2, 4), (0..8).map(|i| i as f32).collect()).unwrap();
@@ -223,6 +237,7 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn layer_norm_zero_mean_unit_var() {
         let x = Array2::from_shape_vec((1, 8), (0..8).map(|i| i as f32).collect()).unwrap();
@@ -237,6 +252,7 @@ mod tests {
 
     // ── rms_norm_heads ────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_heads_no_weight_shape() {
         // [seq, num_heads * head_dim]
@@ -246,6 +262,7 @@ mod tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_heads_normalises_each_head_independently() {
         // Two heads with very different magnitudes → both normalised
@@ -267,6 +284,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn rms_norm_heads_with_weight_scales() {
         let x = Array2::from_shape_vec((1, 4), vec![1.0, 2.0, 3.0, 4.0]).unwrap();

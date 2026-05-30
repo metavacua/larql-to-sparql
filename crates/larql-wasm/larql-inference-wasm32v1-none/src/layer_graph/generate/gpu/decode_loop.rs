@@ -5,16 +5,6 @@
 //! Each step: embed → GPU forward → final norm → lm_head → sample → emit.
 //! Profile timings (`LARQL_PROFILE_DECODE`/`LARQL_PROFILE_SPLIT`) are
 //! accumulated here and returned via [`DecodeLoopOutcome`].
-
-use super::sampling_step::sample_and_emit;
-use crate::layer_graph::generate::detok::Detokenizer;
-use crate::layer_graph::generate::eos::EosConfig;
-use crate::layer_graph::generate::lm_head::lm_head_topk_with_policy;
-use crate::layer_graph::generate::policy::GenerationRuntimeConfig;
-use crate::layer_graph::generate::sampling::Sampler;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
-use larql_compute::FullPipelineLayer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +16,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::sampling_step::sample_and_emit;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::detok::Detokenizer;
+use crate::layer_graph::generate::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::lm_head::lm_head_topk_with_policy;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::policy::GenerationRuntimeConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::sampling::Sampler;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+use larql_compute::FullPipelineLayer;
 /// Aggregated output of the decode-loop phase.
 pub(super) struct DecodeLoopOutcome {
     /// `(text, prob)` per generated token (excluding the first, which the
@@ -45,6 +51,7 @@ pub(super) struct DecodeLoopOutcome {
 /// Run the decode loop for steps 1..max_tokens. The caller must already
 /// have produced the first token from the prefill output and seeded
 /// `generated_ids` / `current_token_id` accordingly.
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(
     not(all(feature = "metal", target_os = "macos")),
     allow(unused_variables)
@@ -242,6 +249,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Dispatch one decode step: pick `decode_token_split_profile`,
 /// `decode_token_q4k_moe`, or plain `decode_token` based on profiling
 /// flag and per-layer FFN format.
@@ -278,6 +286,7 @@ fn run_one_decode_step(
     backend.decode_token(layers, x_dec, hidden, intermediate)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn log_step_diagnostic(step: usize, h_out: Option<&[f32]>) {
     match h_out {
         Some(h) => {
@@ -296,6 +305,7 @@ fn log_step_diagnostic(step: usize, h_out: Option<&[f32]>) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn log_h_1d_diagnostic(step: usize, h_1d: &ndarray::Array1<f32>, hits_len: usize) {
     let h_nan = h_1d.iter().filter(|v| v.is_nan()).count();
     let h_inf = h_1d.iter().filter(|v| v.is_infinite()).count();

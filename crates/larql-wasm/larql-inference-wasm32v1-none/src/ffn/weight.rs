@@ -1,13 +1,19 @@
 //! Dense FFN backend — full matrix multiply, architecture-correct.
 //! This is the ground truth: identical to model inference.
 
+#[cfg(not(target_arch = "wasm32"))]
 use larql_compute::{dot_proj_gpu, ComputeBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::{gelu_tanh, gelu_tanh_gate_up, sigmoid, silu_gate_up, FfnBackend};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::forward::add_bias;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Dense FFN: follows the model architecture exactly (CPU BLAS).
 /// Gated: activation(x @ gate.T) * (x @ up.T) @ down.T + bias
 /// Non-gated: activation(x @ up.T + bias) @ down.T + bias
@@ -15,11 +21,14 @@ pub struct WeightFfn<'a> {
     pub weights: &'a ModelWeights,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> FfnBackend for WeightFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         dense_ffn_forward(self.weights, layer, x).0
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         dense_ffn_forward(self.weights, layer, x)
     }
@@ -29,6 +38,7 @@ impl<'a> FfnBackend for WeightFfn<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Backend-dispatched dense FFN. Matmuls route through `ComputeBackend` when
 /// `backend` is `Some` — useful for prefill on Metal where gate/up/down
 /// projections are the dominant cost.
@@ -37,11 +47,14 @@ pub struct BackendFfn<'a, 'b> {
     pub backend: &'b dyn ComputeBackend,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a, 'b> FfnBackend for BackendFfn<'a, 'b> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         dense_ffn_forward_backend(self.weights, layer, x, Some(self.backend)).0
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         dense_ffn_forward_backend(self.weights, layer, x, Some(self.backend))
     }
@@ -51,6 +64,7 @@ impl<'a, 'b> FfnBackend for BackendFfn<'a, 'b> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Architecture-correct dense FFN — CPU BLAS path.
 pub fn dense_ffn_forward(
     weights: &ModelWeights,
@@ -60,6 +74,7 @@ pub fn dense_ffn_forward(
     dense_ffn_forward_backend(weights, layer, x, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Architecture-correct dense FFN with optional backend dispatch.
 /// `backend = None` → plain ndarray BLAS (same as `dense_ffn_forward`).
 /// `backend = Some(be)` → gate/up/down matmuls through `be.matmul_transb`.
@@ -125,8 +140,10 @@ pub fn dense_ffn_forward_backend(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn x(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),
@@ -271,6 +288,7 @@ mod tests {
         assert_eq!(act.shape(), &[1, weights.intermediate_size]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn dense_ffn_zero_input_produces_finite_output() {
         // Activation at x=0 is well-defined (silu(0) = 0); output must be

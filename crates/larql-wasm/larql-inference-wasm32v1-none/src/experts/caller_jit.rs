@@ -27,6 +27,7 @@ use larql_wasm_math::FloatExt as _;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use wasmtime::{Instance, Memory, Store, TypedFunc};
 
 use super::loader_jit::ExpertStore;

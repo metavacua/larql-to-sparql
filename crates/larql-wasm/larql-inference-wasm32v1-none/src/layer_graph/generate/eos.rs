@@ -9,10 +9,6 @@
 //! (Gemma 4 ran to `--max-tokens` because `<end_of_turn>` was missing);
 //! `vindex::is_end_of_turn` had a longer list; `forward::kv_generate` had
 //! a third superset including Llama-3 markers.
-
-use std::path::Path;
-
-pub use larql_vindex::format::filenames::GENERATION_CONFIG_JSON as GENERATION_CONFIG_FILENAME;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -24,6 +20,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+pub use larql_vindex::format::filenames::GENERATION_CONFIG_JSON as GENERATION_CONFIG_FILENAME;
 /// Token strings that always terminate generation across model families.
 ///
 /// Built-in fallback when `generation_config.json` is missing or doesn't
@@ -80,6 +81,7 @@ impl EosConfig {
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from a parsed `generation_config.json` value, layered on top
     /// of [`Self::builtin`]. Both `eos_token_id: 1` and `eos_token_id: [1, 2]`
     /// shapes are handled.
@@ -110,6 +112,7 @@ impl EosConfig {
         cfg
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: read `<vindex_dir>/generation_config.json` and apply
     /// it. Missing file falls back to [`Self::builtin`].
     pub fn from_vindex_dir(vindex_dir: &Path) -> Self {
@@ -140,6 +143,7 @@ impl EosConfig {
         self.stop_strings.iter().any(|s| s == trimmed)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Same as [`Self::is_eos`] but falls back to a `skip_special=false`
     /// decode of `id` when `decoded` is empty.
     ///
@@ -270,6 +274,7 @@ mod tests {
         assert!(cfg.is_eos(0, "<eos>"));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn tokenizer_with_end_of_turn() -> tokenizers::Tokenizer {
         // Word-level tokenizer with `<end_of_turn>` registered as an
         // `added_token` flagged `special: true` — mirrors what HF
@@ -331,6 +336,7 @@ mod tests {
         assert!(!cfg.is_eos_with_tokenizer(1, "hi", &tok));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_vindex_dir_reads_file() {
         let tmp = tempfile::tempdir().unwrap();

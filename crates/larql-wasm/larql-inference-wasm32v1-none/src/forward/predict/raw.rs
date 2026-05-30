@@ -1,15 +1,6 @@
 //! Raw-logits forward passes used by target-delta optimisation and Apollo.
 
 use core::ops::Range;
-
-use super::super::embed::embed_tokens;
-use super::super::layer::run_layer_with_ffn;
-use super::super::ple::precompute_per_layer_inputs;
-use super::super::{apply_norm, dot_proj};
-use crate::attention::SharedKV;
-use crate::ffn::WeightFfn;
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +12,24 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::embed::embed_tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::layer::run_layer_with_ffn;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::{apply_norm, dot_proj};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::WeightFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// Return type for [`forward_raw_logits`]. `h_pre_norm` is the residual
 /// at the last transformer block's output (pre-final-norm), `h_final`
 /// is after final-norm, and `logits` are the raw logits at the final
@@ -31,6 +40,7 @@ pub struct RawForward {
     pub logits: ndarray::Array1<f32>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Apply the model's final logits transform: divide by `logits_scaling`
 /// then apply the optional `final_logit_softcapping` tanh.
 fn apply_logits_transform(weights: &ModelWeights, raw_row: &[f32]) -> ndarray::Array1<f32> {
@@ -48,6 +58,7 @@ fn apply_logits_transform(weights: &ModelWeights, raw_row: &[f32]) -> ndarray::A
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Project a single hidden state row to raw logits (pre-softmax, pre-temperature).
 ///
 /// Used by constrained generation: the caller masks the returned vector (e.g. sets
@@ -64,6 +75,7 @@ pub fn hidden_to_raw_logits(weights: &ModelWeights, h_single: &Array2<f32>) -> V
     apply_logits_transform(weights, logits_raw.row(0).as_slice().unwrap()).to_vec()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Raw-logits forward pass used by target-delta optimisation.
 ///
 /// Returns (pre-final-norm residual, final-norm residual, logits) at
@@ -80,6 +92,7 @@ pub fn forward_raw_logits(
     forward_raw_logits_with_prefix(weights, token_ids, None, perturb)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Forward pass with an optional `initial_residual` prepended as a virtual
 /// position-0 token before layer 0.
 ///
@@ -113,6 +126,7 @@ pub fn forward_raw_logits_with_prefix(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Forward pass starting at `from_layer` using a pre-computed boundary
 /// residual as position-0.
 ///
@@ -139,6 +153,7 @@ pub fn forward_from_layer(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Shared implementation. Runs `layer_range` of the transformer with an
 /// optional position-0 residual prefix, perturbs the last row at the
 /// requested target layer, and projects the last position to logits.

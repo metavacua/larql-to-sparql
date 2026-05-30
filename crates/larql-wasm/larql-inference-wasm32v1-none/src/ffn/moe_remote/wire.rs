@@ -168,16 +168,19 @@ pub fn decode_layer_batch_response(bytes: &[u8]) -> Option<Vec<f32>> {
 // ── f16 wire helpers ──────────────────────────────────────────────────────────
 // IEEE-754 binary16 conversion via the `half` crate (already a workspace dep).
 
+#[cfg(not(target_arch = "wasm32"))]
 #[inline(always)]
 pub(super) fn f32_to_f16_bits(v: f32) -> u16 {
     half::f16::from_f32(v).to_bits()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[inline(always)]
 pub(super) fn f16_bits_to_f32(bits: u16) -> f32 {
     half::f16::from_bits(bits).to_f32()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Encode a layer-batch request with f16 residual.  Same shape as the f32
 /// version but residual bytes are 2 per element (vs 4).  Header layout
 /// `[layer u32][hidden u32][K u32]` is unchanged so the server can size
@@ -208,6 +211,7 @@ pub fn encode_layer_batch_request_f16(
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode an f16 layer-batch request.  Reconstructs `residual` to f32 on
 /// the server before passing into `run_experts_cpu_batch`.
 pub fn decode_layer_batch_request_f16(bytes: &[u8]) -> Option<DecodedLayerBatchRequest> {
@@ -241,6 +245,7 @@ pub fn decode_layer_batch_request_f16(bytes: &[u8]) -> Option<DecodedLayerBatchR
     Some((layer, residual, expert_ids, expert_weights))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Encode the f16 layer-batch response (weighted-sum vector packed as f16).
 pub fn encode_layer_batch_response_f16(weighted_sum: &[f32], latency_ms: f32) -> Vec<u8> {
     let hidden = weighted_sum.len();
@@ -253,6 +258,7 @@ pub fn encode_layer_batch_response_f16(weighted_sum: &[f32], latency_ms: f32) ->
     buf
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode the f16 layer-batch response back to f32 for client-side
 /// accumulation.
 pub fn decode_layer_batch_response_f16(bytes: &[u8]) -> Option<Vec<f32>> {

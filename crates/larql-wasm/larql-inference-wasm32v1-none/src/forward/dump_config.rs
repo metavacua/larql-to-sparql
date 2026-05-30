@@ -44,8 +44,6 @@
 //! *whether* to dump, not what to name the file. The consumer-side prefix
 //! [`cpu_stage_prefix`] therefore only finds files when `layer == 0`. Any
 //! future fix should change both sides together.
-
-use std::sync::OnceLock;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -57,6 +55,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 // ── Env var names ──────────────────────────────────────────────────────────
 
 /// `LARQL_CPU_DUMP_LAYERS=<dir>` — read by [`DumpConfig`].
@@ -147,6 +148,7 @@ pub struct DumpConfig {
 }
 
 impl DumpConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Read the three env vars and assemble a `DumpConfig`. Public so test
     /// fixtures can build one without touching the process env.
     pub fn from_env() -> Self {
@@ -162,6 +164,7 @@ impl DumpConfig {
 
     /// Process-wide singleton. First caller pays the env-read cost; every
     /// subsequent caller borrows.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get() -> &'static Self {
         static CFG: OnceLock<DumpConfig> = OnceLock::new();
         CFG.get_or_init(Self::from_env)

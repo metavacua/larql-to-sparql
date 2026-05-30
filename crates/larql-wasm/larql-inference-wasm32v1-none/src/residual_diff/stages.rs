@@ -36,19 +36,6 @@
 //! conversion would silently compare against the wrong file the
 //! moment a backend grows or trims a stage; the explicit pair list
 //! makes the intent visible at the test site.
-
-use std::path::Path;
-
-use larql_compute::prelude::*;
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-
-use super::compare::{LayerStat, ParityThreshold};
-use crate::forward::dump_config::{
-    cpu_stage_prefix, decode_layer_prefix, metal_layer_prefix, ENV_CPU_STAGE_DUMP,
-    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS, ENV_STAGE_DUMP_LAYER,
-};
-use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -60,6 +47,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+
+use super::compare::{LayerStat, ParityThreshold};
+use crate::forward::dump_config::{
+    cpu_stage_prefix, decode_layer_prefix, metal_layer_prefix, ENV_CPU_STAGE_DUMP,
+    ENV_DECODE_DUMP_LAYERS, ENV_METAL_DUMP_LAYERS, ENV_STAGE_DUMP_LAYER,
+};
+use crate::layer_graph::pipeline_layer::DEFAULT_GPU_KV_CACHE_MAX_SEQ;
 
 /// In-memory representation of one backend's per-stage dump for one
 /// layer. Stage names are exactly the suffixes the producer wrote
@@ -132,6 +135,7 @@ impl StageCapture {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Drive a CPU prefill with `LARQL_CPU_STAGE_DUMP` + `LARQL_STAGE_DUMP_LAYER`
     /// active for `layer`, then collect every `cpu_L<layer>_<stage>.f32` it
     /// wrote. Stages produced by the CPU path:
@@ -163,6 +167,7 @@ impl StageCapture {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Drive Metal prefill with `LARQL_METAL_DUMP_LAYERS` +
     /// `LARQL_STAGE_DUMP_LAYER`. Stages produced by the Metal-prefill
     /// path: `norm_out`, `q_out`, `k_out`, `v_out`, `attn_out`,
@@ -207,6 +212,7 @@ impl StageCapture {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Drive Metal prefill on `prefix_ids` then a single
     /// `decode_token(new_id)` with `LARQL_DECODE_DUMP_LAYERS` +
     /// `LARQL_STAGE_DUMP_LAYER` active for `layer`. Stages produced:
@@ -235,6 +241,7 @@ impl StageCapture {
             .collect();
         backend.preallocate_kv_cache_per_layer(&kv_shapes, DEFAULT_GPU_KV_CACHE_MAX_SEQ);
 
+        #[cfg(not(target_arch = "wasm32"))]
         use larql_vindex::GateIndex;
         let gate_index: &dyn GateIndex = index;
         let (q4_ffn, ffn_is_q4k) = if let Some(m) = gate_index.interleaved_q4k_mmap_ref() {
@@ -474,6 +481,7 @@ fn stage_stat(layer: usize, a: &[f32], b: &[f32]) -> LayerStat {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Set two env vars together (a dir-typed one and a layer-index one),
 /// run `f`, restore them. Used because every stage dump is gated by
 /// the *pair* (output dir + which layer to dump).
@@ -500,6 +508,7 @@ fn run_with_two_env_vars(
     Ok(dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk `dir`, pick up every `*.f32` whose name starts with `prefix`,
 /// strip the prefix and the trailing `.f32`, return the rest as the
 /// stage name. Errors only on filesystem read failures — a totally
@@ -529,6 +538,7 @@ fn read_stage_dir(dir: &Path, prefix: &str) -> Result<HashMap<String, Vec<f32>>,
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read_f32_vec(path: &Path) -> Option<Vec<f32>> {
     let bytes = std::fs::read(path).ok()?;
     if !bytes.len().is_multiple_of(4) {
@@ -542,6 +552,7 @@ fn read_f32_vec(path: &Path) -> Option<Vec<f32>> {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_dummy_tokenizer() -> tokenizers::Tokenizer {
     use tokenizers::models::wordpiece::WordPiece;
     let model = WordPiece::default();

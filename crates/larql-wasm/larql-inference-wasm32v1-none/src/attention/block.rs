@@ -2,13 +2,6 @@
 //!
 //! norm → Q/K/V projection → bias → V-norm → QK-norm → RoPE → GQA → O projection → residual.
 //! Supports KV sharing (reuse K/V from a source layer).
-
-use super::gqa::{
-    gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
-};
-use super::rope::apply_rope_partial;
-use super::{AttentionAllWeights, AttentionWeights, SharedKV};
-use ndarray::{s, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +14,18 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::gqa::{
+    gqa_attention_with_all_weights, gqa_attention_with_weights, gqa_reduced_qk_all_weights,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use super::rope::apply_rope_partial;
+#[cfg(not(target_arch = "wasm32"))]
+use super::{AttentionAllWeights, AttentionWeights, SharedKV};
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{s, Array2};
+
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the full attention block. Returns (h_post_attn, attn_projected, optional_weights).
 #[allow(clippy::too_many_arguments)]
 pub fn run_attention_block(
@@ -32,6 +37,7 @@ pub fn run_attention_block(
     run_attention_block_shared(weights, h, layer, capture_attention, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional shared K/V, returning K/V for caching.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -64,6 +70,7 @@ pub fn run_attention_block_with_kv_out(
     Some((h_post, attn_proj, attn_w, k, v))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional shared K/V (discards K/V output).
 #[allow(clippy::too_many_arguments)]
 pub fn run_attention_block_shared(
@@ -89,6 +96,7 @@ pub fn run_attention_block_shared(
     Some((h_post, attn_proj, attn_w))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention, returning the pre-O-projection output per head.
 /// Returns `(h_post_attn, pre_o)` where `pre_o` has shape `[seq, num_q * head_dim]`.
 /// This is the equivalent of Python's `o_proj.register_forward_pre_hook`.
@@ -103,6 +111,7 @@ pub fn run_attention_block_with_pre_o(
     Some((h_post, pre_o))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional shared K/V and return the pre-O-projection
 /// output per query head.
 ///
@@ -120,6 +129,7 @@ pub fn run_attention_block_shared_with_pre_o(
     Some((h_post, pre_o))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional shared K/V and return both the pre-O output and
 /// all per-query-position attention distributions.
 ///
@@ -138,6 +148,7 @@ pub fn run_attention_block_with_pre_o_and_all_attention_weights(
     Some((h_post, pre_o, all_weights?))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention with optional shared K/V and return the pre-O output plus
 /// all-position attention distributions computed from a reduced QK dot product.
 ///
@@ -167,6 +178,7 @@ pub fn run_attention_block_with_pre_o_and_reduced_qk_attention_weights(
     Some((h_post, pre_o, all_weights?))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention while zeroing selected pre-O-projection query heads before W_O.
 ///
 /// Returns the post-attention residual and, when K/V were computed by this call,
@@ -199,6 +211,7 @@ pub fn run_attention_block_zero_pre_o_heads(
     Some((h_post, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention while replacing one pre-O-projection query head before W_O.
 ///
 /// `replacement` must have shape `[seq_len, head_dim]`.
@@ -231,6 +244,7 @@ pub fn run_attention_block_replace_pre_o_head(
     Some((h_post, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention while explicitly subtracting selected query-head
 /// contributions from the O-projected tensor before the attention residual path.
 ///
@@ -264,6 +278,7 @@ pub fn run_attention_block_subtract_pre_o_heads(
     Some((h_post, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run attention while replacing one query-head residual-space contribution
 /// after W_O projection and before the attention residual path.
 ///
@@ -300,6 +315,7 @@ pub fn run_attention_block_replace_head_residual_delta(
     Some((h_post, kv_out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Core attention block implementation.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -576,7 +592,9 @@ fn run_attention_block_core(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn hidden(rows: usize, hidden: usize) -> Array2<f32> {
         Array2::from_shape_vec(
             (rows, hidden),
@@ -730,6 +748,7 @@ mod tests {
         assert!(kv_out.is_none(), "shared-KV path must not return KV");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replace_pre_o_head_substitutes_one_head() {
         let weights = make_test_weights();
@@ -764,6 +783,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replace_head_residual_delta_zero_replacement_matches_zero_head() {
         // A zero residual-space replacement should match the zero-pre-O path

@@ -4,10 +4,6 @@
 //! timing runs get byte/shard accounting without another flag. Both reads
 //! go through [`RemoteMoeRuntime`] so [`record_call`] / [`record_skip`]
 //! pay no per-call env-var cost.
-
-use std::sync::{Mutex, OnceLock};
-
-use super::runtime::RemoteMoeRuntime;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +15,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Mutex, OnceLock};
+
+use super::runtime::RemoteMoeRuntime;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShardTransportTotals {
     pub calls: u64,
@@ -70,24 +71,30 @@ impl TransportSnapshot {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn state() -> &'static Mutex<BTreeMap<String, ShardTransportTotals>> {
+    #[cfg(not(target_arch = "wasm32"))]
     static STATE: OnceLock<Mutex<BTreeMap<String, ShardTransportTotals>>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn enabled() -> bool {
     RemoteMoeRuntime::get().moe_bytes_enabled
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn shard_timing_enabled() -> bool {
     RemoteMoeRuntime::get().moe_shard_timing
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn snapshot() -> TransportSnapshot {
     let by_shard = state().lock().map(|g| g.clone()).unwrap_or_default();
     TransportSnapshot { by_shard }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn record_call(
     shard: &str,
     request_bytes: usize,
@@ -106,6 +113,7 @@ pub fn record_call(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn record_skip(shard: &str) {
     if !enabled() {
         return;
@@ -115,6 +123,7 @@ pub fn record_skip(shard: &str) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn print_delta(label: &str, tok_idx: usize, before: &TransportSnapshot) {
     if !enabled() {
         return;
@@ -148,6 +157,7 @@ pub fn print_delta(label: &str, tok_idx: usize, before: &TransportSnapshot) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn print_summary(label: &str, before: &TransportSnapshot, measured_tokens: usize) {
     if !enabled() {
         return;

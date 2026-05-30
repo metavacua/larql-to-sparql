@@ -2,16 +2,6 @@
 //!
 //! High-level API: load a model, tokenize entities, run forward passes,
 //! write NDJSON output files compatible with vector-load and vindex builds.
-
-use std::io::{BufWriter, Write};
-use std::path::Path;
-
-use crate::error::InferenceError;
-use crate::forward::trace_forward;
-use crate::model::{
-    load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
-};
-use crate::tokenizer::load_tokenizer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +13,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::error::InferenceError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::trace_forward;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::{
+    load_model_dir_validated, load_model_dir_walk_only_validated, resolve_model_path, ModelWeights,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::tokenizer::load_tokenizer;
 
 /// Configuration for residual/activation capture.
 pub struct CaptureConfig {
@@ -55,6 +61,7 @@ pub trait CaptureCallbacks {
 pub struct SilentCallbacks;
 impl CaptureCallbacks for SilentCallbacks {}
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Loaded model ready for inference and capture.
 pub struct InferenceModel {
     weights: ModelWeights,
@@ -80,7 +87,9 @@ struct FeatureActivation {
     magnitude: f32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InferenceModel {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a model from a path or HuggingFace model ID.
     pub fn load(model: &str) -> Result<Self, InferenceError> {
         let model_path = resolve_model_path(model)?;
@@ -94,6 +103,7 @@ impl InferenceModel {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load in walk-only mode — never reads FFN tensors from safetensors.
     /// Requires a vindex to serve the FFN path. Peak RSS during load tracks
     /// only the retained (attention / embed / lm_head / norms) weights,
@@ -129,10 +139,12 @@ impl InferenceModel {
         &mut self.weights
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn tokenizer(&self) -> &tokenizers::Tokenizer {
         &self.tokenizer
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Capture residuals and optionally activations for a list of entities.
     pub fn capture(
         &self,
@@ -271,6 +283,7 @@ impl InferenceModel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Project a residual vector onto the embedding matrix to find top-k tokens.
 fn project_to_vocab(
     embed: &ndarray::ArrayBase<impl ndarray::Data<Elem = f32>, ndarray::Ix2>,
@@ -311,6 +324,7 @@ fn project_to_vocab(
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn current_date() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

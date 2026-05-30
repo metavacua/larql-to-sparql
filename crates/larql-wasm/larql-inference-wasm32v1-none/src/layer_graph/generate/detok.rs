@@ -14,8 +14,6 @@
 //!
 //! Multi-byte UTF-8 characters that straddle a token boundary are handled
 //! by snapping the slice point to the next char boundary before emitting.
-
-use tokenizers::Tokenizer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -27,6 +25,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+#[cfg(not(target_arch = "wasm32"))]
 /// Stateful, single-stream incremental detokeniser.
 ///
 /// One instance per generation call. Not `Sync` — clone the underlying
@@ -39,7 +41,9 @@ pub struct Detokenizer<'a> {
     emitted: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> Detokenizer<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new detokeniser. `skip_special` controls the
     /// `skip_special_tokens` flag passed to the underlying decoder; `true`
     /// matches what every existing call site in the inference crate uses.

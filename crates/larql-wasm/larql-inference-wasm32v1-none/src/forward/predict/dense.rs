@@ -1,14 +1,4 @@
 //! Dense (full-weight) forward passes and logit projection utilities.
-
-use super::super::embed::embed_tokens;
-use super::super::layer::run_layer_with_ffn;
-use super::super::ple::precompute_per_layer_inputs;
-use super::super::{apply_norm, dot_proj};
-use super::types::{PredictResult, PredictResultWithResiduals};
-use crate::attention::SharedKV;
-use crate::ffn::WeightFfn;
-use crate::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +10,24 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::embed::embed_tokens;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::layer::run_layer_with_ffn;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::{apply_norm, dot_proj};
+use super::types::{PredictResult, PredictResultWithResiduals};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::WeightFfn;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Descending order on the probability field of `(index, prob)` pairs,
 /// with NaN probabilities treated as the smallest value so they never
 /// displace a real top-k hit. Used by every top-k selector in this file
@@ -36,6 +44,7 @@ pub(super) fn cmp_desc_nan_last(a: &(usize, f32), b: &(usize, f32)) -> core::cmp
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Project the final hidden state to logits and return top-k predictions.
 pub fn logits_to_predictions_pub(
     weights: &ModelWeights,
@@ -47,6 +56,7 @@ pub fn logits_to_predictions_pub(
     logits_to_predictions(weights, h, tokenizer, top_k, temperature)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn logits_to_predictions(
     weights: &ModelWeights,
     h: &Array2<f32>,
@@ -115,6 +125,7 @@ pub(crate) fn logits_to_predictions(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run a full forward pass and return the top-k next token predictions.
 pub fn predict(
     weights: &ModelWeights,
@@ -125,6 +136,7 @@ pub fn predict(
     predict_with_temperature(weights, tokenizer, token_ids, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn predict_with_temperature(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -163,6 +175,7 @@ pub fn predict_with_temperature(
     logits_to_predictions(weights, &h, tokenizer, top_k, temperature)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Project a single residual vector through final norm + lm_head to get top-1 prediction.
 pub fn logit_lens_top1(
     weights: &ModelWeights,
@@ -179,6 +192,7 @@ pub fn logit_lens_top1(
     result.predictions.into_iter().next()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resume a forward pass from a pre-computed hidden state.
 pub fn predict_from_hidden(
     weights: &ModelWeights,
@@ -191,6 +205,7 @@ pub fn predict_from_hidden(
     predict_from_hidden_with_ffn(weights, tokenizer, h_init, start_layer, top_k, &ffn, &[])
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resume a forward pass from a pre-computed hidden state with a custom FFN backend.
 pub fn predict_from_hidden_with_ffn(
     weights: &ModelWeights,
@@ -220,6 +235,7 @@ pub fn predict_from_hidden_with_ffn(
     logits_to_predictions(weights, &h, tokenizer, top_k, 1.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Forward pass with residual capture — predictions + per-layer residuals.
 pub fn predict_with_ffn_trace(
     weights: &ModelWeights,
@@ -254,6 +270,7 @@ pub fn predict_with_ffn_trace(
 mod tests {
     use super::*;
     use crate::test_utils::TestFixtures;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     #[test]
     fn cmp_desc_nan_last_orders_descending_with_nan_last() {
@@ -303,6 +320,7 @@ mod tests {
         assert!(logit_lens_top1(&fx.weights, &fx.tokenizer, &residual).is_none());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn predict_from_hidden_resumes_at_start_layer() {
         let fx = TestFixtures::build();
@@ -311,6 +329,7 @@ mod tests {
         assert!(r.predictions.len() <= 3);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn predict_from_hidden_with_ffn_handles_empty_token_ids() {
         // Empty token_ids → ple_inputs stays empty; predict still runs.
@@ -338,6 +357,7 @@ mod tests {
         assert!(r.predictions.len() <= 3);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn logits_to_predictions_pub_matches_internal() {
         let fx = TestFixtures::build();

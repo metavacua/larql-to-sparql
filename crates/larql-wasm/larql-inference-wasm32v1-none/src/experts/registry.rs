@@ -1,10 +1,3 @@
-use std::path::{Path, PathBuf};
-
-use serde_json::Value;
-use wasmi::{Engine, Instance, Module, Store};
-
-use super::caller::{self, ExpertMetadata, ExpertResult};
-use super::loader::{instantiate, load_module, ExpertStore};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +9,19 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
+use wasmi::{Engine, Instance, Module, Store};
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::caller::{self, ExpertMetadata, ExpertResult};
+#[cfg(not(target_arch = "wasm32"))]
+use super::loader::{instantiate, load_module, ExpertStore};
+#[cfg(not(target_arch = "wasm32"))]
 /// Runtime information about an expert's WASM module.
 #[derive(Debug, Clone)]
 pub struct WasmInfo {
@@ -30,6 +36,7 @@ pub struct WasmInfo {
     pub instantiated: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A single loaded expert module.
 ///
 /// The compiled `Module` is held from load time, but the `Store` + `Instance`
@@ -43,7 +50,9 @@ pub struct ExpertHandle {
     live: Option<(Store<ExpertStore>, Instance)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ExpertHandle {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Invoke `op` on this expert. Returns `None` if the expert declines.
     pub fn call(&mut self, op: &str, args: &Value) -> anyhow::Result<Option<ExpertResult>> {
         self.ensure_live()?;
@@ -56,6 +65,7 @@ impl ExpertHandle {
         self.live = None;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Report WASM-runtime details for this module.
     pub fn wasm_info(&mut self) -> WasmInfo {
         let pages = match self.live.as_mut() {
@@ -73,6 +83,7 @@ impl ExpertHandle {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn ensure_live(&mut self) -> anyhow::Result<()> {
         if self.live.is_none() {
             self.live = Some(instantiate(&self.engine, &self.module)?);
@@ -81,6 +92,7 @@ impl ExpertHandle {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Registry of all loaded WASM experts.
 pub struct ExpertRegistry {
     engine: Arc<Engine>,
@@ -89,7 +101,9 @@ pub struct ExpertRegistry {
     op_index: HashMap<String, usize>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ExpertRegistry {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load all `.wasm` files from `dir`, sorted by tier (from metadata).
     pub fn load_dir(dir: &Path) -> anyhow::Result<Self> {
         let engine = Arc::new(Engine::default());
@@ -120,6 +134,7 @@ impl ExpertRegistry {
         Ok(reg)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a single `.wasm` file into the registry.
     pub fn load_file(&mut self, path: &Path) -> anyhow::Result<()> {
         let handle = load_one(&self.engine, path)?;
@@ -140,6 +155,7 @@ impl ExpertRegistry {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Dispatch `op` to the expert that advertises it.
     pub fn call(&mut self, op: &str, args: &Value) -> Option<ExpertResult> {
         let idx = *self.op_index.get(op)?;
@@ -179,6 +195,7 @@ impl ExpertRegistry {
         ops
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Report WASM-runtime details for the expert with the given id.
     pub fn wasm_info_for(&mut self, expert_id: &str) -> Option<WasmInfo> {
         let idx = self
@@ -188,6 +205,7 @@ impl ExpertRegistry {
         Some(self.experts[idx].wasm_info())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Report WASM-runtime details for every loaded expert.
     pub fn wasm_infos(&mut self) -> Vec<WasmInfo> {
         (0..self.experts.len())
@@ -211,7 +229,9 @@ impl ExpertRegistry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for ExpertRegistry {
+    #[cfg(not(target_arch = "wasm32"))]
     fn default() -> Self {
         Self {
             engine: Arc::new(Engine::default()),
@@ -221,6 +241,7 @@ impl Default for ExpertRegistry {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_one(engine: &Arc<Engine>, path: &Path) -> anyhow::Result<ExpertHandle> {
     let module = load_module(engine, path)?;
     let (mut store, instance) = instantiate(engine, &module)?;

@@ -26,6 +26,7 @@ pub mod sparse_compute;
 mod tests;
 pub mod weight;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
 /// Number of elements in one Q4_K / Q8_K super-block (the block size both
@@ -39,15 +40,18 @@ pub const Q4K_Q8K_SUPERBLOCK_ELEMS: usize = 256;
 
 /// FFN backend trait. Defines how a single layer's FFN is computed.
 pub trait FfnBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run the FFN for a given layer on the pre-FFN-normed residual.
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32>;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run FFN and also return the pre-down activation (for capture).
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>);
 
     /// Human-readable name for logging.
     fn name(&self) -> &str;
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// For hybrid MoE layers: receive `h_post_attn` (post-attention, pre-FFN,
     /// unnormalized) and return the full layer output `h_out`. Returns `None`
     /// to fall back to local dispatch.
@@ -62,16 +66,21 @@ pub trait FfnBackend {
 
 // ── Re-exports ──
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use moe_remote::{MoeRouterWeights, RemoteMoeBackend, RemoteMoeError, ShardConfig};
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote::{
     LayerShardedBackend, RemoteFfnConfig, RemoteFfnError, RemoteLatencyStats, RemoteWalkBackend,
     WirePreference,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use sparse::SparseFfn;
+#[cfg(not(target_arch = "wasm32"))]
 pub use sparse_compute::{
     sparse_ffn_forward, sparse_ffn_forward_with_full_overrides, sparse_ffn_forward_with_overrides,
     FeatureSlotOverride,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use weight::{dense_ffn_forward_backend, BackendFfn, WeightFfn};
 
 // ── Per-layer backend selection ──
@@ -113,11 +122,13 @@ pub fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn silu_gate_up(gate: &Array2<f32>, up: &Array2<f32>) -> Array2<f32> {
     let activated = gate.mapv(|v| v * sigmoid(v));
     &activated * up
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn gelu_tanh_gate_up(gate: &Array2<f32>, up: &Array2<f32>) -> Array2<f32> {
     let activated = gate.mapv(gelu_tanh);
     &activated * up
@@ -134,6 +145,7 @@ mod router_tests {
     use crate::test_utils::make_test_weights;
     use weight::WeightFfn;
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn ffn_backend_default_forward_moe_full_layer_returns_none() {
         // The trait's default `forward_moe_full_layer` impl always

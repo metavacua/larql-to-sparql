@@ -1,11 +1,6 @@
 //! Tokenizer-level generation policy shared by generation frontends.
 
 use larql_compute::prelude::*;
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-
-use super::eos::EosConfig;
-use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -17,6 +12,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+
+use super::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use super::lm_head::{lm_head_topk_with_policy, LmHeadPolicy};
 const SUPPRESSED_TOKEN_CANDIDATE_TOPK: usize = 256;
 const DEBUG_SUPPRESS_PROBE_IDS: &[u32] = &[5, 31, 4, 168, 184];
 const ENV_DEBUG_TOKEN_IDS: &str = "LARQL_DEBUG_TOKEN_IDS";
@@ -25,6 +28,7 @@ const ENV_METAL_COMPARE_CPU: &str = "LARQL_METAL_COMPARE_CPU";
 const ENV_PROFILE_DECODE: &str = "LARQL_PROFILE_DECODE";
 const ENV_PROFILE_SPLIT: &str = "LARQL_PROFILE_SPLIT";
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub(crate) struct TokenSelectionPolicy {
     pub debug_token_ids: bool,
@@ -33,7 +37,9 @@ pub(crate) struct TokenSelectionPolicy {
     pub lm_head: LmHeadPolicy,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for TokenSelectionPolicy {
+    #[cfg(not(target_arch = "wasm32"))]
     fn default() -> Self {
         Self {
             debug_token_ids: false,
@@ -44,7 +50,9 @@ impl Default for TokenSelectionPolicy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl TokenSelectionPolicy {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn from_env() -> Self {
         Self {
             debug_token_ids: std::env::var(ENV_DEBUG_TOKEN_IDS).is_ok(),
@@ -55,6 +63,7 @@ impl TokenSelectionPolicy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GenerationRuntimeConfig {
     pub compare_cpu: bool,
@@ -63,7 +72,9 @@ pub(crate) struct GenerationRuntimeConfig {
     pub lm_head: LmHeadPolicy,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GenerationRuntimeConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn from_env() -> Self {
         Self {
             compare_cpu: std::env::var(ENV_METAL_COMPARE_CPU).is_ok(),
@@ -74,6 +85,7 @@ impl GenerationRuntimeConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// IDs of tokens that should never be picked during text generation.
 ///
 /// Built from the tokenizer's `added_tokens` table (everything marked
@@ -152,6 +164,7 @@ fn is_structural_marker(tok: &str) -> bool {
     !body.is_empty() && !body.chars().any(char::is_whitespace)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Pick the top-1 vocabulary id from logits, skipping any id in `suppress`.
 pub(crate) fn pick_next_filtered_with_policy(
     index: &VectorIndex,

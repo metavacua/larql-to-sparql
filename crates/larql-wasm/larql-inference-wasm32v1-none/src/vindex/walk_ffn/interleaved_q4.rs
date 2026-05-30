@@ -5,10 +5,6 @@
 //! Metal Q4 path (when `self.backend.has_q4()`): one GPU submission
 //! for gate+up across all seq positions, followed by one vecmat per
 //! position for down. C kernel path is the CPU fallback.
-
-use ndarray::Array2;
-
-use super::WalkFfn;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +16,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::WalkFfn;
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn walk_ffn_q4_interleaved(
         &self,
         layer: usize,

@@ -3,11 +3,6 @@
 //! Single source of truth for extracting per-layer architecture parameters
 //! from larql-models and wiring them into larql-compute's FullPipelineLayer.
 //! Both GPU and CPU paths use this — no duplicated param extraction.
-
-use crate::model::ModelWeights;
-use larql_compute::{
-    FullPipelineLayer, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat, QuantWeight,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,8 +15,15 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::{
+    FullPipelineLayer, MoeLayerWeights, MoeRoutingPolicy, MoeWeightLayout, QuantFormat, QuantWeight,
+};
+
 pub const DEFAULT_GPU_KV_CACHE_MAX_SEQ: usize = 4096;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn kv_cache_shapes_for_arch(weights: &ModelWeights) -> Vec<(usize, usize)> {
     let arch = &*weights.arch;
     (0..weights.num_layers)
@@ -34,6 +36,7 @@ pub(crate) fn kv_cache_shapes_for_arch(weights: &ModelWeights) -> Vec<(usize, us
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Extract per-layer architecture parameters into a FullPipelineLayer.
 ///
 /// This is the single construction site for all per-layer params:
@@ -169,6 +172,7 @@ pub fn build_arch_params<'a>(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_moe_weights<'a>(
     weights: &'a ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
@@ -272,6 +276,7 @@ pub(crate) fn build_moe_weights<'a>(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Helper: resolve attention weights from vindex (Q4_K preferred, Q8 fallback).
 pub fn resolve_attn_weights<'a>(
     index: &'a larql_vindex::VectorIndex,
@@ -345,6 +350,7 @@ pub fn resolve_attn_weights<'a>(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Helper: resolve FFN weights from vindex interleaved mmap.
 ///
 /// Prefers the per-matrix manifest when available (emitted by the streaming
@@ -415,6 +421,7 @@ pub fn resolve_ffn_weights<'a>(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a complete Vec<FullPipelineLayer> for a range of layers.
 /// Single source of truth — used by both GPU decode and GPU prefill paths.
 #[allow(clippy::too_many_arguments)]
@@ -452,6 +459,7 @@ pub fn patch_pipeline_layers_for_remote_ffn(layers: &mut [FullPipelineLayer<'_>]
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// For `--moe-shards` (remote expert) deployments: the client vindex has no
 /// per-layer expert bytes, so `build_moe_weights` returns `None` for every
 /// layer, `has_moe = false`, and the Metal decode never calls `moe_fn`.
@@ -481,6 +489,7 @@ pub fn patch_pipeline_layers_for_remote_moe<'a>(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_moe_stub<'a>(
     weights: &'a ModelWeights,
     arch: &dyn larql_models::ModelArchitecture,
@@ -536,6 +545,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{make_test_vindex, make_test_weights};
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
 
     fn weights() -> &'static ModelWeights {
@@ -703,6 +713,7 @@ mod tests {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build minimal ModelWeights for the synthetic E2B-like arch.  Tensors
     /// are zero-filled (the tests only assert presence/absence and which
     /// arch keys produced them, not numerical correctness).

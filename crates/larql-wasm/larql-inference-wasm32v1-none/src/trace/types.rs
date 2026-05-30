@@ -1,8 +1,6 @@
 //! Core trace types.
 
 use crate::attention::AttentionWeights;
-use crate::model::ModelWeights;
-use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -14,6 +12,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use serde::{Deserialize, Serialize};
 /// A single waypoint in the residual stream.
 #[derive(Clone)]
 pub struct TraceNode {
@@ -92,10 +93,12 @@ impl ResidualTrace {
         traj
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn vocab_project(&self, weights: &ModelWeights, vec: &[f32]) -> Vec<f32> {
         super::vocab::project_to_logits(weights, vec)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn top_k(
         &self,
         weights: &ModelWeights,
@@ -112,6 +115,7 @@ impl ResidualTrace {
         super::vocab::top_k_from_logits(&logits, tokenizer, k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn answer_trajectory(
         &self,
         weights: &ModelWeights,
@@ -153,6 +157,7 @@ impl ResidualTrace {
         traj
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn layer_summaries<'a>(
         &'a self,
         weights: &'a ModelWeights,
@@ -299,6 +304,7 @@ mod tests {
 
     // ── vocab-projection methods (need real ModelWeights + Tokenizer) ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn real_trace() -> (
         ResidualTrace,
         crate::model::ModelWeights,

@@ -14,12 +14,6 @@
 //!
 //! Returns the post-prefill `h_vec` (`seq_len × hidden` floats; only the
 //! last position is meaningful for the subsequent first-token sample).
-
-use crate::layer_graph::generate::gpu_setup::prefill_q4_prompt;
-use crate::layer_graph::generate::types::GenerateError;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
-use larql_compute::FullPipelineLayer;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +25,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::gpu_setup::prefill_q4_prompt;
+use crate::layer_graph::generate::types::GenerateError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+use larql_compute::FullPipelineLayer;
 /// Run the prefill phase for streaming Q4 generation.
 ///
 /// `metal_ple_backend` is `Some(metal)` only when (a) the model uses
@@ -87,6 +89,7 @@ pub(super) fn prefill_for_streaming(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Non-metal build: PLE branch is unreachable (no `MetalBackend`).
 #[cfg(not(all(feature = "metal", target_os = "macos")))]
 #[allow(clippy::too_many_arguments)]
@@ -120,6 +123,7 @@ pub(super) fn prefill_for_streaming(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer Q4_K MoE prefill: route on CPU, dispatch experts on GPU
 /// via `decode_token_q4k_moe` per token. Returns the last-position hidden
 /// padded to a `seq_len × hidden` buffer to match the batched-prefill shape.

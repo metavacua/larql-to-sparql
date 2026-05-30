@@ -22,22 +22,32 @@ mod forced_logits;
 mod prefill;
 mod sampling_step;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use forced_logits::{stream_forced_full_logits, ForcedLogitsResult};
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::cpu::{backend_supports_fused_q4_pipeline, generate_via_cpu_q4k};
+#[cfg(not(target_arch = "wasm32"))]
 use super::detok::Detokenizer;
 use super::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use super::gpu_setup::{
     build_gpu_decode_setup, ensure_prompt_fits, reset_and_preallocate_kv_cache,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use super::lm_head::{cpu_lm_head_topk, lm_head_topk_with_policy};
+#[cfg(not(target_arch = "wasm32"))]
 use super::policy::GenerationRuntimeConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use super::sampling::{Sampler, SamplingConfig};
 use super::types::{GenerateError, GenerateResult, StageTimings};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::layer_graph::CachedLayerGraph;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 use sampling_step::sample_and_emit;
 
 /// LM-head top-K size when running greedy decode.
@@ -47,6 +57,7 @@ const LMHEAD_TOPK_GREEDY: usize = 5;
 /// paying for a full-vocab gemv.
 const LMHEAD_TOPK_SAMPLING_MIN: usize = 64;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn lmhead_k_for_sampling(cfg: &SamplingConfig) -> usize {
     if cfg.is_greedy() {
         LMHEAD_TOPK_GREEDY
@@ -55,6 +66,7 @@ fn lmhead_k_for_sampling(cfg: &SamplingConfig) -> usize {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Greedy multi-token generation. Thin wrapper over
 /// [`generate_with_sampling`] with [`SamplingConfig::greedy`] and
 /// [`EosConfig::builtin`].
@@ -83,6 +95,7 @@ pub fn generate(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate(
@@ -108,6 +121,7 @@ pub fn try_generate(
     .into_result()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Multi-token generation with explicit sampling and EOS configuration.
 /// Identical to [`generate_streaming`] but with no per-token callback.
 #[allow(clippy::too_many_arguments)]
@@ -138,6 +152,7 @@ pub fn generate_with_sampling(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate_with_sampling`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate_with_sampling(
@@ -167,6 +182,7 @@ pub fn try_generate_with_sampling(
     .into_result()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Streaming multi-token generation. Fires `on_token(id, text, prob)` for
 /// every generated token as it's produced, including the first (which
 /// comes out of prefill).
@@ -470,6 +486,7 @@ where
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Fallible variant of [`generate_streaming`].
 #[allow(clippy::too_many_arguments)]
 pub fn try_generate_streaming<F>(
@@ -504,6 +521,7 @@ where
     .into_result()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Diagnostic: print top-5 token comparison between the GPU path's
 /// vindex-KNN lm_head and the CPU dequant lm_head. Triggered by
 /// `LARQL_METAL_COMPARE_CPU=1` to isolate whether wrong-token output

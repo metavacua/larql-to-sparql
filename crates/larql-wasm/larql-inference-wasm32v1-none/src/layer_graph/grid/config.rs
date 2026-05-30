@@ -1,8 +1,10 @@
 use crate::ffn::moe_remote::runtime::{
     ENV_MOE_NO_SPLIT, ENV_MOE_TIMING, ENV_MOE_TOP_K, ENV_SKIP_MOE,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use crate::layer_graph::generate::policy::TokenSelectionPolicy;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub(super) struct GridRuntimeConfig {
     pub moe_top_k_override: Option<usize>,
@@ -12,7 +14,9 @@ pub(super) struct GridRuntimeConfig {
     pub token_policy: TokenSelectionPolicy,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GridRuntimeConfig {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_env() -> Self {
         Self {
             moe_top_k_override: std::env::var(ENV_MOE_TOP_K)
@@ -36,6 +40,7 @@ impl GridRuntimeConfig {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn from_env_returns_default_when_no_vars_set() {
         // Ensure none of the env vars are set so we exercise the default

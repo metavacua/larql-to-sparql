@@ -8,8 +8,6 @@
 //!   2. CPU: pre-FFN norm → walk FFN (gate KNN → sparse down) → residual add
 //!
 //! Requires `--features metal` for GPU attention.
-
-use super::CachedLayerGraph;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,10 +19,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::CachedLayerGraph;
 #[allow(unused_imports)]
 use super::LayerGraph;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Hybrid decode: GPU attention + vindex walk FFN per layer.
 ///
 /// Falls back to `predict_honest` if Metal is unavailable or walk data is missing.
@@ -69,6 +72,7 @@ pub fn predict_hybrid(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Metal-specific hybrid implementation.
 #[cfg(all(feature = "metal", target_os = "macos"))]
 #[allow(clippy::too_many_arguments)]

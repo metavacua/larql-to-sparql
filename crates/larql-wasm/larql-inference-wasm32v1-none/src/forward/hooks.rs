@@ -26,7 +26,6 @@
 //! wrappers passing [`NoopHook`], so call-sites that don't care pay no cost.
 
 use crate::attention::AttentionWeights;
-use ndarray::{Array1, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -38,6 +37,8 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
 /// Mid-forward callbacks. All defaults are no-ops; impls override only the
 /// callbacks they need.
 ///
@@ -46,10 +47,12 @@ use larql_wasm_math::FloatExt as _;
 /// read-only.
 #[allow(unused_variables)]
 pub trait LayerHook {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fires before attention runs at `layer`. `h` is the residual entering
     /// the layer (post-norm has not yet been applied).
     fn on_pre_layer(&mut self, layer: usize, h: &Array2<f32>) {}
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fires after attention, before FFN. The hook may mutate `h` in place
     /// — that is the insertion point for activation patching and
     /// pre-FFN steering.
@@ -59,11 +62,13 @@ pub trait LayerHook {
     /// Only called on layers where `capture_attention=true` was requested.
     fn on_attention_weights(&mut self, layer: usize, weights: &AttentionWeights) {}
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fires when an FFN gate activation has been captured. Read-only.
     /// Only called on layers where `capture_activation=true` was requested.
     /// Shape is `(seq_len, ffn_dim)`.
     fn on_ffn_activation(&mut self, layer: usize, gate: &Array2<f32>) {}
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fires after the full layer (attention + FFN + PLE + scalar). The
     /// hook may mutate `h` — that is the insertion point for residual-stream
     /// ablation, steering, and any "edit before the next layer sees it"
@@ -75,6 +80,7 @@ pub trait LayerHook {
 pub struct NoopHook;
 impl LayerHook for NoopHook {}
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Captures pre-layer / post-attention / post-layer residuals (and optionally
 /// FFN activations + attention weights) at the requested layers. Replaces
 /// the file-output pattern of the legacy `LARQL_CPU_DUMP_LAYERS` env var.
@@ -98,6 +104,7 @@ pub struct RecordHook {
     pub attention_weights: HashMap<usize, Vec<Vec<f32>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RecordHook {
     /// Build a recorder that captures the listed layers.
     pub fn for_layers<I: IntoIterator<Item = usize>>(layers: I) -> Self {
@@ -112,12 +119,15 @@ impl RecordHook {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerHook for RecordHook {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_pre_layer(&mut self, layer: usize, h: &Array2<f32>) {
         if self.layers.contains(&layer) {
             self.pre_layer.insert(layer, h.clone());
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_attention(&mut self, layer: usize, h: &mut Array2<f32>) {
         if self.layers.contains(&layer) {
             self.post_attention.insert(layer, h.clone());
@@ -128,11 +138,13 @@ impl LayerHook for RecordHook {
             self.attention_weights.insert(layer, weights.heads.clone());
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_ffn_activation(&mut self, layer: usize, gate: &Array2<f32>) {
         if self.layers.contains(&layer) {
             self.ffn_activation.insert(layer, gate.clone());
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_layer(&mut self, layer: usize, h: &mut Array2<f32>) {
         if self.layers.contains(&layer) {
             self.post_layer.insert(layer, h.clone());
@@ -159,6 +171,7 @@ impl ZeroAblateHook {
 }
 
 impl LayerHook for ZeroAblateHook {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_layer(&mut self, layer: usize, h: &mut Array2<f32>) {
         let Some(positions) = self.layers.get(&layer) else {
             return;
@@ -177,6 +190,7 @@ impl LayerHook for ZeroAblateHook {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Adds `alpha * v` to the last-token row of the post-layer residual at
 /// requested layers. Implements lazarus's `steer_and_generate`.
 ///
@@ -187,6 +201,7 @@ pub struct SteerHook {
     pub steers: HashMap<usize, (Array1<f32>, f32)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SteerHook {
     pub fn new() -> Self {
         Self {
@@ -194,19 +209,23 @@ impl SteerHook {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn add(mut self, layer: usize, vector: Array1<f32>, alpha: f32) -> Self {
         self.steers.insert(layer, (vector, alpha));
         self
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for SteerHook {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerHook for SteerHook {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_layer(&mut self, layer: usize, h: &mut Array2<f32>) {
         let Some((v, alpha)) = self.steers.get(&layer) else {
             return;
@@ -236,11 +255,13 @@ impl<'a> CompositeHook<'a> {
 }
 
 impl LayerHook for CompositeHook<'_> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_pre_layer(&mut self, layer: usize, h: &Array2<f32>) {
         for hook in self.hooks.iter_mut() {
             hook.on_pre_layer(layer, h);
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_attention(&mut self, layer: usize, h: &mut Array2<f32>) {
         for hook in self.hooks.iter_mut() {
             hook.on_post_attention(layer, h);
@@ -251,11 +272,13 @@ impl LayerHook for CompositeHook<'_> {
             hook.on_attention_weights(layer, weights);
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_ffn_activation(&mut self, layer: usize, gate: &Array2<f32>) {
         for hook in self.hooks.iter_mut() {
             hook.on_ffn_activation(layer, gate);
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_layer(&mut self, layer: usize, h: &mut Array2<f32>) {
         for hook in self.hooks.iter_mut() {
             hook.on_post_layer(layer, h);
@@ -266,7 +289,9 @@ impl LayerHook for CompositeHook<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::array;
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn noop_hook_compiles_and_does_nothing() {
         let mut h: Array2<f32> = array![[1.0, 2.0], [3.0, 4.0]];
@@ -276,6 +301,7 @@ mod tests {
         assert_eq!(h, original);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn record_hook_captures_only_requested_layers() {
         let mut hook = RecordHook::for_layers([1, 3]);
@@ -292,6 +318,7 @@ mod tests {
         assert!(hook.post_layer.contains_key(&3));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn record_hook_clones_residual_so_later_writes_dont_pollute() {
         let mut hook = RecordHook::for_layers([0]);
@@ -302,6 +329,7 @@ mod tests {
         assert_eq!(recorded[[0, 0]], 1.0, "RecordHook must snapshot, not alias");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn zero_ablate_full_layer() {
         let mut hook = ZeroAblateHook::for_layers([2]);
@@ -312,6 +340,7 @@ mod tests {
         assert_eq!(h, array![[0.0, 0.0], [0.0, 0.0]], "target layer zeroed");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn zero_ablate_specific_positions() {
         let mut hook = ZeroAblateHook {
@@ -325,6 +354,7 @@ mod tests {
         assert_eq!(h.row(3).to_vec(), vec![0.0, 0.0], "pos 3 zeroed");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn zero_ablate_out_of_range_position_is_noop() {
         let mut hook = ZeroAblateHook {
@@ -336,6 +366,7 @@ mod tests {
         assert_eq!(h, original);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn steer_adds_alpha_v_to_last_row() {
         let mut hook = SteerHook::new().add(0, array![10.0, 20.0], 0.5);
@@ -349,6 +380,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn steer_silently_skips_on_dim_mismatch() {
         let mut hook = SteerHook::new().add(0, array![1.0, 2.0, 3.0], 1.0);
@@ -358,6 +390,7 @@ mod tests {
         assert_eq!(h, original, "wrong-dim vector must not corrupt residual");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn composite_runs_hooks_in_order() {
         // Steer then record: recorded value must include the steer.

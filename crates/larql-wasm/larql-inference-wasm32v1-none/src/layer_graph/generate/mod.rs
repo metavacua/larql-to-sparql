@@ -27,21 +27,27 @@ pub(crate) mod policy;
 pub mod sampling;
 mod types;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use chat_session::{
     ChatMLRenderer, ChatSession, GemmaRenderer, Llama3Renderer, TurnRenderer, DEFAULT_MAX_CONTEXT,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use constrained::{
     generate_constrained, generate_constrained_streaming, generate_constrained_streaming_sampled,
     try_generate_constrained, try_generate_constrained_streaming,
     try_generate_constrained_streaming_sampled,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use detok::Detokenizer;
 pub use eos::{EosConfig, BUILTIN_STOP_STRINGS, GENERATION_CONFIG_FILENAME};
+#[cfg(not(target_arch = "wasm32"))]
 pub use gpu::{
     generate, generate_streaming, generate_with_sampling, stream_forced_full_logits, try_generate,
     try_generate_streaming, try_generate_with_sampling, ForcedLogitsResult,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use lm_head::lm_head_topk;
+#[cfg(not(target_arch = "wasm32"))]
 pub use sampling::{Sampler, SamplingConfig};
 pub use types::{GenerateError, GenerateResult, StageTimings};
 
@@ -53,6 +59,7 @@ mod tests {
 
     // ── lm_head / logit helpers (synthetic, no vindex) ────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn backend_lm_head_scores_shape() {
         let weights = make_test_weights();
@@ -69,6 +76,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cpu_lm_head_topk_length() {
         let weights = make_test_weights();
@@ -78,6 +86,7 @@ mod tests {
         assert!(!hits.is_empty(), "should return at least 1 entry");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cpu_lm_head_topk_sorted_descending() {
         let weights = make_test_weights();
@@ -98,6 +107,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cpu_lm_head_topk_token_ids_in_range() {
         let weights = make_test_weights();
@@ -118,6 +128,7 @@ mod tests {
     //   LARQL_VINDEX_PATH=/path/to/gemma3-4b-q4k-v2.vindex \
     //   cargo test -p larql-inference --lib layer_graph::generate::tests -- --ignored --nocapture
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_test_vindex() -> Option<(larql_vindex::VectorIndex, larql_models::ModelWeights)> {
         let vpath = std::env::var(crate::vindex::ENV_VINDEX_PATH).ok()?;
         let path = std::path::Path::new(&vpath);
@@ -129,6 +140,7 @@ mod tests {
         Some((index, weights))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "requires LARQL_VINDEX_PATH pointing to a Q4K vindex"]
     fn generate_returns_tokens() {
@@ -167,6 +179,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "requires LARQL_VINDEX_PATH"]
     fn generate_streaming_callback_fires_per_token() {
@@ -212,6 +225,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "requires LARQL_VINDEX_PATH"]
     fn generate_prefill_ms_positive() {

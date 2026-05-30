@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Receiver end of a shard stream's per-collect result channel.
 /// Inner item is `(h2, server_compute_ms)`.
 type ShardStreamResultRx =
@@ -48,6 +49,7 @@ pub struct InflightMoe {
 // for `Runtime::block_on` on macOS.  The gRPC itself runs as proper async
 // inside the tokio task without any scheduling penalty.
 
+#[cfg(not(target_arch = "wasm32"))]
 /// A live gRPC bidirectional stream to one shard.
 ///
 /// The async gRPC work runs in a dedicated tokio task.  The sync Metal decode
@@ -72,7 +74,9 @@ pub struct ShardStream {
     pub(super) _runtime: std::sync::Arc<tokio::runtime::Runtime>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ShardStream {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fire: push input to the async task, return immediately.
     /// Pair with `collect()` to retrieve the result.
     pub fn fire(
@@ -100,6 +104,7 @@ impl ShardStream {
         )))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: fire then collect.
     pub fn send_recv(
         &self,

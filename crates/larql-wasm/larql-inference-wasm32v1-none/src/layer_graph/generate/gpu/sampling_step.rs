@@ -1,10 +1,5 @@
 //! Per-token sample + detokenize + EOS-check helpers shared by the
 //! first-token and decode-loop branches of [`super::generate_streaming`].
-
-use crate::layer_graph::generate::detok::Detokenizer;
-use crate::layer_graph::generate::eos::EosConfig;
-use crate::layer_graph::generate::sampling::Sampler;
-use crate::model::ModelWeights;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +11,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::detok::Detokenizer;
+use crate::layer_graph::generate::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::sampling::Sampler;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
 /// Outcome of a single sampling step: the picked token id, its surface
 /// form, the softmax probability, and whether EOS was hit.
 pub(super) struct PickedToken {
@@ -25,6 +28,7 @@ pub(super) struct PickedToken {
     pub is_eos: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Pick a token from a top-K hits vector, push it onto the detokenizer,
 /// fire `on_token`, and check EOS. Returns `None` when the sampler
 /// rejects the entire distribution (empty hits / all -inf logits) so the

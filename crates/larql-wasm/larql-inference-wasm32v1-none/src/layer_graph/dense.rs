@@ -1,9 +1,3 @@
-use ndarray::Array2;
-
-use super::{LayerGraph, LayerOutput};
-use crate::ffn::FfnBackend;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +9,16 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::{LayerGraph, LayerOutput};
+use crate::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Dense baseline: standard matmul attention + pluggable FFN backend.
 /// This is today's working path — nothing changes, just wrapped in the trait.
 pub struct DenseLayerGraph<'a> {
@@ -24,7 +28,9 @@ pub struct DenseLayerGraph<'a> {
     pub capture_attention: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for DenseLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         weights: &ModelWeights,
@@ -61,16 +67,20 @@ impl<'a> LayerGraph for DenseLayerGraph<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer graph selection: different layers can use different backends.
 pub struct PerLayerGraph<'a> {
     layers: Vec<&'a dyn LayerGraph>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> PerLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(layers: Vec<&'a dyn LayerGraph>) -> Self {
         Self { layers }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn get(&self, layer: usize) -> &'a dyn LayerGraph {
         if layer < self.layers.len() {
             self.layers[layer]
@@ -80,7 +90,9 @@ impl<'a> PerLayerGraph<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> LayerGraph for PerLayerGraph<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_layer(
         &self,
         weights: &ModelWeights,
@@ -101,13 +113,16 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
         W.get_or_init(make_test_weights)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

@@ -6,12 +6,6 @@
 //!
 //! Every entity-dependent layer is computed. No approximate residuals.
 //! This is what `larql bench` and the streaming-demo runner use.
-
-use super::super::{CachedLayerGraph, LayerGraph};
-use crate::layer_graph::logits::finalize_logits;
-use crate::layer_graph::prefill::prefill_kv_cache_cpu;
-use crate::model::ModelWeights;
-use larql_compute::prelude::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,6 +17,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::super::{CachedLayerGraph, LayerGraph};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::logits::finalize_logits;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::prefill::prefill_kv_cache_cpu;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 /// Honest production pipeline: real computation, no over-caching.
 ///
 /// - L0-12: cached (template-fixed, proven at 0.999 cosine — legitimate)

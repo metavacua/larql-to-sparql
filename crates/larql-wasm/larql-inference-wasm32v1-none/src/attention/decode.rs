@@ -8,11 +8,6 @@
 //! cached position + itself).
 //!
 //! See `predict::generate_cached` for the prefill→decode driver.
-
-use ndarray::Array2;
-
-use super::rope::apply_rope_partial_at;
-use super::SharedKV;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -24,6 +19,15 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::rope::apply_rope_partial_at;
+#[cfg(not(target_arch = "wasm32"))]
+use super::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer K/V cache. Can grow unbounded or be clamped to a fixed
 /// sliding window (Markov-residual-bounded strategy — keep the last W
 /// positions' K/V, evict older). When bounded, attention becomes
@@ -48,6 +52,7 @@ pub struct KvCache {
     pub next_position: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvCache {
     /// Unbounded cache — grows with every decode step.
     pub fn with_layers(num_layers: usize) -> Self {
@@ -78,6 +83,7 @@ impl KvCache {
             .unwrap_or(0)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Apply the window bound to a layer's cache: if the cache has more
     /// than `max_window` rows, drop the oldest rows (keeping the tail).
     /// No-op when unbounded or under the limit.
@@ -107,6 +113,7 @@ impl KvCache {
     // but these methods give a stable, documented API and handle the
     // `Vec<Option<_>>` indexing in one place.
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Read K/V for a layer (post-RoPE K, post-V-norm V). `None` if the
     /// layer index is out of range or that layer's cache is empty (e.g.
     /// before prefill, or when the layer reuses another layer's K/V).
@@ -114,6 +121,7 @@ impl KvCache {
         self.layers.get(layer).and_then(|opt| opt.as_ref())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Overwrite K/V for a layer with the supplied tensors. `K` and `V`
     /// must have the same row count. Caller is responsible for the rows
     /// being post-RoPE / post-V-norm — surgery happens at the same stage
@@ -138,6 +146,7 @@ impl KvCache {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Lift `other`'s entire K/V for `layer` into `self`. No-op if either
     /// side's layer is empty or out of range. Implements lazarus
     /// `kv_inject_test` (full-layer transplant).
@@ -148,6 +157,7 @@ impl KvCache {
         self.set_layer(layer, (k.clone(), v.clone()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Lift positions `[start..end]` of `other`'s `layer` K/V into `self`.
     /// Replaces `self`'s entire layer cache with the slice (it does not
     /// merge — concatenation/merge is the caller's job because each
@@ -180,6 +190,7 @@ impl KvCache {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// GQA attention for a single decode step.
 ///
 /// `q_new`: `[1, num_q * head_dim]` — Q for the new token only.
@@ -243,6 +254,7 @@ pub fn gqa_attention_decode_step(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the attention block for one decode step using an incremental KV
 /// cache. `h_new` is the `[1, hidden]` residual for the new token.
 /// `kv_entry` is the layer's existing `(K_cache, V_cache)` or `None` on
@@ -265,6 +277,7 @@ pub fn run_attention_block_decode_step(
     run_attention_block_decode_step_backend(weights, h_new, layer, kv_entry, abs_position, None)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Decode-step attention with optional GPU-accelerated projections
 /// (Q/K/V/O matmuls route through `ComputeBackend::matmul_transb` when
 /// `backend` is `Some`). GQA softmax + weighted-V stays on CPU —
@@ -443,6 +456,7 @@ pub fn run_attention_block_decode_step_backend(
 mod tests {
     use super::*;
     use crate::test_utils::make_test_weights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
     // ── KvCache ───────────────────────────────────────────────────────────────
 
@@ -453,6 +467,7 @@ mod tests {
         assert_eq!(cache.next_position, 0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn kv_cache_with_window_clips() {
         let kv_dim = 4usize;
@@ -481,6 +496,7 @@ mod tests {
 
     // ── KV surgery (get / set / clear / clone) ────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn fill_kv(layer_rows: usize, kv_dim: usize, fill: f32) -> SharedKV {
         let k = Array2::from_elem((layer_rows, kv_dim), fill);
         let v = Array2::from_elem((layer_rows, kv_dim), fill);
@@ -545,6 +561,7 @@ mod tests {
         assert_eq!(recipient.get_layer(0).unwrap().0[[0, 0]], 9.0);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn clone_layer_position_range_slices_donor() {
         let mut donor = KvCache::with_layers(1);
@@ -584,6 +601,7 @@ mod tests {
 
     // ── decode step ───────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decode_step_output_shape() {
         let weights = make_test_weights();
@@ -595,6 +613,7 @@ mod tests {
         assert_eq!(v.shape()[0], 1, "V should have 1 new row");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decode_step_output_finite() {
         let weights = make_test_weights();
@@ -604,6 +623,7 @@ mod tests {
         assert!(h_out.iter().all(|v| v.is_finite()));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decode_step_kv_grows_with_prior() {
         let weights = make_test_weights();
@@ -616,6 +636,7 @@ mod tests {
         assert_eq!(kv2.0.shape()[0], 2, "K should grow by 1 per step");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn decode_step_all_layers_succeed() {
         let weights = make_test_weights();

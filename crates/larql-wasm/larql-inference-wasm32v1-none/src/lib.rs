@@ -71,15 +71,20 @@ pub mod vindex;
 // Re-export dependencies for downstream crates.
 pub use larql_models;
 pub use larql_vindex;
+#[cfg(not(target_arch = "wasm32"))]
 pub use ndarray;
+#[cfg(not(target_arch = "wasm32"))]
 pub use safetensors;
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokenizers;
 
+#[cfg(not(target_arch = "wasm32"))]
 // Backend re-exports — only the names with external consumers via
 // `larql_inference::*`. Callers wanting other compute types should
 // `use larql_compute::...` directly.
 pub use larql_compute::cpu::ops::moe::{run_single_expert, run_single_expert_with_norm};
 pub use larql_compute::QuantFormat;
+#[cfg(not(target_arch = "wasm32"))]
 pub use larql_compute::{cpu_backend, default_backend, ComputeBackend};
 
 /// Map a model's activation function to the compute-layer `Activation` enum.
@@ -94,18 +99,23 @@ pub fn activation_from_arch(
 
 // Re-export essentials at crate root.
 pub use attention::AttentionWeights;
+#[cfg(not(target_arch = "wasm32"))]
 pub use capture::{
     CaptureCallbacks, CaptureConfig, InferenceModel, TopKEntry, VectorFileHeader, VectorRecord,
     DEFAULT_ACTIVATION_TOP_K, DEFAULT_RESIDUAL_TOP_K,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use chat::{wrap_chat_prompt, wrap_prompt_raw, wrap_with_vindex_template, ChatWrap};
+#[cfg(not(target_arch = "wasm32"))]
 pub use error::InferenceError;
 pub use ffn::graph_backend::{GateIndex, IndexBuildCallbacks, SilentIndexCallbacks};
+#[cfg(not(target_arch = "wasm32"))]
 pub use ffn::{
     BackendFfn, FfnBackend, LayerFfnRouter, LayerShardedBackend, MoeRouterWeights, RemoteFfnConfig,
     RemoteFfnError, RemoteLatencyStats, RemoteMoeBackend, RemoteMoeError, RemoteWalkBackend,
     ShardConfig, SparseFfn, WeightFfn, WirePreference,
 };
+#[cfg(not(target_arch = "wasm32"))]
 // Crate-root forward re-exports — kept for any name with external use OR
 // in-crate examples/tests/benches that already import from the root. The
 // curated `research` module (below) re-sources these from subpaths so it
@@ -129,6 +139,7 @@ pub use forward::{
     walk_trace_from_residuals, InferenceWeights, KnnOverride, LayerAttentionCapture, MemitFact,
     MemitResult, PredictResult, TargetDeltaOpts,
 };
+#[cfg(not(target_arch = "wasm32"))]
 // Crate-root layer_graph re-exports — kept for any name with external use
 // OR in-crate examples/tests/benches that import via the root. Truly-unused
 // names (no external + no inference example/test usage) dropped 2026-05-09:
@@ -178,13 +189,17 @@ pub use layer_graph::{
     TemplateUniverse,
     WalkLayerGraph,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use model::{load_model_dir, resolve_model_path, ModelWeights};
+#[cfg(not(target_arch = "wasm32"))]
 pub use tokenizer::{decode_token, decode_token_raw, encode_prompt, load_tokenizer};
+#[cfg(not(target_arch = "wasm32"))]
 pub use trace::{
     trace as trace_decomposed, trace_residuals, AnswerWaypoint, BoundaryStore, BoundaryWriter,
     ContextStore, ContextTier, ContextWriter, LayerSummary, ResidualTrace, TraceNode,
     TracePositions, TraceStore, TraceWriter,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use vindex::{open_inference_vindex, predict_q4k, FfnL1Cache, WalkFfn, WalkFfnConfig};
 
 /// Stable, application-facing inference imports.
@@ -193,6 +208,7 @@ pub use vindex::{open_inference_vindex, predict_q4k, FfnL1Cache, WalkFfn, WalkFf
 /// glob imports. The crate root remains source-compatible while the public
 /// surface is gradually narrowed.
 pub mod prelude {
+    #[cfg(not(target_arch = "wasm32"))]
     pub use crate::{
         default_backend, generate, generate_streaming, generate_with_sampling, load_model_dir,
         load_tokenizer, open_inference_vindex, predict, predict_q4k, resolve_model_path,
@@ -215,6 +231,7 @@ pub mod prelude {
 /// `cosine_similarity`, `kl_divergence`, …) now live in the `larql-kv`
 /// crate — depend on it directly.
 pub mod research {
+    #[cfg(not(target_arch = "wasm32"))]
     // Source directly from subpaths so this curated surface keeps working
     // even when individual root re-exports are dropped. Kept as a single
     // import block per source module so the surface is easy to scan.
@@ -232,10 +249,12 @@ pub mod research {
         PredictResultWithResiduals, RawForward, SpecCapture, TargetDelta, TargetDeltaOpts,
         TraceResult, KNN_COSINE_THRESHOLD,
     };
+    #[cfg(not(target_arch = "wasm32"))]
     pub use crate::layer_graph::{
         predict_honest, predict_pipeline, predict_with_graph, predict_with_graph_vindex_logits,
         trace_with_graph, AttentionCache, TemplatePattern, TemplateUniverse,
     };
+    #[cfg(not(target_arch = "wasm32"))]
     pub use crate::trace::{
         trace as trace_decomposed, trace_residuals, AnswerWaypoint, BoundaryStore, BoundaryWriter,
         ContextStore, ContextTier, ContextWriter, LayerSummary, ResidualTrace, TraceNode,

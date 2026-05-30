@@ -1,19 +1,3 @@
-use super::config::GridRuntimeConfig;
-use super::setup::{build_grid_pipeline_setup, reset_and_preallocate_grid_kv, RemotePatch};
-use super::GridGenerateResult;
-use crate::ffn::moe_remote::RemoteMoeError;
-use crate::ffn::{FfnBackend, LayerShardedBackend};
-use crate::forward::apply_norm;
-use crate::layer_graph::generate::detok::Detokenizer;
-use crate::layer_graph::generate::eos::EosConfig;
-use crate::layer_graph::generate::policy::{
-    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
-};
-use crate::residual::rms_norm;
-use larql_compute::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
-use larql_compute::prelude::*;
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +9,32 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use super::config::GridRuntimeConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use super::setup::{build_grid_pipeline_setup, reset_and_preallocate_grid_kv, RemotePatch};
+use super::GridGenerateResult;
+use crate::ffn::moe_remote::RemoteMoeError;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::{FfnBackend, LayerShardedBackend};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::apply_norm;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::detok::Detokenizer;
+use crate::layer_graph::generate::eos::EosConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::layer_graph::generate::policy::{
+    build_special_suppress_set_with_policy, pick_next_filtered_with_policy,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::residual::rms_norm;
+use larql_compute::cpu::ops::q4k_q8k_dot::{quantize_x_to_q8k, Q8KActivation};
+use larql_compute::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
 /// Autoregressive generation with Metal GPU attention and remote dense FFN.
 ///
 /// For dense models (not MoE) where the entire FFN should be offloaded to a
@@ -175,6 +185,7 @@ pub fn generate_with_remote_ffn(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn apply_norm_for_ffn(weights: &ModelWeights, h_post_attn: &[f32], layer: usize) -> Vec<f32> {
     let arch = &*weights.arch;
     let norm_offset = arch.norm_weight_offset();
@@ -195,6 +206,7 @@ fn apply_norm_for_ffn(weights: &ModelWeights, h_post_attn: &[f32], layer: usize)
     normed.row(0).to_vec()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn dispatch_ffn_with_q8k_fallback(
     remote: &LayerShardedBackend,
     weights: &ModelWeights,
@@ -223,6 +235,7 @@ fn dispatch_ffn_with_q8k_fallback(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Batch pre-dispatch variant of [`generate_with_remote_ffn`].
 #[allow(clippy::too_many_arguments)]
 pub fn generate_with_remote_ffn_batch(

@@ -17,14 +17,19 @@ mod remote_ffn;
 mod tensors;
 mod walk_ffn;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use generation::generate_q4k_cpu_constrained_streaming_sampled_with_eos;
+#[cfg(not(target_arch = "wasm32"))]
 pub use generation::{
     generate_q4k_cpu, generate_q4k_cpu_constrained, generate_q4k_cpu_constrained_streaming,
     generate_q4k_cpu_constrained_streaming_sampled, generate_q4k_cpu_remote, is_end_of_turn,
     predict_q4k,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use hidden::predict_q4k_hidden;
+#[cfg(not(target_arch = "wasm32"))]
 pub use hooks::predict_q4k_hidden_hooked;
+#[cfg(not(target_arch = "wasm32"))]
 pub use interventions::{
     predict_q4k_hidden_with_mapped_head_residual_delta, predict_q4k_hidden_with_mapped_pre_o_head,
     predict_q4k_hidden_with_original_head_residual_delta,
@@ -32,10 +37,14 @@ pub use interventions::{
     predict_q4k_hidden_with_replaced_pre_o_head, predict_q4k_hidden_with_subtracted_pre_o_heads,
     predict_q4k_hidden_with_zeroed_pre_o_heads,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use metal::{
     predict_q4k_metal, predict_q4k_metal_capture_pre_wo, predict_q4k_metal_hidden,
     predict_q4k_metal_with_replaced_head_residual_delta,
 };
+#[cfg(not(target_arch = "wasm32"))]
 pub use remote_ffn::{predict_q4k_hidden_with_ffn, predict_q4k_with_ffn};
+#[cfg(not(target_arch = "wasm32"))]
 pub use tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
+#[cfg(not(target_arch = "wasm32"))]
 pub use walk_ffn::{q4k_ffn_forward_layer, q4k_ffn_forward_layer_q8k};

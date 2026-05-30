@@ -33,13 +33,16 @@
 //! decoded as `<unused*>` tokens. This loader propagates the validation
 //! error so the user sees the rebuild guidance directly.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::error::InferenceError;
 use larql_vindex::format::filenames::{
     ATTN_WEIGHTS_Q4K_BIN as ATTN_Q4K_BIN, ATTN_WEIGHTS_Q8_BIN as ATTN_Q8_BIN, INTERLEAVED_Q4K_BIN,
     INTERLEAVED_Q4_BIN, LM_HEAD_BIN, LM_HEAD_Q4_BIN,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use larql_vindex::{SilentLoadCallbacks, VectorIndex, VindexError};
 
 /// Env var pointing at a real `*.vindex` directory. Real-model
@@ -48,6 +51,7 @@ use larql_vindex::{SilentLoadCallbacks, VectorIndex, VindexError};
 /// source of truth so the literal isn't repeated across test fixtures.
 pub const ENV_VINDEX_PATH: &str = "LARQL_VINDEX_PATH";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Open a vindex for inference: load core, lm_head (best-effort),
 /// attention weights (strict), FFN weights (strict).
 ///
@@ -106,6 +110,7 @@ mod tests {
         assert!(result.is_err(), "missing directory must error");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Helper: drop a marker file at `path` so the loader's
     /// `path.is_file()` checks see it. We're not testing what's inside
     /// — just the file-presence logic that picks Q4_K vs Q8 vs absent.

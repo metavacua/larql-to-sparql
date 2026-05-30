@@ -12,9 +12,6 @@
 //! `bos_token` / `eos_token` from the tokenizer config. One user turn
 //! only — multi-turn rendering can be built on top but isn't needed for
 //! the one-shot prompt path.
-
-use minijinja::{context, Environment};
-use serde_json::Value;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -26,6 +23,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use minijinja::{context, Environment};
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
 /// Render `template_str` (Jinja2) against a single-turn conversation.
 /// Returns the rendered string or a `minijinja::Error` with full diagnostic
 /// info (line/column, template frame).
@@ -40,6 +43,7 @@ pub(crate) fn render_chat_template(
     tmpl.render(ctx)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Render `template_str` against an arbitrary multi-message conversation
 /// plus optional `enable_thinking` flag.  Used by the CLI's diagnostic
 /// `--system` / thinking flags so callers can inject a system prompt or
@@ -74,6 +78,7 @@ pub fn render_chat_template_multi(
     tmpl.render(ctx).map_err(|e| e.to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Assemble the minijinja environment with all HF-compat shims attached.
 /// Factored out so tests can poke at individual shims in isolation.
 fn build_env(template_str: &str) -> Result<Environment<'static>, minijinja::Error> {
@@ -114,6 +119,7 @@ fn build_env(template_str: &str) -> Result<Environment<'static>, minijinja::Erro
     Ok(env)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the minijinja context for a single-turn user→model conversation.
 /// Mirrors HF's `apply_chat_template(messages, add_generation_prompt=True)`.
 fn build_context(cfg: &Value, user_prompt: &str) -> minijinja::Value {
@@ -130,6 +136,7 @@ fn build_context(cfg: &Value, user_prompt: &str) -> minijinja::Value {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read a tokenizer_config field that may be either a plain string or a
 /// `{content: "…"}` object — HF wraps some special-token metadata this way.
 fn cfg_string_field(cfg: &Value, key: &str) -> Option<String> {

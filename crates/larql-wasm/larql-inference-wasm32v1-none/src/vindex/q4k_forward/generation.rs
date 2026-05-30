@@ -1,10 +1,3 @@
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-use tokenizers::Tokenizer;
-
-use crate::forward::PredictResult;
-
-use super::hidden::predict_q4k_hidden;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +9,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+
+use crate::forward::PredictResult;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::hidden::predict_q4k_hidden;
+#[cfg(not(target_arch = "wasm32"))]
 /// End-to-end predict on a Q4_K/Q6_K vindex.
 pub fn predict_q4k(
     weights: &mut ModelWeights,
@@ -42,6 +47,7 @@ pub fn is_end_of_turn(token: &str) -> bool {
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU autoregressive generation against a Q4_K / Q6_K vindex.
 pub fn generate_q4k_cpu(
     weights: &mut ModelWeights,
@@ -73,6 +79,7 @@ pub fn generate_q4k_cpu(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Like [`generate_q4k_cpu`] but dispatches MoE expert matmuls to remote shard
 /// servers via [`crate::ffn::RemoteMoeBackend`].
 pub fn generate_q4k_cpu_remote(
@@ -109,6 +116,7 @@ pub fn generate_q4k_cpu_remote(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Constrained variant of [`generate_q4k_cpu`]. Greedy under the mask.
 pub fn generate_q4k_cpu_constrained<M>(
     weights: &mut ModelWeights,
@@ -133,6 +141,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Streaming-callback variant of [`generate_q4k_cpu_constrained`].
 /// Fires `on_token(id, text, prob)` after each masked argmax pick. Used
 /// by the OpenAI server's SSE path so JSON / structured-output streams
@@ -165,6 +174,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sampling-aware streaming-constrained CPU Q4_K decode. Drives token
 /// selection through the supplied `SamplingConfig` (temperature, top_p,
 /// top_k, seed, repetition penalties) over the masked logits — so JSON
@@ -199,6 +209,7 @@ where
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Sampling-aware streaming-constrained CPU Q4_K decode with explicit EOS
 /// policy. Kept crate-visible so public legacy helpers continue to use the
 /// built-in stop set while higher-level generation APIs can honor

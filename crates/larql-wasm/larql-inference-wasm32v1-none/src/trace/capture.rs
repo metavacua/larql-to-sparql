@@ -1,15 +1,4 @@
 //! Trace capture — decomposed forward pass recording attn and FFN deltas.
-
-use ndarray::Array2;
-
-use crate::attention::SharedKV;
-use crate::ffn::{FfnBackend, WeightFfn};
-use crate::forward::hooks::LayerHook;
-use crate::forward::ple::precompute_per_layer_inputs;
-use crate::forward::{embed_tokens_pub, run_layer_with_capture_hooked};
-use crate::model::ModelWeights;
-
-use super::types::*;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -21,6 +10,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ffn::{FfnBackend, WeightFfn};
+use crate::forward::hooks::LayerHook;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::{embed_tokens_pub, run_layer_with_capture_hooked};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+
+use super::types::*;
 /// Which positions to capture.
 pub enum TracePositions {
     Last,
@@ -28,17 +34,21 @@ pub enum TracePositions {
     Positions(Vec<usize>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct TraceLayerHook {
     post_attention: Option<Array2<f32>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerHook for TraceLayerHook {
+    #[cfg(not(target_arch = "wasm32"))]
     fn on_post_attention(&mut self, _layer: usize, h: &mut Array2<f32>) {
         self.post_attention = Some(h.clone());
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture a complete residual stream trace.
 pub fn trace_residuals(
     weights: &ModelWeights,
@@ -144,6 +154,7 @@ pub fn trace_residuals(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Convenience: trace with default WeightFfn.
 pub fn trace(
     weights: &ModelWeights,
@@ -167,7 +178,9 @@ mod tests {
     use crate::forward::{forward_raw_logits, hidden_to_raw_logits};
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();
@@ -177,10 +190,12 @@ mod tests {
     struct ZeroFfn;
 
     impl FfnBackend for ZeroFfn {
+        #[cfg(not(target_arch = "wasm32"))]
         fn forward(&self, _layer: usize, x: &Array2<f32>) -> Array2<f32> {
             Array2::zeros((x.nrows(), x.ncols()))
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         fn forward_with_activation(
             &self,
             _layer: usize,
@@ -288,6 +303,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     // `trace()` and `forward_raw_logits()` compute the same forward pass
     // but through slightly different BLAS dispatch paths. Linux + macOS
     // produce bit-stable enough output that the residual matches within

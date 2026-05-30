@@ -32,10 +32,6 @@
 //!
 //! Per-step (outside op-name field): one decode call on `generated_ids`,
 //! then early return.
-
-use tokenizers::Tokenizer;
-
-use crate::experts::OpSpec;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -47,6 +43,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokenizers::Tokenizer;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::experts::OpSpec;
 /// Where the decoder is in the `{"op":"<NAME>","args":{...}}` skeleton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GrammarState {
@@ -76,6 +78,7 @@ pub(crate) fn op_grammar_state(generated_text: &str) -> GrammarState {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Vocabulary mask that constrains the op-name field of a generated
 /// `{"op":"<NAME>","args":{...}}` block to a prefix of one of the
 /// advertised op names.
@@ -101,7 +104,9 @@ pub struct OpNameMask<'tok> {
     seed_text: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<'tok> OpNameMask<'tok> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct from a list of valid op names.
     pub fn new(valid_ops: Vec<String>, tokenizer: &'tok Tokenizer) -> Self {
         Self {
@@ -113,6 +118,7 @@ impl<'tok> OpNameMask<'tok> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Construct from a slice of [`OpSpec`] (the args field is ignored —
     /// only the op name is constrained at the token level).
     pub fn from_op_specs(specs: &[OpSpec], tokenizer: &'tok Tokenizer) -> Self {

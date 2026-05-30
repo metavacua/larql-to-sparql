@@ -1,14 +1,3 @@
-
-use larql_models::ModelWeights;
-use larql_vindex::VectorIndex;
-use ndarray::Array2;
-
-use crate::attention::SharedKV;
-use crate::forward::embed_tokens_pub;
-use crate::forward::ple::precompute_per_layer_inputs;
-use crate::forward::run_layer_with_ffn;
-
-use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +9,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_models::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::VectorIndex;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::attention::SharedKV;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::embed_tokens_pub;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::ple::precompute_per_layer_inputs;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::forward::run_layer_with_ffn;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::tensors::{insert_q4k_layer_tensors, remove_layer_tensors};
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute the final hidden state for `token_ids` against a Q4_K/Q6_K
 /// vindex, dequantising attn + FFN one layer at a time. Returns the
 /// `[seq_len, hidden]` array; caller owns the lm_head step.
@@ -96,6 +105,7 @@ pub fn predict_q4k_hidden(
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build `MoeRouterWeights` for a single layer from the model's vector store.
 fn build_moe_router_weights<'a>(
     weights: &'a larql_models::ModelWeights,
@@ -123,6 +133,7 @@ fn build_moe_router_weights<'a>(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU forward for one hybrid-MoE layer (Gemma 4 26B A4B).
 fn run_moe_layer_cpu(
     weights: &ModelWeights,

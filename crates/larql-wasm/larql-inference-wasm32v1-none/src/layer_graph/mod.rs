@@ -34,6 +34,7 @@ pub mod prefill;
 mod template;
 mod walk;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use generate::{
     generate, generate_constrained, generate_constrained_streaming,
     generate_constrained_streaming_sampled, generate_streaming, generate_with_sampling,
@@ -43,9 +44,11 @@ pub use generate::{
     GenerateResult, Llama3Renderer, Sampler, SamplingConfig, StageTimings, TurnRenderer,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
 use crate::attention::AttentionWeights;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 
 // Re-export everything publicly
@@ -55,6 +58,7 @@ pub use predict::*;
 pub use template::*;
 pub use walk::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Output of a single layer's computation.
 pub struct LayerOutput {
     /// Post-layer residual (input to next layer).
@@ -70,6 +74,7 @@ pub struct LayerOutput {
 /// Implementations control both attention and FFN computation.
 /// The residual is always the input. The mechanism changes.
 pub trait LayerGraph {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run one transformer layer: attention + FFN + residuals.
     fn forward_layer(
         &self,
@@ -88,7 +93,9 @@ mod tests {
     use crate::ffn::WeightFfn;
     use crate::test_utils::make_test_weights;
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
 
     fn weights() -> &'static ModelWeights {
@@ -96,6 +103,7 @@ mod tests {
         W.get_or_init(make_test_weights)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn input(seq: usize, hidden: usize) -> Array2<f32> {
         let data: Vec<f32> = (0..seq * hidden).map(|i| (i as f32 + 1.0) * 0.01).collect();
         Array2::from_shape_vec((seq, hidden), data).unwrap()

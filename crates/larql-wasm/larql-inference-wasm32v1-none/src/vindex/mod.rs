@@ -11,8 +11,11 @@ mod walk_config;
 mod walk_ffn;
 
 pub use l1_cache::FfnL1Cache;
+#[cfg(not(target_arch = "wasm32"))]
 pub use loader::{open_inference_vindex, ENV_VINDEX_PATH};
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use q4k_forward::generate_q4k_cpu_constrained_streaming_sampled_with_eos;
+#[cfg(not(target_arch = "wasm32"))]
 pub use q4k_forward::{
     generate_q4k_cpu, generate_q4k_cpu_constrained, generate_q4k_cpu_constrained_streaming,
     generate_q4k_cpu_constrained_streaming_sampled, generate_q4k_cpu_remote,
@@ -28,4 +31,5 @@ pub use q4k_forward::{
     q4k_ffn_forward_layer, q4k_ffn_forward_layer_q8k, remove_layer_tensors,
 };
 pub use walk_config::WalkFfnConfig;
+#[cfg(not(target_arch = "wasm32"))]
 pub use walk_ffn::WalkFfn;

@@ -27,12 +27,6 @@
 //! - **Serial per-feature loop** (line ~240): the canonical
 //!   correctness baseline; always works because `ffn_row_*` always has
 //!   *some* backend.
-
-use ndarray::Array2;
-use rayon::prelude::*;
-
-use super::helpers::hits_len_ge_intermediate;
-use super::WalkFfn;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -44,7 +38,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+use super::helpers::hits_len_ge_intermediate;
+#[cfg(not(target_arch = "wasm32"))]
+use super::WalkFfn;
+#[cfg(not(target_arch = "wasm32"))]
 impl<'a> WalkFfn<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Sparse walk FFN — see module docs.
     pub(super) fn walk_ffn_sparse(
         &self,

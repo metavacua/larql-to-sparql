@@ -20,10 +20,6 @@
 //! Validated in Python: 200/200 (100%) at N=200 with multi-layer
 //! distribution across L8-L12 on v11 TinyStories 115M. See
 //! `~/chris-source/chris-experiments/compilation/15_v11_model/RESULTS.md §20`.
-
-use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
-use crate::model::ModelWeights;
-use ndarray::{Array1, Array2};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -35,6 +31,13 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::trace::{capture_ffn_activation_matrix, estimate_ffn_covariance};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::model::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
 /// A single fact to be compiled via MEMIT.
 #[derive(Debug, Clone)]
 pub struct MemitFact {
@@ -48,6 +51,7 @@ pub struct MemitFact {
     pub label: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Result of a MEMIT solve at one layer.
 #[derive(Debug)]
 pub struct MemitResult {
@@ -104,6 +108,7 @@ const COVARIANCE_PROMPTS: &[&str] = &[
     "The painting was created during the",
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run MEMIT with PRE-OPTIMISED target deltas.
 ///
 /// For each fact, runs `optimise_target_delta` (at the last layer, by
@@ -133,6 +138,7 @@ pub fn run_memit_with_target_opt(
     run_memit_with_target_opt_multi(weights, facts, ridge, td_opts, tokenizer, 1)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Multi-layer target-delta MEMIT (Python reference Phase 4).
 ///
 /// For each fact:
@@ -206,6 +212,7 @@ pub fn run_memit_with_target_opt_multi(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the full MEMIT pipeline: estimate covariance, compute per-fact
 /// activations and targets, solve the closed-form weight edit.
 ///
@@ -228,6 +235,7 @@ pub fn run_memit(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Source for the R matrix rows — either per-fact optimised residual
 /// deltas (from `optimise_target_delta`) or the embed-shortcut
 /// `target_alpha × unit(embed[target])`.
@@ -236,6 +244,7 @@ enum RSource<'a> {
     OptimisedDeltas(&'a [Array1<f32>]),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_memit_inner(
     weights: &ModelWeights,
     facts: &[MemitFact],
@@ -301,6 +310,7 @@ fn run_memit_inner(
     Ok(results)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Per-layer view of the R source — the shortcut scalar or the
 /// subset of optimised deltas for this layer's facts.
 enum RPerLayer {
@@ -308,6 +318,7 @@ enum RPerLayer {
     OptimisedDeltas(Vec<Array1<f32>>),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// MEMIT solve for a single layer — the core algorithm.
 fn memit_solve_layer(
     weights: &ModelWeights,
@@ -508,6 +519,7 @@ mod tests {
 
     // ── MemitResult delta shape ────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn memit_result_delta_w_shape_matches_weights() {
         // Build a synthetic MemitResult and verify expected shapes.
@@ -530,6 +542,7 @@ mod tests {
     //   LARQL_VINDEX_PATH=/path/to/vindex.vindex \
     //   cargo test -p larql-inference --lib forward::memit::tests -- --ignored --nocapture
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "requires LARQL_VINDEX_PATH pointing to a non-Q4K vindex with model weights"]
     fn run_memit_single_fact_produces_delta() {

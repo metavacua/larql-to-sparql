@@ -1,10 +1,13 @@
 //! KV cache prefill — populate Metal KV cache from CPU attention.
 
+#[cfg(not(target_arch = "wasm32"))]
 use ndarray::Array2;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::model::ModelWeights;
 use larql_compute::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Prefill with KV cache population: run CPU attention, capture K/V, populate Metal KV cache.
 /// Returns the final hidden state after all layers.
 /// After this, `backend.decode_token()` can generate new tokens using the populated cache.
@@ -38,6 +41,7 @@ pub fn prefill_with_kv(
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Lightweight CPU KV cache population after GPU prefill.
 pub(super) fn prefill_kv_cache_cpu(
     weights: &ModelWeights,
@@ -59,6 +63,7 @@ mod tests {
     use crate::test_utils::{make_test_vindex, make_test_weights};
     use larql_compute::CpuBackend;
     use larql_models::ModelWeights;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::OnceLock;
     fn weights() -> &'static ModelWeights {
         static W: OnceLock<ModelWeights> = OnceLock::new();

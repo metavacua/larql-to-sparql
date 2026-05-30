@@ -4,7 +4,6 @@
 //! Uses BLAS gemv for both Q·K scores and softmax·V accumulation.
 
 use super::{AttentionAllWeights, AttentionWeights};
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +15,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+#[cfg(not(target_arch = "wasm32"))]
 /// GQA with causal masking (no weight capture).
 /// q: (seq, num_q * head_dim), k: (seq, num_kv * head_dim), v: same as k
 #[allow(clippy::too_many_arguments)]
@@ -34,6 +36,7 @@ pub fn gqa_attention(
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// GQA that optionally captures per-head attention weights for the last token.
 /// `softcap`: if Some(cap), apply tanh(scores/cap)*cap before softmax.
 #[allow(clippy::too_many_arguments)]
@@ -55,6 +58,7 @@ pub fn gqa_attention_with_weights(
     (out, last)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// GQA that captures every query-position attention distribution.
 ///
 /// Diagnostic/capture tooling uses this for relation-state probes. Production
@@ -80,6 +84,7 @@ pub fn gqa_attention_with_all_weights(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture every query-position attention distribution using only the first
 /// `qk_rank` dimensions of each Q/K head. This is a diagnostic surface for
 /// reduced-QK address probes; it does not compute a V-weighted output.
@@ -147,6 +152,7 @@ pub fn gqa_reduced_qk_all_weights(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn gqa_attention_capture(
     q: &Array2<f32>,
@@ -267,16 +273,20 @@ fn gqa_attention_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use ndarray::Array2;
+    #[cfg(not(target_arch = "wasm32"))]
     fn ones(rows: usize, cols: usize) -> Array2<f32> {
         Array2::ones((rows, cols))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn small(rows: usize, cols: usize, scale: f32) -> Array2<f32> {
         let data: Vec<f32> = (0..rows * cols).map(|i| (i as f32 + 1.0) * scale).collect();
         Array2::from_shape_vec((rows, cols), data).unwrap()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     // seq=4, num_q=2, head_dim=4, num_kv=1, reps=2
     fn run(seq: usize) -> Array2<f32> {
         let hd = 4usize;
@@ -633,6 +643,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn gqa_reps_2_head_pairs_share_kv() {
         // Q-heads 0,1 use KV-head 0; Q-heads 2,3 use KV-head 1.

@@ -166,6 +166,7 @@ fn shard_config_strips_trailing_slash() {
 //   3. The manifest parser round-trips JSON → `Vec<ShardConfig>` with
 //      ownership sets matching the inclusive ranges in the input.
 
+#[cfg(not(target_arch = "wasm32"))]
 fn make_unit_shard(units: &[(usize, usize)]) -> Shard {
     let set: HashSet<(usize, usize)> = units.iter().copied().collect();
     let config = ShardConfig::with_units("http://localhost:9000", set);
@@ -183,6 +184,7 @@ fn shard_with_units_only_owns_via_layer_aware_check() {
     assert!(!s.owns_unit(3, 5)); // belongs to layer 0, not 3
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn shard_layer_uniform_owns_unit_falls_back_to_range() {
     let config = ShardConfig::new(0, 31, "http://localhost:9000");
@@ -247,6 +249,7 @@ fn unit_manifest_rejects_non_numeric_layer() {
     assert!(format!("{err}").contains("layer key 'oops'"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_unit_manifest_reports_path_on_missing_file() {
     let bogus = std::path::PathBuf::from("/nonexistent/larql-units-x.json");
@@ -262,6 +265,7 @@ fn parse_unit_manifest_reports_path_on_missing_file() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn parse_unit_manifest_round_trips_from_file() {
     // Happy path: write a manifest to a tempfile, parse it back into shards.

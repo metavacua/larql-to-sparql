@@ -3,15 +3,6 @@
 //! HTTP and UDS use the binary `application/x-larql-expert` wire body;
 //! gRPC uses the `ExpertBatchRequest` proto over the persistent HTTP/2
 //! channel.
-
-use prost::Message;
-
-use super::super::error::RemoteMoeError;
-use super::super::metrics;
-use super::super::wire::{
-    decode_expert_response, encode_expert_request, ExpertCallItem, ExpertResultItem,
-    EXPERT_BATCH_PATH, EXPERT_BINARY_CONTENT_TYPE,
-};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -23,10 +14,23 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use prost::Message;
+
+use super::super::error::RemoteMoeError;
+use super::super::metrics;
+use super::super::wire::{
+    decode_expert_response, encode_expert_request, ExpertCallItem, ExpertResultItem,
+    EXPERT_BATCH_PATH, EXPERT_BINARY_CONTENT_TYPE,
+};
 #[cfg(unix)]
 use super::uds_call;
+#[cfg(not(target_arch = "wasm32"))]
 use super::{Shard, ShardTransport};
+#[cfg(not(target_arch = "wasm32"))]
 impl Shard {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Send a batch of expert calls to this shard.
     ///
     /// Dispatches via gRPC (persistent HTTP/2) when the shard URL starts with

@@ -10,15 +10,6 @@
 //! from every walk path and only asserts on the dispatch trace. That
 //! keeps the tests fast, deterministic, and independent of BLAS / HF
 //! weights / disk.
-
-use ndarray::{Array1, Array2, ArrayView2};
-use std::sync::Mutex;
-
-use larql_vindex::{
-    FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
-};
-
-use super::DispatchEntry;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -30,6 +21,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2, ArrayView2};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
+use larql_vindex::{
+    FeatureMeta, Fp4FfnAccess, GateLookup, NativeFfnAccess, PatchOverrides, QuantizedFfnAccess,
+};
+
+use super::DispatchEntry;
 /// Toggleable mock of GateIndex that reports whichever backends the
 /// test wants available. All walk methods return zero arrays — the
 /// tests only assert on the dispatch trace.
@@ -65,6 +67,7 @@ impl MockIndex {
 }
 
 impl GateLookup for MockIndex {
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn(&self, _layer: usize, _residual: &Array1<f32>, _top_k: usize) -> Vec<(usize, f32)> {
         vec![]
     }
@@ -75,6 +78,7 @@ impl GateLookup for MockIndex {
         self.num_features
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn gate_knn_batch(&self, _l: usize, _x: &Array2<f32>, _k: usize) -> Vec<usize> {
         vec![]
     }

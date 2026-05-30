@@ -26,8 +26,11 @@ use std::collections::{HashMap, HashSet};
 use larql_wasm_math::FloatExt as _;
 #[cfg(unix)]
 use super::uds_call;
+#[cfg(not(target_arch = "wasm32"))]
 use super::{Shard, ShardTransport};
+#[cfg(not(target_arch = "wasm32"))]
 impl Shard {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Send all layers' routing decisions in one request, receive all h2 values.
     ///
     /// HTTP and UDS only.
@@ -89,6 +92,7 @@ impl Shard {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Q8K-prenormed variant: client sends pre-quantised h_norm instead of
     /// the raw residual.  4× smaller upload; server skips pre_experts_norm
     /// + Q8K quantisation and calls the matvec directly.

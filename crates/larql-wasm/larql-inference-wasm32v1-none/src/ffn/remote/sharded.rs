@@ -6,14 +6,6 @@
 //!
 //! Each shard may itself have `--moe-shards` configured server-side, making
 //! expert dispatch transparent to the client.
-
-use std::time::Duration;
-
-use ndarray::Array2;
-
-use super::http::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
-use crate::ffn::FfnBackend;
-use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -25,12 +17,25 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+#[cfg(not(target_arch = "wasm32"))]
+use super::http::{RemoteFfnConfig, RemoteFfnError, RemoteWalkBackend, WirePreference};
+use crate::ffn::FfnBackend;
+use larql_compute::cpu::ops::q4k_q8k_dot::Q8KActivation;
+#[cfg(not(target_arch = "wasm32"))]
 struct LayerShard {
     start: usize,
     end: usize, // inclusive
     backend: RemoteWalkBackend,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// FFN backend that routes each layer to the owning shard.
 ///
 /// Build with [`LayerShardedBackend::connect`]. Parses either:
@@ -40,12 +45,15 @@ pub struct LayerShardedBackend {
     shards: Vec<LayerShard>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerShardedBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from a spec string and connect (health-check) each shard.
     pub fn connect(spec: &str, timeout: Duration) -> Result<Self, RemoteFfnError> {
         Self::connect_with_wire(spec, timeout, WirePreference::BestAvailable)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Build from a spec string with an explicit wire format preference.
     pub fn connect_with_wire(
         spec: &str,
@@ -83,6 +91,7 @@ impl LayerShardedBackend {
             .unwrap_or("")
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn shard_for(&self, layer: usize) -> Option<&RemoteWalkBackend> {
         self.shards
             .iter()
@@ -114,7 +123,9 @@ impl LayerShardedBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerShardedBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fire one HTTP request per layer in parallel.
     ///
     /// Each layer gets its own independent `h_post_attn` input (not chained).
@@ -151,7 +162,9 @@ impl LayerShardedBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerShardedBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Fire one HTTP request per layer in parallel using the Q8K wire format.
     ///
     /// Each layer's pre-normed Q8K activation is dispatched to the owning shard.
@@ -240,6 +253,7 @@ impl LayerShardedBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerShardedBackend {
     /// Send a single layer's Q8K-prenormed activation to the owning shard and
     /// return the FFN delta. Uses the same `/v1/walk-ffn-q8k` wire format as
@@ -252,7 +266,9 @@ impl LayerShardedBackend {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FfnBackend for LayerShardedBackend {
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward(&self, layer: usize, x: &Array2<f32>) -> Array2<f32> {
         match self.shard_for(layer) {
             Some(shard) => shard.forward(layer, x),
@@ -260,6 +276,7 @@ impl FfnBackend for LayerShardedBackend {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_with_activation(&self, layer: usize, x: &Array2<f32>) -> (Array2<f32>, Array2<f32>) {
         match self.shard_for(layer) {
             Some(shard) => shard.forward_with_activation(layer, x),
@@ -270,6 +287,7 @@ impl FfnBackend for LayerShardedBackend {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn forward_moe_full_layer(
         &self,
         layer: usize,
@@ -286,6 +304,7 @@ impl FfnBackend for LayerShardedBackend {
 
 // ── Parse "START-END=URL,..." ─────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_shard_map_with_wire(
     spec: &str,
     timeout: Duration,
