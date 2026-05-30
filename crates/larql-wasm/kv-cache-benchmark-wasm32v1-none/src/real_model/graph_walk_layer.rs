@@ -35,6 +35,7 @@ pub struct GraphWalkResult {
     pub memory_bytes: usize,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run graph walk prediction: embed → gate KNN → feature → down KNN → token.
 ///
 /// For factual queries, this bypasses the forward pass entirely.
@@ -113,6 +114,7 @@ pub fn run_graph_walk(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run graph walk using vindex logits (lm_head KNN) for final prediction.
 /// This is the simpler path: full forward pass through walk FFN, then KNN logits.
 /// Requires a WalkLayerGraph (dense attention + walk FFN per layer).

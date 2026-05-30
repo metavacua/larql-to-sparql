@@ -6,7 +6,6 @@
 use super::kv_capture::KvCapture;
 use crate::metrics::Metrics;
 use crate::turboquant::TurboQuant;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -18,6 +17,8 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Result of applying TurboQuant to captured K/V.
 pub struct TurboQuantResult {
     /// Compressed bytes for all K/V across all layers.
@@ -103,6 +104,7 @@ pub fn apply_turboquant(capture: &KvCapture, tq: &TurboQuant) -> TurboQuantResul
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Quantize a 2D tensor row-by-row, return decoded tensor + metrics.
 fn quantize_tensor(
     tensor: &Array2<f32>,

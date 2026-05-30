@@ -89,6 +89,7 @@ pub struct RealModelBenchmark<'a> {
 }
 
 impl<'a> RealModelBenchmark<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         weights: &'a ModelWeights,
         tokenizer: &'a tokenizers::Tokenizer,
@@ -104,6 +105,7 @@ impl<'a> RealModelBenchmark<'a> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run all strategies on a prompt and compare.
 pub fn run_all_strategies(
     bench: &RealModelBenchmark,
@@ -264,6 +266,7 @@ pub fn run_all_strategies(
     results
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Benchmark all registered `KvEngine` implementations on a prompt.
 ///
 /// Times prefill only (single token generation is too noisy for a one-shot

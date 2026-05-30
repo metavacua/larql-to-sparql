@@ -9,15 +9,18 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Benchmark runner: sweeps context lengths × strategies × models.
 /// Outputs JSON + formatted table.
 use crate::{model_config::ModelConfig, run_strategy_benchmark, KvStrategy, StrategyResult};
+#[cfg(not(target_arch = "wasm32"))]
 use rand::prelude::*;
 /// Context lengths to sweep.
 pub const CONTEXT_LENGTHS: &[usize] = &[
     512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 370_000,
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run all strategies across all context lengths for a given model.
 pub fn run_sweep(
     config: &ModelConfig,
@@ -38,6 +41,7 @@ pub fn run_sweep(
     results
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Memory-only sweep (no encode/decode, just analytical formula).
 /// Fast — can run for all models including 70B.
 pub fn memory_sweep(
@@ -79,6 +83,7 @@ pub struct MultiTurnResult {
     pub wall_clock_us: f64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Simulate a multi-turn conversation.
 pub fn multi_turn_simulation(
     config: &ModelConfig,
@@ -124,6 +129,7 @@ pub fn multi_turn_simulation(
     results
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Format the memory-scaling table (per-strategy × context length).
 pub fn format_comparative_table(config: &ModelConfig, strategies: &[&dyn KvStrategy]) -> String {
     let mut out = String::new();
@@ -177,12 +183,14 @@ fn format_tokens(tokens: usize) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write results to JSON file.
 pub fn write_json(results: &[StrategyResult], path: &str) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(results)?;
     std::fs::write(path, json)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Write memory sweep to JSON file.
 pub fn write_memory_json(points: &[MemoryPoint], path: &str) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(points)?;

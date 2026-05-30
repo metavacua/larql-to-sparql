@@ -17,6 +17,7 @@ use larql_wasm_math::FloatExt as _;
 /// These codebooks are the optimal scalar quantizers for this distribution.
 /// Values validated against llama.cpp Discussion #20969 reference implementation.
 use super::lloyd_max::Codebook;
+#[cfg(not(target_arch = "wasm32"))]
 /// Get the pre-computed codebook for a given dimension and bit-width.
 pub fn get_codebook(dim: usize, bits: u8) -> &'static Codebook {
     match (dim, bits) {
@@ -34,6 +35,7 @@ pub fn get_codebook(dim: usize, bits: u8) -> &'static Codebook {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::LazyLock;
 
 // For Beta(d/2, d/2), the standard deviation is approximately 1/sqrt(2d).
@@ -43,6 +45,7 @@ use std::sync::LazyLock;
 // d=128: sigma ≈ 0.0625, range ≈ [-0.19, 0.19]
 // d=256: sigma ≈ 0.0442, range ≈ [-0.13, 0.13]
 
+#[cfg(not(target_arch = "wasm32"))]
 /// 4-bit codebook for d=128 (16 centroids).
 /// Optimal for Beta(64, 64) ≈ N(0, 1/256).
 static CODEBOOK_D128_4BIT: LazyLock<Codebook> = LazyLock::new(|| {
@@ -50,6 +53,7 @@ static CODEBOOK_D128_4BIT: LazyLock<Codebook> = LazyLock::new(|| {
     make_gaussian_codebook(16, sigma)
 });
 
+#[cfg(not(target_arch = "wasm32"))]
 /// 4-bit codebook for d=256 (16 centroids).
 /// Optimal for Beta(128, 128) ≈ N(0, 1/512).
 static CODEBOOK_D256_4BIT: LazyLock<Codebook> = LazyLock::new(|| {
@@ -57,12 +61,14 @@ static CODEBOOK_D256_4BIT: LazyLock<Codebook> = LazyLock::new(|| {
     make_gaussian_codebook(16, sigma)
 });
 
+#[cfg(not(target_arch = "wasm32"))]
 /// 3-bit codebook for d=128 (8 centroids).
 static CODEBOOK_D128_3BIT: LazyLock<Codebook> = LazyLock::new(|| {
     let sigma = 1.0 / (2.0 * 128.0_f32).sqrt();
     make_gaussian_codebook(8, sigma)
 });
 
+#[cfg(not(target_arch = "wasm32"))]
 /// 3-bit codebook for d=256 (8 centroids).
 static CODEBOOK_D256_3BIT: LazyLock<Codebook> = LazyLock::new(|| {
     let sigma = 1.0 / (2.0 * 256.0_f32).sqrt();
@@ -73,6 +79,9 @@ static CODEBOOK_D256_3BIT: LazyLock<Codebook> = LazyLock::new(|| {
 ///
 /// For a Gaussian, the optimal centroids at various bit-widths are well-known.
 /// We generate from samples and iterate to convergence.
+// RNG-based codebook generation (rand / rand_distr) — native; no entropy on
+// wasm32v1-none.
+#[cfg(not(target_arch = "wasm32"))]
 fn make_gaussian_codebook(n_levels: usize, sigma: f32) -> Codebook {
     use rand::prelude::*;
     use rand_distr::Normal;

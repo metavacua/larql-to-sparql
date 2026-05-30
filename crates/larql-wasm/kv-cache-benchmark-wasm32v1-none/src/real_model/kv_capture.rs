@@ -7,7 +7,6 @@ use larql_inference::attention::run_attention_with_kv;
 use larql_inference::ffn::WeightFfn;
 use larql_inference::forward::{embed_tokens_pub, run_ffn};
 use larql_inference::model::ModelWeights;
-use ndarray::Array2;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +18,8 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
 /// Captured K/V tensors from a full forward pass.
 pub struct KvCapture {
     /// Per-layer K tensors (post-RoPE). Shape: [seq_len, num_kv_heads * head_dim]

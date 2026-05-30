@@ -21,10 +21,6 @@ use larql_inference::attention::run_attention_block_decode_step;
 use larql_inference::ffn::WeightFfn;
 use larql_inference::forward::{embed_tokens_pub, logits_to_predictions_pub, run_ffn};
 use larql_inference::model::ModelWeights;
-use ndarray::Array2;
-
-use super::kv_capture::capture_kv;
-use super::markov_layer::{rs_decode_step, rs_prefill};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -36,6 +32,11 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array2;
+
+use super::kv_capture::capture_kv;
+use super::markov_layer::{rs_decode_step, rs_prefill};
 /// Whether the answer is in the model's weights or planted in the prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum QueryType {
@@ -79,6 +80,7 @@ impl DecodeComparisonResult {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the decode comparison: full-KV decode vs RS-decode, N steps.
 ///
 /// Both decoders start from the same prefill (identical hidden state at
@@ -197,6 +199,7 @@ pub fn run_decode_comparison(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run one full-KV decode step: embed token, run all layers, return hidden.
 fn full_kv_step(
     weights: &ModelWeights,
@@ -217,6 +220,7 @@ fn full_kv_step(
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Cosine similarity of the last row of two hidden-state arrays.
 fn hidden_cosine(h1: &Array2<f32>, h2: &Array2<f32>) -> f64 {
     let v1 = h1.row(h1.shape()[0] - 1);
@@ -235,6 +239,7 @@ fn hidden_cosine(h1: &Array2<f32>, h2: &Array2<f32>) -> f64 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Get the first token ID for a token string.
 /// Falls back to 0 (BOS/PAD) if the string encodes to multiple or zero tokens.
 fn token_to_id(tokenizer: &tokenizers::Tokenizer, token: &str) -> u32 {

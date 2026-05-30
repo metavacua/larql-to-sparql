@@ -71,6 +71,7 @@ pub trait KvStrategy {
     fn memory_bytes(&self, config: &ModelConfig, seq_len: usize) -> usize;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run encode → decode → measure on synthetic data for any strategy.
 pub fn run_strategy_benchmark(
     strategy: &dyn KvStrategy,

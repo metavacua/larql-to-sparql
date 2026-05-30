@@ -138,6 +138,7 @@ pub fn forward_to_logits(
     forward_to_logits_traced(weights, index, token_ids, config).0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Same as `forward_to_logits` but also returns the per-layer walk-path
 /// trace (one `(layer, path_name)` per layer). Enables the CLI
 /// `--trace` flag and catches cases where a candidate vindex silently

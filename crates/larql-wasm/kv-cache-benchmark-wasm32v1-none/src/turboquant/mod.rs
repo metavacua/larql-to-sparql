@@ -18,10 +18,12 @@ pub mod lloyd_max;
 pub mod packing;
 pub mod rotation;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use larql_kv::turbo_quant::TurboQuant;
 
 use crate::{model_config::ModelConfig, KvStrategy};
 
+#[cfg(not(target_arch = "wasm32"))]
 impl KvStrategy for TurboQuant {
     fn name(&self) -> &str {
         match self.bits {

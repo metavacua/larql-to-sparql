@@ -55,6 +55,7 @@ pub struct PromptResult {
 
 // ── Test 1: Paris test ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run the Paris test across all strategies. Returns pass/fail per strategy.
 pub fn test_paris(
     weights: &ModelWeights,
@@ -77,6 +78,7 @@ pub fn test_paris(
 
 // ── Test 2: Top-1 match rate ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Run top-1 match rate on a prompt set. Returns per-strategy match rates.
 pub fn test_top1_match_rate(
     weights: &ModelWeights,
@@ -113,6 +115,7 @@ pub fn test_top1_match_rate(
 
 // ── Test 4: Multi-token generation stability ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Generate multiple tokens and measure divergence from baseline.
 /// Returns (strategy, first_diverge_token, match_rate) per strategy.
 pub fn test_generation_stability(
@@ -139,6 +142,7 @@ pub fn test_generation_stability(
     ]
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Simple greedy token generation (temperature=0).
 fn generate_tokens(
     weights: &ModelWeights,
