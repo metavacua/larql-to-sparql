@@ -25,6 +25,7 @@
 //!   Metal expert buffer cache, called from boot.
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};

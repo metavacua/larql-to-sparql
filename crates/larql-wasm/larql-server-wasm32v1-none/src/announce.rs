@@ -8,13 +8,20 @@ use core::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use larql_router_protocol::{
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
     AnnounceMsg, DroppingMsg, GridServiceClient, HeartbeatMsg, RouterPayload, ServerMessage,
     ServerPayload,
 };
 
 use crate::metrics::LayerLatencyTracker;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tonic::metadata::AsciiMetadataValue;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::{error, info, warn};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -75,6 +82,7 @@ pub struct AvailableConfig {
 
 // ── Public entry points ────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Spawn a background task that keeps the grid connection alive.
 /// Returns immediately; the task runs for the process lifetime.
 pub fn run_announce(config: AnnounceConfig) {
@@ -105,6 +113,7 @@ pub fn run_announce(config: AnnounceConfig) {
     });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Spawn a Mode B background task: advertise available capacity, wait for
 /// `AssignMsg`, download the assigned shard, send `ReadyMsg`, then
 /// re-enter Mode A serving loop.
@@ -193,6 +202,7 @@ fn dropping_message(model_id: String, layer_start: u32, layer_end: u32) -> Serve
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Wait until `counter` reaches zero or `timeout` expires.
 /// Polls every 100 ms. Used by GT6 drain to ensure no requests are
 /// mid-flight before sending DroppingMsg.
@@ -218,6 +228,7 @@ async fn drain_requests(counter: &core::sync::atomic::AtomicU32, timeout: Durati
 
 // ── Single connection lifecycle ────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     let channel = tonic::transport::Channel::from_shared(cfg.join_url.clone())?
         .connect()
@@ -312,6 +323,7 @@ async fn try_once(cfg: &AnnounceConfig) -> Result<(), Box<dyn core::error::Error
 
 // ── Mode B connection lifecycle ────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn try_once_available(
     cfg: &AvailableConfig,
 ) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {

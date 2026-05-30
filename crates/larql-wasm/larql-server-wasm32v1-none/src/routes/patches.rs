@@ -3,8 +3,11 @@
 //! Session-aware: if `X-Session-Id` header is present, patches are scoped
 //! to that session. Otherwise, patches go to the global shared state.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -32,6 +35,7 @@ pub struct ApplyPatchRequest {
     pub patch: Option<larql_vindex::VindexPatch>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve a patch from the request body (inline or URL).
 fn resolve_patch(
     req: &ApplyPatchRequest,
@@ -195,6 +199,7 @@ pub async fn handle_apply_patch(
     apply_patch_to_model(&state, None, &headers, req).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/patches/apply",
@@ -267,6 +272,7 @@ pub async fn handle_list_patches(
     list_patches_for_model(&state, None, &headers).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/patches",
@@ -323,6 +329,7 @@ async fn remove_patch_from_model(
     })))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     delete,
     path = "/v1/patches/{name}",
@@ -344,6 +351,7 @@ pub async fn handle_remove_patch(
     remove_patch_from_model(&state, None, &headers, &name).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     delete,
     path = "/v1/{model_id}/patches/{name}",

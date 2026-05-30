@@ -227,6 +227,7 @@ mod tests {
         assert!(alloc::sync::Arc::ptr_eq(&a, &b));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn concurrent_reads_do_not_panic() {
         use std::sync::Arc as StdArc;

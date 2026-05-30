@@ -35,7 +35,9 @@
 //!   bytes (~33% smaller wire than the JSON array form). Many
 //!   production OpenAI clients default to base64 for embeddings.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -226,6 +228,7 @@ fn encode_floats_base64(values: &[f32]) -> String {
     base64::engine::general_purpose::STANDARD.encode(&bytes)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Mean pool a `[seq_len × hidden]` matrix to a `[hidden]` vector.
 /// Returns zeros for empty sequences (caller should reject upstream).
 fn mean_pool(h: &larql_vindex::ndarray::Array2<f32>) -> Vec<f32> {
@@ -265,6 +268,7 @@ mod tests {
         assert_eq!(pooled, vec![2.0, 5.0]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn mean_pool_empty_sequence_returns_zero_vector() {
         let h: larql_vindex::ndarray::Array2<f32> = larql_vindex::ndarray::Array2::zeros((0, 4));

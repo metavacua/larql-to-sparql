@@ -10,6 +10,7 @@ use clap::Parser;
 
 use larql_server::bootstrap::{self, normalize_serve_alias, BoxError, Cli};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
     // Accept both `larql-server <path>` and `larql-server serve <path>`.

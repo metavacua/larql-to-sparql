@@ -1,6 +1,8 @@
 //! GET /v1/stats
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::error::ServerError;
@@ -105,6 +107,7 @@ pub async fn handle_stats(
     Ok(Json(add_q4k_ffn(model, stats).await))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/stats",

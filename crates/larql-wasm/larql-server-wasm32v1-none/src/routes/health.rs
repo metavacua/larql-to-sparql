@@ -1,6 +1,8 @@
 //! GET /v1/health
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::band_utils::HEALTH_STATUS_OK;

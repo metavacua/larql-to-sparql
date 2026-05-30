@@ -40,10 +40,14 @@
 //!
 //! See `docs/server-spec.md` for the LARQL-vs-OpenAI envelope split.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::StatusCode;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 
 use crate::error::ServerError;
@@ -161,6 +165,7 @@ impl IntoResponse for OpenAIError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
     use axum::body::to_bytes;
     async fn body_json(resp: Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();

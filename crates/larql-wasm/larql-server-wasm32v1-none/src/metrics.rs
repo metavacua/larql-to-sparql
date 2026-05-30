@@ -9,6 +9,7 @@
 //! - `avg_ms`: EMA (α=0.1) — smooth, low overhead, updated every request.
 //! - `p99_ms`: ring-buffer p99 over the last 100 requests — tail latency.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
 
 use larql_router_protocol::LayerLatency;

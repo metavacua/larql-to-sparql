@@ -8,10 +8,14 @@
 //! Returns HTTP 404 when the server was not launched with `--experts` (i.e.,
 //! it owns all experts or is not operating as an expert shard).
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::StatusCode;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 
 use crate::state::AppState;

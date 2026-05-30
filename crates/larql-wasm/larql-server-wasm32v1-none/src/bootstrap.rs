@@ -1,7 +1,9 @@
 //! Server bootstrap and vindex loading helpers.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::middleware;
 use clap::Parser;
 use larql_vindex::format::filenames::*;
@@ -9,7 +11,9 @@ use larql_vindex::{
     load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer, PatchedVindex,
     SilentLoadCallbacks, VectorIndex,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::{info, warn};
 
 use crate::cache::DescribeCache;
@@ -139,6 +143,7 @@ impl UnitManifest {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Parse `--units PATH` into the canonical `(layer, expert_id)` ownership set.
 pub fn parse_unit_manifest(
     path: &Path,
@@ -150,6 +155,7 @@ pub fn parse_unit_manifest(
     manifest.into_unit_set()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_single_vindex(
     path_str: &str,
     opts: LoadVindexOptions,
@@ -379,6 +385,7 @@ pub fn load_single_vindex(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn discover_vindexes(dir: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -652,6 +659,7 @@ pub struct Cli {
 
 // ── Server lifecycle ──────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Boot the server: load every vindex named on the command line, build the
 /// router, run any opt-in warmups, then bind the TCP listener (plus optional
 /// UDS / TLS / gRPC sockets) and run forever.
@@ -1139,6 +1147,7 @@ mod tests {
         assert!(parse_ram_bytes("notanumber").is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn unique_temp_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
@@ -1162,6 +1171,7 @@ mod tests {
     // ownership-check and warmup loops can rely on it without having to
     // re-validate.
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_units_file(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("units.json");
         std::fs::write(&path, body).unwrap();
@@ -1203,6 +1213,7 @@ mod tests {
         assert!(msg.contains("end (2) must be >= start (5)"), "got: {msg}");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parse_unit_manifest_missing_file_reports_path() {
         let bogus = PathBuf::from("/nonexistent/larql-units-not-here.json");
@@ -1258,6 +1269,7 @@ mod tests {
         assert_eq!(normalize_serve_alias(args.clone()), args);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn discover_vindexes_returns_sorted_dirs_with_index_json() {
         let dir = unique_temp_dir("discover");

@@ -1,6 +1,8 @@
 //! GET /v1/relations — list all known relation types (top tokens).
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, Query, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -152,6 +154,7 @@ pub struct RelationsParams {
     pub source: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
@@ -258,6 +261,7 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
     }))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/relations",
@@ -280,6 +284,7 @@ pub async fn handle_relations(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/relations",

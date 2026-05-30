@@ -7,12 +7,18 @@
 //!
 //! Activated when the server is started with `--embed-only`.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::body::Body;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, Query, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 
 use larql_inference::forward::predict::logits_to_predictions_pub;
@@ -91,6 +97,7 @@ fn parse_binary_embed_request(bytes: &[u8]) -> Result<Vec<u32>, ServerError> {
         .collect())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn encode_binary_embed_response(h: &Array2<f32>) -> Vec<u8> {
     let seq_len = h.shape()[0];
     let hidden = h.shape()[1];
@@ -140,6 +147,7 @@ pub struct TokenDecodeQuery {
 
 // ── Core helpers ──────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Look up embedding rows for the given token IDs and apply the embed scale.
 /// Returns shape [seq_len, hidden_size].
 ///
@@ -184,6 +192,7 @@ pub(crate) fn embed_tokens(
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `POST /v1/embed`
 ///
 /// JSON request: `{"token_ids": [...]}`.
@@ -220,6 +229,7 @@ pub async fn handle_embed(
     handle_embed_inner(&state, None, headers, body).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/embed",
@@ -242,6 +252,7 @@ pub async fn handle_embed_multi(
     handle_embed_inner(&state, Some(model_id.as_str()), headers, body).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_embed_inner(
     state: &AppState,
     model_id: Option<&str>,
@@ -318,6 +329,7 @@ async fn handle_embed_inner(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `POST /v1/logits`
 ///
 /// Accepts JSON (`{"residual": [...], "top_k": 5, "temperature": 1.0}`) or
@@ -346,6 +358,7 @@ pub async fn handle_logits(
     handle_logits_inner(&state, None, headers, body).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/logits",
@@ -367,6 +380,7 @@ pub async fn handle_logits_multi(
     handle_logits_inner(&state, Some(model_id.as_str()), headers, body).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn handle_logits_inner(
     state: &AppState,
     model_id: Option<&str>,
@@ -468,6 +482,7 @@ pub async fn handle_token_encode(
     handle_token_encode_inner(&state, None, q)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/token/encode",
@@ -532,6 +547,7 @@ pub async fn handle_token_decode(
     handle_token_decode_inner(&state, None, q)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/token/decode",
@@ -586,6 +602,7 @@ fn handle_token_decode_inner(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `GET /v1/embed/{token_id}`
 ///
 /// Returns the scaled f32 embedding vector for a single token ID.
@@ -625,6 +642,7 @@ pub async fn handle_embed_single(
     handle_embed_single_inner(&state, None, token_id, headers)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/embed/{token_id}",
@@ -648,6 +666,7 @@ pub async fn handle_embed_single_multi(
     handle_embed_single_inner(&state, Some(model_id.as_str()), token_id, headers)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn handle_embed_single_inner(
     state: &AppState,
     model_id: Option<&str>,
@@ -770,6 +789,7 @@ mod tests {
         assert_eq!(body.len(), 4 + 5 * 4);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn binary_embed_response_header_fields() {
         // Response format: [seq_len u32][hidden_size u32][seq_len × hidden_size f32]
@@ -896,6 +916,7 @@ mod tests {
 
     // ── Embed matrix lookup logic ────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn embed_lookup_returns_correct_row() {
         // embed[2] = [0, 0, 1, 0] → after scale=1.0 same
@@ -908,6 +929,7 @@ mod tests {
         assert_eq!(row, vec![0.0, 0.0, 1.0, 0.0]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn embed_lookup_applies_scale() {
         let mut embed = Array2::<f32>::zeros((4, 4));
@@ -918,6 +940,7 @@ mod tests {
         assert_eq!(row, vec![2.5, 0.0, 0.0, 0.0]);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn embed_lookup_out_of_range_detected() {
         let embed = Array2::<f32>::zeros((8, 4));
@@ -926,6 +949,7 @@ mod tests {
         assert!(7usize < vocab); // token_id=7 is in range
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn embed_response_shape() {
         // seq_len=3 tokens, hidden=4 → residual is [[f32×4], [f32×4], [f32×4]]

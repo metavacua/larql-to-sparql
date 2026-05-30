@@ -14,9 +14,13 @@
 //! leak; the constant-time compare removes the bytewise leak. SHA-256
 //! preimage resistance means a digest match implies the inputs match.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{Request, StatusCode};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::middleware::Next;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -44,6 +48,7 @@ fn tokens_match(provided: &str, expected: &str) -> bool {
     bool::from(a.ct_eq(&b))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Middleware that validates the Authorization: Bearer <api_key> header.
 /// If no api_key is configured, all requests pass through.
 pub async fn auth_middleware(

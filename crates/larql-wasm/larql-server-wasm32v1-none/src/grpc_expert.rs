@@ -1,9 +1,11 @@
 //! gRPC `ExpertService` — unary batch + bidirectional streaming.
 
 use std::pin::Pin;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use futures::StreamExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tonic::{Request, Response, Status, Streaming};
 
 use larql_router_protocol::{
@@ -63,6 +65,7 @@ type StreamOutput =
 impl ExpertService for ExpertGrpcService {
     // ── Unary batch ──────────────────────────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn expert_batch(
         &self,
         request: Request<ExpertBatchRequest>,
@@ -145,6 +148,7 @@ impl ExpertService for ExpertGrpcService {
 
     type ExpertStreamStream = StreamOutput;
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn expert_stream(
         &self,
         request: Request<Streaming<ExpertLayerInput>>,

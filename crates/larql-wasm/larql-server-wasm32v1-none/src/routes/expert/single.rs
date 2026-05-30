@@ -1,6 +1,8 @@
 //! `POST /v1/expert/{layer}/{expert_id}` — single expert dispatch.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::error::ServerError;
@@ -145,6 +147,7 @@ pub fn run_expert(
     Ok(output)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/expert/{layer}/{expert_id}",

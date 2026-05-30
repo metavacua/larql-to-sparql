@@ -1,6 +1,8 @@
 //! GET /v1/walk — feature scan for a prompt.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, Query, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -47,6 +49,7 @@ fn parse_layers(s: &str, all: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn walk_prompt(model: &LoadedModel, params: &WalkParams) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
@@ -100,6 +103,7 @@ fn walk_prompt(model: &LoadedModel, params: &WalkParams) -> Result<serde_json::V
     }))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/walk",
@@ -123,6 +127,7 @@ pub async fn handle_walk(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/walk",

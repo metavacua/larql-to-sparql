@@ -1,8 +1,11 @@
 //! Error types → HTTP status codes.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::StatusCode;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -39,6 +42,7 @@ pub enum ServerError {
 }
 
 impl IntoResponse for ServerError {
+    #[cfg(not(target_arch = "wasm32"))]
     fn into_response(self) -> Response {
         let (status, message) = match &self {
             ServerError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),

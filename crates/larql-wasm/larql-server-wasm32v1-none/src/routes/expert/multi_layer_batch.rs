@@ -10,9 +10,13 @@
 //!
 //! Used by the predispatch path when all shards are HTTP/UDS transport.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::body::Bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 
 use larql_compute::Q8KActivation;
@@ -38,6 +42,7 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/experts/multi-layer-batch",
@@ -106,6 +111,7 @@ pub async fn handle_experts_multi_layer_batch(
         .map_err(|e| ServerError::Internal(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Q8K-prenormed variant: client pre-quantises h_norm, server skips
 /// `pre_experts_norm` and `quantize_h_norm_for_q4k` — just the matvec.
 /// 4× smaller upload; response is standard f32.

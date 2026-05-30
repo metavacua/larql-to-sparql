@@ -7,6 +7,7 @@
 //!
 //! See README.md → "Environment variables" for what each flag does.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -53,6 +54,7 @@ pub const I8_WIRE: &str = "LARQL_I8_WIRE";
 // in process-wide `OnceLock`s — env vars don't change at runtime, and the
 // per-call syscall used to show up in HTTP-path traces.
 
+#[cfg(not(target_arch = "wasm32"))]
 fn cached_is_set(slot: &OnceLock<bool>, name: &'static str) -> bool {
     *slot.get_or_init(|| std::env::var(name).is_ok())
 }
@@ -105,6 +107,7 @@ pub fn metal_vs_cpu_debug() -> bool {
     cached_is_set(&CACHE, METAL_VS_CPU_DEBUG)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// `LARQL_MOE_BATCH_MODE=<mode>` — override the auto-selected batch mode.
 /// Returns `None` when unset; the caller decides what's valid.
 pub fn moe_batch_mode() -> Option<String> {

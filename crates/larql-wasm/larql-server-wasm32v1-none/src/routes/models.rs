@@ -24,7 +24,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::http::API_PREFIX;

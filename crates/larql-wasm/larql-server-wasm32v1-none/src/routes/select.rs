@@ -1,6 +1,8 @@
 //! POST /v1/select — SQL-style edge query.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -43,6 +45,7 @@ fn default_order() -> String {
     "desc".into()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn select_edges(
     model: &LoadedModel,
     req: &SelectRequest,
@@ -165,6 +168,7 @@ fn select_edges(
     }))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/select",
@@ -188,6 +192,7 @@ pub async fn handle_select(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/select",

@@ -44,14 +44,20 @@
 //! - `n>1` returns 400
 //! - `logprobs` request field accepted, response field always `null` (F18)
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::sse::{Event, KeepAlive, Sse};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use core::convert::Infallible;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::wrappers::ReceiverStream;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::StreamExt as _;
 
 use crate::error::ServerError;
@@ -235,6 +241,7 @@ pub struct ChatCompletionsResponse {
     pub usage: ChatUsage,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/chat/completions",
@@ -442,6 +449,7 @@ fn build_chat_logprobs(tokens: &[(String, f64)]) -> ChatLogprobs {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// SSE stream for `/v1/chat/completions`. First chunk emits
 /// `delta: {role: "assistant"}`; subsequent chunks emit
 /// `delta: {content: "<token text>"}`; the final chunk has empty
@@ -1074,6 +1082,7 @@ fn schema_for_response_format(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Resolve common end-of-turn token ids for the loaded model. The
 /// constrained-mask uses these to gate EOS — the model can't truncate
 /// while the FSM is mid-structure, but once the FSM is complete the
@@ -1105,6 +1114,7 @@ fn resolve_eos_token_ids(
     ids
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the masked-vocab callback the constrained generator expects.
 /// Wraps the tokenizer in `Arc` (the schema mask caches surface forms
 /// per id), seeds a fresh FSM from `schema`, and includes the model's

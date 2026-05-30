@@ -87,8 +87,11 @@
 //!   12    M×4   output (f32[] LE)
 //! ```
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{header, StatusCode};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 use larql_vindex::{PatchOverrides, QuantizedFfnAccess};
 use serde::Deserialize;
@@ -443,6 +446,7 @@ fn validate_owned(model: &LoadedModel, scan_layers: &[usize]) -> Result<(), Serv
 
 // ── Core computation ──────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Architecture-correct FFN forward pass for one or more layers.
 /// Returns a typed [`FfnOutput`] used by both JSON and binary encoders.
 pub(crate) fn run_full_output_core(
@@ -721,6 +725,7 @@ pub(crate) fn run_full_output_core(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_full_output(
     model: &LoadedModel,
     req: &WalkFfnRequest,
@@ -731,6 +736,7 @@ fn run_full_output(
     Ok(encode_json_full_output(&out))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_features_only(
     model: &LoadedModel,
     req: &WalkFfnRequest,
@@ -774,6 +780,7 @@ fn run_features_only(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_walk_ffn(state: &AppState, req: &WalkFfnRequest) -> Result<serde_json::Value, ServerError> {
     let model = state
         .model(None)
@@ -796,6 +803,7 @@ fn run_walk_ffn(state: &AppState, req: &WalkFfnRequest) -> Result<serde_json::Va
 
 // ── HTTP handler ──────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/walk-ffn",
@@ -910,6 +918,7 @@ pub async fn handle_walk_ffn(
 /// Content-type for the Q8K dense-FFN batch protocol.
 pub(crate) const Q8K_BATCH_CT: &str = "application/x-larql-ffn-q8k-batch";
 
+#[cfg(not(target_arch = "wasm32"))]
 /// POST /v1/walk-ffn-q8k — Q8K-prenormed dense FFN batch endpoint.
 ///
 /// The client has already applied the FFN input norm and quantised the

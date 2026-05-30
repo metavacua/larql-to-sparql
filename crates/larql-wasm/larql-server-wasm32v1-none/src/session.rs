@@ -6,10 +6,12 @@
 //! Sessions are identified by a `X-Session-Id` header. If no header is present,
 //! patches go to the global (shared) PatchedVindex.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
 use std::time::{Duration, Instant};
 
 use larql_vindex::PatchedVindex;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
 
 use crate::state::LoadedModel;
@@ -187,6 +189,7 @@ impl SessionManager {
         Ok(session.patched.num_patches())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Blocking write access to sessions map (for use in spawn_blocking).
     pub fn sessions_blocking_write(
         &self,

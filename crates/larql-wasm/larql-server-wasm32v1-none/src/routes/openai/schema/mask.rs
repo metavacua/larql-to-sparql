@@ -37,6 +37,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// Build the `mask_fn` adapter expected by
 /// [`larql_inference::layer_graph::generate_constrained`].
 ///

@@ -1,9 +1,14 @@
 //! GET /v1/describe — query all knowledge edges for an entity.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, Query, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -54,6 +59,7 @@ fn default_min_score() -> f32 {
     5.0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn describe_entity(
     model: &LoadedModel,
     params: &DescribeParams,
@@ -220,6 +226,7 @@ fn describe_entity(
     }))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn describe_with_cache(
     state: &Arc<AppState>,
     model: &Arc<LoadedModel>,
@@ -293,6 +300,7 @@ pub async fn handle_describe(
     describe_with_cache(&state, model, &headers, params).await
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/describe",

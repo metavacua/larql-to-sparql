@@ -1,6 +1,8 @@
 //! POST /v1/explain-infer — walk inference with per-layer feature trace.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -94,6 +96,7 @@ fn format_lens(token: &str, probability: f64) -> serde_json::Value {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn explain_infer(
     model: &LoadedModel,
     req: &ExplainRequest,
@@ -295,6 +298,7 @@ fn explain_infer(
     Ok(body)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/explain-infer",
@@ -318,6 +322,7 @@ pub async fn handle_explain(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/explain-infer",

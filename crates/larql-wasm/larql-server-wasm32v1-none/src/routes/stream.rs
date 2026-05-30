@@ -8,8 +8,11 @@
 //!   ← {"type": "layer", "layer": 15, "edges": [...]}
 //!   ← {"type": "done", "total_edges": 6, "latency_ms": 12.3}
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 
 use crate::band_utils::{
@@ -46,6 +49,7 @@ fn ws_error(message: impl Into<String>) -> serde_json::Value {
     serde_json::json!({"type": WS_TYPE_ERROR, "message": message.into()})
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Send a JSON value over the WebSocket as a text frame. Returns the
 /// underlying `axum::Error` if the peer has disconnected; callers
 /// typically use [`send_msg_or_return`] to short-circuit cleanly.
@@ -193,6 +197,7 @@ async fn handle_stream_describe(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn stream_describe_messages(
     state: &AppState,
     request: &serde_json::Value,
@@ -286,6 +291,7 @@ async fn stream_describe_messages(
     messages
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Handle streaming INFER: run forward pass and stream top-K predictions.
 ///
 /// Protocol:
@@ -382,6 +388,7 @@ async fn handle_stream_infer(
     let _ = send_msg(socket, &done_msg).await;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// WebSocket streaming token generation.
 ///
 /// Protocol:
@@ -551,6 +558,7 @@ mod tests {
         ExtractLevel, FeatureMeta, LayerBands, PatchedVindex, QuantFormat, VectorIndex,
         VindexConfig, VindexLayerInfo,
     };
+    #[cfg(not(target_arch = "wasm32"))]
     use tokio::sync::RwLock;
 
     use crate::cache::DescribeCache;
@@ -618,11 +626,13 @@ mod tests {
         assert_eq!(msg["latency_ms"], 4.5);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn functional_tokenizer() -> larql_vindex::tokenizers::Tokenizer {
         let json = r#"{"version":"1.0","truncation":null,"padding":null,"added_tokens":[],"normalizer":null,"pre_tokenizer":null,"post_processor":null,"decoder":null,"model":{"type":"WordLevel","vocab":{"France":0,"Germany":1,"capital":2,"UNK":7},"unk_token":"UNK"}}"#;
         larql_vindex::tokenizers::Tokenizer::from_bytes(json.as_bytes()).unwrap()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn test_model(labels: HashMap<(usize, usize), String>) -> Arc<LoadedModel> {
         let mut gate = Array2::<f32>::zeros((3, 4));
         gate[[0, 0]] = 10.0;
@@ -719,6 +729,7 @@ mod tests {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn test_state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
         Arc::new(AppState {
             models,

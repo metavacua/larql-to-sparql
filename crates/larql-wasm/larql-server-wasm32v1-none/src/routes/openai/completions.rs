@@ -45,13 +45,19 @@
 
 use core::convert::Infallible;
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::sse::{Event, KeepAlive, Sse};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::wrappers::ReceiverStream;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::StreamExt as _;
 
 use crate::error::ServerError;
@@ -293,6 +299,7 @@ pub async fn handle_completions(
     .into_response())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build an SSE response that streams one chunk per generated token.
 /// Final chunk carries `finish_reason`; the stream terminates with
 /// `data: [DONE]\n\n`.

@@ -24,6 +24,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
 /// CPU expert dispatch with pre_norm hoisted out of the per-expert loop and
 /// allocation-free per-expert compute via `ExpertScratch`.
 ///
@@ -207,6 +208,7 @@ pub fn run_experts_cpu_batch(
     Ok(out)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Expert dispatch with a pre-quantised Q8K activation — skips `pre_experts_norm`
 /// and `quantize_h_norm_for_q4k` because the client already did both.  4× less
 /// upload traffic; server goes straight to the Q4K × Q8K matvec.

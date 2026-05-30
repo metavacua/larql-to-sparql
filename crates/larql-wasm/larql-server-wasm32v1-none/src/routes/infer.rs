@@ -1,7 +1,10 @@
 //! POST /v1/infer — full forward pass with attention.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -83,6 +86,7 @@ fn infer_mode_flags(mode: &str) -> (bool, bool, bool) {
     (is_compare, use_walk, use_dense)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_infer(
     state: &AppState,
     model: &LoadedModel,
@@ -198,6 +202,7 @@ fn run_infer(
     Ok(serde_json::Value::Object(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/infer",
@@ -226,6 +231,7 @@ pub async fn handle_infer(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/infer",

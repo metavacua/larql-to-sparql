@@ -4,8 +4,11 @@
 //! use as gate vectors, write down vector overrides with target embedding.
 //! Supports session isolation via X-Session-Id header.
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::{Path, State};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -191,6 +194,7 @@ fn apply_insert(
     (inserted, use_constellation)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_insert(
     state: &AppState,
     model: &LoadedModel,
@@ -245,6 +249,7 @@ fn run_insert(
     }))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/insert",
@@ -272,6 +277,7 @@ pub async fn handle_insert(
     Ok(Json(result))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/insert",

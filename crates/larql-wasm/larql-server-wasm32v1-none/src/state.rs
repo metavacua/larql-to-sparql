@@ -1,5 +1,6 @@
 //! AppState: loaded vindex + config, shared across all handlers.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use crate::embed_store::EmbedStoreF16;
@@ -9,6 +10,7 @@ use larql_vindex::{
     format::filenames::FEATURE_LABELS_JSON, ndarray::Array2, tokenizers, PatchedVindex,
     VindexConfig,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
 
 use crate::cache::DescribeCache;
@@ -157,6 +159,7 @@ impl LoadedModel {
             .map_err(|e| format!("weights RwLock poisoned: {e}"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn ensure_weights_cell(&self) -> Result<&std::sync::RwLock<ModelWeights>, String> {
         if let Some(cell) = self.weights.get() {
             return Ok(cell);
@@ -266,12 +269,14 @@ impl AppState {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Compute elapsed milliseconds from `start`, rounded to one decimal place.
 pub fn elapsed_ms(start: std::time::Instant) -> f64 {
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     (ms * 10.0).round() / 10.0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load probe-confirmed feature labels from feature_labels.json.
 /// Format: {"L{layer}_F{feature}": "relation_name", ...}
 pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize), String> {
@@ -370,6 +375,7 @@ mod loaded_model_tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn tiny_loaded_model(quant: QuantFormat, release_mmap: bool) -> LoadedModel {
         let hidden = 4;
         let gate = Array2::<f32>::zeros((2, hidden));

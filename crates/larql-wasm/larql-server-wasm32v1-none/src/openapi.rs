@@ -12,7 +12,9 @@
 //! - `swagger_router()` — helper that returns a ready-to-merge router
 //!   hosting both the UI and the spec JSON.
 
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa::OpenApi;
+#[cfg(not(target_arch = "wasm32"))]
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::error::ErrorBody;
@@ -28,6 +30,7 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 pub mod params {
+    #[cfg(not(target_arch = "wasm32"))]
     use utoipa::IntoParams;
 
     /// Path parameter selecting which vindex to target in multi-model mode.
@@ -49,6 +52,7 @@ pub mod schemas {
     //! runtime — they exist purely for spec generation.
 
     use serde::Serialize;
+    #[cfg(not(target_arch = "wasm32"))]
     use utoipa::ToSchema;
     // ---- browse ------------------------------------------------------
 
@@ -583,6 +587,7 @@ pub mod schemas {
 )]
 pub struct ApiDoc;
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Build a router hosting Swagger UI at `/swagger-ui` and the spec at
 /// `/v1/openapi.json`. Merge into the main app router.
 pub fn swagger_router() -> axum::Router {

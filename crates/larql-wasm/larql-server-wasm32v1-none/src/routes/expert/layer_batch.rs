@@ -15,10 +15,15 @@
 
 use std::sync::{OnceLock};
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::body::Bytes;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::Semaphore;
 
 use larql_inference::ffn::moe_remote::{
@@ -43,6 +48,7 @@ use std::collections::{HashMap, HashSet};
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
 
+#[cfg(not(target_arch = "wasm32"))]
 // Limits concurrent `run_experts_cpu_batch` calls to the number of logical
 // CPUs on the machine.  Without this, 30 simultaneous predispatch requests
 // each try to use rayon's global thread pool, causing ~30× oversubscription
@@ -68,6 +74,7 @@ fn compute_semaphore() -> &'static Semaphore {
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/experts/layer-batch",
@@ -149,6 +156,7 @@ pub async fn handle_experts_layer_batch(
     Ok(resp)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/experts/layer-batch-f16",

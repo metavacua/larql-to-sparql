@@ -1,5 +1,6 @@
 //! TTL cache for DESCRIBE results.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 #[allow(unused_imports)]

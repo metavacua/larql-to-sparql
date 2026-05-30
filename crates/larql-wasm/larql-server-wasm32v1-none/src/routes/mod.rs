@@ -29,8 +29,11 @@ pub mod walk;
 pub mod walk_ffn;
 pub mod warmup;
 
+#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::DefaultBodyLimit;
+#[cfg(not(target_arch = "wasm32"))]
 use axum::routing::{delete, get, post};
+#[cfg(not(target_arch = "wasm32"))]
 use axum::Router;
 
 // Expert batch payloads can be large when the client batches all sequence

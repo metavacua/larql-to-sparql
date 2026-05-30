@@ -12,6 +12,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
 /// Compute a short ETag from a JSON response body.
 pub fn compute_etag(body: &serde_json::Value) -> String {
     let mut hasher = DefaultHasher::new();
