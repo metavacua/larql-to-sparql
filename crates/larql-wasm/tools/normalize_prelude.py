@@ -36,9 +36,8 @@ Usage:
 from __future__ import annotations
 import re
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
+from wasm_gate_common import WASM_DIR, kernel_crates
 
 CANONICAL = '''#[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
@@ -307,13 +306,6 @@ def fix_extern_crate_alloc(root_file: Path) -> bool:
         root_file.write_text(new)
         return True
     return False
-
-
-def kernel_crates() -> list[str]:
-    return sorted(
-        d.name for d in WASM_DIR.iterdir()
-        if d.is_dir() and d.name.endswith('-wasm32v1-none')
-    )
 
 
 if __name__ == '__main__':

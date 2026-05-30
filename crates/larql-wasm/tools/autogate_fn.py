@@ -20,10 +20,8 @@ Usage:
 from __future__ import annotations
 import re
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
-GATE = '#[cfg(not(target_arch = "wasm32"))]'
+from wasm_gate_common import WASM_DIR, GATE, kernel_crates
 
 # Native-only symbols. A fn referencing any of these (outside comments) is gated.
 NATIVE = re.compile(
@@ -182,11 +180,6 @@ def process_file(path: Path, dry: bool) -> int:
     if not dry:
         path.write_text('\n'.join(lines))
     return len(set(inserts))
-
-
-def kernel_crates() -> list[str]:
-    return sorted(d.name for d in WASM_DIR.iterdir()
-                  if d.is_dir() and d.name.endswith('-wasm32v1-none'))
 
 
 if __name__ == '__main__':

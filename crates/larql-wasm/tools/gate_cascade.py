@@ -21,13 +21,9 @@ Usage:
 """
 from __future__ import annotations
 import re
-import subprocess
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
-MANIFEST = WASM_DIR / "Cargo.toml"
-GATE = '#[cfg(not(target_arch = "wasm32"))]'
+from wasm_gate_common import WASM_DIR, ROOT, GATE, cargo_check
 
 ITEM_START = re.compile(
     r'^(\s*)(?:pub(?:\s*\([^)]*\))?\s+)?'
@@ -36,16 +32,6 @@ ITEM_START = re.compile(
 )
 
 
-def check(crate: str) -> tuple[bool, str]:
-    r = subprocess.run(
-        ["cargo", "check", "--manifest-path", str(MANIFEST), "-p", crate,
-         "--target", "wasm32v1-none", "--lib", "--message-format=short"],
-        capture_output=True, text=True, cwd=WASM_DIR.parent.parent,
-    )
-    return r.returncode == 0, r.stdout + r.stderr
-
-
-# Error lines that indicate "this code path needs a native item that's gated".
 # Error lines whose code path needs a native-only item that has been gated.
 # Matches both `error[E####]:` and bare `error:` (macro-not-found has no code),
 # across the phrasings the compiler uses for "this references something absent
@@ -101,7 +87,7 @@ def one_pass(crate: str) -> tuple[int, bool, str]:
     """Run one gating pass. Returns (items_gated, already_ok, check_output).
     The check output is returned so the caller can report/decide without a
     second `cargo check` (each check is a full wasm compile)."""
-    ok, out = check(crate)
+    ok, out = cargo_check(crate)
     if ok:
         return 0, True, out
     # Map file -> set of error line numbers (1-based).
@@ -116,7 +102,7 @@ def one_pass(crate: str) -> tuple[int, bool, str]:
         by_file.setdefault(rel, set()).add(lineno - 1)
     gated = 0
     for rel, errlines in by_file.items():
-        path = (WASM_DIR.parent.parent / rel)
+        path = (ROOT / rel)
         if not path.exists():
             path = WASM_DIR / rel
         if not path.exists():

@@ -19,15 +19,9 @@ Usage:
   python3 tools/check_overgate.py prove <crate>
 """
 from __future__ import annotations
-import re
-import subprocess
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
-MANIFEST = WASM_DIR / "Cargo.toml"
-
-GATE = '#[cfg(not(target_arch = "wasm32"))]'
+from wasm_gate_common import WASM_DIR, GATE, cargo_check, kernel_crates
 
 # Symbols whose presence justifies a native-only gate.
 NATIVE_SYMBOLS = (
@@ -48,24 +42,7 @@ NATIVE_SYMBOLS = (
 )
 
 
-def cargo_check(crate: str) -> bool:
-    r = subprocess.run(
-        ["cargo", "check", "--manifest-path", str(MANIFEST),
-         "-p", crate, "--target", "wasm32v1-none", "--lib",
-         "--message-format=short"],
-        capture_output=True, text=True, cwd=WASM_DIR.parent.parent,
-    )
-    return r.returncode == 0
-
-
-def kernel_crates() -> list[str]:
-    return sorted(
-        d.name for d in WASM_DIR.iterdir()
-        if d.is_dir() and d.name.endswith('-wasm32v1-none')
-    )
-
-
-def gate_sites(rs: Path) -> list[int]:
+def gate_sites(rs) -> list[int]:
     """Return line indices (0-based) of native-only gate attributes."""
     lines = rs.read_text().split('\n')
     return [i for i, l in enumerate(lines) if l.strip() == GATE]
@@ -141,7 +118,7 @@ def cmd_prove(crate: str) -> None:
     if not src.exists():
         print(f"no src for {crate}")
         return
-    if not cargo_check(crate):
+    if not cargo_check(crate)[0]:
         print(f"❌ {crate} does not currently pass wasm32v1-none — fix it before proving.")
         return
 
@@ -169,7 +146,7 @@ def cmd_prove(crate: str) -> None:
             # find the matching line index in current text (stable: same as original)
             del cur[site]
             rs.write_text('\n'.join(cur))
-            still_ok = cargo_check(crate)
+            still_ok = cargo_check(crate)[0]
             rs.write_text(original)  # restore
             if still_ok:
                 ctx = gated_context(original.split('\n'), site)

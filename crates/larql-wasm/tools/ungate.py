@@ -21,21 +21,8 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
-ROOT = WASM_DIR.parent.parent
-MANIFEST = WASM_DIR / "Cargo.toml"
-GATE = '#[cfg(not(target_arch = "wasm32"))]'
-
-
-def check(crate: str, target_wasm: bool) -> bool:
-    cmd = ["cargo", "check", "--manifest-path", str(MANIFEST), "-p", crate, "--lib",
-           "--message-format=short"]
-    if target_wasm:
-        cmd += ["--target", "wasm32v1-none"]
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
-    return r.returncode == 0
+from wasm_gate_common import WASM_DIR, ROOT, GATE, cargo_check
 
 
 def prove_flagged(crate: str) -> list[tuple[str, int]]:
@@ -91,8 +78,8 @@ def process(crate: str) -> None:
         if gate_idxs:
             path.write_text('\n'.join(lines))
 
-    ok_w = check(crate, True)
-    ok_n = check(crate, False)
+    ok_w = cargo_check(crate, wasm=True)[0]
+    ok_n = cargo_check(crate, wasm=False)[0]
     if ok_w and ok_n:
         print(f"✅ {crate}: removed {removed} unnecessary gate(s); both targets clean")
     else:

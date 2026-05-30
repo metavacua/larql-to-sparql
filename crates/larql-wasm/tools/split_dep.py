@@ -23,19 +23,11 @@ Usage:
 from __future__ import annotations
 import re
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
+from wasm_gate_common import WASM_DIR, kernel_crates
 
 NOT_WASM = "[target.'cfg(not(target_arch = \"wasm32\"))'.dependencies]"
 WASM = "[target.'cfg(target_arch = \"wasm32\")'.dependencies]"
-
-
-def kernel_crates() -> list[str]:
-    return sorted(
-        d.name for d in WASM_DIR.iterdir()
-        if d.is_dir() and d.name.endswith('-wasm32v1-none')
-    )
 
 
 def remove_from_deps(text: str, dep: str) -> tuple[str, bool]:

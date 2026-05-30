@@ -14,13 +14,11 @@ Usage:
 """
 from __future__ import annotations
 import sys
-from pathlib import Path
 
-WASM_DIR = Path(__file__).resolve().parents[1]
-GATE = '#[cfg(not(target_arch = "wasm32"))]'
+from wasm_gate_common import WASM_DIR, GATE, kernel_crates
 
 
-def dedupe(path: Path) -> int:
+def dedupe(path) -> int:
     lines = path.read_text().split('\n')
     out: list[str] = []
     removed = 0
@@ -32,11 +30,6 @@ def dedupe(path: Path) -> int:
     if removed:
         path.write_text('\n'.join(out))
     return removed
-
-
-def kernel_crates() -> list[str]:
-    return sorted(d.name for d in WASM_DIR.iterdir()
-                  if d.is_dir() and d.name.endswith('-wasm32v1-none'))
 
 
 if __name__ == '__main__':
