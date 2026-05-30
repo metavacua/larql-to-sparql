@@ -78,6 +78,22 @@ def ensure_target_dep(text: str, section_header: str, dep_line: str) -> str:
         return text.rstrip() + f'\n\n{section_header}\n{dep_line}\n'
 
 
+# Per-dep feature recipes for the split. native = std (default features);
+# wasm = no_std (default-features = false) plus whatever alloc/derive features
+# the dep needs. Default recipe (None) = bare std vs default-features=false.
+SPLIT_RECIPES: dict[str, tuple[str, str]] = {
+    # native line body, wasm line body
+    'serde': (
+        '{ version = "1", features = ["derive"] }',
+        '{ version = "1", default-features = false, features = ["derive", "alloc"] }',
+    ),
+    'serde_json': (
+        '{ version = "1" }',
+        '{ version = "1", default-features = false, features = ["alloc"] }',
+    ),
+}
+
+
 def process(crate: str, dep: str, version: str) -> bool:
     manifest = WASM_DIR / crate / 'Cargo.toml'
     if not manifest.exists():
@@ -90,11 +106,14 @@ def process(crate: str, dep: str, version: str) -> bool:
     if not removed:
         return False  # dep wasn't in plain [dependencies]; leave as-is
 
-    new = ensure_target_dep(new, NOT_WASM, f'{dep} = "{version}"')
-    new = ensure_target_dep(
-        new, WASM,
-        f'{dep} = {{ version = "{version}", default-features = false }}'
-    )
+    if dep in SPLIT_RECIPES:
+        native_body, wasm_body = SPLIT_RECIPES[dep]
+    else:
+        native_body = f'"{version}"'
+        wasm_body = f'{{ version = "{version}", default-features = false }}'
+
+    new = ensure_target_dep(new, NOT_WASM, f'{dep} = {native_body}')
+    new = ensure_target_dep(new, WASM, f'{dep} = {wasm_body}')
     new = re.sub(r'\n{3,}', '\n\n', new)
     if new != text:
         manifest.write_text(new)

@@ -12,7 +12,6 @@ categories = ["science"]
 larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm32v1-none", default-features = false }
 larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
 larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-compute-wasm32v1-none" }
-serde = { workspace = true }
 
 # Matrix types (all compute via larql-compute)
 
@@ -52,6 +51,7 @@ metal = ["larql-compute/metal"]
 # parallel runs would race.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 ndarray = "0.16"
 rayon = "1.10"
@@ -68,6 +68,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }

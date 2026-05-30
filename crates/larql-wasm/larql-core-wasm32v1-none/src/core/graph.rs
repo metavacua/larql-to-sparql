@@ -12,6 +12,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 const LARQL_JSON_VERSION: &str = "0.1.0";
 const JSON_KEY_VERSION: &str = "larql_version";
 const JSON_KEY_METADATA: &str = "metadata";
@@ -669,6 +672,8 @@ pub struct DescribeResult {
 pub enum GraphError {
     #[error("deserialization failed: {0}")]
     Deserialize(String),
+    // std::io::Error only arises on the native file-load/save paths.
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

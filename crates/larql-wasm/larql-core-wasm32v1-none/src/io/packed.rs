@@ -7,6 +7,16 @@
 //!   Edge records (28 bytes each, fixed-width)
 //!   Metadata section (variable-length JSON per edge)
 //!   String table (length-prefixed UTF-8 strings)
+#[allow(unused_imports)]
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use hashbrown::{HashMap, HashSet};
+#[allow(unused_imports)]
+use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 
 use std::io::{self, Cursor, Read, Write};
 use std::path::Path;
@@ -14,14 +24,6 @@ use std::path::Path;
 use crate::core::edge::Edge;
 use crate::core::enums::SourceType;
 use crate::core::graph::{Graph, GraphError};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
 const MAGIC: [u8; 4] = *b"LARQ";
 const FORMAT_VERSION: u16 = 1;
 const HEADER_SIZE: usize = 32;

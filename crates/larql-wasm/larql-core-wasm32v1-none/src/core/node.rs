@@ -6,6 +6,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// An entity node — always derived from edges, never stored directly.
 /// Node type is an optional free-form string, inferred from schema rules at runtime.
 #[derive(Debug, Clone)]

@@ -9,6 +9,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// A mock provider for testing. Knowledge is injected at construction time —
 /// nothing is hardcoded in the engine. Use `MockProvider::new()` for an empty
 /// provider, or `MockProvider::with_knowledge()` to supply test fixtures.

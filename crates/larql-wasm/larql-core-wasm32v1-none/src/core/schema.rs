@@ -7,6 +7,9 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 /// Metadata for a relation type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelationMeta {
@@ -79,8 +82,8 @@ impl Schema {
     /// using the loaded type rules. Returns None if no rule matches.
     pub fn infer_type(
         &self,
-        outgoing: &std::collections::HashSet<String>,
-        incoming: &std::collections::HashSet<String>,
+        outgoing: &HashSet<String>,
+        incoming: &HashSet<String>,
     ) -> Option<String> {
         for rule in &self.type_rules {
             let out_match =

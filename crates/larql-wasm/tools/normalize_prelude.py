@@ -69,6 +69,20 @@ def strip_old_imports(text: str) -> str:
     i = 0
     n = len(lines)
 
+    # Collection types the canonical prelude already provides (so any
+    # `use std/alloc::collections::{...}` importing only these is redundant).
+    PRELUDE_COLLECTIONS = {
+        'HashMap', 'HashSet', 'BTreeMap', 'BTreeSet', 'VecDeque', 'BinaryHeap',
+    }
+
+    def redundant_collections_use(s: str) -> bool:
+        m = re.match(r'(?:pub\s+)?use\s+(?:std|alloc)::collections::\{([^}]*)\};', s)
+        if not m:
+            return False
+        items = {x.strip() for x in m.group(1).split(',') if x.strip()}
+        # redundant iff every imported item is already provided by the prelude
+        return bool(items) and items <= PRELUDE_COLLECTIONS
+
     def is_target_use(line: str) -> bool:
         s = line.strip()
         return (
@@ -78,9 +92,11 @@ def strip_old_imports(text: str) -> str:
             s.startswith('pub use hashbrown::') or
             s.startswith('use larql_wasm_math::FloatExt') or
             # gated std::collections HashMap/HashSet imports we previously injected
-            (s.startswith('use std::collections::{HashMap') ) or
+            (s.startswith('use std::collections::{HashMap')) or
             (s.startswith('use std::collections::HashMap')) or
-            (s.startswith('use std::collections::HashSet'))
+            (s.startswith('use std::collections::HashSet')) or
+            # redundant `use {std,alloc}::collections::{...}` of prelude types
+            redundant_collections_use(s)
         )
 
     # Attributes that, when stacked directly above a target use, should also drop.
@@ -150,14 +166,28 @@ def find_insert_point(lines: list[str]) -> int:
 
 
 def strip_inline_qualifiers(text: str) -> str:
-    """The earlier remap rewrote inline `std::collections::HashMap::new()` to
-    `hashbrown::HashMap::new()`, which breaks native (hashbrown is wasm32-only).
-    The canonical prelude now provides bare `HashMap`/`HashSet` on both targets,
-    so drop the `hashbrown::` qualifier from inline (non-`use`) positions."""
-    # Only safe because all `use hashbrown::...` lines are stripped beforehand,
-    # so every remaining `hashbrown::` is an inline type/expr reference.
+    """Drop module qualifiers on HashMap/HashSet at inline (non-`use`) positions
+    so they resolve to the cfg-split prelude imports (hashbrown on wasm32,
+    std::collections on native).
+
+    - `hashbrown::HashMap` → `HashMap` (remap left these inline; break native)
+    - inline `std::collections::HashMap` → `HashMap` (remap only fixed `use`
+      lines; inline type positions like `&std::collections::HashSet<T>` remain
+      and break wasm32). `use std::collections::...` lines are preserved — they
+      are the native half of the prelude split.
+    """
+    # hashbrown:: is only ever inline here (use-lines stripped earlier).
     text = re.sub(r'\bhashbrown::(HashMap|HashSet)\b', r'\1', text)
-    return text
+
+    out = []
+    for line in text.split('\n'):
+        s = line.lstrip()
+        # Preserve `use std::collections::...` (prelude native half).
+        if s.startswith('use ') or s.startswith('pub use '):
+            out.append(line)
+            continue
+        out.append(re.sub(r'\bstd::collections::(HashMap|HashSet)\b', r'\1', line))
+    return '\n'.join(out)
 
 
 def normalize_file(path: Path) -> bool:

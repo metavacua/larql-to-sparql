@@ -16,7 +16,6 @@ real-model = ["larql-vindex", "larql-models", "ndarray", "tokenizers", "zip"]
 name = "kv_cache_benchmark_wasm32v1_none"
 
 [dependencies]
-serde.workspace = true
 
 # Always available: needed for the criterion bench (accuracy metrics, engine_kind).
 larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
@@ -29,6 +28,7 @@ larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models
 # `zip` for reading the .npz container in apollo11_store (uncompressed archives).
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 serde_json = { workspace = true }
 rand = "0.8"
@@ -38,6 +38,7 @@ tokenizers = { version = "0.21", optional = true }
 zip = { version = "2", optional = true, default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }

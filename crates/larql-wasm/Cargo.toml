@@ -52,7 +52,7 @@ serde        = { version = "1", default-features = false, features = ["derive", 
 serde_core   = { version = "1", default-features = false, features = ["alloc"] }
 serde_json   = { version = "1", default-features = false, features = ["alloc"] }
 thiserror    = { version = "2", default-features = false }
-hashbrown    = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
+hashbrown    = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more", "serde"] }
 libm         = { version = "0.2", default-features = false }
 
 [profile.release]

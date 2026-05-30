@@ -12,7 +12,6 @@ larql-core = { path = "../larql-core-wasm32v1-none", package = "larql-core-wasm3
 larql-inference = { path = "../larql-inference-wasm32v1-none", package = "larql-inference-wasm32v1-none" }
 larql-models = { path = "../larql-models-wasm32v1-none", package = "larql-models-wasm32v1-none" }
 larql-vindex = { path = "../larql-vindex-wasm32v1-none", package = "larql-vindex-wasm32v1-none" }
-serde = { workspace = true, features = ["derive"] }
 
 [features]
 default = []
@@ -27,6 +26,7 @@ metal = ["larql-compute/metal", "larql-inference/metal", "larql-vindex/metal"]
 # asserts on the canned response.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 ndarray = "0.16"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
@@ -34,6 +34,7 @@ rustyline = "15"
 serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }

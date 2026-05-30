@@ -123,6 +123,11 @@ def cmd_lint(crates: list[str]) -> None:
                 # unavailable on wasm32v1-none, so the gate is definitionally needed.
                 if 'use std::' in ctx or 'use ::std::' in ctx:
                     continue
+                # Gated re-exports (`pub use ...`) mirror the gating of the item
+                # they export; the real over-gate check happens at the item's
+                # own definition. Skip to avoid noise.
+                if ctx.lstrip().startswith('pub use ') or ctx.lstrip().startswith('use '):
+                    continue
                 if not any(sym in ctx for sym in NATIVE_SYMBOLS):
                     rel = rs.relative_to(WASM_DIR)
                     print(f"  ?? {rel}:{i+1}  {ctx.strip()[:90]}")

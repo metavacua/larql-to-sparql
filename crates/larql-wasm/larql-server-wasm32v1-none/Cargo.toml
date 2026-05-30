@@ -24,8 +24,6 @@ larql-compute = { path = "../larql-compute-wasm32v1-none", package = "larql-comp
 # Already in the lockfile via rustls; declared here as a direct dep so the
 # threat-model rationale is visible at the crate boundary.
 
-serde = { workspace = true, features = ["derive"] }
-
 [features]
 default = []
 # Enable Metal-backed GPU expert kernels on the shard server.  Forwards to
@@ -43,6 +41,7 @@ tonic-build = "0.13"
 protobuf-src = "2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 axum = { version = "0.8", features = ["ws"] }
 half = "2"
@@ -69,6 +68,7 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 larql-wasm-math = { workspace = true }
 thiserror = { version = "2", default-features = false }
 hashbrown = { workspace = true }

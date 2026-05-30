@@ -6,7 +6,11 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
 #[cfg(feature = "msgpack")]
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[cfg(feature = "msgpack")]
@@ -26,6 +30,8 @@ pub fn from_msgpack_bytes(bytes: &[u8]) -> Result<Graph, GraphError> {
     Graph::from_json_value(&value)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a graph from a MessagePack file.
 #[cfg(feature = "msgpack")]
 pub fn load_msgpack(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
@@ -33,6 +39,8 @@ pub fn load_msgpack(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     from_msgpack_bytes(&bytes)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 /// Save a graph to a MessagePack file.
 #[cfg(feature = "msgpack")]
 pub fn save_msgpack(graph: &Graph, path: impl AsRef<Path>) -> Result<(), GraphError> {

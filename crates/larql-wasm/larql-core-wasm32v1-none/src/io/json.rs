@@ -1,6 +1,3 @@
-use std::path::Path;
-
-use crate::core::graph::{Graph, GraphError};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -9,6 +6,15 @@ use hashbrown::{HashMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
 use std::collections::{HashMap, HashSet};
+#[cfg(target_arch = "wasm32")]
+#[allow(unused_imports)]
+use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use crate::core::graph::{Graph, GraphError};
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a .larql.json graph from disk.
 pub fn load_json(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     let contents = std::fs::read_to_string(path)?;
@@ -17,6 +23,8 @@ pub fn load_json(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     Graph::from_json_value(&value)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_arch = "wasm32"))]
 /// Save a graph to .larql.json format (pretty-printed).
 pub fn save_json(graph: &Graph, path: impl AsRef<Path>) -> Result<(), GraphError> {
     let json = graph.to_json_value();
