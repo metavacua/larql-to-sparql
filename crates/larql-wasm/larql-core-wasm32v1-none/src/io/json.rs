@@ -14,7 +14,6 @@ use std::path::Path;
 
 use crate::core::graph::{Graph, GraphError};
 #[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
 /// Load a .larql.json graph from disk.
 pub fn load_json(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     let contents = std::fs::read_to_string(path)?;
@@ -23,7 +22,6 @@ pub fn load_json(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     Graph::from_json_value(&value)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg(not(target_arch = "wasm32"))]
 /// Save a graph to .larql.json format (pretty-printed).
 pub fn save_json(graph: &Graph, path: impl AsRef<Path>) -> Result<(), GraphError> {

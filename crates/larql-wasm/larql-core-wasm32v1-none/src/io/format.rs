@@ -15,7 +15,6 @@ pub enum Format {
 
 impl Format {
     #[cfg(not(target_arch = "wasm32"))]
-    #[cfg(not(target_arch = "wasm32"))]
     /// Detect format from file extension.
     /// Returns None if the extension is unrecognised.
     pub fn from_path(path: impl AsRef<Path>) -> Option<Self> {

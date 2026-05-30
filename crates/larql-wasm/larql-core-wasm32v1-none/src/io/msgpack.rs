@@ -31,7 +31,6 @@ pub fn from_msgpack_bytes(bytes: &[u8]) -> Result<Graph, GraphError> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
 /// Load a graph from a MessagePack file.
 #[cfg(feature = "msgpack")]
 pub fn load_msgpack(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
@@ -39,7 +38,6 @@ pub fn load_msgpack(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     from_msgpack_bytes(&bytes)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[cfg(not(target_arch = "wasm32"))]
 /// Save a graph to a MessagePack file.
 #[cfg(feature = "msgpack")]

@@ -26,8 +26,6 @@ use std::path::Path;
 
 use crate::core::graph::{Graph, GraphError};
 pub use format::Format;
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
 /// Load a graph from disk, auto-detecting format from the file extension.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
@@ -38,8 +36,6 @@ pub fn load(path: impl AsRef<Path>) -> Result<Graph, GraphError> {
     load_with_format(path, fmt)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
 /// Load a graph using an explicit format.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_with_format(path: impl AsRef<Path>, fmt: Format) -> Result<Graph, GraphError> {
@@ -51,8 +47,6 @@ pub fn load_with_format(path: impl AsRef<Path>, fmt: Format) -> Result<Graph, Gr
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
 /// Save a graph to disk, auto-detecting format from the file extension.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save(graph: &Graph, path: impl AsRef<Path>) -> Result<(), GraphError> {
