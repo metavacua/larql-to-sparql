@@ -4,11 +4,6 @@
 //! Two interfaces, one session:
 //! - session.query("DESCRIBE 'France'") — LQL string queries
 //! - session.vindex — direct PyVindex access for numpy arrays
-
-use pyo3::prelude::*;
-
-use crate::vindex::PyVindex;
-use larql_lql::{parse, Session};
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,8 +15,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::vindex::PyVindex;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_lql::{parse, Session};
 // ── PySession ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Session", unsendable)]
 pub struct PySession {
     session: Session,
@@ -29,7 +33,9 @@ pub struct PySession {
     path: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PySession {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a session (Rust-callable).
     pub fn create(py: Python<'_>, path: &str) -> PyResult<Self> {
         let mut session = Session::new();
@@ -54,14 +60,17 @@ impl PySession {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PySession {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a session connected to a vindex.
     #[new]
     fn new(py: Python<'_>, path: &str) -> PyResult<Self> {
         Self::create(py, path)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Execute an LQL query string. Returns list of output lines.
     ///
     /// Examples:
@@ -85,12 +94,14 @@ impl PySession {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Execution error: {e}")))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Execute an LQL query and return results as a single string.
     fn query_text(&mut self, lql: &str) -> PyResult<String> {
         let lines = self.query(lql)?;
         Ok(lines.join("\n"))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Access the underlying Vindex for direct numpy operations.
     #[getter]
     fn vindex(&self, py: Python<'_>) -> PyResult<Py<PyVindex>> {

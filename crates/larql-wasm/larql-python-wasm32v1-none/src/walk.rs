@@ -3,32 +3,6 @@
 //! Weight files are mmap'd, not loaded to heap. Array2 views point directly
 //! at mmap'd memory. Only the pages touched during inference are paged in.
 //! Peak RSS: ~one layer of weights at a time (OS manages page eviction).
-
-use ndarray::{Array1, Array2};
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
-use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict};
-use std::path::Path;
-
-use larql_inference::ffn::FfnBackend;
-use larql_inference::forward::{
-    capture_donor_state_with_ffn, embedding_neighbors as li_embedding_neighbors,
-    embedding_row as li_embedding_row, embedding_row_scaled as li_embedding_row_scaled,
-    generate_cached_hooked, logit_lens_topk, patch_and_trace_with_ffn,
-    project_through_unembed as li_project_through_unembed, trace_forward_full_hooked,
-    track_race as li_track_race, track_token as li_track_token,
-    unembedding_row as li_unembedding_row, RecordHook, SteerHook, ZeroAblateHook,
-};
-use larql_inference::{predict_with_ffn, ModelWeights, WalkFfn};
-use larql_vindex::format::filenames::{
-    ATTN_WEIGHTS_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN, GATE_VECTORS_BIN, LM_HEAD_BIN,
-    MODEL_WEIGHTS_BIN, NORMS_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
-};
-use larql_vindex::{
-    load_vindex_config, load_vindex_tokenizer, tokenizers, SilentLoadCallbacks, VectorIndex,
-};
-
-use crate::trace_py;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -40,12 +14,48 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::{Array1, Array2};
+#[cfg(not(target_arch = "wasm32"))]
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::types::{PyBytes, PyDict};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+use larql_inference::ffn::FfnBackend;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::forward::{
+    capture_donor_state_with_ffn, embedding_neighbors as li_embedding_neighbors,
+    embedding_row as li_embedding_row, embedding_row_scaled as li_embedding_row_scaled,
+    generate_cached_hooked, logit_lens_topk, patch_and_trace_with_ffn,
+    project_through_unembed as li_project_through_unembed, trace_forward_full_hooked,
+    track_race as li_track_race, track_token as li_track_token,
+    unembedding_row as li_unembedding_row, RecordHook, SteerHook, ZeroAblateHook,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::{predict_with_ffn, ModelWeights, WalkFfn};
+use larql_vindex::format::filenames::{
+    ATTN_WEIGHTS_BIN, DOWN_WEIGHTS_BIN, EMBEDDINGS_BIN, GATE_VECTORS_BIN, LM_HEAD_BIN,
+    MODEL_WEIGHTS_BIN, NORMS_BIN, UP_WEIGHTS_BIN, WEIGHT_MANIFEST_JSON,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{
+    load_vindex_config, load_vindex_tokenizer, tokenizers, SilentLoadCallbacks, VectorIndex,
+};
+
+use crate::trace_py;
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap'd weight file — kept alive so Array2 views remain valid.
 struct WeightMmap {
     _file: std::fs::File,
     mmap: memmap2::Mmap,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create ModelWeights backed by mmap'd files.
 /// Tensors are Array2<f32> created from mmap'd memory.
 /// For f32 vindexes: zero-copy (pointer into mmap).
@@ -292,6 +302,7 @@ fn load_mmap_weights(dir: &Path) -> Result<(ModelWeights, Vec<WeightMmap>), Stri
 
 // ── InferState: lazy-loaded mmap'd weights for vindex.infer() ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap'd model weights, reusable across infer() calls.
 /// Created lazily on first infer(), held by PyVindex.
 pub struct InferState {
@@ -299,7 +310,9 @@ pub struct InferState {
     _mmaps: Vec<WeightMmap>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InferState {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(dir: &Path) -> Result<Self, String> {
         let (weights, mmaps) = load_mmap_weights(dir)?;
         Ok(Self {
@@ -311,6 +324,7 @@ impl InferState {
 
 // ── Python class ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "WalkModel", unsendable)]
 pub struct PyWalkModel {
     weights: ModelWeights,
@@ -322,8 +336,10 @@ pub struct PyWalkModel {
     _mmaps: Vec<WeightMmap>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyWalkModel {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a walk model from a vindex directory.
     ///
     /// Weight files are mmap'd, not loaded to heap. Only the pages
@@ -353,6 +369,7 @@ impl PyWalkModel {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run full forward pass with walk FFN. Returns [(token, probability)].
     #[pyo3(signature = (prompt, top_k_predictions=5))]
     fn predict(&self, prompt: &str, top_k_predictions: usize) -> PyResult<Vec<(String, f64)>> {
@@ -374,6 +391,7 @@ impl PyWalkModel {
         Ok(result.predictions)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run walk FFN for a single layer.
     ///
     /// Accepts raw f32 bytes (from MLX memoryview), returns raw f32 bytes.
@@ -412,6 +430,7 @@ impl PyWalkModel {
         Ok(PyBytes::new(py, out_bytes))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Feature selection only — returns indices for MLX sparse matmul.
     ///
     /// Runs gate KNN on the vindex for each sequence position, returns the
@@ -466,6 +485,7 @@ impl PyWalkModel {
         Ok(indices)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Feature selection returning indices and gate scores.
     ///
     /// Like gate_select but also returns the max gate score per feature
@@ -514,26 +534,31 @@ impl PyWalkModel {
         Ok((indices, scores))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn num_layers(&self) -> usize {
         self.weights.num_layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn hidden_size(&self) -> usize {
         self.weights.hidden_size
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn intermediate_size(&self) -> usize {
         self.weights.intermediate_size
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top_k(&self) -> usize {
         self.top_k
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Capture a complete residual stream trace.
     ///
     /// Runs a full forward pass through WalkFfn, recording the residual,
@@ -565,6 +590,7 @@ impl PyWalkModel {
     // forward pass with a `LayerHook` registered and return numpy tensors
     // ready for Python-side analysis.
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Tokenize then capture last-token residual at each requested layer.
     ///
     /// Returns `dict[layer_index] -> numpy.ndarray (hidden_size,)`.
@@ -600,6 +626,7 @@ impl PyWalkModel {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run a forward pass with a [`RecordHook`] and return the **full**
     /// `(seq_len, hidden_size)` post-layer residual at each requested
     /// layer. Larger than `capture_residuals` — only call when you need
@@ -634,6 +661,7 @@ impl PyWalkModel {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Zero-ablate the post-layer residual at the listed `ablate_layers`,
     /// then capture last-token residuals at `capture_layers`. Mirrors
     /// lazarus's `ablate_layers` + measurement workflow.
@@ -669,6 +697,7 @@ impl PyWalkModel {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Add `alpha * v` to the last-token row of the post-layer residual at
     /// each (layer, vector, alpha) entry, then capture last-token
     /// residuals at `capture_layers`. Mirrors lazarus's `steer_and_generate`
@@ -709,6 +738,7 @@ impl PyWalkModel {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Activation patching. Run `donor_prompt`, capture post-layer
     /// residuals at the `(layer, position)` coords in `coords`, then run
     /// `recipient_prompt` with those residuals patched in at the same
@@ -748,6 +778,7 @@ impl PyWalkModel {
 
     // ── Logit lens / vocab projection ──────────────────────────────────────
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Project `residual` through final norm + lm_head + softcap and
     /// return the top-`k` `(token_id, probability)` pairs.
     #[pyo3(signature = (residual, k=10))]
@@ -755,6 +786,7 @@ impl PyWalkModel {
         Ok(logit_lens_topk(&self.weights, residual.as_slice()?, k))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Probability of `target_token_id` at the residual.
     fn track_token_at(
         &self,
@@ -768,6 +800,7 @@ impl PyWalkModel {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-k per layer for a `dict[layer] -> residual` mapping.
     /// Returns `dict[layer] -> List[(token_id, prob)]`.
     #[pyo3(signature = (residuals, k=5))]
@@ -791,6 +824,7 @@ impl PyWalkModel {
         Ok(out)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-`k` vocab tokens by cosine similarity to `query` against `W_E`.
     /// Returns `[(token_id, cosine), ...]` descending.
     #[pyo3(signature = (query, k=10))]
@@ -802,6 +836,7 @@ impl PyWalkModel {
         Ok(li_embedding_neighbors(&self.weights, query.as_slice()?, k))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Raw `lm_head @ vec` projection — top-`k` `(token_id, logit)` pairs.
     /// **No final norm, no softcap, no softmax.** This is the DLA
     /// primitive — apply it to a head's contribution or any direction
@@ -820,6 +855,7 @@ impl PyWalkModel {
         ))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Embedding row for `token_id`. `scaled=True` (default) returns the
     /// row multiplied by `embed_scale` so it matches what the forward
     /// pass writes into the residual. `scaled=False` returns the raw
@@ -839,6 +875,7 @@ impl PyWalkModel {
         Ok(row.map(|r| r.into_pyarray(py)))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Unembedding (`lm_head`) row for `token_id` — the direction whose
     /// dot product with the final residual gives the raw logit for that
     /// token (before any norm/softcap/scaling).
@@ -850,6 +887,7 @@ impl PyWalkModel {
         Ok(li_unembedding_row(&self.weights, token_id).map(|r| r.into_pyarray(py)))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Multi-token generation with a `LayerHook` active on **every layer
     /// of every step** (prefill + each decode step). Mirrors lazarus's
     /// `steer_and_generate` and `ablate_and_generate` workflows.
@@ -915,7 +953,9 @@ impl PyWalkModel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PyWalkModel {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Tokenize a prompt to ids, raising a Python ValueError on failure.
     fn encode(&self, prompt: &str) -> PyResult<Vec<u32>> {
         let encoding = self

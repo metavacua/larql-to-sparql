@@ -17,7 +17,9 @@ use larql_wasm_math::FnvHasher as DefaultHasher;
 #[macro_use]
 extern crate alloc;
 
+#[cfg(not(target_arch = "wasm32"))]
 use pyo3::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use pyo3::types::PyDict;
 
 use larql_core as lq;
@@ -27,12 +29,16 @@ mod trace_py;
 mod vindex;
 mod walk;
 
+#[cfg(not(target_arch = "wasm32"))]
 use session::PySession;
+#[cfg(not(target_arch = "wasm32"))]
 use trace_py::{
     PyAnswerWaypoint, PyBoundaryStore, PyBoundaryWriter, PyLayerSummary, PyResidualTrace,
     PyTraceStore,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use vindex::{PyDescribeEdge, PyFeatureMeta, PyRelation, PyVindex, PyWalkHit};
+#[cfg(not(target_arch = "wasm32"))]
 use walk::PyWalkModel;
 
 // ── Helpers ──
@@ -48,6 +54,7 @@ fn parse_source(s: &str) -> lq::SourceType {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_merge_strategy(s: &str) -> lq::MergeStrategy {
     match s {
         "union" => lq::MergeStrategy::Union,
@@ -58,14 +65,17 @@ fn parse_merge_strategy(s: &str) -> lq::MergeStrategy {
 
 // ── PyEdge ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Edge")]
 #[derive(Clone)]
 pub struct PyEdge {
     inner: lq::Edge,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyEdge {
+    #[cfg(not(target_arch = "wasm32"))]
     #[new]
     #[pyo3(signature = (subject, relation, object, confidence=1.0, source="unknown", metadata=None, injection=None))]
     fn new(
@@ -94,21 +104,25 @@ impl PyEdge {
         Ok(Self { inner: edge })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn subject(&self) -> &str {
         &self.inner.subject
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn relation(&self) -> &str {
         &self.inner.relation
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn object(&self) -> &str {
         &self.inner.object
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn confidence(&self) -> f64 {
         self.inner.confidence
@@ -119,6 +133,7 @@ impl PyEdge {
         self.inner.source.as_str()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn metadata<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         match &self.inner.metadata {
@@ -143,6 +158,7 @@ impl PyEdge {
         (t.0, t.1, t.2)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn to_compact<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
         dict.set_item("s", &self.inner.subject)?;
@@ -165,6 +181,7 @@ impl PyEdge {
         Ok(dict)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[staticmethod]
     fn from_compact(d: &Bound<'_, PyDict>) -> PyResult<PyEdge> {
         let s: String = d.get_item("s")?.unwrap().extract()?;
@@ -218,6 +235,7 @@ impl PyEdge {
     }
 
     fn __hash__(&self) -> u64 {
+        #[cfg(not(target_arch = "wasm32"))]
         use core::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         self.inner.hash(&mut hasher);
@@ -227,19 +245,23 @@ impl PyEdge {
 
 // ── PyNode ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Node")]
 #[derive(Clone)]
 pub struct PyNode {
     inner: lq::core::node::Node,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyNode {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn name(&self) -> &str {
         &self.inner.name
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Returns the node type string, or "unknown" if not inferred.
     /// Matches Python NodeType enum values.
     #[getter]
@@ -247,11 +269,13 @@ impl PyNode {
         self.inner.node_type.as_deref().unwrap_or("unknown")
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn degree(&self) -> usize {
         self.inner.degree
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn out_degree(&self) -> usize {
         self.inner.out_degree
@@ -262,6 +286,7 @@ impl PyNode {
         self.inner.in_degree
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         let ntype = self.inner.node_type.as_deref().unwrap_or("unknown");
         format!(
@@ -273,11 +298,13 @@ impl PyNode {
 
 // ── PyGraph ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Graph", unsendable)]
 pub struct PyGraph {
     inner: lq::Graph,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyGraph {
     #[new]
@@ -297,10 +324,12 @@ impl PyGraph {
         self.inner.add_edges(edges.into_iter().map(|e| e.inner));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn remove_edge(&mut self, subject: &str, relation: &str, object_: &str) -> bool {
         self.inner.remove_edge(subject, relation, object_)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[pyo3(signature = (strategy="max_confidence"))]
     fn deduplicate(&mut self, strategy: &str) -> usize {
         self.inner.deduplicate(parse_merge_strategy(strategy))
@@ -308,6 +337,7 @@ impl PyGraph {
 
     // ── Queries ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[pyo3(signature = (subject, relation=None))]
     fn select(&self, subject: &str, relation: Option<&str>) -> Vec<PyEdge> {
         self.inner
@@ -326,6 +356,7 @@ impl PyGraph {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Matches Python: returns {"entity", "type", "outgoing", "incoming"}
     fn describe<'py>(&self, py: Python<'py>, entity: &str) -> PyResult<Bound<'py, PyDict>> {
         let result = self.inner.describe(entity);
@@ -372,6 +403,7 @@ impl PyGraph {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Matches Python: returns (None, path) on failure instead of None
     fn walk(&self, subject: &str, relations: Vec<String>) -> (Option<String>, Vec<PyEdge>) {
         let refs: Vec<&str> = relations.iter().map(|s| s.as_str()).collect();
@@ -384,6 +416,7 @@ impl PyGraph {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[pyo3(signature = (query, max_results=10))]
     fn search(&self, query: &str, max_results: usize) -> Vec<PyEdge> {
         self.inner
@@ -393,6 +426,7 @@ impl PyGraph {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[pyo3(signature = (entity, depth=2))]
     fn subgraph(&self, entity: &str, depth: u32) -> PyGraph {
         PyGraph {
@@ -412,6 +446,7 @@ impl PyGraph {
         self.inner.node(name).map(|n| PyNode { inner: n })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn nodes(&self) -> Vec<PyNode> {
         self.inner
             .nodes()
@@ -422,16 +457,19 @@ impl PyGraph {
 
     // ── Accessors ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn edge_count(&self) -> usize {
         self.inner.edge_count()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn node_count(&self) -> usize {
         self.inner.node_count()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn edges(&self) -> Vec<PyEdge> {
         self.inner
@@ -462,6 +500,7 @@ impl PyGraph {
 
     // ── Stats ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let s = self.inner.stats();
         let dict = PyDict::new(py);
@@ -481,6 +520,7 @@ impl PyGraph {
 
     // ── Serialization ──
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let json_val = self.inner.to_json_value();
         let json_str = serde_json::to_string(&json_val)
@@ -489,6 +529,7 @@ impl PyGraph {
         json_mod.call_method1("loads", (json_str,))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[staticmethod]
     fn from_dict(data: &Bound<'_, PyAny>) -> PyResult<PyGraph> {
         let json_mod = data.py().import("json")?;
@@ -525,17 +566,20 @@ impl PyGraph {
 
 // ── Free functions ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn load(path: &str) -> PyResult<PyGraph> {
     let graph = lq::load(path).map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     Ok(PyGraph { inner: graph })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn save(graph: &PyGraph, path: &str) -> PyResult<()> {
     lq::save(&graph.inner, path).map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn shortest_path(graph: &PyGraph, from: &str, to: &str) -> Option<(f64, Vec<PyEdge>)> {
     lq::shortest_path(&graph.inner, from, to).map(|(cost, path)| {
@@ -546,11 +590,13 @@ fn shortest_path(graph: &PyGraph, from: &str, to: &str) -> Option<(f64, Vec<PyEd
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn merge_graphs(target: &mut PyGraph, other: &PyGraph) -> usize {
     lq::merge_graphs(&mut target.inner, &other.inner)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 #[pyo3(signature = (target, other, strategy="union"))]
 fn merge_graphs_with_strategy(target: &mut PyGraph, other: &PyGraph, strategy: &str) -> usize {
@@ -562,6 +608,7 @@ fn merge_graphs_with_strategy(target: &mut PyGraph, other: &PyGraph, strategy: &
     lq::merge_graphs_with_strategy(&mut target.inner, &other.inner, s)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn diff<'py>(py: Python<'py>, old: &PyGraph, new: &PyGraph) -> PyResult<Bound<'py, PyDict>> {
     let result = lq::diff(&old.inner, &new.inner);
@@ -586,6 +633,7 @@ fn diff<'py>(py: Python<'py>, old: &PyGraph, new: &PyGraph) -> PyResult<Bound<'p
     Ok(dict)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 #[pyo3(signature = (graph, damping=0.85, max_iterations=100, tolerance=1e-6))]
 fn pagerank<'py>(
@@ -607,6 +655,7 @@ fn pagerank<'py>(
     Ok(dict)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 #[pyo3(signature = (graph, source, max_depth=10))]
 fn bfs_traversal(graph: &PyGraph, source: &str, max_depth: usize) -> (Vec<String>, Vec<PyEdge>) {
@@ -621,6 +670,7 @@ fn bfs_traversal(graph: &PyGraph, source: &str, max_depth: usize) -> (Vec<String
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 #[pyo3(signature = (graph, source, max_depth=10))]
 fn dfs_traversal(graph: &PyGraph, source: &str, max_depth: usize) -> (Vec<String>, Vec<PyEdge>) {
@@ -635,6 +685,7 @@ fn dfs_traversal(graph: &PyGraph, source: &str, max_depth: usize) -> (Vec<String
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn load_csv(path: &str) -> PyResult<PyGraph> {
     let graph =
@@ -642,12 +693,14 @@ fn load_csv(path: &str) -> PyResult<PyGraph> {
     Ok(PyGraph { inner: graph })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyfunction]
 fn save_csv(graph: &PyGraph, path: &str) -> PyResult<()> {
     lq::save_csv(&graph.inner, path)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk FFN weights from a model directory. Returns a Graph of extracted edges.
 ///
 /// Args:
@@ -696,6 +749,7 @@ fn weight_walk(
     Ok(PyGraph { inner: graph })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Walk attention OV circuits from a model. Returns a Graph of routing edges.
 #[pyfunction]
 #[pyo3(signature = (model_path, output_path=None, layer=None, top_k=3, min_score=0.0))]
@@ -742,6 +796,7 @@ fn attention_walk(
 
 // ── Vindex top-level functions ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Load a vindex from a directory path.
 ///
 /// Returns a Vindex object with gate vectors, embeddings, and tokenizer.
@@ -756,6 +811,7 @@ fn load_vindex(path: &str) -> PyResult<PyVindex> {
     PyVindex::open(path)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Create an LQL session connected to a vindex.
 ///
 /// The session provides both LQL query execution and direct vindex access:
@@ -769,6 +825,7 @@ fn create_session(py: Python<'_>, path: &str) -> PyResult<PySession> {
 
 // ── Module ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Graph types (existing)

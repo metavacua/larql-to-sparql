@@ -6,20 +6,6 @@
 //! Two access patterns:
 //! - Direct API: gate_vector(), embed(), gate_knn() — raw numpy arrays
 //! - High-level: describe(), entity_knn(), insert() — string in, results out
-
-use ndarray::Array1;
-use numpy::{IntoPyArray, PyArray1, PyArray2};
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
-
-use larql_vindex::patch::knn_store::KnnStore;
-use larql_vindex::{
-    format::filenames::KNN_STORE_BIN, load_vindex_config, load_vindex_embeddings,
-    load_vindex_tokenizer, tokenizers, FeatureMeta, SilentLoadCallbacks, VectorIndex, VindexConfig,
-    WalkHit,
-};
-
-use larql_lql::relations::RelationClassifier;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +17,26 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use ndarray::Array1;
+#[cfg(not(target_arch = "wasm32"))]
+use numpy::{IntoPyArray, PyArray1, PyArray2};
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::types::PyDict;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::patch::knn_store::KnnStore;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::{
+    format::filenames::KNN_STORE_BIN, load_vindex_config, load_vindex_embeddings,
+    load_vindex_tokenizer, tokenizers, FeatureMeta, SilentLoadCallbacks, VectorIndex, VindexConfig,
+    WalkHit,
+};
+
+use larql_lql::relations::RelationClassifier;
 // ── Content token filter (matches LQL executor logic) ──
 
 fn is_readable_token(tok: &str) -> bool {
@@ -53,6 +59,7 @@ fn is_readable_token(tok: &str) -> bool {
     readable * 2 >= total && total > 0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_content_token(tok: &str) -> bool {
     let tok = tok.trim();
     if !is_readable_token(tok) {
@@ -164,6 +171,7 @@ fn is_content_token(tok: &str) -> bool {
 
 // ── PyDescribeEdge ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "DescribeEdge")]
 #[derive(Clone)]
 pub struct PyDescribeEdge {
@@ -185,8 +193,10 @@ pub struct PyDescribeEdge {
     pub also: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyDescribeEdge {
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         let rel = self.relation.as_deref().unwrap_or("?");
         format!(
@@ -198,6 +208,7 @@ impl PyDescribeEdge {
 
 // ── PyRelation ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Relation")]
 #[derive(Clone)]
 pub struct PyRelation {
@@ -211,8 +222,10 @@ pub struct PyRelation {
     pub top_tokens: Vec<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyRelation {
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         format!(
             "Relation(name='{}', count={}, cluster={})",
@@ -223,29 +236,35 @@ impl PyRelation {
 
 // ── PyFeatureMeta ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "FeatureMeta")]
 #[derive(Clone)]
 pub struct PyFeatureMeta {
     inner: FeatureMeta,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyFeatureMeta {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top_token(&self) -> &str {
         &self.inner.top_token
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top_token_id(&self) -> u32 {
         self.inner.top_token_id
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn c_score(&self) -> f32 {
         self.inner.c_score
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top_k<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
         let mut result = Vec::new();
@@ -259,6 +278,7 @@ impl PyFeatureMeta {
         Ok(result)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         format!(
             "FeatureMeta(token='{}', id={}, c={:.4})",
@@ -269,6 +289,7 @@ impl PyFeatureMeta {
 
 // ── PyWalkHit ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "WalkHit")]
 #[derive(Clone)]
 pub struct PyWalkHit {
@@ -278,23 +299,28 @@ pub struct PyWalkHit {
     inner_meta: FeatureMeta,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyWalkHit {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn layer(&self) -> usize {
         self.inner_layer
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn feature(&self) -> usize {
         self.inner_feature
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn gate_score(&self) -> f32 {
         self.inner_gate_score
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn meta(&self) -> PyFeatureMeta {
         PyFeatureMeta {
@@ -302,6 +328,7 @@ impl PyWalkHit {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top_token(&self) -> &str {
         &self.inner_meta.top_token
@@ -320,7 +347,9 @@ impl PyWalkHit {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<WalkHit> for PyWalkHit {
+    #[cfg(not(target_arch = "wasm32"))]
     fn from(h: WalkHit) -> Self {
         Self {
             inner_layer: h.layer,
@@ -333,6 +362,7 @@ impl From<WalkHit> for PyWalkHit {
 
 // ── PyVindex ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "Vindex", unsendable)]
 pub struct PyVindex {
     pub(crate) index: VectorIndex,
@@ -353,7 +383,9 @@ pub struct PyVindex {
     pub(crate) walk_model: core::cell::RefCell<Option<crate::walk::InferState>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PyVindex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a vindex from a directory path (Rust-callable).
     pub fn open(path: &str) -> PyResult<Self> {
         let dir = std::path::Path::new(path);
@@ -401,6 +433,7 @@ impl PyVindex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run a closure with a reference to the lazily-loaded walk FFN state.
     /// Loads on first call; subsequent calls reuse the mmap'd weights.
     fn with_walk_model<F, R>(&self, f: F) -> PyResult<R>
@@ -422,6 +455,7 @@ impl PyVindex {
         f(state.as_ref().unwrap())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Compute scaled embedding for entity text. Multi-token entities are averaged.
     fn compute_embed(&self, text: &str) -> PyResult<Array1<f32>> {
         let encoding = self
@@ -458,8 +492,10 @@ impl PyVindex {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyVindex {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Load a vindex from a directory path.
     #[staticmethod]
     fn load(path: &str) -> PyResult<Self> {
@@ -470,41 +506,49 @@ impl PyVindex {
     //  Properties
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn num_layers(&self) -> usize {
         self.config.num_layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn hidden_size(&self) -> usize {
         self.config.hidden_size
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn vocab_size(&self) -> usize {
         self.config.vocab_size
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn model(&self) -> &str {
         &self.config.model
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn family(&self) -> &str {
         &self.config.family
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn is_mmap(&self) -> bool {
         self.index.is_mmap()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn total_gate_vectors(&self) -> usize {
         self.index.total_gate_vectors()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn loaded_layers(&self) -> Vec<usize> {
         self.index.loaded_layers()
@@ -524,6 +568,7 @@ impl PyVindex {
     //  Embeddings
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Embed entity text as a scaled numpy array.
     /// Multi-token entities are averaged (e.g., "John Coyle" averages both tokens).
     fn embed<'py>(&self, py: Python<'py>, text: &str) -> PyResult<Bound<'py, PyArray1<f32>>> {
@@ -531,6 +576,7 @@ impl PyVindex {
         Ok(arr.to_vec().into_pyarray(py))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Tokenize text and return all token IDs.
     fn tokenize(&self, text: &str) -> PyResult<Vec<u32>> {
         let encoding = self
@@ -540,6 +586,7 @@ impl PyVindex {
         Ok(encoding.get_ids().to_vec())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Decode token IDs back to text.
     fn decode(&self, ids: Vec<u32>) -> PyResult<String> {
         self.tokenizer
@@ -547,6 +594,7 @@ impl PyVindex {
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the raw embedding for a token ID (unscaled).
     fn embedding<'py>(
         &self,
@@ -563,6 +611,7 @@ impl PyVindex {
         Ok(self.embeddings.row(id).to_vec().into_pyarray(py))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the full embedding matrix as numpy (vocab_size, hidden_size).
     fn embedding_matrix<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
         let (rows, cols) = (self.embeddings.shape()[0], self.embeddings.shape()[1]);
@@ -584,6 +633,7 @@ impl PyVindex {
     //  Gate vectors
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get a single gate vector as numpy array (hidden_size,).
     fn gate_vector<'py>(
         &self,
@@ -602,6 +652,7 @@ impl PyVindex {
             })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get all gate vectors at a layer as numpy (num_features, hidden_size).
     fn gate_vectors<'py>(
         &self,
@@ -620,6 +671,7 @@ impl PyVindex {
     //  KNN & Walk
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Gate KNN: find top-K features at a layer by dot product with a query vector.
     /// Returns list of (feature_index, score) tuples.
     #[pyo3(signature = (layer, query_vector, top_k=10))]
@@ -628,6 +680,7 @@ impl PyVindex {
         self.index.gate_knn(layer, &arr, top_k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Walk: gate KNN across multiple layers with a raw residual vector.
     /// Returns list of WalkHit objects.
     #[pyo3(signature = (residual, layers=None, top_k=5))]
@@ -642,6 +695,7 @@ impl PyVindex {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: embed entity text and walk across layers.
     /// Like walk() but takes a string instead of a raw vector.
     #[pyo3(signature = (entity, layers=None, top_k=5))]
@@ -661,6 +715,7 @@ impl PyVindex {
             .collect())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Convenience: embed entity and do gate KNN at a layer.
     #[pyo3(signature = (entity, layer, top_k=10))]
     fn entity_knn(&self, entity: &str, layer: usize, top_k: usize) -> PyResult<Vec<(usize, f32)>> {
@@ -679,6 +734,7 @@ impl PyVindex {
             .map(|m| PyFeatureMeta { inner: m })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get feature metadata as a dict (for quick inspection in notebooks).
     fn feature<'py>(
         &self,
@@ -705,6 +761,7 @@ impl PyVindex {
         Ok(Some(dict))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the relation label for a feature (probe or cluster-assigned).
     fn feature_label(&self, layer: usize, feature: usize) -> Option<String> {
         self.classifier
@@ -717,6 +774,7 @@ impl PyVindex {
     //  DESCRIBE — knowledge edge discovery
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Describe an entity: find all knowledge edges.
     ///
     /// Returns a list of DescribeEdge objects with relation labels,
@@ -887,6 +945,7 @@ impl PyVindex {
         rels
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the cluster centre vector for a relation type as numpy array.
     /// Returns None if the relation is not found.
     fn cluster_centre<'py>(
@@ -903,6 +962,7 @@ impl PyVindex {
             .map(|v| v.into_pyarray(py)))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the typical layer for a relation type.
     fn typical_layer(&self, relation: &str) -> Option<usize> {
         self.classifier
@@ -910,6 +970,7 @@ impl PyVindex {
             .typical_layer_for_relation(relation)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Check if entity has an edge with the given relation.
     #[pyo3(signature = (entity, relation=None))]
     fn has_edge(&self, entity: &str, relation: Option<&str>) -> PyResult<bool> {
@@ -925,6 +986,7 @@ impl PyVindex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get the target token for an entity+relation pair.
     /// Returns None if not found.
     #[pyo3(signature = (entity, relation))]
@@ -945,6 +1007,7 @@ impl PyVindex {
     //  Mutation — INSERT
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Insert a knowledge edge: synthesise gate vector and write to index.
     ///
     /// Gate vector = entity_embed * 0.7 + cluster_centre * 0.3, normalised to
@@ -1053,6 +1116,7 @@ impl PyVindex {
         self.index.find_free_feature(layer)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Low-level: set a gate vector directly. For constellation insert experiments.
     fn set_gate_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) -> PyResult<()> {
         let arr = Array1::from_vec(vector);
@@ -1060,6 +1124,7 @@ impl PyVindex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Low-level: set a custom down vector override for a feature.
     /// During inference, this vector is used instead of the model's down weight row.
     fn set_down_vector(&mut self, layer: usize, feature: usize, vector: Vec<f32>) -> PyResult<()> {
@@ -1067,6 +1132,7 @@ impl PyVindex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Low-level: set feature metadata directly.
     #[pyo3(signature = (layer, feature, top_token, c_score=0.9))]
     fn set_feature_meta(
@@ -1097,6 +1163,7 @@ impl PyVindex {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Delete edges matching an entity (and optionally a relation).
     #[pyo3(signature = (entity, relation=None, layer=None))]
     fn delete(
@@ -1136,6 +1203,7 @@ impl PyVindex {
     //  Config / Stats
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Return vindex stats as a dict.
     fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
@@ -1166,6 +1234,7 @@ impl PyVindex {
         Ok(dict)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Layer bands (syntax, knowledge, output) if available.
     fn layer_bands<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         match &self.config.layer_bands {
@@ -1184,6 +1253,7 @@ impl PyVindex {
     //  INFER — full forward pass with walk FFN
     // ══════════════════════════════════════════════
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run inference: full forward pass with vindex walk FFN.
     ///
     /// Model weights are mmap'd on first call and reused — zero-copy, fast.
@@ -1238,6 +1308,7 @@ impl PyVindex {
         self.knn_store.as_ref().map(|s| s.len()).unwrap_or(0)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-k cosine-similarity query against the L0 KnnStore at a single
     /// layer. Returns `(entity, relation, target_token, cosine)` tuples
     /// sorted descending by cosine.
@@ -1274,6 +1345,7 @@ impl PyVindex {
             .collect())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Per-fact target-delta optimisation (MEMIT phase 3).
     ///
     /// Returns (delta_array, baseline_loss, final_loss). Currently only
@@ -1325,6 +1397,7 @@ impl PyVindex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Run inference and capture per-layer residuals — the actual query
     /// vectors the walk FFN's `gate_knn` operates on at each layer
     /// (post-attention, post-RMSNorm, last-token position).
@@ -1378,6 +1451,7 @@ impl PyVindex {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Find features whose down weight vectors project toward a target token.
     ///
     /// For each feature at the given layers, computes:

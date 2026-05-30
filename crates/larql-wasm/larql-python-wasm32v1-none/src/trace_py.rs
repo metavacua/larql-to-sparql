@@ -1,14 +1,4 @@
 //! Python bindings for ResidualTrace — the complete record of inference.
-
-use pyo3::prelude::*;
-
-use std::path::Path;
-
-use larql_inference::ffn::{FfnBackend, WeightFfn};
-use larql_inference::trace as trace_mod;
-use larql_inference::trace::TracePositions;
-use larql_inference::ModelWeights;
-use larql_vindex::tokenizers;
 #[allow(unused_imports)]
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
 #[cfg(target_arch = "wasm32")]
@@ -20,6 +10,22 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+
+#[cfg(not(target_arch = "wasm32"))]
+use pyo3::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ffn::{FfnBackend, WeightFfn};
+use larql_inference::trace as trace_mod;
+use larql_inference::trace::TracePositions;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_inference::ModelWeights;
+#[cfg(not(target_arch = "wasm32"))]
+use larql_vindex::tokenizers;
+#[cfg(not(target_arch = "wasm32"))]
 /// Complete inference trace — the residual stream DAG.
 #[pyclass(name = "ResidualTrace", unsendable)]
 pub struct PyResidualTrace {
@@ -28,42 +34,52 @@ pub struct PyResidualTrace {
     pub(crate) tokenizer_ptr: *const tokenizers::Tokenizer,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PyResidualTrace {
+    #[cfg(not(target_arch = "wasm32"))]
     fn weights(&self) -> &ModelWeights {
         unsafe { &*self.weights_ptr }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     fn tokenizer(&self) -> &tokenizers::Tokenizer {
         unsafe { &*self.tokenizer_ptr }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyResidualTrace {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn prompt(&self) -> &str {
         &self.inner.prompt
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn tokens(&self) -> Vec<String> {
         self.inner.tokens.clone()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_layers(&self) -> usize {
         self.inner.n_layers
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn hidden_size(&self) -> usize {
         self.inner.hidden_size
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_nodes(&self) -> usize {
         self.inner.nodes.len()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Top-k predictions at (layer, position). Position defaults to last token.
     #[pyo3(signature = (layer, position=None, k=5))]
     fn top_k(&self, layer: i32, position: Option<usize>, k: usize) -> Vec<(String, f32)> {
@@ -72,6 +88,7 @@ impl PyResidualTrace {
             .top_k(self.weights(), self.tokenizer(), layer, pos, k)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Rank of a token at (layer, position).
     #[pyo3(signature = (token, layer, position=None))]
     fn rank_of(&self, token: &str, layer: i32, position: Option<usize>) -> u32 {
@@ -93,6 +110,7 @@ impl PyResidualTrace {
             + 1
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Track answer rank, probability, and attn/ffn contribution through all layers.
     fn answer_trajectory(&self, answer: &str) -> PyResult<Vec<PyAnswerWaypoint>> {
         let tok_id = self
@@ -107,6 +125,7 @@ impl PyResidualTrace {
             .collect())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Compact per-layer summary: norms, top prediction, delta norms.
     fn summary(&self) -> Vec<PyLayerSummary> {
         let summaries = self.inner.layer_summaries(self.weights(), self.tokenizer());
@@ -116,6 +135,7 @@ impl PyResidualTrace {
             .collect()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get residual vector at (layer, position) as a list of floats.
     #[pyo3(signature = (layer, position=None))]
     fn residual(&self, layer: i32, position: Option<usize>) -> Option<Vec<f32>> {
@@ -123,6 +143,7 @@ impl PyResidualTrace {
         self.inner.node(layer, pos).map(|n| n.residual.clone())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Get attention delta at (layer, position) as a list of floats.
     #[pyo3(signature = (layer, position=None))]
     fn attn_delta(&self, layer: i32, position: Option<usize>) -> Option<Vec<f32>> {
@@ -137,6 +158,7 @@ impl PyResidualTrace {
         self.inner.node(layer, pos).map(|n| n.ffn_delta.clone())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Save the trace to an mmap-friendly binary file.
     ///
     /// The file is append-only and can be re-opened for reading with
@@ -161,6 +183,7 @@ impl PyResidualTrace {
         Ok(written)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         format!(
             "ResidualTrace('{}', {} tokens, {} layers, {} nodes)",
@@ -174,14 +197,17 @@ impl PyResidualTrace {
 
 // ── Mmap'd trace store ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Read-only mmap'd trace store — zero-copy access to frozen token chains.
 #[pyclass(name = "TraceStore", unsendable)]
 pub struct PyTraceStore {
     inner: trace_mod::TraceStore,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyTraceStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open a trace file for mmap'd reading.
     #[new]
     fn new(path: &str) -> PyResult<Self> {
@@ -190,11 +216,13 @@ impl PyTraceStore {
         Ok(Self { inner: store })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_tokens(&self) -> usize {
         self.inner.n_tokens()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_layers(&self) -> usize {
         self.inner.n_layers()
@@ -221,11 +249,13 @@ impl PyTraceStore {
         self.inner.ffn_delta(token, layer).map(|s| s.to_vec())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// File size in bytes.
     fn file_size(&self) -> usize {
         HEADER_SIZE + self.inner.n_tokens() * self.chain_size()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         let mb = (HEADER_SIZE + self.inner.n_tokens() * self.chain_size()) as f64 / 1e6;
         format!(
@@ -238,6 +268,7 @@ impl PyTraceStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl PyTraceStore {
     fn chain_size(&self) -> usize {
         let waypoints = self.inner.n_layers() + 1;
@@ -245,10 +276,12 @@ impl PyTraceStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const HEADER_SIZE: usize = 64;
 
 // ── Boundary store ──
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Mmap'd boundary residual store — compressed context for infinite sequences.
 ///
 /// Stores one residual per window boundary (~10 KB per 200 tokens).
@@ -258,8 +291,10 @@ pub struct PyBoundaryStore {
     inner: trace_mod::BoundaryStore,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyBoundaryStore {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Open an existing boundary file.
     #[new]
     fn new(path: &str) -> PyResult<Self> {
@@ -268,14 +303,17 @@ impl PyBoundaryStore {
         Ok(Self { inner: store })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_boundaries(&self) -> usize {
         self.inner.n_boundaries()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn total_tokens(&self) -> usize {
         self.inner.total_tokens()
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn hidden_size(&self) -> usize {
         self.inner.hidden_size()
@@ -300,6 +338,7 @@ impl PyBoundaryStore {
         self.inner.token_range(i)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         let data_kb = self.inner.data_size() as f64 / 1024.0;
         format!(
@@ -312,14 +351,17 @@ impl PyBoundaryStore {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Writable boundary store.
 #[pyclass(name = "BoundaryWriter", unsendable)]
 pub struct PyBoundaryWriter {
     inner: Option<trace_mod::BoundaryWriter>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyBoundaryWriter {
+    #[cfg(not(target_arch = "wasm32"))]
     /// Create a new boundary store file.
     #[new]
     #[pyo3(signature = (path, hidden_size, window_size=200, max_boundaries=10000))]
@@ -341,6 +383,7 @@ impl PyBoundaryWriter {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Append a boundary residual.
     fn append(
         &mut self,
@@ -357,6 +400,7 @@ impl PyBoundaryWriter {
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn n_boundaries(&self) -> usize {
         self.inner.as_ref().map(|w| w.n_boundaries()).unwrap_or(0)
@@ -367,6 +411,7 @@ impl PyBoundaryWriter {
         self.inner.as_ref().map(|w| w.total_tokens()).unwrap_or(0)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Flush and finalize the file.
     fn finish(&mut self) -> PyResult<String> {
         let writer = self
@@ -380,6 +425,7 @@ impl PyBoundaryWriter {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Capture a trace from a WalkModel (called from PyWalkModel.trace).
 #[allow(dead_code)]
 pub fn capture_trace(
@@ -392,6 +438,7 @@ pub fn capture_trace(
     capture_trace_with_ffn(weights, tokenizer, prompt, positions, &ffn)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn capture_trace_with_ffn(
     weights: &ModelWeights,
     tokenizer: &tokenizers::Tokenizer,
@@ -430,29 +477,36 @@ pub fn capture_trace_with_ffn(
 
 // ── Answer waypoint ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "AnswerWaypoint")]
 pub struct PyAnswerWaypoint {
     inner: trace_mod::AnswerWaypoint,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyAnswerWaypoint {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn layer(&self) -> i32 {
         self.inner.layer
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn rank(&self) -> u32 {
         self.inner.rank
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn prob(&self) -> f32 {
         self.inner.prob
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn attn_logit(&self) -> f32 {
         self.inner.attn_logit
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn ffn_logit(&self) -> f32 {
         self.inner.ffn_logit
@@ -462,6 +516,7 @@ impl PyAnswerWaypoint {
         self.inner.residual_norm
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn __repr__(&self) -> String {
         let l = if self.inner.layer == -1 {
             "emb".to_string()
@@ -477,29 +532,36 @@ impl PyAnswerWaypoint {
 
 // ── Layer summary ──
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pyclass(name = "LayerSummary")]
 pub struct PyLayerSummary {
     inner: trace_mod::LayerSummary,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[pymethods]
 impl PyLayerSummary {
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn layer(&self) -> i32 {
         self.inner.layer
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn residual_norm(&self) -> f32 {
         self.inner.residual_norm
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn attn_delta_norm(&self) -> f32 {
         self.inner.attn_delta_norm
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn ffn_delta_norm(&self) -> f32 {
         self.inner.ffn_delta_norm
     }
+    #[cfg(not(target_arch = "wasm32"))]
     #[getter]
     fn top1_token(&self) -> &str {
         &self.inner.top1_token
@@ -526,6 +588,7 @@ impl PyLayerSummary {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn softmax_f32(logits: &[f32]) -> Vec<f32> {
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exp_sum: f64 = logits.iter().map(|&l| ((l - max) as f64).exp()).sum();
