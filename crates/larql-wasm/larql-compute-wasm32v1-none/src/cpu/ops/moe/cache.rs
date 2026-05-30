@@ -49,6 +49,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{OnceLock, RwLock};
@@ -100,7 +104,7 @@ fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -
 fn cache_key(bytes: &[u8], format: crate::QuantFormat, expected_floats: usize) -> Key {
     use core::hash::{Hash, Hasher};
 
-    let mut h = hashbrown::hash_map::DefaultHasher::new();
+    let mut h = DefaultHasher::new();
     bytes.hash(&mut h);
     (
         bytes.as_ptr() as usize,

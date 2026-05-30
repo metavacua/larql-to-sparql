@@ -10,6 +10,10 @@ use std::collections::{HashMap, HashSet};
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
 use larql_wasm_math::FloatExt as _;
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(target_arch = "wasm32")]
+use larql_wasm_math::FnvHasher as DefaultHasher;
 #[macro_use]
 extern crate alloc;
 
@@ -215,7 +219,7 @@ impl PyEdge {
 
     fn __hash__(&self) -> u64 {
         use core::hash::{Hash, Hasher};
-        let mut hasher = hashbrown::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         self.inner.hash(&mut hasher);
         hasher.finish()
     }
