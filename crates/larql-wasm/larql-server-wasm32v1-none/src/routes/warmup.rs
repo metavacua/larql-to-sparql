@@ -15,30 +15,17 @@
 //! boot when `larql-server --warmup-walk-ffn` is set, which is the
 //! recommended posture for production grid shards.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 use std::time::Instant;
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::{Deserialize, Serialize};
-#[cfg(not(target_arch = "wasm32"))]
 use tracing::info;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 #[derive(Default, Deserialize, utoipa::ToSchema)]
 pub struct WarmupRequest {
     /// Specific layers to prefetch (`madvise WILLNEED`). Defaults to
@@ -168,7 +155,6 @@ pub fn warmup_model(model: &LoadedModel, req: &WarmupRequest) -> WarmupResponse 
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Async wrapper for `warmup_model` that runs the (potentially
 /// multi-second) work on a blocking worker so the tokio runtime
 /// stays responsive.

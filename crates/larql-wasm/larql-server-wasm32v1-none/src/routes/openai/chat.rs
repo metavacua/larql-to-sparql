@@ -44,20 +44,15 @@
 //! - `n>1` returns 400
 //! - `logprobs` request field accepted, response field always `null` (F18)
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::sse::{Event, KeepAlive, Sse};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use core::convert::Infallible;
-#[cfg(not(target_arch = "wasm32"))]
+use std::convert::Infallible;
+use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::StreamExt as _;
 
 use crate::error::ServerError;
@@ -66,17 +61,7 @@ use crate::state::{AppState, LoadedModel};
 
 use super::schema::{ObjectSchema, Schema};
 use super::util::{contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const CHAT_COMPLETION_OBJECT: &str = "chat.completion";
 const CHAT_COMPLETION_CHUNK_OBJECT: &str = "chat.completion.chunk";
 const ASSISTANT_ROLE: &str = "assistant";
@@ -241,7 +226,6 @@ pub struct ChatCompletionsResponse {
     pub usage: ChatUsage,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/chat/completions",
@@ -449,7 +433,6 @@ fn build_chat_logprobs(tokens: &[(String, f64)]) -> ChatLogprobs {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// SSE stream for `/v1/chat/completions`. First chunk emits
 /// `delta: {role: "assistant"}`; subsequent chunks emit
 /// `delta: {content: "<token text>"}`; the final chunk has empty
@@ -519,9 +502,9 @@ fn stream_chat_completion(
         let model_id_cb = model_id.clone();
         let tx_cb = tx.clone();
         let stop_strings_cb = stop_strings.clone();
-        let early_stop = alloc::rc::Rc::new(core::cell::Cell::new(false));
+        let early_stop = std::rc::Rc::new(std::cell::Cell::new(false));
         let early_stop_cb = early_stop.clone();
-        let buffered_text = alloc::rc::Rc::new(core::cell::RefCell::new(String::new()));
+        let buffered_text = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let buffered_text_cb = buffered_text.clone();
         let on_token = move |_id: u32, text: &str, _prob: f64| {
             if early_stop_cb.get() {
@@ -1082,7 +1065,6 @@ fn schema_for_response_format(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Resolve common end-of-turn token ids for the loaded model. The
 /// constrained-mask uses these to gate EOS — the model can't truncate
 /// while the FSM is mid-structure, but once the FSM is complete the
@@ -1094,8 +1076,8 @@ fn schema_for_response_format(
 /// vocab.
 fn resolve_eos_token_ids(
     tokenizer: &larql_inference::tokenizers::Tokenizer,
-) -> HashSet<u32> {
-    let mut ids = HashSet::new();
+) -> std::collections::HashSet<u32> {
+    let mut ids = std::collections::HashSet::new();
     for tok in [
         "<end_of_turn>",
         "<|end_of_turn|>",
@@ -1114,7 +1096,6 @@ fn resolve_eos_token_ids(
     ids
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Build the masked-vocab callback the constrained generator expects.
 /// Wraps the tokenizer in `Arc` (the schema mask caches surface forms
 /// per id), seeds a fresh FSM from `schema`, and includes the model's
@@ -1126,13 +1107,14 @@ fn build_constrained_mask(
 ) -> impl FnMut(&[u32], &mut Vec<f32>) {
     let eos_ids = resolve_eos_token_ids(tokenizer);
     let tk: std::sync::Arc<larql_inference::tokenizers::Tokenizer> =
-        alloc::sync::Arc::new(tokenizer.clone());
+        std::sync::Arc::new(tokenizer.clone());
     super::schema::build_mask(tk, super::schema::Fsm::new(schema), String::new(), eos_ids)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     // Multi-turn template rendering is tested in
     // `larql_inference::prompt::render_messages_tests` (Gemma, ChatML,
     // Llama, Mistral, Plain). This handler only marshals JSON to the

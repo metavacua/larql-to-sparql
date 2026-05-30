@@ -12,23 +12,12 @@
 //! on every call — still only 1–2 µs, negligible vs network overhead.
 
 use larql_vindex::format::filenames::*;
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Mutex};
+use std::sync::{Arc, Mutex};
 
-#[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 pub struct EmbedStoreF16 {
     mmap: Arc<Mmap>,
     pub vocab_size: usize,
@@ -42,7 +31,6 @@ pub struct EmbedStoreF16 {
 }
 
 impl EmbedStoreF16 {
-    #[cfg(not(target_arch = "wasm32"))]
     /// Open `{dir}/embeddings.bin` as a read-only mmap.
     ///
     /// Validates the file size matches `vocab_size × hidden_size × 2` bytes.
@@ -163,9 +151,8 @@ fn f16_to_f32(bits: u16) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
-    #[cfg(not(target_arch = "wasm32"))]
+
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
@@ -180,7 +167,6 @@ mod tests {
         dir
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn write_embeddings(dir: &Path, halves: &[u16]) {
         let mut file = std::fs::File::create(dir.join(EMBEDDINGS_BIN)).unwrap();
         for half in halves {
@@ -222,7 +208,6 @@ mod tests {
         assert!(f16_to_f32(0x7E00).is_nan());
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_rejects_missing_file() {
         let dir = unique_temp_dir("embed-missing");
@@ -234,7 +219,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn open_rejects_wrong_size() {
         let dir = unique_temp_dir("embed-size");
@@ -247,7 +231,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lookup_decodes_scales_and_caches_until_cap() {
         let dir = unique_temp_dir("embed-lookup");
@@ -275,7 +258,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn lookup_rejects_out_of_range_token() {
         let dir = unique_temp_dir("embed-oob");

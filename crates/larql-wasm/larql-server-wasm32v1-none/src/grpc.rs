@@ -1,25 +1,14 @@
 //! gRPC service implementation for VindexService.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use tokio_stream::wrappers::ReceiverStream;
-#[cfg(not(target_arch = "wasm32"))]
 use tonic::{Request, Response, Status};
 
 use crate::band_utils::{
     HEALTH_STATUS_OK, INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK, PROBE_RELATION_SOURCE,
 };
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
 pub mod proto {
     tonic::include_proto!("vindex");
@@ -43,7 +32,7 @@ impl VindexService for VindexGrpcService {
         let served = self
             .state
             .requests_served
-            .load(core::sync::atomic::Ordering::Relaxed);
+            .load(std::sync::atomic::Ordering::Relaxed);
         Ok(Response::new(HealthResponse {
             status: HEALTH_STATUS_OK.into(),
             uptime_seconds: uptime,
@@ -93,7 +82,6 @@ impl VindexService for VindexGrpcService {
         }))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn describe(
         &self,
         request: Request<DescribeRequest>,
@@ -113,7 +101,6 @@ impl VindexService for VindexGrpcService {
         Ok(Response::new(result))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn walk(&self, request: Request<WalkRequest>) -> Result<Response<WalkResponse>, Status> {
         self.state.bump_requests();
         let req = request.into_inner();
@@ -130,7 +117,6 @@ impl VindexService for VindexGrpcService {
         Ok(Response::new(result))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn select(
         &self,
         request: Request<SelectRequest>,
@@ -150,7 +136,6 @@ impl VindexService for VindexGrpcService {
         Ok(Response::new(result))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn infer(
         &self,
         request: Request<InferRequest>,
@@ -174,7 +159,6 @@ impl VindexService for VindexGrpcService {
         Ok(Response::new(result))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn get_relations(
         &self,
         _request: Request<RelationsRequest>,
@@ -193,7 +177,6 @@ impl VindexService for VindexGrpcService {
         Ok(Response::new(result))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn walk_ffn(
         &self,
         request: Request<WalkFfnRequest>,
@@ -215,7 +198,6 @@ impl VindexService for VindexGrpcService {
 
     type StreamDescribeStream = ReceiverStream<Result<DescribeLayerEvent, Status>>;
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn stream_describe(
         &self,
         request: Request<DescribeRequest>,
@@ -242,13 +224,12 @@ impl VindexService for VindexGrpcService {
 /// rather than panicking — corrupted vindex data or future patched scoring
 /// paths must not be able to take a gRPC worker down via `sort_by`.
 #[inline]
-fn cmp_score_desc(a: f32, b: f32) -> core::cmp::Ordering {
-    b.partial_cmp(&a).unwrap_or(core::cmp::Ordering::Equal)
+fn cmp_score_desc(a: f32, b: f32) -> std::cmp::Ordering {
+    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
 }
 
 // ── Blocking handler implementations ──
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_describe(
     model: &crate::state::LoadedModel,
     req: &DescribeRequest,
@@ -346,7 +327,6 @@ fn grpc_describe(
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_walk(model: &crate::state::LoadedModel, req: &WalkRequest) -> Result<WalkResponse, Status> {
     let start = std::time::Instant::now();
     let top_k = if req.top > 0 { req.top as usize } else { 5 };
@@ -398,7 +378,6 @@ fn grpc_walk(model: &crate::state::LoadedModel, req: &WalkRequest) -> Result<Wal
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_select(
     model: &crate::state::LoadedModel,
     req: &SelectRequest,
@@ -469,7 +448,6 @@ fn grpc_select(
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_infer(
     model: &crate::state::LoadedModel,
     req: &InferRequest,
@@ -569,14 +547,13 @@ fn grpc_infer(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse, Status> {
     let start = std::time::Instant::now();
     let patched = model.patched.blocking_read();
     let all_layers = patched.loaded_layers();
 
-    let mut counts: HashMap<String, (usize, String)> =
-        HashMap::new();
+    let mut counts: std::collections::HashMap<String, (usize, String)> =
+        std::collections::HashMap::new();
     for &layer in &all_layers {
         if let Some(metas) = patched.down_meta_at(layer) {
             for meta in metas.iter().flatten() {
@@ -602,7 +579,7 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
             example,
         })
         .collect();
-    relations.sort_by_key(|r| core::cmp::Reverse(r.count));
+    relations.sort_by_key(|r| std::cmp::Reverse(r.count));
     let total = relations.len() as u32;
     relations.truncate(50);
 
@@ -613,7 +590,6 @@ fn grpc_relations(model: &crate::state::LoadedModel) -> Result<RelationsResponse
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_walk_ffn(
     model: &crate::state::LoadedModel,
     req: &WalkFfnRequest,
@@ -659,7 +635,6 @@ fn grpc_walk_ffn(
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_walk_ffn_features_only(
     model: &crate::state::LoadedModel,
     scan_layers: &[usize],
@@ -689,7 +664,6 @@ fn grpc_walk_ffn_features_only(
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_walk_ffn_full_output(
     model: &crate::state::LoadedModel,
     scan_layers: &[usize],
@@ -733,7 +707,6 @@ fn grpc_walk_ffn_full_output(
     Ok(results)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn grpc_stream_describe(
     model: &crate::state::LoadedModel,
     req: &DescribeRequest,
@@ -839,7 +812,8 @@ fn grpc_stream_describe(
 #[cfg(test)]
 mod tests {
     use super::cmp_score_desc;
-    use core::cmp::Ordering;
+    use std::cmp::Ordering;
+
     #[test]
     fn cmp_score_desc_orders_descending() {
         assert_eq!(cmp_score_desc(1.0, 2.0), Ordering::Greater);

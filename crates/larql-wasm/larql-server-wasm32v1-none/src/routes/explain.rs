@@ -1,25 +1,15 @@
 //! POST /v1/explain-infer — walk inference with per-layer feature trace.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
 use crate::band_utils::{get_layer_bands, BAND_KNOWLEDGE, BAND_OUTPUT, BAND_SYNTAX};
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct ExplainRequest {
     pub prompt: String,
@@ -96,7 +86,6 @@ fn format_lens(token: &str, probability: f64) -> serde_json::Value {
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn explain_infer(
     model: &LoadedModel,
     req: &ExplainRequest,
@@ -156,7 +145,7 @@ fn explain_infer(
     let trace_layers = larql_inference::walk_trace_from_residuals(&residuals, &patched);
 
     // Build logit lens: layer → (top_token, probability)
-    let lens_map: HashMap<usize, (String, f64)> = lens_residuals
+    let lens_map: std::collections::HashMap<usize, (String, f64)> = lens_residuals
         .iter()
         .filter_map(|(layer, residual)| {
             let pred = larql_inference::logit_lens_top1(weights, &model.tokenizer, residual)?;
@@ -165,8 +154,8 @@ fn explain_infer(
         .collect();
 
     // Build attention lookup: layer → top attended tokens
-    let attention_map: HashMap<usize, Vec<(String, f32)>> = {
-        let mut map = HashMap::new();
+    let attention_map: std::collections::HashMap<usize, Vec<(String, f32)>> = {
+        let mut map = std::collections::HashMap::new();
         for cap in &attention_captures {
             let n_heads = cap.weights.heads.len();
             if n_heads == 0 || token_strs.is_empty() {
@@ -191,7 +180,7 @@ fn explain_infer(
                     Some((tok.trim().to_string(), w))
                 })
                 .collect();
-            pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal));
+            pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             pairs.truncate(3);
             map.insert(cap.layer, pairs);
         }
@@ -220,13 +209,13 @@ fn explain_infer(
                 let a_pos = a.gate_score > 0.0;
                 let b_pos = b.gate_score > 0.0;
                 match (a_pos, b_pos) {
-                    (true, false) => core::cmp::Ordering::Less,
-                    (false, true) => core::cmp::Ordering::Greater,
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
                     _ => b
                         .gate_score
                         .abs()
                         .partial_cmp(&a.gate_score.abs())
-                        .unwrap_or(core::cmp::Ordering::Equal),
+                        .unwrap_or(std::cmp::Ordering::Equal),
                 }
             });
             lh
@@ -298,7 +287,6 @@ fn explain_infer(
     Ok(body)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/explain-infer",
@@ -322,7 +310,6 @@ pub async fn handle_explain(
     Ok(Json(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/explain-infer",
@@ -351,6 +338,7 @@ pub async fn handle_explain_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn explain_defaults_match_api_contract() {
         assert_eq!(default_top(), 5);

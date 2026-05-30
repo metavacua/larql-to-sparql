@@ -7,24 +7,11 @@
 //! Eviction: simple capacity cap per layer — entries are dropped when the
 //!           per-layer map is full (FIFO drop via HashMap entry churn).
 
-use core::hash::{Hash, Hasher};
-use core::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{RwLock};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(target_arch = "wasm32")]
-use larql_wasm_math::FnvHasher as DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+
 pub const L2_DEFAULT_MAX_ENTRIES: usize = 4096;
 
 pub struct FfnL2Cache {
@@ -54,7 +41,7 @@ impl FfnL2Cache {
     pub fn key(feature_ids: &[usize]) -> u64 {
         let mut ids = feature_ids.to_vec();
         ids.sort_unstable();
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
         ids.hash(&mut hasher);
         hasher.finish()
     }
@@ -131,10 +118,10 @@ mod tests {
     fn key_matches_l1_scheme() {
         // L1 and L2 use identical key derivation — cross-tier consistency.
         fn l1_key(ids: &[usize]) -> u64 {
-            use core::hash::{Hash, Hasher};
+            use std::hash::{Hash, Hasher};
             let mut sorted = ids.to_vec();
             sorted.sort_unstable();
-            let mut h = DefaultHasher::new();
+            let mut h = std::collections::hash_map::DefaultHasher::new();
             sorted.hash(&mut h);
             h.finish()
         }
@@ -224,10 +211,9 @@ mod tests {
         let a = cache.get(0, key).unwrap();
         let b = cache.get(0, key).unwrap();
         // Both Arcs point at the same allocation
-        assert!(alloc::sync::Arc::ptr_eq(&a, &b));
+        assert!(std::sync::Arc::ptr_eq(&a, &b));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn concurrent_reads_do_not_panic() {
         use std::sync::Arc as StdArc;

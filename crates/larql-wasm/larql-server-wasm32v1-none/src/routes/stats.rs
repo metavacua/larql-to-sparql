@@ -1,23 +1,13 @@
 //! GET /v1/stats
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 fn build_stats(model: &LoadedModel) -> serde_json::Value {
     let config = &model.config;
     let total_features: usize = config.layers.iter().map(|l| l.num_features).sum();
@@ -107,7 +97,6 @@ pub async fn handle_stats(
     Ok(Json(add_q4k_ffn(model, stats).await))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/stats",

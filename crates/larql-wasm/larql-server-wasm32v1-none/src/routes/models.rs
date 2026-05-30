@@ -22,26 +22,15 @@
 //! unmodified, while larql-aware clients still see `path` / `features`
 //! / `loaded`.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 
 use crate::http::API_PREFIX;
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const MODEL_OBJECT: &str = "model";
 const LIST_OBJECT: &str = "list";
 const OWNED_BY: &str = "larql";

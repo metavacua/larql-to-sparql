@@ -10,13 +10,11 @@
 //!
 //! Used by the predispatch path when all shards are HTTP/UDS transport.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::body::Bytes;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 
 use larql_compute::Q8KActivation;
@@ -30,19 +28,7 @@ use crate::error::ServerError;
 use crate::state::AppState;
 
 use super::cpu::{run_experts_cpu_batch, run_experts_cpu_batch_q8k_prenormed};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/experts/multi-layer-batch",
@@ -111,7 +97,6 @@ pub async fn handle_experts_multi_layer_batch(
         .map_err(|e| ServerError::Internal(e.to_string()))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Q8K-prenormed variant: client pre-quantises h_norm, server skips
 /// `pre_experts_norm` and `quantize_h_norm_for_q4k` — just the matvec.
 /// 4× smaller upload; response is standard f32.

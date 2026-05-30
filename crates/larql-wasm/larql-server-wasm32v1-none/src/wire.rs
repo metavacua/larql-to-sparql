@@ -17,9 +17,7 @@
 //! `preferred_response_ct` selects the best format the server can satisfy.
 //! The server checks `LARQL_F16_WIRE_DISABLE` before honouring f16 requests.
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
 
 /// f32 binary content-type (existing).
@@ -29,7 +27,6 @@ pub const FFN_F16_CT: &str = "application/x-larql-ffn-f16";
 /// i8 symmetric binary content-type (ADR-0009).
 pub const FFN_I8_CT: &str = "application/x-larql-ffn-i8";
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Select the best response content-type given the client's `Accept` header.
 ///
 /// Priority: i8 > f16 > f32, subject to server feature flags.
@@ -64,7 +61,6 @@ pub fn accept_header(headers: &HeaderMap) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(target_arch = "wasm32"))]
     use axum::http::HeaderValue;
 
     fn hm(ct: &str) -> HeaderMap {

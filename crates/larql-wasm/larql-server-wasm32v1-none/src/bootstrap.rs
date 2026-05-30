@@ -1,9 +1,8 @@
 //! Server bootstrap and vindex loading helpers.
 
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::middleware;
 use clap::Parser;
 use larql_vindex::format::filenames::*;
@@ -11,28 +10,15 @@ use larql_vindex::{
     load_vindex_config, load_vindex_embeddings, load_vindex_tokenizer, PatchedVindex,
     SilentLoadCallbacks, VectorIndex,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
-#[cfg(not(target_arch = "wasm32"))]
 use tracing::{info, warn};
 
 use crate::cache::DescribeCache;
 use crate::session::SessionManager;
 use crate::state::{load_probe_labels, model_id_from_name, AppState, LoadedModel};
 use crate::{announce, auth, grpc, grpc_expert, ratelimit, routes};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
-pub type BoxError = Box<dyn core::error::Error + Send + Sync>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 // ── CLI defaults ───────────────────────────────────────────────────────────────
 //
@@ -103,7 +89,7 @@ pub struct LoadVindexOptions {
     /// Fine-grained per-(layer, expert) ownership.  When `Some`, takes
     /// precedence over `expert_filter` for `run_expert`'s ownership check
     /// and for the HNSW / Metal warmup loops.  Loaded from `--units` JSON.
-    pub unit_filter: Option<Arc<HashSet<(usize, usize)>>>,
+    pub unit_filter: Option<Arc<std::collections::HashSet<(usize, usize)>>>,
     /// Server-side remote MoE backend. When `Some`, the walk-ffn handler
     /// delegates MoE expert dispatch to remote shard servers.
     pub moe_remote: Option<Arc<larql_inference::ffn::RemoteMoeBackend>>,
@@ -121,8 +107,8 @@ impl UnitManifest {
     /// Expand the per-layer range list into the flat `(layer, expert_id)`
     /// set used by ownership checks.  Reports the first malformed entry in
     /// the error path so the operator can fix it without grepping.
-    pub fn into_unit_set(self) -> Result<HashSet<(usize, usize)>, BoxError> {
-        let mut units = HashSet::new();
+    pub fn into_unit_set(self) -> Result<std::collections::HashSet<(usize, usize)>, BoxError> {
+        let mut units = std::collections::HashSet::new();
         for (layer_str, ranges) in self.layer_experts {
             let layer: usize = layer_str.parse().map_err(|_| -> BoxError {
                 format!("--units: layer key '{layer_str}' is not a valid usize").into()
@@ -143,11 +129,10 @@ impl UnitManifest {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Parse `--units PATH` into the canonical `(layer, expert_id)` ownership set.
 pub fn parse_unit_manifest(
     path: &Path,
-) -> Result<HashSet<(usize, usize)>, BoxError> {
+) -> Result<std::collections::HashSet<(usize, usize)>, BoxError> {
     let bytes = std::fs::read(path)
         .map_err(|e| -> BoxError { format!("--units: read {}: {e}", path.display()).into() })?;
     let manifest: UnitManifest = serde_json::from_slice(&bytes)
@@ -155,7 +140,6 @@ pub fn parse_unit_manifest(
     manifest.into_unit_set()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn load_single_vindex(
     path_str: &str,
     opts: LoadVindexOptions,
@@ -371,21 +355,20 @@ pub fn load_single_vindex(
         weights: std::sync::OnceLock::new(),
         probe_labels,
         ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(num_layers),
-        layer_latency_tracker: alloc::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
-        requests_in_flight: alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0)),
+        layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+        requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
         expert_filter: opts.expert_filter,
         unit_filter: opts.unit_filter.clone(),
         moe_remote: opts.moe_remote.clone(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_backend: std::sync::OnceLock::new(),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
-        moe_scratches: std::sync::Mutex::new(HashMap::new()),
+        moe_scratches: std::sync::Mutex::new(std::collections::HashMap::new()),
         #[cfg(all(feature = "metal-experts", target_os = "macos"))]
         metal_ffn_layer_bufs: std::sync::OnceLock::new(),
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn discover_vindexes(dir: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -402,7 +385,7 @@ pub fn discover_vindexes(dir: &Path) -> Vec<PathBuf> {
 
 pub fn normalize_serve_alias(args: Vec<String>) -> Vec<String> {
     if args.len() > 1 && args[1] == "serve" {
-        core::iter::once(args[0].clone())
+        std::iter::once(args[0].clone())
             .chain(args[2..].iter().cloned())
             .collect()
     } else {
@@ -659,7 +642,6 @@ pub struct Cli {
 
 // ── Server lifecycle ──────────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Boot the server: load every vindex named on the command line, build the
 /// router, run any opt-in warmups, then bind the TCP listener (plus optional
 /// UDS / TLS / gRPC sockets) and run forever.
@@ -694,7 +676,7 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
             u.len(),
             u.iter()
                 .map(|(l, _)| *l)
-                .collect::<HashSet<_>>()
+                .collect::<std::collections::HashSet<_>>()
                 .len(),
         );
     }
@@ -810,7 +792,7 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
     let state = Arc::new(AppState {
         models: models.clone(),
         started_at: std::time::Instant::now(),
-        requests_served: core::sync::atomic::AtomicU64::new(0),
+        requests_served: std::sync::atomic::AtomicU64::new(0),
         api_key: cli.api_key.clone(),
         sessions: SessionManager::new(DEFAULT_SESSION_TTL_SECS),
         describe_cache: DescribeCache::new(cli.cache_ttl),
@@ -1126,6 +1108,7 @@ pub async fn serve(cli: Cli) -> Result<(), BoxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn parse_ram_bytes_gb() {
         assert_eq!(parse_ram_bytes("24GB").unwrap(), 24 * 1024 * 1024 * 1024);
@@ -1147,7 +1130,6 @@ mod tests {
         assert!(parse_ram_bytes("notanumber").is_err());
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn unique_temp_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
@@ -1171,7 +1153,6 @@ mod tests {
     // ownership-check and warmup loops can rely on it without having to
     // re-validate.
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn write_units_file(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("units.json");
         std::fs::write(&path, body).unwrap();
@@ -1188,7 +1169,7 @@ mod tests {
         let units = parse_unit_manifest(&path).unwrap();
         // Layer 0: experts 0..=2 → (0,0), (0,1), (0,2)
         // Layer 3: experts 5..=7 + 10 → (3,5), (3,6), (3,7), (3,10)
-        let expected: HashSet<(usize, usize)> =
+        let expected: std::collections::HashSet<(usize, usize)> =
             [(0, 0), (0, 1), (0, 2), (3, 5), (3, 6), (3, 7), (3, 10)]
                 .into_iter()
                 .collect();
@@ -1213,7 +1194,6 @@ mod tests {
         assert!(msg.contains("end (2) must be >= start (5)"), "got: {msg}");
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parse_unit_manifest_missing_file_reports_path() {
         let bogus = PathBuf::from("/nonexistent/larql-units-not-here.json");
@@ -1269,7 +1249,6 @@ mod tests {
         assert_eq!(normalize_serve_alias(args.clone()), args);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn discover_vindexes_returns_sorted_dirs_with_index_json() {
         let dir = unique_temp_dir("discover");

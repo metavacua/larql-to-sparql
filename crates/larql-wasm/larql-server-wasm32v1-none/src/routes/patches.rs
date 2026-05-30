@@ -3,28 +3,17 @@
 //! Session-aware: if `X-Session-Id` header is present, patches are scoped
 //! to that session. Otherwise, patches go to the global shared state.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::session::{extract_session_id, PATCH_UNNAMED};
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const PATCH_INLINE_NAME: &str = "inline-patch";
 
 #[derive(Deserialize)]
@@ -35,7 +24,6 @@ pub struct ApplyPatchRequest {
     pub patch: Option<larql_vindex::VindexPatch>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Resolve a patch from the request body (inline or URL).
 fn resolve_patch(
     req: &ApplyPatchRequest,
@@ -199,7 +187,6 @@ pub async fn handle_apply_patch(
     apply_patch_to_model(&state, None, &headers, req).await
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/patches/apply",
@@ -272,7 +259,6 @@ pub async fn handle_list_patches(
     list_patches_for_model(&state, None, &headers).await
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/patches",
@@ -329,7 +315,6 @@ async fn remove_patch_from_model(
     })))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     delete,
     path = "/v1/patches/{name}",
@@ -351,7 +336,6 @@ pub async fn handle_remove_patch(
     remove_patch_from_model(&state, None, &headers, &name).await
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     delete,
     path = "/v1/{model_id}/patches/{name}",

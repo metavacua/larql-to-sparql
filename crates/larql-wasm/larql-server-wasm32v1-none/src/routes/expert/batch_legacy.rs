@@ -9,13 +9,11 @@
 //!   - it's the only batch endpoint that supports cross-layer requests in
 //!     a single round-trip (e.g. interp tooling).
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::body::Bytes;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 
 use larql_inference::ffn::moe_remote::{
@@ -29,19 +27,7 @@ use crate::state::AppState;
 
 use super::single::run_expert;
 use super::{BatchExpertRequest, BatchExpertResponse, BatchExpertResult};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/expert/batch",

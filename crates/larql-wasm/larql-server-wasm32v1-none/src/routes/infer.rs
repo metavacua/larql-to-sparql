@@ -1,10 +1,9 @@
 //! POST /v1/infer — full forward pass with attention.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -12,17 +11,7 @@ use crate::band_utils::{INFER_MODE_COMPARE, INFER_MODE_DENSE, INFER_MODE_WALK};
 use crate::error::ServerError;
 use crate::session::extract_session_id;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct InferRequest {
     /// Prompt to run inference on.
@@ -86,7 +75,6 @@ fn infer_mode_flags(mode: &str) -> (bool, bool, bool) {
     (is_compare, use_walk, use_dense)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_infer(
     state: &AppState,
     model: &LoadedModel,
@@ -202,7 +190,6 @@ fn run_infer(
     Ok(serde_json::Value::Object(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/infer",
@@ -231,7 +218,6 @@ pub async fn handle_infer(
     Ok(Json(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/infer",
@@ -265,6 +251,7 @@ pub async fn handle_infer_multi(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn infer_defaults_match_api_contract() {
         assert_eq!(default_top(), 5);

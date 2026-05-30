@@ -35,9 +35,9 @@
 //!   bytes (~33% smaller wire than the JSON array form). Many
 //!   production OpenAI clients default to base64 for embeddings.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -47,17 +47,7 @@ use crate::routes::openai::OpenAIError;
 use crate::state::{AppState, LoadedModel};
 
 use crate::routes::embed::embed_tokens;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const EMBEDDING_OBJECT: &str = "embedding";
 const LIST_OBJECT: &str = "list";
 
@@ -228,7 +218,6 @@ fn encode_floats_base64(values: &[f32]) -> String {
     base64::engine::general_purpose::STANDARD.encode(&bytes)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Mean pool a `[seq_len × hidden]` matrix to a `[hidden]` vector.
 /// Returns zeros for empty sequences (caller should reject upstream).
 fn mean_pool(h: &larql_vindex::ndarray::Array2<f32>) -> Vec<f32> {
@@ -254,6 +243,7 @@ fn mean_pool(h: &larql_vindex::ndarray::Array2<f32>) -> Vec<f32> {
 mod tests {
     use super::*;
     use larql_vindex::ndarray::array;
+
     #[test]
     fn mean_pool_single_row_returns_row() {
         let h = array![[1.0f32, 2.0, 3.0]];
@@ -268,7 +258,6 @@ mod tests {
         assert_eq!(pooled, vec![2.0, 5.0]);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn mean_pool_empty_sequence_returns_zero_vector() {
         let h: larql_vindex::ndarray::Array2<f32> = larql_vindex::ndarray::Array2::zeros((0, 4));
@@ -304,7 +293,7 @@ mod tests {
             EmbeddingInput::SingleTokens(v) => assert_eq!(v, vec![1, 2, 3]),
             other => panic!(
                 "expected SingleTokens, got {:?}",
-                core::mem::discriminant(&other)
+                std::mem::discriminant(&other)
             ),
         }
     }

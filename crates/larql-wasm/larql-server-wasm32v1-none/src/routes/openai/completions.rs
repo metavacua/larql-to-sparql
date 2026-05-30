@@ -43,21 +43,16 @@
 //! `logprobs: int` returns `null` in the response. Top-k log-probabilities
 //! over the lm_head distribution land in F18.
 
-use core::convert::Infallible;
+use std::convert::Infallible;
+use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::sse::{Event, KeepAlive, Sse};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::wrappers::ReceiverStream;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio_stream::StreamExt as _;
 
 use crate::error::ServerError;
@@ -65,17 +60,7 @@ use crate::routes::openai::OpenAIError;
 use crate::state::{AppState, LoadedModel};
 
 use super::util::{contains_any, error_chunk, new_id_suffix, trim_at_stop, unix_now, StopSpec};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const TEXT_COMPLETION_OBJECT: &str = "text_completion";
 const DEFAULT_MAX_TOKENS: usize = 16;
 
@@ -299,7 +284,6 @@ pub async fn handle_completions(
     .into_response())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Build an SSE response that streams one chunk per generated token.
 /// Final chunk carries `finish_reason`; the stream terminates with
 /// `data: [DONE]\n\n`.
@@ -537,6 +521,7 @@ fn run_completions_loop(
 /// resolves to `0.0` for every token. `top_logprobs` is an empty map
 /// per token until top-K alternatives are surfaced (follow-up).
 fn build_completion_logprobs(tokens: &[(String, f64)]) -> CompletionLogprobs {
+    use std::collections::BTreeMap;
 
     let mut text_offset = Vec::with_capacity(tokens.len());
     let mut acc = 0usize;
@@ -565,6 +550,7 @@ fn build_completion_logprobs(tokens: &[(String, f64)]) -> CompletionLogprobs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn deserialize_single_string_prompt() {
         let json = serde_json::json!({"prompt": "hello"});

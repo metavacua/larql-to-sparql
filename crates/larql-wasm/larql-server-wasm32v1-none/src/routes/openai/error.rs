@@ -40,28 +40,14 @@
 //!
 //! See `docs/server-spec.md` for the LARQL-vs-OpenAI envelope split.
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::StatusCode;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Serialize;
-#[cfg(not(target_arch = "wasm32"))]
 use utoipa::ToSchema;
 
 use crate::error::ServerError;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// OpenAI-shaped error returned by the three OpenAI-compat handlers.
 ///
 /// Renders as `{"error": {"message", "type", "param", "code"}}`.
@@ -165,8 +151,8 @@ impl IntoResponse for OpenAIError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(target_arch = "wasm32"))]
     use axum::body::to_bytes;
+
     async fn body_json(resp: Response) -> serde_json::Value {
         let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()

@@ -1,24 +1,15 @@
 //! GET /v1/relations — list all known relation types (top tokens).
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use axum::extract::{Path, Query, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// Content-word filter matching the local executor's `is_content_token`.
 fn is_content_token(tok: &str) -> bool {
     let tok = tok.trim();
@@ -154,7 +145,6 @@ pub struct RelationsParams {
     pub source: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError> {
     let start = std::time::Instant::now();
 
@@ -223,7 +213,7 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
     }
 
     let mut sorted: Vec<&TokenInfo> = tokens.values().collect();
-    sorted.sort_by_key(|t| core::cmp::Reverse(t.count));
+    sorted.sort_by_key(|t| std::cmp::Reverse(t.count));
     sorted.truncate(50);
 
     let relations: Vec<serde_json::Value> = sorted
@@ -261,7 +251,6 @@ fn list_relations(model: &LoadedModel) -> Result<serde_json::Value, ServerError>
     }))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/relations",
@@ -284,7 +273,6 @@ pub async fn handle_relations(
     Ok(Json(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/relations",

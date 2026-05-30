@@ -1,7 +1,8 @@
 //! AppState: loaded vindex + config, shared across all handlers.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::embed_store::EmbedStoreF16;
 
@@ -10,23 +11,11 @@ use larql_vindex::{
     format::filenames::FEATURE_LABELS_JSON, ndarray::Array2, tokenizers, PatchedVindex,
     VindexConfig,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
 
 use crate::cache::DescribeCache;
 use crate::ffn_l2_cache::FfnL2Cache;
 use crate::session::SessionManager;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
 /// A single loaded model.
 pub struct LoadedModel {
@@ -87,7 +76,7 @@ pub struct LoadedModel {
     /// Active walk-ffn request counter — incremented on request entry,
     /// decremented on return. Used by GT6 drain to know when it is safe
     /// to send DroppingMsg(reason="reassigned").
-    pub requests_in_flight: std::sync::Arc<core::sync::atomic::AtomicU32>,
+    pub requests_in_flight: std::sync::Arc<std::sync::atomic::AtomicU32>,
     /// Expert ID range this server owns (from `--experts START-END`).
     /// `None` = serve all experts. Used by the expert endpoint to reject
     /// requests for experts this shard doesn't hold.
@@ -98,7 +87,7 @@ pub struct LoadedModel {
     /// rejects any (layer, expert_id) not in this set.  Designed for the
     /// architecture where each shard hosts a tight set of (layer, expert)
     /// units rather than a contiguous expert range.
-    pub unit_filter: Option<Arc<HashSet<(usize, usize)>>>,
+    pub unit_filter: Option<Arc<std::collections::HashSet<(usize, usize)>>>,
     /// Remote MoE expert backend wired via `--moe-shards` or `--moe-units-manifest`.
     /// When `Some`, the walk-ffn handler uses this for MoE layers instead of local dispatch.
     pub moe_remote: Option<Arc<larql_inference::ffn::RemoteMoeBackend>>,
@@ -115,7 +104,7 @@ pub struct LoadedModel {
     /// using a scratch entry.
     #[cfg(all(feature = "metal-experts", target_os = "macos"))]
     pub moe_scratches: std::sync::Mutex<
-        HashMap<(usize, usize, usize), Arc<larql_compute::MoeScratch>>,
+        std::collections::HashMap<(usize, usize, usize), Arc<larql_compute::MoeScratch>>,
     >,
     /// Per-layer pre-loaded Q4K weight buffers for Metal dense FFN dispatch.
     /// `[gate_buf, up_buf, down_buf]` for each layer. Lazily populated on first
@@ -159,7 +148,6 @@ impl LoadedModel {
             .map_err(|e| format!("weights RwLock poisoned: {e}"))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn ensure_weights_cell(&self) -> Result<&std::sync::RwLock<ModelWeights>, String> {
         if let Some(cell) = self.weights.get() {
             return Ok(cell);
@@ -222,7 +210,7 @@ pub struct AppState {
     /// Server start time for uptime reporting.
     pub started_at: std::time::Instant,
     /// Request counter.
-    pub requests_served: core::sync::atomic::AtomicU64,
+    pub requests_served: std::sync::atomic::AtomicU64,
     /// Optional API key for authentication.
     pub api_key: Option<String>,
     /// Per-session PatchedVindex manager.
@@ -248,7 +236,7 @@ impl AppState {
 
     pub fn bump_requests(&self) {
         self.requests_served
-            .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Get a model by ID, or return a `NotFound` error.
@@ -269,14 +257,12 @@ impl AppState {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Compute elapsed milliseconds from `start`, rounded to one decimal place.
 pub fn elapsed_ms(start: std::time::Instant) -> f64 {
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     (ms * 10.0).round() / 10.0
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Load probe-confirmed feature labels from feature_labels.json.
 /// Format: {"L{layer}_F{feature}": "relation_name", ...}
 pub fn load_probe_labels(vindex_path: &std::path::Path) -> HashMap<(usize, usize), String> {
@@ -375,7 +361,6 @@ mod loaded_model_tests {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn tiny_loaded_model(quant: QuantFormat, release_mmap: bool) -> LoadedModel {
         let hidden = 4;
         let gate = Array2::<f32>::zeros((2, hidden));
@@ -402,8 +387,8 @@ mod loaded_model_tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: HashMap::new(),
             ffn_l2_cache: crate::ffn_l2_cache::FfnL2Cache::new(1),
-            layer_latency_tracker: alloc::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
-            requests_in_flight: alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0)),
+            layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+            requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             expert_filter: None,
             unit_filter: None,
             moe_remote: None,

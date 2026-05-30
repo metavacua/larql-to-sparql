@@ -1,24 +1,14 @@
 //! POST /v1/select — SQL-style edge query.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SelectRequest {
     #[serde(default)]
@@ -45,7 +35,6 @@ fn default_order() -> String {
     "desc".into()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn select_edges(
     model: &LoadedModel,
     req: &SelectRequest,
@@ -113,7 +102,7 @@ fn select_edges(
                 let cmp = a
                     .c_score
                     .partial_cmp(&b.c_score)
-                    .unwrap_or(core::cmp::Ordering::Equal);
+                    .unwrap_or(std::cmp::Ordering::Equal);
                 if descending {
                     cmp.reverse()
                 } else {
@@ -136,7 +125,7 @@ fn select_edges(
                 let cmp = a
                     .c_score
                     .partial_cmp(&b.c_score)
-                    .unwrap_or(core::cmp::Ordering::Equal);
+                    .unwrap_or(std::cmp::Ordering::Equal);
                 cmp.reverse()
             });
         }
@@ -168,7 +157,6 @@ fn select_edges(
     }))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/select",
@@ -192,7 +180,6 @@ pub async fn handle_select(
     Ok(Json(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/select",

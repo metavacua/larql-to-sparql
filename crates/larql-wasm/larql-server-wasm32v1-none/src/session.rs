@@ -6,26 +6,17 @@
 //! Sessions are identified by a `X-Session-Id` header. If no header is present,
 //! patches go to the global (shared) PatchedVindex.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use axum::http::HeaderMap;
 use std::time::{Duration, Instant};
 
 use larql_vindex::PatchedVindex;
-#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::RwLock;
 
 use crate::state::LoadedModel;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// Per-session state — an isolated PatchedVindex overlay.
 pub struct SessionState {
     pub patched: PatchedVindex,
@@ -189,7 +180,6 @@ impl SessionManager {
         Ok(session.patched.num_patches())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     /// Blocking write access to sessions map (for use in spawn_blocking).
     pub fn sessions_blocking_write(
         &self,

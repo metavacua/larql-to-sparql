@@ -4,11 +4,10 @@
 //! use as gate vectors, write down vector overrides with target embedding.
 //! Supports session isolation via X-Session-Id header.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -16,17 +15,7 @@ use crate::band_utils::{get_layer_bands, INSERT_MODE_CONSTELLATION, INSERT_MODE_
 use crate::error::ServerError;
 use crate::session::extract_session_id;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct InsertRequest {
     pub entity: String,
@@ -194,7 +183,6 @@ fn apply_insert(
     (inserted, use_constellation)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_insert(
     state: &AppState,
     model: &LoadedModel,
@@ -249,7 +237,6 @@ fn run_insert(
     }))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/insert",
@@ -277,7 +264,6 @@ pub async fn handle_insert(
     Ok(Json(result))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/{model_id}/insert",

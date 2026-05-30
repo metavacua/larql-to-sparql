@@ -87,33 +87,22 @@
 //!   12    M×4   output (f32[] LE)
 //! ```
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{header, StatusCode};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 use larql_vindex::{PatchOverrides, QuantizedFfnAccess};
 use serde::Deserialize;
 
 use crate::error::ServerError;
 use crate::state::{AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// RAII guard that decrements the requests_in_flight counter on drop (GT6 drain).
-struct RifGuard(std::sync::Arc<core::sync::atomic::AtomicU32>);
+struct RifGuard(std::sync::Arc<std::sync::atomic::AtomicU32>);
 impl Drop for RifGuard {
     fn drop(&mut self) {
-        use core::sync::atomic::Ordering;
+        use std::sync::atomic::Ordering;
         // Saturating sub to avoid wrapping if something incremented 0 and dropped twice.
         let prev = self
             .0
@@ -446,7 +435,6 @@ fn validate_owned(model: &LoadedModel, scan_layers: &[usize]) -> Result<(), Serv
 
 // ── Core computation ──────────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Architecture-correct FFN forward pass for one or more layers.
 /// Returns a typed [`FfnOutput`] used by both JSON and binary encoders.
 pub(crate) fn run_full_output_core(
@@ -535,7 +523,7 @@ pub(crate) fn run_full_output_core(
 
             // Build router weights from model vectors.
             fn get_vec(
-                vectors: &HashMap<String, Vec<f32>>,
+                vectors: &std::collections::HashMap<String, Vec<f32>>,
                 k: Option<String>,
             ) -> &[f32] {
                 k.and_then(|k| vectors.get(&k))
@@ -725,7 +713,6 @@ pub(crate) fn run_full_output_core(
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_full_output(
     model: &LoadedModel,
     req: &WalkFfnRequest,
@@ -736,7 +723,6 @@ fn run_full_output(
     Ok(encode_json_full_output(&out))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_features_only(
     model: &LoadedModel,
     req: &WalkFfnRequest,
@@ -780,7 +766,6 @@ fn run_features_only(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn run_walk_ffn(state: &AppState, req: &WalkFfnRequest) -> Result<serde_json::Value, ServerError> {
     let model = state
         .model(None)
@@ -803,7 +788,6 @@ fn run_walk_ffn(state: &AppState, req: &WalkFfnRequest) -> Result<serde_json::Va
 
 // ── HTTP handler ──────────────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     post,
     path = "/v1/walk-ffn",
@@ -831,7 +815,7 @@ pub async fn handle_walk_ffn(
 
     // Track active requests for GT6 drain.
     let _rif_guard = state.models.first().map(|m| {
-        use core::sync::atomic::Ordering;
+        use std::sync::atomic::Ordering;
         m.requests_in_flight.fetch_add(1, Ordering::Relaxed);
         RifGuard(m.requests_in_flight.clone())
     });
@@ -918,7 +902,6 @@ pub async fn handle_walk_ffn(
 /// Content-type for the Q8K dense-FFN batch protocol.
 pub(crate) const Q8K_BATCH_CT: &str = "application/x-larql-ffn-q8k-batch";
 
-#[cfg(not(target_arch = "wasm32"))]
 /// POST /v1/walk-ffn-q8k — Q8K-prenormed dense FFN batch endpoint.
 ///
 /// The client has already applied the FFN input norm and quantised the
@@ -1130,6 +1113,7 @@ pub async fn handle_walk_ffn_q8k(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     // ── decode_binary_request ─────────────────────────────────────────────────
 
     fn make_single_binary(

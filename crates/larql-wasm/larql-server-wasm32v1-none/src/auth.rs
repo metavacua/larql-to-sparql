@@ -14,30 +14,18 @@
 //! leak; the constant-time compare removes the bytewise leak. SHA-256
 //! preimage resistance means a digest match implies the inputs match.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{Request, StatusCode};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::middleware::Next;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::http::{BEARER_PREFIX, HEALTH_PATH};
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// Constant-time equality on bearer tokens.
 ///
 /// Hashes both inputs with SHA-256 and compares the 32-byte digests with
@@ -48,7 +36,6 @@ fn tokens_match(provided: &str, expected: &str) -> bool {
     bool::from(a.ct_eq(&b))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Middleware that validates the Authorization: Bearer <api_key> header.
 /// If no api_key is configured, all requests pass through.
 pub async fn auth_middleware(
@@ -87,6 +74,7 @@ pub async fn auth_middleware(
 #[cfg(test)]
 mod tests {
     use super::tokens_match;
+
     #[test]
     fn matching_tokens_compare_equal() {
         assert!(tokens_match("secret123", "secret123"));

@@ -1,14 +1,12 @@
 //! GET /v1/describe — query all knowledge edges for an entity.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use axum::extract::{Path, Query, State};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::HeaderMap;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::Json;
 use serde::Deserialize;
 
@@ -17,17 +15,7 @@ use crate::band_utils::{
 };
 use crate::error::ServerError;
 use crate::state::{elapsed_ms, AppState, LoadedModel};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 const DESCRIBE_CACHE_CONTROL: &str = "public, max-age=86400";
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -59,7 +47,6 @@ fn default_min_score() -> f32 {
     5.0
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn describe_entity(
     model: &LoadedModel,
     params: &DescribeParams,
@@ -179,7 +166,7 @@ fn describe_entity(
     ranked.sort_by(|a, b| {
         b.gate
             .partial_cmp(&a.gate)
-            .unwrap_or(core::cmp::Ordering::Equal)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     ranked.truncate(params.limit);
 
@@ -226,7 +213,6 @@ fn describe_entity(
     }))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 async fn describe_with_cache(
     state: &Arc<AppState>,
     model: &Arc<LoadedModel>,
@@ -300,7 +286,6 @@ pub async fn handle_describe(
     describe_with_cache(&state, model, &headers, params).await
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[utoipa::path(
     get,
     path = "/v1/{model_id}/describe",

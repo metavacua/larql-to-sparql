@@ -13,18 +13,7 @@ use larql_compute::Q8KActivation;
 use crate::env_flags;
 use crate::error::ServerError;
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
-#[cfg(not(target_arch = "wasm32"))]
+
 /// CPU expert dispatch with pre_norm hoisted out of the per-expert loop and
 /// allocation-free per-expert compute via `ExpertScratch`.
 ///
@@ -87,8 +76,8 @@ pub fn run_experts_cpu_batch(
     // for the lifetime of the worker thread; replaces the old code's 3 fresh
     // Vec<f32> heap allocations per expert call.
     thread_local! {
-        static SCRATCH: core::cell::RefCell<Option<ExpertScratch>> =
-            const { core::cell::RefCell::new(None) };
+        static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
+            const { std::cell::RefCell::new(None) };
     }
 
     let format = if weights.has_per_layer_ffn() {
@@ -208,7 +197,6 @@ pub fn run_experts_cpu_batch(
     Ok(out)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Expert dispatch with a pre-quantised Q8K activation — skips `pre_experts_norm`
 /// and `quantize_h_norm_for_q4k` because the client already did both.  4× less
 /// upload traffic; server goes straight to the Q4K × Q8K matvec.
@@ -221,6 +209,7 @@ pub fn run_experts_cpu_batch_q8k_prenormed(
 ) -> Result<Vec<f32>, ServerError> {
     use larql_compute::cpu::ops::moe::{run_single_expert_q4k_q8k_into, ExpertScratch};
     use rayon::prelude::*;
+
     let model = state.model_or_err(None)?;
     let weights = model
         .get_or_load_weights()
@@ -241,8 +230,8 @@ pub fn run_experts_cpu_batch_q8k_prenormed(
         |eid: usize| -> Option<(&[u8], &[u8])> { weights.get_layer_entry_bytes(layer, eid) };
 
     thread_local! {
-        static SCRATCH: core::cell::RefCell<Option<ExpertScratch>> =
-            const { core::cell::RefCell::new(None) };
+        static SCRATCH: std::cell::RefCell<Option<ExpertScratch>> =
+            const { std::cell::RefCell::new(None) };
     }
 
     let out = expert_ids

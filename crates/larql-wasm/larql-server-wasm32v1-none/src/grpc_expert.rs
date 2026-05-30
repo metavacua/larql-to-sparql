@@ -1,11 +1,10 @@
 //! gRPC `ExpertService` — unary batch + bidirectional streaming.
 
 use std::pin::Pin;
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 use std::time::Instant;
 
 use futures::StreamExt;
-#[cfg(not(target_arch = "wasm32"))]
 use tonic::{Request, Response, Status, Streaming};
 
 use larql_router_protocol::{
@@ -15,17 +14,6 @@ use larql_router_protocol::{
 
 use crate::env_flags;
 use crate::state::AppState;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
 pub struct ExpertGrpcService {
     pub state: Arc<AppState>,
@@ -65,7 +53,6 @@ type StreamOutput =
 impl ExpertService for ExpertGrpcService {
     // ── Unary batch ──────────────────────────────────────────────────────────
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn expert_batch(
         &self,
         request: Request<ExpertBatchRequest>,
@@ -148,7 +135,6 @@ impl ExpertService for ExpertGrpcService {
 
     type ExpertStreamStream = StreamOutput;
 
-    #[cfg(not(target_arch = "wasm32"))]
     async fn expert_stream(
         &self,
         request: Request<Streaming<ExpertLayerInput>>,

@@ -1,32 +1,17 @@
 //! Per-IP rate limiting middleware using a token bucket.
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Mutex};
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::ConnectInfo;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::http::{Request, StatusCode};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::middleware::Next;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::{IntoResponse, Response};
 
 use crate::http::HEALTH_PATH;
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// Token bucket for a single IP.
 struct Bucket {
     tokens: f64,
@@ -104,7 +89,6 @@ impl RateLimiter {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Middleware that applies per-IP rate limiting.
 /// Uses ConnectInfo to get the client IP. Falls back to allowing if IP is unavailable.
 pub async fn rate_limit_middleware(
@@ -147,6 +131,7 @@ pub async fn rate_limit_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn parse_per_minute() {
         let rl = RateLimiter::parse("100/min").unwrap();

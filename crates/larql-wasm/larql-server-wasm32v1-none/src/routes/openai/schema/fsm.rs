@@ -23,17 +23,7 @@
 //! masked out so the model can't truncate mid-structure.
 
 use super::ast::{ArraySchema, NumberSchema, ObjectSchema, Schema, StringSchema};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
+
 /// Public step result. The FSM is left mutated only on `Ok`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepResult {
@@ -798,7 +788,7 @@ fn step_string(s: &mut StringFrame, ch: char) -> AtomOutcome {
                 }
             }
             if s.is_key {
-                AtomOutcome::CompleteKey(core::mem::take(&mut s.decoded))
+                AtomOutcome::CompleteKey(std::mem::take(&mut s.decoded))
             } else {
                 AtomOutcome::CompleteValue
             }
@@ -994,6 +984,8 @@ fn step_const(c: &mut ConstFrame, ch: char) -> AtomOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
     fn assert_accepts(schema: Schema, json: &str) {
         let mut fsm = Fsm::new(schema);
         let res = fsm.step_str(json);

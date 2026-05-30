@@ -8,28 +8,16 @@
 //!   ← {"type": "layer", "layer": 15, "edges": [...]}
 //!   ← {"type": "done", "total_edges": 6, "latency_ms": 12.3}
 
-#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-#[cfg(not(target_arch = "wasm32"))]
 use axum::extract::State;
-#[cfg(not(target_arch = "wasm32"))]
 use axum::response::Response;
 
 use crate::band_utils::{
     filter_layers_by_band, get_layer_bands, INFER_MODE_DENSE, PROBE_RELATION_SOURCE,
 };
 use crate::state::{elapsed_ms, AppState};
-#[allow(unused_imports)]
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec, vec, format, borrow::{Cow, ToOwned}, rc::Rc, sync::Arc, collections::{BTreeMap, BTreeSet, VecDeque, BinaryHeap}};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use hashbrown::{HashMap, HashSet};
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
-#[cfg(target_arch = "wasm32")]
-#[allow(unused_imports)]
-use larql_wasm_math::FloatExt as _;
 
 // WebSocket message type strings (outbound protocol contract).
 const WS_TYPE_ERROR: &str = "error";
@@ -49,7 +37,6 @@ fn ws_error(message: impl Into<String>) -> serde_json::Value {
     serde_json::json!({"type": WS_TYPE_ERROR, "message": message.into()})
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Send a JSON value over the WebSocket as a text frame. Returns the
 /// underlying `axum::Error` if the peer has disconnected; callers
 /// typically use [`send_msg_or_return`] to short-circuit cleanly.
@@ -197,7 +184,6 @@ async fn handle_stream_describe(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 async fn stream_describe_messages(
     state: &AppState,
     request: &serde_json::Value,
@@ -291,7 +277,6 @@ async fn stream_describe_messages(
     messages
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Handle streaming INFER: run forward pass and stream top-K predictions.
 ///
 /// Protocol:
@@ -388,7 +373,6 @@ async fn handle_stream_infer(
     let _ = send_msg(socket, &done_msg).await;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// WebSocket streaming token generation.
 ///
 /// Protocol:
@@ -551,20 +535,21 @@ async fn handle_stream_generate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::sync::atomic::AtomicU64;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicU64;
 
     use larql_vindex::ndarray::Array2;
     use larql_vindex::{
         ExtractLevel, FeatureMeta, LayerBands, PatchedVindex, QuantFormat, VectorIndex,
         VindexConfig, VindexLayerInfo,
     };
-    #[cfg(not(target_arch = "wasm32"))]
     use tokio::sync::RwLock;
 
     use crate::cache::DescribeCache;
     use crate::ffn_l2_cache::FfnL2Cache;
     use crate::session::SessionManager;
     use crate::state::LoadedModel;
+
     #[test]
     fn websocket_error_shape_is_stable() {
         let msg = ws_error("bad input");
@@ -626,13 +611,11 @@ mod tests {
         assert_eq!(msg["latency_ms"], 4.5);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn functional_tokenizer() -> larql_vindex::tokenizers::Tokenizer {
         let json = r#"{"version":"1.0","truncation":null,"padding":null,"added_tokens":[],"normalizer":null,"pre_tokenizer":null,"post_processor":null,"decoder":null,"model":{"type":"WordLevel","vocab":{"France":0,"Germany":1,"capital":2,"UNK":7},"unk_token":"UNK"}}"#;
         larql_vindex::tokenizers::Tokenizer::from_bytes(json.as_bytes()).unwrap()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn test_model(labels: HashMap<(usize, usize), String>) -> Arc<LoadedModel> {
         let mut gate = Array2::<f32>::zeros((3, 4));
         gate[[0, 0]] = 10.0;
@@ -715,21 +698,20 @@ mod tests {
             weights: std::sync::OnceLock::new(),
             probe_labels: labels,
             ffn_l2_cache: FfnL2Cache::new(1),
-            layer_latency_tracker: alloc::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
-            requests_in_flight: alloc::sync::Arc::new(core::sync::atomic::AtomicU32::new(0)),
+            layer_latency_tracker: std::sync::Arc::new(crate::metrics::LayerLatencyTracker::new()),
+            requests_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             expert_filter: None,
             unit_filter: None,
             moe_remote: None,
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
             metal_backend: std::sync::OnceLock::new(),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
-            moe_scratches: std::sync::Mutex::new(HashMap::new()),
+            moe_scratches: std::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(all(feature = "metal-experts", target_os = "macos"))]
             metal_ffn_layer_bufs: std::sync::OnceLock::new(),
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn test_state(models: Vec<Arc<LoadedModel>>) -> Arc<AppState> {
         Arc::new(AppState {
             models,
